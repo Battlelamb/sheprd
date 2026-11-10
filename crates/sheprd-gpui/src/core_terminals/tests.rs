@@ -38,6 +38,7 @@ mod quote;
 mod recent;
 mod refresh;
 mod remote_workspaces;
+mod reported_names;
 mod requests;
 mod resize;
 mod restore;

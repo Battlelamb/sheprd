@@ -183,6 +183,18 @@ impl Target {
     pub(crate) fn is_local(&self) -> bool {
         self.route == Route::Local
     }
+
+    /// Where a prompt typed here comes from, as the chat's program sees it:
+    /// this app, on its machine or reaching it from another.
+    pub(crate) fn origin(&self) -> sheprd_chat_protocol::Origin {
+        use sheprd_chat_protocol::{Device, Origin, Via};
+        let via = if self.is_local() {
+            Via::Local
+        } else {
+            Via::Remote
+        };
+        Origin::new(Device::Desktop, via)
+    }
 }
 
 /// How the window reaches a chat's program.

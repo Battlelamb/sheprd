@@ -45,6 +45,7 @@ fn every_client_command_is_refused_without_changing_the_transcript() {
     );
     for command in [
         Command::Prompt {
+            origin: None,
             text: "Do work".into(),
             attachments: vec![],
         },

@@ -242,6 +242,8 @@ pub(crate) fn run_owned(
         login_hint: agent.login_hint,
         pane: target.map(|target| target.pane),
         require_load: options.require_load,
+        system_prompt: crate::context::system_prompt_path()
+            .and_then(|path| crate::context::read_system_prompt(&path)),
     };
     let session_thread = thread::Builder::new()
         .name("acp-session".to_owned())

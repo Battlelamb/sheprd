@@ -45,6 +45,7 @@ mod notices;
 mod observed_status;
 mod observer_program;
 mod opencode;
+mod origin;
 mod overlay;
 mod pasted;
 mod phases;
@@ -80,6 +81,12 @@ mod zoom;
 
 /// How long a test waits on a worker or a socket before failing.
 const WAIT: Duration = Duration::from_secs(5);
+
+/// Where a prompt typed in a chat on this machine says it comes from.
+const TYPED_HERE: sheprd_chat_protocol::Origin = sheprd_chat_protocol::Origin::new(
+    sheprd_chat_protocol::Device::Desktop,
+    sheprd_chat_protocol::Via::Local,
+);
 
 fn epoch(n: u128) -> uuid::Uuid {
     uuid::Uuid::from_u128(n)

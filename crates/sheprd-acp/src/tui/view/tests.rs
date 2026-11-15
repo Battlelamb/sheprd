@@ -74,6 +74,7 @@ fn enter_sends_the_prompt_and_alt_enter_adds_a_line() {
     assert_eq!(
         press(&mut view, KeyCode::Enter),
         Some(Out::Command(Command::Prompt {
+            origin: Some(TYPED_HERE),
             text: "fix\nit".to_owned(),
             attachments: Vec::new(),
         }))

@@ -514,6 +514,26 @@ host. Embedded HTML pages use the platform webview; see the
 [Linux browser plan](linux-browser-plan.md). Rich chat does not provide hosted
 ChatGPT services such as account history, voice/video chat or hosted tools.
 
+## What the agent is told
+
+`Command::Prompt` carries an optional `Origin`: the device (`desktop`,
+`terminal`, `phone_app`, `phone_web`) and the connection (`local`, `remote`,
+`lan`, `tailscale`, `relay`). The client that relays a prompt sets it: the
+app from the chat's route, the program's own view as `terminal`/`local`, and
+the remote control daemon from the request, its relay marker, the peer
+address, the name dialed (`*.ts.net`), and whether the User-Agent is a
+browser's. The daemon replaces any origin a phone sends.
+
+`sheprd-acp` (`context.rs`) sends the agent a `<sheprd>` text block ahead of
+the prompt's own: the user's `herdr/chat-system-prompt.md` from the
+configuration root, at most 16 KiB, with the run's first prompt, and a
+description of the origin whenever it differs from the last one told. A
+queued prompt keeps its origin. Where the person cannot open paths on the
+agent's machine, the note asks the agent to link pictures as Markdown images,
+which [linked pictures](#messages-and-controls) attach to the chat, and to
+render HTML mockups to screenshots. The transcript shows only the person's
+words. An older program ignores the field, and an older client sends none.
+
 ## Existing CLI sessions
 
 Discovery checks Herdr's session metadata and the foreground process identity.

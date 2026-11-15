@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Attachment, Change, MAX_ATTACHMENTS, OptionValue, PermissionId, Transcript};
+use crate::{Attachment, Change, MAX_ATTACHMENTS, OptionValue, Origin, PermissionId, Transcript};
 
 /// The attach protocol version; a client and program must agree exactly.
 pub const VERSION: u32 = 1;
@@ -91,6 +91,9 @@ pub enum Command {
         /// Files sent with it, at most [`MAX_ATTACHMENTS`].
         #[serde(default)]
         attachments: Vec<Attachment>,
+        /// Where it was typed; none from clients that predate origins.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<Origin>,
     },
     /// Ends the running turn, declines its pending permission requests, and
     /// drops queued prompts.

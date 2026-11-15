@@ -6,14 +6,18 @@ use std::collections::HashMap;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::text::Line;
 use sheprd_chat_protocol::{
-    Attachment, Change, Command, Cursor, EntryId, MAX_ATTACHMENTS, Rejection, ServerMessage,
-    Status, Transcript,
+    Attachment, Change, Command, Cursor, Device, EntryId, MAX_ATTACHMENTS, Origin, Rejection,
+    ServerMessage, Status, Transcript, Via,
 };
 use unicode_width::UnicodeWidthChar;
 
 use sheprd_chat_protocol::assist::{self, History};
 
 use super::lines;
+
+/// Where a prompt typed in this view comes from: the terminal of the
+/// machine the agent runs on.
+const TYPED_HERE: Origin = Origin::new(Device::Terminal, Via::Local);
 
 /// What the view asks the program to do.
 #[derive(Debug, PartialEq, Eq)]
@@ -347,6 +351,7 @@ impl View {
                     self.history.push(&text, &self.transcript);
                 }
                 return Some(Out::Command(Command::Prompt {
+                    origin: Some(TYPED_HERE),
                     text,
                     attachments: std::mem::take(&mut self.attachments),
                 }));

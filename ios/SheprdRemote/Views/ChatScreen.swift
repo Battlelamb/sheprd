@@ -258,7 +258,6 @@ private struct ChatDocument: View {
         }
         .sheet(item: question) { permission in
             QuestionSheet(key: key, permission: permission)
-                .presentationDetents([.medium, .large])
         }
     }
 
@@ -346,48 +345,5 @@ private struct RunningCapsule: View {
         .glassEffect(.regular, in: .capsule)
         .frame(maxWidth: ChatDocument.readableWidth)
         .padding(.horizontal, 16)
-    }
-}
-
-/// Questions A: a bottom sheet in thumb reach, full-width options, the
-/// "always" ones set apart.
-private struct QuestionSheet: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    let key: PaneKey
-    let permission: Permission
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(permission.title).font(.title3.weight(.semibold))
-            let always = permission.options.filter { $0.kind == .allowAlways || $0.kind == .rejectAlways }
-            ForEach(permission.options.filter { !always.contains($0) }) { option in
-                if option.kind == .allowOnce {
-                    Button { answer(option) } label: { Text(option.name).frame(maxWidth: .infinity) }
-                        .buttonStyle(.glassProminent).controlSize(.large).tint(Home.AgentStatus.blocked.color)
-                } else {
-                    Button { answer(option) } label: { Text(option.name).frame(maxWidth: .infinity) }
-                        .buttonStyle(.glass).controlSize(.large)
-                }
-            }
-            if !always.isEmpty {
-                Divider()
-                ForEach(always) { option in
-                    Button(option.name) { answer(option) }.font(.subheadline)
-                }
-            }
-        }
-        .padding(24)
-    }
-
-    /// The sheet leaves once the answer is allowed; a refused answer
-    /// brings the question back, and the sync bar says why.
-    private func answer(_ option: PermissionOption) {
-        Task {
-            guard await OwnerCheck.allows(option) else { return }
-            let fleet = model.fleet
-            Task { _ = await fleet.send(.answer(permission: permission.id, option: option.id), to: key) }
-            dismiss()
-        }
     }
 }

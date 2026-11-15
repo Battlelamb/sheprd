@@ -396,6 +396,7 @@ impl Bridge {
             .unwrap_or_default();
         let input = request.get("input").cloned().unwrap_or(Value::Null);
         let (options, ask) = permission::ask(control.to_owned(), request);
+        let meta = ask.meta();
         self.next_request += 1;
         self.asks.insert(self.next_request, ask);
         let fields = wire::ToolCallUpdateFields::new()
@@ -405,7 +406,8 @@ impl Bridge {
             self.session.clone(),
             wire::ToolCallUpdate::new(tool_use.to_owned(), fields),
             options,
-        );
+        )
+        .meta(meta);
         vec![Out::Session(Inbound::Request {
             id: wire::RequestId::Number(self.next_request),
             method: "session/request_permission".to_owned(),

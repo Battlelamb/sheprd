@@ -8,10 +8,12 @@ use serde::{Deserialize, Serialize};
 use crate::{Author, CommandId, Image};
 
 mod activity;
+mod question;
 mod question_answers;
 pub use activity::{
     Activity, ActivityKind, ActivityState, MAX_ACTIVITIES, MAX_ACTIVITY_TEXT, Running,
 };
+pub use question::{MAX_ANSWER_TEXT, MAX_QUESTION_CHOICES, Question, QuestionOption};
 pub use question_answers::{MAX_QUESTION_ANSWERS, MAX_QUESTION_TEXT, valid_question_answers};
 
 /// An entry's identity, assigned by the program in increasing order.
@@ -336,6 +338,10 @@ pub struct Permission {
     pub call_id: Option<String>,
     pub id: PermissionId,
     pub options: Vec<PermissionOption>,
+    /// The question in full, when the request is one the agent asked with
+    /// choices; answered with [`Command::AnswerQuestion`](crate::Command::AnswerQuestion).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question: Option<Question>,
     pub title: String,
 }
 

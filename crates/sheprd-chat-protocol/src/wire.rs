@@ -99,6 +99,12 @@ pub enum Command {
         option: String,
         permission: PermissionId,
     },
+    /// Answers a permission request that carries a [`Question`](crate::Question):
+    /// option labels, or the person's own words, one unless it takes several.
+    AnswerQuestion {
+        answers: Vec<String>,
+        permission: PermissionId,
+    },
     SetMode {
         id: String,
     },
@@ -167,6 +173,8 @@ pub enum Rejection {
     UnknownPermission,
     #[error("that is not one of the request's options")]
     UnknownOption,
+    #[error("the answer is empty, too long, or has more choices than the question takes")]
+    InvalidAnswer,
     #[error("the agent has no such mode")]
     UnknownMode,
     #[error("the agent has no such setting, or it does not take that value")]

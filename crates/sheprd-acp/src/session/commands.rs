@@ -27,6 +27,10 @@ impl<R: FnMut(Update)> Session<R> {
             Command::Prompt { text, attachments } => self.prompt(id, text, attachments),
             Command::Cancel => self.cancel(),
             Command::Answer { option, permission } => self.answer(permission, &option),
+            Command::AnswerQuestion {
+                answers,
+                permission,
+            } => self.answer_question(permission, answers),
             Command::SetMode { id } => self.set_mode(id),
             Command::SetOption { id, value } => self.set_option(id, &value),
             Command::Unqueue { id } => self.unqueue(id),
@@ -186,6 +190,25 @@ impl<R: FnMut(Update)> Session<R> {
             return Err(Rejection::UnknownOption);
         }
         self.resolve(permission, Some(option));
+        Ok(())
+    }
+
+    fn answer_question(
+        &mut self,
+        permission: PermissionId,
+        answers: Vec<String>,
+    ) -> Result<(), Rejection> {
+        if !self.asked.contains_key(&permission) {
+            return Err(Rejection::UnknownPermission);
+        }
+        self.transcript
+            .permissions
+            .iter()
+            .find(|asked| asked.id == permission)
+            .and_then(|asked| asked.question.as_ref())
+            .ok_or(Rejection::UnknownOption)?
+            .check(&answers)?;
+        self.resolve_answers(permission, answers);
         Ok(())
     }
 

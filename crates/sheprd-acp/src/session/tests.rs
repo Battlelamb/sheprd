@@ -22,6 +22,7 @@ mod media;
 mod opencode;
 mod permissions;
 mod prompt_titles;
+mod questions;
 mod resume;
 mod settings;
 mod streaming;

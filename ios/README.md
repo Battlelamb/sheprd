@@ -91,6 +91,7 @@ and nothing goes through your phone.
      opens a chat, as tapping a Live Activity does.
    - `-openTerm PANE` opens a terminal; `-type TEXT` then types into it
      (a newline presses Enter).
+   - `-homeSearch TEXT` types into Home's search.
    - `-tab workspaces|settings` opens that tab, and `-openWorkspace ID`
      opens that workspace's screen in it.
    - `-otherAgents YES` unfolds a workspace's other agents.

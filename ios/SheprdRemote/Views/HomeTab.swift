@@ -2,19 +2,41 @@ import SheprdRemoteCore
 import SwiftUI
 
 /// Home B: every agent in the order the person chose, a question answered
-/// in place.
+/// in place, with the Workspaces tab's search above it.
 struct HomeTab: View {
     @Environment(AppModel.self) private var model
     @Environment(WindowState.self) private var window: WindowState?
     @AppStorage(HomeRow.sortKey) private var sort = AgentSort.priority
     @Binding var pairing: Bool
+    @State private var query = ""
 
     var body: some View {
+        Group {
+            if query.isEmpty { chats } else { SearchResults(query: query, workspacesAsRoutes: true) }
+        }
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Workspaces, chats, terminals")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { window?.home = true }
+        .onDisappear { window?.home = false }
+        #if DEBUG
+        .task { if let text = UserDefaults.standard.string(forKey: "homeSearch") { query = text } }
+        #endif
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) { AgentSortMenu(sort: $sort) }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Talk to Sheprd", systemImage: "waveform") { model.talk() }
+                    .disabled(model.fleet.machines.isEmpty)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("New Workspace", systemImage: "plus") { model.creating = .workspace(device: nil) }
+                    .disabled(model.fleet.machines.isEmpty)
+            }
+        }
+    }
+
+    private var chats: some View {
         ChatList()
             .nearbyBanner()
-            .navigationBarTitleDisplayMode(.inline)
-            .onAppear { window?.home = true }
-            .onDisappear { window?.home = false }
             .overlay {
                 if model.computers.isEmpty {
                     ContentUnavailableView {
@@ -29,17 +51,6 @@ struct HomeTab: View {
                           !model.fleet.machines.contains(where: { $0.status == .revoked }) {
                     ContentUnavailableView("No chats", systemImage: "bubble.left.and.text.bubble.right",
                                            description: Text("Chats and agents running in Sheprd on your computers appear here."))
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { AgentSortMenu(sort: $sort) }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Talk to Sheprd", systemImage: "waveform") { model.talk() }
-                        .disabled(model.fleet.machines.isEmpty)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("New Workspace", systemImage: "plus") { model.creating = .workspace(device: nil) }
-                        .disabled(model.fleet.machines.isEmpty)
                 }
             }
     }

@@ -81,4 +81,40 @@ struct SavedRelaysTests {
         #expect(RelayReach.read(status: 200, body: Data("<html>".utf8)) == .notARelay)
         #expect(RelayReach.read(status: 404, body: info) == .notARelay)
     }
+
+    @Test func anAnswerLongerThanARelaysIsNotReadToItsEnd() async throws {
+        let short = Endless(length: 8)
+        #expect(try await RelayReach.bounded(short, limit: 8) == Data(repeating: 0x7B, count: 8))
+        // An answer without end: one byte past the limit is the last read.
+        let endless = Endless(length: .max)
+        #expect(try await RelayReach.bounded(endless, limit: RelayReach.maxInfo) == nil)
+        #expect(endless.pulled.count == RelayReach.maxInfo + 1)
+    }
+}
+
+/// An answer of `length` bytes that counts how many were asked for.
+private struct Endless: AsyncSequence {
+    typealias Element = UInt8
+
+    final class Count: @unchecked Sendable {
+        var count = 0
+    }
+
+    let length: Int
+    let pulled = Count()
+
+    struct Iterator: AsyncIteratorProtocol {
+        let length: Int
+        let pulled: Count
+
+        mutating func next() async -> UInt8? {
+            guard pulled.count < length else { return nil }
+            pulled.count += 1
+            return 0x7B
+        }
+    }
+
+    func makeAsyncIterator() -> Iterator {
+        Iterator(length: length, pulled: pulled)
+    }
 }

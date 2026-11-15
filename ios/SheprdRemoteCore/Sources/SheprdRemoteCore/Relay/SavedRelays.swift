@@ -93,14 +93,42 @@ public enum RelayReach: Equatable, Sendable {
         return info.websocket == false ? .noWebSocket : .reachable
     }
 
+    /// The most of an answer that is read: a relay's `/v1/info` is a few
+    /// hundred bytes.
+    static let maxInfo = 16 * 1024
+
     /// Asks `endpoint` whether it is a relay, waiting at most ten seconds.
+    /// The answer is read as it arrives and dropped once it is longer than
+    /// `maxInfo`, so whatever a saved address serves, it costs this phone
+    /// no more memory than that.
     public static func probe(_ endpoint: RelayEndpoint, session: URLSession = .shared) async -> RelayReach {
         guard let url = endpoint.info else { return .notARelay }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
         request.httpMethod = "GET"
-        guard let (body, response) = try? await session.data(for: request),
+        guard let (bytes, response) = try? await session.bytes(for: request),
               let http = response as? HTTPURLResponse
         else { return .unreachable }
-        return read(status: http.statusCode, body: body.prefix(16 * 1024))
+        // Leaving with the answer unfinished ends the download.
+        defer { bytes.task.cancel() }
+        guard http.expectedContentLength <= Int64(maxInfo) else { return .notARelay }
+        do {
+            guard let body = try await bounded(bytes, limit: maxInfo) else { return .notARelay }
+            return read(status: http.statusCode, body: body)
+        } catch {
+            return .unreachable
+        }
+    }
+
+    /// What `bytes` carries, or nil once it carries more than `limit`: the
+    /// rest is never read.
+    static func bounded<Bytes: AsyncSequence>(_ bytes: Bytes, limit: Int) async throws -> Data?
+        where Bytes.Element == UInt8
+    {
+        var body = Data()
+        for try await byte in bytes {
+            guard body.count < limit else { return nil }
+            body.append(byte)
+        }
+        return body
     }
 }

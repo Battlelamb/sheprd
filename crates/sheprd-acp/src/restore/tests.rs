@@ -2,6 +2,7 @@ use super::*;
 
 mod closure;
 mod core;
+mod switch;
 
 /// `path` made absolute on this platform: Windows needs a drive.
 fn abs(path: &str) -> PathBuf {

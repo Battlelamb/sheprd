@@ -45,11 +45,14 @@ fn rejection(messages: &[ServerMessage], id: CommandId) -> Option<Rejection> {
         .expect("the command was acknowledged")
 }
 
+/// The process the agent started second runs as.
+const SECOND_PID: u32 = 4242;
+
 /// Hands the session a new agent's outbox, as the program does after
 /// [`Flow::Launch`], and returns what the session writes to it.
 fn launch(harness: &mut Harness) -> Receiver<Vec<u8>> {
     let (sender, agent) = bounded(64);
-    harness.session.launched(Outbox(sender));
+    harness.session.launched(Outbox(sender), SECOND_PID);
     agent
 }
 
@@ -105,6 +108,8 @@ fn switching_starts_the_new_agent_from_a_fresh_transcript() {
         }
     );
     assert_eq!(*harness.switched.borrow(), [Agent::Codex]);
+    // The restore record follows the new agent only once it runs.
+    assert!(harness.started.borrow().is_empty());
     let messages = drain(&client);
     assert_eq!(rejection(&messages, id), None);
     let Some(ServerMessage::Snapshot { cursor, transcript }) = messages.first() else {
@@ -125,6 +130,7 @@ fn switching_starts_the_new_agent_from_a_fresh_transcript() {
     let sent = requests(&agent);
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0]["method"], "initialize");
+    assert_eq!(*harness.started.borrow(), [SECOND_PID]);
     // Nothing more reached the agent switched away from.
     assert!(harness.sent().is_empty());
 }

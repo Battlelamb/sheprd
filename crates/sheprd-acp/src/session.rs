@@ -111,6 +111,8 @@ pub(crate) enum Update {
     Harness(Agent),
     /// The agent's session opened with this id, new or continued.
     Opened(String),
+    /// The agent a switch asked for started as this process.
+    Started(u32),
     /// A prompt just sent to the agent, as the transcript shows it, which
     /// names the pane and its tab.
     Prompt(String),

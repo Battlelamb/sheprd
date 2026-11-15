@@ -39,6 +39,8 @@ struct Harness {
     prompts: Prompts,
     reports: Reports,
     session: TestSession,
+    /// The processes the session reported a switch's agent started as.
+    started: Rc<RefCell<Vec<u32>>>,
     /// The agents the session reported switching to.
     switched: Rc<RefCell<Vec<Agent>>>,
 }
@@ -67,6 +69,8 @@ fn harness_with(config: Config) -> Harness {
     let opened_sink = Rc::clone(&opened);
     let switched: Rc<RefCell<Vec<Agent>>> = Rc::default();
     let switched_sink = Rc::clone(&switched);
+    let started: Rc<RefCell<Vec<u32>>> = Rc::default();
+    let started_sink = Rc::clone(&started);
     let session = Session::new(
         config,
         Outbox(sender),
@@ -75,6 +79,7 @@ fn harness_with(config: Config) -> Harness {
             Update::Harness(agent) => switched_sink.borrow_mut().push(agent),
             Update::Opened(id) => opened_sink.borrow_mut().push(id),
             Update::Prompt(prompt) => prompt_sink.borrow_mut().push(prompt),
+            Update::Started(pid) => started_sink.borrow_mut().push(pid),
         }) as Box<dyn FnMut(Update)>,
     );
     Harness {
@@ -83,6 +88,7 @@ fn harness_with(config: Config) -> Harness {
         prompts,
         reports,
         session,
+        started,
         switched,
     }
 }

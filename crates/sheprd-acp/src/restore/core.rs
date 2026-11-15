@@ -233,7 +233,7 @@ struct Started {
     started: String,
 }
 
-fn started_path(dir: &Path, endpoint: &EndpointId) -> PathBuf {
+pub(super) fn started_path(dir: &Path, endpoint: &EndpointId) -> PathBuf {
     dir.join(format!("{endpoint}.agent"))
 }
 

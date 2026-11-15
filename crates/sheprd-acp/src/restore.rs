@@ -135,6 +135,17 @@ impl Keeper {
         self.agent = agent;
     }
 
+    /// The agent a switch asked for started as `pid`. A core chat records it
+    /// as the agent a later restore must find gone; when that cannot be
+    /// written, the earlier agent's record goes too, so a restore refuses
+    /// rather than take the switched-away agent's end for this one's.
+    pub(crate) fn agent_switched(&mut self, pid: u32) {
+        self.child = Some(pid);
+        if self.core && self.agent_started(pid).is_err() {
+            core::agent_ended(&self.dir, &self.endpoint);
+        }
+    }
+
     /// Records the session that just opened, replacing an earlier one. A
     /// session id that could not be typed back safely is not kept, and its
     /// earlier record goes with it, so a restore never continues a session

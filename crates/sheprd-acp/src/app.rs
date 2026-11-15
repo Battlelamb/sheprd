@@ -349,6 +349,11 @@ pub(crate) fn run_owned(
                         report.rename(agent.display_name().to_owned());
                     }
                 }
+                Update::Started(pid) => {
+                    if let Some(keeper) = &mut session_keeper {
+                        keeper.agent_switched(pid);
+                    }
+                }
                 Update::Opened(id) => {
                     if let Some(keeper) = &session_keeper {
                         keeper.opened(&id);
@@ -383,8 +388,9 @@ pub(crate) fn run_owned(
                         let next = builtin(agent, None, adapter, &cwd);
                         match start(next.start, &cwd, &launcher, harness) {
                             Ok(started) => {
+                                let pid = started.process.id();
                                 current = Some(started.process);
-                                session.launched(started.outbox);
+                                session.launched(started.outbox, pid);
                             }
                             Err(error) => session.launch_failed(&error),
                         }

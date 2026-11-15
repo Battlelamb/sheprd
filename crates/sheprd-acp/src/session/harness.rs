@@ -83,7 +83,8 @@ impl<R: FnMut(Update)> Session<R> {
 
     /// The agent [`super::Flow::Launch`] asked for started: open the ACP
     /// connection to it.
-    pub(crate) fn launched(&mut self, outbox: rpc::Outbox) {
+    pub(crate) fn launched(&mut self, outbox: rpc::Outbox, pid: u32) {
+        (self.report)(Update::Started(pid));
         self.outbox = outbox;
         self.start();
     }

@@ -36,9 +36,7 @@ impl SheprdWindow {
                 {
                     return None;
                 }
-                let Some(tab) = cx.try_global::<Store>().and_then(|store| store.get(*tab)) else {
-                    return None;
-                };
+                let tab = cx.try_global::<Store>().and_then(|store| store.get(*tab))?;
                 (tab.scope.clone(), tab.workspace_id.clone())
             }
             RecentCorePane::Shell { terminal } => {
@@ -54,13 +52,10 @@ impl SheprdWindow {
                 )
             }
         };
-        let Some(index) = self
+        let index = self
             .endpoints
             .iter()
-            .position(|endpoint| crate::browser::scope(endpoint) == scope)
-        else {
-            return None;
-        };
+            .position(|endpoint| crate::browser::scope(endpoint) == scope)?;
         if !self.can_switch_endpoint(index) {
             return None;
         }

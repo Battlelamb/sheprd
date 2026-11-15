@@ -7,9 +7,7 @@ use crate::{
 use gpui::{Entity, VisualTestContext};
 use std::path::Path;
 
-fn shell<'a>(
-    cx: &'a mut TestAppContext,
-) -> (Entity<SheprdWindow>, &'a mut VisualTestContext, TabId) {
+fn shell(cx: &mut TestAppContext) -> (Entity<SheprdWindow>, &mut VisualTestContext, TabId) {
     let (view, cx, tab) = window_with_split(cx, &["t1", "shell"]);
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {

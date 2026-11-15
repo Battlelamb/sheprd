@@ -5,11 +5,11 @@ use serde_json::json;
 use sheprd_client::protocol::{FrameData, PaneSurfaceFrame};
 use std::sync::Arc;
 
-fn mixed<'a>(
-    cx: &'a mut TestAppContext,
+fn mixed(
+    cx: &mut TestAppContext,
 ) -> (
     Entity<SheprdWindow>,
-    &'a mut VisualTestContext,
+    &mut VisualTestContext,
     crate::browser::TabId,
     MockPeer,
 ) {

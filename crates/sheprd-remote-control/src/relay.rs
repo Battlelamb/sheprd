@@ -21,6 +21,9 @@ pub use error::Error;
 pub(crate) use error::Result;
 
 pub(crate) use crate::control::RelayState as Status;
+use crate::control::RelayStatus;
+use crate::relay_label::RelayLabel;
+use crate::server::Relay;
 use serde::Serialize;
 use sheprd_relay::Endpoint;
 use sheprd_relay::wire::Key;
@@ -66,6 +69,9 @@ pub(crate) struct Relays {
     changed: watch::Sender<u64>,
     endpoints: Vec<Endpoint>,
     keys: keys::Keys,
+    /// What `[remote] relays` calls each relay, by endpoint; unlabelled
+    /// relays are left out.
+    labels: BTreeMap<String, RelayLabel>,
     /// The open pairing dial, if any, and a revision listeners follow.
     pairing: Mutex<Option<Pairing>>,
     pairing_changed: watch::Sender<u64>,
@@ -78,19 +84,41 @@ pub(crate) struct Relays {
 pub(crate) struct Info {
     /// The tunnel identity to pin: X25519 then ML-KEM-768, base64url.
     pub(crate) identity: String,
+    /// What the user calls each relay, by endpoint as `relays` writes it;
+    /// unlabelled relays are left out, and the field with them.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) labels: BTreeMap<String, RelayLabel>,
     /// The relays this computer listens on.
     pub(crate) relays: Vec<String>,
     /// This computer's route, base64url.
     pub(crate) route: String,
 }
 
+impl Info {
+    /// The info without labels, for the nearby offer: its sealed bytes
+    /// cross Bluetooth and match shared vectors, and the phone learns the
+    /// labels from `GET /api/relay` once paired.
+    pub(crate) fn without_labels(self) -> Self {
+        Self {
+            labels: BTreeMap::new(),
+            ..self
+        }
+    }
+}
+
 impl Relays {
     /// Loads or makes the relay keys in `state_dir`. Blocking.
-    pub(crate) fn load(state_dir: &Path, endpoints: Vec<Endpoint>) -> Result<Self> {
+    pub(crate) fn load(state_dir: &Path, relays: Vec<Relay>) -> Result<Self> {
+        let labels = relays
+            .iter()
+            .filter(|relay| !relay.label.is_empty())
+            .map(|relay| (relay.endpoint.to_string(), relay.label.clone()))
+            .collect();
         Ok(Self {
             changed: watch::Sender::new(0),
-            endpoints,
+            endpoints: relays.into_iter().map(|relay| relay.endpoint).collect(),
             keys: keys::Keys::load_or_create(state_dir)?,
+            labels,
             pairing: Mutex::default(),
             pairing_changed: watch::Sender::new(0),
             status: Mutex::default(),
@@ -102,6 +130,7 @@ impl Relays {
         use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
         Info {
             identity: URL_SAFE_NO_PAD.encode(self.keys.tunnel.identity().to_bytes()),
+            labels: self.labels.clone(),
             relays: self.endpoints.iter().map(ToString::to_string).collect(),
             route: self.keys.route().to_string(),
         }
@@ -143,12 +172,20 @@ impl Relays {
         self.changed.send_modify(|revision| *revision += 1);
     }
 
-    /// Each relay's state.
-    pub(crate) fn status(&self) -> BTreeMap<String, Status> {
+    /// Each relay's state, and its label.
+    pub(crate) fn status(&self) -> BTreeMap<String, RelayStatus> {
         self.status
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+            .iter()
+            .map(|(endpoint, state)| {
+                let status = RelayStatus {
+                    label: self.labels.get(endpoint).cloned().unwrap_or_default(),
+                    state: state.clone(),
+                };
+                (endpoint.clone(), status)
+            })
+            .collect()
     }
 
     fn set_status(&self, endpoint: &Endpoint, status: Status) {

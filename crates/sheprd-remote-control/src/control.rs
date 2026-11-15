@@ -360,7 +360,26 @@ pub struct Status {
     /// Each relay this computer listens on, by endpoint; absent when it
     /// listens on none, or the daemon is older.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub relays: std::collections::BTreeMap<String, RelayState>,
+    pub relays: std::collections::BTreeMap<String, RelayStatus>,
+}
+
+/// One relay as `sheprd remote status` shows it: where it stands, and the
+/// label `[remote] relays` gives it, whose fields an older daemon omits.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RelayStatus {
+    #[serde(flatten)]
+    pub label: crate::relay_label::RelayLabel,
+    #[serde(flatten)]
+    pub state: RelayState,
+}
+
+impl From<RelayState> for RelayStatus {
+    fn from(state: RelayState) -> Self {
+        Self {
+            label: crate::relay_label::RelayLabel::default(),
+            state,
+        }
+    }
 }
 
 /// Where one relay stands.

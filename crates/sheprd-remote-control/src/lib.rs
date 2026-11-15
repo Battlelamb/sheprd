@@ -23,6 +23,7 @@ mod native;
 mod push;
 #[cfg(feature = "server")]
 mod relay;
+pub mod relay_label;
 #[cfg(feature = "server")]
 pub mod server;
 #[cfg(feature = "server")]

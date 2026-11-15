@@ -9,6 +9,7 @@ use crate::{auth::devices::RelayKeys, relay::Info};
 fn info() -> Info {
     Info {
         identity: "identity".into(),
+        labels: Default::default(),
         relays: vec!["https://relay.example.org".into()],
         route: "route".into(),
     }

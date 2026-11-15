@@ -58,6 +58,9 @@ struct ComputerScreen: View {
                     Text("Connected through the checked address. When it stops answering, this phone tries the others.")
                 }
             }
+            if let relay = computer.relay {
+                ComputerRelaysSection(record: relay)
+            }
             if let vouching = model.vouching(computer) {
                 Section {
                     LabeledContent("Paired through", value: model.displayName(vouching))

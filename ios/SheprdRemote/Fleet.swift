@@ -664,7 +664,12 @@ final class Fleet {
                 if known != nil { onRelay?(device, nil) }
                 return
             }
-            if let known, known.matches(info) { return }
+            if let known, known.matches(info) {
+                // The keys hold; only what the owner calls the relays may
+                // have changed.
+                if let relabeled = known.relabeled(info) { onRelay?(device, relabeled) }
+                return
+            }
             guard let record = RelayRecord.make(from: info), let keys = record.enrollment else { return }
             do {
                 try await call(device) { client, token in try await client.enrollRelay(keys, bearer: token) }

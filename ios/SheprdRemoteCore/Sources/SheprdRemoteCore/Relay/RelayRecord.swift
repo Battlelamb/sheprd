@@ -16,13 +16,33 @@ public struct RelayRecord: Codable, Hashable, Sendable {
     public var dialKey: Data
     /// This phone's tunnel static key for the computer (X25519, raw).
     public var tunnelKey: Data
+    /// What the computer's owner calls each relay, keyed by the endpoint's
+    /// `description`; refreshed whenever the computer says, without new keys.
+    public var labels: [String: RelayLabel]
 
-    public init(relays: [RelayEndpoint], route: Data, identity: Data, dialKey: Data, tunnelKey: Data) {
+    public init(
+        relays: [RelayEndpoint], route: Data, identity: Data, dialKey: Data, tunnelKey: Data,
+        labels: [String: RelayLabel] = [:]
+    ) {
         self.relays = relays
         self.route = route
         self.identity = identity
         self.dialKey = dialKey
         self.tunnelKey = tunnelKey
+        self.labels = labels
+    }
+
+    enum CodingKeys: String, CodingKey { case relays, route, identity, dialKey, tunnelKey, labels }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        relays = try c.decode([RelayEndpoint].self, forKey: .relays)
+        route = try c.decode(Data.self, forKey: .route)
+        identity = try c.decode(Data.self, forKey: .identity)
+        dialKey = try c.decode(Data.self, forKey: .dialKey)
+        tunnelKey = try c.decode(Data.self, forKey: .tunnelKey)
+        // Records saved before relays had labels have none.
+        labels = try c.decodeIfPresent([String: RelayLabel].self, forKey: .labels) ?? [:]
     }
 
     /// A record for what `info` says, with fresh keys for this phone; nil
@@ -39,7 +59,8 @@ public struct RelayRecord: Codable, Hashable, Sendable {
             route: route,
             identity: identity,
             dialKey: P256.Signing.PrivateKey().rawRepresentation,
-            tunnelKey: Curve25519.KeyAgreement.PrivateKey().rawRepresentation
+            tunnelKey: Curve25519.KeyAgreement.PrivateKey().rawRepresentation,
+            labels: labels(from: info)
         )
     }
 
@@ -54,8 +75,18 @@ public struct RelayRecord: Codable, Hashable, Sendable {
         )
     }
 
+    /// This record with the labels `info` gives, or nil when they are the
+    /// ones it has: labels change without new keys.
+    public func relabeled(_ info: API.RelayInfo) -> RelayRecord? {
+        let fresh = Self.labels(from: info)
+        guard fresh != labels else { return nil }
+        var record = self
+        record.labels = fresh
+        return record
+    }
+
     /// Whether `info` still names the same computer and relays, so the
-    /// keys already sent hold.
+    /// keys already sent hold. Labels do not count (`relabeled`).
     public func matches(_ info: API.RelayInfo) -> Bool {
         Base64URL.decode(info.route) == route
             && Base64URL.decode(info.identity) == identity
@@ -110,11 +141,15 @@ extension API {
         public let identity: String
         public let relays: [String]
         public let route: String
+        /// What the owner calls each relay, by endpoint; nil from a daemon
+        /// without labels, or none to give.
+        public let labels: [String: RelayLabel]?
 
-        public init(identity: String, relays: [String], route: String) {
+        public init(identity: String, relays: [String], route: String, labels: [String: RelayLabel]? = nil) {
             self.identity = identity
             self.relays = relays
             self.route = route
+            self.labels = labels
         }
     }
 

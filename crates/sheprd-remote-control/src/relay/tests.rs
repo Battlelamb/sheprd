@@ -25,6 +25,7 @@ use tokio::{
 };
 
 mod addresses;
+mod labels;
 
 /// A relay serving QUIC and HTTP on loopback ports: its HTTP address, and
 /// its QUIC address and pin.
@@ -94,7 +95,7 @@ async fn listening(relays: &Relays) {
         if relays
             .status()
             .values()
-            .any(|state| *state == Status::Listening)
+            .any(|status| status.state == Status::Listening)
         {
             return;
         }
@@ -109,7 +110,7 @@ async fn a_paired_phone_reaches_the_api_through_a_relay_end_to_end() {
     let dir = tempfile::tempdir().unwrap();
     let mut shared = state(dir.path());
     let endpoint = Endpoint::parse(&format!("http://{http}")).unwrap();
-    let relays = Arc::new(Relays::load(dir.path(), vec![endpoint]).unwrap());
+    let relays = Arc::new(Relays::load(dir.path(), vec![endpoint.into()]).unwrap());
     Arc::get_mut(&mut shared).unwrap().relay = Some(Arc::clone(&relays));
     let (_device, token) = signed_in(&shared, 9);
 
@@ -189,7 +190,7 @@ async fn a_dial_key_no_device_sent_is_refused_at_the_relay() {
     let dir = tempfile::tempdir().unwrap();
     let shared = state(dir.path());
     let endpoint = Endpoint::parse(&format!("http://{http}")).unwrap();
-    let relays = Arc::new(Relays::load(dir.path(), vec![endpoint]).unwrap());
+    let relays = Arc::new(Relays::load(dir.path(), vec![endpoint.into()]).unwrap());
     let (_stop, stopped) = watch::channel(false);
     relays.start(served(dir.path(), &shared).0, stopped);
     listening(&relays).await;
@@ -217,7 +218,7 @@ async fn a_nearby_phone_off_the_network_claims_through_a_pairing_dial() {
     let dir = tempfile::tempdir().unwrap();
     let mut shared = state(dir.path());
     let endpoint = Endpoint::parse(&format!("http://{http}")).unwrap();
-    let relays = Arc::new(Relays::load(dir.path(), vec![endpoint]).unwrap());
+    let relays = Arc::new(Relays::load(dir.path(), vec![endpoint.into()]).unwrap());
     Arc::get_mut(&mut shared).unwrap().relay = Some(Arc::clone(&relays));
     let (_stop, stopped) = watch::channel(false);
     let (served, client) = served(dir.path(), &shared);

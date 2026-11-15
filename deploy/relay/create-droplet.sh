@@ -25,6 +25,10 @@ caddyfile=$(base64 < "$here/Caddyfile" | tr -d '\n')
 data=$(mktemp)
 trap 'rm -f "$data"' EXIT
 
+# The relay droplets there already, by id: a region created again has two
+# droplets of one name, and only this run's are named at the end.
+before=$(doctl compute droplet list --tag-name sheprd-relay --format ID --no-header)
+
 for region in "$@"; do
   domain=""
   if [ -n "${RELAY_DOMAIN_SUFFIX:-}" ]; then
@@ -68,16 +72,16 @@ if [ -n "${RELAY_DOMAIN_SUFFIX:-}" ]; then
   echo "Point each name at its droplet's address above first."
 else
   listed=$(doctl compute droplet list --tag-name sheprd-relay \
-    --format Name,PublicIPv4 --no-header) || listed=""
-  for region in "$@"; do
-    # A region created twice has two droplets of one name: name them all.
-    addresses=$(awk -v name="sheprd-relay-$region" '$1 == name && $2 != "" { print $2 }' <<<"$listed")
-    if [ -z "$addresses" ]; then
-      echo "  $region: https://IP-WITH-DASHES.sslip.io (its address could not be read)"
-      continue
-    fi
+    --format ID,Name,PublicIPv4 --no-header) || listed=""
+  # An older droplet of the same name may serve another name: skip it.
+  addresses=$(awk -v before="$before" '
+    BEGIN { split(before, ids, "\n"); for (i in ids) old[ids[i]] = 1 }
+    $3 != "" && !($1 in old) { print $3 }' <<<"$listed")
+  if [ -z "$addresses" ]; then
+    echo "  https://IP-WITH-DASHES.sslip.io (the new droplets' addresses could not be read)"
+  else
     while read -r address; do
       echo "  https://${address//./-}.sslip.io"
     done <<<"$addresses"
-  done
+  fi
 fi

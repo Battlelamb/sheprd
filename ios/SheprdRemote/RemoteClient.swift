@@ -277,6 +277,20 @@ final class RemoteClient: Sendable {
         let _: EmptyAnswer = try await send("POST", "/api/term/\(Self.segment(pane))/paste", body: Body(text: text), bearer: bearer)
     }
 
+    /// The question the terminal agent in `pane` waits on, if any.
+    func termPrompt(pane: String, bearer: String) async throws -> TermPrompt? {
+        let answer: TermPrompt.Answer = try await send("GET", "/api/term/\(Self.segment(pane))/prompt", bearer: bearer)
+        return answer.prompt
+    }
+
+    /// Takes `choice` of the question shown, with `text` for one that takes
+    /// words; refused when the question changed since.
+    func termChoose(_ choice: TermPrompt.Choice, text: String?, pane: String, bearer: String) async throws {
+        struct Body: Encodable { let number: UInt32; let label: String; let text: String? }
+        let body = Body(number: choice.number, label: choice.label, text: text)
+        let _: EmptyAnswer = try await send("POST", "/api/term/\(Self.segment(pane))/prompt", body: body, bearer: bearer)
+    }
+
     /// A picture the computer stores and types the path of, as a file
     /// dropped on a terminal would.
     func termUpload(_ image: Data, pane: String, bearer: String) async throws {

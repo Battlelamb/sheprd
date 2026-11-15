@@ -169,6 +169,11 @@ private struct ChatDocument: View {
     let terminal: TerminalItem?
     @State private var problem: String?
     @State private var dismissedQuestion: PermissionId?
+    @State private var position = ScrollPosition(edge: .bottom)
+    /// Scrolled away from the latest, so the jump back shows.
+    @State private var away = false
+    /// How many of the latest turns show; earlier ones load on request.
+    @State private var shownTurns = 5
     /// A link the agent wrote, shown in full before it opens.
     @State private var pendingLink: URL?
 
@@ -177,48 +182,29 @@ private struct ChatDocument: View {
     static let readableWidth: CGFloat = 680
 
     var body: some View {
-        let entries = transcript.entries
-        let start = entries.lastIndex { if case .user = $0.kind { true } else { false } } ?? 0
-        let earlier = entries[..<start]
-        let latest = entries[start...]
-        let tools = latest.compactMap { if case let .tool(tool) = $0.kind { tool } else { nil } }
+        let turns = ChatTurn.split(transcript.entries)
+        let tools: [Tool] = (turns.last ?? []).compactMap { entry in
+            if case let .tool(tool) = entry.kind { tool } else { nil }
+        }
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if !earlier.isEmpty || transcript.truncated {
-                    DisclosureGroup {
-                        LazyVStack(alignment: .leading, spacing: 12) {
-                            ForEach(Array(earlier)) { EntryView(entry: $0) }
-                        }
+            LazyVStack(alignment: .leading, spacing: 16) {
+                let hidden = max(turns.count - shownTurns, 0)
+                if hidden > 0 {
+                    Button {
+                        shownTurns += 10
                     } label: {
-                        let turns = earlier.filter { if case .user = $0.kind { true } else { false } }.count
-                        Text("Earlier in this chat · \(turns) turn\(turns == 1 ? "" : "s")")
-                            .font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                        Label("Show \(min(hidden, 10)) earlier of \(hidden)", systemImage: "arrow.up.circle")
+                            .font(.subheadline.weight(.medium))
                     }
+                    .buttonStyle(.glass)
+                    .frame(maxWidth: .infinity)
+                } else if transcript.truncated {
+                    Label("Older messages stay on the computer", systemImage: "clock.arrow.circlepath")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
-                if case let .user(text, _) = latest.first?.kind {
-                    HStack(alignment: .top, spacing: 10) {
-                        Rectangle().fill(.tint).frame(width: 3)
-                        Text(text).font(.title3.weight(.semibold)).textSelection(.enabled)
-                    }
-                    .fixedSize(horizontal: false, vertical: true)
-                }
-                if !tools.isEmpty {
-                    DisclosureGroup {
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(tools, id: \.callId) { ToolRow(tool: $0) }
-                        }
-                        .padding(.top, 6)
-                    } label: {
-                        Label(stepsLine(tools), systemImage: "list.bullet.indent")
-                            .font(.subheadline).foregroundStyle(.secondary)
-                    }
-                    Divider()
-                }
-                ForEach(Array(latest.dropFirst())) { entry in
-                    if case .tool = entry.kind {} else { EntryView(entry: entry) }
-                }
-                ForEach(tools.flatMap(diffs), id: \.path) { diff in
-                    DiffBlock(path: diff.path, old: diff.old, new: diff.new)
+                ForEach(Array(turns.enumerated().dropFirst(hidden)), id: \.element.first?.id) { index, turn in
+                    if index > hidden { Divider().padding(.vertical, 8) }
+                    ChatTurn(entries: turn)
                 }
                 if !transcript.queued.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
@@ -253,31 +239,52 @@ private struct ChatDocument: View {
             .padding(.bottom, 24)
         }
         .defaultScrollAnchor(.bottom)
+        .scrollPosition($position)
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentSize.height - geometry.contentOffset.y - geometry.containerSize.height > 240
+        } action: { _, now in
+            away = now
+        }
+        // Dragging the conversation puts the keyboard away, as Messages does.
+        .scrollDismissesKeyboard(.interactively)
         .opacity(store.stale ? 0.6 : 1)
-        .safeAreaInset(edge: .bottom) {
+        // A bar, not an inset: what scrolls under it fades as under the
+        // system's own toolbars.
+        .safeAreaBar(edge: .bottom) {
             // The running turn's status sits where the turn grows, just
             // above the composer, not over the earlier answers at the top.
             VStack(spacing: 8) {
+                if away {
+                    Button {
+                        withAnimation(.snappy) { position.scrollTo(edge: .bottom) }
+                    } label: {
+                        Image(systemName: "arrow.down").font(.body.weight(.semibold)).frame(width: 36, height: 36)
+                    }
+                    .buttonStyle(.glass).buttonBorderShape(.circle)
+                    .accessibilityLabel("Jump to the latest")
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.trailing, 16)
+                    .transition(.scale.combined(with: .opacity))
+                }
+                if let terminal {
+                    PromptCard(key: key, agent: transcript.agent, waiting: terminal.needsYou, terminal: terminal.terminalRoute)
+                }
                 if transcript.status == .working {
                     RunningCapsule(transcript: transcript, tools: tools)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                Group {
-                    if let terminal {
-                        TerminalReply(
-                            key: key,
-                            agent: transcript.agent.isEmpty ? (terminal.agent?.name ?? "the agent") : transcript.agent,
-                            waiting: terminal.needsYou,
-                            terminal: terminal.terminalRoute
-                        )
-                    } else {
-                        Composer(key: key, store: store, transcript: transcript, problem: $problem)
-                    }
-                }
+                Composer(
+                    key: key,
+                    store: store,
+                    transcript: transcript,
+                    destination: terminal == nil ? .chat : .terminal,
+                    problem: $problem
+                )
                 .frame(maxWidth: Self.readableWidth + 40)
                 .frame(maxWidth: .infinity)
             }
             .animation(.snappy, value: transcript.status == .working)
+            .animation(.snappy, value: away)
         }
         .environment(\.openURL, OpenURLAction { url in
             guard MarkdownView.webSchemes.contains(url.scheme?.lowercased() ?? "") else { return .discarded }
@@ -312,15 +319,7 @@ private struct ChatDocument: View {
         )
     }
 
-    private func stepsLine(_ tools: [Tool]) -> String {
-        let edited = Set(tools.filter { $0.kind == .edit }.flatMap(\.locations)).count
-        let steps = "\(tools.count) step\(tools.count == 1 ? "" : "s")"
-        return edited > 0 ? "\(steps) · \(edited) file\(edited == 1 ? "" : "s") changed" : steps
-    }
 
-    private func diffs(_ tool: Tool) -> [(path: String, old: String?, new: String)] {
-        tool.content.compactMap { if case let .diff(path, old, new) = $0 { (path, old, new) } else { nil } }
-    }
 
     private func unqueue(_ queued: Queued) {
         Task { problem = await model.fleet.send(.unqueue(queued.id), to: key) }

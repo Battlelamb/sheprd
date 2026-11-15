@@ -173,7 +173,8 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
   terminal title, both absent from older daemons. Home lists these tabs
   with the chats, by status, and opens the agent's pane.
 - `agent.transcript` is `true` when the agent's own conversation can be
-  read as a chat: Claude Code in a Herdr 1 pane. The phone then opens it
+  read as a chat: Claude Code or Codex in a Herdr 1 pane, as
+  `sheprd_client::herdr::observe` lists them. The phone then opens it
   with `{"type": "subscribe", "view": "chat", "pane": PANE}` on the
   agent's pane, as it opens a chat, and `GET /api/v2/chat/{pane}` answers
   the same. The daemon starts `sheprd-acp observe` for it then, on the
@@ -181,10 +182,26 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
   there; the transcript is `read_only`, its steps reach no notifications,
   and no terminal is attached, so the pane keeps its size. At most eight
   observers run; past that the oldest no phone follows ends. Where it
-  cannot be read (a Windows host, a session Herdr does not name, a
-  `CLAUDE_CONFIG_DIR` on macOS) the subscription answers `error`, and the
+  cannot be read (a Windows host, a session Herdr does not name, a Codex
+  launched to resume another session, a `CLAUDE_CONFIG_DIR` or
+  `CODEX_HOME` on macOS) the subscription answers `error`, and the
   phone offers the terminal. Replies go to the terminal through
   `/api/term/{pane}/paste` and Enter. Absent (false) from older daemons.
+- `GET /api/term/{pane}/prompt` answers `{"prompt": PROMPT}`, or `null`
+  when nothing waits: the numbered menu at the bottom of the pane's
+  screen, as `sheprd_client::herdr::prompt` reads it (Claude Code's
+  questions and permission prompts, Codex's approvals). It is a menu only
+  when exactly one choice carries the highlight (`❯` or `›`), so a numbered
+  list in an answer never is. `question` is its lines top to bottom,
+  `choices` each `{number, label, detail?, text?}` (`text: true` takes
+  typed words), and `selected` the highlighted index. Reading uses
+  `pane.read`, which neither attaches nor resizes.
+- `POST /api/term/{pane}/prompt` with `{"number", "label", "text"?}` takes
+  that choice: the daemon reads the screen again, refuses with 400 when
+  the choice is no longer there under that number and label, then presses
+  Up or Down to it and Enter, typing `text` into a choice that takes
+  words first. A set of questions goes one at a time, ending on the
+  agent's own review, as at the desk.
 - A terminal's `convert` is what its menu may move into a chat, as
   Sheprd's Move Agent into Chat does: the agent's pane, and which agent it
   is. It is absent when nothing can move (`sheprd_client::herdr::convert`,

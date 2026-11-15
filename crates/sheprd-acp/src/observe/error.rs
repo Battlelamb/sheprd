@@ -11,10 +11,12 @@ pub enum Error {
     ConfigDirNotUtf8,
     #[error("Codex transcript directory exceeds the observation limit")]
     DayTooLarge,
+    #[cfg(any(target_os = "linux", test))]
     #[error("process environment exceeds the observation limit")]
     EnvironmentTooLarge,
     #[error("the original agent exited or was replaced")]
     Exited,
+    #[cfg(target_os = "macos")]
     #[error("invalid process id")]
     InvalidPid,
     #[cfg(any(target_os = "linux", test))]

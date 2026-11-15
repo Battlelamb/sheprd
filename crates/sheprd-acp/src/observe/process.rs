@@ -6,6 +6,7 @@ use super::{Error, Result};
 use std::path::PathBuf;
 
 /// Bytes of the environment read; only one config variable is kept.
+#[cfg(any(target_os = "linux", test))]
 const MAX_ENVIRONMENT: u64 = 128 * 1024;
 
 pub(super) enum Process {
@@ -15,6 +16,10 @@ pub(super) enum Process {
     /// A process on this Mac, by PID.
     #[cfg(target_os = "macos")]
     Darwin(u32),
+    /// Elsewhere no process can be read, so none is ever made; the variant
+    /// keeps every `match` here whole on every platform.
+    #[cfg(not(any(target_os = "linux", target_os = "macos", test)))]
+    Unsupported(std::convert::Infallible),
 }
 
 impl Process {
@@ -47,6 +52,8 @@ impl Process {
             Self::Proc(path) => procfs::started(path),
             #[cfg(target_os = "macos")]
             Self::Darwin(pid) => darwin::started(*pid),
+            #[cfg(not(any(target_os = "linux", target_os = "macos", test)))]
+            Self::Unsupported(never) => match *never {},
         }
     }
 
@@ -56,6 +63,8 @@ impl Process {
             Self::Proc(path) => std::fs::read_link(path.join("cwd")).ok(),
             #[cfg(target_os = "macos")]
             Self::Darwin(pid) => darwin::cwd(*pid),
+            #[cfg(not(any(target_os = "linux", target_os = "macos", test)))]
+            Self::Unsupported(never) => match *never {},
         }
     }
 
@@ -68,24 +77,30 @@ impl Process {
             Self::Proc(path) => procfs::open_files(path),
             #[cfg(target_os = "macos")]
             Self::Darwin(_) => Vec::new(),
+            #[cfg(not(any(target_os = "linux", target_os = "macos", test)))]
+            Self::Unsupported(never) => match *never {},
         }
     }
 
     /// The environment as `NAME=value` entries separated by NUL bytes, at
-    /// most [`MAX_ENVIRONMENT`] bytes; empty when it cannot be read. macOS
+    /// most 128 KiB; empty when it cannot be read. macOS
     /// shows no other process's environment, even this user's, so there an
     /// agent's config directory is always its default.
     pub(super) fn environment(&self) -> Result<Vec<u8>> {
-        let bytes = match self {
+        match self {
             #[cfg(any(target_os = "linux", test))]
-            Self::Proc(path) => procfs::environment(path)?,
+            Self::Proc(path) => {
+                let bytes = procfs::environment(path)?;
+                if bytes.len() as u64 > MAX_ENVIRONMENT {
+                    return Err(Error::EnvironmentTooLarge);
+                }
+                Ok(bytes)
+            }
             #[cfg(target_os = "macos")]
-            Self::Darwin(_) => Vec::new(),
-        };
-        if bytes.len() as u64 > MAX_ENVIRONMENT {
-            return Err(Error::EnvironmentTooLarge);
+            Self::Darwin(_) => Ok(Vec::new()),
+            #[cfg(not(any(target_os = "linux", target_os = "macos", test)))]
+            Self::Unsupported(never) => match *never {},
         }
-        Ok(bytes)
     }
 }
 

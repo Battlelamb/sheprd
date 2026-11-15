@@ -333,12 +333,12 @@ app learns the pane it should open:
   the agent can take up to 30 s. A refusal, such as a busy agent or one
   Herdr reports no session for, is a `409` whose `error` the phone shows;
   every refusal comes before the agent is touched, and leaves it running.
-- `POST /api/v2/chat/{pane}/summarize` asks the chat's own agent program,
-  run once on its own with no tools and no saved session, where the chat
-  stands, from the end of its transcript; Claude stands in for an agent
-  with no headless mode, and for one that is missing, fails, or answers
-  nothing (one that runs past 90 s is not retried). Nothing reaches the
-  chat itself. It answers `202`
+- `POST /api/v2/chat/{pane}/summarize` asks Claude Code, run once on its
+  own (`claude -p` with no tools, no MCP servers, and no saved session),
+  where the chat stands, from the end of its transcript. Nothing reaches
+  the chat itself. The transcript is untrusted, so the summarizer gets no
+  tool to act or read with; Codex and Gemini are not used, as neither
+  offers a headless mode with every tool off. It answers `202`
   at once, or `400` when nothing was said yet or three summaries are
   already running, and the result reaches every phone as the chat's
   `summary.row_summary` on `home`: `{"state": "pending", "since_ms"}`,

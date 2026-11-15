@@ -1,7 +1,14 @@
-//! A smarter line for a chat's row: the chat's own agent program, run once
-//! on its own, reads the end of the transcript and says where it stands.
-//! The chat's session, history, and context are untouched, as nothing is
-//! sent to it; the summary is the daemon's and lives with the chat's link.
+//! A smarter line for a chat's row: Claude Code, run once on its own with
+//! no tools and no MCP servers, reads the end of the transcript and says
+//! where the chat stands. The chat's session, history, and context are
+//! untouched, as nothing is sent to it; the summary is the daemon's and
+//! lives with the chat's link.
+//!
+//! The transcript is untrusted: an agent may have read a web page or an
+//! issue written to steer whatever reads it next. So the summarizer gets
+//! no tool to act or read with, only the text, and its answer is one
+//! bounded line shown on the person's own phone. Codex and Gemini are not
+//! used, as neither offers a headless mode with every tool off.
 
 mod error;
 
@@ -59,60 +66,20 @@ pub(crate) enum RowSummary {
     },
 }
 
-/// The agent programs that can summarize without a terminal.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum Program {
-    // keep-sorted start
-    Claude,
-    Codex,
-    Gemini,
-    // keep-sorted end
-}
-
-impl Program {
-    /// The chat's own agent first, then Claude for agents with no
-    /// headless mode here.
-    pub(crate) fn candidates(agent: &str) -> Vec<Self> {
-        let agent = agent.to_lowercase();
-        let own = [Self::Codex, Self::Gemini]
-            .into_iter()
-            .find(|program| agent.contains(program.name()));
-        own.into_iter().chain([Self::Claude]).collect()
-    }
-
-    fn name(self) -> &'static str {
-        match self {
-            Self::Claude => "claude",
-            Self::Codex => "codex",
-            Self::Gemini => "gemini",
-        }
-    }
-
-    /// One answer with no tools, no saved session, and no approvals.
-    fn args(self) -> Vec<OsString> {
-        let args: &[&str] = match self {
-            Self::Claude => &[
-                "-p",
-                "--tools",
-                "",
-                "--no-session-persistence",
-                "--output-format",
-                "text",
-                PROMPT,
-            ],
-            Self::Codex => &[
-                "exec",
-                "--ephemeral",
-                "--skip-git-repo-check",
-                "--sandbox",
-                "read-only",
-                PROMPT,
-            ],
-            // Untrusted, as a temporary folder is, Gemini drops plan mode.
-            Self::Gemini => &["--skip-trust", "--approval-mode", "plan", "-p", PROMPT],
-        };
-        args.iter().map(OsString::from).collect()
-    }
+/// Claude Code's headless mode with no built-in tools, no MCP servers
+/// (`--strict-mcp-config` with none given), and no saved session.
+fn claude() -> (OsString, Vec<OsString>) {
+    let args = [
+        "-p",
+        "--tools",
+        "",
+        "--strict-mcp-config",
+        "--no-session-persistence",
+        "--output-format",
+        "text",
+        PROMPT,
+    ];
+    ("claude".into(), args.iter().map(OsString::from).collect())
 }
 
 /// The person's prompts and the agent's answers, oldest first, as much of
@@ -160,13 +127,9 @@ impl Drop for Slot {
     }
 }
 
-/// Blocking: the summary of `input` from the first of `agent`'s
-/// candidates installed here.
-pub(crate) fn run(agent: &str, input: &str) -> Result<String, Error> {
-    let candidates = Program::candidates(agent)
-        .into_iter()
-        .map(|program| (OsString::from(program.name()), program.args()));
-    run_first(candidates, input, WAIT)
+/// Blocking: Claude's summary of `input`.
+pub(crate) fn run(input: &str) -> Result<String, Error> {
+    run_first([claude()], input, WAIT)
 }
 
 /// The answer of the first of `candidates` that gives one, each run for at

@@ -2,8 +2,9 @@ import SheprdRemoteCore
 import SwiftUI
 
 extension View {
-    /// Summarize at the row's leading edge: the chat's agent, run once on
-    /// its own, says where the chat stands, and its row shows that.
+    /// Summarize at the row's leading edge: Claude Code, run once on the
+    /// computer with no tools, says where the chat stands, and its row
+    /// shows that.
     func summarizeSwipe(_ key: PaneKey) -> some View {
         modifier(SummarizeSwipe(key: key))
     }

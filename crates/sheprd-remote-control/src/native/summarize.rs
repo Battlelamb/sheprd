@@ -1,5 +1,5 @@
-//! `POST /api/v2/chat/{pane}/summarize`: asks the chat's agent program, run
-//! once on its own, where the chat stands. It answers at once; the summary
+//! `POST /api/v2/chat/{pane}/summarize`: asks Claude Code, run once on its
+//! own with no tools, where the chat stands. It answers at once; the summary
 //! reaches every phone's list on `home` when the agent is done.
 
 use crate::{
@@ -36,11 +36,10 @@ pub(crate) async fn summarize(
     if !link.begin_summary(now_ms()) {
         return Ok(accepted());
     }
-    let agent = transcript.agent;
     tokio::spawn(async move {
         let answer = tokio::task::spawn_blocking(move || {
             let _slot = slot;
-            row_summary::run(&agent, &input)
+            row_summary::run(&input)
         })
         .await;
         let summary = match answer {

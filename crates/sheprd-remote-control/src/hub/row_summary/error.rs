@@ -9,7 +9,7 @@ pub(crate) enum Error {
     Empty,
     #[error("the agent stopped with an error")]
     Failed,
-    #[error("no agent that can summarize is installed on this computer")]
+    #[error("summaries use Claude Code, which is not installed on this computer")]
     NoAgent,
     #[error("the agent could not start")]
     Start(#[source] std::io::Error),

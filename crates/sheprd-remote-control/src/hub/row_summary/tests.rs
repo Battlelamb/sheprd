@@ -23,42 +23,18 @@ fn agent(id: u64, text: &str) -> Entry {
 }
 
 #[test]
-fn the_chat_s_own_agent_goes_first_then_claude() {
-    assert_eq!(
-        Program::candidates("Codex"),
-        [Program::Codex, Program::Claude]
-    );
-    assert_eq!(
-        Program::candidates("gemini"),
-        [Program::Gemini, Program::Claude]
-    );
-    assert_eq!(Program::candidates("Claude"), [Program::Claude]);
-    assert_eq!(Program::candidates("OpenCode"), [Program::Claude]);
-}
-
-#[test]
-fn no_candidate_runs_with_tools_or_saves_a_session() {
-    let claude = Program::Claude.args();
+fn claude_runs_with_no_tools_no_mcp_servers_and_no_session() {
+    let (program, args) = claude();
+    assert_eq!(program, "claude");
     assert!(
-        claude
-            .windows(2)
+        args.windows(2)
             .any(|pair| pair[0] == "--tools" && pair[1].is_empty())
     );
-    assert!(claude.contains(&"--no-session-persistence".into()));
-    let codex = Program::Codex.args();
-    assert!(
-        codex
-            .windows(2)
-            .any(|pair| pair[0] == "--sandbox" && pair[1] == "read-only")
-    );
-    assert!(codex.contains(&"--ephemeral".into()));
-    let gemini = Program::Gemini.args();
-    assert!(gemini.contains(&"--skip-trust".into()));
-    assert!(
-        gemini
-            .windows(2)
-            .any(|pair| pair[0] == "--approval-mode" && pair[1] == "plan")
-    );
+    assert!(args.contains(&"--strict-mcp-config".into()));
+    // No MCP config is given, so none loads.
+    assert!(!args.contains(&"--mcp-config".into()));
+    assert!(args.contains(&"--no-session-persistence".into()));
+    assert_eq!(args.last(), Some(&PROMPT.into()));
 }
 
 #[test]

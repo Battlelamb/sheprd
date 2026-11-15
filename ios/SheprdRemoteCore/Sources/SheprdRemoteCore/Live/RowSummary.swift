@@ -1,7 +1,7 @@
 import Foundation
 
-/// A chat's summary as its row shows it: what the chat's own agent, run
-/// once on its own, said of where the chat stands.
+/// A chat's summary as its row shows it: what Claude Code, run once on the
+/// computer with no tools, said of where the chat stands.
 public enum RowSummary: Codable, Hashable, Sendable {
     case pending(sinceMs: UInt64)
     case ready(text: String, atMs: UInt64)

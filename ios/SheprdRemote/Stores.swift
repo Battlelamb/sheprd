@@ -23,6 +23,8 @@ final class ChatStore {
     private(set) var diverged = false
     /// Prompts this phone sent that the transcript does not show yet.
     private(set) var outgoing: [Outgoing] = []
+    /// Why the computer would not show the chat, while nothing came.
+    var problem: String?
 
     init(key: PaneKey, cached: Cache.CachedChat?) {
         self.key = key

@@ -20,16 +20,33 @@ struct ChatScreen: View {
         model.fleet.chatItems.first { $0.key == key }
     }
 
+    /// The terminal tab whose agent this conversation is, when it is a
+    /// terminal agent's rather than a chat's.
+    private var terminal: TerminalItem? {
+        guard item == nil else { return nil }
+        return model.fleet.terminalItems.first { $0.computer.device == key.device && $0.agent?.pane == key.pane }
+    }
+
     /// The chat's name as the computer last sent it, so a rename shows at
     /// once; the route's title until the home arrives.
     private var name: String {
-        item?.chat.title ?? title
+        item?.chat.title ?? terminal?.title ?? title
     }
 
     var body: some View {
         Group {
             if let store, let transcript = store.transcript {
-                ChatDocument(key: key, store: store, transcript: model.fleet.chat(transcript, for: key))
+                ChatDocument(key: key, store: store, transcript: model.fleet.chat(transcript, for: key), terminal: terminal)
+            } else if let problem = store?.problem {
+                ContentUnavailableView {
+                    Label("Can't show this conversation", systemImage: "text.bubble")
+                } description: {
+                    Text(problem)
+                } actions: {
+                    if let route = terminal?.terminalRoute {
+                        RouteLink(route) { Text("Open the terminal") }.buttonStyle(.glassProminent)
+                    }
+                }
             } else {
                 ProgressView("Loading the chat…")
             }
@@ -59,11 +76,13 @@ struct ChatScreen: View {
             // inspector sits outside the chat's stack, so the bar's middle
             // is the chat's.
             ToolbarItem(placement: .principal) {
-                Button { showingSession = store != nil } label: {
+                Button { showingSession = store != nil && terminal == nil } label: {
                     VStack(spacing: 0) {
                         HStack(spacing: 4) {
                             Text(name).font(.headline).lineLimit(1)
-                            Image(systemName: "chevron.down.circle.fill").font(.caption).foregroundStyle(.tertiary)
+                            if terminal == nil {
+                                Image(systemName: "chevron.down.circle.fill").font(.caption).foregroundStyle(.tertiary)
+                            }
                         }
                         if let line = store?.transcript.map({ sessionLine(model.fleet.chat($0, for: key)) }), !line.isEmpty {
                             Text(line).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -72,7 +91,13 @@ struct ChatScreen: View {
                 }
                 .buttonStyle(.plain)
                 .frame(maxWidth: width == .regular ? 480 : 360)
-                .accessibilityHint("Shows the session's settings")
+                .accessibilityHint(terminal == nil ? "Shows the session's settings" : "")
+            }
+            if let route = terminal?.terminalRoute {
+                ToolbarItem(placement: .topBarTrailing) {
+                    RouteLink(route) { Image(systemName: "apple.terminal") }
+                        .accessibilityLabel("Open the terminal")
+                }
             }
             if let usage = store?.transcript?.usage {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -140,6 +165,8 @@ private struct ChatDocument: View {
     let key: PaneKey
     let store: ChatStore
     let transcript: Transcript
+    /// The terminal tab whose agent this is; replies go to its terminal.
+    let terminal: TerminalItem?
     @State private var problem: String?
     @State private var dismissedQuestion: PermissionId?
     /// A link the agent wrote, shown in full before it opens.
@@ -235,9 +262,20 @@ private struct ChatDocument: View {
                     RunningCapsule(transcript: transcript, tools: tools)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                Composer(key: key, store: store, transcript: transcript, problem: $problem)
-                    .frame(maxWidth: Self.readableWidth + 40)
-                    .frame(maxWidth: .infinity)
+                Group {
+                    if let terminal {
+                        TerminalReply(
+                            key: key,
+                            agent: transcript.agent.isEmpty ? (terminal.agent?.name ?? "the agent") : transcript.agent,
+                            waiting: terminal.needsYou,
+                            terminal: terminal.terminalRoute
+                        )
+                    } else {
+                        Composer(key: key, store: store, transcript: transcript, problem: $problem)
+                    }
+                }
+                .frame(maxWidth: Self.readableWidth + 40)
+                .frame(maxWidth: .infinity)
             }
             .animation(.snappy, value: transcript.status == .working)
         }

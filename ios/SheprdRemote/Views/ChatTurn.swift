@@ -66,14 +66,14 @@ struct ChatTurn: View {
     }
 }
 
-/// A prompt as its turn's heading. A picture sent into a terminal reaches
-/// the agent as a file path in the prompt; it shows as a picture mark, not
-/// as the path.
+/// A prompt as its turn's heading. A picture this app sends into a
+/// terminal reaches the agent as the path its computer stored it at; that
+/// path shows as a picture mark. Any other path stays as typed.
 private struct PromptHeading: View {
     let text: String
 
     var body: some View {
-        let (words, pictures) = Self.pictures(in: text)
+        let (words, pictures) = PromptPictures.split(text)
         HStack(alignment: .top, spacing: 10) {
             Rectangle().fill(.tint).frame(width: 3)
             VStack(alignment: .leading, spacing: 6) {
@@ -87,21 +87,5 @@ private struct PromptHeading: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private static let pictureTypes: Set<String> = ["gif", "heic", "jpeg", "jpg", "png", "webp"]
-
-    /// The prompt without the absolute paths of pictures in it, and how many
-    /// there were.
-    static func pictures(in text: String) -> (String, Int) {
-        var count = 0
-        let kept = text.split(separator: " ", omittingEmptySubsequences: false).filter { word in
-            let isPicture = word.hasPrefix("/")
-                && !word.contains("\n")
-                && pictureTypes.contains(word.split(separator: ".").last.map { $0.lowercased() } ?? "")
-            if isPicture { count += 1 }
-            return !isPicture
-        }
-        return (kept.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines), count)
     }
 }

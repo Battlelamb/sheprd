@@ -127,13 +127,12 @@ final class PicturesTextView: UITextView {
         }
     }
 
-    /// What the keyboard's paste suggestion and a drop hand over.
+    /// What the keyboard's paste suggestion and a drop hand over: pictures
+    /// to the pictures, the rest, such as words, into the text.
     override func paste(itemProviders: [NSItemProvider]) {
         let images = itemProviders.filter { $0.canLoadObject(ofClass: UIImage.self) }
-        guard !images.isEmpty else {
-            super.paste(itemProviders: itemProviders)
-            return
-        }
+        let rest = itemProviders.filter { !$0.canLoadObject(ofClass: UIImage.self) }
+        if !rest.isEmpty { super.paste(itemProviders: rest) }
         for provider in images {
             provider.loadObject(ofClass: UIImage.self) { [weak self] object, _ in
                 guard let image = object as? UIImage else { return }

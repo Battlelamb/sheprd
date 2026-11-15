@@ -39,6 +39,9 @@ struct Composer: View {
     @State private var focused = false
     /// Counts sends, for the haptic.
     @State private var sends = 0
+    /// The last message on its way to a terminal: the next waits for it, so
+    /// two messages never interleave their pictures, words, and Enter.
+    @State private var terminalSend: Task<Void, Never>?
 
     /// Whether nothing can be sent: a read-only transcript, unless what is
     /// typed goes to the agent's terminal.
@@ -399,7 +402,9 @@ struct Composer: View {
         dictation.reset()
         saveDraft()
         let pane = key.pane
-        Task {
+        let before = terminalSend
+        terminalSend = Task {
+            await before?.value
             do {
                 try await model.fleet.call(key.device) { client, token in
                     for picture in sent { try await client.termUpload(picture.jpeg, pane: pane, bearer: token) }

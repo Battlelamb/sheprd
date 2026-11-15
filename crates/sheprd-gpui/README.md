@@ -947,8 +947,11 @@ preserves these drafts. Theme, font, and layout writes from Settings are seriali
 
 **Ghostty** and **Herdr** are independent library filters, both enabled initially.
 Turn either off to show only the other; search text is preserved, and changing a
-filter does not change the live theme or pending draft. Ghostty includes native
-built-ins and theme files. The built-ins bundle popular Ghostty themes from
+filter does not change the live theme or pending draft. Switching to one library
+locates its saved or drafted theme. Saved and draft cards have an accent outline,
+while a filled background marks keyboard focus; the first search result may be
+focused without being the current theme. Ghostty includes native built-ins and
+theme files. The built-ins bundle popular Ghostty themes from
 iTerm2-Color-Schemes under their Ghostty names, so a platform without Ghostty
 still lists them; when Ghostty is installed, its copy of a built-in, including
 an older spelling such as `tokyonight` or `catppuccin-mocha`, is listed once,

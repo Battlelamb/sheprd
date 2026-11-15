@@ -20,6 +20,8 @@ impl SheprdWindow {
         let theme = &self.theme;
         let paired = Supervisor::devices(cx).is_none_or(|devices| !devices.is_empty());
         let connected = Supervisor::connected(cx);
+        let per_build = Supervisor::approval_per_build(cx);
+        let warning = theme.ink(theme.palette[3]);
         let label: SharedString = match paired {
             false => fl!("remote-menu-pair-label").into(),
             true => fl!("remote-menu-phones-label", count = connected).into(),
@@ -73,9 +75,23 @@ impl SheprdWindow {
             } else {
                 theme.muted
             }));
+        // The firewall's warning takes the badge's corner: it matters more
+        // than who is connected, which the count still says.
+        let phone = div().relative().child(phone).when(per_build, |icon| {
+            icon.child(
+                div()
+                    .debug_selector(|| "titlebar-remote-firewall".into())
+                    .absolute()
+                    .top(px(-2.))
+                    .right(px(-3.))
+                    .size(px(7.))
+                    .rounded_full()
+                    .bg(rgb(warning)),
+            )
+        });
         Some(if paired {
             button
-                .child(div().relative().child(phone).when(connected > 0, |icon| {
+                .child(phone.when(connected > 0 && !per_build, |icon| {
                     icon.child(
                         div()
                             .debug_selector(|| "titlebar-remote-live".into())
@@ -147,6 +163,17 @@ impl SheprdWindow {
                     .text_color(rgb(theme.muted))
                     .child(fl!("remote-menu-phones")),
             )
+            .when(Supervisor::approval_per_build(cx), |menu| {
+                menu.child(
+                    div()
+                        .debug_selector(|| "remote-menu-firewall".into())
+                        .px(px(6.))
+                        .pb(px(4.))
+                        .text_size(px(self.config.ui.size - 1.))
+                        .text_color(rgb(theme.ink(theme.palette[3])))
+                        .child(fl!("remote-menu-firewall")),
+                )
+            })
             .children(
                 devices
                     .iter()

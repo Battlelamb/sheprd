@@ -17,6 +17,10 @@ settings-remote-health-not-running = Not running: { $reason }
 settings-remote-service-failed = Could not change the service: { $error }
 settings-remote-revoke-failed = Could not revoke the device: { $error }
 settings-remote-retry = Retry
+# Shown while the service runs a build without a developer ID and the
+# macOS firewall is on.
+settings-remote-firewall = Phones will be blocked after this build changes
+settings-remote-firewall-note = The macOS firewall is on, and this build of the daemon is not signed with a developer ID, so macOS approves only this exact build. After a rebuild, the next restart of the Mac or of the daemon blocks phones until someone clicks Allow at this computer. Run remote control from a signed release to keep the approval.
 
 settings-remote-section-service = Service
 settings-remote-keep-running-note = Phones keep working and notifications keep coming. Pairing a new device still needs Sheprd.

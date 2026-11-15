@@ -17,8 +17,10 @@ pub(super) enum Process {
     #[cfg(target_os = "macos")]
     Darwin(u32),
     /// Elsewhere no process can be read, so none is ever made; the variant
-    /// keeps every `match` here whole on every platform.
+    /// keeps every `match` here whole on every platform. Never constructing
+    /// it is its purpose.
     #[cfg(not(any(target_os = "linux", target_os = "macos", test)))]
+    #[allow(dead_code)]
     Unsupported(std::convert::Infallible),
 }
 

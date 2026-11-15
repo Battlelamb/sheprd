@@ -58,6 +58,7 @@ struct ChatList: View {
             .contextMenu {
                 Button("Close Chat", systemImage: "xmark.circle", role: .destructive) { closing = item }
             }
+            .summarizeSwipe(item.key)
         case let .agent(item):
             if let route = item.route {
                 NavigationLink(value: route) { AgentTerminalRowLabel(item: item, showsComputer: !grouped, showsWorkspace: !grouped) }

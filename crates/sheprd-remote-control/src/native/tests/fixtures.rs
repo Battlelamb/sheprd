@@ -121,6 +121,7 @@ fn home() -> Home {
         question: Some(permission(3)),
         questions: 1,
         last_text: Some("Added Equalize Splits.".into()),
+        row_summary: None,
         turn_started_ms: Some(1_761_670_000_000),
         last_turn_ended_ms: None,
         agent: "Claude".into(),

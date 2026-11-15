@@ -581,6 +581,15 @@ final class Fleet {
         }
     }
 
+    /// Asks for a chat's row summary; every phone's list shows it when the
+    /// computer has it.
+    func summarize(_ key: PaneKey) async throws {
+        let pane = key.pane
+        try await call(key.device) { client, token in
+            try await client.summarize(pane: pane, bearer: token)
+        }
+    }
+
     /// Names a chat or the terminal tab a pane is in; the next `home` from
     /// the computer carries the name to every list.
     func rename(_ key: PaneKey, to label: String) async throws {

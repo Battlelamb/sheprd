@@ -152,16 +152,32 @@ struct ChatRowLabel: View {
                     }
                     StatusMark(status: item.chat.status, asking: item.question != nil)
                 }
-                Text(detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                detail.font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityValue(showsWorkspace && item.workspace.merged ? "Pull request merged" : "")
             }
         }
     }
 
-    private var detail: AttributedString {
-        let said = item.question?.title ?? item.chat.summary?.lastText
-        return RowPlace.line([
+    /// The line under the title: a waiting question first, then the
+    /// summary the person asked for while it still holds, then the latest
+    /// reply.
+    private var detail: Text {
+        let summary = item.question == nil ? item.chat.summary?.currentRowSummary : nil
+        switch summary {
+        case let .ready(text, _)?:
+            return Text("\(Image(systemName: "sparkles")) \(line(said: text))")
+        case .pending?:
+            return Text("\(Image(systemName: "sparkles")) \(line(said: String(localized: "Summarizing…")))")
+        case let .failed(reason, _)?:
+            return Text("\(Image(systemName: "exclamationmark.triangle")) \(line(said: String(localized: "No summary: \(reason)")))")
+        case .other?, nil:
+            return Text(line(said: item.question?.title ?? item.chat.summary?.lastText))
+        }
+    }
+
+    private func line(said: String?) -> AttributedString {
+        RowPlace.line([
             showsComputer ? AttributedString(item.computer.name) : nil,
             showsWorkspace ? RowPlace.name(of: item.workspace) : nil,
             said.map { AttributedString($0) },

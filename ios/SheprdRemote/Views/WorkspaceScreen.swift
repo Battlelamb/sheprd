@@ -54,6 +54,7 @@ struct WorkspaceScreen: View {
             Section {
                 ForEach(chats) { item in
                     RouteLink(.chat(item.key, title: item.chat.title)) { ChatRowLabel(item: item, showsComputer: false, showsWorkspace: false) }
+                        .summarizeSwipe(item.key)
                 }
                 ForEach(terminals.filter { $0.agent != nil }) { item in
                     if let route = item.route {

@@ -106,3 +106,30 @@ fn configured_relays_come_first_and_shared_ones_add_only_what_is_new() {
         ["https://relay.example.org", "https://b.example.org"]
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_offer_written_after_loading_but_before_starting_is_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut shared = state(dir.path());
+    let relays = Arc::new(Relays::load(dir.path(), Vec::new()).unwrap());
+    Arc::get_mut(&mut shared).unwrap().relay = Some(Arc::clone(&relays));
+    // No control socket answers yet, so the offer goes to the file.
+    let path = dir.path().to_owned();
+    tokio::task::spawn_blocking(move || {
+        crate::relay::shared::share(
+            &path,
+            Offer {
+                source: "studio".into(),
+                relays: vec!["relay.example.org".into()],
+            },
+        )
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(relays.endpoints().is_empty());
+    let (_stop, stopped) = watch::channel(false);
+    relays.start(served(dir.path(), &shared).0, stopped);
+    assert_eq!(relays.endpoints().len(), 1);
+    assert!(relays.info().is_some());
+}

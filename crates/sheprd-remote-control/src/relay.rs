@@ -159,6 +159,9 @@ impl Relays {
         offer: control::relays::Offer,
     ) -> std::result::Result<Vec<String>, shared::Error> {
         {
+            // The file's lock too, so an offer written while no daemon
+            // answered is never written over with an older copy.
+            let _file = shared::lock(&self.shared_file)?;
             let mut shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
             let mut next = shared.clone();
             if next.offer(offer)? {
@@ -230,7 +233,19 @@ impl Relays {
 
     /// Starts a listener for each relay, serving `router` over each
     /// session, until `stopped`; relays shared later start as they come.
+    /// The control socket answers by now, so this reads the shared relays
+    /// again: an offer written to the file while it did not, after
+    /// [`Self::load`] read it, is kept. One written after this finds the
+    /// socket and is sent again (`shared::share`). Blocking: it reads the
+    /// file.
     pub(crate) fn start(self: &Arc<Self>, served: Served, stopped: watch::Receiver<bool>) {
+        match shared::lock(&self.shared_file) {
+            Ok(_file) => {
+                *self.shared.lock().unwrap_or_else(PoisonError::into_inner) =
+                    shared::load(&self.shared_file);
+            }
+            Err(error) => tracing::warn!(%error, "could not read the shared relays again"),
+        }
         let runtime = Handle::current();
         let mut until = stopped.clone();
         self.running
@@ -252,9 +267,13 @@ impl Relays {
     /// Brings the running listeners in line with [`Self::endpoints`]:
     /// starts the new ones and stops the ones left out, or every one once
     /// the daemon stops. Also tells nearby offers whether to name relays.
+    ///
+    /// The relays wanted are read under the lock that orders these updates,
+    /// so an update that read an older list can never finish after a newer
+    /// one and start a relay since withdrawn.
     fn follow(self: &Arc<Self>) {
-        let wanted = self.endpoints();
         let mut running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
+        let wanted = self.endpoints();
         let Some(started) = &running.started else {
             return;
         };

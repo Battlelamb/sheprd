@@ -47,3 +47,11 @@ fn the_file_is_private() {
     let mode = fs::metadata(file(dir.path())).unwrap().permissions().mode();
     assert_eq!(mode & 0o777, 0o600);
 }
+
+#[test]
+fn with_no_daemon_the_relays_listened_on_are_the_shared_ones() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(listened(dir.path()).unwrap().is_empty());
+    share(dir.path(), offer("studio", &["relay.example.org"])).unwrap();
+    assert_eq!(listened(dir.path()).unwrap(), ["https://relay.example.org"]);
+}

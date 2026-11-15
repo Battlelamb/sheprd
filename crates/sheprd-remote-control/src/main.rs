@@ -109,19 +109,15 @@ fn run_enroll(state_dir: &std::path::Path) -> sheprd_remote_control::Result<()> 
     Ok(())
 }
 
-/// `relays`: shares `offer` with the daemon, or with no offer reads the
-/// relays shared so far; either way, what it listens on.
+/// `relays`: shares `offer` with the daemon, or with no offer reads what it
+/// listens on; either way, its own relays and the shared ones.
 fn relays(
     state_dir: &std::path::Path,
     offer: Option<sheprd_remote_control::control::relays::Offer>,
 ) -> sheprd_remote_control::Result<serde_json::Value> {
     let relays = match offer {
         Some(offer) => shared_relays::share(state_dir, offer)?,
-        None => shared_relays::load(&shared_relays::file(state_dir))
-            .endpoints()
-            .iter()
-            .map(ToString::to_string)
-            .collect(),
+        None => shared_relays::listened(state_dir)?,
     };
     Ok(serde_json::json!({ "relays": relays }))
 }

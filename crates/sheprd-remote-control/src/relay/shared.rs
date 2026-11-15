@@ -44,31 +44,62 @@ pub fn save(file: &Path, shared: &Shared) -> Result<(), Error> {
 }
 
 /// Offers `offer` to the daemon whose state is `state_dir` and returns the
-/// relays it listens on now; with no daemon running, keeps it in the file
-/// the daemon reads when it starts, and returns the shared relays alone.
-/// Blocking.
+/// relays it listens on now. With no daemon answering, keeps it in the file
+/// the daemon reads when it starts, then asks once more: a daemon that read
+/// the file just before this wrote it, and answers by now, takes the offer
+/// itself. Otherwise returns the shared relays alone. Blocking.
 pub fn share(state_dir: &Path, offer: Offer) -> Result<Vec<String>, Error> {
     let address = control::address(state_dir);
-    match control::request(&address, &Request::ShareRelays(offer.clone())) {
-        Ok(Response::Relays { relays }) => Ok(relays),
-        Ok(_) => Err(Error::Unexpected),
+    let ask = |offer: &Offer| control::request(&address, &Request::ShareRelays(offer.clone()));
+    match ask(&offer) {
+        Ok(answer) => answered(answer),
         Err(control::Error::Connect(_)) => {
             let file = file(state_dir);
-            let _lock = lock(&file)?;
-            let mut shared = load(&file);
-            if shared.offer(offer)? {
-                save(&file, &shared)?;
+            let shared = {
+                let _lock = lock(&file)?;
+                let mut shared = load(&file);
+                if shared.offer(offer.clone())? {
+                    save(&file, &shared)?;
+                }
+                shared
+            };
+            match ask(&offer) {
+                Ok(answer) => answered(answer),
+                Err(control::Error::Connect(_)) => Ok(names(shared.endpoints())),
+                Err(error) => Err(error.into()),
             }
-            Ok(shared.endpoints().iter().map(ToString::to_string).collect())
         }
         Err(error) => Err(error.into()),
     }
 }
 
+/// The relays the daemon whose state is `state_dir` listens on, its own and
+/// shared ones; with none running, the shared ones it will listen on.
+/// Blocking.
+pub fn listened(state_dir: &Path) -> Result<Vec<String>, Error> {
+    match control::request(&control::address(state_dir), &Request::Status) {
+        Ok(Response::Status(status)) => Ok(status.relays.into_keys().collect()),
+        Ok(_) => Err(Error::Unexpected),
+        Err(control::Error::Connect(_)) => Ok(names(load(&file(state_dir)).endpoints())),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn answered(answer: Response) -> Result<Vec<String>, Error> {
+    match answer {
+        Response::Relays { relays } => Ok(relays),
+        _ => Err(Error::Unexpected),
+    }
+}
+
+fn names(endpoints: Vec<sheprd_relay::Endpoint>) -> Vec<String> {
+    endpoints.iter().map(ToString::to_string).collect()
+}
+
 /// Holds `file`'s lock until the handle is dropped, so two offers with no
 /// daemon running cannot both read the old copy. The system frees it if
 /// its holder dies. Blocking.
-fn lock(file: &Path) -> Result<fs::File, Error> {
+pub(crate) fn lock(file: &Path) -> Result<fs::File, Error> {
     let path = file.with_extension("lock");
     let failed = |operation| {
         let path = path.clone();

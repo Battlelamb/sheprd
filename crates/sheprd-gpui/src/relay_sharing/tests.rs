@@ -70,3 +70,70 @@ fn the_host_answer_says_whether_it_took_them() {
     assert!(matches!(sync::parse(b"nope"), Err(Error::Answer(_))));
     assert!(sync::SCRIPT.contains("relays --offer"));
 }
+
+fn target(host: &str) -> ConnectTarget {
+    ConnectTarget::Ssh {
+        target: host.into(),
+        session: "default".into(),
+    }
+}
+
+fn reached(hosts: &[&str], at: Instant) -> Reached {
+    Reached {
+        machines: hosts
+            .iter()
+            .map(|host| ((*host).to_owned(), target(host)))
+            .collect(),
+        at,
+    }
+}
+
+#[test]
+fn each_window_counts_and_one_never_hides_another_s_machines() {
+    let now = Instant::now();
+    let (one, two) = (EntityId::from(1_u64), EntityId::from(2_u64));
+    let mut sharing = RelaySharing::default();
+    sharing.windows.insert(one, reached(&["ssh:a"], now));
+    sharing.windows.insert(two, reached(&["ssh:b"], now));
+    sharing.links.insert(
+        "ssh:a".into(),
+        Link {
+            sent: Some(relays(&["relay.example.org"])),
+            last: Some(now),
+            running: false,
+        },
+    );
+    sharing.forget_unreached(now);
+    let machines: Vec<String> = sharing.machines(now).into_keys().collect();
+    assert_eq!(machines, ["ssh:a", "ssh:b"]);
+    // Window two's report keeps window one's link as it was.
+    assert!(sharing.links["ssh:a"].sent.is_some());
+}
+
+#[test]
+fn a_silent_window_stops_counting_and_its_machines_hear_again_on_return() {
+    let start = Instant::now();
+    let later = start + WINDOW_SILENCE;
+    let (closed, open) = (EntityId::from(1_u64), EntityId::from(2_u64));
+    let mut sharing = RelaySharing::default();
+    sharing
+        .windows
+        .insert(closed, reached(&["ssh:a", "ssh:b"], start));
+    sharing.windows.insert(open, reached(&[], later));
+    for (id, running) in [("ssh:a", false), ("ssh:b", true)] {
+        sharing.links.insert(
+            id.into(),
+            Link {
+                sent: Some(Vec::new()),
+                last: Some(start),
+                running,
+            },
+        );
+    }
+    sharing.forget_unreached(later);
+    assert!(!sharing.windows.contains_key(&closed));
+    assert!(sharing.machines(later).is_empty());
+    // A link with an offer running is kept, so it never starts twice.
+    assert!(!sharing.links.contains_key("ssh:a"));
+    assert!(sharing.links["ssh:b"].running);
+}

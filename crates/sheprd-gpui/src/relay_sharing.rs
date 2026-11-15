@@ -15,7 +15,7 @@ mod sync;
 pub use error::Error;
 
 use crate::device_tags::Daemon;
-use gpui::{App, BorrowAppContext, Global};
+use gpui::{App, BorrowAppContext, EntityId, Global};
 use sheprd_client::ConnectTarget;
 use std::{
     collections::{BTreeMap, HashMap},
@@ -27,6 +27,9 @@ use std::{
 const RETRY: Duration = Duration::from_secs(120);
 /// How often a machine that took them is told again.
 const REFRESH: Duration = Duration::from_secs(600);
+/// How long a window's report counts: windows report every poll, so one
+/// silent this long has closed.
+const WINDOW_SILENCE: Duration = Duration::from_secs(30);
 
 /// Where one machine stands.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -65,9 +68,17 @@ pub(crate) struct RelaySharing {
     /// The name this computer shares under, which each machine keys its
     /// relays by.
     source: String,
-    /// The machines windows can reach now, by endpoint ID.
-    machines: BTreeMap<String, ConnectTarget>,
+    /// What each window reached when it last said, by window: each window
+    /// reports its own machines, so one is never taken for all of them.
+    windows: HashMap<EntityId, Reached>,
     links: HashMap<String, Link>,
+}
+
+/// The machines one window reached, and when it said so.
+#[derive(Debug)]
+struct Reached {
+    machines: BTreeMap<String, ConnectTarget>,
+    at: Instant,
 }
 
 impl Global for RelaySharing {}
@@ -101,12 +112,12 @@ impl RelaySharing {
         }
     }
 
-    /// Tells which devices a window can reach; this computer's own daemon
+    /// Tells which devices `window` can reach; this computer's own daemon
     /// follows the settings itself, so only other machines count.
-    pub(crate) fn reach(cx: &mut App, reachable: &BTreeMap<String, Daemon>) {
-        let Some(this) = cx.try_global::<Self>() else {
+    pub(crate) fn reach(cx: &mut App, window: EntityId, reachable: &BTreeMap<String, Daemon>) {
+        if !cx.has_global::<Self>() {
             return;
-        };
+        }
         let machines: BTreeMap<String, ConnectTarget> = reachable
             .iter()
             .filter_map(|(id, daemon)| match daemon {
@@ -114,15 +125,34 @@ impl RelaySharing {
                 Daemon::Remote(target) => Some((id.clone(), target.clone())),
             })
             .collect();
-        if this.machines != machines {
-            cx.update_global::<Self, _>(|this, _| {
-                // A machine that comes back may have restarted from
-                // anything: it hears the relays again.
-                this.links.retain(|id, _| machines.contains_key(id));
-                this.machines = machines;
-            });
-        }
+        let now = Instant::now();
+        cx.update_global::<Self, _>(|this, _| {
+            this.windows.insert(window, Reached { machines, at: now });
+            this.forget_unreached(now);
+        });
         Self::tick(cx);
+    }
+
+    /// Every machine some window reaches now. A window that stopped saying,
+    /// such as one that closed, counts no longer.
+    fn machines(&self, now: Instant) -> BTreeMap<String, ConnectTarget> {
+        self.windows
+            .values()
+            .filter(|reached| now.duration_since(reached.at) < WINDOW_SILENCE)
+            .flat_map(|reached| reached.machines.clone())
+            .collect()
+    }
+
+    /// Drops windows that went quiet, and resets the links of machines no
+    /// window reaches, so one that comes back, maybe restarted from
+    /// anything, hears the relays again. An offer still running keeps its
+    /// link, so it is never started twice.
+    fn forget_unreached(&mut self, now: Instant) {
+        self.windows
+            .retain(|_, reached| now.duration_since(reached.at) < WINDOW_SILENCE);
+        let machines = self.machines(now);
+        self.links
+            .retain(|id, link| link.running || machines.contains_key(id));
     }
 
     /// Starts the offers that are due.
@@ -135,14 +165,9 @@ impl RelaySharing {
         };
         let now = Instant::now();
         let due: Vec<(String, ConnectTarget)> = this
-            .machines
-            .iter()
-            .filter(|(id, _)| {
-                this.links
-                    .get(*id)
-                    .is_none_or(|link| link.due(&relays, now))
-            })
-            .map(|(id, target)| (id.clone(), target.clone()))
+            .machines(now)
+            .into_iter()
+            .filter(|(id, _)| this.links.get(id).is_none_or(|link| link.due(&relays, now)))
             .collect();
         let source = this.source.clone();
         for (id, target) in due {

@@ -61,25 +61,21 @@ struct ComputerScreen: View {
             }
             if !computer.relayHosts.isEmpty {
                 Section {
+                    // Which relay carries the connection is the proxy's to
+                    // know, so the section says it once, not on every row.
+                    if relayed {
+                        Label("Connected through a relay", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
                     ForEach(computer.relayHosts, id: \.self) { host in
-                        LabeledContent {
+                        LabeledContent(Computer.relayLabel) {
                             Text(host).textSelection(.enabled)
-                        } label: {
-                            if relayed {
-                                Label(Computer.relayLabel, systemImage: "checkmark.circle.fill")
-                                    .labelStyle(.titleAndIcon).foregroundStyle(.green)
-                                    .accessibilityLabel("\(Computer.relayLabel), connected")
-                            } else {
-                                Text(Computer.relayLabel)
-                            }
                         }
                     }
                 } header: {
                     Text("Relays")
                 } footer: {
-                    Text(relayed
-                        ? "Connected through a relay, end to end encrypted: none of the addresses answers."
-                        : "When none of the addresses answers, such as with Tailscale off, this \(UIDevice.current.model) reaches \(name) through a relay, end to end encrypted.")
+                    Text("When none of the addresses answers, such as with Tailscale off, this \(UIDevice.current.model) reaches \(name) through a relay, end to end encrypted.")
                 }
             }
             if let vouching = model.vouching(computer) {

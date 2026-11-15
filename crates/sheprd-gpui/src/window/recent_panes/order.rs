@@ -69,6 +69,10 @@ impl RecentPanes {
     ) {
         for projection in projections {
             let Some(snapshot) = projection.snapshot else {
+                // A request queued on a transport that ended never lands, and
+                // a new connection replays nothing, so what it reports later
+                // is the user's own focus rather than a stale one.
+                self.abandon(projection.endpoint);
                 continue;
             };
             match self.boots.get(projection.endpoint) {
@@ -239,26 +243,28 @@ impl RecentPanes {
         {
             cycle.observed = None;
         }
-        let invalidated = self.pending.as_ref().is_some_and(|pending| {
-            pending
-                .source
-                .as_ref()
-                .is_some_and(|key| key.endpoint == endpoint)
-                || pending
-                    .destinations
-                    .back()
-                    .is_some_and(|key| key.endpoint == endpoint)
-        });
-        if invalidated {
-            self.pending = None;
-        } else if let Some(pending) = &mut self.pending {
-            pending.destinations.retain(|key| key.endpoint != endpoint);
-        }
+        let invalidated = self.abandon(endpoint);
         if invalidated || self.order.iter().any(|key| key.endpoint == endpoint) {
             // The cursor indexes the order about to shrink.
             self.finish();
             self.order.retain(|key| key.endpoint != endpoint);
         }
+    }
+
+    /// Stops waiting on `endpoint` to confirm the pending selection. Returns
+    /// whether the whole selection went with it: its source or final
+    /// destination was there. Otherwise only the passes there are dropped.
+    fn abandon(&mut self, endpoint: &str) -> bool {
+        let Some(pending) = &mut self.pending else {
+            return false;
+        };
+        let on = |key: &PaneKey| key.endpoint == endpoint;
+        if pending.source.as_ref().is_some_and(on) || pending.destinations.back().is_some_and(on) {
+            self.pending = None;
+            return true;
+        }
+        pending.destinations.retain(|key| !on(key));
+        false
     }
 
     fn promote(&mut self, key: PaneKey) {

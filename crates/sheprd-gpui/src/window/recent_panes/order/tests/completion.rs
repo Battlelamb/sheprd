@@ -246,19 +246,58 @@ fn a_closed_final_destination_allows_later_legacy_focus_to_be_remembered() {
 }
 
 #[test]
-fn disconnect_keeps_legacy_pending_selection_through_stale_reports() {
+fn a_dropped_transport_abandons_the_legacy_selection_it_never_delivered() {
     let mut recent = visited(&["a", "b", "c", "d"]);
     assert_eq!(accept(&mut recent, "d"), "c");
     assert_eq!(accept(&mut recent, "d"), "b");
     assert_eq!(accept(&mut recent, "d"), "a");
     recent.release(Modifiers::none());
     recent.observe(&projections(&[(LOCAL, None)]), None);
-    for focused in ["d", "c", "b"] {
-        unfenced(&mut recent, focused);
-    }
+    assert!(recent.pending.is_none());
+    assert_eq!(order(&recent), ["a", "d", "c", "b"]);
 
+    // The same boot answers again, still on the pane the presses left, and
+    // the user then visits a pane the cycle only passed through.
+    unfenced(&mut recent, "d");
+    unfenced(&mut recent, "c");
+
+    assert_eq!(order(&recent), ["c", "d", "a", "b"]);
     assert_eq!(
-        peek_local(&recent, Step::Back, &focusing("b")).map(|(_, pane)| pane),
-        Some("a".into())
+        peek_local(&recent, Step::Back, &focusing("c")).map(|(_, pane)| pane),
+        Some("d".into())
     );
+}
+
+#[test]
+fn a_dropped_source_machine_abandons_a_selection_that_left_it() {
+    let mut recent = across_endpoints();
+    let local = focusing("b");
+    let remote = remote("x");
+    let projected = projections(&[(LOCAL, Some(&local)), (REMOTE, Some(&remote))]);
+    let (index, target) = recent
+        .peek(Step::Back, &projected, Some(&key(REMOTE, "x")))
+        .unwrap();
+    assert_eq!(target, key(LOCAL, "b"));
+    recent.begin(index, Modifiers::control(), Some(key(REMOTE, "x")));
+    recent.release(Modifiers::none());
+
+    recent.observe(&projections(&[(LOCAL, Some(&local)), (REMOTE, None)]), None);
+
+    assert!(recent.pending.is_none());
+    assert_eq!(order(&recent), ["b", "remote:x", "a"]);
+}
+
+#[test]
+fn a_dropped_machine_only_passed_through_keeps_the_selection_pending() {
+    let mut recent = across_endpoints();
+    assert_eq!(order(&recent), ["remote:x", "b", "a"]);
+    recent.begin(0, Modifiers::control(), Some(key(LOCAL, "b")));
+    recent.begin(2, Modifiers::control(), Some(key(LOCAL, "b")));
+
+    let local = focusing("b");
+    recent.observe(&projections(&[(LOCAL, Some(&local)), (REMOTE, None)]), None);
+
+    let pending = recent.pending.as_ref().unwrap();
+    assert_eq!(pending.destinations, [key(LOCAL, "a")]);
+    assert_eq!(pending.source, Some(key(LOCAL, "b")));
 }

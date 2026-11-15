@@ -1,9 +1,9 @@
 use super::*;
 
 #[test]
-fn only_claude_in_a_herdr_1_pane_is_observed() {
+fn only_claude_and_codex_in_a_herdr_1_pane_are_observed() {
     assert!(observable("w1:p1", Some("claude")));
-    assert!(!observable("w1:p1", Some("codex")));
+    assert!(observable("w1:p1", Some("codex")));
     assert!(!observable("w1:p1", Some("bash")));
     assert!(!observable("w1:p1", None));
 }
@@ -22,6 +22,7 @@ mod running {
     fn binding(pane: &str, session: &str) -> Binding {
         Binding {
             pane: pane.to_owned(),
+            agent: Agent::Claude,
             session: session.to_owned(),
             pid: 10,
             started: 20,

@@ -4,6 +4,7 @@
 
 mod agent_kind;
 pub mod convert;
+pub mod observe;
 pub mod processes;
 pub mod sessions;
 pub mod snapshot;

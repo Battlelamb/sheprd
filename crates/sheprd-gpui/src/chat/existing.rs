@@ -5,7 +5,10 @@ use crate::teleport::{self, Envelope, Host, ProcessInfoResult, SessionKind, Snap
 use sheprd_chat_protocol::Agent;
 use sheprd_client::{
     ConnectTarget, ScriptLimits,
-    herdr::processes::{self, ProcessIdentity, agent_args, agent_processes},
+    herdr::{
+        observe::{self, observable},
+        processes::{self, ProcessIdentity, agent_args, agent_processes},
+    },
     protocol::{ClientShellAgent, ClientShellSnapshot},
     shell_quote,
 };
@@ -28,7 +31,6 @@ const SETTLED: Duration = Duration::from_secs(30);
 /// One unreachable probe keeps the overlays; this many in a row drop them.
 const MAX_FAILURES: u8 = 2;
 mod batch;
-mod codex;
 mod error;
 pub(crate) use error::Error;
 
@@ -392,9 +394,7 @@ fn inspect_host(
                 .foreground_processes
                 .iter()
                 .find(|process| process.pid == pid)?;
-            if agent == Agent::Codex
-                && !codex::session_matches(agent_args(agent, &process.argv)?, &session.value)
-            {
+            if !observe::launch_agrees(agent, agent_args(agent, &process.argv)?, &session.value) {
                 return None;
             }
             let unchanged = last.snapshot.pane(&pane.pane_id).is_some_and(|after| {
@@ -440,15 +440,6 @@ pub(crate) fn candidates(snapshot: &ClientShellSnapshot) -> Vec<&ClientShellAgen
         .filter(|agent| super::discovery::endpoint(&agent.tokens).is_none())
         .take(super::MAX_CHATS)
         .collect()
-}
-
-/// The agent named `name`, when it is one whose running conversation can be
-/// observed: its CLI reports a session id the observer can read.
-pub(crate) fn observable(name: &str) -> Option<Agent> {
-    match name.parse() {
-        Ok(agent @ (Agent::Codex | Agent::Claude)) => Some(agent),
-        _ => None,
-    }
 }
 
 /// [`sheprd_client::herdr::processes::agent_pid`] over the identities this

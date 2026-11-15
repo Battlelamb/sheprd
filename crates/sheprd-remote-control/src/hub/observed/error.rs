@@ -7,11 +7,13 @@ pub enum Error {
     Answer(#[source] serde_json::Error),
     #[error("the agent's own process could not be told apart in its pane")]
     Process,
-    #[error("Herdr names no session this agent's conversation can be read from")]
+    #[error(
+        "Herdr does not know which conversation this agent is in. Install Herdr's integration for it (herdr integration install claude, or codex) and start the agent again"
+    )]
     Session,
     #[error("the observer could not start")]
     Start(#[source] std::io::Error),
-    #[error("only Claude Code in a Herdr 1 pane on macOS or Linux shows as a chat")]
+    #[error("only Claude Code or Codex in a Herdr 1 pane on macOS or Linux shows as a chat")]
     Unsupported,
     // keep-sorted end
 }

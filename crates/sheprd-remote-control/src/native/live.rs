@@ -212,8 +212,14 @@ fn handle(
                         Ok(link) => link,
                         Err(error) => {
                             tracing::info!(%error, "a terminal agent's chat cannot be shown");
+                            // What the person can do about it, when it is
+                            // theirs to fix; never a path or a process.
+                            let message = match error {
+                                crate::hub::Error::Observed(error) => error.to_string(),
+                                _ => "this agent's conversation cannot be shown".to_owned(),
+                            };
                             let message = ServerMessage::Error {
-                                message: "this agent's conversation cannot be shown".to_owned(),
+                                message,
                                 view: Some(view),
                             };
                             let _ = out.send(message).await;

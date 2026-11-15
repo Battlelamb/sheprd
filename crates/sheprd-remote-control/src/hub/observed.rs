@@ -1,5 +1,6 @@
 //! A terminal agent's conversation, shown to phones as a chat. A Claude
-//! Code CLI running in a Herdr pane keeps its own transcript; the same
+//! Code or Codex CLI running in a Herdr pane keeps its own transcript
+//! (`sheprd_client::herdr::observe` names which agents do); the same
 //! `sheprd-acp observe` Sheprd's `render_existing` uses projects it, read
 //! only, while the terminal keeps all input. An observer starts when a
 //! phone first opens the chat and ends with the agent, when the pane's
@@ -18,7 +19,8 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sheprd_chat_protocol::Agent;
 use sheprd_client::herdr::{
-    processes::{agent_pid, local_identity},
+    observe,
+    processes::{agent_args, agent_pid, local_identity},
     snapshot::{Pane, ProcessInfo, SessionKind},
 };
 use std::{
@@ -45,6 +47,7 @@ struct Running {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Binding {
     pane: String,
+    agent: Agent,
     session: String,
     pid: u32,
     started: u64,
@@ -98,14 +101,12 @@ impl Observed {
 }
 
 /// Whether the agent named `name` in `pane` has a conversation phones can
-/// read as a chat: Claude Code, which keeps its transcript under its own
-/// name, in a Herdr 1 pane. Codex also needs its arguments checked against
-/// the session, which this does not yet do, and a Herdr 2 terminal reports
-/// its processes another way. The same on every host, so a phone sees one
-/// answer; [`Hub::observe`] refuses where processes cannot be read.
+/// read as a chat: one [`observe::observable`] names, in a Herdr 1 pane (a
+/// Herdr 2 terminal reports its processes another way). The same on every
+/// host, so a phone sees one answer; [`Hub::observe`] refuses where
+/// processes cannot be read.
 pub(crate) fn observable(pane: &str, name: Option<&str>) -> bool {
-    name.and_then(|name| name.parse().ok()) == Some(Agent::Claude)
-        && !core::owns(&json!({"pane_id": pane}))
+    name.and_then(observe::observable).is_some() && !core::owns(&json!({"pane_id": pane}))
 }
 
 #[derive(Deserialize)]
@@ -148,7 +149,7 @@ impl Hub {
         let mut command = sheprd_client::new_command(program);
         command.args([
             "observe".to_owned(),
-            Agent::Claude.name().to_owned(),
+            binding.agent.name().to_owned(),
             binding.session.clone(),
             binding.pid.to_string(),
             binding.started.to_string(),
@@ -165,13 +166,19 @@ impl Hub {
     async fn binding(&self, pane: &str) -> super::Result<Binding> {
         let params = json!({"pane_id": pane});
         let found: PaneAnswer = parse(self.call(ApiMethod::PaneGet, params.clone()).await?)?;
+        let agent = found
+            .pane
+            .agent
+            .as_deref()
+            .and_then(observe::observable)
+            .ok_or(Error::Unsupported)?;
+        // The session and the pane must name the same agent.
         let session = found
             .pane
             .agent_session
             .filter(|session| {
                 session.kind == SessionKind::Id
-                    && session.agent == Agent::Claude.name()
-                    && found.pane.agent.as_deref() == Some(Agent::Claude.name())
+                    && session.agent == agent.name()
                     && uuid::Uuid::parse_str(&session.value).is_ok()
             })
             .ok_or(Error::Session)?;
@@ -182,7 +189,7 @@ impl Hub {
             .iter()
             .filter_map(|process| Some((process.pid, local_identity(process.pid)?)))
             .collect();
-        let pid = agent_pid(Agent::Claude, &info.process_info, |pid| {
+        let pid = agent_pid(agent, &info.process_info, |pid| {
             identities
                 .get(&pid)
                 .copied()
@@ -190,8 +197,21 @@ impl Hub {
         })
         .ok_or(Error::Process)?;
         let started = identities.get(&pid).ok_or(Error::Process)?.started;
+        // A launch that names another session than Herdr's cannot be
+        // trusted to be showing Herdr's.
+        let argv = info
+            .process_info
+            .foreground_processes
+            .iter()
+            .find(|process| process.pid == pid)
+            .and_then(|process| agent_args(agent, &process.argv))
+            .ok_or(Error::Process)?;
+        if !observe::launch_agrees(agent, argv, &session.value) {
+            return Err(Error::Session.into());
+        }
         Ok(Binding {
             pane: pane.to_owned(),
+            agent,
             session: session.value,
             pid,
             started,

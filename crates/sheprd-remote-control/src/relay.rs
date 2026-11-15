@@ -11,10 +11,17 @@
 //!
 //! A relay sees only the tunnel's ciphertext, and a device that is not
 //! paired hears `offline` from the relay or, past it, nothing at all.
+//!
+//! Relays share nothing, so a phone always dials the relays this computer
+//! listens on, never its own: two machines set up with different relays
+//! still meet. To use the nearest, the daemon measures each relay's round
+//! trip and `GET /api/relay` lists them nearest first, with those times,
+//! and the phone adds its own leg to each before choosing (`nearest`).
 
 mod error;
 pub(crate) mod keys;
 mod listen;
+mod nearest;
 mod serve;
 
 pub use error::Error;
@@ -69,6 +76,8 @@ pub(crate) struct Relays {
     /// The open pairing dial, if any, and a revision listeners follow.
     pairing: Mutex<Option<Pairing>>,
     pairing_changed: watch::Sender<u64>,
+    /// Each listening relay's round-trip time, keyed by endpoint.
+    rtt: Mutex<BTreeMap<String, Duration>>,
     /// Each relay's state, for `sheprd remote status`.
     status: Mutex<BTreeMap<String, Status>>,
 }
@@ -78,10 +87,16 @@ pub(crate) struct Relays {
 pub(crate) struct Info {
     /// The tunnel identity to pin: X25519 then ML-KEM-768, base64url.
     pub(crate) identity: String,
-    /// The relays this computer listens on.
+    /// The relays this computer listens on, nearest first; those not
+    /// listening now keep their configured order, after the rest.
     pub(crate) relays: Vec<String>,
     /// This computer's route, base64url.
     pub(crate) route: String,
+    /// Each listening relay's round trip from this computer, in
+    /// milliseconds, so the phone can add its own leg. Older phones ignore
+    /// it.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) rtt_ms: BTreeMap<String, u32>,
 }
 
 impl Relays {
@@ -93,6 +108,7 @@ impl Relays {
             keys: keys::Keys::load_or_create(state_dir)?,
             pairing: Mutex::default(),
             pairing_changed: watch::Sender::new(0),
+            rtt: Mutex::default(),
             status: Mutex::default(),
         })
     }
@@ -100,10 +116,12 @@ impl Relays {
     /// What `GET /api/relay` answers.
     pub(crate) fn info(&self) -> Info {
         use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+        let rtt = self.rtt.lock().unwrap_or_else(PoisonError::into_inner);
         Info {
             identity: URL_SAFE_NO_PAD.encode(self.keys.tunnel.identity().to_bytes()),
-            relays: self.endpoints.iter().map(ToString::to_string).collect(),
+            relays: nearest::first(&self.endpoints, &rtt),
             route: self.keys.route().to_string(),
+            rtt_ms: nearest::millis(&rtt),
         }
     }
 
@@ -149,6 +167,16 @@ impl Relays {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
+    }
+
+    /// Records `endpoint`'s round trip while it listens; `None` forgets it,
+    /// so a relay that dropped this computer is not offered as nearest.
+    fn set_rtt(&self, endpoint: &Endpoint, rtt: Option<Duration>) {
+        let mut times = self.rtt.lock().unwrap_or_else(PoisonError::into_inner);
+        match rtt {
+            Some(rtt) => times.insert(endpoint.to_string(), rtt),
+            None => times.remove(&endpoint.to_string()),
+        };
     }
 
     fn set_status(&self, endpoint: &Endpoint, status: Status) {

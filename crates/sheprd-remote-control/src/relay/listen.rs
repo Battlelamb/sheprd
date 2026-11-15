@@ -23,6 +23,8 @@ const INFO_TIMEOUT: Duration = Duration::from_secs(10);
 const ATTEMPT: Duration = Duration::from_secs(5);
 /// How many of a relay's addresses are tried per connection.
 const MAX_ADDRESSES: usize = 8;
+/// How often a listening relay's round trip is read again.
+const RTT_EVERY: Duration = Duration::from_secs(30);
 
 /// Keeps listening on `endpoint` until `stopped`.
 pub(super) async fn run(
@@ -36,8 +38,12 @@ pub(super) async fn run(
         relays.set_status(&endpoint, Status::Connecting);
         let result = tokio::select! {
             result = session(&relays, &endpoint, &served, &mut wait) => result,
-            _ = stopped.wait_for(|stop| *stop) => return,
+            _ = stopped.wait_for(|stop| *stop) => {
+                relays.set_rtt(&endpoint, None);
+                return;
+            }
         };
+        relays.set_rtt(&endpoint, None);
         if let Err(error) = result {
             tracing::warn!(relay = %endpoint, error = %error, "relay listening failed");
             relays.set_status(
@@ -83,9 +89,11 @@ async fn session(
     listener.set_dial_keys(dial_keys(state)).await?;
     add_pairing(relays, &mut listener).await;
     relays.set_status(endpoint, Status::Listening);
-    tracing::info!(relay = %endpoint, "listening on a relay");
+    relays.set_rtt(endpoint, Some(listener.rtt()));
+    tracing::info!(relay = %endpoint, rtt = ?listener.rtt(), "listening on a relay");
     // Listening worked: the next failure starts the backoff over.
     *wait = FIRST;
+    let mut measure = tokio::time::interval(RTT_EVERY);
     loop {
         tokio::select! {
             incoming = listener.accept() => {
@@ -100,6 +108,7 @@ async fn session(
             _ = changed.changed() => listener.set_dial_keys(dial_keys(state)).await?,
             _ = pairing.changed() => add_pairing(relays, &mut listener).await,
             _ = revoked.changed() => listener.set_dial_keys(dial_keys(state)).await?,
+            _ = measure.tick() => relays.set_rtt(endpoint, Some(listener.rtt())),
             error = listener.closed() => return Err(Error::Client(error.into())),
         }
     }

@@ -171,6 +171,13 @@ impl Listener {
         Ok(Incoming { key, recv, send })
     }
 
+    /// The connection's smoothed round-trip time to the relay, which QUIC
+    /// keeps current from its keep-alives: how near the relay is.
+    #[must_use]
+    pub fn rtt(&self) -> std::time::Duration {
+        self.connection.rtt()
+    }
+
     /// Resolves when the relay drops this listener or the connection ends.
     pub async fn closed(&self) -> quinn::ConnectionError {
         self.connection.closed().await

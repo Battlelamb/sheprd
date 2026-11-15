@@ -7,6 +7,7 @@
 mod api;
 mod attach;
 mod chat;
+pub(crate) mod chat_title;
 mod convert;
 mod core;
 mod daemon;

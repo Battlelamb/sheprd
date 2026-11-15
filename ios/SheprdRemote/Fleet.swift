@@ -590,6 +590,14 @@ final class Fleet {
         }
     }
 
+    /// A short title for a chat from its agent, run once on its own.
+    func suggestTitle(_ key: PaneKey) async throws -> String {
+        let pane = key.pane
+        return try await call(key.device) { client, token in
+            try await client.suggestTitle(pane: pane, bearer: token)
+        }
+    }
+
     /// Names a chat or the terminal tab a pane is in; the next `home` from
     /// the computer carries the name to every list.
     func rename(_ key: PaneKey, to label: String) async throws {

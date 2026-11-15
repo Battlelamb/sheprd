@@ -17,3 +17,16 @@ pub(crate) enum Error {
     TimedOut,
     // keep-sorted end
 }
+
+impl Error {
+    /// How a request that ran an agent answers this failure.
+    pub(crate) fn status(&self) -> axum::http::StatusCode {
+        use axum::http::StatusCode;
+        match self {
+            Self::Busy => StatusCode::TOO_MANY_REQUESTS,
+            Self::NoAgent => StatusCode::CONFLICT,
+            Self::TimedOut => StatusCode::GATEWAY_TIMEOUT,
+            Self::Empty | Self::Failed | Self::Start(_) => StatusCode::BAD_GATEWAY,
+        }
+    }
+}

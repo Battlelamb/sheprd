@@ -189,6 +189,7 @@ impl Hub {
         }
         let follower = hub.clone();
         tokio::spawn(async move { follower.follow().await });
+        tokio::spawn(hub.clone().follow_observed_sessions());
         Ok(hub)
     }
 

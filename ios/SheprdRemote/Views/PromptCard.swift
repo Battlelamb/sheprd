@@ -57,9 +57,9 @@ struct PromptCard: View {
                 VStack(spacing: 8) {
                     ForEach(prompt.choices) { choice in
                         if choice.takesWords {
-                            wordsField(choice)
+                            wordsField(choice, of: prompt)
                         } else {
-                            Button { choose(choice, text: nil) } label: {
+                            Button { choose(choice, of: prompt, text: nil) } label: {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(choice.label).font(.body.weight(.medium))
                                     if let detail = choice.detail {
@@ -94,13 +94,13 @@ struct PromptCard: View {
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
-    private func wordsField(_ choice: TermPrompt.Choice) -> some View {
+    private func wordsField(_ choice: TermPrompt.Choice, of prompt: TermPrompt) -> some View {
         HStack(spacing: 8) {
             TextField(choice.label, text: $words, axis: .vertical)
                 .lineLimit(1 ... 4)
                 .padding(.horizontal, 12).padding(.vertical, 9)
                 .background(.fill.tertiary, in: .rect(cornerRadius: Self.radius))
-            Button { choose(choice, text: words) } label: {
+            Button { choose(choice, of: prompt, text: words) } label: {
                 Image(systemName: "arrow.up").font(.body.weight(.semibold)).frame(width: 28, height: 28)
             }
             .buttonStyle(.glassProminent).buttonBorderShape(.circle)
@@ -143,14 +143,14 @@ struct PromptCard: View {
         }
     }
 
-    private func choose(_ choice: TermPrompt.Choice, text: String?) {
+    private func choose(_ choice: TermPrompt.Choice, of shown: TermPrompt, text: String?) {
         let pane = key.pane
         sending = true
         Task {
             defer { sending = false }
             do {
                 try await model.fleet.call(key.device) { client, token in
-                    try await client.termChoose(choice, text: text, pane: pane, bearer: token)
+                    try await client.termChoose(choice, of: shown, text: text, pane: pane, bearer: token)
                 }
                 answered += 1
                 words = ""

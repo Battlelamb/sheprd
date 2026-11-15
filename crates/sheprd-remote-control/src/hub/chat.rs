@@ -198,7 +198,10 @@ impl Chat {
                     let (all, _) = broadcast::channel(1);
                     observed.connected(reader, writer, Link::Child(child.clone()), None, &all);
                     observed.closed.store(true, Ordering::SeqCst);
-                    observed.set_connected(false, &all);
+                    // Said even when it never connected, so whoever waits
+                    // for its first transcript learns at once.
+                    lock(&observed.state).connected = false;
+                    observed.publish(Event::Connection, &all);
                     let _ = lock(&child).wait();
                 }
             });
@@ -227,6 +230,31 @@ impl Chat {
     /// Whether it ended for good: closed, or an observer that finished.
     pub(crate) fn is_closed(&self) -> bool {
         self.closed.load(Ordering::SeqCst)
+    }
+
+    /// Whether the first transcript arrives within `within`: false when
+    /// the connection ends first, as an observer that cannot read the
+    /// conversation does, or nothing comes in time.
+    pub(crate) async fn opened(&self, within: Duration) -> bool {
+        let mut events = self.events.subscribe();
+        let deadline = tokio::time::sleep(within);
+        tokio::pin!(deadline);
+        loop {
+            if lock(&self.state).cursor.is_some() {
+                return true;
+            }
+            if self.is_closed() {
+                return false;
+            }
+            tokio::select! {
+                () = &mut deadline => return false,
+                event = events.recv() => {
+                    if matches!(event, Err(broadcast::error::RecvError::Closed)) {
+                        return false;
+                    }
+                }
+            }
+        }
     }
 
     /// How many phones follow it now.

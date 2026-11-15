@@ -31,6 +31,7 @@ mod origins;
 mod pace;
 mod pairing;
 mod presence;
+mod prompt;
 mod pull_requests;
 mod rename;
 mod routes;

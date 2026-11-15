@@ -196,9 +196,11 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
   `choices` each `{number, label, detail?, text?}` (`text: true` takes
   typed words), and `selected` the highlighted index. Reading uses
   `pane.read`, which neither attaches nor resizes.
-- `POST /api/term/{pane}/prompt` with `{"number", "label", "text"?}` takes
-  that choice: the daemon reads the screen again, refuses with 400 when
-  the choice is no longer there under that number and label, then presses
+- `POST /api/term/{pane}/prompt` with `{"question", "number", "label",
+  "text"?}` takes that choice: the daemon reads the screen again, refuses
+  with 400 unless the question's lines are the ones the phone showed and
+  the choice is still there under that number and label (so a late answer
+  never approves another command with the same choices), then presses
   Up or Down to it and Enter, typing `text` into a choice that takes
   words first. A set of questions goes one at a time, ending on the
   agent's own review, as at the desk.

@@ -283,11 +283,12 @@ final class RemoteClient: Sendable {
         return answer.prompt
     }
 
-    /// Takes `choice` of the question shown, with `text` for one that takes
-    /// words; refused when the question changed since.
-    func termChoose(_ choice: TermPrompt.Choice, text: String?, pane: String, bearer: String) async throws {
-        struct Body: Encodable { let number: UInt32; let label: String; let text: String? }
-        let body = Body(number: choice.number, label: choice.label, text: text)
+    /// Takes `choice` of `prompt`, the question as shown, with `text` for
+    /// a choice that takes words; refused when the question changed since,
+    /// even to another with the same choices.
+    func termChoose(_ choice: TermPrompt.Choice, of prompt: TermPrompt, text: String?, pane: String, bearer: String) async throws {
+        struct Body: Encodable { let question: [String]; let number: UInt32; let label: String; let text: String? }
+        let body = Body(question: prompt.question, number: choice.number, label: choice.label, text: text)
         let _: EmptyAnswer = try await send("POST", "/api/term/\(Self.segment(pane))/prompt", body: body, bearer: bearer)
     }
 

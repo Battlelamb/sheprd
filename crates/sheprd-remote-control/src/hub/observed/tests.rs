@@ -69,3 +69,79 @@ mod running {
         observed.retain(|_| false);
     }
 }
+
+#[cfg(unix)]
+mod lifecycle {
+    use super::*;
+
+    fn observer(program: &str, args: &[&str]) -> Arc<Chat> {
+        let mut command = sheprd_client::new_command(program);
+        command.args(args);
+        Chat::observe("w1:p1".to_owned(), command).unwrap()
+    }
+
+    #[tokio::test]
+    async fn an_observer_that_ends_before_reading_is_not_opened() {
+        let chat = observer("/usr/bin/true", &[]);
+        assert!(!chat.opened(Duration::from_secs(5)).await);
+    }
+
+    #[tokio::test]
+    async fn an_observer_that_reads_nothing_in_time_is_not_opened() {
+        let chat = observer("/bin/sleep", &["30"]);
+        assert!(!chat.opened(Duration::from_millis(200)).await);
+        chat.close();
+    }
+
+    #[test]
+    fn the_newest_observer_is_kept_past_the_limit_when_all_others_are_followed() {
+        let observed = Observed::default();
+        let mut phones = Vec::new();
+        for n in 0..MAX_OBSERVED {
+            let chat = observer("/bin/sleep", &["30"]);
+            phones.push(chat.subscribe().1);
+            observed.keep(
+                Binding {
+                    pane: format!("w{n}:p1"),
+                    agent: Agent::Claude,
+                    session: "a".into(),
+                    pid: 1,
+                    started: 1,
+                },
+                chat,
+            );
+        }
+        let newest = observer("/bin/sleep", &["30"]);
+        observed.keep(
+            Binding {
+                pane: "new:p1".into(),
+                agent: Agent::Claude,
+                session: "a".into(),
+                pid: 1,
+                started: 1,
+            },
+            newest.clone(),
+        );
+        assert!(!newest.is_closed());
+        observed.retain(|_| false);
+    }
+
+    #[test]
+    fn ending_a_session_closes_only_its_observer() {
+        let observed = Observed::default();
+        let old = observer("/bin/sleep", &["30"]);
+        let binding = Binding {
+            pane: "w1:p1".into(),
+            agent: Agent::Claude,
+            session: "old".into(),
+            pid: 1,
+            started: 1,
+        };
+        observed.keep(binding, old.clone());
+        observed.end("w1:p1", "other");
+        assert!(!old.is_closed());
+        observed.end("w1:p1", "old");
+        assert!(old.is_closed());
+        assert!(observed.sessions().is_empty());
+    }
+}

@@ -13,6 +13,8 @@ pub enum Error {
     Session,
     #[error("the observer could not start")]
     Start(#[source] std::io::Error),
+    #[error("the agent's conversation could not be read on its computer; open the terminal")]
+    Unreadable,
     #[error("only Claude Code or Codex in a Herdr 1 pane on macOS or Linux shows as a chat")]
     Unsupported,
     // keep-sorted end

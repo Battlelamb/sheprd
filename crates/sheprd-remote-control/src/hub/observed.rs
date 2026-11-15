@@ -26,6 +26,7 @@ use sheprd_client::herdr::{
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, PoisonError},
+    time::Duration,
 };
 
 pub(crate) type Result<T, E = Error> = std::result::Result<T, E>;
@@ -33,6 +34,10 @@ pub(crate) type Result<T, E = Error> = std::result::Result<T, E>;
 /// Observers kept at once. Past it the least recently opened one that no
 /// phone follows ends; one every phone still follows is never ended.
 const MAX_OBSERVED: usize = 8;
+/// How long a new observer has to read its first transcript.
+const FIRST_READ: Duration = Duration::from_secs(10);
+/// How often running observers' sessions are checked against Herdr's.
+const SESSION_CHECK: Duration = Duration::from_secs(3);
 
 /// The observers running now, by pane, with what each was started for.
 #[derive(Default)]
@@ -80,11 +85,32 @@ impl Observed {
         let mut running = self.lock();
         running.push(Running { binding, chat });
         while running.len() > MAX_OBSERVED {
-            let Some(oldest) = running.iter().position(|kept| kept.chat.followers() == 0) else {
+            // Never the one just added, which its phone is about to follow.
+            let older = &running[..running.len() - 1];
+            let Some(oldest) = older.iter().position(|kept| kept.chat.followers() == 0) else {
                 break;
             };
             running.remove(oldest).chat.close();
         }
+    }
+
+    /// Each running observer's pane and the session it reads.
+    fn sessions(&self) -> Vec<(String, String)> {
+        self.lock()
+            .iter()
+            .map(|kept| (kept.binding.pane.clone(), kept.binding.session.clone()))
+            .collect()
+    }
+
+    /// Ends the observer of `pane` that reads `session`.
+    fn end(&self, pane: &str, session: &str) {
+        self.lock().retain(|kept| {
+            let ended = kept.binding.pane == pane && kept.binding.session == session;
+            if ended {
+                kept.chat.close();
+            }
+            !ended
+        });
     }
 
     /// Ends the observers of panes that no longer show an agent that can be
@@ -157,8 +183,41 @@ impl Hub {
             pane.to_owned(),
         ]);
         let chat = Chat::observe(pane.to_owned(), command).map_err(Error::Start)?;
+        // An observer that cannot find or read the conversation ends before
+        // its first transcript; the phone is told, not shown an empty chat.
+        if !chat.opened(FIRST_READ).await {
+            chat.close();
+            return Err(Error::Unreadable.into());
+        }
         self.observed.keep(binding, chat.clone());
         Ok(chat)
+    }
+
+    /// Ends observers whose agent moved to another session in the same
+    /// process, as Claude Code's `/resume` or `/clear` does: its old
+    /// transcript stays valid, so only Herdr's report tells. Runs for the
+    /// hub's life, asking only while observers run.
+    pub(crate) async fn follow_observed_sessions(self: Arc<Self>) {
+        let mut tick = tokio::time::interval(SESSION_CHECK);
+        loop {
+            tick.tick().await;
+            for (pane, session) in self.observed.sessions() {
+                let Ok(answer) = self
+                    .call(ApiMethod::PaneGet, json!({"pane_id": pane}))
+                    .await
+                else {
+                    continue;
+                };
+                let Ok(found) = parse::<PaneAnswer>(answer) else {
+                    continue;
+                };
+                if found.pane.agent_session.map(|now| now.value).as_deref()
+                    != Some(session.as_str())
+                {
+                    self.observed.end(&pane, &session);
+                }
+            }
+        }
     }
 
     /// Asks Herdr which session and process `pane`'s agent runs, then

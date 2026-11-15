@@ -61,6 +61,7 @@ fn each_relay_is_offered_by_the_address_the_daemon_names_it_by() {
         serial: 1,
         signer: Signer::Maintainer,
     });
+    assert!(!listed.expired(1) && listed.expired(2));
     assert_eq!(
         listed.relays,
         [Public {
@@ -69,4 +70,32 @@ fn each_relay_is_offered_by_the_address_the_daemon_names_it_by() {
             region: Some("fra1".into()),
         }]
     );
+}
+
+fn failed() -> Result<Option<Vec<u8>>, Error> {
+    Err(Error::Download(ureq::Error::ConnectionFailed))
+}
+
+#[test]
+fn one_signature_failing_to_download_leaves_the_other_to_vouch() {
+    let signature = || Ok(Some(SIGNED_SIG.to_vec()));
+    let listed = settle(SIGNED, failed(), signature(), SIGNED_AT).unwrap();
+    assert_eq!(listed.signer, Signer::Actions);
+    // Neither arrived, or the one that did vouches for nothing: the failed
+    // download is why, not a list nobody signed.
+    for ed25519 in [failed(), Ok(None), Ok(Some(b"nonsense".to_vec()))] {
+        let refused = settle(SIGNED, failed(), ed25519, SIGNED_AT);
+        assert!(matches!(refused, Err(Error::Download(_))));
+    }
+    // Every download worked: the list itself is what is refused.
+    let unsigned = settle(SIGNED, Ok(None), Ok(None), SIGNED_AT);
+    assert!(matches!(
+        unsigned,
+        Err(Error::Refused(directory::Error::Unsigned))
+    ));
+    let expired = settle(SIGNED, failed(), signature(), 4_102_444_800);
+    assert!(matches!(
+        expired,
+        Err(Error::Refused(directory::Error::Expired { .. }))
+    ));
 }

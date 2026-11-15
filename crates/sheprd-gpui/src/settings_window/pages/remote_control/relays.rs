@@ -153,12 +153,47 @@ impl SettingsWindow {
         index: usize,
         cx: &mut Context<Self>,
     ) {
+        self.add_public_relay_at(index, public_relays::now(), cx);
+    }
+
+    /// [`Self::add_public_relay`] at `now` (Unix seconds).
+    pub(in crate::settings_window) fn add_public_relay_at(
+        &mut self,
+        index: usize,
+        now: u64,
+        cx: &mut Context<Self>,
+    ) {
+        if self.expire_public_relays(now, cx) {
+            return;
+        }
         let Offered::Listed(listed) = &self.remote.offered else {
             return;
         };
         if let Some(relay) = listed.relays.get(index) {
             self.save_with_relay(relay.address.clone(), cx);
         }
+    }
+
+    /// Stops offering a list that expired by `now` (Unix seconds), however
+    /// long the window stayed open: its relays go, and the page says why,
+    /// with Retry. True when it did.
+    pub(in crate::settings_window) fn expire_public_relays(
+        &mut self,
+        now: u64,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Offered::Listed(listed) = &self.remote.offered else {
+            return false;
+        };
+        if !listed.expired(now) {
+            return false;
+        }
+        let expired = sheprd_relay::directory::Error::Expired {
+            expires: listed.expires,
+        };
+        self.remote.offered = Offered::Failed(public_relays::Error::from(expired).localize());
+        cx.notify();
+        true
     }
 
     /// Remove's click on the relay at `index`.

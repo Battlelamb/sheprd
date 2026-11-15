@@ -159,6 +159,9 @@ impl SettingsWindow {
             self.remote.relay = Some(field(String::new(), relays::PLACEHOLDER, cx));
         }
         self.sync_remote_fields(cx);
+        // A list kept from an earlier visit may have expired since; it is
+        // then read again like one that failed.
+        self.expire_public_relays(crate::remote::public_relays::now(), cx);
         // Tests offer a list of their own; they never reach the network.
         #[cfg(not(test))]
         if matches!(self.remote.offered, Offered::Unknown | Offered::Failed(_)) {

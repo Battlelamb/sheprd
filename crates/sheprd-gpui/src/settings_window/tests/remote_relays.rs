@@ -16,6 +16,9 @@ use sheprd_remote_control::control::RelayState;
 
 const HOME: &str = "https://relay.example.org";
 const AWAY: &str = "https://eu.example.org/relay";
+/// When [`sheprd_list`] stops being taken: 2100, so tests reading the
+/// clock still see it offered.
+const EXPIRES: u64 = 4_102_444_800;
 
 /// The daemon running, listening on [`HOME`] and failing on [`AWAY`].
 fn listening() -> Health {
@@ -163,6 +166,7 @@ fn a_relay_row_says_how_the_daemon_stands_on_it() {
 /// Sheprd's list with Frankfurt, which is [`HOME`], and one unnamed relay.
 fn sheprd_list() -> Listed {
     Listed {
+        expires: EXPIRES,
         relays: vec![
             Public {
                 address: HOME.into(),
@@ -227,6 +231,7 @@ fn an_empty_or_unreadable_list_says_so(cx: &mut TestAppContext) {
         &view,
         cx,
         Offered::Listed(Listed {
+            expires: EXPIRES,
             relays: Vec::new(),
             signer: Signer::Actions,
         }),
@@ -271,4 +276,37 @@ fn a_public_relay_is_titled_by_its_name_and_region() {
         ..frankfurt
     };
     assert_eq!(public_title(&region_only), "fra1");
+}
+
+#[gpui::test]
+fn an_expired_list_stops_offering_its_relays(cx: &mut TestAppContext) {
+    let (view, cx, edits) = page(cx);
+    offer(&view, cx, Offered::Listed(sheprd_list()));
+    // Still good a second before it expires: Add saves.
+    view.update(cx, |view, cx| {
+        view.add_public_relay_at(1, EXPIRES - 1, cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(edits.lock().unwrap().len(), 1);
+    // The window stayed open past the expiry: Add saves nothing, the
+    // relays go, and Retry reads the list again.
+    view.update(cx, |view, cx| view.add_public_relay_at(1, EXPIRES, cx));
+    cx.run_until_parked();
+    draw(cx);
+    assert_eq!(edits.lock().unwrap().len(), 1);
+    assert!(cx.debug_bounds("remote-public-relay-0").is_none());
+    assert!(cx.debug_bounds("remote-public-relays-retry").is_some());
+    view.read_with(cx, |view, _| {
+        assert!(matches!(view.remote.offered, Offered::Failed(_)));
+    });
+    // Coming back to the page with an expired list does the same.
+    let mut old = sheprd_list();
+    old.expires = 1;
+    offer(&view, cx, Offered::Listed(old));
+    view.update(cx, |view, cx| view.open_remote_control(cx));
+    draw(cx);
+    assert!(cx.debug_bounds("remote-public-relay-0").is_none());
+    view.read_with(cx, |view, _| {
+        assert!(matches!(view.remote.offered, Offered::Failed(_)));
+    });
 }

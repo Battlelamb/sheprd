@@ -474,8 +474,11 @@ machines) reaches them through the same relays:
   offer replacing what that source shared before, and listens on its own
   `[remote] relays` and every shared relay, each once. Relays start and
   stop at once, without a restart, and its own setting is never changed.
-  With no daemon running, the command writes the file and the daemon
-  reads it when it starts.
+  When the command cannot reach the daemon, it writes the file itself,
+  then asks once more. The file is what stands: the daemon builds each
+  change on it, reads it again once its control socket answers, and every
+  minute after, so an offer written while it started, or while its socket
+  was busy, is never lost.
 - Every daemon certifies loopback, and keeps its relay keys even with no
   relay set, so a relay shared later serves phones at once.
 - The phone learns the new relays from `GET /api/relay` the next time it

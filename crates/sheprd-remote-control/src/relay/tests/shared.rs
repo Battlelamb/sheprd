@@ -133,3 +133,50 @@ async fn an_offer_written_after_loading_but_before_starting_is_kept() {
     assert_eq!(relays.endpoints().len(), 1);
     assert!(relays.info().is_some());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_offer_written_while_the_daemon_ran_is_built_on_and_picked_up() {
+    let dir = tempfile::tempdir().unwrap();
+    let shared = state(dir.path());
+    let relays = Arc::new(Relays::load(dir.path(), Vec::new()).unwrap());
+    let (_stop, stopped) = watch::channel(false);
+    relays.start(served(dir.path(), &shared).0, stopped);
+    let file = super::super::shared::file(dir.path());
+    let offer = |source: &str, relay: &str| Offer {
+        source: source.into(),
+        relays: vec![relay.into()],
+    };
+
+    // A command that could not reach this daemon wrote its offer itself.
+    let mut written = Shared::default();
+    written.offer(offer("laptop", "a.example.org")).unwrap();
+    super::super::shared::save(&file, &written).unwrap();
+    // The daemon's next offer builds on the file, not its own older copy.
+    let relays_for_share = Arc::clone(&relays);
+    let listened = tokio::task::spawn_blocking(move || {
+        relays_for_share.share(offer("studio", "b.example.org"))
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(listened.len(), 2);
+    assert_eq!(super::super::shared::load(&file).endpoints().len(), 2);
+
+    // Without one, it reads the file again on its own.
+    let mut withdrawn = super::super::shared::load(&file);
+    withdrawn
+        .offer(Offer {
+            source: "laptop".into(),
+            relays: Vec::new(),
+        })
+        .unwrap();
+    super::super::shared::save(&file, &withdrawn).unwrap();
+    let relays_for_reload = Arc::clone(&relays);
+    assert!(
+        tokio::task::spawn_blocking(move || relays_for_reload.reload())
+            .await
+            .unwrap()
+    );
+    let names: Vec<String> = relays.endpoints().iter().map(ToString::to_string).collect();
+    assert_eq!(names, ["https://b.example.org"]);
+}

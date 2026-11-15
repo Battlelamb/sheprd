@@ -184,8 +184,9 @@ Sheprd on another computer shares its relays with this one by running
 `sheprd-remote-control relays --offer` over SSH (`control::relays`): each
 computer's list replaces what it shared before, is kept in
 `STATE_DIR/relay/shared.json`, and is listened on at once beside this
-computer's own `[remote] relays`, which it never changes. With no daemon
-running, the command writes the file for the daemon to read when it starts.
+computer's own `[remote] relays`, which it never changes. When the daemon
+does not answer, the command writes the file itself; the daemon builds each
+change on the file and reads it again every minute, so no offer is lost.
 
 Bluetooth pairing works from another network: the sealed nearby offer
 also carries `relay` (the same fields as `GET /api/relay`), revealing it

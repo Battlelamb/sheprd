@@ -39,6 +39,8 @@ use tokio::{runtime::Handle, sync::watch};
 /// How long a pairing dial stays open on the relays: the nearby token's
 /// claim window, with room for the phone to find a relay.
 const PAIRING: Duration = Duration::from_secs(120);
+/// How often a running daemon reads the shared relays' file again.
+const SHARED_RECHECK: Duration = Duration::from_secs(60);
 
 /// A pairing dial the relays let through once: the key a nearby phone
 /// derives from the token sealed to it, and that token, the tunnel's
@@ -159,15 +161,15 @@ impl Relays {
         offer: control::relays::Offer,
     ) -> std::result::Result<Vec<String>, shared::Error> {
         {
-            // The file's lock too, so an offer written while no daemon
-            // answered is never written over with an older copy.
+            // The file is what stands, not this copy: a command that could
+            // not reach this daemon (a busy pipe looks the same as none)
+            // wrote its offer there, and it is built on, never written over.
             let _file = shared::lock(&self.shared_file)?;
-            let mut shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
-            let mut next = shared.clone();
+            let mut next = shared::load(&self.shared_file);
             if next.offer(offer)? {
                 shared::save(&self.shared_file, &next)?;
-                *shared = next;
             }
+            *self.shared.lock().unwrap_or_else(PoisonError::into_inner) = next;
         }
         self.follow();
         Ok(self.endpoints().iter().map(ToString::to_string).collect())
@@ -233,19 +235,14 @@ impl Relays {
 
     /// Starts a listener for each relay, serving `router` over each
     /// session, until `stopped`; relays shared later start as they come.
+    ///
     /// The control socket answers by now, so this reads the shared relays
     /// again: an offer written to the file while it did not, after
-    /// [`Self::load`] read it, is kept. One written after this finds the
-    /// socket and is sent again (`shared::share`). Blocking: it reads the
-    /// file.
+    /// [`Self::load`] read it, is kept. Then it reads the file every
+    /// [`SHARED_RECHECK`], for an offer a command wrote there while this
+    /// daemon ran but did not answer.
     pub(crate) fn start(self: &Arc<Self>, served: Served, stopped: watch::Receiver<bool>) {
-        match shared::lock(&self.shared_file) {
-            Ok(_file) => {
-                *self.shared.lock().unwrap_or_else(PoisonError::into_inner) =
-                    shared::load(&self.shared_file);
-            }
-            Err(error) => tracing::warn!(%error, "could not read the shared relays again"),
-        }
+        self.reload();
         let runtime = Handle::current();
         let mut until = stopped.clone();
         self.running
@@ -259,9 +256,46 @@ impl Relays {
         self.follow();
         let this = Arc::clone(self);
         runtime.spawn(async move {
-            let _ = until.wait_for(|stop| *stop).await;
+            let mut recheck = tokio::time::interval(SHARED_RECHECK);
+            recheck.tick().await;
+            loop {
+                tokio::select! {
+                    changed = until.changed() => {
+                        if changed.is_err() || *until.borrow() {
+                            break;
+                        }
+                    }
+                    _ = recheck.tick() => {
+                        let this = Arc::clone(&this);
+                        let _ = tokio::task::spawn_blocking(move || {
+                            if this.reload() {
+                                this.follow();
+                            }
+                        })
+                        .await;
+                    }
+                }
+            }
             this.follow();
         });
+    }
+
+    /// Takes the shared relays as the file has them. Returns whether they
+    /// changed. Blocking.
+    fn reload(&self) -> bool {
+        let saved = match shared::lock(&self.shared_file) {
+            Ok(_file) => shared::load(&self.shared_file),
+            Err(error) => {
+                tracing::warn!(%error, "could not read the shared relays");
+                return false;
+            }
+        };
+        let mut shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
+        if *shared == saved {
+            return false;
+        }
+        *shared = saved;
+        true
     }
 
     /// Brings the running listeners in line with [`Self::endpoints`]:

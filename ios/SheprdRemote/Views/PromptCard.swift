@@ -124,11 +124,19 @@ struct PromptCard: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// Shows what the computer reads now: no question clears the card. A
+    /// read that fails keeps what is shown, rather than hiding a question
+    /// still waiting.
     private func refresh() async {
         let pane = key.pane
-        guard let found = try? await model.fleet.call(key.device, { client, token in
-            try await client.termPrompt(pane: pane, bearer: token)
-        }) else { return }
+        let found: TermPrompt?
+        do {
+            found = try await model.fleet.call(key.device) { client, token in
+                try await client.termPrompt(pane: pane, bearer: token)
+            }
+        } catch {
+            return
+        }
         if found != prompt {
             prompt = found
             problem = nil

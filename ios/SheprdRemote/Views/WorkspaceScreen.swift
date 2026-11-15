@@ -224,7 +224,13 @@ struct WorkspaceScreen: View {
         askedAgent = agent
         Task {
             defer { askedAgent = nil }
+            // Where the transcript ends before asking: an earlier ask with
+            // the same words, already answered, is not this one's answer.
+            let sent: EntryId?
             do {
+                sent = try await model.fleet.call(device) { client, token in
+                    try await client.chat(pane, bearer: token)
+                }.transcript.entries.last?.id
                 let refused = try await model.fleet.call(device) { client, token in
                     try await client.command(.prompt(text: prompt), pane: pane, bearer: token)
                 }
@@ -244,7 +250,7 @@ struct WorkspaceScreen: View {
                 guard let snapshot = try? await model.fleet.call(device, { client, token in
                     try await client.chat(pane, bearer: token)
                 }) else { continue }
-                switch WorkspaceNaming.answer(to: prompt, in: snapshot.transcript) {
+                switch WorkspaceNaming.answer(to: prompt, in: snapshot.transcript, after: sent) {
                 case let .name(name)?:
                     askedAgent = nil
                     rename(to: name, from: current)

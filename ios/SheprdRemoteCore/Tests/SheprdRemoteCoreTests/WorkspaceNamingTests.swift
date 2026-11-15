@@ -13,7 +13,9 @@ struct WorkspaceNamingTests {
         return transcript
     }
 
-    private var ended: EntryKind { .turn(TurnSummary(durationMs: 900, end: .done, tokens: nil)) }
+    private var ended: EntryKind { turn(.done) }
+
+    private func turn(_ end: TurnEnd) -> EntryKind { .turn(TurnSummary(durationMs: 900, end: end, tokens: nil)) }
 
     @Test func thePromptNamesTheLimits() {
         #expect(prompt.contains("worktree/lucky-stone"))
@@ -41,6 +43,26 @@ struct WorkspaceNamingTests {
     @Test func aTurnWithoutTextHasNoName() {
         let refused = transcript([.user(text: prompt, files: 0), ended])
         #expect(WorkspaceNaming.answer(to: prompt, in: refused) == .noName)
+    }
+
+    @Test(arguments: [TurnEnd.cancelled, .refused, .failed, .limit, .other])
+    func anUnfinishedTurnHasNoNameWhateverItSaid(end: TurnEnd) {
+        let stopped = transcript([.user(text: prompt, files: 0), .agent(text: "iOS search"), turn(end)])
+        #expect(WorkspaceNaming.answer(to: prompt, in: stopped) == .noName)
+    }
+
+    @Test func aRetryWaitsForItsOwnAnswer() {
+        // The first ask ended without a name; the retry, same words, is
+        // still queued behind the agent's work.
+        var queued = transcript([.user(text: prompt, files: 0), turn(.cancelled)])
+        let sent = queued.entries.last?.id
+        #expect(WorkspaceNaming.answer(to: prompt, in: queued, after: sent) == nil)
+        queued.entries += [
+            Entry(id: 2, kind: .user(text: prompt, files: 0)),
+            Entry(id: 3, kind: .agent(text: "Rename by agent")),
+            Entry(id: 4, kind: ended),
+        ]
+        #expect(WorkspaceNaming.answer(to: prompt, in: queued, after: sent) == .name("Rename by agent"))
     }
 
     @Test func dropsWhatAgentsAddAnyway() {

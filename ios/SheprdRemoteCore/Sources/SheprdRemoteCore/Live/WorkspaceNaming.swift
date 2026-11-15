@@ -23,15 +23,21 @@ public enum WorkspaceNaming {
 
     /// The name the agent gave in answer to `prompt`, once its turn has
     /// ended; `nil` while it is still answering, or when the prompt is not
-    /// in the transcript (yet). A turn that ended without a usable name
-    /// answers ``Answer/noName``.
-    public static func answer(to prompt: String, in transcript: Transcript) -> Answer? {
-        guard let asked = transcript.entries.lastIndex(where: {
-            if case let .user(text, _) = $0.kind { text.trimmingCharacters(in: .whitespacesAndNewlines) == prompt } else { false }
+    /// in the transcript (yet). Only a prompt entered after `after`, the
+    /// transcript's last entry when it was sent, counts, so a retry with
+    /// the same words waits for its own answer behind a busy agent. A turn
+    /// that was stopped, refused, or failed, or that ended without a usable
+    /// name, answers ``Answer/noName``, whatever text it had streamed.
+    public static func answer(to prompt: String, in transcript: Transcript, after: EntryId? = nil) -> Answer? {
+        guard let asked = transcript.entries.lastIndex(where: { entry in
+            guard after.map({ entry.id > $0 }) ?? true else { return false }
+            if case let .user(text, _) = entry.kind { return text.trimmingCharacters(in: .whitespacesAndNewlines) == prompt }
+            return false
         }) else { return nil }
         let after = transcript.entries[(asked + 1)...]
-        guard after.contains(where: { if case .turn = $0.kind { true } else { false } }) else { return nil }
-        let reply = after.prefix { if case .turn = $0.kind { false } else { true } }
+        guard let ended = after.firstIndex(where: { if case .turn = $0.kind { true } else { false } }) else { return nil }
+        guard case let .turn(summary) = after[ended].kind, summary.end == .done else { return .noName }
+        let reply = after[..<ended]
             .compactMap { if case let .agent(text) = $0.kind { text } else { nil } }
             .joined()
         return name(from: reply).map(Answer.name) ?? Answer.noName
@@ -39,7 +45,7 @@ public enum WorkspaceNaming {
 
     public enum Answer: Hashable, Sendable {
         case name(String)
-        /// The turn ended without one: refused, cancelled, or empty.
+        /// The turn ended without one: stopped, refused, failed, or empty.
         case noName
     }
 

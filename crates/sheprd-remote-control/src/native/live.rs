@@ -499,6 +499,12 @@ async fn follow_chat(state: Shared, link: Arc<Chat>, since: Option<Cursor>, out:
         if !send_all(&out, batch.messages(&pane, link.summary().connected)).await {
             return;
         }
+        // An observed terminal agent's chat ends for good when its agent
+        // moves to another session or exits: the phone opens it afresh.
+        if link.is_closed() && state.hub.layout().chat(&pane).is_none() {
+            let _ = out.send(reload).await;
+            return;
+        }
     }
 }
 

@@ -127,6 +127,28 @@ mod lifecycle {
     }
 
     #[test]
+    fn a_kept_observer_that_never_reads_is_discarded_and_ended() {
+        let observed = Observed::default();
+        let starting = observer("/bin/sleep", &["30"]);
+        let other = observer("/bin/sleep", &["30"]);
+        let binding = |pane: &str| Binding {
+            pane: pane.into(),
+            agent: Agent::Claude,
+            session: "a".into(),
+            pid: 1,
+            started: 1,
+        };
+        // Kept as it starts, so a phone leaving mid-wait leaves it bounded.
+        observed.keep(binding("w1:p1"), starting.clone());
+        observed.keep(binding("w2:p1"), other.clone());
+        observed.discard(&starting);
+        assert!(starting.is_closed());
+        assert!(!other.is_closed());
+        assert_eq!(observed.sessions(), [("w2:p1".to_owned(), "a".to_owned())]);
+        observed.retain(|_| false);
+    }
+
+    #[test]
     fn ending_a_session_closes_only_its_observer() {
         let observed = Observed::default();
         let old = observer("/bin/sleep", &["30"]);

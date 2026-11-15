@@ -102,6 +102,12 @@ impl Observed {
             .collect()
     }
 
+    /// Ends `chat` and forgets it.
+    fn discard(&self, chat: &Arc<Chat>) {
+        chat.close();
+        self.lock().retain(|kept| !Arc::ptr_eq(&kept.chat, chat));
+    }
+
     /// Ends the observer of `pane` that reads `session`.
     fn end(&self, pane: &str, session: &str) {
         self.lock().retain(|kept| {
@@ -169,9 +175,27 @@ impl Hub {
         }
         let program = self.program().ok_or(super::Error::ProgramMissing)?;
         let binding = self.binding(pane).await?;
-        if let Some(chat) = self.observed.find(&binding) {
-            return Ok(chat);
+        let chat = match self.observed.find(&binding) {
+            Some(chat) => chat,
+            None => self.start_observer(program, binding)?,
+        };
+        // An observer that cannot find or read the conversation ends before
+        // its first transcript; the phone is told, not shown an empty chat.
+        // It is already among the kept ones, so a phone that leaves during
+        // this wait leaves it bounded and ended with the rest.
+        if !chat.opened(FIRST_READ).await {
+            self.observed.discard(&chat);
+            return Err(Error::Unreadable.into());
         }
+        Ok(chat)
+    }
+
+    fn start_observer(
+        &self,
+        program: std::path::PathBuf,
+        binding: Binding,
+    ) -> super::Result<Arc<Chat>> {
+        let pane = binding.pane.clone();
         let mut command = sheprd_client::new_command(program);
         command.args([
             "observe".to_owned(),
@@ -180,15 +204,9 @@ impl Hub {
             binding.pid.to_string(),
             binding.started.to_string(),
             "--pane".to_owned(),
-            pane.to_owned(),
+            pane.clone(),
         ]);
-        let chat = Chat::observe(pane.to_owned(), command).map_err(Error::Start)?;
-        // An observer that cannot find or read the conversation ends before
-        // its first transcript; the phone is told, not shown an empty chat.
-        if !chat.opened(FIRST_READ).await {
-            chat.close();
-            return Err(Error::Unreadable.into());
-        }
+        let chat = Chat::observe(pane, command).map_err(Error::Start)?;
         self.observed.keep(binding, chat.clone());
         Ok(chat)
     }

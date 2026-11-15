@@ -65,6 +65,15 @@ pub(crate) fn open_pairing(state: &crate::web::State) {
     }
 }
 
+/// Has nearby offers say what the relays measure now, nearest first, as
+/// `GET /api/relay` does, rather than what they said at start, before any
+/// listened: called before each offer is sealed.
+pub(crate) fn refresh_offer(relays: Option<&Relays>, auth: &mut crate::auth::Auth) {
+    if let Some(relays) = relays {
+        auth.set_relay_offer(relays.info());
+    }
+}
+
 /// The relays this computer listens on, and what it listens with.
 #[derive(Debug)]
 pub(crate) struct Relays {

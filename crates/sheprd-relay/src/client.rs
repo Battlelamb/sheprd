@@ -114,6 +114,30 @@ pub struct Incoming {
     pub send: SendStream,
 }
 
+/// A stream the relay opened for a dial, its header not read yet.
+#[derive(Debug)]
+pub struct Pending {
+    recv: RecvStream,
+    send: SendStream,
+}
+
+impl Pending {
+    /// Reads the header the relay puts first: which key dialed.
+    pub async fn incoming(mut self) -> Result<Incoming> {
+        let mut header = [0; 1 + KEY_LEN];
+        self.recv.read_exact(&mut header).await?;
+        let [kind, key @ ..] = header;
+        if kind != INCOMING {
+            return Err(Error::Malformed);
+        }
+        Ok(Incoming {
+            key,
+            recv: self.recv,
+            send: self.send,
+        })
+    }
+}
+
 impl Listener {
     /// Listens on `key`'s route over `connection`, with the relay's listen
     /// token when it asks for one (empty otherwise). No one may dial until
@@ -159,16 +183,20 @@ impl Listener {
         self.message(Message::PairingKey { key, seconds }).await
     }
 
-    /// The next dial: a stream the relay opened on this connection.
+    /// The next dial: a stream the relay opened on this connection, its
+    /// header read. Not cancel-safe: dropped while the header is arriving,
+    /// it drops that dial. A listener that waits on other events beside it
+    /// takes [`Listener::next_stream`] instead.
     pub async fn accept(&self) -> Result<Incoming> {
-        let (send, mut recv) = self.connection.accept_bi().await?;
-        let mut header = [0; 1 + KEY_LEN];
-        recv.read_exact(&mut header).await?;
-        let [kind, key @ ..] = header;
-        if kind != INCOMING {
-            return Err(Error::Malformed);
-        }
-        Ok(Incoming { key, recv, send })
+        self.next_stream().await?.incoming().await
+    }
+
+    /// The next stream the relay opened, before its header is read.
+    /// Cancel-safe, so it can wait beside timers and other events; read the
+    /// header with [`Pending::incoming`], away from them.
+    pub async fn next_stream(&self) -> Result<Pending> {
+        let (send, recv) = self.connection.accept_bi().await?;
+        Ok(Pending { recv, send })
     }
 
     /// The connection's smoothed round-trip time to the relay, which QUIC

@@ -51,6 +51,16 @@ struct RelayNearnessTests {
         #expect(await probes.rtt([Self.europe], now: start).isEmpty)
     }
 
+    @Test func aProbeFromTheOldNetworkIsNotRecordedAfterAChange() async {
+        let probes = RelayProbes()
+        let old = await probes.currentNetwork
+        await probes.forget()
+        await probes.finished(Self.europe, millis: 40, network: old)
+        #expect(await probes.rtt([Self.europe]).isEmpty)
+        await probes.finished(Self.europe, millis: 40, network: probes.currentNetwork)
+        #expect(await probes.rtt([Self.europe]) == [Self.europe: 40])
+    }
+
     @Test func theComputersNewOrderIsSavedButJitterIsNot() throws {
         let base = try RelayRecordTests.info()
         let info = API.RelayInfo(

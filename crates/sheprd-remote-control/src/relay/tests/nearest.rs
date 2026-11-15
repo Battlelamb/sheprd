@@ -85,3 +85,23 @@ fn a_computer_listening_nowhere_sends_no_round_trips() {
     let json = serde_json::to_value(relays.info()).unwrap();
     assert!(json.get("rtt_ms").is_none());
 }
+
+#[test]
+fn a_nearby_offer_carries_the_round_trips_measured_since_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let all = endpoints(&["https://far.example.org", "https://near.example.org"]);
+    let relays = Relays::load(dir.path(), all.clone()).unwrap();
+    let mut auth = crate::auth::Auth::load(dir.path(), crate::auth::Limits::default()).unwrap();
+    // At start nothing listens yet.
+    refresh_offer(Some(&relays), &mut auth);
+    relays.set_rtt(&all[1], Some(Duration::from_millis(15)));
+    refresh_offer(Some(&relays), &mut auth);
+    let offer = serde_json::to_value(crate::auth::nearby::Offer {
+        token: "t".into(),
+        origins: &[],
+        relay: auth.relay_offer(),
+    })
+    .unwrap();
+    assert_eq!(offer["relay"]["relays"][0], "https://near.example.org");
+    assert_eq!(offer["relay"]["rtt_ms"]["https://near.example.org"], 15);
+}

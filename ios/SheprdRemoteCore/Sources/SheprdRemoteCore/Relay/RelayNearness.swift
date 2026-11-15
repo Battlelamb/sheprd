@@ -59,7 +59,11 @@ public actor RelayProbes {
     static let timeout: TimeInterval = 3
 
     private var measured: [RelayEndpoint: (millis: Int, at: Date)] = [:]
-    private var probing: Set<RelayEndpoint> = []
+    /// The probes running, each with the network it started on.
+    private var probing: [RelayEndpoint: Int] = [:]
+    /// Which network measurements are for, bumped by `forget`: a probe
+    /// that started on an earlier one is not recorded.
+    private var network = 0
 
     /// The fresh measurements among `relays`, in milliseconds.
     public func rtt(_ relays: [RelayEndpoint], now: Date = Date()) -> [RelayEndpoint: Int] {
@@ -77,28 +81,39 @@ public actor RelayProbes {
         measured[relay] = (max(1, millis), at)
     }
 
-    /// Forgets every measurement, when the phone changed networks.
+    /// Forgets every measurement, when the phone changed networks. Probes
+    /// still running are for the old network: their results are dropped,
+    /// and the next `refresh` starts new ones.
     public func forget() {
         measured.removeAll()
+        probing.removeAll()
+        network += 1
     }
 
     /// Measures, in the background, each of `relays` with no fresh
     /// measurement and no probe running.
     public func refresh(_ relays: [RelayEndpoint], session: URLSession = .shared) {
         let fresh = rtt(relays)
-        for relay in relays where fresh[relay] == nil && !probing.contains(relay) {
-            probing.insert(relay)
+        for relay in relays where fresh[relay] == nil && probing[relay] == nil {
+            let network = network
+            probing[relay] = network
             Task {
                 let millis = await Self.probe(relay, session: session)
-                self.finished(relay, millis: millis)
+                self.finished(relay, millis: millis, network: network)
             }
         }
     }
 
-    private func finished(_ relay: RelayEndpoint, millis: Int?) {
-        probing.remove(relay)
+    /// Records a probe's result, unless the phone changed networks since
+    /// it started.
+    func finished(_ relay: RelayEndpoint, millis: Int?, network: Int) {
+        guard network == self.network else { return }
+        probing[relay] = nil
         if let millis { record(relay, millis: millis) }
     }
+
+    /// The network measurements are for now; tests start probes on it.
+    var currentNetwork: Int { network }
 
     /// The round trip of a second `GET /v1/info`, once the first has set up
     /// the connection, so only the path is timed, not TLS.

@@ -118,14 +118,26 @@ public actor RelayProbes {
     /// The round trip of a second `GET /v1/info`, once the first has set up
     /// the connection, so only the path is timed, not TLS.
     static func probe(_ relay: RelayEndpoint, session: URLSession) async -> Int? {
-        guard let url = URL(string: relay.description + "/v1/info") else { return nil }
+        guard let url = relay.info else { return nil }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
         request.httpMethod = "GET"
-        guard (try? await session.data(for: request)) != nil else { return nil }
+        guard await answered(request, session: session) else { return nil }
         let start = Date()
-        guard let (_, response) = try? await session.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200
-        else { return nil }
+        guard await answered(request, session: session) else { return nil }
         return Int(Date().timeIntervalSince(start) * 1_000)
+    }
+
+    /// Whether `request` got a 200 of at most `RelayReach.maxInfo` bytes.
+    /// The answer is read as it arrives and dropped past that, as
+    /// `RelayReach.probe` does, so whatever a relay serves costs this phone
+    /// no more memory than that.
+    static func answered(_ request: URLRequest, session: URLSession) async -> Bool {
+        guard let (bytes, response) = try? await session.bytes(for: request),
+              let http = response as? HTTPURLResponse
+        else { return false }
+        // Leaving with the answer unfinished ends the download.
+        defer { bytes.task.cancel() }
+        guard http.statusCode == 200, http.expectedContentLength <= Int64(RelayReach.maxInfo) else { return false }
+        return (try? await RelayReach.bounded(bytes, limit: RelayReach.maxInfo)) != nil
     }
 }

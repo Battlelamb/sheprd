@@ -457,6 +457,33 @@ never need a token. Settings > Computers > a computer lists its relays, and
 "Add relay" lets a user type an endpoint for a computer paired before it
 had one.
 
+**Built: the machines Sheprd connects to.** A relay added once on the
+computer reaches every SSH and cloud machine its Sheprd connects to, so a
+phone paired with them through it (`docs/remote-control-plan.md`, Other
+machines) reaches them through the same relays:
+
+- Sheprd (`relay_sharing`) runs `sheprd-remote-control relays --offer`
+  over SSH on each connected machine that has the program, with
+  `{"source", "relays"}`: this computer's host name and its `[remote]
+  relays`, whole. It offers at once when the list changes or a machine
+  connects, every 10 minutes after, and 2 minutes after a machine did not
+  take it. An empty list is offered once per run, so a relay removed while
+  Sheprd was closed is withdrawn too.
+- The machine's daemon keeps each source's list in
+  `STATE_DIR/relay/shared.json` (0600; 16 sources, 16 relays each), the
+  offer replacing what that source shared before, and listens on its own
+  `[remote] relays` and every shared relay, each once. Relays start and
+  stop at once, without a restart, and its own setting is never changed.
+  With no daemon running, the command writes the file and the daemon
+  reads it when it starts.
+- Every daemon certifies loopback, and keeps its relay keys even with no
+  relay set, so a relay shared later serves phones at once.
+- The phone learns the new relays from `GET /api/relay` the next time it
+  reaches the machine directly, and checks again every 10 minutes while
+  connected. Settings > Computers marks a computer it can reach through a
+  relay ("Tailscale · Relay"), and its page lists the relays and says when
+  the phone is connected through one.
+
 **Sheprd to SSH machines.** `sheprd-relay-agent --relay ENDPOINT
 [--token-file FILE]`, repeatable, and Devices lets the user pick which of
 the computer's relays to dial.

@@ -97,6 +97,8 @@ impl SheprdWindow {
             .collect();
         // The same computers keep the text shortcuts.
         crate::text_shortcuts::Store::reach(cx, &reachable);
+        // And hear which relays this computer listens on.
+        crate::relay_sharing::RelaySharing::reach(cx, &reachable);
         DeviceTags::reach(cx, reachable);
     }
 

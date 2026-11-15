@@ -1,6 +1,8 @@
 //! Listening on relays, so a paired phone reaches this computer from any
 //! network (`docs/relay-plan.md`, Clients). For each relay in `[remote]
-//! relays`, the daemon keeps one QUIC connection and listens on its route,
+//! relays`, and each one Sheprd on another computer shared with this one
+//! (`control::relays`), the daemon keeps one QUIC connection and listens
+//! on its route,
 //! naming the dial keys of its paired devices. Each dial runs the
 //! end-to-end tunnel (`sheprd-tunnel`), admitting only a paired device's
 //! tunnel key, then serves the same API over it, over the same TLS as on
@@ -16,21 +18,23 @@ mod error;
 pub(crate) mod keys;
 mod listen;
 mod serve;
+pub mod shared;
 
 pub use error::Error;
 pub(crate) use error::Result;
 
+use crate::control;
 pub(crate) use crate::control::RelayState as Status;
 use serde::Serialize;
 use sheprd_relay::Endpoint;
 use sheprd_relay::wire::Key;
 use std::{
     collections::BTreeMap,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, PoisonError},
     time::{Duration, Instant},
 };
-use tokio::sync::watch;
+use tokio::{runtime::Handle, sync::watch};
 
 /// How long a pairing dial stays open on the relays: the nearby token's
 /// claim window, with room for the phone to find a relay.
@@ -64,13 +68,33 @@ pub(crate) struct Relays {
     /// Bumped whenever a device's relay keys change, so each listener
     /// names them again.
     changed: watch::Sender<u64>,
-    endpoints: Vec<Endpoint>,
+    /// The relays `[remote] relays` names, listened on first.
+    configured: Vec<Endpoint>,
     keys: keys::Keys,
     /// The open pairing dial, if any, and a revision listeners follow.
     pairing: Mutex<Option<Pairing>>,
     pairing_changed: watch::Sender<u64>,
+    running: Mutex<Running>,
+    /// What other computers shared, and the file that keeps it.
+    shared: Mutex<control::relays::Shared>,
+    shared_file: PathBuf,
     /// Each relay's state, for `sheprd remote status`.
     status: Mutex<BTreeMap<String, Status>>,
+}
+
+/// The listeners running, once [`Relays::start`] said what they serve.
+#[derive(Debug, Default)]
+struct Running {
+    started: Option<Started>,
+    /// Each listening relay's own stop, by endpoint.
+    listeners: BTreeMap<String, watch::Sender<bool>>,
+}
+
+#[derive(Debug)]
+struct Started {
+    runtime: Handle,
+    served: Served,
+    stopped: watch::Receiver<bool>,
 }
 
 /// What a paired phone needs to reach this computer through its relays.
@@ -85,26 +109,65 @@ pub(crate) struct Info {
 }
 
 impl Relays {
-    /// Loads or makes the relay keys in `state_dir`. Blocking.
-    pub(crate) fn load(state_dir: &Path, endpoints: Vec<Endpoint>) -> Result<Self> {
+    /// Loads or makes the relay keys in `state_dir`, and the relays other
+    /// computers shared with it. Blocking.
+    pub(crate) fn load(state_dir: &Path, configured: Vec<Endpoint>) -> Result<Self> {
+        let shared_file = shared::file(state_dir);
         Ok(Self {
             changed: watch::Sender::new(0),
-            endpoints,
+            configured,
             keys: keys::Keys::load_or_create(state_dir)?,
             pairing: Mutex::default(),
             pairing_changed: watch::Sender::new(0),
+            running: Mutex::default(),
+            shared: Mutex::new(shared::load(&shared_file)),
+            shared_file,
             status: Mutex::default(),
         })
     }
 
-    /// What `GET /api/relay` answers.
-    pub(crate) fn info(&self) -> Info {
-        use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-        Info {
-            identity: URL_SAFE_NO_PAD.encode(self.keys.tunnel.identity().to_bytes()),
-            relays: self.endpoints.iter().map(ToString::to_string).collect(),
-            route: self.keys.route().to_string(),
+    /// Every relay to listen on: the configured ones, then the shared ones
+    /// they do not already name.
+    pub(crate) fn endpoints(&self) -> Vec<Endpoint> {
+        let mut all = self.configured.clone();
+        let shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
+        for endpoint in shared.endpoints() {
+            if !all.contains(&endpoint) {
+                all.push(endpoint);
+            }
         }
+        all
+    }
+
+    /// What `GET /api/relay` answers, while this computer listens on any
+    /// relay.
+    pub(crate) fn info(&self) -> Option<Info> {
+        use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+        let relays: Vec<String> = self.endpoints().iter().map(ToString::to_string).collect();
+        (!relays.is_empty()).then(|| Info {
+            identity: URL_SAFE_NO_PAD.encode(self.keys.tunnel.identity().to_bytes()),
+            relays,
+            route: self.keys.route().to_string(),
+        })
+    }
+
+    /// Takes the relays another computer shares, keeps them, and listens on
+    /// them at once; returns every relay listened on now. Blocking: it
+    /// writes the file.
+    pub(crate) fn share(
+        self: &Arc<Self>,
+        offer: control::relays::Offer,
+    ) -> std::result::Result<Vec<String>, shared::Error> {
+        {
+            let mut shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut next = shared.clone();
+            if next.offer(offer)? {
+                shared::save(&self.shared_file, &next)?;
+                *shared = next;
+            }
+        }
+        self.follow();
+        Ok(self.endpoints().iter().map(ToString::to_string).collect())
     }
 
     /// Opens a pairing dial for the phone holding `secret`, on every relay.
@@ -151,23 +214,81 @@ impl Relays {
             .clone()
     }
 
+    /// Records a listener's state, unless it was stopped meanwhile: a
+    /// relay no longer listened on is not shown.
     fn set_status(&self, endpoint: &Endpoint, status: Status) {
+        let running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
+        let key = endpoint.to_string();
+        if !running.listeners.contains_key(&key) {
+            return;
+        }
         self.status
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(endpoint.to_string(), status);
+            .insert(key, status);
     }
 
     /// Starts a listener for each relay, serving `router` over each
-    /// session, until `stopped`.
+    /// session, until `stopped`; relays shared later start as they come.
     pub(crate) fn start(self: &Arc<Self>, served: Served, stopped: watch::Receiver<bool>) {
-        for endpoint in &self.endpoints {
-            tokio::spawn(listen::run(
+        let runtime = Handle::current();
+        let mut until = stopped.clone();
+        self.running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .started = Some(Started {
+            runtime: runtime.clone(),
+            served,
+            stopped,
+        });
+        self.follow();
+        let this = Arc::clone(self);
+        runtime.spawn(async move {
+            let _ = until.wait_for(|stop| *stop).await;
+            this.follow();
+        });
+    }
+
+    /// Brings the running listeners in line with [`Self::endpoints`]:
+    /// starts the new ones and stops the ones left out, or every one once
+    /// the daemon stops. Also tells nearby offers whether to name relays.
+    fn follow(self: &Arc<Self>) {
+        let wanted = self.endpoints();
+        let mut running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(started) = &running.started else {
+            return;
+        };
+        let stopping = *started.stopped.borrow();
+        let wanted: Vec<Endpoint> = if stopping { Vec::new() } else { wanted };
+        let (runtime, served) = (started.runtime.clone(), started.served.clone());
+        let mut status = self.status.lock().unwrap_or_else(PoisonError::into_inner);
+        running.listeners.retain(|key, stop| {
+            let keep = wanted.iter().any(|endpoint| endpoint.to_string() == *key);
+            if !keep {
+                let _ = stop.send(true);
+                status.remove(key);
+            }
+            keep
+        });
+        for endpoint in wanted {
+            let key = endpoint.to_string();
+            if running.listeners.contains_key(&key) {
+                continue;
+            }
+            let (stop, stopped) = watch::channel(false);
+            running.listeners.insert(key.clone(), stop);
+            status.insert(key, Status::Connecting);
+            runtime.spawn(listen::run(
                 Arc::clone(self),
-                endpoint.clone(),
+                endpoint,
                 served.clone(),
-                stopped.clone(),
+                stopped,
             ));
+        }
+        drop(status);
+        drop(running);
+        if !stopping {
+            served.state.auth().set_relay_offer(self.info());
         }
     }
 }

@@ -1800,18 +1800,24 @@ first, then drops the pair whole before the trailing controls would be
 pushed out.
 
 Ctrl-Tab (`recent_pane`) switches to the pane this window focused most
-recently before the current one across all connected machines. A quick tap
+recently before the current one across all connected machines, including
+herdr-core tabs and the fallback shell. Herdr 1 panes require surface fencing
+support; older unfenced daemons show an unsupported-command notice. A quick tap
 goes back and forth between two panes. Holding Ctrl while pressing Tab again
 walks the history without reordering intermediate panes. Releasing Ctrl makes
-the selected pane most recent.
+the selected pane most recent once its focus is confirmed. Releasing before
+that confirmation waits; a failed selection never becomes a visit.
 Ctrl-Shift-Tab (`recent_pane_reverse`) goes the other way, starting from the
 least recently used pane. If another pane gains focus during the hold, that
 pane becomes most recent on release. Each window remembers at most 100 panes.
 Closed panes and unavailable machines are skipped. Reconnecting to the same
-daemon boot preserves its history. A restarted or removed machine loses only
-its own remembered panes.
-A press during a live activation or focus change is ignored. An unavailable
-selected machine can still switch to a reachable pane on another machine.
+daemon boot preserves its history. A restarted Herdr 1 daemon loses only
+its Herdr 1 panes. A removed machine loses its destinations. Core panes
+remain independent of Herdr 1 restarts.
+A further press while a recent selection is pending is ignored. Core panes
+can still switch locally during an unrelated Herdr 1 outage or activation.
+An unavailable selected machine can still switch to a reachable pane on
+another machine.
 The palette and the devices rail keep Ctrl-Tab for their own filters while
 they are open. A terminal program no longer receives Ctrl-Tab or
 Ctrl-Shift-Tab; unbind or rebind the two commands in `[keybindings]` to give

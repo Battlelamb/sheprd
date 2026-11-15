@@ -363,6 +363,7 @@ impl SheprdWindow {
         {
             self.input_probe.actions += 1;
         }
+        self.observe_recent_focus(window, cx);
         if self.core_pane_command(command, window, cx)
             || self.core_history_command(command, window, cx)
         {

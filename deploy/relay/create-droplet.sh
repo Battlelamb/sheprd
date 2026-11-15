@@ -9,7 +9,7 @@
 #                  `doctl compute ssh-key list` (default: none, console only)
 #   RELAY_DOMAIN_SUFFIX  e.g. relay.example.org gives nyc3.relay.example.org;
 #                  point those names at the droplets yourself. Without it,
-#                  each relay is served at IP.sslip.io.
+#                  each relay is served at IP-WITH-DASHES.sslip.io.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -54,5 +54,30 @@ cat <<'NOTE'
 
 Each droplet starts its relay within a few minutes. The dashboard login is in
 /root/sheprd-relay-login.txt on each droplet (`doctl compute ssh NAME`, or the
-web console). Without RELAY_DOMAIN_SUFFIX the address is IP-with-dashes.sslip.io.
+web console).
+
+Add each relay in Sheprd, under Settings > Remote control > Relays:
 NOTE
+
+# The addresses, as the droplets serve them: the certificate is for the name
+# with dashes, so the IP with dots would be refused.
+if [ -n "${RELAY_DOMAIN_SUFFIX:-}" ]; then
+  for region in "$@"; do
+    echo "  https://$region.$RELAY_DOMAIN_SUFFIX"
+  done
+  echo "Point each name at its droplet's address above first."
+else
+  listed=$(doctl compute droplet list --tag-name sheprd-relay \
+    --format Name,PublicIPv4 --no-header) || listed=""
+  for region in "$@"; do
+    # A region created twice has two droplets of one name: name them all.
+    addresses=$(awk -v name="sheprd-relay-$region" '$1 == name && $2 != "" { print $2 }' <<<"$listed")
+    if [ -z "$addresses" ]; then
+      echo "  $region: https://IP-WITH-DASHES.sslip.io (its address could not be read)"
+      continue
+    fi
+    while read -r address; do
+      echo "  https://${address//./-}.sslip.io"
+    done <<<"$addresses"
+  done
+fi

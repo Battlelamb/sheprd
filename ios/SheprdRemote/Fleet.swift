@@ -590,7 +590,7 @@ final class Fleet {
         }
     }
 
-    /// A short title for a chat from its agent, run once on its own.
+    /// A short title for a chat from Claude, run once on its own.
     func suggestTitle(_ key: PaneKey) async throws -> String {
         let pane = key.pane
         return try await call(key.device) { client, token in

@@ -327,19 +327,18 @@ app learns the pane it should open:
   the agent can take up to 30 s. A refusal, such as a busy agent or one
   Herdr reports no session for, is a `409` whose `error` the phone shows;
   every refusal comes before the agent is touched, and leaves it running.
-- `POST /api/v2/chat/{pane}/summarize` asks the chat's own agent program,
-  run once on its own with no tools and no saved session, where the chat
-  stands, from the end of its transcript; Claude stands in for an agent
-  with no headless mode, and for one that is missing, fails, or answers
-  nothing (one that runs past 90 s is not retried). Nothing reaches the
-  chat itself. It answers `202`
-  at once, or `400` when nothing was said yet or three summaries are
+- `POST /api/v2/chat/{pane}/summarize` asks Claude, run once on its own,
+  where the chat stands, from the end of its transcript, whatever the
+  chat's agent: Codex and Gemini cannot run without tools or MCP servers.
+  Claude runs with no tools, no MCP server, only the user's own settings,
+  and no saved session, in a fresh private folder and its own process
+  group, which ends with it; it is stopped after 90 s. Nothing reaches the
+  chat itself. It answers `202` at once, or `400` when nothing was said yet or three summaries are
   already running, and the result reaches every phone as the chat's
   `summary.row_summary` on `home`: `{"state": "pending", "since_ms"}`,
   `{"state": "ready", "text", "at_ms"}`, or `{"state": "failed", "reason",
   "at_ms"}`. The daemon keeps it until it restarts.
-- `POST /api/v2/chat/{pane}/title` asks the same agent program, the same
-  way, for a short title for the chat (at most 40 characters, cut on a
+- `POST /api/v2/chat/{pane}/title` asks Claude the same way for a short title for the chat (at most 40 characters, cut on a
   word) and answers `{"title"}` when it is done; it does not rename the
   chat. The Session sheet's Name from Chat button renames the chat to it
   through `rename`. It answers `400` when nothing was said yet, `429` when

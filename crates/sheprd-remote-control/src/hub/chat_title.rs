@@ -1,6 +1,6 @@
-//! A name for a chat from its agent: the chat's agent program, run once on
-//! its own as for a row summary ([`super::row_summary`]), reads the end of
-//! the transcript and answers a short title. Nothing is sent to the chat,
+//! A name for a chat: Claude, run once on its own as for a row summary
+//! ([`super::row_summary`]), reads the end of the transcript and answers a
+//! short title. Nothing is sent to the chat,
 //! so its session and context are untouched; the phone renames the chat.
 
 use super::row_summary;
@@ -15,9 +15,9 @@ const PROMPT: &str = "The input is the end of a conversation between a person an
 agent. Reply with a short title for it, as a tab would show: 2 to 5 plain words, at most 40 \
 characters, no quotes, punctuation, emoji, Markdown, or explanation.";
 
-/// Blocking: `agent`'s title for `input`, the excerpt of a transcript.
-pub(crate) fn run(agent: &str, input: &str) -> Result<String, row_summary::Error> {
-    let answer = row_summary::ask(agent, PROMPT, input)?;
+/// Blocking: the title for `input`, the excerpt of a transcript.
+pub(crate) fn run(input: &str) -> Result<String, row_summary::Error> {
+    let answer = row_summary::ask(PROMPT, input)?;
     title_from(&answer).ok_or(row_summary::Error::Empty)
 }
 

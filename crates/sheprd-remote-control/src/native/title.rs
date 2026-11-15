@@ -1,5 +1,5 @@
-//! `POST /api/v2/chat/{pane}/title`: asks the chat's agent program, run once
-//! on its own, for a short title for the chat, and answers it. The phone
+//! `POST /api/v2/chat/{pane}/title`: asks Claude, run once on its own, for a
+//! short title for the chat, and answers it. The phone
 //! then renames the chat, so the person sees the name before it is kept.
 
 use crate::{
@@ -31,10 +31,9 @@ pub(crate) async fn title(
     }
     // Shares the summaries' cap, as each runs an agent program.
     let slot = row_summary::Slot::take()?;
-    let agent = transcript.agent;
     let title = tokio::task::spawn_blocking(move || {
         let _slot = slot;
-        chat_title::run(&agent, &input)
+        chat_title::run(&input)
     })
     .await
     .map_err(|_| row_summary::Error::Failed)??;

@@ -23,19 +23,8 @@ fn agent(id: u64, text: &str) -> Entry {
 }
 
 #[test]
-fn the_chat_s_own_agent_goes_first_then_claude() {
-    assert_eq!(
-        Program::candidates("Codex"),
-        [Program::Codex, Program::Claude]
-    );
-    assert_eq!(Program::candidates("gemini"), [Program::Claude]);
-    assert_eq!(Program::candidates("Claude"), [Program::Claude]);
-    assert_eq!(Program::candidates("OpenCode"), [Program::Claude]);
-}
-
-#[test]
-fn no_candidate_runs_with_tools_or_saves_a_session() {
-    let claude = Program::Claude.args(PROMPT);
+fn claude_runs_with_no_tools_mcp_servers_project_settings_or_session() {
+    let claude = claude_args(PROMPT);
     assert!(
         claude
             .windows(2)
@@ -48,13 +37,15 @@ fn no_candidate_runs_with_tools_or_saves_a_session() {
             .windows(2)
             .any(|pair| pair[0] == "--setting-sources" && pair[1] == "user")
     );
-    let codex = Program::Codex.args(PROMPT);
-    assert!(
-        codex
-            .windows(2)
-            .any(|pair| pair[0] == "--sandbox" && pair[1] == "read-only")
-    );
-    assert!(codex.contains(&"--ephemeral".into()));
+}
+
+#[cfg(unix)]
+#[test]
+fn what_the_agent_leaves_running_does_not_hold_the_run() {
+    let started = Instant::now();
+    let text = run_first([sh("cat > /dev/null; sleep 30 & echo Done.")], "x", WAIT).unwrap();
+    assert_eq!(text, "Done.");
+    assert!(started.elapsed() < Duration::from_secs(10));
 }
 
 #[test]

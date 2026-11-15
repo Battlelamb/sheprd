@@ -1,5 +1,5 @@
-//! A smarter line for a chat's row: the chat's own agent program, run once
-//! on its own, reads the end of the transcript and says where it stands.
+//! A smarter line for a chat's row: Claude, run once on its own, reads the
+//! end of the chat's transcript and says where it stands.
 //! The chat's session, history, and context are untouched, as nothing is
 //! sent to it; the summary is the daemon's and lives with the chat's link.
 
@@ -14,7 +14,10 @@ use std::{
     ffi::OsString,
     io::{Read, Write},
     process::Stdio,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -33,6 +36,8 @@ const MAX_SUMMARY_CHARS: usize = 280;
 const MAX_RUNNING: usize = 3;
 /// How often a running agent is checked for having exited.
 const POLL: Duration = Duration::from_millis(100);
+/// How long the agent's output may take to close once it has exited.
+const DRAIN: Duration = Duration::from_secs(2);
 
 /// What the agent is asked; the transcript follows on its input.
 const PROMPT: &str = "The input is the end of a conversation between a person and a coding \
@@ -59,61 +64,26 @@ pub(crate) enum RowSummary {
     },
 }
 
-/// The agent programs that can summarize without a terminal and without
-/// tools that reach past the answer. Gemini is not one: its command line
-/// cannot turn every tool off, so its chats fall to Claude.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum Program {
-    // keep-sorted start
-    Claude,
-    Codex,
-    // keep-sorted end
-}
-
-impl Program {
-    /// The chat's own agent first, then Claude for agents with no
-    /// headless mode here.
-    pub(crate) fn candidates(agent: &str) -> Vec<Self> {
-        let agent = agent.to_lowercase();
-        let own = agent.contains(Self::Codex.name()).then_some(Self::Codex);
-        own.into_iter().chain([Self::Claude]).collect()
-    }
-
-    fn name(self) -> &'static str {
-        match self {
-            Self::Claude => "claude",
-            Self::Codex => "codex",
-        }
-    }
-
-    /// One answer to `prompt` with no tools, no saved session, and no
-    /// approvals. Claude reads only the user's own settings and no MCP
-    /// server; Codex's read-only sandbox has no network and writes nothing.
-    fn args(self, prompt: &str) -> Vec<OsString> {
-        let args: &[&str] = match self {
-            Self::Claude => &[
-                "-p",
-                "--tools",
-                "",
-                "--no-session-persistence",
-                "--setting-sources",
-                "user",
-                "--strict-mcp-config",
-                "--output-format",
-                "text",
-                prompt,
-            ],
-            Self::Codex => &[
-                "exec",
-                "--ephemeral",
-                "--skip-git-repo-check",
-                "--sandbox",
-                "read-only",
-                prompt,
-            ],
-        };
-        args.iter().map(OsString::from).collect()
-    }
+/// Claude's arguments for one answer to `prompt`: no tools, no saved
+/// session, only the user's own settings, and no MCP server. Every chat is
+/// answered by Claude, whatever its agent: Codex and Gemini cannot be run
+/// without tools or MCP servers that reach past the answer.
+fn claude_args(prompt: &str) -> Vec<OsString> {
+    [
+        "-p",
+        "--tools",
+        "",
+        "--no-session-persistence",
+        "--setting-sources",
+        "user",
+        "--strict-mcp-config",
+        "--output-format",
+        "text",
+        prompt,
+    ]
+    .iter()
+    .map(OsString::from)
+    .collect()
 }
 
 /// The person's prompts and the agent's answers, oldest first, as much of
@@ -161,19 +131,15 @@ impl Drop for Slot {
     }
 }
 
-/// Blocking: the summary of `input` from the first of `agent`'s
-/// candidates installed here.
-pub(crate) fn run(agent: &str, input: &str) -> Result<String, Error> {
-    ask(agent, PROMPT, input)
+/// Blocking: the summary of `input`.
+pub(crate) fn run(input: &str) -> Result<String, Error> {
+    ask(PROMPT, input)
 }
 
-/// Blocking: the answer to `prompt` about `input` from the first of
-/// `agent`'s candidates installed here, cut to [`MAX_SUMMARY_CHARS`].
-pub(crate) fn ask(agent: &str, prompt: &str, input: &str) -> Result<String, Error> {
-    let candidates = Program::candidates(agent)
-        .into_iter()
-        .map(|program| (OsString::from(program.name()), program.args(prompt)));
-    run_first(candidates, input, WAIT)
+/// Blocking: Claude's answer to `prompt` about `input`, cut to
+/// [`MAX_SUMMARY_CHARS`].
+pub(crate) fn ask(prompt: &str, input: &str) -> Result<String, Error> {
+    run_first([("claude".into(), claude_args(prompt))], input, WAIT)
 }
 
 /// The answer of the first of `candidates` that gives one, each run for at
@@ -214,6 +180,9 @@ fn run_one(
         // A user service's `PATH` is bare; the login shell's finds the
         // agents the user's own shell runs.
         sheprd_client::login_env::apply(&mut command);
+        // Its own process group, so what it starts ends with it.
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(&mut command, 0);
         // Away from any checkout, so the agent reads only what it is given.
         command
             .args(args)
@@ -236,31 +205,34 @@ fn answer(mut child: std::process::Child, input: String, wait: Duration) -> Resu
             let _ = stdin.write_all(input.as_bytes());
         });
     }
-    let reader = child.stdout.take().map(|stdout| {
+    let (sender, output) = mpsc::sync_channel(1);
+    if let Some(stdout) = child.stdout.take() {
         thread::spawn(move || {
             let mut bytes = Vec::new();
             let mut limited = stdout.take(MAX_OUTPUT_BYTES);
             let _ = limited.read_to_end(&mut bytes);
             // The rest is drained so the agent never blocks on a full pipe.
             let _ = std::io::copy(&mut limited.into_inner(), &mut std::io::sink());
-            bytes
-        })
-    });
+            let _ = sender.send(bytes);
+        });
+    }
     let deadline = Instant::now() + wait;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() < deadline => thread::sleep(POLL),
             Ok(None) | Err(_) => {
+                end_group(&child);
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(Error::TimedOut);
             }
         }
     };
-    let bytes = reader
-        .and_then(|reader| reader.join().ok())
-        .unwrap_or_default();
+    // What it started and left running would hold the output open, and the
+    // run's slot with it.
+    end_group(&child);
+    let bytes = output.recv_timeout(DRAIN).unwrap_or_default();
     if !status.success() {
         return Err(Error::Failed);
     }
@@ -269,6 +241,21 @@ fn answer(mut child: std::process::Child, input: String, wait: Duration) -> Resu
         return Err(Error::Empty);
     }
     Ok(text)
+}
+
+/// Kills what is left of the agent's process group. Windows has none here;
+/// the bounded wait for the output keeps a leftover child from holding
+/// the run there.
+fn end_group(child: &std::process::Child) {
+    #[cfg(unix)]
+    if let Some(group) = i32::try_from(child.id())
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    {
+        let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+    }
+    #[cfg(not(unix))]
+    let _ = child;
 }
 
 #[cfg(test)]

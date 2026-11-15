@@ -18,7 +18,7 @@ struct SessionSheet: View {
     /// The name being typed; `nil` until the field is edited.
     @State private var draft: String?
     @State private var renaming = false
-    /// The chat's agent, run once on its own, is reading the chat for a name.
+    /// Claude, run once on its own, is reading the chat for a name.
     @State private var suggesting = false
     @FocusState private var naming: Bool
 

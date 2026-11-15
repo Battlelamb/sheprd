@@ -367,14 +367,14 @@ final class RemoteClient: Sendable {
         return (components.percentEncodedQuery ?? "").replacingOccurrences(of: "+", with: "%2B")
     }
 
-    /// Asks the chat's agent, run once on its own, where the chat stands;
+    /// Asks Claude, run once on its own, where the chat stands;
     /// the summary arrives on `home` when it is done.
     func summarize(pane: String, bearer: String) async throws {
         let _: EmptyAnswer = try await send("POST", "/api/v2/chat/\(Self.segment(pane))/summarize", body: NoBody(), bearer: bearer)
     }
 
-    /// A short title for the chat `pane` runs, from its agent run once on
-    /// its own; the chat is not renamed. The agent may take up to 90
+    /// A short title for the chat `pane` runs, from Claude run once on its
+    /// own; the chat is not renamed. The agent may take up to 90
     /// seconds, so this waits longer than that for the computer to say why.
     func suggestTitle(pane: String, bearer: String) async throws -> String {
         struct Answer: Decodable { let title: String }

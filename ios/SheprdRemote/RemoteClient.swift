@@ -367,6 +367,12 @@ final class RemoteClient: Sendable {
         return (components.percentEncodedQuery ?? "").replacingOccurrences(of: "+", with: "%2B")
     }
 
+    /// Asks the chat's agent, run once on its own, where the chat stands;
+    /// the summary arrives on `home` when it is done.
+    func summarize(pane: String, bearer: String) async throws {
+        let _: EmptyAnswer = try await send("POST", "/api/v2/chat/\(Self.segment(pane))/summarize", body: NoBody(), bearer: bearer)
+    }
+
     /// Names a workspace; it always has a name.
     func renameWorkspace(_ workspace: String, to label: String, bearer: String) async throws {
         struct Body: Encodable { let label: String }

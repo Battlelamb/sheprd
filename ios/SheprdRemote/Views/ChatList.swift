@@ -7,9 +7,8 @@ import SwiftUI
 struct ChatList: View {
     @Environment(AppModel.self) private var model
     @AppStorage(HomeRow.sortKey) private var sort = AgentSort.priority
-    /// The chat a long press asked to close, waiting for confirmation.
-    @State private var closing: ChatItem?
-    @State private var problem: String?
+    /// What a swipe or long press asked to close, waiting for confirmation.
+    @State private var closing: CloseTarget?
 
     var body: some View {
         let sections = HomeRow.sections(sort, chats: model.fleet.chatItems, agents: model.fleet.agentTerminals)
@@ -20,20 +19,7 @@ struct ChatList: View {
             }
         }
         .refreshable { model.fleet.networkChanged() }
-        .confirmationDialog(
-            "Close \(closing?.chat.title ?? "this chat")?",
-            isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil } }),
-            titleVisibility: .visible,
-            presenting: closing
-        ) { item in
-            Button("Close Chat", role: .destructive) { close(item) }
-        } message: { _ in
-            Text("Its pane closes in Sheprd and the agent stops.")
-        }
-        .alert("The chat did not close", isPresented: Binding(get: { problem != nil }, set: { if !$0 { problem = nil } })) {
-        } message: {
-            Text(problem ?? "")
-        }
+        .closeConfirmation($closing)
     }
 
     @ViewBuilder
@@ -56,21 +42,14 @@ struct ChatList: View {
                 }
             }
             .contextMenu {
-                Button("Close Chat", systemImage: "xmark.circle", role: .destructive) { closing = item }
+                Button("Close Chat", systemImage: "xmark.circle", role: .destructive) { closing = .chat(item.key, title: item.chat.title) }
             }
+            .closeSwipe(.chat(item.key, title: item.chat.title), closing: $closing)
+            .summarizeSwipe(item.key)
         case let .agent(item):
             if let route = item.route {
                 NavigationLink(value: route) { AgentTerminalRowLabel(item: item, showsComputer: !grouped, showsWorkspace: !grouped) }
-            }
-        }
-    }
-
-    private func close(_ item: ChatItem) {
-        Task {
-            do {
-                try await model.fleet.closeChatPane(item.key)
-            } catch {
-                problem = error.localizedDescription
+                    .closeSwipe(item.closeTarget, closing: $closing)
             }
         }
     }

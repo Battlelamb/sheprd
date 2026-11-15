@@ -53,6 +53,8 @@ pub(crate) enum Event {
     },
     /// The program became reachable, or stopped being.
     Connection,
+    /// The row's summary started, arrived, or failed; only lists redraw.
+    Summary,
 }
 
 /// What a subscriber starts from.
@@ -75,6 +77,8 @@ pub(crate) struct Summary {
     /// The start of the first prompt sent, on one line: what a row calls a
     /// chat its agent has not titled.
     pub(crate) first_prompt: Option<String>,
+    /// What the chat's agent last said of where it stands, when asked.
+    pub(crate) row_summary: Option<super::RowSummary>,
     pub(crate) turn_started_ms: Option<u64>,
     /// When the latest turn ended, for "5m ago" on an idle row.
     pub(crate) last_turn_ended_ms: Option<u64>,
@@ -136,6 +140,9 @@ pub(crate) struct Chat {
     acks: Mutex<HashMap<CommandId, oneshot::Sender<Option<sheprd_chat_protocol::Rejection>>>>,
     closed: AtomicBool,
     closer: Mutex<Option<Closer>>,
+    /// Every chat's steps, for lists to redraw when the summary changes.
+    all: broadcast::Sender<(String, Event)>,
+    row_summary: Mutex<Option<super::RowSummary>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -159,6 +166,8 @@ impl Chat {
             acks: Mutex::new(HashMap::new()),
             closed: AtomicBool::new(false),
             closer: Mutex::new(None),
+            all: all.clone(),
+            row_summary: Mutex::new(None),
         });
         let reader = chat.clone();
         thread::Builder::new()
@@ -213,6 +222,7 @@ impl Chat {
                     _ => None,
                 }),
             first_prompt: first_prompt(transcript),
+            row_summary: lock(&self.row_summary).clone(),
             turn_started_ms: transcript.turn.map(|turn| turn.started_ms),
             last_turn_ended_ms: last_turn_ended_ms(transcript),
             agent: transcript.agent.clone(),
@@ -375,6 +385,24 @@ impl Chat {
         if changed {
             self.publish(Event::Connection, all);
         }
+    }
+
+    /// Marks a summary running from `now_ms`, unless one already is.
+    pub(crate) fn begin_summary(&self, now_ms: u64) -> bool {
+        let mut summary = lock(&self.row_summary);
+        if matches!(*summary, Some(super::RowSummary::Pending { .. })) {
+            return false;
+        }
+        *summary = Some(super::RowSummary::Pending { since_ms: now_ms });
+        drop(summary);
+        self.publish(Event::Summary, &self.all);
+        true
+    }
+
+    /// Keeps the summary, or why there is none, and redraws the lists.
+    pub(crate) fn finish_summary(&self, summary: super::RowSummary) {
+        *lock(&self.row_summary) = Some(summary);
+        self.publish(Event::Summary, &self.all);
     }
 
     fn publish(&self, event: Event, all: &broadcast::Sender<(String, Event)>) {

@@ -171,6 +171,9 @@ public struct Home: Codable, Hashable, Sendable {
         /// The start of the first prompt, for a chat its agent has not
         /// titled; absent before one is sent, and from older computers.
         public var firstPrompt: String? = nil
+        /// What the chat's agent said of where it stands when the person
+        /// asked; absent until then, and from older computers.
+        public var rowSummary: RowSummary? = nil
         public var turnStartedMs: UInt64?
         /// When the latest turn ended; absent from older computers.
         public var lastTurnEndedMs: UInt64?
@@ -180,6 +183,7 @@ public struct Home: Codable, Hashable, Sendable {
             case connected, status, question, questions
             case lastText = "last_text"
             case firstPrompt = "first_prompt"
+            case rowSummary = "row_summary"
             case turnStartedMs = "turn_started_ms"
             case lastTurnEndedMs = "last_turn_ended_ms"
             case usagePercent = "usage_percent"

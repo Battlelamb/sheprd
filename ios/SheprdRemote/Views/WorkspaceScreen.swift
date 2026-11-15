@@ -25,6 +25,8 @@ struct WorkspaceScreen: View {
     /// The name a rename asked for, shown with a spinner until the
     /// computer's next `home` carries it, the request fails, or it times out.
     @State private var pendingName: String?
+    /// What a row's swipe asked to close, waiting for confirmation.
+    @State private var closing: CloseTarget?
 
     private static let terminal = "terminal"
 
@@ -57,10 +59,13 @@ struct WorkspaceScreen: View {
             Section {
                 ForEach(chats) { item in
                     RouteLink(.chat(item.key, title: item.chat.title)) { ChatRowLabel(item: item, showsComputer: false, showsWorkspace: false) }
+                        .closeSwipe(.chat(item.key, title: item.chat.title), closing: $closing)
+                        .summarizeSwipe(item.key)
                 }
                 ForEach(terminals.filter { $0.agent != nil }) { item in
                     if let route = item.route {
                         RouteLink(route) { AgentTerminalRowLabel(item: item, showsComputer: false, showsWorkspace: false) }
+                            .closeSwipe(item.closeTarget, closing: $closing)
                     }
                 }
                 ForEach(terminals.filter { $0.agent == nil }) { item in
@@ -68,6 +73,7 @@ struct WorkspaceScreen: View {
                         RouteLink(.term(PaneKey(device: key.device, pane: pane.pane), title: item.terminal.label)) {
                             TerminalRowLabel(terminal: item.terminal)
                         }
+                        .closeSwipe(item.closeTarget, closing: $closing)
                     }
                 }
             } header: {
@@ -115,6 +121,12 @@ struct WorkspaceScreen: View {
             if UserDefaults.standard.bool(forKey: "otherAgents") { showsOthers = true }
             // `-openChanges YES` opens the workspace's changes.
             if UserDefaults.standard.bool(forKey: "openChanges"), opened == nil { opened = .changes(key) }
+            // `-summarizeFirst YES` asks for the summary of the first chat
+            // with a reply, as its row's swipe does.
+            if UserDefaults.standard.bool(forKey: "summarizeFirst"),
+               let chat = model.fleet.chatItems.first(where: { $0.computer.device == key.device && $0.workspace.id == key.workspace && $0.chat.summary?.lastText != nil }) {
+                Task { try? await model.fleet.summarize(chat.key) }
+            }
             // `-renamePending NAME` shows a rename on its way, sending nothing.
             if let name = UserDefaults.standard.string(forKey: "renamePending") { pendingName = name }
             if UserDefaults.standard.bool(forKey: "renameWorkspace") {
@@ -146,6 +158,7 @@ struct WorkspaceScreen: View {
                 try await client.changes(workspace: id, scope: .uncommitted, bearer: token)
             }.total
         }
+        .closeConfirmation($closing)
         .alert("The tab did not start", isPresented: Binding(get: { problem != nil }, set: { if !$0 { problem = nil } })) {
         } message: {
             Text(problem ?? "")

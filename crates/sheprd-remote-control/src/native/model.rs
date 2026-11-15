@@ -115,6 +115,10 @@ pub(crate) struct ChatSummary {
     /// absent before one is sent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) first_prompt: Option<String>,
+    /// What the chat's agent said of where it stands, when the person asked
+    /// (`POST /api/v2/chat/{pane}/summarize`); absent until then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) row_summary: Option<hub::RowSummary>,
     pub(crate) turn_started_ms: Option<u64>,
     /// When the latest turn ended; absent from older chat programs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -338,6 +342,7 @@ impl From<Summary> for ChatSummary {
             questions: summary.questions,
             last_text: summary.last_text,
             first_prompt: summary.first_prompt,
+            row_summary: summary.row_summary,
             turn_started_ms: summary.turn_started_ms,
             last_turn_ended_ms: summary.last_turn_ended_ms,
             usage_percent: summary.usage_percent,

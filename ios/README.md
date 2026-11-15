@@ -100,6 +100,9 @@ and nothing goes through your phone.
    - `-renameWorkspace YES` opens a workspace's rename alert. It lists the
      local Herdr daemon's real workspaces, so pressing Rename changes one.
      `-renamePending NAME` shows a rename to NAME on its way, sending nothing.
+   - `-summarizeFirst YES` asks for the row summary of a workspace's first
+     chat with a reply, as its row's swipe does. It runs that chat's agent
+     once, which costs a model call.
    - `-newWorkspace YES` opens the new workspace form.
    - `-computerTags work,lab` tags the first computer, `-computerTagFilter work`
      filters Workspaces by a tag, and `-openComputer YES` opens the first

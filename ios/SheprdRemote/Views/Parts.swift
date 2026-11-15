@@ -117,6 +117,7 @@ extension View {
 }
 
 struct ChatRowLabel: View {
+    @AppStorage(RowLines.key) private var lines = RowLines.choices.lowerBound
     var item: ChatItem
     var showsComputer = true
     /// Off on the workspace's own screen, which names it already.
@@ -145,7 +146,7 @@ struct ChatRowLabel: View {
                         LastAnswer(date: date)
                     }
                 }
-                Text(detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                detail.font(.subheadline).foregroundStyle(.secondary).lineLimit(RowLines.clamped(lines))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityValue(showsWorkspace && item.workspace.merged ? "Pull request merged" : "")
             }
@@ -163,10 +164,27 @@ struct ChatRowLabel: View {
         return agent.isEmpty ? String(localized: "Chat") : agent.capitalized
     }
 
-    private var detail: AttributedString {
-        let said = (item.question?.title ?? item.chat.summary?.lastText)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .flatMap { $0.isEmpty ? nil : $0 }
+    /// The line under the title: a waiting question first, then the
+    /// summary the person asked for while it still holds, then the latest
+    /// reply.
+    private var detail: Text {
+        let summary = item.question == nil ? item.chat.summary?.currentRowSummary : nil
+        switch summary {
+        case let .ready(text, _)?:
+            return Text("\(Image(systemName: "sparkles")) \(line(said: text))")
+        case .pending?:
+            return Text("\(Image(systemName: "sparkles")) \(line(said: String(localized: "Summarizing…")))")
+        case let .failed(reason, _)?:
+            return Text("\(Image(systemName: "exclamationmark.triangle")) \(line(said: String(localized: "No summary: \(reason)")))")
+        case .other?, nil:
+            let said = (item.question?.title ?? item.chat.summary?.lastText)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .flatMap { $0.isEmpty ? nil : $0 }
+            return Text(line(said: said))
+        }
+    }
+
+    private func line(said: String?) -> AttributedString {
         let line = RowPlace.line([
             showsComputer ? AttributedString(item.computer.name) : nil,
             showsWorkspace ? RowPlace.name(of: item.workspace) : nil,

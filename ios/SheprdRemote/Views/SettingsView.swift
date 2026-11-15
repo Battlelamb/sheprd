@@ -19,6 +19,7 @@ struct SettingsView: View {
     @AppStorage(VoiceSettings.confirmsKey) private var voiceConfirms = false
     @AppStorage(VoiceSettings.languageKey) private var voicePhoneLanguage = false
     @AppStorage(ActivityTokens.genericSetting) private var genericActivities = false
+    @AppStorage(RowLines.key) private var rowLines = RowLines.choices.lowerBound
 
     var body: some View {
         List {
@@ -73,12 +74,19 @@ struct SettingsView: View {
             } footer: {
                 Text("A relay joins this \(UIDevice.current.model) to a computer when they are on different networks.")
             }
-            Section("Chats") {
+            Section {
+                Picker("Lines per Row", selection: $rowLines) {
+                    ForEach(RowLines.choices, id: \.self) { Text($0, format: .number).tag($0) }
+                }
                 NavigationLink {
                     TextShortcutsView()
                 } label: {
                     LabeledContent("Text Shortcuts", value: "\(model.shortcuts.shortcuts.count)")
                 }
+            } header: {
+                Text("Chats")
+            } footer: {
+                Text("Lines per Row is how much of a chat's latest reply or summary its row shows in the lists.")
             }
             Section {
                 Toggle("Speak Results", isOn: $voiceSpeaks)

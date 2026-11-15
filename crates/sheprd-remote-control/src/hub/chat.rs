@@ -3,7 +3,8 @@
 //! transcript with the protocol's own reducer, and broadcasts each step; it
 //! reconnects from its cursor when the connection drops, until the pane
 //! leaves the layout. Phones read the transcript and subscribe; nothing on
-//! the async side touches the socket.
+//! the async side touches the socket. An observed terminal agent's chat is
+//! the same, read from a `sheprd-acp observe` child instead (`observed`).
 
 use super::{Error, Result};
 use sheprd_chat_protocol::{
@@ -15,6 +16,7 @@ use std::{
     collections::HashMap,
     io::{BufReader, BufWriter, Read, Write},
     path::{Path, PathBuf},
+    process::{self, Child, Stdio},
     sync::{
         Arc, Mutex, MutexGuard, PoisonError,
         atomic::{AtomicBool, Ordering},
@@ -118,7 +120,33 @@ pub(crate) struct Chat {
     writer: Mutex<Option<SyncSender<ClientMessage>>>,
     acks: Mutex<HashMap<CommandId, oneshot::Sender<Option<sheprd_chat_protocol::Rejection>>>>,
     closed: AtomicBool,
-    closer: Mutex<Option<Closer>>,
+    closer: Mutex<Option<Link>>,
+}
+
+/// What ends a connection, from any thread: a socket's, or the observer
+/// child that is the other end of one.
+enum Link {
+    Socket(Closer),
+    Child(Arc<Mutex<Child>>),
+}
+
+impl Link {
+    fn close(&self) {
+        match self {
+            Self::Socket(closer) => closer.close(),
+            // Only a signal; the reader reaps the child.
+            Self::Child(child) => {
+                let _ = lock(child).kill();
+            }
+        }
+    }
+
+    fn try_clone(&self) -> std::io::Result<Self> {
+        Ok(match self {
+            Self::Socket(closer) => Self::Socket(closer.try_clone()?),
+            Self::Child(child) => Self::Child(child.clone()),
+        })
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -133,8 +161,59 @@ impl Chat {
         address: PathBuf,
         all: broadcast::Sender<(String, Event)>,
     ) -> std::io::Result<Arc<Self>> {
+        let chat = Self::new(pane);
+        let reader = chat.clone();
+        thread::Builder::new()
+            .name("herdr-remote-chat".into())
+            .spawn(move || reader.run(&address, &all))?;
+        Ok(chat)
+    }
+
+    /// Starts `observer`, a `sheprd-acp observe` command, and reads the
+    /// terminal agent's conversation from it once: it is not restarted, and
+    /// the chat closes when it ends. Its steps reach only its own
+    /// subscribers, never notifications: the agent's terminal has its own.
+    pub(crate) fn observe(
+        pane: String,
+        mut observer: process::Command,
+    ) -> std::io::Result<Arc<Self>> {
+        let mut child = observer
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let (Some(writer), Some(reader)) = (child.stdin.take(), child.stdout.take()) else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::ErrorKind::BrokenPipe.into());
+        };
+        let chat = Self::new(pane);
+        let child = Arc::new(Mutex::new(child));
+        let observed = chat.clone();
+        let spawned = thread::Builder::new()
+            .name("herdr-remote-observer".into())
+            .spawn({
+                let child = child.clone();
+                move || {
+                    let (all, _) = broadcast::channel(1);
+                    observed.connected(reader, writer, Link::Child(child.clone()), None, &all);
+                    observed.closed.store(true, Ordering::SeqCst);
+                    observed.set_connected(false, &all);
+                    let _ = lock(&child).wait();
+                }
+            });
+        if let Err(error) = spawned {
+            let mut child = lock(&child);
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+        Ok(chat)
+    }
+
+    fn new(pane: String) -> Arc<Self> {
         let (events, _) = broadcast::channel(SUBSCRIBERS_QUEUE);
-        let chat = Arc::new(Self {
+        Arc::new(Self {
             pane,
             state: Mutex::new(State::default()),
             events,
@@ -142,12 +221,17 @@ impl Chat {
             acks: Mutex::new(HashMap::new()),
             closed: AtomicBool::new(false),
             closer: Mutex::new(None),
-        });
-        let reader = chat.clone();
-        thread::Builder::new()
-            .name("herdr-remote-chat".into())
-            .spawn(move || reader.run(&address, &all))?;
-        Ok(chat)
+        })
+    }
+
+    /// Whether it ended for good: closed, or an observer that finished.
+    pub(crate) fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
+    }
+
+    /// How many phones follow it now.
+    pub(crate) fn followers(&self) -> usize {
+        self.events.receiver_count()
     }
 
     /// The transcript now and a subscription to every step after it. The
@@ -253,7 +337,7 @@ impl Chat {
                 && let Ok((reader, writer, closer)) = connection.split()
             {
                 retry = Duration::from_millis(500);
-                self.connected(reader, writer, closer, since, all);
+                self.connected(reader, writer, Link::Socket(closer), since, all);
             }
             self.set_connected(false, all);
             thread::sleep(retry);
@@ -265,7 +349,7 @@ impl Chat {
         &self,
         reader: impl Read,
         writer: impl Write + Send + 'static,
-        closer: Closer,
+        closer: Link,
         since: Option<Cursor>,
         all: &broadcast::Sender<(String, Event)>,
     ) {
@@ -369,7 +453,7 @@ impl Chat {
 /// until the connection ends or a write fails.
 fn write(
     writer: impl Write,
-    closer: &Closer,
+    closer: &Link,
     hello: ClientMessage,
     queued: &Receiver<ClientMessage>,
 ) {

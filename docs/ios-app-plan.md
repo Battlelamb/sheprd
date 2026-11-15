@@ -157,7 +157,7 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
     "terminals": [{
       "tab": "t2", "label": "zsh", "cwd": "/Users/me/code/sheprd", "zoomed": false,
       "panes": [{"pane": "p2", "label": null, "cwd": "/Users/me/code/sheprd", "focused": true}],
-      "agent": {"name": "claude", "status": "done", "pane": "p2", "title": "Fix the build"},
+      "agent": {"name": "claude", "status": "done", "pane": "p2", "title": "Fix the build", "transcript": true},
       "convert": {"agent": "claude", "pane": "p2"}
     }]
   }]
@@ -172,6 +172,19 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
   `claude` run in a shell: `pane` is the pane it runs in and `title` its
   terminal title, both absent from older daemons. Home lists these tabs
   with the chats, by status, and opens the agent's pane.
+- `agent.transcript` is `true` when the agent's own conversation can be
+  read as a chat: Claude Code in a Herdr 1 pane. The phone then opens it
+  with `{"type": "subscribe", "view": "chat", "pane": PANE}` on the
+  agent's pane, as it opens a chat, and `GET /api/v2/chat/{pane}` answers
+  the same. The daemon starts `sheprd-acp observe` for it then, on the
+  pane's host, with the session Herdr reports and the process's birth read
+  there; the transcript is `read_only`, its steps reach no notifications,
+  and no terminal is attached, so the pane keeps its size. At most eight
+  observers run; past that the oldest no phone follows ends. Where it
+  cannot be read (a Windows host, a session Herdr does not name, a
+  `CLAUDE_CONFIG_DIR` on macOS) the subscription answers `error`, and the
+  phone offers the terminal. Replies go to the terminal through
+  `/api/term/{pane}/paste` and Enter. Absent (false) from older daemons.
 - A terminal's `convert` is what its menu may move into a chat, as
   Sheprd's Move Agent into Chat does: the agent's pane, and which agent it
   is. It is absent when nothing can move (`sheprd_client::herdr::convert`,

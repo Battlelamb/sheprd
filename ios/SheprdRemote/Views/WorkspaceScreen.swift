@@ -406,7 +406,9 @@ private struct ChangesRow: View {
     }
 }
 
-/// A terminal tab without an agent: its name and folder.
+/// A terminal tab without an agent: its name, and what runs in it. A
+/// computer that does not say (Herdr 1) gets its folder's name instead,
+/// so the second line is never blank.
 private struct TerminalRowLabel: View {
     var terminal: Home.TerminalRow
 
@@ -416,11 +418,23 @@ private struct TerminalRowLabel: View {
                 .frame(width: 28, height: 28).background(.fill.secondary, in: .rect(cornerRadius: 28 * 0.28))
             VStack(alignment: .leading, spacing: 2) {
                 Text(terminal.label).lineLimit(1)
-                if let cwd = terminal.firstPane?.cwd ?? terminal.cwd {
-                    Text(cwd).font(.subheadline).foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.head)
+                switch terminal.firstPane?.job {
+                case let .running(command)?:
+                    Text(verbatim: command).font(.subheadline.monospaced()).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.tail)
+                case .idle?:
+                    Text("Idle").font(.subheadline).foregroundStyle(.tertiary)
+                case .other?, nil:
+                    Text(folder).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
         }
+    }
+
+    /// The last part of the tab's folder, or a plain word when it has none.
+    private var folder: String {
+        let path = terminal.firstPane?.cwd ?? terminal.cwd ?? ""
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        return path.isEmpty || name.isEmpty || name == "/" ? String(localized: "Terminal") : name
     }
 }

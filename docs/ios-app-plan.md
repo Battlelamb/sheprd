@@ -172,6 +172,12 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
   `claude` run in a shell: `pane` is the pane it runs in and `title` its
   terminal title, both absent from older daemons. Home lists these tabs
   with the chats, by status, and opens the agent's pane.
+- A chat's `summary.first_prompt` is the start of its first prompt, which
+  names a chat its agent has not titled; absent before one is sent and
+  from older daemons.
+- A terminal pane's `job` is what runs in front of its shell:
+  `{"state": "running", "command": "cargo test"}` or `{"state": "idle"}`.
+  Only Herdr 2 says; it is absent for Herdr 1 and from older daemons.
 - A terminal's `convert` is what its menu may move into a chat, as
   Sheprd's Move Agent into Chat does: the agent's pane, and which agent it
   is. It is absent when nothing can move (`sheprd_client::herdr::convert`,

@@ -22,7 +22,7 @@ pub(crate) use convert::Error as ConvertError;
 pub(crate) use core::{Keeper, arrangeable};
 #[cfg(test)]
 pub(crate) use layout::TerminalAgent;
-pub(crate) use layout::{Chat as ChatRow, Layout, Terminal, TerminalPane, Workspace};
+pub(crate) use layout::{Chat as ChatRow, Job, Layout, Terminal, TerminalPane, Workspace};
 
 use serde_json::{Value, json};
 use sheprd_chat_protocol::{Agent, Command, EndpointId, Rejection};
@@ -795,6 +795,7 @@ pub(crate) fn layout_terminal(tab: &str, label: &str) -> Terminal {
             label: None,
             cwd: None,
             focused: true,
+            job: None,
         }],
         zoomed: false,
         agent: None,

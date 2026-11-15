@@ -14,6 +14,7 @@ mod installed_agents_path;
 #[cfg(unix)]
 mod live_chat;
 mod messages;
+mod pane_job;
 mod pictures;
 mod projection;
 mod reducer;
@@ -53,6 +54,7 @@ pub(super) fn layout(endpoint: EndpointId) -> Layout {
                     label: None,
                     cwd: Some("/work".into()),
                     focused: true,
+                    job: None,
                 }],
                 zoomed: false,
                 agent: Some(crate::hub::TerminalAgent {

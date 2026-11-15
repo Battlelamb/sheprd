@@ -76,50 +76,43 @@ extension Home.AgentStatus {
     }
 }
 
-/// The status a row shows after its title.
+/// An agent's status as a small badge on its icon's corner, so the title
+/// line keeps its width: red when it needs you, its color with moving dots
+/// while it works, a check once done, and nothing while idle.
 struct StatusMark: View {
     var status: Home.AgentStatus
     var asking = false
 
     var body: some View {
+        let shown: Home.AgentStatus = asking ? .blocked : status
         Group {
-            if asking || status == .blocked {
-                Circle().fill(Home.AgentStatus.blocked.color).frame(width: 9, height: 9).accessibilityLabel("Needs you")
-            } else {
-                switch status {
-                case .working:
-                    Image(systemName: "ellipsis").foregroundStyle(status.color).symbolEffect(.variableColor.iterative)
-                        .accessibilityLabel("Working")
-                case .done:
-                    Image(systemName: "checkmark").font(.caption2.bold()).foregroundStyle(status.color).accessibilityLabel("Done")
-                default:
-                    EmptyView()
-                }
+            switch shown {
+            case .blocked: badge("exclamationmark", shown).accessibilityLabel("Needs you")
+            case .working:
+                badge("ellipsis", shown, animated: true).accessibilityLabel("Working")
+            case .done: badge("checkmark", shown).accessibilityLabel("Done")
+            case .idle, .unknown: EmptyView()
             }
         }
     }
+
+    private func badge(_ symbol: String, _ status: Home.AgentStatus, animated: Bool = false) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 8, weight: .black))
+            .foregroundStyle(.white)
+            .symbolEffect(.variableColor.iterative, isActive: animated)
+            .frame(width: 15, height: 15)
+            .background(status.color, in: .circle)
+            // A ring of the row's own color parts the badge from the icon.
+            .padding(2)
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: .circle)
+    }
 }
 
-/// An agent's status as a filled round icon, centered on a row as the
-/// pull request's state is.
-struct StatusBadge: View {
-    var status: Home.AgentStatus
-
-    var body: some View {
-        Group {
-            switch status {
-            case .blocked:
-                Image(systemName: "exclamationmark.circle.fill").foregroundStyle(status.color).accessibilityLabel("Needs you")
-            case .working:
-                Image(systemName: "ellipsis.circle.fill").foregroundStyle(status.color).symbolEffect(.pulse)
-                    .accessibilityLabel("Working")
-            case .done:
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(status.color).accessibilityLabel("Done")
-            case .idle, .unknown:
-                EmptyView()
-            }
-        }
-        .imageScale(.large)
+extension View {
+    /// `mark` on this icon's bottom corner, hanging just past its edge.
+    func statusBadge(_ mark: StatusMark) -> some View {
+        overlay(alignment: .bottomTrailing) { mark.offset(x: 6, y: 6) }
     }
 }
 
@@ -134,9 +127,10 @@ struct ChatRowLabel: View {
         // line below runs the full width.
         HStack(spacing: 12) {
             AgentIcon(agent: item.chat.agent)
+                .statusBadge(StatusMark(status: item.chat.status, asking: item.question != nil))
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(item.chat.title).lineLimit(1)
+                    Text(title).lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if item.drafted {
                         Image(systemName: "pencil.circle.fill")
@@ -150,7 +144,6 @@ struct ChatRowLabel: View {
                     } else if !item.needsYou, let date = item.lastAnswer {
                         LastAnswer(date: date)
                     }
-                    StatusMark(status: item.chat.status, asking: item.question != nil)
                 }
                 Text(detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -159,13 +152,29 @@ struct ChatRowLabel: View {
         }
     }
 
+    /// The chat's title, else its first prompt, else its agent's name, so a
+    /// chat not yet titled still has a row that says what it is.
+    private var title: String {
+        let title = item.chat.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty { return title }
+        let prompt = item.chat.summary?.firstPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !prompt.isEmpty { return prompt }
+        let agent = item.chat.agent?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return agent.isEmpty ? String(localized: "Chat") : agent.capitalized
+    }
+
     private var detail: AttributedString {
-        let said = item.question?.title ?? item.chat.summary?.lastText
-        return RowPlace.line([
+        let said = (item.question?.title ?? item.chat.summary?.lastText)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { $0.isEmpty ? nil : $0 }
+        let line = RowPlace.line([
             showsComputer ? AttributedString(item.computer.name) : nil,
             showsWorkspace ? RowPlace.name(of: item.workspace) : nil,
             said.map { AttributedString($0) },
         ])
+        // Never a blank line: a chat with nothing said yet says so.
+        guard line.characters.isEmpty else { return line }
+        return AttributedString(item.working ? String(localized: "Working…") : String(localized: "No messages yet"))
     }
 }
 
@@ -199,6 +208,7 @@ struct AgentTerminalRowLabel: View {
     var body: some View {
         HStack(spacing: 12) {
             AgentIcon(agent: item.agent?.name)
+                .statusBadge(StatusMark(status: item.agent?.status ?? .unknown))
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(item.title).lineLimit(1)
@@ -210,8 +220,6 @@ struct AgentTerminalRowLabel: View {
                     .accessibilityValue(showsWorkspace && item.workspace.merged ? "Pull request merged" : "")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            // Centered on the row, beside the chevron.
-            StatusBadge(status: item.agent?.status ?? .unknown)
         }
     }
 

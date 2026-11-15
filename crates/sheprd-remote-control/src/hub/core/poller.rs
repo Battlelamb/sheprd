@@ -19,6 +19,11 @@ pub(super) struct Poller {
     doc: Option<(u64, Option<spaces::Spaces>)>,
     checkouts: super::checkouts::Checkouts,
     names: spaces::Names,
+    pub(super) recovery: sheprd_core_client::chat_recovery::Sweep,
+    /// The recovery aliases the last poll saw: a phone names the replacement,
+    /// while the saved file may still name the terminal it replaced.
+    pub(super) replacements:
+        std::collections::BTreeMap<sheprd_backend::TerminalId, sheprd_backend::TerminalId>,
     saved: Option<(SystemTime, Option<SavedTabs>)>,
 }
 
@@ -60,6 +65,36 @@ impl Poller {
         if let Some(tabs) = tabs {
             self.refresh_saved(tabs);
         }
+        let replacements = sheprd_core_client::chat_recovery::mapping(
+            terminals
+                .iter()
+                .map(|terminal| (terminal.address.as_str(), &terminal.labels)),
+        );
+        if let Some(scope) = scope
+            && let Some((_, Some(saved))) = &mut self.saved
+        {
+            saved.remap(scope, &replacements);
+        }
+        if let Some((_, Some(spaces))) = &mut self.doc {
+            spaces.remap(&replacements);
+        }
+        let terminals: Vec<_> = terminals
+            .iter()
+            .filter(|terminal| {
+                terminal
+                    .labels
+                    .get(sheprd_core_client::chat_recovery::PENDING_LABEL)
+                    .is_none_or(String::is_empty)
+            })
+            .filter(|terminal| {
+                !replacements
+                    .keys()
+                    .any(|old| old.as_str() == terminal.address)
+            })
+            .cloned()
+            .collect();
+        self.replacements = replacements;
+        let terminals = terminals.as_slice();
         let saved = self.saved.as_ref().and_then(|(_, saved)| saved.as_ref());
         let mut layout = match &self.doc {
             Some((_, Some(spaces))) => {
@@ -79,6 +114,28 @@ impl Poller {
             .as_ref()
             .and_then(|(_, saved)| saved.as_ref())
             .is_some_and(|saved| saved.workspaces(scope).any(|workspace| workspace.id == id))
+    }
+
+    /// Every terminal `scope`'s saved tabs hold, watching ones included.
+    pub(super) fn held(&self, scope: Option<&str>) -> std::collections::HashSet<String> {
+        let saved = self.saved.as_ref().and_then(|(_, saved)| saved.as_ref());
+        saved
+            .zip(scope)
+            .into_iter()
+            .flat_map(|(saved, scope)| saved.core_tabs(scope))
+            .flat_map(|tab| tab.panes.terminals())
+            .map(|terminal| terminal.as_str().to_owned())
+            .collect()
+    }
+
+    /// The workspace of `scope`'s saved tab `tab`.
+    pub(super) fn saved_workspace(&self, scope: &str, tab: u64) -> Option<String> {
+        self.saved
+            .as_ref()
+            .and_then(|(_, saved)| saved.as_ref())?
+            .core_tabs(scope)
+            .find(|saved| saved.id == tab)
+            .map(|saved| saved.workspace_id.to_owned())
     }
 
     fn refresh_saved(&mut self, path: &Path) {

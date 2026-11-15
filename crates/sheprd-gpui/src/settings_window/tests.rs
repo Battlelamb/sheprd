@@ -25,6 +25,7 @@ mod pages_behaviour;
 mod quit_saves;
 mod remote_control;
 mod remote_history_reload;
+mod remote_relays;
 mod rtl;
 mod save_now;
 mod scrollbars;
@@ -32,6 +33,7 @@ mod search;
 mod section_order;
 mod sidebar_drafts;
 mod tab_layout;
+mod text_shortcuts;
 mod theme_drafts;
 // Saving a shared Herdr theme is Unix-only.
 mod theme_hover;

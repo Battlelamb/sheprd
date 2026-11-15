@@ -20,6 +20,7 @@ mod harnesses;
 mod history;
 mod linked_pictures;
 mod media;
+mod opencode;
 mod permissions;
 mod prompt_titles;
 mod resume;

@@ -3,9 +3,11 @@
 mod acting;
 mod alert_shelf;
 mod boot_fence;
+mod clear_alerts;
 mod closed;
 mod closed_page;
 mod core;
+mod core_closed;
 mod core_open;
 mod en_xa;
 mod excerpt;

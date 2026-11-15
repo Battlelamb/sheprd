@@ -180,7 +180,10 @@ pub const FAMILIES: &[(&str, &str)] = &[
     ),
     ("px0", "Open px0 on the caller's local checkout"),
     ("notes", "Notes kept on worktrees"),
-    ("worktree", "Mute or unmute the caller's worktree"),
+    (
+        "worktree",
+        "List app-kept worktrees, open their dialogs, or mute notifications",
+    ),
     (
         "feedback",
         "Notes the user sent this pane, from pages, reviews, or terminals",
@@ -244,7 +247,10 @@ pub const FAMILIES: &[(&str, &str)] = &[
     ),
     ("commands", "List the commands `run` accepts"),
     ("logs", "Print or locate the app's log"),
-    ("update", "Check for an app update; never installs"),
+    (
+        "update",
+        "Check for an app update, or show the install dialog",
+    ),
     ("diagnostics", "Write a redacted bundle for a bug report"),
     ("integrations", "Agent integrations and the agent skill"),
 ];

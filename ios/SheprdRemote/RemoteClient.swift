@@ -124,6 +124,12 @@ final class RemoteClient: Sendable {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 10
         configuration.waitsForConnectivity = false
+        // Through a relay, each connection is a relay session, and a relay
+        // allows four per dial key: two for calls leaves room for the live
+        // socket and a reconnect.
+        if URL(string: origin)?.host == "127.0.0.1" {
+            configuration.httpMaximumConnectionsPerHost = 2
+        }
         session = URLSession(
             configuration: configuration,
             delegate: PinnedTrust(fingerprint: fingerprint),
@@ -244,6 +250,20 @@ final class RemoteClient: Sendable {
         try await send("PUT", "/api/v2/tags", body: tags, bearer: bearer)
     }
 
+    // MARK: Text shortcuts
+
+    /// The computer's text shortcuts. An older computer answers 404, and
+    /// leaves `shortcuts_ms` out of its home, so this is not asked of it.
+    func shortcuts(bearer: String) async throws -> TextShortcuts {
+        try await send("GET", "/api/v2/shortcuts", bearer: bearer)
+    }
+
+    /// Offers this phone's text shortcuts; answers those that stand, which
+    /// are the computer's own if it heard of a later edit.
+    func offerShortcuts(_ shortcuts: TextShortcuts, bearer: String) async throws -> TextShortcuts {
+        try await send("PUT", "/api/v2/shortcuts", body: shortcuts, bearer: bearer)
+    }
+
     // MARK: Terminals
 
     /// Keys in Herdr's syntax (`TermInput`), at most 64.
@@ -272,6 +292,14 @@ final class RemoteClient: Sendable {
 
     /// Runs an action from the sheet; answers the pane to show next, or
     /// `nil` when the pane or tab is gone.
+    /// A terminal tab in `workspace`, which needs no pane there, so a
+    /// workspace with nothing in it yet gets its first; answers its pane.
+    func newTerminal(workspace: String, bearer: String) async throws -> String {
+        struct Answer: Decodable { let pane: String }
+        let answer: Answer = try await send("POST", "/api/v2/workspaces/\(Self.segment(workspace))/terminals", bearer: bearer, timeout: 30)
+        return answer.pane
+    }
+
     func termAction(_ action: TermAction, pane: String, bearer: String) async throws -> String? {
         struct Body: Encodable { let action: TermAction }
         struct Answer: Decodable { let pane: String? }
@@ -343,6 +371,22 @@ final class RemoteClient: Sendable {
     func renameWorkspace(_ workspace: String, to label: String, bearer: String) async throws {
         struct Body: Encodable { let label: String }
         let _: EmptyAnswer = try await send("POST", "/api/v2/workspaces/\(Self.segment(workspace))/rename", body: Body(label: label), bearer: bearer)
+    }
+
+    /// How to reach this computer through its relays; nil from a daemon
+    /// that listens on none.
+    func relayInfo(bearer: String) async throws -> API.RelayInfo? {
+        do {
+            return try await send("GET", "/api/relay", bearer: bearer)
+        } catch RemoteError.status(404, _) {
+            return nil
+        }
+    }
+
+    /// Sends this phone's relay keys, which the computer's relays then let
+    /// through.
+    func enrollRelay(_ keys: API.RelayKeys, bearer: String) async throws {
+        let _: EmptyAnswer = try await send("POST", "/api/relay", body: keys, bearer: bearer)
     }
 
     /// What was said in this computer's chats; nil from a daemon that

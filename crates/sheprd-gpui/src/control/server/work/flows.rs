@@ -3,11 +3,11 @@
 //! opens the flow as the caller's workspace menu would, already pointed at
 //! the caller's checkout, and leaves the consequential step to the user:
 //! restoring, moving, launching, and trusting a script all wait for them.
-use super::{find, repository, selected_workspace};
+use super::{Source, find, repository, selected_workspace};
 use crate::{
     SheprdWindow,
     control::protocol::{
-        Caller, ErrorCode, Response,
+        ErrorCode, Response,
         work::{FanOutRequest, Script},
     },
     dialog_input::DialogInput,
@@ -42,9 +42,9 @@ pub(in crate::control::server) fn bring_forward(window: &Window, cx: &mut App) {
 }
 
 /// Opens the caller's workspace menu, the way every flow here starts.
-fn open_menu(
+fn open_menu<'a>(
     view: &mut SheprdWindow,
-    caller: &Caller,
+    caller: impl Into<Source<'a>>,
     window: &mut Window,
     cx: &mut Context<SheprdWindow>,
 ) -> Result<String, Response> {
@@ -59,21 +59,55 @@ fn open_menu(
     Ok(workspace)
 }
 
+/// The caller's workspace when it is one the app keeps for Herdr 2: on the
+/// window's selected host, else a refusal, as dialogs act there alone.
+/// `None` when the caller is in no such workspace.
+fn kept_workspace<'a>(
+    view: &SheprdWindow,
+    caller: impl Into<Source<'a>>,
+) -> Option<Result<String, Response>> {
+    let caller = caller.into();
+    let found = find(view, caller).ok()?;
+    found
+        .herdr
+        .is_none()
+        .then(|| selected_workspace(view, caller))
+}
+
+/// Opens the menu of the kept workspace `id`, as [`open_menu`] does a
+/// Herdr 1 workspace's.
+fn open_kept_menu(
+    view: &mut SheprdWindow,
+    id: &str,
+    window: &mut Window,
+    cx: &mut Context<SheprdWindow>,
+) -> Result<String, Response> {
+    view.open_kept_workspace_menu(id, Point::default(), window, cx);
+    if view.menu.page != Some(Page::Workspace) {
+        return Err(Response::error(
+            ErrorCode::Failed,
+            "The workspace's menu did not open",
+        ));
+    }
+    Ok(id.to_owned())
+}
+
 /// What the caller's workspace is checked out on, for messages.
-fn branch(view: &SheprdWindow, caller: &Caller) -> String {
+fn branch<'a>(view: &SheprdWindow, caller: impl Into<Source<'a>>) -> String {
     find(view, caller)
         .ok()
-        .and_then(|found| found.workspace.branch.clone())
+        .and_then(|found| found.workspace.branch)
         .unwrap_or_else(|| "the checkout".to_owned())
 }
 
-pub(super) fn restore(
+pub(super) fn restore<'a>(
     view: &mut SheprdWindow,
-    caller: &Caller,
+    caller: impl Into<Source<'a>>,
     id: Option<String>,
     window: &mut Window,
     cx: &mut Context<SheprdWindow>,
 ) -> Response {
+    let caller = caller.into();
     if id
         .as_deref()
         .is_some_and(|id| !crate::checkpoint::valid_id(id))
@@ -105,9 +139,9 @@ pub(super) fn restore(
     }
 }
 
-pub(super) fn script(
+pub(super) fn script<'a>(
     view: &mut SheprdWindow,
-    caller: &Caller,
+    caller: impl Into<Source<'a>>,
     kind: Script,
     cx: &mut Context<SheprdWindow>,
 ) -> Response {
@@ -136,14 +170,19 @@ pub(super) fn script(
 }
 
 /// The script job for the caller's workspace, built as its menu builds one.
-fn launch(view: &SheprdWindow, caller: &Caller, kind: ScriptKind) -> Result<Launch, Response> {
+fn launch<'a>(
+    view: &SheprdWindow,
+    caller: impl Into<Source<'a>>,
+    kind: ScriptKind,
+) -> Result<Launch, Response> {
+    let caller = caller.into();
     selected_workspace(view, caller)?;
     let found = find(view, caller)?;
     let Some(tree) = &found.workspace.worktree else {
         return Err(invalid(crate::worktree_scripts::Error::NotGit.to_string()));
     };
     // The menu offers the setup script on linked worktrees alone.
-    if kind == ScriptKind::Setup && !tree.is_linked_worktree {
+    if kind == ScriptKind::Setup && !tree.linked {
         return Err(invalid(
             "The setup script runs in linked worktrees, not the main checkout",
         ));
@@ -153,11 +192,21 @@ fn launch(view: &SheprdWindow, caller: &Caller, kind: ScriptKind) -> Result<Laun
         kind,
         endpoint: (view.selection_epoch, endpoint.generation),
         endpoint_id: endpoint.id.clone(),
-        boot: found.snapshot.boot_id.clone(),
-        workspace: found.workspace.workspace_id.clone(),
+        boot: found
+            .herdr
+            .as_ref()
+            .map(|herdr| herdr.snapshot.boot_id.clone())
+            .unwrap_or_default(),
+        workspace: found.workspace.id.clone(),
         repo: tree.label.clone(),
         repo_key: tree.key.clone(),
-        checkout: None,
+        checkout: found
+            .herdr
+            .is_none()
+            .then(|| crate::worktree_scripts::Checkout {
+                path: found.workspace.cwd.clone(),
+                root: None,
+            }),
         force: false,
         requested: true,
     })
@@ -194,13 +243,14 @@ pub(super) fn pick_host<'a>(
     }
 }
 
-pub(super) fn teleport(
+pub(super) fn teleport<'a>(
     view: &mut SheprdWindow,
-    caller: &Caller,
+    caller: impl Into<Source<'a>>,
     host: &str,
     window: &mut Window,
     cx: &mut Context<SheprdWindow>,
 ) -> Response {
+    let caller = caller.into();
     let hosts: Vec<(&str, &str)> = view
         .endpoints
         .iter()
@@ -213,16 +263,28 @@ pub(super) fn teleport(
     if id == view.endpoints[view.selected_endpoint].id {
         return invalid(format!("The worktree is already on {label}"));
     }
-    if let Err(response) = open_menu(view, caller, window, cx) {
-        return response;
-    }
+    // A workspace the app keeps for Herdr 2 has its own menu, and no
+    // Herdr 1 state to find it by.
+    let opened = match kept_workspace(view, caller) {
+        Some(kept) => kept.and_then(|id| open_kept_menu(view, &id, window, cx)),
+        None => open_menu(view, caller, window, cx),
+    };
+    let workspace = match opened {
+        Ok(workspace) => workspace,
+        Err(response) => return response,
+    };
     if !view.can_teleport() {
         view.dismiss_menu(window, cx);
         return invalid(
             "Teleport moves a linked worktree, from Linux or macOS, off a host it can script, while no other move runs",
         );
     }
-    let branch = branch(view, caller);
+    let branch = view
+        .sessions(view.selected_endpoint)
+        .core
+        .as_ref()
+        .and_then(|core| core.workspace(&workspace)?.branch.clone())
+        .unwrap_or_else(|| branch(view, caller));
     view.open_teleport(window, cx);
     let Some(teleport) = view
         .teleport
@@ -285,13 +347,14 @@ pub(super) fn prompt_text(prompt: &str) -> String {
         .to_owned()
 }
 
-pub(super) fn fan_out(
+pub(super) fn fan_out<'a>(
     view: &mut SheprdWindow,
-    caller: &Caller,
+    caller: impl Into<Source<'a>>,
     request: FanOutRequest,
     window: &mut Window,
     cx: &mut Context<SheprdWindow>,
 ) -> Response {
+    let caller = caller.into();
     let agents = match agents(&request.agents) {
         Ok(agents) => agents,
         Err(response) => return response,
@@ -310,7 +373,11 @@ pub(super) fn fan_out(
             "This window's last fan-out is still open for comparison; keep a lane or close it from the workspace menu first",
         );
     }
-    let workspace = match open_menu(view, caller, window, cx) {
+    let opened = match kept_workspace(view, caller) {
+        Some(kept) => kept.and_then(|id| open_kept_menu(view, &id, window, cx)),
+        None => open_menu(view, caller, window, cx),
+    };
+    let workspace = match opened {
         Ok(workspace) => workspace,
         Err(response) => return response,
     };
@@ -321,7 +388,7 @@ pub(super) fn fan_out(
         );
     }
     let repo = find(view, caller)
-        .map(|found| repository(found.workspace).to_owned())
+        .map(|found| repository(&found.workspace).to_owned())
         .unwrap_or(workspace);
     view.open_fan_out(window, cx);
     let opened = view.menu.page == Some(Page::FanOut)

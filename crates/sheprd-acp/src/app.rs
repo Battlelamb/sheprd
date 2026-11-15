@@ -226,6 +226,18 @@ fn native_history(
 }
 
 pub(crate) fn run(options: Options) -> anyhow::Result<()> {
+    let _owner = crate::restore::core::lock()?;
+    let claimed = crate::restore::core::claim_launch()?;
+    run_owned(claimed, options)
+}
+
+/// The caller holds the core endpoint lock before reading recovery state or
+/// spawning any agent. Herdr 1 chats retain their existing ownership policy.
+/// `claimed` is the recovery generation this launch claimed, if any.
+pub(crate) fn run_owned(
+    claimed: Option<crate::restore::core::Claimed>,
+    options: Options,
+) -> anyhow::Result<()> {
     let cwd = match options.cwd.clone() {
         Some(cwd) => cwd,
         None => std::env::current_dir().context("could not read the current directory")?,
@@ -236,6 +248,14 @@ pub(crate) fn run(options: Options) -> anyhow::Result<()> {
     let agent = agent(&options, &cwd);
     let (inputs, receiver) = bounded::<Input>(INPUTS);
     let first = start(agent.start, &cwd, &inputs, HarnessId::default())?;
+    let agent_process = first.process.clone();
+    // Stops the first agent on every early return; a switch stops it sooner.
+    let owned_agent = agent_process.owned();
+    // A claimed launch continues a session, which `--choose` refuses, so
+    // its agent is never switched away from.
+    if let Some(claimed) = &claimed {
+        crate::restore::core::child_started(claimed, agent_process.id())?;
+    }
 
     let mut notices = Vec::new();
     let history = agent.history.and_then(|history| match history {
@@ -256,14 +276,38 @@ pub(crate) fn run(options: Options) -> anyhow::Result<()> {
         (None, None)
     };
     let target = Target::from_env();
-    let keeper = crate::restore::Keeper::new(
-        sheprd_chat_protocol::restore::restore_dir(),
-        target.as_ref(),
-        endpoint.as_ref(),
-        &options.agent,
-        adapter(&options),
-        &cwd,
-    );
+    let mut keeper = if target.is_none() && std::env::var_os("HC_TERMINAL_ID").is_some() {
+        crate::restore::Keeper::core(
+            sheprd_chat_protocol::restore::restore_dir(),
+            endpoint.as_ref(),
+            &options.agent,
+            adapter(&options),
+            &cwd,
+            |name| std::env::var_os(name),
+        )
+    } else {
+        crate::restore::Keeper::new(
+            sheprd_chat_protocol::restore::restore_dir(),
+            target.as_ref(),
+            endpoint.as_ref(),
+            &options.agent,
+            adapter(&options),
+            &cwd,
+        )
+    };
+    if let Some(keeper) = &mut keeper {
+        keeper.child = Some(agent_process.id());
+    }
+    if target.is_none()
+        && let Some(keeper) = &keeper
+        && let Err(error) = keeper.agent_started(agent_process.id())
+    {
+        // A later restore then refuses rather than guessing the agent ended.
+        notices.push((
+            NoticeLevel::Warning,
+            format!("This chat cannot be restored if it is lost: {error:#}"),
+        ));
+    }
     let reporter = match &target {
         Some(target) => Some(Reporter::start(
             target.clone(),
@@ -328,9 +372,10 @@ pub(crate) fn run(options: Options) -> anyhow::Result<()> {
             let mut current = Some(first.process);
             let mut stopping = Vec::new();
             for input in receiver {
+                let expected = crate::restore::expected_end(&input);
                 match session.handle(input) {
                     Flow::Continue => {}
-                    Flow::Exit => break,
+                    Flow::Exit => return (expected, current, stopping),
                     Flow::Launch { agent, harness } => {
                         if let Some(old) = current.take() {
                             stopping.extend(stop_later(old));
@@ -346,7 +391,7 @@ pub(crate) fn run(options: Options) -> anyhow::Result<()> {
                     }
                 }
             }
-            (current, stopping)
+            (false, current, stopping)
         })?;
 
     // Headless, the session ends when the agent does; otherwise when the view quits.
@@ -357,9 +402,11 @@ pub(crate) fn run(options: Options) -> anyhow::Result<()> {
         let _ = inputs.send(Input::Shutdown);
         result
     };
-    let (current, stopping) = session_thread.join().unwrap_or_default();
-    // Ending here, not killed, the chat is over: nothing restores it.
-    if let Some(keeper) = &keeper {
+    let (ended, current, stopping) = session_thread.join().unwrap_or_default();
+    let expected = ended && result.is_ok();
+    // Only an intentional close or successful agent exit forgets continuity.
+    // A failed view, failed agent, or panicked session keeps its record.
+    if expected && let Some(keeper) = &keeper {
         keeper.ended();
     }
     if let Some(current) = current {
@@ -368,10 +415,25 @@ pub(crate) fn run(options: Options) -> anyhow::Result<()> {
     for handle in stopping {
         let _ = handle.join();
     }
+    drop(owned_agent);
     if let Some(reporter) = reporter {
         reporter.close();
     }
+    if options.headless {
+        return headless_result(ended);
+    }
     result
+}
+
+/// Headless, the chat program's exit status is the agent's. A failed or
+/// crashed agent must not look like a chat that finished: core keeps a
+/// recovery shell only for a program that did not end normally.
+fn headless_result(expected: bool) -> anyhow::Result<()> {
+    if expected {
+        Ok(())
+    } else {
+        Err(crate::Error::AgentEnded.into())
+    }
 }
 
 fn listen(
@@ -392,3 +454,7 @@ fn listen(
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;

@@ -121,6 +121,7 @@ mod socket {
         time::Instant,
     };
 
+    mod arrange;
     mod chat_recovery;
     mod convert;
     mod holds;
@@ -209,6 +210,7 @@ mod socket {
             writeln!(socket, "{response}").unwrap();
             let mut decoder = Decoder::default();
             let mut channel = 6;
+            let mut recovery_docs = HashMap::<String, (Value, u64)>::new();
             while let Some(frame) = receive(&mut socket, &mut decoder) {
                 if frame.kind == Kind::Resize {
                     let side =
@@ -237,8 +239,36 @@ mod socket {
                         json!({"address": "t9", "cols": 80, "rows": 24, "state": "live"})
                     }
                     "doc.get" => {
-                        assert_eq!(request["params"]["name"], "herdr-app");
-                        json!({"value": doc, "version": if doc.is_null() { 0 } else { 1 }})
+                        let name = request["params"]["name"].as_str().unwrap();
+                        if name == "herdr-app" {
+                            json!({"value": doc, "version": if doc.is_null() { 0 } else { 1 }})
+                        } else {
+                            assert!(
+                                name.strip_prefix("sheprd-chat-recovery-")
+                                    .unwrap()
+                                    .parse::<sheprd_chat_protocol::EndpointId>()
+                                    .is_ok()
+                            );
+                            let (value, version) =
+                                recovery_docs.get(name).cloned().unwrap_or((Value::Null, 0));
+                            json!({"value": value, "version": version})
+                        }
+                    }
+                    "doc.set" => {
+                        let name = request["params"]["name"].as_str().unwrap();
+                        assert!(
+                            name.strip_prefix("sheprd-chat-recovery-")
+                                .unwrap()
+                                .parse::<sheprd_chat_protocol::EndpointId>()
+                                .is_ok()
+                        );
+                        let version = recovery_docs.get(name).map_or(0, |(_, version)| *version);
+                        assert_eq!(request["params"]["version"], version);
+                        recovery_docs.insert(
+                            name.to_owned(),
+                            (request["params"]["value"].clone(), version + 1),
+                        );
+                        json!({"version": version + 1})
                     }
                     "terminal.attach" => {
                         attached.send(request["params"].clone()).unwrap();
@@ -309,6 +339,7 @@ mod socket {
             connected: AtomicBool::new(false),
             endpoint: Default::default(),
             holds: AtomicU64::new(0),
+            own: Mutex::default(),
             poller: Mutex::default(),
             scope: None,
             state: Mutex::new(State {
@@ -458,6 +489,7 @@ fn an_unreachable_core_stays_with_the_core_source() {
             session: "test".into(),
         }),
         holds: AtomicU64::new(0),
+        own: Mutex::default(),
         poller: Mutex::default(),
         scope: None,
         state: Mutex::new(State::default()),

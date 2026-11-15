@@ -52,7 +52,7 @@ With [`doctl`](https://docs.digitalocean.com/reference/doctl/) signed in, from a
 deploy/relay/create-droplet.sh fra1
 ```
 
-Each region named gets a small droplet with only ports 22, 80, and 443 open, and a relay serving both QUIC and WebSockets at `https://IP-WITH-DASHES.sslip.io`, with a Let's Encrypt certificate and no DNS to set up. The dashboard's access token is in `/root/sheprd-relay-login.txt` on the droplet. Set `RELAY_DOMAIN_SUFFIX` to use your own names.
+Each region named gets a small droplet with only ports 22, 80, and 443 open, and a relay serving both QUIC and WebSockets at `https://IP-WITH-DASHES.sslip.io`, with a Let's Encrypt certificate and no DNS to set up. The script ends by printing each relay's address, ready to add in Settings. The dashboard's access token is in `/root/sheprd-relay-login.txt` on the droplet. Set `RELAY_DOMAIN_SUFFIX` to use your own names.
 
 ## Any host with Docker
 

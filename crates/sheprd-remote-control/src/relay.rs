@@ -281,15 +281,18 @@ impl Relays {
     }
 
     /// Takes the shared relays as the file has them. Returns whether they
-    /// changed. Blocking.
+    /// changed. The file's lock is held until the copy in memory is
+    /// replaced, as [`Self::share`] holds it, so an offer saved meanwhile is
+    /// never undone by the older file read before it. Blocking.
     fn reload(&self) -> bool {
-        let saved = match shared::lock(&self.shared_file) {
-            Ok(_file) => shared::load(&self.shared_file),
+        let _file = match shared::lock(&self.shared_file) {
+            Ok(file) => file,
             Err(error) => {
                 tracing::warn!(%error, "could not read the shared relays");
                 return false;
             }
         };
+        let saved = shared::load(&self.shared_file);
         let mut shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
         if *shared == saved {
             return false;

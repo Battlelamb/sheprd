@@ -92,23 +92,25 @@ public struct RelayRecord: Codable, Hashable, Sendable {
     }
 
     /// Opens a session to the computer through the first relay that
-    /// answers, of its own and then of `saved`.
+    /// answers, of its own and then of `saved`. A relay that says nothing
+    /// holds the next one back for `RelayRace.stagger` only, so a computer
+    /// that moved off a dead relay is still reached through a saved one.
     public func open(saved: [RelayEndpoint] = [], session: URLSession = .shared) async throws -> RelaySession {
         let dial = try P256.Signing.PrivateKey(rawRepresentation: dialKey)
         let tunnel = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: tunnelKey)
         let listener = try Tunnel.Identity(bytes: identity)
-        var last: Error = RelaySession.Failure.closed
-        for relay in candidates(saved: saved) {
-            do {
-                return try await RelaySession.open(
+        let route = route
+        return try await RelayRace.first(
+            of: candidates(saved: saved),
+            none: RelaySession.Failure.closed,
+            open: { relay in
+                try await RelaySession.open(
                     endpoint: relay, route: route, dialKey: dial,
                     tunnelKey: tunnel, listener: listener, session: session
                 )
-            } catch {
-                last = error
-            }
-        }
-        throw last
+            },
+            discard: { await $0.close() }
+        )
     }
 }
 

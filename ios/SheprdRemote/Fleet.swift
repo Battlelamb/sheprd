@@ -632,6 +632,14 @@ final class Fleet {
     // MARK: Relays
 
     /// The addresses a computer's link races: its own, then its relay's.
+    /// Whether the computer's link is online through its relay proxy.
+    func throughRelay(_ device: String) -> Bool {
+        guard let relay = relayOrigins[device],
+              case let .online(origin) = machines.first(where: { $0.id == device })?.status
+        else { return false }
+        return origin == relay
+    }
+
     private func origins(_ computer: Computer) -> [String] {
         computer.origins + (relayOrigins[computer.device].map { [$0] } ?? [])
     }

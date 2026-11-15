@@ -25,8 +25,7 @@ struct ComputerScreen: View {
         let status = model.fleet.machines.first { $0.id == device }?.status
         let addresses = Self.addresses(computer)
         let connected: String? = if case let .online(origin) = status, addresses.contains(where: { $0.origin == origin }) { origin } else { nil }
-        // The relay proxy answers on loopback: online there is through a relay.
-        let relayed = if case let .online(origin) = status { OriginKind(origin: origin) == .loopback } else { false }
+        let relayed = model.fleet.throughRelay(device)
         return List {
             Section {
                 VStack(spacing: 6) {

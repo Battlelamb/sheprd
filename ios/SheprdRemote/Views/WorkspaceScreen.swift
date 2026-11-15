@@ -22,6 +22,9 @@ struct WorkspaceScreen: View {
     @State private var newName = ""
     /// Why the last rename failed, shown apart from a tab that did not start.
     @State private var renameProblem: String?
+    /// The name a rename asked for, shown with a spinner until the
+    /// computer's next `home` carries it, the request fails, or it times out.
+    @State private var pendingName: String?
 
     private static let terminal = "terminal"
 
@@ -80,18 +83,30 @@ struct WorkspaceScreen: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 Button {
+                    // A rename on its way ends before another starts. Not
+                    // `.disabled`, which would fade the dimmed name further.
+                    guard pendingName == nil else { return }
                     newName = workspace.label
                     renaming = true
                 } label: {
                     HStack(spacing: 4) {
-                        Text(workspace.label).font(.headline).lineLimit(1)
-                        Image(systemName: "pencil.circle.fill").font(.caption).foregroundStyle(.tertiary)
+                        Text(pendingName ?? workspace.label).font(.headline).lineLimit(1)
+                            .foregroundStyle(pendingName == nil ? .primary : .secondary)
+                        if pendingName != nil {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Image(systemName: "pencil.circle.fill").font(.caption).foregroundStyle(.tertiary)
+                        }
                     }
+                    .animation(.default, value: pendingName)
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint("Renames the workspace")
+                .accessibilityValue(pendingName == nil ? "" : "Renaming")
             }
         }
+        // The computer's next `home` carries the new name; stop waiting then.
+        .onChange(of: workspace.label) { pendingName = nil }
         .onAppear {
             model.recentDevice = key.device
             #if DEBUG
@@ -100,6 +115,8 @@ struct WorkspaceScreen: View {
             if UserDefaults.standard.bool(forKey: "otherAgents") { showsOthers = true }
             // `-openChanges YES` opens the workspace's changes.
             if UserDefaults.standard.bool(forKey: "openChanges"), opened == nil { opened = .changes(key) }
+            // `-renamePending NAME` shows a rename on its way, sending nothing.
+            if let name = UserDefaults.standard.string(forKey: "renamePending") { pendingName = name }
             if UserDefaults.standard.bool(forKey: "renameWorkspace") {
                 newName = workspace.label
                 renaming = true
@@ -137,7 +154,7 @@ struct WorkspaceScreen: View {
             TextField("Name", text: $newName)
                 .textInputAutocapitalization(.never)
             Button("Cancel", role: .cancel) {}
-            Button("Rename") { rename(to: newName) }
+            Button("Rename") { rename(to: newName, from: workspace.label) }
                 .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
         } message: {
             Text("The name shows in Sheprd and in your lists.")
@@ -148,13 +165,23 @@ struct WorkspaceScreen: View {
         }
     }
 
-    private func rename(to label: String) {
+    private func rename(to label: String, from current: String) {
+        let label = label.trimmingCharacters(in: .whitespaces)
+        // The same name changes nothing, so no `home` would end the wait.
+        guard label != current else { return }
+        pendingName = label
         Task {
             do {
                 try await model.fleet.renameWorkspace(key, to: label)
             } catch {
+                pendingName = nil
                 renameProblem = error.localizedDescription
+                return
             }
+            // Accepted; the name usually arrives with the next `home`, but
+            // a computer that does not resend it must not spin forever.
+            try? await Task.sleep(for: .seconds(10))
+            if pendingName == label { pendingName = nil }
         }
     }
 

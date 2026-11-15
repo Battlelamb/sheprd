@@ -104,6 +104,11 @@ final class Fleet {
     @ObservationIgnored private var relayOrigins: [String: String] = [:]
     /// Computers whose relay keys are being checked or sent.
     @ObservationIgnored private var enrolling: Set<String> = []
+    /// When each computer was last asked about its relays, so one that
+    /// starts listening on a relay while this phone stays connected, such
+    /// as one Sheprd on another computer shared, is learned within minutes.
+    @ObservationIgnored private var relayAsked: [String: Date] = [:]
+    private static let relayRecheck: TimeInterval = 600
     /// A computer's relay record changed, or it stopped listening on
     /// relays (nil): the app keeps it with the computer.
     var onRelay: ((String, RelayRecord?) -> Void)?
@@ -651,6 +656,7 @@ final class Fleet {
     private func enrollRelay(_ device: String) {
         guard !enrolling.contains(device) else { return }
         enrolling.insert(device)
+        relayAsked[device] = .now
         let known = machines.first { $0.id == device }?.computer.relay
         Task {
             defer { enrolling.remove(device) }
@@ -711,6 +717,10 @@ final class Fleet {
             unreported[device, default: UnreportedFailures()].add(line)
         case let .event(.home(home)):
             if let tags = home.tags { onTags?(tags, machines[index].computer) }
+            if case let .online(origin) = machines[index].status, origin != relayOrigins[device],
+               relayAsked[device].map({ Date.now.timeIntervalSince($0) >= Self.relayRecheck }) ?? true {
+                enrollRelay(device)
+            }
             onShortcutsReported?(home.shortcutsMs, device)
             // The computer's load moves every few seconds; only the header
             // shows it, so the cache, widgets, and Spotlight wait for a

@@ -172,9 +172,11 @@ private struct ComputerRow: View {
             } else if status == .outdated || machine?.needsUpdate == true {
                 ComputerStatusLine(status: .outdated).font(.caption)
             } else if let vouching = model.vouching(computer) {
-                Text("via \(model.displayName(vouching))").font(.caption).foregroundStyle(.secondary)
-            } else if let kind = computer.origins.lazy.map(OriginKind.init(origin:)).first(where: { $0 != .loopback }) {
-                Text(kind.label).font(.caption).foregroundStyle(.secondary)
+                let via = "via \(model.displayName(vouching))"
+                Text(computer.relay == nil ? via : "\(via) · \(Computer.relayLabel)")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if let label = computer.reachLabel {
+                Text(label).font(.caption).foregroundStyle(.secondary)
             }
         }
     }

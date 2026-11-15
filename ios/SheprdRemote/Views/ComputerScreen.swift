@@ -25,6 +25,8 @@ struct ComputerScreen: View {
         let status = model.fleet.machines.first { $0.id == device }?.status
         let addresses = Self.addresses(computer)
         let connected: String? = if case let .online(origin) = status, addresses.contains(where: { $0.origin == origin }) { origin } else { nil }
+        // The relay proxy answers on loopback: online there is through a relay.
+        let relayed = if case let .online(origin) = status { OriginKind(origin: origin) == .loopback } else { false }
         return List {
             Section {
                 VStack(spacing: 6) {
@@ -56,6 +58,29 @@ struct ComputerScreen: View {
             } footer: {
                 if connected != nil {
                     Text("Connected through the checked address. When it stops answering, this phone tries the others.")
+                }
+            }
+            if !computer.relayHosts.isEmpty {
+                Section {
+                    ForEach(computer.relayHosts, id: \.self) { host in
+                        LabeledContent {
+                            Text(host).textSelection(.enabled)
+                        } label: {
+                            if relayed {
+                                Label(Computer.relayLabel, systemImage: "checkmark.circle.fill")
+                                    .labelStyle(.titleAndIcon).foregroundStyle(.green)
+                                    .accessibilityLabel("\(Computer.relayLabel), connected")
+                            } else {
+                                Text(Computer.relayLabel)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Relays")
+                } footer: {
+                    Text(relayed
+                        ? "Connected through a relay, end to end encrypted: none of the addresses answers."
+                        : "When none of the addresses answers, such as with Tailscale off, this \(UIDevice.current.model) reaches \(name) through a relay, end to end encrypted.")
                 }
             }
             if let vouching = model.vouching(computer) {

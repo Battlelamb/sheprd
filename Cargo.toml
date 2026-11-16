@@ -111,6 +111,7 @@ sheprd-remote         = { default-features = false, path = "crates/sheprd-remote
 sheprd-relay          = { default-features = false, path = "crates/sheprd-relay" }
 sheprd-remote-control         = { default-features = false, path = "crates/sheprd-remote-control" }
 sheprd-session        = { path = "crates/sheprd-session" }
+sheprd-t3             = { path = "crates/sheprd-t3" }
 sheprd-terminal       = { path = "crates/sheprd-terminal" }
 sheprd-tunnel         = { path = "crates/sheprd-tunnel" }
 sheprd-updater        = { path = "crates/sheprd-updater" }

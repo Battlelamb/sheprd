@@ -10852,6 +10852,7 @@ dependencies = [
  "sheprd-chat-protocol",
  "sheprd-client",
  "sheprd-core-client",
+ "sheprd-t3",
  "tempfile",
  "thiserror 2.0.21",
  "unicode-width",

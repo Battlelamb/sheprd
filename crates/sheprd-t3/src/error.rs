@@ -13,6 +13,10 @@ pub enum Error {
     /// The socket closed before the answer arrived.
     #[error("the T3 Code connection closed")]
     Closed,
+    /// Nothing arrived within the read timeout. The socket is still
+    /// usable: a partly read message is kept for the next read.
+    #[error("T3 Code sent nothing for a while")]
+    Idle,
     #[error("could not read {path}")]
     Discovery {
         path: PathBuf,
@@ -65,6 +69,14 @@ impl From<tungstenite::Error> for Error {
             },
             tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed => {
                 Self::Closed
+            }
+            tungstenite::Error::Io(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                Self::Idle
             }
             error => Self::WebSocket(Box::new(error)),
         }

@@ -9,6 +9,8 @@ mod control_socket;
 mod enroll;
 mod github;
 mod idle;
+mod relay_enroll;
+mod relay_options;
 mod shutdown;
 
 fn args(list: &[&str]) -> Vec<OsString> {

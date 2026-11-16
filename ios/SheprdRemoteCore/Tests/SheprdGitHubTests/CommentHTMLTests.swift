@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import SheprdGitHub
 
@@ -59,5 +60,20 @@ struct CommentHTMLTests {
 
     @Test func numericEntitiesDecode() {
         #expect(CommentHTML.markdown("a&#39;b &#x2014; c") == "a'b — c")
+    }
+}
+
+/// Bounds on what a remote body may cost or produce.
+struct CommentHTMLBoundsTests {
+    @Test func aDecodedEntityCannotSmuggleADirectionOverride() {
+        let body = PullRequestDetailAnswer.RemoteText.body("a&#x202E;b &#8238;c &#0;d", limit: 100)
+        #expect(body == "ab c d")
+    }
+
+    @Test func manyUnclosedTagsStayCheap() {
+        let text = String(repeating: "<a href=\"", count: 20_000)
+        let start = Date()
+        _ = CommentHTML.markdown(text)
+        #expect(Date().timeIntervalSince(start) < 2)
     }
 }

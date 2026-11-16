@@ -249,12 +249,39 @@ public enum CommentHTML {
         var attributes: Substring
         var end: Substring.Index
 
+        /// The longest tag read; a longer `<…` is text, so a body full of
+        /// unclosed `<` stays linear to read.
+        static let maxLength = 1024
+
+        /// Read in one pass, no regular expression: the name, then to the
+        /// `>` outside quotes, within `maxLength` characters.
         init?(_ text: Substring) {
-            guard let match = text.prefixMatch(of: /<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/) else { return nil }
-            closing = !match.output.1.isEmpty
-            name = match.output.2.lowercased()
-            attributes = match.output.3
-            end = match.range.upperBound
+            let text = text.prefix(Self.maxLength)
+            var index = text.index(after: text.startIndex)
+            closing = index < text.endIndex && text[index] == "/"
+            if closing { index = text.index(after: index) }
+            let nameStart = index
+            guard index < text.endIndex, text[index].isASCII, text[index].isLetter else { return nil }
+            while index < text.endIndex, text[index].isASCII, text[index].isLetter || text[index].isNumber {
+                index = text.index(after: index)
+            }
+            name = text[nameStart..<index].lowercased()
+            let attributesStart = index
+            var quote: Character?
+            while index < text.endIndex {
+                let character = text[index]
+                if let open = quote {
+                    if character == open { quote = nil }
+                } else if character == "\"" || character == "'" {
+                    quote = character
+                } else if character == ">" {
+                    attributes = text[attributesStart..<index]
+                    end = text.index(after: index)
+                    return
+                }
+                index = text.index(after: index)
+            }
+            return nil
         }
 
         func attribute(_ wanted: String) -> String? {

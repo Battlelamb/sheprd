@@ -170,6 +170,8 @@ pub enum Error {
     LaunchAtLogin(#[from] crate::launch_at_login::Error),
     #[error("File not found: {}", path.display())]
     LinkedFileMissing { path: PathBuf },
+    #[error(transparent)]
+    LinkHandlers(#[from] crate::link_handlers::Error),
     #[error("This link names a file on another computer, {host}. It is not opened from here.")]
     LinkOnAnotherHost { host: String },
     #[error(transparent)]
@@ -252,6 +254,8 @@ pub enum Error {
     PreferencesPath,
     #[error(transparent)]
     Processes(#[from] crate::processes::Error),
+    #[error(transparent)]
+    PublicRelays(#[from] crate::remote::public_relays::Error),
     #[error(transparent)]
     Px0(#[from] crate::px0::Error),
     #[error("XDG_CONFIG_HOME must be an absolute path")]

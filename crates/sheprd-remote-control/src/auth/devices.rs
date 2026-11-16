@@ -50,6 +50,10 @@ pub(crate) struct DeviceRecord {
     /// it sent them (`POST /api/relay`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) relay: Option<RelayKeys>,
+    /// When `relay` was last set, so keys signed before it, carried late
+    /// through another computer, cannot replace newer ones.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) relay_ms: Option<u64>,
     /// Whether the device may borrow this computer's GitHub sign-in
     /// (`control::github`). A record from before the switch existed reads
     /// as on, as a new pairing defaults to.
@@ -64,11 +68,7 @@ fn share_github_default() -> bool {
 /// A device's keys for relays, as it sent them, base64url: its tunnel
 /// static key (X25519), which the end-to-end handshake proves, and its
 /// dial key (P-256, SEC1 compressed), which the relay lets through.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct RelayKeys {
-    pub(crate) dial: String,
-    pub(crate) tunnel: String,
-}
+pub(crate) use crate::control::host_relay::Keys as RelayKeys;
 
 impl RelayKeys {
     /// The tunnel key, when it is one.
@@ -172,6 +172,7 @@ impl Devices {
             apns: None,
             via,
             links,
+            relay_ms: device.relay.is_some().then_some(now_ms),
             relay: device.relay,
             share_github,
         });
@@ -274,17 +275,22 @@ impl Devices {
     /// Gives a device a new key, as its Home Screen app takes over from the
     /// browser. The browser's push subscription goes with the old key.
     /// Blocking.
-    /// Stores `keys` as the device's relay keys; whether it is paired.
-    /// Blocking.
-    pub(crate) fn set_relay(&mut self, id: &DeviceId, keys: RelayKeys) -> Result<bool> {
+    /// Stores `keys` as the device's relay keys, set at `now_ms`; whether
+    /// it is paired. Blocking.
+    pub(crate) fn set_relay(
+        &mut self,
+        id: &DeviceId,
+        keys: RelayKeys,
+        now_ms: u64,
+    ) -> Result<bool> {
         let Some(record) = self.records.iter_mut().find(|record| &record.id == id) else {
             return Ok(false);
         };
-        let before = record.relay.replace(keys);
+        let before = (record.relay.replace(keys), record.relay_ms.replace(now_ms));
         let index = self.records.iter().position(|record| &record.id == id);
         self.save_or_undo(|devices| {
             if let Some(record) = index.and_then(|index| devices.records.get_mut(index)) {
-                record.relay = before;
+                (record.relay, record.relay_ms) = before;
             }
         })?;
         Ok(true)

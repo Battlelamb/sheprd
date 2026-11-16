@@ -27,6 +27,10 @@ pub(crate) async fn summarize(
     state.hub.layout().chat(&pane).ok_or(ApiError::NotFound)?;
     let link = state.hub.chat(&pane).ok_or(ApiError::NotFound)?;
     let (transcript, _) = link.base();
+    // The summary describes the chat as it was read, so it carries that
+    // time: a turn that ends while Claude works is newer, and its row
+    // shows the reply rather than the summary.
+    let read_ms = now_ms();
     let input = row_summary::excerpt_of(&transcript);
     if input.is_empty() {
         return Err(ApiError::Invalid("nothing has been said in this chat yet"));
@@ -42,21 +46,26 @@ pub(crate) async fn summarize(
             row_summary::run(&input)
         })
         .await;
-        let summary = match answer {
-            Ok(Ok(text)) => RowSummary::Ready {
-                text,
-                at_ms: now_ms(),
-            },
-            Ok(Err(error)) => RowSummary::Failed {
-                reason: error.to_string(),
-                at_ms: now_ms(),
-            },
-            Err(_) => RowSummary::Failed {
-                reason: row_summary::Error::Failed.to_string(),
-                at_ms: now_ms(),
-            },
-        };
-        link.finish_summary(summary);
+        let answer = answer.unwrap_or(Err(row_summary::Error::Failed));
+        link.finish_summary(finished(answer, read_ms));
     });
     Ok(accepted())
 }
+
+/// The row's summary from Claude's answer to the transcript read at
+/// `read_ms`.
+fn finished(answer: Result<String, row_summary::Error>, read_ms: u64) -> RowSummary {
+    match answer {
+        Ok(text) => RowSummary::Ready {
+            text,
+            at_ms: read_ms,
+        },
+        Err(error) => RowSummary::Failed {
+            reason: error.to_string(),
+            at_ms: read_ms,
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests;

@@ -19,7 +19,9 @@ public struct SavedRelays: Codable, Equatable, Sendable {
     /// Those of `relays` the user typed, tried for every computer.
     public private(set) var typed: Set<RelayEndpoint> = []
     /// Read from a version that did not say which were typed, until
-    /// `settle` decides.
+    /// `settle` decides. Kept when saved, so a launch that could not read
+    /// the paired computers leaves the decision to a later one; until
+    /// then no saved relay is tried beyond the computers that named it.
     private var unsettled = false
 
     public init(_ relays: [RelayEndpoint] = []) {
@@ -77,6 +79,12 @@ public struct SavedRelays: Codable, Equatable, Sendable {
         typed.remove(endpoint)
     }
 
+    /// Stops trying `endpoint` for every computer, keeping it for the
+    /// computers that name it.
+    public mutating func unshare(_ endpoint: RelayEndpoint) {
+        typed.remove(endpoint)
+    }
+
     /// Decides, once, for a list kept before typed relays were told apart:
     /// a relay one of the paired computers names (`named`) is that
     /// computer's; any other was typed, or named by a computer since
@@ -89,7 +97,7 @@ public struct SavedRelays: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case relays, typed
+        case relays, typed, unsettled
     }
 
     public init(from decoder: Decoder) throws {
@@ -105,12 +113,14 @@ public struct SavedRelays: Codable, Equatable, Sendable {
         self.init(read(try container.decode([String].self, forKey: .relays)))
         let typed = read(try container.decodeIfPresent([String].self, forKey: .typed) ?? [])
         self.typed = Set(typed.filter(relays.contains))
+        unsettled = try container.decodeIfPresent(Bool.self, forKey: .unsettled) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(relays.map(\.description), forKey: .relays)
         try container.encode(forEveryComputer.map(\.description), forKey: .typed)
+        if unsettled { try container.encode(true, forKey: .unsettled) }
     }
 }
 

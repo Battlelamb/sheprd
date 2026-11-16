@@ -254,8 +254,10 @@ final class AppModel {
         tokens = ActivityTokens(sessions: sessions)
         fleet = Fleet(sessions: sessions)
         hostLinks = HostLinks(sessions: sessions)
+        var loaded = false
         do {
             computers = try ComputerStore.load()
+            loaded = true
         } catch {
             log.error("Could not read the paired computers: \(error.localizedDescription, privacy: .public)")
             message = error.localizedDescription
@@ -267,7 +269,9 @@ final class AppModel {
         // pick from, and to dial, when that computer cannot be asked.
         var relays = savedRelays
         let named = computers.compactMap(\.relay).flatMap(\.relays)
-        relays.settle(named: Set(named))
+        // Which old relays were typed is decided only against the paired
+        // computers: read wrong, every relay would look typed.
+        if loaded { relays.settle(named: Set(named)) }
         relays.learn(named)
         keep(relays)
         // Unchanged, the property's observer did not run.
@@ -401,11 +405,15 @@ final class AppModel {
         return added
     }
 
-    /// Forgets a relay no paired computer names any more.
+    /// Forgets a relay no paired computer names any more. One a computer
+    /// names stays for it, and is only no longer tried for the others.
     func removeRelay(_ relay: RelayEndpoint) {
-        guard computers(naming: relay).isEmpty else { return }
         var relays = savedRelays
-        relays.remove(relay)
+        if computers(naming: relay).isEmpty {
+            relays.remove(relay)
+        } else {
+            relays.unshare(relay)
+        }
         keep(relays)
     }
 

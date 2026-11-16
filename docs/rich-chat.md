@@ -527,13 +527,16 @@ browser's. The daemon replaces any origin a phone sends.
 `sheprd-acp` (`context.rs`) sends the agent a `<sheprd>` text block ahead of
 the prompt's own: the user's `herdr/chat-system-prompt.md` from the
 configuration root, at most 16 KiB, with the first prompt, and a
-description of the origin whenever its device differs from the last one
-told. A queued prompt keeps its origin. The note's opening tag names the
-device (`<sheprd device="phone_app">`) and the instructions sit in an
-`<instructions>` block, so a restored chat (Claude and Codex logs, or an ACP
-agent's `session/load` replay) and a mirrored log hide the notes and learn
-what was told: the instructions go again only when the file changed, and the
-origin only on another device. Where the person cannot open paths on the
+description of the origin whenever the device, or whether the person can
+open paths there, differs from the last one told. A queued prompt keeps its
+origin. The note's opening tag names both and a checksum of its body
+(`<sheprd device="phone_app" paths="elsewhere" sum="…">`), and the
+instructions sit in an `<instructions>` block. A restored chat (Claude and
+Codex logs, or an ACP agent's `session/load` replay) and a mirrored log hide
+the notes whose checksum matches, leaving text the person typed that only
+looks like one, and learn what the agent last heard: the instructions go
+again only when they differ from the last ones sent, and the origin only on
+another device or a change between this machine and SSH. Where the person cannot open paths on the
 agent's machine, the note asks the agent to link pictures as Markdown images,
 which [linked pictures](#messages-and-controls) attach to the chat, and to
 render HTML mockups to screenshots. The transcript shows only the person's

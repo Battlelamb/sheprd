@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use sheprd_chat_protocol::{Device, Origin, Via};
 
-pub(crate) use note::{Told, hide, split};
+pub(crate) use note::{Place, Told, hide, split};
 
 mod note;
 
@@ -41,68 +41,56 @@ pub(crate) fn read_system_prompt(path: &Path) -> Option<String> {
 /// What the agent has been told in this conversation.
 #[derive(Debug, Default)]
 pub(crate) struct Context {
-    /// The user's system prompt, escaped for the note, until it goes with a
-    /// prompt.
+    /// The user's system prompt now, escaped for the note.
     system_prompt: Option<String>,
-    /// The device the agent last heard the person is on. Only a change of
-    /// device is told again: a phone moving between networks still sees
-    /// the same.
-    told: Option<Device>,
+    /// What the agent last heard, from notes sent, restored, or replayed.
+    /// Compared only when a prompt goes, so a replay may run in any order.
+    told: Told,
 }
 
 impl Context {
-    /// A conversation in which earlier notes told the agent `told`: the
-    /// system prompt goes only when the agent has not had this one.
+    /// A conversation in which earlier notes told the agent `told`.
     pub(crate) fn new(system_prompt: Option<String>, told: Told) -> Self {
-        let mut context = Self {
+        Self {
             system_prompt: system_prompt.map(|text| note::escape(&text)),
-            told: None,
-        };
-        context.resume(told);
-        context
+            told,
+        }
     }
 
     /// Takes in a note the agent replayed from its saved conversation.
-    pub(crate) fn heard(&mut self, text: &str) {
-        let mut told = Told::default();
-        told.heard(text);
-        self.resume(told);
-    }
-
-    fn resume(&mut self, told: Told) {
-        if told.device.is_some() {
-            self.told = told.device;
-        }
-        if told.instructions.is_some() && told.instructions == self.system_prompt {
-            self.system_prompt = None;
-        }
+    pub(crate) fn heard(&mut self, note: &str) {
+        self.told.heard(note);
     }
 
     /// The note to send ahead of a prompt typed at `origin`: the system
-    /// prompt the first time, and where the person is when their device
-    /// differs from the last one told. None when there is nothing new.
+    /// prompt unless the agent last heard these very instructions, and
+    /// where the person is when that changes what they can see. None when
+    /// there is nothing new.
     pub(crate) fn before(&mut self, origin: Option<Origin>) -> Option<String> {
-        let system_prompt = self.system_prompt.take();
-        let origin = origin.filter(|origin| self.told != Some(origin.device));
+        let system_prompt = self
+            .system_prompt
+            .clone()
+            .filter(|text| self.told.instructions.as_ref() != Some(text));
+        let origin = origin.filter(|origin| self.told.place != Some(Place::from(*origin)));
         if system_prompt.is_none() && origin.is_none() {
             return None;
         }
-        let mut text = note::open(origin.map(|origin| origin.device));
-        text.push_str(
+        let mut body = String::from(
             "This note comes from Sheprd, the app the person chats with you in, \
              not from the person. It holds until another note replaces it.\n",
         );
         if let Some(system_prompt) = system_prompt {
-            text.push_str("\nThe person's instructions for every chat:\n");
-            text.push_str(&note::instructions(&system_prompt));
+            body.push_str("\nThe person's instructions for every chat:\n");
+            body.push_str(&note::instructions(&system_prompt));
+            self.told.instructions = Some(system_prompt);
         }
+        let place = origin.map(Place::from);
         if let Some(origin) = origin {
-            self.told = Some(origin.device);
-            text.push('\n');
-            text.push_str(&describe(origin));
+            self.told.place = place;
+            body.push('\n');
+            body.push_str(&describe(origin));
         }
-        text.push_str(note::close());
-        Some(text)
+        Some(note::wrap(place, &body))
     }
 }
 

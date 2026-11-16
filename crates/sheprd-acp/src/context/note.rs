@@ -2,7 +2,7 @@
 //! ahead of the person's words:
 //!
 //! ```text
-//! <sheprd device="phone_app">
+//! <sheprd device="phone_app" paths="elsewhere" sum="…">
 //! …
 //! <instructions>
 //! the user's chat system prompt
@@ -13,27 +13,48 @@
 //!
 //! A restored or mirrored conversation hides these notes, as the live chat
 //! does, and learns from them what the agent was already told, so a chat
-//! that continues does not tell it again.
+//! that continues does not tell it again. `sum` is a checksum of the body,
+//! so a message the person wrote that merely starts with the tag stays as
+//! written; it guards against accidents, not forgery.
 
-use sheprd_chat_protocol::{Device, EntryKind, Transcript};
+use sheprd_chat_protocol::{Device, EntryKind, Origin, Transcript};
 
 const OPEN: &str = "<sheprd";
 const CLOSE: &str = "</sheprd>";
 const INSTRUCTIONS: &str = "<instructions>\n";
 const INSTRUCTIONS_END: &str = "\n</instructions>";
 
+/// What decides the advice a note gives: the device, and whether the
+/// person can open paths on the agent's machine there. A phone moving
+/// between networks keeps both; the desktop app on this computer and over
+/// SSH differ.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct Place {
+    pub(crate) device: Device,
+    pub(crate) opens_paths: bool,
+}
+
+impl From<Origin> for Place {
+    fn from(origin: Origin) -> Self {
+        Self {
+            device: origin.device,
+            opens_paths: origin.opens_paths(),
+        }
+    }
+}
+
 /// What earlier notes told the agent; a later note overrides an earlier one.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Told {
-    pub(crate) device: Option<Device>,
+    pub(crate) place: Option<Place>,
     /// The instructions as the note wrote them, see [`escape`].
     pub(crate) instructions: Option<String>,
 }
 
 impl Told {
     pub(crate) fn heard(&mut self, note: &str) {
-        if let Some(device) = device_of(note) {
-            self.device = Some(device);
+        if let Some(place) = place_of(note) {
+            self.place = Some(place);
         }
         if let Some(instructions) = instructions_of(note) {
             self.instructions = Some(instructions.to_owned());
@@ -41,20 +62,20 @@ impl Told {
     }
 }
 
-/// The opening tag of a note, naming the device when it says where the
-/// person is.
-pub(super) fn open(device: Option<Device>) -> String {
-    let name = device
-        .and_then(|device| serde_json::to_value(device).ok())
-        .and_then(|value| value.as_str().map(str::to_owned));
-    match name {
-        Some(name) => format!("{OPEN} device=\"{name}\">\n"),
-        None => format!("{OPEN}>\n"),
+/// The whole note around `body`: the opening tag, naming the place when
+/// the body says where the person is, the body, and the closing tag.
+pub(super) fn wrap(place: Option<Place>, body: &str) -> String {
+    let mut tag = String::from(OPEN);
+    if let Some(Place {
+        device,
+        opens_paths,
+    }) = place
+        && let Ok(serde_json::Value::String(name)) = serde_json::to_value(device)
+    {
+        let paths = if opens_paths { "here" } else { "elsewhere" };
+        tag.push_str(&format!(" device=\"{name}\" paths=\"{paths}\""));
     }
-}
-
-pub(super) fn close() -> &'static str {
-    CLOSE
+    format!("{tag} sum=\"{:016x}\">\n{body}{CLOSE}", checksum(body))
 }
 
 /// The instructions block for `instructions`, already [`escape`]d.
@@ -69,14 +90,21 @@ pub(super) fn escape(text: &str) -> String {
         .replace("</instructions>", "</ instructions>")
 }
 
-/// The note `text` starts with, and the person's words after it.
+/// The note Sheprd wrote that `text` starts with, and the person's words
+/// after it. Text that only looks like a note is not one.
 pub(crate) fn split(text: &str) -> Option<(&str, &str)> {
     let text = text.trim_start();
-    let rest = text.strip_prefix(OPEN)?;
-    if !rest.starts_with(['>', ' ']) {
+    if !text.strip_prefix(OPEN)?.starts_with(' ') {
         return None;
     }
-    let end = text.find(CLOSE)? + CLOSE.len();
+    let tag_end = text.find(">\n")?;
+    let close = text.find(CLOSE)?;
+    let body = text.get(tag_end + 2..close)?;
+    let sum = attribute(&text[..tag_end], "sum")?;
+    if sum != format!("{:016x}", checksum(body)) {
+        return None;
+    }
+    let end = close + CLOSE.len();
     Some((&text[..end], text[end..].trim_start()))
 }
 
@@ -98,10 +126,32 @@ pub(crate) fn hide(transcript: &mut Transcript) -> Told {
     told
 }
 
-fn device_of(note: &str) -> Option<Device> {
+/// FNV-1a: stable across Rust versions and machines, which a note read
+/// back from a log written by an older run needs.
+fn checksum(body: &str) -> u64 {
+    body.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let (_, rest) = tag.split_once(&format!(" {name}=\""))?;
+    Some(rest.split_once('"')?.0)
+}
+
+fn place_of(note: &str) -> Option<Place> {
     let tag = &note[..note.find('>')?];
-    let name = tag.split_once("device=\"")?.1.split_once('"')?.0;
-    serde_json::from_value(serde_json::Value::String(name.to_owned())).ok()
+    let name = attribute(tag, "device")?;
+    let device = serde_json::from_value(serde_json::Value::String(name.to_owned())).ok()?;
+    let opens_paths = match attribute(tag, "paths")? {
+        "here" => true,
+        "elsewhere" => false,
+        _ => return None,
+    };
+    Some(Place {
+        device,
+        opens_paths,
+    })
 }
 
 fn instructions_of(note: &str) -> Option<&str> {

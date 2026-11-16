@@ -16,9 +16,10 @@ fn said(text: &str) -> Entry {
 fn notes_sent_to_the_agent_stay_hidden_in_a_mirror() {
     let with_note = |words: &str| {
         let mut transcript = Transcript::new("Claude".to_owned());
-        transcript.entries = vec![said(&format!(
-            "<sheprd device=\"phone_app\">\nnote\n</sheprd>\n{words}"
-        ))];
+        let note = crate::context::Context::new(Some("Be brief.".to_owned()), Default::default())
+            .before(None)
+            .unwrap();
+        transcript.entries = vec![said(&format!("{note}\n{words}"))];
         transcript
     };
     let mut mirror = Mirror::new(with_note("first"), None);

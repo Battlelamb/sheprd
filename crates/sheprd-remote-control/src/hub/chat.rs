@@ -74,6 +74,9 @@ pub(crate) struct Summary {
     pub(crate) questions: usize,
     /// The start of the agent's latest answer, on one line.
     pub(crate) last_text: Option<String>,
+    /// The start of the first prompt sent, on one line: what a row calls a
+    /// chat its agent has not titled.
+    pub(crate) first_prompt: Option<String>,
     /// What the chat's agent last said of where it stands, when asked.
     pub(crate) row_summary: Option<super::RowSummary>,
     pub(crate) turn_started_ms: Option<u64>,
@@ -95,6 +98,20 @@ pub(crate) fn last_turn_ended_ms(transcript: &Transcript) -> Option<u64> {
             _ => None,
         })
         .flatten()
+}
+
+/// The start of the first prompt in `transcript` that says anything, on
+/// one line.
+pub(crate) fn first_prompt(transcript: &Transcript) -> Option<String> {
+    transcript
+        .entries
+        .iter()
+        .find_map(|entry| match &entry.kind {
+            sheprd_chat_protocol::EntryKind::User { text, .. } => {
+                Some(excerpt(text, 80)).filter(|line| !line.is_empty())
+            }
+            _ => None,
+        })
 }
 
 /// The first `limit` characters of `text` on one line.
@@ -204,6 +221,7 @@ impl Chat {
                     sheprd_chat_protocol::EntryKind::Agent { text } => Some(excerpt(text, 140)),
                     _ => None,
                 }),
+            first_prompt: first_prompt(transcript),
             row_summary: lock(&self.row_summary).clone(),
             turn_started_ms: transcript.turn.map(|turn| turn.started_ms),
             last_turn_ended_ms: last_turn_ended_ms(transcript),

@@ -111,6 +111,10 @@ pub(crate) struct ChatSummary {
     pub(crate) question: Option<Permission>,
     pub(crate) questions: usize,
     pub(crate) last_text: Option<String>,
+    /// The start of the first prompt, for a chat its agent has not titled;
+    /// absent before one is sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) first_prompt: Option<String>,
     /// What the chat's agent said of where it stands, when the person asked
     /// (`POST /api/v2/chat/{pane}/summarize`); absent until then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -184,6 +188,10 @@ pub(crate) struct Pane {
     pub(crate) label: Option<String>,
     pub(crate) cwd: Option<String>,
     pub(crate) focused: bool,
+    /// What runs in front of its shell; absent when the computer's Herdr
+    /// does not say, and from older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) job: Option<hub::Job>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -333,6 +341,7 @@ impl From<Summary> for ChatSummary {
             question: summary.question,
             questions: summary.questions,
             last_text: summary.last_text,
+            first_prompt: summary.first_prompt,
             row_summary: summary.row_summary,
             turn_started_ms: summary.turn_started_ms,
             last_turn_ended_ms: summary.last_turn_ended_ms,
@@ -376,6 +385,7 @@ fn terminal(terminal: &hub::Terminal) -> Terminal {
                 label: pane.label.clone(),
                 cwd: pane.cwd.clone(),
                 focused: pane.focused,
+                job: pane.job.clone(),
             })
             .collect(),
         agent: terminal.agent.as_ref().map(|agent| TerminalAgent {

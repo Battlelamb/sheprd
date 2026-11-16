@@ -25,6 +25,12 @@ struct ChatList: View {
     /// screenful on a phone, as in Workspaces.
     private static let indexedFrom = 12
 
+    /// Each section and the rows it lists, in order: what changes when a
+    /// row moves, appears, or goes, but not when a row's text does.
+    private var arrangement: [[String]] {
+        sections.map { [$0.id] + $0.items.map(\.id) }
+    }
+
     var body: some View {
         let open = sections
             .filter { !model.collapsed.home.contains(Self.key($0, sort: sort)) }
@@ -45,6 +51,10 @@ struct ChatList: View {
             }
         }
         .listSectionIndexVisibility(sections.count > 1 && open >= Self.indexedFrom ? .visible : .hidden)
+        // Updates arrive from the computers unanimated; an agent going from
+        // idle to working to done moves its row between sections, which the
+        // list animates when the arrangement it shows changes.
+        .animation(.snappy, value: arrangement)
         .refreshable { model.fleet.networkChanged() }
         .closeConfirmation($closing)
     }

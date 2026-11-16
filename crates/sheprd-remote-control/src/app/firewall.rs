@@ -5,19 +5,43 @@
 //! remembers that exact build: once the file changes, the next start of the
 //! daemon (a restart of the Mac, of the service, or launchd's own) is
 //! blocked until someone clicks Allow at the computer. Loopback still works,
-//! so nothing on the desktop shows it. Everything here blocks.
+//! so nothing on the desktop shows it.
+//!
+//! The answer is advisory: a check that fails, runs past its deadline, or
+//! prints what this module does not recognise warns of nothing. Its
+//! failures stay here, for the caller's log; nothing shows them to people.
+//! Everything here blocks, for at most [`DEADLINE`] per command.
 
-use super::{Error, Result};
-use std::path::Path;
+mod error;
+
+pub use error::{Error, Result};
+use std::{ffi::OsStr, path::Path, process::ExitStatus, time::Duration};
+
+/// How long each command may take before the check gives up on it.
+pub const DEADLINE: Duration = Duration::from_secs(5);
+/// How much of a command's output is read; both answers fit in a fraction.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const OUTPUT_LIMIT: u64 = 64 * 1024;
 
 /// How long an approval of the daemon lasts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Approval {
-    /// No firewall to approve it, or a signer the firewall remembers.
+    /// No firewall to approve it, a signer the firewall remembers, or an
+    /// answer this module could not read.
     #[default]
     Lasting,
     /// The firewall is on and remembers only this build of the daemon.
     ThisBuild,
+}
+
+/// Who signed a binary, as `codesign -dv` says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+enum Signer {
+    /// A team, as a developer ID or development certificate names.
+    Team,
+    /// Ad-hoc ("TeamIdentifier=not set") or not signed at all.
+    Nobody,
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -31,14 +55,15 @@ const CODESIGN: &str = "/usr/bin/codesign";
 pub fn approval(program: &Path) -> Result<Approval> {
     #[cfg(target_os = "macos")]
     {
-        if !firewall_on(&output(SOCKETFILTERFW, ["--getglobalstate".as_ref()])?) {
+        let (status, state) = output(SOCKETFILTERFW, ["--getglobalstate".as_ref()], DEADLINE)?;
+        if !status.success() || !firewall_on(&state) {
             return Ok(Approval::Lasting);
         }
-        let signature = output(CODESIGN, ["-dv".as_ref(), program.as_os_str()])?;
-        Ok(if has_team(&signature) {
-            Approval::Lasting
-        } else {
-            Approval::ThisBuild
+        let (status, signature) =
+            output(CODESIGN, ["-dv".as_ref(), program.as_os_str()], DEADLINE)?;
+        Ok(match signer(status.success(), &signature) {
+            Some(Signer::Nobody) => Approval::ThisBuild,
+            Some(Signer::Team) | None => Approval::Lasting,
         })
     }
     #[cfg(not(target_os = "macos"))]
@@ -48,21 +73,63 @@ pub fn approval(program: &Path) -> Result<Approval> {
     }
 }
 
-/// Both streams of `program`, whatever its exit status: `codesign -dv`
-/// writes to stderr, and fails on an unsigned file, which has no team.
+/// `program`'s exit status and both its streams, as one text: `codesign
+/// -dv` writes to stderr, and fails on an unsigned file. Gives up after
+/// `deadline`, killing and reaping the child.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn output<'a>(
     program: &'static str,
-    args: impl IntoIterator<Item = &'a std::ffi::OsStr>,
-) -> Result<String> {
-    let output = sheprd_client::new_command(program)
-        .args(args)
-        .stdin(std::process::Stdio::null())
-        .output()
-        .map_err(|source| Error::Spawn { program, source })?;
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
-    Ok(text)
+    args: impl IntoIterator<Item = &'a OsStr>,
+    deadline: Duration,
+) -> Result<(ExitStatus, String)> {
+    use std::io::Read;
+    let (reader, writer) = std::io::pipe().map_err(|source| Error::Spawn { program, source })?;
+    let mut child = {
+        // The command holds the pipe's write ends until it is dropped, and
+        // the reader below sees the end of the output only once none is left.
+        let stdout = writer
+            .try_clone()
+            .map_err(|source| Error::Spawn { program, source })?;
+        sheprd_client::new_command(program)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(stdout)
+            .stderr(writer)
+            .spawn()
+            .map_err(|source| Error::Spawn { program, source })?
+    };
+    let (send, receive) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let mut text = Vec::new();
+        let read = reader
+            .take(OUTPUT_LIMIT)
+            .read_to_end(&mut text)
+            .map(|_| text);
+        let _ = send.send(read);
+    });
+    let text = match receive.recv_timeout(deadline) {
+        Ok(Ok(text)) => text,
+        Ok(Err(source)) => {
+            reap(&mut child);
+            return Err(Error::Read { program, source });
+        }
+        Err(_) => {
+            reap(&mut child);
+            return Err(Error::Timeout { program });
+        }
+    };
+    // The output ended, so the child has closed its streams and is exiting.
+    let status = child
+        .wait()
+        .map_err(|source| Error::Read { program, source })?;
+    Ok((status, String::from_utf8_lossy(&text).into_owned()))
+}
+
+/// Ends a child the check gave up on, so it leaves no zombie.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn reap(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// Whether `socketfilterfw --getglobalstate` says the firewall is on:
@@ -77,13 +144,25 @@ fn firewall_on(text: &str) -> bool {
         .is_some_and(|state| state > 0)
 }
 
-/// Whether `codesign -dv` names a team: "TeamIdentifier=ABCDE12345" rather
-/// than "TeamIdentifier=not set", or no line at all for an unsigned file.
+/// Who signed the binary `codesign -dv` described, or `None` when its
+/// answer is not one of those this module knows: a failure other than an
+/// unsigned file (unreadable, missing, not code), or wording it never used.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn has_team(text: &str) -> bool {
-    text.lines()
-        .filter_map(|line| line.trim().strip_prefix("TeamIdentifier="))
-        .any(|team| !team.is_empty() && team != "not set")
+fn signer(success: bool, text: &str) -> Option<Signer> {
+    if text.contains("code object is not signed at all") {
+        return Some(Signer::Nobody);
+    }
+    if !success {
+        return None;
+    }
+    let team = text
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("TeamIdentifier="))?;
+    match team.trim() {
+        "" => None,
+        "not set" => Some(Signer::Nobody),
+        _ => Some(Signer::Team),
+    }
 }
 
 #[cfg(test)]

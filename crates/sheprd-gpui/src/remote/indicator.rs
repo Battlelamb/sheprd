@@ -37,6 +37,10 @@ impl SheprdWindow {
             .map(|control| self.chrome_stop(crate::window::chrome_focus::Region::TitleBar, control))
             .role(Role::Button)
             .aria_label(label)
+            // The badge is only a color; a screen reader hears the warning.
+            .when(per_build, |button| {
+                button.aria_description(fl!("remote-menu-firewall"))
+            })
             .flex()
             .relative()
             .flex_none()

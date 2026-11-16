@@ -29,29 +29,34 @@ public struct Lenders: Sendable {
     }
 }
 
-/// Reads a workspace's pull request from GitHub when a computer lends a
-/// token for its host, and otherwise, or when that read fails for any
-/// reason (no lease, no access to the organization, SSO, the rate limit,
-/// no network), asks the workspace's computer as before. Falling back is
-/// quiet: only the answer's origin tells.
+/// Reads a workspace's pull request from GitHub with the phone's own
+/// sign-in (github.com only), else with a token a computer lends for its
+/// host, and otherwise, or when those reads fail for any reason (no token,
+/// no access to the organization, SSO, the rate limit, no network), asks
+/// the workspace's computer as before. Falling back is quiet: only the
+/// answer's origin tells.
 public actor PullRequestReader {
     private let leases: GitHubLeases
     private let api: GitHubAPI
+    private let ownSignIn: GitHubSignIn?
 
-    public init(leases: GitHubLeases, api: GitHubAPI) {
+    public init(leases: GitHubLeases, api: GitHubAPI, signIn: GitHubSignIn? = nil) {
         self.leases = leases
         self.api = api
+        ownSignIn = signIn
     }
 
     /// The app's: tokens in the Keychain, GitHub over the network.
     public static func live() -> PullRequestReader {
         PullRequestReader(
             leases: GitHubLeases(store: TokenStore(vault: Keychain.vault(service: TokenStore.service))),
-            api: .live()
+            api: .live(),
+            signIn: .live()
         )
     }
 
     public var tokens: GitHubLeases { leases }
+    public var signIn: GitHubSignIn? { ownSignIn }
 
     /// The checks of `workspace`'s pull request.
     public func checks(
@@ -124,14 +129,16 @@ public actor PullRequestReader {
         return found
     }
 
-    /// `read` with a lease for `host`, once more with a new one when GitHub
-    /// refuses the first (401); nil when there is none or the read fails,
-    /// for the computer to answer instead.
+    /// `read` with the phone's own sign-in when `host` is github.com, then
+    /// with a lease for `host`, each once more with a renewed token when
+    /// GitHub refuses the first (401); nil when there is none or the reads
+    /// fail, for the computer to answer instead.
     private func attempt<Value: Sendable>(
         host: GitHubHost,
         source: Lenders,
         _ read: @Sendable (GitHubAPI, GitHubToken) async throws -> Value
     ) async -> Value? {
+        if let ownSignIn, host == Self.signInHost, let value = await own(ownSignIn, read) { return value }
         for _ in 0..<2 {
             guard !Task.isCancelled,
                   let lease = try? await leases.lease(for: host, lenders: source.lenders, fetch: source.fetch)
@@ -140,6 +147,31 @@ public actor PullRequestReader {
                 return try await read(api, lease.token)
             } catch GitHubError.unauthorized {
                 await leases.rejected(lease)
+            } catch {
+                return nil
+            }
+        }
+        return nil
+    }
+
+    /// The host the phone signs in to itself: Sheprd's GitHub App exists on
+    /// github.com alone.
+    private static let signInHost = GitHubHost("github.com")
+
+    /// `read` with the own sign-in; nil when signed out, when renewing
+    /// fails, or when the read fails (a 401 after renewing, no access to
+    /// the repository), for a lent token to try.
+    private func own<Value: Sendable>(
+        _ signIn: GitHubSignIn,
+        _ read: @Sendable (GitHubAPI, GitHubToken) async throws -> Value
+    ) async -> Value? {
+        guard !Task.isCancelled, var token = try? await signIn.token() else { return nil }
+        for renewed in [false, true] {
+            do {
+                return try await read(api, token)
+            } catch GitHubError.unauthorized where !renewed {
+                guard let next = try? await signIn.renew(rejected: token) else { return nil }
+                token = next
             } catch {
                 return nil
             }

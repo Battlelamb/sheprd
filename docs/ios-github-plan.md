@@ -8,7 +8,8 @@ neither, the Changes screen can only say that standalone reads are off.
 
 With this plan the phone calls GitHub itself, with a sign-in it gets from a
 paired computer. The computer only reports which repository and branch a
-workspace is on, and hands over a token. The phone never signs in itself.
+workspace is on, and hands over a token. The phone can also sign in to
+github.com itself, so it reads GitHub with no computer reachable.
 
 ## Decisions
 
@@ -16,9 +17,14 @@ workspace is on, and hands over a token. The phone never signs in itself.
   each Enterprise host have their own account; the phone does not route
   between several accounts on one host as the desktop's additional accounts
   do.
-- **The token comes from a desktop.** No device flow on the phone, and no
-  sign-in screen. Settings shows which computer each host's account came
-  from.
+- **The token comes from a desktop, or from the phone's own sign-in.**
+  Without signing in, the phone borrows a computer's token. Settings shows
+  which computer each host's account came from, and offers its own sign-in
+  for github.com.
+- **The phone's own sign-in wins** for github.com; a lent token is the
+  fallback when it is signed out or its sign-in fails. Enterprise hosts
+  only come from a computer's `gh`: Sheprd's GitHub App exists on
+  github.com alone.
 - **GitHub Enterprise is supported**: Enterprise Server (`https://HOST/api/v3`,
   `https://HOST/api/graphql`) and GHE.com (`https://api.SUBDOMAIN.ghe.com`).
 - **Falling back to the computer is quiet.** When a direct read fails (no
@@ -79,6 +85,25 @@ replaces that promise, so the user has to opt in:
   widgets, or the watch, and removed when no computer lends that host any
   more.
 
+## Signing in on the phone
+
+- GitHub's device flow with Sheprd's GitHub App (`Iv23liurUcwxPjrdIFYT`,
+  the client ID the desktop uses; device flow needs no secret). The phone
+  shows the code with a copy button and opens `github.com/login/device`
+  in `ASWebAuthenticationSession`, then polls as GitHub asks
+  (`authorization_pending`, `slow_down`, `expired_token`,
+  `access_denied`).
+- Its authorization is its own token pair, separate from the desktop's,
+  so renewing one never signs the other out. The phone keeps the access
+  and refresh tokens in its Keychain (this device only, not synced),
+  renews shortly before expiry or on a 401, and saves the rotated pair
+  before using it, as `sheprd-github`'s `token.rs` does.
+- Sign out deletes both tokens; revoking the authorization itself is on
+  GitHub (Settings > Applications), which the screen links to.
+- An organization that has not installed the App still reads public
+  repositories only; the screen says so and links to the installation,
+  as the desktop's `installation.rs` does.
+
 ## Phases
 
 ### 1. The computer names the repository (Rust)
@@ -129,8 +154,9 @@ replaces that promise, so the user has to opt in:
   existing diff view.
 - A Pull requests list in the Workspaces tab: mine, and review requested,
   including repositories no computer has a workspace for.
-- Settings > GitHub: one row per host with the login, avatar, and the
-  computer it came from.
+- Settings > GitHub: one row per host with the login, avatar, and where
+  its token comes from (this iPhone's sign-in, or a computer), with Sign
+  in and Sign out for github.com, and the device-code sheet.
 
 ### 5. Actions (later)
 

@@ -19,5 +19,8 @@ fn a_kept_workspace_closes_without_waiting_on_a_herdr_1_git_check(cx: &mut TestA
     assert!(cx.debug_bounds("close-git-status").is_none());
     let submit = cx.debug_bounds("dialog-submit").unwrap();
     cx.simulate_click(submit.center(), gpui::Modifiers::none());
-    view.read_with(cx, |view, _| assert!(view.menu.page.is_none()));
+    view.read_with(cx, |view, _| {
+        assert!(view.menu.page.is_none());
+        assert!(!view.is_kept_workspace(&id));
+    });
 }

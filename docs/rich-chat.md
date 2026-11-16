@@ -61,6 +61,41 @@ The Terminal layout still renders chat. The terminal button and
 `sheprd chat show` restores the chat view. These commands change presentation
 without starting or stopping the agent. See the [CLI guide](cli.md#existing-agent-rendering).
 
+## Choosing the agent
+
+The tab strip's **Agent** button (`[chat] launcher = "agent"`, the default)
+starts a chat with the agent you used last, unless plan usage says it is
+short: when its plan has hit a limit, is 80% used, or is half used and on
+pace to run out before it resets, the button starts the installed agent with
+the most room instead, and its tooltip says why. Usage comes from the status
+bar's last reading of the selected host, matched by name (Claude, Codex,
+Copilot, Gemini, OpenCode, Pi); every window counts, so a weekly limit
+running out matters even when a session window is fuller. An agent without
+a reading, or whose limits have reset since, counts as having room, and one
+tight plan never replaces another. With usage turned off
+(`[usage] show = false`), the agent you used last is always kept. Starting another agent this
+way does not change your preference: the next chat goes back to the agent
+you used once its plan has room. `sheprd usage pick` shows the same choice
+and each agent's room. Until you send the first prompt,
+the composer's first button names that agent and opens a menu of the others
+installed on the same machine. Picking one stops the running agent and
+starts the chosen one in the same folder: the conversation starts over empty,
+and anything you typed while the first agent was still starting waits for
+the new one. Once a prompt reaches the agent, the button goes away, because
+the conversation now lives in that agent. The in-pane view offers the same
+choice as the first row of **Ctrl+O**.
+
+While the choice is open, a line over the composer says why the chat started
+with another agent than the one you used last, or, when the running agent's
+plan is short and another's is not, offers to switch to it in one click. The
+model stays the agent's own default; pick it from the composer as before.
+
+Chats on an SSH host keep the agent they start with, because the host's own
+`sheprd-acp` may predate switching. So do chats run by an older `sheprd-acp`
+found on this machine's `PATH`: Sheprd asks for the choice only when the
+program's `--help` offers `--choose`. The other launcher placements put a
+button per agent in the strip instead, and those chats can switch too.
+
 ## Chats in Herdr 2 panes
 
 In a Herdr 2 (herdr-core) tab, starting a chat from the tab strip's launcher

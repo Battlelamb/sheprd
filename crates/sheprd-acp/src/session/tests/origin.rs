@@ -182,11 +182,14 @@ fn a_replayed_conversation_hides_its_notes_and_counts_them_told() {
     );
     let load = harness.last_request("session/load");
     for text in [said_on_phone().as_str(), "earlier"] {
-        harness.input(Input::Agent(Inbound::Notification {
-            method: "session/update".to_owned(),
-            params: json!({"sessionId": "old", "update": {"sessionUpdate": "user_message_chunk",
+        harness.input(Input::Agent(
+            HarnessId::default(),
+            Inbound::Notification {
+                method: "session/update".to_owned(),
+                params: json!({"sessionId": "old", "update": {"sessionUpdate": "user_message_chunk",
                 "content": {"type": "text", "text": text}}}),
-        }));
+            },
+        ));
     }
     harness.respond(load["id"].as_i64().unwrap(), json!({}));
     let texts: Vec<_> = harness

@@ -299,6 +299,12 @@ impl SettingsWindow {
                 None,
             ))
             .child(switch_row)
+            .when(Supervisor::approval_per_build(cx), |page| {
+                page.child(
+                    ui::row(theme, "remote-firewall", fl!("settings-remote-firewall"))
+                        .description(fl!("settings-remote-firewall-note")),
+                )
+            })
             .child(
                 ui::row(
                     theme,

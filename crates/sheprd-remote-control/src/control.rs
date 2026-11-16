@@ -15,6 +15,7 @@ pub mod edited;
 pub mod hosts;
 pub mod layout;
 pub mod pull_requests;
+pub mod relays;
 pub mod shortcuts;
 pub mod tags;
 use serde::{Deserialize, Serialize};
@@ -206,6 +207,11 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         offer: Option<shortcuts::TextShortcuts>,
     },
+    /// Relays Sheprd on another computer shares with this one, replacing
+    /// what that computer shared before (`relays`). Answered with every
+    /// relay the daemon listens on now. Sheprd never sends it to its own
+    /// daemon, which follows `[remote] relays`.
+    ShareRelays(relays::Offer),
     /// On a host: adds a phone another computer's user allowed, as
     /// `herdr-remote-control enroll` asks. Sheprd never sends it to its
     /// own daemon.
@@ -274,6 +280,10 @@ pub enum Response {
     Enrolled(hosts::Enrolled),
     Tags(tags::ComputerTags),
     Shortcuts(shortcuts::TextShortcuts),
+    /// The relays the daemon listens on, its own and those shared with it.
+    Relays {
+        relays: Vec<String>,
+    },
     AppUpdate {
         /// A phone asked to update since the last report. Taken by reading.
         requested: bool,
@@ -368,7 +378,13 @@ pub struct Status {
 #[serde(rename_all = "snake_case", tag = "state")]
 pub enum RelayState {
     Connecting,
-    Listening,
+    Listening {
+        /// The round trip to the relay, in milliseconds, which tells how
+        /// near it is; absent until measured, or from an older daemon. An
+        /// older app reads the state and ignores it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rtt_ms: Option<u32>,
+    },
     /// The last attempt failed; another follows.
     Failed {
         error: String,

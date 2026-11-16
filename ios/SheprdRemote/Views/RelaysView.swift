@@ -26,8 +26,9 @@ struct RelaysView: View {
                     let naming = model.computers(naming: relay)
                     RelayRow(relay: relay, reach: reach[relay], naming: naming.map(model.displayName))
                         // A relay a computer names comes back with it, so
-                        // only the others can be removed.
-                        .deleteDisabled(!naming.isEmpty)
+                        // removing one only stops trying it for the others,
+                        // which only one you added is.
+                        .deleteDisabled(!naming.isEmpty && !model.savedRelays.typed.contains(relay))
                 }
                 .onDelete { offsets in
                     for relay in offsets.map({ relays[$0] }) { model.removeRelay(relay) }
@@ -36,7 +37,7 @@ struct RelaysView: View {
                 Text("Relays")
             } footer: {
                 if !relays.isEmpty {
-                    Text("Each computer is tried on the relays it named, then on the others here. A relay sees only encrypted traffic.")
+                    Text("Each computer is tried on the relays it named, then on the ones you added. A relay sees only encrypted traffic.")
                 }
             }
             Section {

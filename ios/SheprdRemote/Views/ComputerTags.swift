@@ -59,35 +59,43 @@ struct PillFlow: Layout {
     }
 }
 
-/// The tags in use, above the Workspaces list: a tap shows only the
-/// computers with that tag, and another shows them all again.
-struct TagFilterBar: View {
+/// The tags in use, as a filter in the Workspaces toolbar: a menu of the
+/// tags, each showing only the computers with it, and all of them again.
+/// While a tag is chosen the button names it in its color, so the list
+/// says why it is shorter without a row of its own above it.
+struct TagFilterMenu: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let tags = ComputerTags.all(in: model.computers)
-        if !tags.isEmpty {
-            let active = ComputerTags.active(model.tagFilter.tag, among: model.computers)
-            Section {
-                ScrollView(.horizontal) {
-                    HStack(spacing: 6) {
-                        ForEach(tags, id: \.self) { tag in
-                            Button {
-                                withAnimation(.snappy) { model.tagFilter.tag = tag == active ? nil : tag }
-                            } label: {
-                                TagPill(tag: tag, selected: tag == active)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Show \(tag) computers")
-                            .accessibilityAddTraits(tag == active ? .isSelected : [])
-                        }
-                    }
+        let active = ComputerTags.active(model.tagFilter.tag, among: model.computers)
+        Menu {
+            Picker("Show", selection: Binding(
+                get: { active },
+                set: { tag in withAnimation(.snappy) { model.tagFilter.tag = tag } }
+            )) {
+                Label("All Computers", systemImage: "desktopcomputer").tag(String?.none)
+                ForEach(tags, id: \.self) { tag in
+                    Label(tag, systemImage: "tag").tag(Optional(tag))
                 }
-                .scrollIndicators(.hidden)
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
+            }
+            .pickerStyle(.inline)
+        } label: {
+            if let active {
+                // Plain views, as a toolbar shows a `Label` as its icon alone.
+                let color = RepositoryAvatar.tint(active.lowercased())
+                HStack(spacing: 5) {
+                    Image(systemName: "line.3.horizontal.decrease")
+                    Text(active).lineLimit(1)
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(color)
+                .padding(.horizontal, 4)
+            } else {
+                Label("Filter by Tag", systemImage: "line.3.horizontal.decrease")
             }
         }
+        .accessibilityLabel(active.map { "Showing \($0) computers" } ?? "Filter by Tag")
     }
 }
 

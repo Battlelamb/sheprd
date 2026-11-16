@@ -47,11 +47,12 @@ touch it.
 | Who owns it | `sheprd-acp`, as it owns the chat. The thread record replaces the restore record's single `agent` and `session` with segments; the record outlives the process when the thread is kept, not only when it was killed. |
 | Switching after the first prompt | `SetAgent` stays allowed while the agent is idle. `AgentFixed` now means only "a turn is running". Switching mid-turn is refused rather than cancelling silently. |
 | What the new agent learns | A **handoff**: the selection below, sent ahead of the user's next prompt as attributed context, never as the user's words. No model writes a summary; selected items keep their full text. |
-| Switching back | Resume the earlier agent's own session (`--resume` for Claude and Codex, `session/load` for ACP agents) and hand it only what happened since it last ran. Its native context is better than any handoff. |
+| Switching back | Resume the earlier agent's own session (`--resume` for Claude and Codex, `session/load` for ACP agents) and hand it only what happened since it last ran. Its native context is better than any handoff. When it cannot resume (the agent lacks ACP's `loadSession` capability, its session is gone, or loading fails), the switch starts a new session as for any other agent, with the full handoff, and the transcript says the earlier session could not be continued. A delta is never sent to a session that does not hold what came before it. |
 | What is left out | Listed by entry id in the handoff, and readable through a `thread_read` tool the chat gives the agent (below). |
 | Forks | A fork is a new thread in a new pane, starting from a chosen entry, with a handoff to its first agent. Merge-back sends the parent a handoff of the fork's new entries. Phase 5. |
 | Thread list | The app lists thread records per host, beside workspaces in `sheprd-session`. Archive hides a record; delete removes it. A thread with no pane is continued by starting `sheprd-acp --thread ID` in a new one. |
-| Storage | One JSON record per thread, as restore records are today, plus the transcript in a bounded append-only file beside it. No database; no daemon. |
+| Storage | One JSON record per thread, as restore records are today, plus the thread's own transcript file beside it (below). No database; no daemon. |
+| Where history is read from | The thread's transcript file, never the attach window, which stays trimmed as today. The handoff and `thread_read` read the same file, so what one names the other can return. Agents' native logs are not a source: their entries have no thread entry ids. |
 
 ## The handoff
 
@@ -59,6 +60,7 @@ Selection follows what T3 Code found works
 (`packages/provider-core/src/server/handoffBudget.ts` there):
 
 1. Always the thread's first prompt, the latest prompt, and the latest reply.
+   The transcript file pins the first prompt (below), so it is always there.
 2. Then entries newest first, until a budget of about 16,000 tokens,
    counted by a byte estimate (no tokenizer dependency).
 3. Kept entries keep their full text: prompts, replies, tool calls with
@@ -66,20 +68,38 @@ Selection follows what T3 Code found works
    per-entry cap is cut with a marker.
 4. Anything not kept is named by entry id, oldest and newest first, with a
    line telling the agent to read it with `thread_read` when it needs it.
+   Entries the transcript file has already trimmed are not named as
+   readable: the handoff says how many were trimmed and that they are gone.
 
-On a switch back, the selection covers only entries after the target's last
-segment, and step 1 uses the latest prompt and reply only.
+On a switch back that resumes the target's own session, the selection
+covers only entries after the target's last segment, and step 1 uses the
+latest prompt and reply only. A switch back that cannot resume uses the full
+selection above.
 
-The handoff text is built in `sheprd-chat-protocol` from the `Transcript`,
-so it is pure and tested without an agent; `sheprd-acp` only sends it.
+The handoff text is built in `sheprd-chat-protocol` from the thread's
+entries and its trimmed ranges, so it is pure and tested without an agent;
+`sheprd-acp` only sends it.
+
+## The transcript file
+
+Each thread appends its entries, with their ids, to one file beside its
+record, separate from the attach window clients see:
+
+- The first prompt is pinned: trimming never removes it.
+- Past the cap (below), the oldest entries after the first prompt are
+  removed, and the file records the removed id range, so a read of it
+  answers "trimmed" rather than nothing.
+- Promises narrow to what the file keeps: the pinned first prompt and every
+  retained entry. Nothing older is fetched from anywhere else.
 
 ## `thread_read`
 
 ACP's `session/new` and `session/load` take `mcpServers`. The chat passes
-one stdio server, `sheprd-acp thread-mcp --endpoint ID`, which connects to
-its own chat's attach socket as a read-only client and offers:
+one stdio server, `sheprd-acp thread-mcp --thread ID`, which opens its own
+thread's transcript file read-only and offers:
 
-- `thread_read { from, to }`: entries by id range, bounded per call.
+- `thread_read { from, to }`: entries by id range, bounded per call; ids
+  in a trimmed range come back as trimmed, not as an error or silence.
 - `thread_search { query }`: entry ids whose text matches, bounded.
 
 The server reads only its own thread, cannot send commands, and ends with
@@ -121,9 +141,8 @@ Each phase is its own pull request.
 ## Bounds
 
 - Handoff: at most 16,000 estimated tokens and 1 MiB.
-- Transcript file per thread: capped and trimmed from the oldest entry, as
-  the attach transcript already is; the native agent log stays the source
-  for anything older.
+- Transcript file per thread: at most 64 MiB, trimmed from the oldest
+  entry after the pinned first prompt, with the trimmed ranges recorded.
 - Segments per thread: capped (64); the oldest are folded into one.
 - `thread_read`: at most 64 entries or 256 KiB per call.
 

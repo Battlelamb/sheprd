@@ -11443,6 +11443,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "sheprd-t3"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sheprd-chat-protocol",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tungstenite 0.30.0",
+ "ureq",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "sheprd-terminal"
 version = "0.1.0"
 dependencies = [

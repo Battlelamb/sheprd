@@ -97,3 +97,21 @@ fn switching_sources_preserves_a_pending_herdr_theme(cx: &mut TestAppContext) {
         assert_eq!(view.theme_intent.as_ref().unwrap().choice, herdr_draft);
     });
 }
+
+#[gpui::test]
+fn source_switch_locates_a_saved_herdr_alias(cx: &mut TestAppContext) {
+    let (view, cx) = cx.add_window_view(fixture);
+    view.update(cx, |view, cx| {
+        view.shared =
+            Some(herdr_settings::Settings::parse_text("[theme]\nname = 'tokyonight'\n").unwrap());
+        let herdr = Choice {
+            scope: Scope::Herdr,
+            name: "tokyo-night".into(),
+        };
+
+        view.set_theme_sources(false, true, cx);
+        assert_eq!(view.themes.choice(), Some(herdr.clone()));
+        assert!(view.theme_card_saved(&herdr));
+        assert!(view.theme_intent.is_none());
+    });
+}

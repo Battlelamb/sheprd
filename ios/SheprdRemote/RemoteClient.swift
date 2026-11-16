@@ -242,6 +242,12 @@ final class RemoteClient: Sendable {
         )
     }
 
+    /// Hands this phone's relay keys for another computer to this one, to
+    /// carry there; posting the same request again reads where it stands.
+    func carryRelay(_ request: API.HostRelayRequest, bearer: String) async throws -> API.HostRelayState {
+        try await send("POST", "/api/v2/hosts/relay", body: request, bearer: bearer)
+    }
+
     // MARK: Tags
 
     /// Offers this phone's copy of the computer's tags; answers those that

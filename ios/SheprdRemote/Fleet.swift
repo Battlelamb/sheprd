@@ -104,6 +104,8 @@ final class Fleet {
     @ObservationIgnored private var relayOrigins: [String: String] = [:]
     /// Computers whose relay keys are being checked or sent.
     @ObservationIgnored private var enrolling: Set<String> = []
+    /// Gets relay keys to computers out of reach through ones online.
+    @ObservationIgnored private var carrier: RelayCarrier?
     /// A computer's relay record changed, or it stopped listening on
     /// relays (nil): the app keeps it with the computer.
     var onRelay: ((String, RelayRecord?) -> Void)?
@@ -122,12 +124,20 @@ final class Fleet {
     init(sessions: Sessions, cache: Cache = .shared) {
         self.sessions = sessions
         self.cache = cache
+        carrier = RelayCarrier(
+            carry: { [weak self] near, request in
+                guard let self else { throw CancellationError() }
+                return try await self.call(near) { client, token in try await client.carryRelay(request, bearer: token) }
+            },
+            onRelay: { [weak self] device, record in self?.onRelay?(device, record) }
+        )
     }
 
     /// Follows `computers`: new ones get a link, forgotten ones lose theirs.
     func sync(_ computers: [Computer]) {
         let wanted = Set(computers.map(\.device))
         for machine in machines where !wanted.contains(machine.id) {
+            carrier?.forget(machine.id)
             stopLink(machine.id)
             cache.clear(machine.id)
             unreported[machine.id] = nil
@@ -703,6 +713,8 @@ final class Fleet {
             if case let .online(origin) = status, origin != relayOrigins[device] {
                 enrollRelay(device)
             }
+            // A computer out of reach may be reached through another.
+            carrier?.check(machines.map { ($0.computer, $0.status) })
         case let .unreachable(failures):
             // Kept for the computer's log, which shows only silence for
             // this: nothing here reached it.

@@ -37,7 +37,7 @@ public struct Lenders: Sendable {
 /// answer's origin tells.
 public actor PullRequestReader {
     private let leases: GitHubLeases
-    private let api: GitHubAPI
+    let api: GitHubAPI
     private let ownSignIn: GitHubSignIn?
 
     public init(leases: GitHubLeases, api: GitHubAPI, signIn: GitHubSignIn? = nil) {
@@ -133,7 +133,7 @@ public actor PullRequestReader {
     /// with a lease for `host`, each once more with a renewed token when
     /// GitHub refuses the first (401); nil when there is none or the reads
     /// fail, for the computer to answer instead.
-    private func attempt<Value: Sendable>(
+    func attempt<Value: Sendable>(
         host: GitHubHost,
         source: Lenders,
         _ read: @Sendable (GitHubAPI, GitHubToken) async throws -> Value

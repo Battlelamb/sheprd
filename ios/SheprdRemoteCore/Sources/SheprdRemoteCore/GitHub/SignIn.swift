@@ -54,6 +54,13 @@ public actor GitHubSignIn {
         return current
     }
 
+    /// When the access token held expires; nil when signed out or for one
+    /// that does not. It renews shortly before.
+    public var expiry: Date? {
+        loadOnce()
+        return held?.expiresAt
+    }
+
     /// The current state, then each change, until the stream is dropped.
     public func states() -> AsyncStream<GitHubSignInState> {
         loadOnce()

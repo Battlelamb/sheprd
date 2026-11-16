@@ -17,6 +17,8 @@ struct ChangesScreen: View {
     @State private var scope = ChangeScope.uncommitted
     @State private var files = Loading<ChangeList>.waiting
     @State private var checks: PullRequestChecks?
+    /// The branch's pull request when GitHub answered: title, state, review.
+    @State private var pullRequest: GitHubPullRequest?
     @State private var checksError: String?
     /// Who answered the checks: GitHub, or the computer when no lease
     /// answered.
@@ -64,7 +66,13 @@ struct ChangesScreen: View {
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets())
             }
-            if let checks, !checks.checks.isEmpty { checksSection(checks) }
+            if scope == .branch, let checks {
+                PullRequestHeader(checks: checks, pullRequest: pullRequest, workspace: workspace, origin: checksOrigin) {
+                    sending = $0
+                }
+            } else if let checks, !checks.checks.isEmpty {
+                checksSection(checks)
+            }
             if let checksError {
                 Section("Pull request checks") {
                     Text(checksError).foregroundStyle(.secondary)
@@ -143,22 +151,24 @@ struct ChangesScreen: View {
         }
         do {
             let read = if let workspace {
-                try await GitHubReads.reader.checks(
+                try await GitHubReads.reader.branchPullRequest(
                     workspace: workspace, computer: machine?.computer.name ?? "", source: fleet.gitHubLenders, askComputer: ask
                 )
             } else {
-                Sourced(try await ask(), from: .computer(machine?.computer.name ?? ""))
+                Sourced(BranchPullRequest(checks: try await ask()), from: .computer(machine?.computer.name ?? ""))
             }
             guard !Task.isCancelled, checksGeneration == generation,
                   branch == workspace?.branch, cwd == workspace?.cwd,
                   number == workspace?.pullRequest?.number else { return }
-            checks = read.value
+            checks = read.value.checks
+            pullRequest = read.value.pullRequest
             checksOrigin = read.origin
         } catch {
             guard !Task.isCancelled, checksGeneration == generation,
                   branch == workspace?.branch, cwd == workspace?.cwd,
                   number == workspace?.pullRequest?.number else { return }
             checks = nil
+            pullRequest = nil
             checksOrigin = nil
             checksError = error.localizedDescription
         }
@@ -232,7 +242,7 @@ private struct ViaComputer: View {
 }
 
 /// A file's name, folder, and line counts.
-private struct FileRow: View {
+struct FileRow: View {
     var file: ChangedFile
 
     var body: some View {
@@ -332,8 +342,6 @@ private struct FileDiffScreen: View {
     let scope: ChangeScope
     let file: ChangedFile
     @State private var diff = Loading<FileDiff>.waiting
-    /// The screen's width, which colored lines fill however short.
-    @State private var width: CGFloat?
 
     var body: some View {
         content
@@ -351,20 +359,7 @@ private struct FileDiffScreen: View {
         case let .loaded(diff) where diff.lines.isEmpty:
             ContentUnavailableView("Nothing to show", systemImage: "doc.text", description: Text(diff.note ?? ""))
         case let .loaded(diff):
-            ScrollView([.vertical, .horizontal]) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    // First, so nobody reads to the end to learn there is more.
-                    if let note = diff.note {
-                        Label(note, systemImage: "scissors").font(.footnote).foregroundStyle(.secondary)
-                            .padding(12).frame(width: width, alignment: .leading)
-                    }
-                    ForEach(Array(diff.lines.enumerated()), id: \.offset) { _, line in DiffLineRow(line: line) }
-                }
-                .frame(minWidth: width, alignment: .leading)
-            }
-            .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
-            // Both axes would otherwise center a diff shorter than the screen.
-            .defaultScrollAnchor(.topLeading)
+            DiffView(diff: diff)
         }
     }
 
@@ -382,6 +377,31 @@ private struct FileDiffScreen: View {
         } catch {
             diff = .failed(error.localizedDescription)
         }
+    }
+}
+
+/// A diff's lines, scrolling both ways; also shows a pull request's
+/// patches from GitHub.
+struct DiffView: View {
+    let diff: FileDiff
+    /// The screen's width, which colored lines fill however short.
+    @State private var width: CGFloat?
+
+    var body: some View {
+        ScrollView([.vertical, .horizontal]) {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                // First, so nobody reads to the end to learn there is more.
+                if let note = diff.note {
+                    Label(note, systemImage: "scissors").font(.footnote).foregroundStyle(.secondary)
+                        .padding(12).frame(width: width, alignment: .leading)
+                }
+                ForEach(Array(diff.lines.enumerated()), id: \.offset) { _, line in DiffLineRow(line: line) }
+            }
+            .frame(minWidth: width, alignment: .leading)
+        }
+        .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
+        // Both axes would otherwise center a diff shorter than the screen.
+        .defaultScrollAnchor(.topLeading)
     }
 }
 

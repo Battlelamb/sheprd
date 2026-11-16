@@ -6,9 +6,9 @@ import Foundation
 /// and REST answers' ETags, so an unchanged answer costs no quota.
 public actor GitHubAPI {
     private let transport: GitHubTransport
-    private let now: @Sendable () -> Date
-    private var paused: [GitHubHost: Date] = [:]
-    private var etags = ETagCache()
+    let now: @Sendable () -> Date
+    var paused: [GitHubHost: Date] = [:]
+    var etags = ETagCache()
 
     public init(transport: @escaping GitHubTransport, now: @escaping @Sendable () -> Date = { Date() }) {
         self.transport = transport
@@ -96,7 +96,7 @@ public actor GitHubAPI {
 
     /// Sends `request` unless `host` is paused, and pauses it when GitHub
     /// says to wait.
-    private func send(_ request: URLRequest, host: GitHubHost, limit: BodyLimit) async throws -> GitHubResponse {
+    func send(_ request: URLRequest, host: GitHubHost, limit: BodyLimit) async throws -> GitHubResponse {
         let now = now()
         if let until = paused[host] {
             if until > now { throw GitHubError.rateLimited(until: until) }

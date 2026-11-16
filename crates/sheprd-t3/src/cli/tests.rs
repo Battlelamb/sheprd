@@ -7,11 +7,9 @@ fn args(list: &[&str]) -> Vec<OsString> {
 #[test]
 fn each_command_parses_with_its_options() {
     assert_eq!(
-        parse(args(&["pair", "--token-file", "/t", "CODE"])).unwrap(),
+        parse(args(&["pair", "--token-file", "/t"])).unwrap(),
         Options {
-            command: Command::Pair {
-                code: "CODE".to_owned()
-            },
+            command: Command::Pair,
             json: false,
             server: None,
             token_file: Some(PathBuf::from("/t")),
@@ -56,6 +54,11 @@ fn mistakes_are_refused_before_anything_runs() {
         parse(args(&["pair", "--server"])),
         Err(Error::Missing("--server"))
     );
+    // A pairing code in the arguments would be visible to other users.
+    assert_eq!(
+        parse(args(&["pair", "CODE", "--token-file", "/t"])),
+        Err(Error::Arguments("pair"))
+    );
     assert_eq!(
         parse(args(&["threads", "--verbose"])),
         Err(Error::Unknown("--verbose".to_owned()))
@@ -64,4 +67,14 @@ fn mistakes_are_refused_before_anything_runs() {
         parse(args(&["delete", "--token-file", "/t"])),
         Err(Error::Unknown("delete".to_owned()))
     );
+}
+
+#[test]
+fn server_text_cannot_drive_the_terminal() {
+    assert_eq!(
+        plain("Fix \u{1b}]52;c;cm0gLXJm\u{7}it"),
+        "Fix \u{fffd}]52;c;cm0gLXJm\u{fffd}it"
+    );
+    assert_eq!(plain("a\tb\nc\u{9b}d"), "a\u{fffd}b\u{fffd}c\u{fffd}d");
+    assert_eq!(plain("é 日本"), "é 日本");
 }

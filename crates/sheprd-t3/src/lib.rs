@@ -16,6 +16,7 @@ pub mod frame;
 pub mod http;
 pub mod shell;
 pub mod thread;
+pub mod token;
 pub mod transcript;
 
 pub use error::{Error, Result};

@@ -4,25 +4,21 @@
 mod cli;
 
 use std::{
-    fs::{File, OpenOptions},
-    io::{Read as _, Write as _},
+    io::{BufRead as _, Read as _},
     path::Path,
     process::ExitCode,
 };
 
 use anyhow::{Context as _, bail};
-use secrecy::{ExposeSecret as _, SecretString};
+use secrecy::SecretString;
 use serde_json::json;
 use sheprd_t3::{
     connection::Connection, discover, frame::ServerFrame, http::Server, shell::Shell,
-    thread::Thread,
+    thread::Thread, token,
 };
 use url::Url;
 
 use cli::{Command, Options};
-
-/// The most a token file may weigh.
-const TOKEN_LIMIT: u64 = 16 * 1024;
 
 fn main() -> ExitCode {
     let options = match cli::parse(std::env::args_os().skip(1)) {
@@ -53,9 +49,21 @@ fn run(options: Options) -> anyhow::Result<()> {
     let token_file = options.token_file.context("--token-file is required")?;
     match options.command {
         Command::Help => Ok(()),
-        Command::Pair { code } => {
-            let access = server.sign_in(&SecretString::from(code), "Sheprd")?;
-            save_token(&token_file, &access.token)?;
+        Command::Pair => {
+            // From stdin, never the arguments, which other users can list.
+            eprintln!("Pairing code from `t3 auth pairing create` on the server's machine:");
+            let mut code = String::new();
+            std::io::stdin()
+                .lock()
+                .take(1024)
+                .read_line(&mut code)
+                .context("could not read the pairing code")?;
+            let code = code.trim();
+            if code.is_empty() {
+                bail!("no pairing code");
+            }
+            let access = server.sign_in(&SecretString::from(code.to_owned()), "Sheprd")?;
+            token::save(&token_file, &descriptor.environment_id, &access.token)?;
             if options.json {
                 println!(
                     "{}",
@@ -69,16 +77,16 @@ fn run(options: Options) -> anyhow::Result<()> {
             } else {
                 println!(
                     "Signed in to {} (T3 Code {}) with {}; the token is in {}.",
-                    descriptor.label,
-                    descriptor.server_version,
-                    access.scope,
+                    cli::plain(&descriptor.label),
+                    cli::plain(&descriptor.server_version),
+                    cli::plain(&access.scope),
                     token_file.display()
                 );
             }
             Ok(())
         }
         Command::Threads => {
-            let mut connection = connect(&server, &token_file)?;
+            let mut connection = connect(&server, &descriptor.environment_id, &token_file)?;
             let id = connection.request("orchestration.subscribeShell", json!({}))?;
             let mut shell = Shell::default();
             first_chunk(&mut connection, &id, |value| shell.apply(value))?;
@@ -87,7 +95,7 @@ fn run(options: Options) -> anyhow::Result<()> {
             print_threads(&shell, options.json)
         }
         Command::Show { thread } => {
-            let mut connection = connect(&server, &token_file)?;
+            let mut connection = connect(&server, &descriptor.environment_id, &token_file)?;
             let id = connection.request(
                 "orchestration.subscribeThread",
                 json!({ "threadId": thread }),
@@ -108,9 +116,13 @@ fn run(options: Options) -> anyhow::Result<()> {
             if options.json {
                 println!("{}", serde_json::to_string_pretty(&transcript)?);
             } else {
-                println!("{} ({:?})", state.header.title, transcript.status);
+                println!(
+                    "{} ({:?})",
+                    cli::plain(&state.header.title),
+                    transcript.status
+                );
                 for entry in &transcript.entries {
-                    println!("{}", line(&entry.kind));
+                    println!("{}", cli::plain(&line(&entry.kind)));
                 }
             }
             Ok(())
@@ -131,8 +143,14 @@ fn origin(server: Option<&str>) -> anyhow::Result<Url> {
     Ok(discover::local_origin(&home)?)
 }
 
-fn connect(server: &Server, token_file: &Path) -> anyhow::Result<Connection<std::net::TcpStream>> {
-    let token = read_token(token_file)?;
+/// A connection with the token in `token_file`, which only the server
+/// `environment_id`, the one answering now, may receive.
+fn connect(
+    server: &Server,
+    environment_id: &str,
+    token_file: &Path,
+) -> anyhow::Result<Connection<std::net::TcpStream>> {
+    let token = token::load(token_file, environment_id)?;
     let ticket = server.ticket(&token)?;
     Ok(Connection::open(&server.socket(&ticket)?)?)
 }
@@ -194,7 +212,13 @@ fn print_threads(shell: &Shell, json: bool) -> anyhow::Result<()> {
         } else {
             thread.status.as_deref().unwrap_or("?")
         };
-        println!("{}\t{project}\t{status}\t{}", thread.id, thread.title);
+        println!(
+            "{}\t{}\t{}\t{}",
+            cli::plain(&thread.id),
+            cli::plain(project),
+            cli::plain(status),
+            cli::plain(&thread.title)
+        );
     }
     Ok(())
 }
@@ -212,34 +236,4 @@ fn line(kind: &sheprd_chat_protocol::EntryKind) -> String {
         EntryKind::Image { .. } => "[picture]".to_owned(),
         EntryKind::Turn(_) => String::new(),
     }
-}
-
-fn save_token(path: &Path, token: &SecretString) -> anyhow::Result<()> {
-    let mut options = OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let mut file = options
-        .open(path)
-        .with_context(|| format!("could not write {}", path.display()))?;
-    file.write_all(token.expose_secret().as_bytes())?;
-    Ok(())
-}
-
-fn read_token(path: &Path) -> anyhow::Result<SecretString> {
-    let mut text = String::new();
-    File::open(path)
-        .with_context(|| {
-            format!(
-                "could not read {}; run `sheprd-t3 pair` first",
-                path.display()
-            )
-        })?
-        .take(TOKEN_LIMIT)
-        .read_to_string(&mut text)?;
-    let token = text.trim();
-    if token.is_empty() {
-        bail!("{} holds no token", path.display());
-    }
-    Ok(SecretString::from(token.to_owned()))
 }

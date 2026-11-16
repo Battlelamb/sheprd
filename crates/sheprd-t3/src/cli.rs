@@ -6,13 +6,14 @@ pub const HELP: &str = "\
 sheprd-t3: read T3 Code threads as Sheprd chats
 
 Usage:
-  sheprd-t3 pair --token-file FILE [--server URL] CODE
+  sheprd-t3 pair --token-file FILE [--server URL]
   sheprd-t3 threads --token-file FILE [--server URL] [--json]
   sheprd-t3 show --token-file FILE [--server URL] [--json] THREAD
 
 Commands:
   pair      Sign in with a one-time code from `t3 auth pairing create` on
-            the server's machine, and keep the token in FILE (mode 0600)
+            the server's machine, read from stdin, and keep the token in
+            FILE (mode 0600), usable only with that server
   threads   List the server's threads
   show      Print one thread as a chat transcript
 
@@ -27,7 +28,7 @@ Options:
 #[derive(Debug, Eq, PartialEq)]
 pub enum Command {
     Help,
-    Pair { code: String },
+    Pair,
     Threads,
     Show { thread: String },
 }
@@ -54,6 +55,14 @@ pub enum Error {
     Arguments(&'static str),
     #[error("--token-file is required")]
     TokenFile,
+}
+
+/// `text` from the server, safe for a terminal: control characters, which
+/// could move the cursor or start an escape sequence, become `\u{fffd}`.
+pub fn plain(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { '\u{fffd}' } else { c })
+        .collect()
 }
 
 /// Parses the arguments after the program's name.
@@ -99,9 +108,9 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Options, Error>
     };
     let command = match command.as_deref() {
         None => return Err(Error::NoCommand),
-        Some("pair") => Command::Pair {
-            code: one("pair", positional)?,
-        },
+        // The code comes on stdin: arguments are visible to other users.
+        Some("pair") if positional.is_empty() => Command::Pair,
+        Some("pair") => return Err(Error::Arguments("pair")),
         Some("threads") if positional.is_empty() => Command::Threads,
         Some("threads") => return Err(Error::Arguments("threads")),
         Some("show") => Command::Show {

@@ -39,6 +39,8 @@ pub enum Error {
     /// to a proof key.
     #[error("T3 Code issued a {0} token; this client uses Bearer tokens")]
     TokenType(String),
+    #[error(transparent)]
+    Token(#[from] crate::token::Error),
     /// A message larger than this client accepts.
     #[error("T3 Code sent a message over {limit} bytes")]
     TooLarge { limit: usize },

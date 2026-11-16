@@ -4,6 +4,7 @@ use serde_json::json;
 mod addresses;
 mod changes;
 mod github;
+mod host_relay;
 mod layout;
 mod pull_requests;
 mod relays;

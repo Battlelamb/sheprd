@@ -13,6 +13,7 @@ pub mod app_update;
 pub mod changes;
 pub mod edited;
 pub mod github;
+pub mod host_relay;
 pub mod hosts;
 pub mod layout;
 pub mod pull_requests;
@@ -250,6 +251,21 @@ pub enum Request {
         id: changes::AskId,
         answer: layout::Answer,
     },
+    /// Takes the phones' requests to carry their relay keys to another of
+    /// their computers (`host_relay`) that Sheprd has not taken yet. An
+    /// older daemon refuses it, and Sheprd then carries none.
+    HostRelays,
+    /// What carrying `relay` came to.
+    HostRelayed {
+        /// The phone, as this computer knows it.
+        device: DeviceId,
+        /// Boxed, as the largest request, so every request stays small.
+        relay: Box<host_relay::Request>,
+        outcome: Box<host_relay::Outcome>,
+    },
+    /// On a host: keeps a phone's relay keys, signed with its own device
+    /// key there, as `herdr-remote-control relay-enroll` asks.
+    RelayEnroll(Box<host_relay::Request>),
     /// Takes the phones' asks for Sheprd's GitHub sign-in, waiting up to
     /// [`ASK_WAIT`] for one. Sheprd sends it while a phone is connected or
     /// its status counts asks waiting (`Status::github_asks`).
@@ -325,6 +341,10 @@ pub enum Response {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         layout: Vec<layout::Ask>,
     },
+    HostRelays {
+        jobs: Vec<host_relay::Job>,
+    },
+    Relayed(host_relay::Outcome),
     #[serde(rename = "github_lease_asks")]
     GitHubLeaseAsks {
         asks: Vec<github::LeaseAsk>,

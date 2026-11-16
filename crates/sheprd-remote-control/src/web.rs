@@ -241,6 +241,10 @@ pub(crate) fn router(state: Shared) -> Router {
         .route("/api/v2/github/token", get(crate::native::github::token))
         .route("/api/v2/home", get(crate::native::get_home))
         .route("/api/v2/hosts", get(hosts::list))
+        .route(
+            "/api/v2/hosts/relay",
+            post(hosts::relay).layer(DefaultBodyLimit::max(16 * 1024)),
+        )
         .route("/api/v2/hosts/{host}/pair", post(hosts::pair))
         .route("/api/v2/live", get(crate::native::live))
         .route("/api/v2/new", get(crate::native::new_options))
@@ -486,9 +490,12 @@ impl IntoResponse for ApiError {
             Self::Auth(auth::Error::Links(auth::links::Error::UnknownHost)) => {
                 StatusCode::NOT_FOUND
             }
-            Self::Auth(auth::Error::Links(
-                auth::links::Error::Busy | auth::links::Error::TooMany,
-            )) => StatusCode::TOO_MANY_REQUESTS,
+            Self::Auth(
+                auth::Error::Links(auth::links::Error::Busy | auth::links::Error::TooMany)
+                | auth::Error::HostRelay(
+                    auth::host_relays::Error::Busy | auth::host_relays::Error::TooMany,
+                ),
+            ) => StatusCode::TOO_MANY_REQUESTS,
             Self::Auth(
                 auth::Error::Store { .. }
                 | auth::Error::StoreFormat { .. }

@@ -19,7 +19,7 @@
 pub mod agent;
 pub mod authorized;
 pub mod cli;
-mod error;
+pub mod error;
 pub mod files;
 pub mod keys;
 mod listen;

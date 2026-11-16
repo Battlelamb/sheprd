@@ -154,3 +154,20 @@ fn concurrent_changes_to_the_desktops_are_never_lost() {
     assert!(authorized.admits(&kept.entry().tunnel));
     assert!(!authorized.admits(&revoked.entry().tunnel));
 }
+
+#[test]
+fn a_second_agent_on_the_same_state_directory_refuses_to_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let options = || Options {
+        forward: "127.0.0.1:22".parse().unwrap(),
+        relays: Vec::new(),
+        state_dir: dir.path().to_owned(),
+    };
+    let first = Agent::load(options()).unwrap();
+    assert!(matches!(
+        Agent::load(options()),
+        Err(crate::Error::AlreadyRunning { .. })
+    ));
+    drop(first);
+    Agent::load(options()).unwrap();
+}

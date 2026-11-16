@@ -4,6 +4,8 @@ use std::path::PathBuf;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     // keep-sorted start
+    #[error("another agent is already running on {}", path.display())]
+    AlreadyRunning { path: PathBuf },
     #[error("{} holds more than {} desktops", path.display(), crate::authorized::MAX_ENTRIES)]
     AuthorizedFull { path: PathBuf },
     #[error("{} line {line} is not `DIAL_KEY TUNNEL_KEY [LABEL]`", path.display())]
@@ -42,3 +44,17 @@ pub enum Error {
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+/// `error` and its sources joined with `: `, for `status` and the command
+/// line, where the cause matters more than the step.
+#[must_use]
+pub fn chain(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    text
+}

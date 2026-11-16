@@ -112,6 +112,17 @@ struct Running {
 
 async fn start(dir: &Path) -> Running {
     let (http, quic, pin) = relay().await;
+    let (agent, stop) = start_on(dir, http).await;
+    Running {
+        agent,
+        quic,
+        pin,
+        _stop: stop,
+    }
+}
+
+/// An agent on `dir` listening on the relay at `http`, once it listens.
+async fn start_on(dir: &Path, http: SocketAddr) -> (Arc<Agent>, watch::Sender<bool>) {
     let forward = ssh_server().await;
     let options = Options {
         forward,
@@ -124,22 +135,20 @@ async fn start(dir: &Path) -> Running {
     let agent = Agent::load(options).unwrap();
     let (stop, stopped) = watch::channel(false);
     tokio::spawn(Arc::clone(&agent).run(stopped));
+    until(&agent, |state| *state == RelayState::Listening).await;
+    (agent, stop)
+}
+
+/// Waits, up to five seconds, for the agent's one relay to be in a state
+/// `wanted` accepts.
+async fn until(agent: &Agent, wanted: impl Fn(&RelayState) -> bool) {
     for _ in 0..100 {
-        if agent
-            .relay_states()
-            .values()
-            .any(|state| *state == RelayState::Listening)
-        {
-            return Running {
-                agent,
-                quic,
-                pin,
-                _stop: stop,
-            };
+        if agent.relay_states().values().any(&wanted) {
+            return;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    panic!("never listened: {:?}", agent.relay_states());
+    panic!("never reached the state: {:?}", agent.relay_states());
 }
 
 /// A session's plaintext end, and the QUIC connection that carries it.
@@ -241,4 +250,35 @@ async fn removing_a_desktop_ends_its_session() {
     // The other desktop still gets through.
     let mut session = dial(&running, &other).await.unwrap();
     assert_eq!(greeting(&mut session.io).await, b"SSH-2.0-test\r\n");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_another_replaced_stops_reporting_listening() {
+    let (http, _, _) = relay().await;
+    let first_dir = tempfile::tempdir().unwrap();
+    let (first, _first_stop) = start_on(first_dir.path(), http).await;
+    // A copy of the same keys elsewhere: the relay gives it the route.
+    let second_dir = tempfile::tempdir().unwrap();
+    std::fs::copy(
+        first_dir.path().join(crate::keys::FILE),
+        second_dir.path().join(crate::keys::FILE),
+    )
+    .unwrap();
+    let (second, _second_stop) = start_on(second_dir.path(), http).await;
+    assert_eq!(first.route(), second.route());
+    let replaced = client::Error::Replaced.to_string();
+    until(
+        &first,
+        |state| matches!(state, RelayState::Failed { error } if error.ends_with(&replaced)),
+    )
+    .await;
+    // It waits the longest backoff before trying again, so the second
+    // keeps the route rather than the two trading it.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(
+        second
+            .relay_states()
+            .values()
+            .all(|state| *state == RelayState::Listening)
+    );
 }

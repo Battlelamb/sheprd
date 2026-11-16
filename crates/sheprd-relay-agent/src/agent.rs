@@ -4,6 +4,7 @@
 use crate::{
     Result,
     authorized::Authorized,
+    files::RunLock,
     keys::Keys,
     listen,
     status::{self, Live, RelayState},
@@ -52,6 +53,8 @@ impl std::fmt::Debug for Relay {
 /// The agent's keys, its desktops, and each relay's state.
 #[derive(Debug)]
 pub struct Agent {
+    /// Keeps a second agent off this state directory while this one lives.
+    _run: RunLock,
     authorized: watch::Sender<Authorized>,
     forward: SocketAddr,
     pub(crate) keys: Keys,
@@ -61,16 +64,19 @@ pub struct Agent {
 }
 
 impl Agent {
-    /// Loads or makes the keys and reads the desktops. Blocking.
+    /// Loads or makes the keys and reads the desktops; refuses when
+    /// another agent runs on the same state directory. Blocking.
     pub fn load(options: Options) -> Result<Arc<Self>> {
         let Options {
             forward,
             relays,
             state_dir,
         } = options;
+        let run = RunLock::try_acquire(&state_dir)?;
         let keys = Keys::load_or_create(&state_dir)?;
         let authorized = watch::Sender::new(Authorized::load(&state_dir)?);
         Ok(Arc::new(Self {
+            _run: run,
             authorized,
             forward,
             keys,

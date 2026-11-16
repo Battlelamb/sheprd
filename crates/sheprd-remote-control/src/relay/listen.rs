@@ -37,6 +37,11 @@ pub(super) async fn run(
         };
         relays.set_rtt(&endpoint, None);
         if let Err(error) = result {
+            // Another listener with this computer's key took the route: come
+            // back slowly, so the two do not take it from each other forever.
+            if matches!(error, Error::Client(client::Error::Replaced)) {
+                wait = LONGEST;
+            }
             tracing::warn!(relay = %endpoint, error = %error, "relay listening failed");
             relays.set_status(
                 &endpoint,
@@ -104,7 +109,7 @@ async fn session(
             _ = pairing.changed() => add_pairing(relays, &mut listener).await,
             _ = revoked.changed() => listener.set_dial_keys(dial_keys(state)).await?,
             _ = measure.tick() => relays.set_rtt(endpoint, Some(listener.rtt())),
-            error = listener.closed() => return Err(Error::Client(error.into())),
+            error = listener.closed() => return Err(Error::Client(error)),
         }
     }
 }

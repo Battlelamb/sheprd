@@ -44,22 +44,13 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("sheprd-relay-agent: {}", chain(&error));
+            eprintln!(
+                "sheprd-relay-agent: {}",
+                sheprd_relay_agent::error::chain(&error)
+            );
             ExitCode::FAILURE
         }
     }
-}
-
-/// `error` and its sources, joined.
-fn chain(error: &dyn std::error::Error) -> String {
-    let mut text = error.to_string();
-    let mut source = error.source();
-    while let Some(cause) = source {
-        text.push_str(": ");
-        text.push_str(&cause.to_string());
-        source = cause.source();
-    }
-    text
 }
 
 fn execute(command: Command, state_dir: &Path) -> Result<()> {

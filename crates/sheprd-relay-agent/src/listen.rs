@@ -2,7 +2,7 @@
 //! authorized desktops' dial keys, and hand each dial to [`crate::serve`];
 //! reconnect with backoff when anything breaks.
 
-use crate::{Result, agent::Agent, agent::Relay, serve, status::RelayState};
+use crate::{Error, Result, agent::Agent, agent::Relay, serve, status::RelayState};
 use sheprd_relay::client::{self, Listener};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::watch;
@@ -21,11 +21,16 @@ pub(crate) async fn run(agent: Arc<Agent>, relay: Relay, mut stopped: watch::Rec
             _ = stopped.wait_for(|stop| *stop) => return,
         };
         if let Err(error) = result {
+            // Another agent with these keys took the route: come back
+            // slowly, so the two do not take it from each other forever.
+            if matches!(error, Error::Client(client::Error::Replaced)) {
+                wait = LONGEST;
+            }
             tracing::warn!(relay = %relay.endpoint, error = %error, "relay listening failed");
             agent.set_state(
                 &relay.endpoint,
                 RelayState::Failed {
-                    error: error.to_string(),
+                    error: crate::error::chain(&error),
                 },
             );
         }
@@ -71,7 +76,7 @@ async fn session(agent: &Arc<Agent>, relay: &Relay, wait: &mut Duration) -> Resu
                 let keys = authorized.borrow_and_update().dial_keys();
                 listener.set_dial_keys(keys).await?;
             }
-            error = listener.closed() => return Err(client::Error::from(error).into()),
+            error = listener.closed() => return Err(error.into()),
         }
     }
 }

@@ -119,19 +119,48 @@ impl Lock {
     /// Waits for the lock on `state_dir`, creating the directory and its
     /// lock file when missing. Blocking.
     pub fn acquire(state_dir: &Path) -> Result<Self> {
-        create_private_dir(state_dir)?;
-        let path = state_dir.join(LOCK);
-        let mut options = OpenOptions::new();
-        options.read(true).write(true).create(true).truncate(false);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let file = options.open(&path).map_err(io_error(&path))?;
+        let (file, path) = lock_file(state_dir, LOCK)?;
         file.lock().map_err(io_error(&path))?;
         Ok(Self { _file: file })
     }
+}
+
+/// Held by the running agent for its whole life, so a second `run` on the
+/// same state directory refuses to start rather than taking the route from
+/// the first on every relay, which would leave the first listening on
+/// nothing.
+#[derive(Debug)]
+pub struct RunLock {
+    _file: fs::File,
+}
+
+const RUN_LOCK: &str = "run.lock";
+
+impl RunLock {
+    /// Takes the run lock on `state_dir`, or [`Error::AlreadyRunning`].
+    /// Blocking only to open the file.
+    pub fn try_acquire(state_dir: &Path) -> Result<Self> {
+        let (file, path) = lock_file(state_dir, RUN_LOCK)?;
+        match file.try_lock() {
+            Ok(()) => Ok(Self { _file: file }),
+            Err(fs::TryLockError::WouldBlock) => Err(Error::AlreadyRunning { path }),
+            Err(fs::TryLockError::Error(source)) => Err(io_error(&path)(source)),
+        }
+    }
+}
+
+fn lock_file(state_dir: &Path, name: &str) -> Result<(fs::File, PathBuf)> {
+    create_private_dir(state_dir)?;
+    let path = state_dir.join(name);
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(&path).map_err(io_error(&path))?;
+    Ok((file, path))
 }
 
 /// Removes `path`, when it exists. Blocking.

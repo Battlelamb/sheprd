@@ -18,6 +18,9 @@ struct ChangesScreen: View {
     @State private var files = Loading<ChangeList>.waiting
     @State private var checks: PullRequestChecks?
     @State private var checksError: String?
+    /// Who answered the checks: GitHub, or the computer when no lease
+    /// answered.
+    @State private var checksOrigin: ReadOrigin?
     @State private var checksGeneration = UUID()
     @State private var sending: PullRequestCheck?
     #if DEBUG
@@ -67,7 +70,7 @@ struct ChangesScreen: View {
                     Text(checksError).foregroundStyle(.secondary)
                 }
             }
-            if machine?.home?.github == false {
+            if machine?.home?.github == false, checksOrigin != .github {
                 Section {
                     Text("Standalone GitHub reads are not enabled on this computer. Its owner can sign in with gh and enable remote GitHub CLI reads there.")
                         .foregroundStyle(.secondary)
@@ -134,19 +137,29 @@ struct ChangesScreen: View {
         let cwd = workspace?.cwd
         let number = workspace?.pullRequest?.number
         checksError = nil
+        let fleet = model.fleet
+        let ask: @Sendable () async throws -> PullRequestChecks = {
+            try await fleet.call(device) { client, token in try await client.checks(workspace: id, bearer: token) }
+        }
         do {
-            let read = try await model.fleet.call(device) { client, token in
-                try await client.checks(workspace: id, bearer: token)
+            let read = if let workspace {
+                try await GitHubReads.reader.checks(
+                    workspace: workspace, computer: machine?.computer.name ?? "", source: fleet.gitHubLenders, askComputer: ask
+                )
+            } else {
+                Sourced(try await ask(), from: .computer(machine?.computer.name ?? ""))
             }
             guard !Task.isCancelled, checksGeneration == generation,
                   branch == workspace?.branch, cwd == workspace?.cwd,
                   number == workspace?.pullRequest?.number else { return }
-            checks = read
+            checks = read.value
+            checksOrigin = read.origin
         } catch {
             guard !Task.isCancelled, checksGeneration == generation,
                   branch == workspace?.branch, cwd == workspace?.cwd,
                   number == workspace?.pullRequest?.number else { return }
             checks = nil
+            checksOrigin = nil
             checksError = error.localizedDescription
         }
     }
@@ -198,6 +211,22 @@ struct ChangesScreen: View {
             }
         } header: {
             Text(verbatim: checks.number.map { "Checks on #\($0)" } ?? "Checks")
+        } footer: {
+            ViaComputer(origin: checksOrigin, direct: workspace?.github != nil)
+        }
+    }
+}
+
+/// "via NAME" under an answer the computer gave where GitHub could have:
+/// the phone fell back to it quietly.
+private struct ViaComputer: View {
+    var origin: ReadOrigin?
+    /// The workspace names a GitHub repository the phone could read.
+    var direct: Bool
+
+    var body: some View {
+        if direct, case let .computer(name)? = origin, !name.isEmpty {
+            Text("via \(name)").font(.caption2).foregroundStyle(.secondary)
         }
     }
 }
@@ -396,9 +425,18 @@ private struct SendLogSheet: View {
     let key: WorkspaceKey
     let check: PullRequestCheck
     @State private var excerpt = Loading<String>.waiting
+    @State private var excerptOrigin: ReadOrigin?
     @State private var pane: String?
     @State private var sendingNow = false
     @State private var problem: String?
+
+    private var machine: Fleet.Machine? {
+        model.fleet.machines.first { $0.id == key.device }
+    }
+
+    private var workspace: Home.Workspace? {
+        machine?.home?.workspaces.first { $0.id == key.workspace }
+    }
 
     private var chats: [ChatItem] {
         model.fleet.chatItems.filter { $0.computer.device == key.device && $0.workspace.id == key.workspace }
@@ -424,8 +462,12 @@ private struct SendLogSheet: View {
                             .pickerStyle(.inline)
                         }
                     }
-                    Section("Log excerpt") {
+                    Section {
                         Text(text).font(.caption.monospaced()).textSelection(.enabled)
+                    } header: {
+                        Text("Log excerpt")
+                    } footer: {
+                        ViaComputer(origin: excerptOrigin, direct: workspace?.github != nil)
                     }
                     if let problem { Section { Text(problem).foregroundStyle(.red) } }
                 }
@@ -450,10 +492,20 @@ private struct SendLogSheet: View {
         pane = pane ?? chats.first?.chat.pane
         guard let job = check.job else { return }
         let (device, id) = (key.device, key.workspace)
+        let fleet = model.fleet
+        let ask: @Sendable () async throws -> CheckLogExcerpt = {
+            try await fleet.call(device) { client, token in try await client.checkLog(job: job, workspace: id, bearer: token) }
+        }
         do {
-            excerpt = .loaded(try await model.fleet.call(device) { client, token in
-                try await client.checkLog(job: job, workspace: id, bearer: token)
-            }.excerpt)
+            let read = if let workspace {
+                try await GitHubReads.reader.checkLog(
+                    job: job, workspace: workspace, computer: machine?.computer.name ?? "", source: fleet.gitHubLenders, askComputer: ask
+                )
+            } else {
+                Sourced(try await ask(), from: .computer(machine?.computer.name ?? ""))
+            }
+            excerpt = .loaded(read.value.excerpt)
+            excerptOrigin = read.origin
         } catch {
             excerpt = .failed(error.localizedDescription)
         }
@@ -475,6 +527,34 @@ private struct SendLogSheet: View {
             } catch {
                 problem = error.localizedDescription
             }
+        }
+    }
+}
+
+/// The phone's own GitHub reads, shared by every screen so leases, rate
+/// limits, and ETags hold across them.
+enum GitHubReads {
+    static let reader = PullRequestReader.live()
+}
+
+extension Fleet {
+    /// The paired computers as lenders of GitHub tokens: the hosts each
+    /// one's latest home lends, and when it last answered, now for those
+    /// online. A computer no longer paired is not among them, so what it
+    /// lent is forgotten at the next read.
+    var gitHubLenders: Lenders {
+        let lenders = machines.map { machine in
+            let online = if case .online = machine.status { true } else { false }
+            return GitHubLender(device: machine.id, name: machine.computer.name, home: machine.home, reached: online ? .now : machine.updated)
+        }
+        return Lenders(lenders: lenders) { [self] device, host in try await lease(host, from: device) }
+    }
+
+    private func lease(_ host: GitHubHost, from device: String) async throws -> LeaseFetch {
+        do {
+            return .lease(try await call(device) { client, token in try await client.githubToken(host: host, bearer: token) })
+        } catch let RemoteError.status(status, _) {
+            return .status(status)
         }
     }
 }

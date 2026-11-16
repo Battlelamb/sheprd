@@ -123,12 +123,18 @@ pub struct Relay {
     pub label: RelayLabel,
 }
 
-impl From<&str> for Relay {
-    fn from(endpoint: &str) -> Self {
+impl From<String> for Relay {
+    fn from(endpoint: String) -> Self {
         Self {
-            endpoint: endpoint.to_owned(),
+            endpoint,
             label: RelayLabel::default(),
         }
+    }
+}
+
+impl From<&str> for Relay {
+    fn from(endpoint: &str) -> Self {
+        endpoint.to_owned().into()
     }
 }
 
@@ -317,8 +323,9 @@ pub enum Edit {
     Notifications(Privacy),
     Port(u16),
     Presence(bool),
-    /// The whole list, as Settings shows it after adding or removing one.
-    Relays(Vec<String>),
+    /// The whole list, as Settings shows it after adding or removing one;
+    /// each keeps its label.
+    Relays(Vec<Relay>),
 }
 
 impl Edit {
@@ -357,17 +364,45 @@ impl Edit {
                 // list matches the relays its status reports.
                 let mut listed = toml_edit::Array::new();
                 let mut seen = Vec::new();
-                for relay in relays {
-                    let address = relay_address(&relay)?;
-                    if !seen.contains(&address) {
-                        listed.push(address.as_str());
-                        seen.push(address);
+                for Relay { endpoint, label } in relays {
+                    let address = relay_address(&endpoint)?;
+                    if seen.contains(&address) {
+                        continue;
                     }
+                    label.check().map_err(|source| Error::RelayLabel {
+                        relay: address.clone(),
+                        source,
+                    })?;
+                    listed.push(relay_value(&address, label));
+                    seen.push(address);
                 }
                 ("relays", toml_edit::Value::Array(listed))
             }
         })
     }
+}
+
+/// A relay as the config file writes it: its address alone, or a table
+/// with its label.
+fn relay_value(address: &str, label: RelayLabel) -> toml_edit::Value {
+    if label.is_empty() {
+        return address.into();
+    }
+    let mut table = toml_edit::InlineTable::new();
+    table.insert("endpoint", address.into());
+    if let Some(name) = label.name {
+        table.insert("name", name.into());
+    }
+    if let Some(description) = label.description {
+        table.insert("description", description.into());
+    }
+    if !label.tags.is_empty() {
+        table.insert(
+            "tags",
+            label.tags.iter().collect::<toml_edit::Array>().into(),
+        );
+    }
+    toml_edit::Value::InlineTable(table)
 }
 
 /// A relay's address as the daemon names it in its status and saves it:

@@ -66,3 +66,51 @@ fn a_relay_label_the_daemon_cannot_use_is_refused() {
         );
     }
 }
+
+#[test]
+fn saving_the_list_from_settings_keeps_each_label() -> anyhow::Result<()> {
+    use crate::config::{preferences::Preference, remote::Edit};
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("local.toml");
+    let fra3 = Relay {
+        endpoint: " https://fra3.example.org/ ".into(),
+        label: RelayLabel {
+            description: Some("not for public use".into()),
+            name: Some("fra3".into()),
+            tags: vec!["eu".into(), "private".into()],
+        },
+    };
+    Config::save_preference_path(
+        Preference::Remote(Edit::Relays(vec![
+            "https://sfo3.example.org".into(),
+            fra3.clone(),
+        ])),
+        &path,
+    )?;
+    let saved = Config::parse(&fs::read_to_string(&path)?)?.remote.relays;
+    assert_eq!(
+        saved,
+        [
+            Relay::from("https://sfo3.example.org"),
+            Relay {
+                // Written as the daemon names it.
+                endpoint: "https://fra3.example.org".into(),
+                ..fra3.clone()
+            },
+        ]
+    );
+    // A label the daemon would refuse is not written.
+    let blank = Relay {
+        label: RelayLabel {
+            name: Some(" ".into()),
+            ..RelayLabel::default()
+        },
+        ..fra3
+    };
+    let before = fs::read_to_string(&path)?;
+    assert!(
+        Config::save_preference_path(Preference::Remote(Edit::Relays(vec![blank])), &path).is_err()
+    );
+    assert_eq!(fs::read_to_string(&path)?, before);
+    Ok(())
+}

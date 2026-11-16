@@ -6,7 +6,10 @@
 
 use super::{Edit, SettingsWindow, ui};
 use crate::{
-    config::{Theme, remote::relay_address},
+    config::{
+        Theme,
+        remote::{Relay, relay_address},
+    },
     i18n::{Localize, fl},
     remote::{
         Health,
@@ -58,7 +61,7 @@ impl Standing {
                 .ok()
                 .and_then(|address| status.relays.get(&address))
         });
-        match reported {
+        match reported.map(|reported| &reported.state) {
             Some(RelayState::Listening) => Self::Listening,
             Some(RelayState::Connecting) => Self::Connecting,
             Some(RelayState::Failed { error }) => Self::Failed(error.clone()),
@@ -92,6 +95,29 @@ impl Standing {
     }
 }
 
+/// A listed relay's description: how it stands, then, for a labelled one,
+/// its address when a name took its place, its description, and its tags.
+pub(in crate::settings_window) fn relay_line(relay: &Relay, standing: &Standing) -> String {
+    let label = &relay.label;
+    let mut parts = vec![standing.line()];
+    if label.name.is_some() {
+        parts.push(crate::notifications::safe_text(&relay.endpoint, 200));
+    }
+    if let Some(description) = &label.description {
+        parts.push(crate::notifications::safe_text(description, 256));
+    }
+    if !label.tags.is_empty() {
+        let tags = label
+            .tags
+            .iter()
+            .map(|tag| crate::notifications::safe_text(tag, 32))
+            .collect::<Vec<_>>()
+            .join(", ");
+        parts.push(fl!("settings-remote-relay-tags", tags = tags));
+    }
+    parts.join(" · ")
+}
+
 /// A public relay's title: its name and region when the list gives them,
 /// else its address.
 pub(in crate::settings_window) fn public_title(relay: &Public) -> String {
@@ -118,7 +144,9 @@ impl SettingsWindow {
             .remote
             .relays
             .iter()
-            .any(|relay| relay == address || relay_address(relay).is_ok_and(|it| it == address))
+            .any(|Relay { endpoint, .. }| {
+                endpoint == address || relay_address(endpoint).is_ok_and(|it| it == address)
+            })
     }
 
     fn save_with_relay(&mut self, address: String, cx: &mut Context<Self>) {
@@ -126,7 +154,7 @@ impl SettingsWindow {
             return;
         }
         let mut relays = self.config.remote.relays.clone();
-        relays.push(address);
+        relays.push(address.into());
         self.save_remote(Edit::Relays(relays), cx);
     }
 
@@ -243,8 +271,12 @@ impl SettingsWindow {
         let relays = &self.config.remote.relays;
         let idle = !self.busy();
         let rows = relays.iter().enumerate().map(|(index, relay)| {
-            let name = crate::notifications::safe_text(relay, 200);
-            let standing = Standing::of(relay, health);
+            let address = crate::notifications::safe_text(&relay.endpoint, 200);
+            let name = relay.label.name.as_deref().map_or_else(
+                || address.clone(),
+                |name| crate::notifications::safe_text(name, 64),
+            );
+            let standing = Standing::of(&relay.endpoint, health);
             let remove = ui::button(
                 theme,
                 format!("remote-relay-{index}-remove"),
@@ -262,7 +294,7 @@ impl SettingsWindow {
             });
             ui::row(theme, format!("remote-relay-{index}"), name)
                 .dot(standing.color(theme))
-                .description(standing.line())
+                .description(relay_line(relay, &standing))
                 .control(remove)
                 .into_any_element()
         });

@@ -49,6 +49,8 @@ settings-remote-relay-listening = Listening
 settings-remote-relay-connecting = Connecting…
 settings-remote-relay-failed = Failed: { $error }
 settings-remote-relay-unreported = The daemon has not reported on it yet.
+# $tags is the relay's tags from remote.relays, joined with commas.
+settings-remote-relay-tags = Tags: { $tags }
 settings-remote-relay-remove = Remove
 settings-remote-relay-remove-label = Remove { $relay }
 settings-remote-relay-add = Add a relay

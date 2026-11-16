@@ -30,6 +30,19 @@ Or name them in the config file:
 relays = ["https://relay.example.org"]
 ```
 
+To tell relays apart, give one a name, a description, and tags. Write it as a table instead of an address:
+
+```toml
+[remote]
+relays = [
+  "https://relay.example.org",
+  { endpoint = "https://fra3.example.org", name = "fra3",
+    description = "not for public use", tags = ["eu", "private"] },
+]
+```
+
+Settings, `sheprd remote status`, and the iPhone's relay lists then show the name in place of the address, with the description and tags below it. Adding or removing a relay in Settings keeps the labels of the others. A name is at most 64 characters, a description 256, and a tag 32, with at most 8 tags. The label stays between you, your computer, and your phones: the relay never sees it.
+
 A paired phone learns of a new relay the next time it reaches the computer directly, and uses it after that whenever it has no direct path.
 
 On the iPhone, **Settings > Relays** lists the relays it keeps, each with a dot for whether it answers. The relays your computers named are filled in and kept. To reach a computer that moved to a relay while the phone was away, type that relay's address there and choose **Add Relay**: the phone then tries it for every computer it is paired with. A computer not paired yet is still paired nearby or on its network first.

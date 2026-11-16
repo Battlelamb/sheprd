@@ -9,8 +9,11 @@ struct ComputerRelaysSection: View {
 
     var body: some View {
         Section {
-            ForEach(record.relays, id: \.self) { relay in
-                RelayRow(relay: relay, label: record.label(for: relay))
+            // By position: a list written by hand may name a relay twice.
+            ForEach(Array(record.relays.enumerated()), id: \.offset) { _, relay in
+                RelayLabelView(relay: relay, label: record.label(for: relay))
+                    .padding(.vertical, 2)
+                    .accessibilityElement(children: .combine)
             }
         } header: {
             Text("Relays")
@@ -20,38 +23,44 @@ struct ComputerRelaysSection: View {
     }
 }
 
-private struct RelayRow: View {
+/// A relay as its owner labelled it: the name over the address when it has
+/// one, else the address, then its description and tags. The address keeps
+/// its scheme, so `http://` and `https://` relays on one host differ.
+struct RelayLabelView: View {
     let relay: RelayEndpoint
     let label: RelayLabel?
+    /// Below the title, such as whether the relay answers.
+    var status: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             if let name = label?.name {
-                Text(name).font(.body.weight(.medium))
+                Text(name)
                 address.font(.caption.monospaced()).foregroundStyle(.secondary)
             } else {
-                address.font(.body.monospaced())
+                address
+            }
+            if let status {
+                Text(status).font(.caption).foregroundStyle(.secondary)
             }
             if let description = label?.description {
-                Text(description).font(.subheadline).foregroundStyle(.secondary)
+                Text(description).font(.caption).foregroundStyle(.secondary)
             }
             if let tags = label?.tags, !tags.isEmpty {
-                RelayTags(tags: tags)
+                RelayTags(tags: tags).padding(.top, 2)
             }
         }
-        .padding(.vertical, 2)
-        .accessibilityElement(children: .combine)
     }
 
     private var address: some View {
-        Text(relay.host + (relay.port.map { ":\($0)" } ?? "") + relay.prefix)
+        Text(verbatim: relay.description)
             .textSelection(.enabled)
             .lineLimit(1)
             .truncationMode(.middle)
     }
 }
 
-/// A relay's tags as small capsules, wrapping onto more lines as needed.
+/// A relay's tags as small capsules, stacked when they do not fit a line.
 private struct RelayTags: View {
     let tags: [String]
 
@@ -63,8 +72,9 @@ private struct RelayTags: View {
     }
 
     private var capsules: some View {
-        ForEach(tags, id: \.self) { tag in
-            Text(tag)
+        // By position: nothing stops a tag from being given twice.
+        ForEach(Array(tags.enumerated()), id: \.offset) { _, tag in
+            Text(verbatim: tag)
                 .font(.caption2.weight(.medium))
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(.tint.opacity(0.15), in: Capsule())

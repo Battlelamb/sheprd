@@ -790,7 +790,12 @@ last uses its own domain.
   one with that fingerprint checks the signature, keeps the keys, and
   answers with its relays, signed with its CA key (`control::host_relay`).
   Sheprd, the near daemon, and the phone each check that signature against
-  the pinned fingerprint, so no other host can answer for that computer. Still to come: a dial
+  the pinned fingerprint, so no other host can answer for that computer.
+  Sheprd gives up after eight minutes (`host_relay::CARRY_MS`), before the
+  near daemon stops waiting. The far daemon dates each phone's relay keys
+  and refuses carried keys signed before them, and the phone drops a
+  carried answer once it reached that computer directly, so keys that
+  arrive late never replace newer ones. Still to come: a dial
   key per relay, Sheprd's signed list (`"default"`), the WebSocket
   fallback, and pairing over a relay from the QR.
 

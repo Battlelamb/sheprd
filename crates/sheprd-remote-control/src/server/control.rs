@@ -237,6 +237,21 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
                 },
             };
         }
+        Request::ShareRelays(offer) => {
+            let Some(relay) = &state.relay else {
+                return Response::Error {
+                    code: ErrorCode::Unsupported,
+                    message: "this computer cannot listen on relays".into(),
+                };
+            };
+            return match relay.share(offer) {
+                Ok(relays) => Response::Relays { relays },
+                Err(error) => Response::Error {
+                    code: ErrorCode::Unsaved,
+                    message: error.to_string(),
+                },
+            };
+        }
         Request::Shortcuts { offer } => {
             let Some(offer) = offer else {
                 return Response::Shortcuts(state.shortcuts.current());
@@ -344,7 +359,7 @@ fn relay_enroll(state: &State, request: &control::host_relay::Request, now: u64)
     let mut outcome = match &state.relay {
         Some(relay) => {
             relay.devices_changed();
-            match Some(relay.info()).filter(Info::valid) {
+            match relay.info().filter(Info::valid) {
                 Some(info) => Outcome::Relayed {
                     info,
                     proof: unsigned,

@@ -90,6 +90,12 @@ pub enum Invocation {
         state_dir: Option<PathBuf>,
         device: String,
     },
+    /// Lists the relays this computer listens on, taking any another
+    /// computer shares on standard input (`control::relays::Offer`).
+    Relays {
+        state_dir: Option<PathBuf>,
+        offer: bool,
+    },
     /// Reads this computer's text shortcuts, offering any given on standard
     /// input.
     Shortcuts {
@@ -112,6 +118,7 @@ Usage: sheprd-remote-control serve --state-dir DIR [options]
        sheprd-remote-control relay-enroll [--state-dir DIR] < REQUEST.json
        sheprd-remote-control tags [--offer] [--state-dir DIR] [< TAGS.json]
        sheprd-remote-control shortcuts [--offer] [--state-dir DIR] [< SHORTCUTS.json]
+       sheprd-remote-control relays [--offer] [--state-dir DIR] [< RELAYS.json]
 
 Serves this computer's Herdr chats to paired phones over HTTPS. Sheprd
 starts it when Remote control is on.
@@ -150,8 +157,11 @@ so a phone paired there also reaches this computer. enroll starts the
 daemon when it does not run and prints this computer's answer as JSON.
 relay-enroll keeps a phone's relay keys, signed with its own key here, so
 the phone reaches this computer through its relays, and prints the outcome
-as JSON; it needs the daemon running. Their state directory defaults to
-the one Sheprd on this computer uses.
+as JSON; it needs the daemon running.
+relays --offer takes {\"source\", \"relays\"}, the relays Sheprd on
+another computer listens on, replacing what that computer shared before:
+the daemon listens on them too, beside its own [remote] relays.
+Their state directory defaults to the one Sheprd on this computer uses.
 ";
 
 pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, ParseError> {
@@ -164,6 +174,12 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
             return parse_host(true, args).map(|invocation| match invocation {
                 Invocation::Enroll { state_dir } => Invocation::RelayEnroll { state_dir },
                 other => other,
+            });
+        }
+        Some("relays") => {
+            return parse_edited(args, |state_dir, offer| Invocation::Relays {
+                state_dir,
+                offer,
             });
         }
         Some("shortcuts") => {
@@ -343,7 +359,7 @@ fn parse_host(
     })
 }
 
-/// `tags` or `shortcuts`, then `[--offer] [--state-dir DIR]`, as `made`.
+/// `tags`, `shortcuts`, or `relays`, then `[--offer] [--state-dir DIR]`, as `made`.
 fn parse_edited(
     mut args: impl Iterator<Item = OsString>,
     made: fn(Option<PathBuf>, bool) -> Invocation,

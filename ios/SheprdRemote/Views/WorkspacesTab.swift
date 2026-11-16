@@ -34,6 +34,7 @@ struct WorkspacesTab: View {
     /// The computer whose page is open from its header menu.
     @State private var details: String?
     @State private var forgetting: Computer?
+    @AppStorage(WorkspacesShows.key) private var shows = WorkspacesShows.workspaces
 
     /// Workspaces open at once before the list needs its index: about a
     /// screenful on a phone.
@@ -41,8 +42,15 @@ struct WorkspacesTab: View {
 
     var body: some View {
         Group {
-            if query.isEmpty { list } else { SearchResults(query: query) }
+            if !query.isEmpty {
+                SearchResults(query: query)
+            } else if shows == .pullRequests {
+                PullRequestsList(shows: $shows)
+            } else {
+                list
+            }
         }
+        .gitHubRefresh(showsLists: query.isEmpty && shows == .pullRequests)
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Workspaces, chats, terminals")
         // No title, as Home and Settings have none; the search names it.
         .navigationBarTitleDisplayMode(.inline)
@@ -53,10 +61,10 @@ struct WorkspacesTab: View {
         .task { if UserDefaults.standard.bool(forKey: "openComputer") { details = model.computers.first?.device } }
         #endif
         .toolbar {
-            if query.isEmpty, !ComputerTags.all(in: model.computers).isEmpty {
+            if query.isEmpty, shows == .workspaces, !ComputerTags.all(in: model.computers).isEmpty {
                 ToolbarItem(placement: .topBarLeading) { TagFilterMenu() }
             }
-            if query.isEmpty, machines.count > 1 {
+            if query.isEmpty, shows == .workspaces, machines.count > 1 {
                 ToolbarItem(placement: .topBarTrailing) {
                     let shown = machines.map(\.id)
                     let folded = model.collapsed.computers.allCollapsed(shown)
@@ -77,6 +85,7 @@ struct WorkspacesTab: View {
 
     private var list: some View {
         List {
+            WorkspacesShowsPicker(shows: $shows)
             ForEach(machines) { machine in
                 let collapsed = model.collapsed.computers.contains(machine.id)
                 Section {
@@ -404,7 +413,8 @@ struct WorkspacePullRequestBadge: View {
     var workspace: Home.Workspace
 
     var body: some View {
-        if let pullRequest = workspace.pullRequest {
+        // GitHub's own answer when the phone read it, else the computer's.
+        if let pullRequest = GitHubDirect.shared.badge(for: workspace) {
             PullRequestPill(pullRequest: pullRequest)
         } else if let commits = workspace.unopenedCommits {
             UnopenedPill(commits: commits)

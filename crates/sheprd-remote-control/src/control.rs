@@ -12,6 +12,7 @@ use sheprd_chat_protocol::{read_frame, write_frame};
 pub mod app_update;
 pub mod changes;
 pub mod edited;
+pub mod github;
 pub mod hosts;
 pub mod layout;
 pub mod pull_requests;
@@ -117,6 +118,11 @@ pub enum Request {
         /// with too (`hosts`).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         hosts: Vec<hosts::HostId>,
+        /// Whether the phone may borrow this computer's GitHub sign-in
+        /// (`github`), as the dialog's switch says. On unless an approval
+        /// says otherwise, as an older Sheprd's never does.
+        #[serde(default = "yes", skip_serializing_if = "is_yes")]
+        share_github: bool,
     },
     /// Closes the dialog's pairing; its token stops working.
     CancelPairing {
@@ -127,6 +133,14 @@ pub enum Request {
     /// dropped at once. Sheprd asks the user before sending it.
     Revoke {
         device: DeviceId,
+    },
+    /// Whether `device` may borrow this computer's GitHub sign-in. Turned
+    /// off, the device gets no further token; one it holds keeps working
+    /// until it expires, or, from `gh`, until `gh` signs out.
+    #[serde(rename = "share_github")]
+    ShareGitHub {
+        device: DeviceId,
+        share: bool,
     },
     /// Stops the daemon. The service manager does not restart it.
     Shutdown,
@@ -236,6 +250,22 @@ pub enum Request {
         id: changes::AskId,
         answer: layout::Answer,
     },
+    /// Takes the phones' asks for Sheprd's GitHub sign-in, waiting up to
+    /// [`ASK_WAIT`] for one. Sheprd sends it while a phone is connected or
+    /// its status counts asks waiting (`Status::github_asks`).
+    #[serde(rename = "github_lease_asks")]
+    GitHubLeaseAsks {
+        /// Sheprd's main github.com account now, which phones are told
+        /// this computer lends; `None` when it has none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        login: Option<String>,
+    },
+    /// Sheprd's answer to a [`github::LeaseAsk`].
+    #[serde(rename = "github_lease")]
+    GitHubLease {
+        id: changes::AskId,
+        answer: github::LeaseAnswer,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -294,6 +324,10 @@ pub enum Response {
         /// daemon sends none, and an older Sheprd leaves them to time out.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         layout: Vec<layout::Ask>,
+    },
+    #[serde(rename = "github_lease_asks")]
+    GitHubLeaseAsks {
+        asks: Vec<github::LeaseAsk>,
     },
 }
 
@@ -367,6 +401,10 @@ pub struct Status {
     pub devices: usize,
     /// Devices with an open stream now.
     pub connected: usize,
+    /// Phones' asks for Sheprd's GitHub sign-in waiting to be taken
+    /// (`Request::GitHubLeaseAsks`); an older daemon has none.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub github_asks: usize,
     /// Each relay this computer listens on, by endpoint; absent when it
     /// listens on none, or the daemon is older.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -494,6 +532,9 @@ pub struct Device {
     pub push: bool,
     /// Whether it has a stream open now.
     pub connected: bool,
+    /// Whether it may borrow this computer's GitHub sign-in (`github`).
+    #[serde(default = "yes")]
+    pub share_github: bool,
     /// The computer that vouched for it, when another computer's user
     /// allowed it (`hosts`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -501,6 +542,22 @@ pub struct Device {
     /// The other hosts it was paired with from here, or may be.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hosts: Vec<hosts::HostLink>,
+}
+
+/// Serde's default for a switch that is on unless said otherwise.
+fn yes() -> bool {
+    true
+}
+
+/// Whether a switch is on, so it is left out; serde passes a reference.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_yes(value: &bool) -> bool {
+    *value
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 
 #[cfg(test)]

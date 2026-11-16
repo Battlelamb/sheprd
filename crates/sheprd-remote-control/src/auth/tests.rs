@@ -13,6 +13,7 @@ mod nearby_vectors;
 mod pairing;
 mod presence;
 mod session;
+mod share_github;
 
 const ORIGIN: &str = "https://192.168.1.20:7443";
 const FINGERPRINT: &str = "AB:CD:EF:01";

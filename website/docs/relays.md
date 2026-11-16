@@ -53,7 +53,7 @@ The computer listens on a relay over QUIC, so name a relay on a droplet or your 
 
 [![Deploy to DigitalOcean](https://www.deploytodo.com/do-btn-blue.svg)](https://sheprd.org/relay/)
 
-The button opens [sheprd.org/relay](https://sheprd.org/relay/), which creates one small droplet in each region you choose, with a relay serving both QUIC and WebSockets:
+The button, and **Deploy on DigitalOcean** in **Settings > Remote control > Relays**, open [sheprd.org/relay](https://sheprd.org/relay/), which creates one small droplet in each region you choose, with a relay serving both QUIC and WebSockets:
 
 1. In DigitalOcean, open **API > Tokens** and generate a token that expires soon. Give it **Custom Scopes**: `droplet` create and read, `ssh_key` read, and `tag` create; or **Full Access**.
 2. Paste it on the page, choose one or more regions near you and your computers, and optionally a size, your own domain, and the SSH keys to install.

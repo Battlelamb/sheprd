@@ -83,11 +83,12 @@ pub(super) fn instructions(instructions: &str) -> String {
     format!("{INSTRUCTIONS}{instructions}{INSTRUCTIONS_END}\n")
 }
 
-/// `text` with nothing in it that would end the note or its instructions
-/// early.
+/// `text` with nothing in it that would end the note early or read as
+/// the instructions block: only Sheprd writes those tags.
 pub(super) fn escape(text: &str) -> String {
     text.replace(CLOSE, "</ sheprd>")
         .replace("</instructions>", "</ instructions>")
+        .replace("<instructions>", "< instructions>")
 }
 
 /// The note Sheprd wrote that `text` starts with, and the person's words

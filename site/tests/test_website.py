@@ -105,6 +105,9 @@ class WebsiteTests(unittest.TestCase):
         """sheprd_relay::directory::SETUP_URL points at the relays docs page."""
         source = (ROOT / "crates/sheprd-relay/src/directory.rs").read_text()
         self.assertIn('SETUP_URL: &str = "https://sheprd.org/docs/relays/"', source)
+        # Settings opens the deploy page beside the private relay setting.
+        self.assertIn('DEPLOY_URL: &str = "https://sheprd.org/relay/"', source)
+        self.assertTrue((WEBSITE / "relay/index.html").is_file())
         slugs, _ = docs_pages()
         self.assertIn("relays", slugs)
         page = (ROOT / "website/docs/relays.md").read_text()

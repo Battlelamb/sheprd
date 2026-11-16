@@ -95,6 +95,31 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
             state.changes.answer_layout(id, answer);
             return Response::Done;
         }
+        Request::GitHubLeaseAsks { login } => {
+            state.changes.seen();
+            let asks = state.lending.asks.take(login, control::ASK_WAIT);
+            return Response::GitHubLeaseAsks { asks };
+        }
+        Request::GitHubLease { id, answer } => {
+            state.lending.asks.answer(id, answer);
+            return Response::Done;
+        }
+        Request::ShareGitHub { device, share } => {
+            let changed = state.auth().devices_mut().set_share_github(&device, share);
+            match changed {
+                Ok(true) => {
+                    state.lending.shares_changed();
+                    Ok(Response::Done)
+                }
+                Ok(false) => {
+                    return Response::Error {
+                        code: ErrorCode::UnknownDevice,
+                        message: "no such device".into(),
+                    };
+                }
+                Err(error) => Err(error),
+            }
+        }
         Request::Pair => {
             let mut origins = state.origins();
             let details = super::addresses::current(&mut origins);
@@ -112,10 +137,11 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
             allow,
             code,
             hosts,
+            share_github,
         } => {
             let answered = state
                 .auth()
-                .answer_with_hosts(&id, allow, &code, &hosts, now)
+                .answer_with_hosts(&id, allow, &code, &hosts, share_github, now)
                 .map(Response::Pairing);
             // An approved phone that sent relay keys reaches this computer
             // through them at once.
@@ -374,6 +400,7 @@ fn status(state: &State) -> Status {
         chats: layout.chats().count(),
         devices: state.auth().devices().len(),
         connected: state.connected().len(),
+        github_asks: state.lending.asks.queued(),
         relays: state
             .relay
             .as_ref()

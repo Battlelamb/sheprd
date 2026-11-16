@@ -97,8 +97,9 @@ pub(crate) enum Problem {
 /// The templates and instructions a chat uses.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Prompts {
-    /// The user's instructions for every chat, already filled in.
-    pub(crate) instructions: Option<String>,
+    /// The user's instructions for every chat, as written: they are filled
+    /// in when they go, so they name the agent running then.
+    instructions: Option<String>,
     /// The user's copies, by kind; a kind without one uses its built-in.
     templates: Vec<(Kind, String)>,
 }
@@ -114,6 +115,25 @@ pub(crate) struct Facts {
 /// use: instructions go once, wherever the person is then.
 const PLACE_NAMES: &[&str] = &["connection", "device", "where"];
 const FACT_NAMES: &[&str] = &["agent", "cwd", "max_image_mb", "max_pictures", "os"];
+
+/// What the place names of a template stand for.
+#[derive(Clone, Copy, Debug)]
+enum Where {
+    /// The person is at this origin.
+    At(Origin),
+    /// No client has said where the person is.
+    Unknown,
+    /// The text may not name the place, which stays as written.
+    Unnamed,
+}
+
+/// A file of the user's, as far as using it goes.
+enum Found {
+    Missing,
+    /// Empty, or not usable, which says why.
+    Unused,
+    Text(String),
+}
 
 impl Prompts {
     /// Built-in templates with `instructions`.
@@ -131,33 +151,34 @@ impl Prompts {
         Some(root.join(DIR))
     }
 
-    /// Reads the user's files from `dir` (and the older instructions file
-    /// beside it), and what was wrong with any of them.
-    pub(crate) fn load(dir: &Path, facts: &Facts) -> (Self, Vec<Problem>) {
+    /// Reads the user's files from `dir`, and what was wrong with any of
+    /// them. Only a missing `instructions.md` falls back to the older file
+    /// beside the folder: an empty one clears the instructions.
+    pub(crate) fn load(dir: &Path) -> (Self, Vec<Problem>) {
         let mut problems = Vec::new();
         let mut templates = Vec::new();
         for &kind in Kind::ALL {
             let path = dir.join(kind.file());
-            if let Some(text) = read(&path, &mut problems) {
+            if let Found::Text(text) = read(&path, &mut problems) {
                 check(&path, &text, &[PLACE_NAMES, FACT_NAMES], &mut problems);
                 templates.push((kind, text));
             }
         }
-        let path = dir.join(INSTRUCTIONS);
-        let legacy = dir
-            .parent()
-            .and_then(Path::parent)
-            .map(|root| root.join(LEGACY_INSTRUCTIONS));
-        let instructions = read(&path, &mut problems)
-            .map(|text| (path, text))
-            .or_else(|| {
-                let legacy = legacy?;
-                read(&legacy, &mut problems).map(|text| (legacy, text))
-            })
-            .map(|(path, text)| {
+        let mut path = dir.join(INSTRUCTIONS);
+        let mut found = read(&path, &mut problems);
+        if let Found::Missing = found
+            && let Some(root) = dir.parent().and_then(Path::parent)
+        {
+            path = root.join(LEGACY_INSTRUCTIONS);
+            found = read(&path, &mut problems);
+        }
+        let instructions = match found {
+            Found::Text(text) => {
                 check(&path, &text, &[FACT_NAMES], &mut problems);
-                fill(&text, facts, None)
-            });
+                Some(text)
+            }
+            Found::Missing | Found::Unused => None,
+        };
         let prompts = Self {
             instructions,
             templates,
@@ -165,73 +186,94 @@ impl Prompts {
         (prompts, problems)
     }
 
-    /// The template of `kind` filled in for a person at `origin`.
+    /// The instructions filled in with `facts`.
+    pub(crate) fn instructions(&self, facts: &Facts) -> Option<String> {
+        let text = self.instructions.as_deref()?;
+        Some(fill(text, facts, Where::Unnamed))
+    }
+
+    /// The template of `kind` filled in for a person at `origin`, or at an
+    /// unknown place when no client said.
     pub(crate) fn render(&self, kind: Kind, facts: &Facts, origin: Option<Origin>) -> String {
         let template = self
             .templates
             .iter()
             .find(|(known, _)| *known == kind)
             .map_or(kind.builtin(), |(_, text)| text.as_str());
-        fill(template, facts, origin)
+        fill(template, facts, origin.map_or(Where::Unknown, Where::At))
     }
 }
 
-fn fill(template: &str, facts: &Facts, origin: Option<Origin>) -> String {
+fn fill(template: &str, facts: &Facts, at: Where) -> String {
+    let place = |name: &str| match at {
+        Where::At(origin) => Some(match name {
+            "connection" => Cow::Borrowed(super::connection_name(origin.via)),
+            "device" => Cow::Borrowed(super::device_name(origin.device)),
+            _ => Cow::Owned(super::place_phrase(origin)),
+        }),
+        Where::Unknown => Some(Cow::Borrowed(match name {
+            "connection" => "an unknown connection",
+            "device" => "a Sheprd client",
+            _ => "in a Sheprd client",
+        })),
+        Where::Unnamed => None,
+    };
     let rendered = template::render(template, |name| {
         Some(match name {
             "agent" => Cow::Borrowed(facts.agent.as_str()),
-            "connection" => Cow::Borrowed(super::connection_name(origin?.via)),
             "cwd" => Cow::Borrowed(facts.cwd.as_str()),
-            "device" => Cow::Borrowed(super::device_name(origin?.device)),
             "max_image_mb" => Cow::Owned(MAX_IMAGE_MB.to_string()),
             "max_pictures" => Cow::Owned(MAX_PICTURES.to_string()),
             "os" => Cow::Borrowed(std::env::consts::OS),
-            "where" => Cow::Owned(super::place_phrase(origin?)),
+            name if PLACE_NAMES.contains(&name) => return place(name),
             _ => return None,
         })
     });
     rendered.trim().to_owned()
 }
 
-/// The text of the file at `path`, when it exists and says something; a
-/// file that cannot be used is a problem rather than a silent default.
-fn read(path: &Path, problems: &mut Vec<Problem>) -> Option<String> {
-    let path_buf = || path.to_owned();
-    let metadata = match std::fs::metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return None,
+/// The file at `path`: missing, empty or unusable (a problem says why), or
+/// its text. The read itself stops past [`MAX_FILE`], so a file that grows
+/// meanwhile is never read whole.
+fn read(path: &Path, problems: &mut Vec<Problem>) -> Found {
+    use std::io::Read as _;
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Found::Missing,
         Err(source) => {
             problems.push(Problem::Unreadable {
-                path: path_buf(),
+                path: path.to_owned(),
                 source,
             });
-            return None;
+            return Found::Unused;
         }
     };
-    if metadata.len() > MAX_FILE {
-        problems.push(Problem::TooLarge { path: path_buf() });
-        return None;
+    let mut bytes = Vec::new();
+    if let Err(source) = file.take(MAX_FILE + 1).read_to_end(&mut bytes) {
+        problems.push(Problem::Unreadable {
+            path: path.to_owned(),
+            source,
+        });
+        return Found::Unused;
     }
-    let bytes = match std::fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(source) => {
-            problems.push(Problem::Unreadable {
-                path: path_buf(),
-                source,
-            });
-            return None;
-        }
-    };
     if bytes.len() as u64 > MAX_FILE {
-        problems.push(Problem::TooLarge { path: path_buf() });
-        return None;
+        problems.push(Problem::TooLarge {
+            path: path.to_owned(),
+        });
+        return Found::Unused;
     }
     let Ok(text) = String::from_utf8(bytes) else {
-        problems.push(Problem::NotText { path: path_buf() });
-        return None;
+        problems.push(Problem::NotText {
+            path: path.to_owned(),
+        });
+        return Found::Unused;
     };
     let text = text.trim();
-    (!text.is_empty()).then(|| text.to_owned())
+    if text.is_empty() {
+        Found::Unused
+    } else {
+        Found::Text(text.to_owned())
+    }
 }
 
 /// Warns once about each name in `text` none of `known` holds.

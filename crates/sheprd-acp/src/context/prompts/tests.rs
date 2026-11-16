@@ -65,7 +65,7 @@ fn a_users_copy_replaces_the_built_in_text() {
         "On {{ device }} via {{ connection }} ({{ where }}), in {{ cwd }} with {{ agent }} on {{ os }}.\n",
     )
     .unwrap();
-    let (prompts, problems) = Prompts::load(&dir, &facts());
+    let (prompts, problems) = Prompts::load(&dir);
     assert!(problems.is_empty(), "{problems:?}");
     assert_eq!(
         prompts.render(Kind::Phone, &facts(), Some(PHONE)),
@@ -87,7 +87,7 @@ fn a_users_copy_replaces_the_built_in_text() {
 fn an_empty_copy_keeps_the_built_in_text() {
     let (_root, dir) = folder();
     std::fs::write(dir.join("intro.md"), " \n").unwrap();
-    let (prompts, problems) = Prompts::load(&dir, &facts());
+    let (prompts, problems) = Prompts::load(&dir);
     assert!(problems.is_empty());
     assert_eq!(prompts, Prompts::default());
 }
@@ -98,7 +98,7 @@ fn a_copy_that_cannot_be_used_says_why_and_keeps_the_built_in_text() {
     std::fs::write(dir.join("desktop.md"), "x".repeat(MAX_FILE as usize + 1)).unwrap();
     std::fs::write(dir.join("remote.md"), [0xff, 0xfe]).unwrap();
     std::fs::create_dir(dir.join("terminal.md")).unwrap();
-    let (prompts, problems) = Prompts::load(&dir, &facts());
+    let (prompts, problems) = Prompts::load(&dir);
     assert_eq!(prompts, Prompts::default());
     let mut kinds: Vec<_> = problems
         .iter()
@@ -131,7 +131,7 @@ fn an_unknown_name_is_reported_once_and_sent_as_written() {
         "{{ mood }} and {{ mood }} in {{ cwd }}",
     )
     .unwrap();
-    let (prompts, problems) = Prompts::load(&dir, &facts());
+    let (prompts, problems) = Prompts::load(&dir);
     assert_eq!(problems.len(), 1);
     assert!(matches!(&problems[0], Problem::UnknownName { name, .. } if name == "mood"));
     assert!(problems[0].to_string().contains("{{ mood }}"));
@@ -149,22 +149,74 @@ fn instructions_are_filled_in_once_without_the_place() {
         "\nWork in {{ cwd }} as {{ agent }}; I am {{ where }}.\n",
     )
     .unwrap();
-    let (prompts, problems) = Prompts::load(&dir, &facts());
+    let (prompts, problems) = Prompts::load(&dir);
     assert_eq!(
-        prompts.instructions.as_deref(),
+        prompts.instructions(&facts()).as_deref(),
         Some("Work in /work as Claude; I am {{ where }}.")
     );
     assert!(matches!(&problems[..], [Problem::UnknownName { name, .. }] if name == "where"));
 }
 
 #[test]
-fn the_older_instructions_file_is_read_when_the_folder_has_none() {
+fn the_older_instructions_file_is_read_only_when_the_folder_has_none() {
     let (root, dir) = folder();
     let legacy = root.path().join(LEGACY_INSTRUCTIONS);
     std::fs::write(&legacy, "Be brief.").unwrap();
-    let (prompts, _) = Prompts::load(&dir, &facts());
-    assert_eq!(prompts.instructions.as_deref(), Some("Be brief."));
+    let (prompts, _) = Prompts::load(&dir);
+    assert_eq!(prompts.instructions(&facts()).as_deref(), Some("Be brief."));
     std::fs::write(dir.join(INSTRUCTIONS), "Be thorough.").unwrap();
-    let (prompts, _) = Prompts::load(&dir, &facts());
-    assert_eq!(prompts.instructions.as_deref(), Some("Be thorough."));
+    let (prompts, _) = Prompts::load(&dir);
+    assert_eq!(
+        prompts.instructions(&facts()).as_deref(),
+        Some("Be thorough.")
+    );
+    // Emptying the new file clears the instructions rather than bringing
+    // the old ones back, and so does one that cannot be used.
+    std::fs::write(dir.join(INSTRUCTIONS), "\n").unwrap();
+    let (prompts, problems) = Prompts::load(&dir);
+    assert_eq!(prompts.instructions(&facts()), None);
+    assert!(problems.is_empty());
+    std::fs::write(dir.join(INSTRUCTIONS), [0xff]).unwrap();
+    let (prompts, problems) = Prompts::load(&dir);
+    assert_eq!(prompts.instructions(&facts()), None);
+    assert!(matches!(&problems[..], [Problem::NotText { .. }]));
+}
+
+#[test]
+fn instructions_name_the_agent_they_are_filled_in_for() {
+    let prompts = Prompts::with_instructions("You are {{ agent }}.");
+    let codex = Facts {
+        agent: "Codex".to_owned(),
+        ..facts()
+    };
+    assert_eq!(
+        prompts.instructions(&facts()).as_deref(),
+        Some("You are Claude.")
+    );
+    assert_eq!(
+        prompts.instructions(&codex).as_deref(),
+        Some("You are Codex.")
+    );
+}
+
+#[test]
+fn place_names_without_a_place_say_so_rather_than_stay_as_written() {
+    let (_root, dir) = folder();
+    std::fs::write(
+        dir.join("intro.md"),
+        "From {{ device }} over {{ connection }}, {{ where }}.",
+    )
+    .unwrap();
+    let (prompts, problems) = Prompts::load(&dir);
+    assert!(problems.is_empty());
+    assert_eq!(
+        prompts.render(Kind::Intro, &facts(), None),
+        "From a Sheprd client over an unknown connection, in a Sheprd client."
+    );
+    assert_eq!(
+        prompts.render(Kind::Intro, &facts(), Some(PHONE)),
+        "From Sheprd's iPhone and iPad app over Sheprd's encrypted relay, on their phone or \
+         tablet, in Sheprd's iPhone and iPad app, connected to this computer through \
+         Sheprd's encrypted relay."
+    );
 }

@@ -327,13 +327,9 @@ pub(crate) fn run_owned(
     };
     // A file of the user's that cannot be used says so in the chat, which
     // then uses the built-in text.
-    let facts = crate::context::Facts {
-        agent: agent.display.clone(),
-        cwd: cwd.display().to_string(),
-    };
     let prompts = match crate::context::Prompts::dir() {
         Some(dir) => {
-            let (prompts, problems) = crate::context::Prompts::load(&dir, &facts);
+            let (prompts, problems) = crate::context::Prompts::load(&dir);
             notices.extend(
                 problems
                     .into_iter()

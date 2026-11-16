@@ -160,7 +160,7 @@ When you scroll up, the conversation stays put and a round button appears, sayin
 
 Besides your words, a chat tells the agent two things it cannot see, in a note ahead of your message that the chat itself does not show:
 
-- **Your instructions.** Instructions for every chat go in `~/.config/herdr/chat-prompts/instructions.md` (under `XDG_CONFIG_HOME` when set, `%APPDATA%` on Windows), on the machine the agent runs on. The first message of each chat sends them, once: a chat restored after a restart does not send them again unless you edited the file. The file may hold up to 16 KiB; an empty file is skipped. An older `~/.config/herdr/chat-system-prompt.md` is still read when `instructions.md` is missing.
+- **Your instructions.** Instructions for every chat go in `~/.config/herdr/chat-prompts/instructions.md` (under `XDG_CONFIG_HOME` when set, `%APPDATA%` on Windows), on the machine the agent runs on. The first message of each chat sends them, once: a chat restored after a restart does not send them again unless you edited the file. The file may hold up to 16 KiB; an empty file means no instructions. An older `~/.config/herdr/chat-system-prompt.md` is still read only when `instructions.md` does not exist.
 - **Where you are typing.** The desktop app on the agent's machine or on another computer over SSH, the terminal pane's own chat view, or Sheprd's iPhone and iPad app or web app, along with how the phone reached the computer: the local network, Tailscale, or Sheprd's relay. The note goes again only when you switch devices, so moving from your desk to your phone and back mid-chat tells the agent each time, while a phone changing networks does not. Opening the same chat from the desktop app on another computer over SSH also counts, since paths are no longer yours to open.
 
 Where you cannot open files on the agent's machine, as on a phone, the agent is asked to put pictures in the chat instead of giving a path: it saves a screenshot or a mockup as an image and links it, which attaches the picture to the message. HTML mockups are rendered to screenshots first.
@@ -190,7 +190,7 @@ Every part of the note is a template you can replace. Copy the built-in file fro
 | `max_pictures` | How many pictures one message attaches |
 | `max_image_mb` | The largest picture, in MB |
 
-`instructions.md` may use all but `where`, `device`, and `connection`, since it goes once wherever you are. A name Sheprd does not know is sent as written, and the chat shows a warning, as it does for a file larger than 16 KiB or not UTF-8 text, which is then skipped for the built-in one.
+`instructions.md` may use all but `where`, `device`, and `connection`, since it goes once wherever you are; it is filled in when sent, so `{{ agent }}` follows a switch to another agent. Before any client has said where you are, the place names read as an unknown Sheprd client. A name Sheprd does not know is sent as written, and the chat shows a warning, as it does for a file larger than 16 KiB or not UTF-8 text, which is then skipped for the built-in one.
 
 ## Existing CLI sessions
 

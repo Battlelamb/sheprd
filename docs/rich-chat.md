@@ -589,7 +589,7 @@ when the program starts, on the machine the agent runs on; one that is too
 large, not UTF-8, or names an unknown placeholder becomes a warning notice in
 the chat. The `<sheprd>` wrapper, its checksum, and the `<instructions>`
 block stay Sheprd's, so a replaced template cannot break hiding notes or
-deciding what to tell again. Templates are escaped like instructions.
+deciding what to tell again. Templates are escaped like instructions, opening `<instructions>` tags included. Instructions are kept as written and filled in when sent, so a switch of agent (`Context::switched`) changes `{{ agent }}` and sends them again; the intro is filled in with the prompt's origin, or the last one a client gave. Files are read through a capped reader. Only a missing `instructions.md` falls back to the older file.
 
 ## Existing CLI sessions
 

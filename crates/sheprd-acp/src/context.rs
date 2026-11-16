@@ -21,8 +21,9 @@ mod template;
 #[derive(Debug, Default)]
 pub(crate) struct Context {
     facts: Facts,
-    /// The user's instructions now, escaped for the note.
-    instructions: Option<String>,
+    /// Where the person last said they are, for the intro of a note sent
+    /// for a client that does not say.
+    last: Option<Origin>,
     prompts: Prompts,
     /// What the agent last heard, from notes sent, restored, or replayed.
     /// Compared only when a prompt goes, so a replay may run in any order.
@@ -34,7 +35,7 @@ impl Context {
     pub(crate) fn new(prompts: Prompts, facts: Facts, told: Told) -> Self {
         Self {
             facts,
-            instructions: prompts.instructions.as_deref().map(note::escape),
+            last: None,
             prompts,
             told,
         }
@@ -45,27 +46,36 @@ impl Context {
         self.told.heard(note);
     }
 
+    /// The chat switched to another agent, which the texts name from now.
+    pub(crate) fn switched(&mut self, agent: &str) {
+        agent.clone_into(&mut self.facts.agent);
+    }
+
     /// The note to send ahead of a prompt typed at `origin`: the
     /// instructions unless the agent last heard these very ones, and where
     /// the person is when that changes what they can see. None when there
     /// is nothing new.
     pub(crate) fn before(&mut self, origin: Option<Origin>) -> Option<String> {
+        if origin.is_some() {
+            self.last = origin;
+        }
         let instructions = self
-            .instructions
-            .clone()
+            .prompts
+            .instructions(&self.facts)
+            .map(|text| note::escape(&text))
             .filter(|text| self.told.instructions.as_ref() != Some(text));
-        let origin = origin.filter(|origin| self.told.place != Some(Place::from(*origin)));
-        if instructions.is_none() && origin.is_none() {
+        let moved = origin.filter(|origin| self.told.place != Some(Place::from(*origin)));
+        if instructions.is_none() && moved.is_none() {
             return None;
         }
-        let mut body = self.part(Kind::Intro, None);
+        let mut body = self.part(Kind::Intro, self.last);
         if let Some(instructions) = instructions {
             body.push_str("\nThe person's instructions for every chat:\n");
             body.push_str(&note::instructions(&instructions));
             self.told.instructions = Some(instructions);
         }
-        let place = origin.map(Place::from);
-        if let Some(origin) = origin {
+        let place = moved.map(Place::from);
+        if let Some(origin) = moved {
             self.told.place = place;
             body.push('\n');
             body.push_str(&self.part(Kind::of(origin), Some(origin)));

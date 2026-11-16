@@ -25,6 +25,7 @@ use tokio::{
 };
 
 mod addresses;
+mod nearest;
 mod shared;
 
 /// A relay serving QUIC and HTTP on loopback ports: its HTTP address, and
@@ -97,6 +98,8 @@ async fn listening(relays: &Relays) {
             .values()
             .any(|state| *state == Status::Listening)
         {
+            // A listening relay's round trip is known at once.
+            assert!(!relays.info().unwrap().rtt_ms.is_empty());
             return;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;

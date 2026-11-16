@@ -13,10 +13,17 @@
 //!
 //! A relay sees only the tunnel's ciphertext, and a device that is not
 //! paired hears `offline` from the relay or, past it, nothing at all.
+//!
+//! Relays share nothing, so a phone always dials the relays this computer
+//! listens on, never its own: two machines set up with different relays
+//! still meet. To use the nearest, the daemon measures each relay's round
+//! trip and `GET /api/relay` lists them nearest first, with those times,
+//! and the phone adds its own leg to each before choosing (`nearest`).
 
 mod error;
 pub(crate) mod keys;
 mod listen;
+mod nearest;
 mod serve;
 pub mod shared;
 
@@ -64,6 +71,15 @@ pub(crate) fn open_pairing(state: &crate::web::State) {
     }
 }
 
+/// Has nearby offers say what the relays measure now, nearest first, as
+/// `GET /api/relay` does, rather than what they said at start, before any
+/// listened: called before each offer is sealed.
+pub(crate) fn refresh_offer(relays: Option<&Relays>, auth: &mut crate::auth::Auth) {
+    if let Some(relays) = relays {
+        auth.set_relay_offer(relays.info());
+    }
+}
+
 /// The relays this computer listens on, and what it listens with.
 #[derive(Debug)]
 pub(crate) struct Relays {
@@ -76,6 +92,8 @@ pub(crate) struct Relays {
     /// The open pairing dial, if any, and a revision listeners follow.
     pairing: Mutex<Option<Pairing>>,
     pairing_changed: watch::Sender<u64>,
+    /// Each listening relay's round-trip time, keyed by endpoint.
+    rtt: Mutex<BTreeMap<String, Duration>>,
     running: Mutex<Running>,
     /// What other computers shared, and the file that keeps it.
     shared: Mutex<control::relays::Shared>,
@@ -104,10 +122,16 @@ struct Started {
 pub(crate) struct Info {
     /// The tunnel identity to pin: X25519 then ML-KEM-768, base64url.
     pub(crate) identity: String,
-    /// The relays this computer listens on.
+    /// The relays this computer listens on, nearest first; those not
+    /// listening now keep their configured order, after the rest.
     pub(crate) relays: Vec<String>,
     /// This computer's route, base64url.
     pub(crate) route: String,
+    /// Each listening relay's round trip from this computer, in
+    /// milliseconds, so the phone can add its own leg. Older phones ignore
+    /// it.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) rtt_ms: BTreeMap<String, u32>,
 }
 
 impl Relays {
@@ -121,6 +145,7 @@ impl Relays {
             keys: keys::Keys::load_or_create(state_dir)?,
             pairing: Mutex::default(),
             pairing_changed: watch::Sender::new(0),
+            rtt: Mutex::default(),
             running: Mutex::default(),
             shared: Mutex::new(shared::load(&shared_file)),
             shared_file,
@@ -145,11 +170,16 @@ impl Relays {
     /// relay.
     pub(crate) fn info(&self) -> Option<Info> {
         use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-        let relays: Vec<String> = self.endpoints().iter().map(ToString::to_string).collect();
-        (!relays.is_empty()).then(|| Info {
+        let endpoints = self.endpoints();
+        if endpoints.is_empty() {
+            return None;
+        }
+        let rtt = self.rtt.lock().unwrap_or_else(PoisonError::into_inner);
+        Some(Info {
             identity: URL_SAFE_NO_PAD.encode(self.keys.tunnel.identity().to_bytes()),
-            relays,
+            relays: nearest::first(&endpoints, &rtt),
             route: self.keys.route().to_string(),
+            rtt_ms: nearest::millis(&rtt),
         })
     }
 
@@ -217,6 +247,16 @@ impl Relays {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
+    }
+
+    /// Records `endpoint`'s round trip while it listens; `None` forgets it,
+    /// so a relay that dropped this computer is not offered as nearest.
+    fn set_rtt(&self, endpoint: &Endpoint, rtt: Option<Duration>) {
+        let mut times = self.rtt.lock().unwrap_or_else(PoisonError::into_inner);
+        match rtt {
+            Some(rtt) => times.insert(endpoint.to_string(), rtt),
+            None => times.remove(&endpoint.to_string()),
+        };
     }
 
     /// Records a listener's state, unless it was stopped meanwhile: a

@@ -3,8 +3,10 @@ use serde_json::json;
 
 mod addresses;
 mod changes;
+mod github;
 mod layout;
 mod pull_requests;
+mod relays;
 
 #[test]
 fn requests_and_responses_keep_their_wire_names() {
@@ -14,6 +16,7 @@ fn requests_and_responses_keep_their_wire_names() {
             allow: true,
             code: "428913".into(),
             hosts: Vec::new(),
+            share_github: true,
         })
         .unwrap(),
         json!({"request": "approve", "id": "p1", "allow": true, "code": "428913"})

@@ -1,20 +1,41 @@
 import Foundation
 
 /// The relays this phone keeps for later: the ones its computers named
-/// while it reached them directly, and the ones typed in Settings. They
-/// are tried for every computer after the relays that computer named
-/// itself, so a computer that moved to a new relay is still reached once
-/// its address is known here. Addresses are not secrets: the phone's keys
-/// for a computer stay in that computer's Keychain record.
+/// while it reached them directly, and the ones typed in Settings.
+///
+/// Only typed relays are tried for every computer, after the relays that
+/// computer named itself, so a computer that moved to a new relay is still
+/// reached once the user adds it here. A relay a computer named is dialed
+/// for that computer only: dialing another computer there would tell
+/// whoever runs it that computer's route, and when this phone reaches it,
+/// though the user never chose that relay for it. Addresses are not
+/// secrets: the phone's keys for a computer stay in that computer's
+/// Keychain record.
 public struct SavedRelays: Codable, Equatable, Sendable {
     /// The most kept: each is one more dial a lost computer costs.
     public static let limit = 16
 
     public private(set) var relays: [RelayEndpoint]
+    /// Those of `relays` the user typed, tried for every computer.
+    public private(set) var typed: Set<RelayEndpoint> = []
+    /// Read from a version that did not say which were typed, until
+    /// `settle` decides. Kept when saved, so a launch that could not read
+    /// the paired computers leaves the decision to a later one; until
+    /// then no saved relay is tried beyond the computers that named it.
+    private var unsettled = false
+    /// While unsettled, the relays the user added or stopped sharing
+    /// since: `settle` leaves those choices as they are.
+    private var decided: Set<RelayEndpoint> = []
 
     public init(_ relays: [RelayEndpoint] = []) {
         self.relays = []
         learn(relays)
+    }
+
+    /// The typed relays, in the order kept: what every computer may be
+    /// dialed on beyond its own.
+    public var forEveryComputer: [RelayEndpoint] {
+        relays.filter(typed.contains)
     }
 
     /// What became of an address typed in Settings.
@@ -33,9 +54,16 @@ public struct SavedRelays: Codable, Equatable, Sendable {
         guard !text.trimmingCharacters(in: .whitespaces).isEmpty, let endpoint = RelayEndpoint(text) else {
             return .invalid
         }
-        if relays.contains(endpoint) { return .known }
+        if relays.contains(endpoint) {
+            // Typing a relay a computer named makes it the user's choice
+            // for every computer.
+            decide(endpoint)
+            return typed.insert(endpoint).inserted ? .added(endpoint) : .known
+        }
         guard relays.count < Self.limit else { return .full }
         relays.append(endpoint)
+        typed.insert(endpoint)
+        decide(endpoint)
         return .added(endpoint)
     }
 
@@ -53,18 +81,66 @@ public struct SavedRelays: Codable, Equatable, Sendable {
 
     public mutating func remove(_ endpoint: RelayEndpoint) {
         relays.removeAll { $0 == endpoint }
+        typed.remove(endpoint)
+    }
+
+    /// Stops trying `endpoint` for every computer, keeping it for the
+    /// computers that name it.
+    public mutating func unshare(_ endpoint: RelayEndpoint) {
+        typed.remove(endpoint)
+        decide(endpoint)
+    }
+
+    /// Records a choice the user made before an older list was settled.
+    private mutating func decide(_ endpoint: RelayEndpoint) {
+        if unsettled { decided.insert(endpoint) }
+    }
+
+    /// Decides, once, for a list kept before typed relays were told apart:
+    /// a relay one of the paired computers names (`named`) is that
+    /// computer's; any other was typed, or named by a computer since
+    /// removed, and stays for every computer as before, where Settings
+    /// shows it and the user can remove it.
+    public mutating func settle(named: Set<RelayEndpoint>) {
+        guard unsettled else { return }
+        unsettled = false
+        let undecided = relays.filter { !decided.contains($0) }
+        typed.formUnion(undecided.filter { !named.contains($0) })
+        decided = []
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case decided, relays, typed, unsettled
     }
 
     public init(from decoder: Decoder) throws {
         // One by one: an address a later version writes and this one
         // cannot read costs that relay, not the list.
-        let texts = try decoder.singleValueContainer().decode([String].self)
-        self.init(texts.compactMap(RelayEndpoint.init))
+        let read = { (texts: [String]) in texts.compactMap(RelayEndpoint.init) }
+        if let texts = try? decoder.singleValueContainer().decode([String].self) {
+            self.init(read(texts))
+            unsettled = true
+            return
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(read(try container.decode([String].self, forKey: .relays)))
+        let typed = read(try container.decodeIfPresent([String].self, forKey: .typed) ?? [])
+        self.typed = Set(typed.filter(relays.contains))
+        unsettled = try container.decodeIfPresent(Bool.self, forKey: .unsettled) ?? false
+        if unsettled {
+            let decided = read(try container.decodeIfPresent([String].self, forKey: .decided) ?? [])
+            self.decided = Set(decided.filter(relays.contains))
+        }
     }
 
     public func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(relays.map(\.description))
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(relays.map(\.description), forKey: .relays)
+        try container.encode(forEveryComputer.map(\.description), forKey: .typed)
+        if unsettled {
+            try container.encode(true, forKey: .unsettled)
+            try container.encode(relays.filter(decided.contains).map(\.description), forKey: .decided)
+        }
     }
 }
 

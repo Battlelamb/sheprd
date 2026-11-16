@@ -180,6 +180,14 @@ phone still signs in with its device key and a bearer token. The relay's
 QUIC pin is read from its `/v1/info` over HTTPS. `sheprd remote status`
 shows each relay's state.
 
+Sheprd on another computer shares its relays with this one by running
+`sheprd-remote-control relays --offer` over SSH (`control::relays`): each
+computer's list replaces what it shared before, is kept in
+`STATE_DIR/relay/shared.json`, and is listened on at once beside this
+computer's own `[remote] relays`, which it never changes. When the daemon
+does not answer, the command writes the file itself; the daemon builds each
+change on the file and reads it again every minute, so no offer is lost.
+
 Bluetooth pairing works from another network: the sealed nearby offer
 also carries `relay` (the same fields as `GET /api/relay`), revealing it
 opens a one-dial pairing key on each relay derived from the offer's
@@ -276,7 +284,10 @@ This authorizes every paired phone to read PR information for the workspaces
 that computer lists. A paired SSH/cloud machine uses **its own** `gh` sign-in;
 enrollment does not copy the desktop's GitHub credential or enable this option.
 The daemon reads `gh auth token --hostname github.com` through the existing
-bounded credential reader. It never saves the token or sends it to a phone.
+bounded credential reader. These reads never save the token or send it to a
+phone. Lending a sign-in to the iPhone app (`GET /api/v2/github/token`) is a
+separate, per-device choice, the **Share GitHub sign-in** switch, and does
+not depend on this option (`docs/ios-github-plan.md`).
 Remove the option and restart the service to disable standalone reads; `gh auth
 logout` revokes use of the CLI sign-in after cached answers expire.
 

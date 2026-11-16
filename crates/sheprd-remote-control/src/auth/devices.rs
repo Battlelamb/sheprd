@@ -50,6 +50,15 @@ pub(crate) struct DeviceRecord {
     /// it sent them (`POST /api/relay`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) relay: Option<RelayKeys>,
+    /// Whether the device may borrow this computer's GitHub sign-in
+    /// (`control::github`). A record from before the switch existed reads
+    /// as on, as a new pairing defaults to.
+    #[serde(default = "share_github_default")]
+    pub(crate) share_github: bool,
+}
+
+fn share_github_default() -> bool {
+    true
 }
 
 /// A device's keys for relays, as it sent them, base64url: its tunnel
@@ -138,17 +147,19 @@ impl Devices {
     /// Stores an approved device. Blocking.
     #[cfg(test)]
     pub(crate) fn add(&mut self, device: NewDevice, now_ms: u64) -> Result<()> {
-        self.add_with(device, now_ms, None, Vec::new())
+        self.add_with(device, now_ms, None, Vec::new(), true)
     }
 
-    /// Stores a device with the computer that vouched for it and the hosts
-    /// it may be paired with. Blocking.
+    /// Stores a device with the computer that vouched for it, the hosts
+    /// it may be paired with, and whether it may borrow the GitHub sign-in.
+    /// Blocking.
     pub(crate) fn add_with(
         &mut self,
         device: NewDevice,
         now_ms: u64,
         via: Option<String>,
         links: Vec<Link>,
+        share_github: bool,
     ) -> Result<()> {
         self.records.push(DeviceRecord {
             app: device.app,
@@ -162,6 +173,7 @@ impl Devices {
             via,
             links,
             relay: device.relay,
+            share_github,
         });
         self.save_or_undo(|devices| {
             devices.records.pop();
@@ -195,6 +207,7 @@ impl Devices {
                 connected: connected(&record.id),
                 via: record.via.clone(),
                 hosts: Vec::new(),
+                share_github: record.share_github,
             })
             .collect()
     }
@@ -223,6 +236,22 @@ impl Devices {
                 record.links = previous;
             }
         })
+    }
+
+    /// Lets a device borrow the GitHub sign-in, or stops it; whether it
+    /// is paired. Blocking.
+    pub(crate) fn set_share_github(&mut self, id: &DeviceId, share: bool) -> Result<bool> {
+        let Ok(record) = self.record_mut(id) else {
+            return Ok(false);
+        };
+        let before = std::mem::replace(&mut record.share_github, share);
+        let id = id.clone();
+        self.save_or_undo(move |devices| {
+            if let Ok(record) = devices.record_mut(&id) {
+                record.share_github = before;
+            }
+        })?;
+        Ok(true)
     }
 
     /// Marks a device seen now, writing the store only when its stored time

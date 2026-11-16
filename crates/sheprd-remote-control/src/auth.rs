@@ -445,8 +445,15 @@ impl Auth {
     }
 
     /// Lets nearby offers say how to claim through this computer's relays.
-    pub(crate) fn set_relay_offer(&mut self, offer: crate::relay::Info) {
-        self.relay_offer = Some(offer);
+    /// Nearby offers name no relays while this computer listens on none.
+    pub(crate) fn set_relay_offer(&mut self, offer: Option<crate::relay::Info>) {
+        self.relay_offer = offer;
+    }
+
+    /// What nearby offers say about the relays now.
+    #[cfg(test)]
+    pub(crate) fn relay_offer(&self) -> Option<&crate::relay::Info> {
+        self.relay_offer.as_ref()
     }
 
     /// The token last sealed to a nearby phone, once, for the relays to
@@ -502,16 +509,18 @@ impl Auth {
         shown: &str,
         now_ms: u64,
     ) -> Result<PairingState> {
-        self.answer_with_hosts(id, allow, shown, &[], now_ms)
+        self.answer_with_hosts(id, allow, shown, &[], true, now_ms)
     }
 
-    /// [`Self::answer`], allowing the device on the hosts the desktop ticked.
+    /// [`Self::answer`], allowing the device on the hosts the desktop ticked,
+    /// and to borrow the GitHub sign-in when `share_github` says so.
     pub(crate) fn answer_with_hosts(
         &mut self,
         id: &PairingId,
         allow: bool,
         shown: &str,
         hosts: &[HostId],
+        share_github: bool,
         now_ms: u64,
     ) -> Result<PairingState> {
         if allow {
@@ -527,7 +536,7 @@ impl Auth {
         let devices = &mut self.devices;
         let links = self.links.allowed(hosts);
         self.pairings.answer(id, allow, now_ms, |device| {
-            devices.add_with(device.clone(), now_ms, None, links)
+            devices.add_with(device.clone(), now_ms, None, links, share_github)
         })?;
         self.sync_apps();
         self.pairings.state(id, now_ms)
@@ -699,6 +708,9 @@ impl Auth {
             now_ms,
             Some(via),
             Vec::new(),
+            // As a phone paired here directly: on until the user turns it
+            // off in this host's Sheprd.
+            true,
         )?;
         Ok(id)
     }

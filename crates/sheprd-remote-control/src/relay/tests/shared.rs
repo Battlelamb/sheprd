@@ -99,7 +99,7 @@ fn configured_relays_come_first_and_shared_ones_add_only_what_is_new() {
         })
         .unwrap();
     super::super::shared::save(&super::super::shared::file(dir.path()), &saved).unwrap();
-    let relays = Relays::load(dir.path(), vec![configured]).unwrap();
+    let relays = Relays::load(dir.path(), vec![configured.into()]).unwrap();
     let names: Vec<String> = relays.endpoints().iter().map(ToString::to_string).collect();
     assert_eq!(
         names,

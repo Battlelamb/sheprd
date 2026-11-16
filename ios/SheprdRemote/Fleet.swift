@@ -695,7 +695,8 @@ final class Fleet {
                 return
             }
             if let known, known.matches(info) {
-                // Same keys; only the computer's nearest relays may differ.
+                // Same keys; only the computer's nearest relays, or what its
+                // owner calls them, may differ.
                 if let refreshed = known.refreshed(with: info) { onRelay?(device, refreshed) }
                 return
             }

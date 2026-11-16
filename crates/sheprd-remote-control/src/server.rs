@@ -12,7 +12,7 @@ mod notifier;
 mod options;
 
 pub use crate::push::Privacy;
-pub use options::{Certificate, Invocation, Options, ParseError, USAGE, parse};
+pub use options::{Certificate, Invocation, Options, ParseError, Relay, USAGE, parse};
 
 use crate::{
     Result,

@@ -96,6 +96,9 @@ struct Mockup: View {
         case ("ghsettings", "B"): GHSettingsPage(state: state)
         case ("ghsettings", "C"): GHSettingsCards(state: state)
         case ("ghsettings", "D"): GHSettingsByComputer(state: state)
+        case ("ghsignin", "A"): GHSignInSheet(state: state)
+        case ("ghsignin", "B"): GHSignInSteps(state: state)
+        case ("ghsignin", "C"): GHSignInInline(state: state)
         default: Text("No mockup \(screen) \(variant)")
         }
     }
@@ -127,8 +130,12 @@ struct Catalog: View {
         ("prdetail", "C", 0), ("prdetail", "C", 1), ("prdetail", "D", 0), ("prdetail", "D", 1),
         ("prlist", "A", 0), ("prlist", "A", 1), ("prlist", "B", 0), ("prlist", "B", 1),
         ("prlist", "C", 0), ("prlist", "C", 1), ("prlist", "D", 0), ("prlist", "D", 1),
-        ("ghsettings", "A", 0), ("ghsettings", "A", 1), ("ghsettings", "B", 0),
-        ("ghsettings", "C", 0), ("ghsettings", "D", 0),
+        ("ghsettings", "A", 0), ("ghsettings", "A", 1), ("ghsettings", "A", 2), ("ghsettings", "A", 3),
+        ("ghsettings", "B", 0), ("ghsettings", "B", 1), ("ghsettings", "C", 0), ("ghsettings", "C", 1),
+        ("ghsettings", "D", 0), ("ghsettings", "D", 1),
+        ("ghsignin", "A", 0), ("ghsignin", "A", 1), ("ghsignin", "A", 2), ("ghsignin", "A", 3), ("ghsignin", "A", 4),
+        ("ghsignin", "B", 0), ("ghsignin", "B", 1), ("ghsignin", "B", 2), ("ghsignin", "B", 3), ("ghsignin", "B", 4),
+        ("ghsignin", "C", 0), ("ghsignin", "C", 1), ("ghsignin", "C", 2), ("ghsignin", "C", 3), ("ghsignin", "C", 4),
     ]
 
     var body: some View {

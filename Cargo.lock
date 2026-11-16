@@ -11048,6 +11048,7 @@ dependencies = [
  "sheprd-chat-protocol",
  "sheprd-client",
  "sheprd-core-client",
+ "sheprd-memory",
  "tempfile",
  "thiserror 2.0.21",
  "unicode-width",
@@ -11324,6 +11325,7 @@ dependencies = [
  "sheprd-diagnostics",
  "sheprd-github",
  "sheprd-i18n",
+ "sheprd-memory",
  "sheprd-mods",
  "sheprd-orchestrator",
  "sheprd-relay",
@@ -11392,6 +11394,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sheprd-memory"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "sheprd-client",
+ "tempfile",
+ "thiserror 2.0.21",
+ "uuid",
+]
+
+[[package]]
 name = "sheprd-mods"
 version = "0.1.0"
 dependencies = [
@@ -11433,6 +11447,7 @@ dependencies = [
  "sheprd-client",
  "sheprd-credentials",
  "sheprd-github",
+ "sheprd-memory",
  "sheprd-remote",
  "sheprd-session",
  "tempfile",
@@ -11511,7 +11526,28 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "ureq",
  "url",
+]
+
+[[package]]
+name = "sheprd-relay-agent"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.23.1",
+ "getrandom 0.4.3",
+ "p256 0.14.0",
+ "quinn",
+ "serde",
+ "serde_json",
+ "sheprd-relay",
+ "sheprd-tunnel",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

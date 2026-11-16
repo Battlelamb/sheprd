@@ -98,6 +98,8 @@ fn output<'a>(
             .spawn()
             .map_err(|source| Error::Spawn { program, source })?
     };
+    // One deadline for the whole command: reading its output, then its exit.
+    let ends = std::time::Instant::now() + deadline;
     let (send, receive) = std::sync::mpsc::sync_channel(1);
     std::thread::spawn(move || {
         let mut text = Vec::new();
@@ -118,10 +120,25 @@ fn output<'a>(
             return Err(Error::Timeout { program });
         }
     };
-    // The output ended, so the child has closed its streams and is exiting.
-    let status = child
-        .wait()
-        .map_err(|source| Error::Read { program, source })?;
+    // The output ended or reached its limit. A child that closed its
+    // streams, or is stuck writing past the limit, may still not exit: it
+    // gets what is left of the deadline, then is killed like any other.
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if std::time::Instant::now() < ends => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Ok(None) => {
+                reap(&mut child);
+                return Err(Error::Timeout { program });
+            }
+            Err(source) => {
+                reap(&mut child);
+                return Err(Error::Read { program, source });
+            }
+        }
+    };
     Ok((status, String::from_utf8_lossy(&text).into_owned()))
 }
 

@@ -77,6 +77,21 @@ fn output_gives_up_on_a_command_past_its_deadline() {
     assert!(started.elapsed() < Duration::from_secs(5));
 }
 
+#[cfg(unix)]
+#[test]
+fn output_gives_up_on_a_command_that_closes_its_streams_but_keeps_running() {
+    let started = std::time::Instant::now();
+    let deadline = Duration::from_millis(200);
+    let error = output(
+        "/bin/sh",
+        ["-c".as_ref(), "exec >/dev/null 2>&1; sleep 30".as_ref()],
+        deadline,
+    )
+    .unwrap_err();
+    assert!(matches!(error, Error::Timeout { program: "/bin/sh" }));
+    assert!(started.elapsed() < Duration::from_secs(5));
+}
+
 #[test]
 fn a_missing_command_fails_to_spawn() {
     let error = output("/nowhere/socketfilterfw", std::iter::empty(), DEADLINE).unwrap_err();

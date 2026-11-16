@@ -5,8 +5,9 @@ import SwiftUI
 /// answered in place. Agents run in terminal tabs join them, so Home lists
 /// every agent the computers run. Home shows it.
 ///
-/// Counts by status sit above the sections, and each section folds to its
-/// header as a computer does in the Workspaces tab.
+/// Each section folds to its header as a computer does in the Workspaces
+/// tab, a status section's header shows its colored dot, and a long list
+/// gets an index on its edge, as Workspaces has.
 struct ChatList: View {
     @Environment(AppModel.self) private var model
     @AppStorage(HomeRow.sortKey) private var sort = AgentSort.priority
@@ -20,38 +21,30 @@ struct ChatList: View {
         "\(sort.rawValue)/\(section.id)"
     }
 
+    /// Rows open at once before the list needs its index: about a
+    /// screenful on a phone, as in Workspaces.
+    private static let indexedFrom = 12
+
     var body: some View {
-        let counts = HomeRow.counts(chats: model.fleet.chatItems, agents: model.fleet.agentTerminals)
-        ScrollViewReader { proxy in
-            List {
-                UnpairedCards()
-                if !counts.isEmpty {
-                    // Its own section, kept close to the search above and
-                    // the first section below: a grouped list would leave a
-                    // whole section's gap on each side of one row of chips.
-                    Section {
-                        CountChips(counts: counts) { status in open(status, proxy: proxy) }
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                    }
-                    .listSectionSpacing(0)
-                }
-                ForEach(sections) { section in
-                    let key = Self.key(section, sort: sort)
-                    let folded = model.collapsed.home.contains(key)
-                    Section {
-                        if !folded { ForEach(section.items) { row($0) } }
-                    } header: {
-                        SectionHeader(title: section.title, count: section.items.count, folded: folded) {
-                            withAnimation(.snappy) { model.collapsed.home.toggle(key) }
-                        }
-                        .id(key)
+        let open = sections
+            .filter { !model.collapsed.home.contains(Self.key($0, sort: sort)) }
+            .reduce(0) { $0 + $1.items.count }
+        List {
+            UnpairedCards()
+            ForEach(sections) { section in
+                let key = Self.key(section, sort: sort)
+                let folded = model.collapsed.home.contains(key)
+                Section {
+                    if !folded { ForEach(section.items) { row($0) } }
+                } header: {
+                    SectionHeader(title: section.title, count: section.items.count, status: section.status, folded: folded) {
+                        withAnimation(.snappy) { model.collapsed.home.toggle(key) }
                     }
                 }
+                .sectionIndexLabel(section.title.first.map { String($0).uppercased() })
             }
         }
-        .contentMargins(.top, 0, for: .scrollContent)
+        .listSectionIndexVisibility(sections.count > 1 && open >= Self.indexedFrom ? .visible : .hidden)
         .refreshable { model.fleet.networkChanged() }
         .closeConfirmation($closing)
     }
@@ -87,51 +80,11 @@ struct ChatList: View {
             }
         }
     }
-
-    /// A count's tap shows its section, opening it if folded. Only the
-    /// priority order has a section per status; the others keep their place.
-    private func open(_ status: Home.AgentStatus, proxy: ScrollViewProxy) {
-        guard sort == .priority, let section = sections.first(where: { $0.id == status.rawValue }) else { return }
-        let key = Self.key(section, sort: sort)
-        withAnimation(.snappy) {
-            if model.collapsed.home.contains(key) { model.collapsed.home.toggle(key) }
-            proxy.scrollTo(key, anchor: .top)
-        }
-    }
-
-}
-
-/// One chip per status with agents: its icon and how many. The section
-/// headers below name them, so the chips stay short enough to fit a phone.
-private struct CountChips: View {
-    var counts: [(status: Home.AgentStatus, count: Int)]
-    var tap: (Home.AgentStatus) -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ForEach(counts, id: \.status) { status, count in
-                Button { tap(status) } label: {
-                    HStack(spacing: 5) {
-                        CountIcon(status: status)
-                        Text(count, format: .number).fontWeight(.semibold).monospacedDigit()
-                    }
-                    .font(.subheadline)
-                    .padding(.horizontal, 12).padding(.vertical, 7)
-                    .background(.background, in: .capsule)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(count) \(status.label)")
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 4)
-    }
 }
 
 /// A status as a filled round icon, idle included, which `StatusMark`
 /// leaves off a row's icon.
-private struct CountIcon: View {
+private struct StatusDot: View {
     var status: Home.AgentStatus
 
     var body: some View {
@@ -149,6 +102,8 @@ private struct CountIcon: View {
 private struct SectionHeader: View {
     var title: String
     var count: Int
+    /// The status its rows share, shown as a colored dot.
+    var status: Home.AgentStatus?
     var folded: Bool
     var toggle: () -> Void
 
@@ -157,6 +112,7 @@ private struct SectionHeader: View {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.right").font(.caption.bold())
                     .rotationEffect(.degrees(folded ? 0 : 90))
+                if let status { StatusDot(status: status) }
                 Text(title).lineLimit(1)
                 Text(count, format: .number).foregroundStyle(.secondary).monospacedDigit()
                 Spacer(minLength: 0)

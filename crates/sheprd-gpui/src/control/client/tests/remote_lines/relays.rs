@@ -6,7 +6,7 @@ fn status_says_how_each_relay_stands_in_text_and_json() {
     let mut status = status();
     status.relays.insert(
         "https://sfo3.relay.example.org".into(),
-        RelayState::Listening,
+        RelayState::Listening { rtt_ms: Some(42) },
     );
     status.relays.insert(
         "https://fra1.relay.example.org".into(),
@@ -23,7 +23,7 @@ fn status_says_how_each_relay_stands_in_text_and_json() {
     assert!(
         output
             .text
-            .contains("Relay: https://sfo3.relay.example.org — listening")
+            .contains("Relay: https://sfo3.relay.example.org — listening, 42 ms")
     );
     assert!(output.text.contains(
         "Relay: https://fra1.relay.example.org — failed: the relay could not be reached"
@@ -31,5 +31,9 @@ fn status_says_how_each_relay_stands_in_text_and_json() {
     assert_eq!(
         output.json["status"]["relays"]["https://sfo3.relay.example.org"]["state"],
         "listening"
+    );
+    assert_eq!(
+        output.json["status"]["relays"]["https://sfo3.relay.example.org"]["rtt_ms"],
+        42
     );
 }

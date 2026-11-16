@@ -774,7 +774,9 @@ last uses its own domain.
   axum router over the decrypted stream with `hyper`'s
   `serve_connection`, so the native API, WebSocket, and bearer tokens are
   unchanged.
-- `sheprd remote status --json` reports each relay: listening, last error.
+- `sheprd remote status --json` reports each relay: listening with its
+  round trip (`rtt_ms`), or the last error; Settings shows the round trip
+  beside each relay, so a user can see which is nearest.
 - **Built (first cut):** `[remote] relays` lists private relays; the daemon
   listens on each over QUIC (no WebSocket fallback yet), reading the pin
   from `/v1/info`. Paired phones learn the route, relays, and tunnel

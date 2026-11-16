@@ -102,8 +102,9 @@ final class Fleet {
     /// Each running proxy's origin, raced after the computer's own
     /// addresses, so a direct path wins when there is one.
     @ObservationIgnored private var relayOrigins: [String: String] = [:]
-    /// The relays kept in Settings, dialed for every computer after the
-    /// ones it named. A change restarts the running proxies, which open
+    /// The relays typed in Settings, dialed for every computer after the
+    /// ones it named. Relays another computer named are not: that would
+    /// show this computer's route to a relay the user never chose for it. A change restarts the running proxies, which open
     /// their sessions with the list they started with.
     @ObservationIgnored var savedRelays: [RelayEndpoint] = [] {
         didSet {

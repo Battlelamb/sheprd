@@ -4,6 +4,7 @@
 use sheprd_chat_protocol::{Device, Origin, Via};
 
 use super::*;
+use sheprd_chat_protocol::{Entry, EntryId, Transcript};
 
 const PHONE: Origin = Origin::new(Device::PhoneApp, Via::Tailscale);
 const DESKTOP: Origin = Origin::new(Device::Desktop, Via::Local);
@@ -38,7 +39,7 @@ fn a_phone_prompt_tells_the_agent_first_and_the_transcript_shows_only_the_words(
     harness.command(0, from(Some(PHONE), "show me the mockups"));
     let (id, sent) = sent_prompt(&harness);
     assert_eq!(sent.len(), 2);
-    assert!(sent[0].starts_with("<sheprd>"));
+    assert!(sent[0].starts_with("<sheprd device=\"phone_app\">"));
     assert!(sent[0].contains("Tailscale"));
     assert!(sent[0].contains("Markdown image"));
     assert_eq!(sent[1], "show me the mockups");
@@ -102,4 +103,94 @@ fn the_system_prompt_goes_with_the_first_prompt_only() {
     finish(&mut harness, id);
     harness.command(0, from(None, "encore"));
     assert_eq!(sent_prompt(&harness).1, ["encore"]);
+}
+
+const SAID_ON_PHONE: &str = "<sheprd device=\"phone_app\">\nThe person's instructions for every chat:\n<instructions>\nBe brief.\n</instructions>\n\nThe person is typing on their phone.\n</sheprd>";
+
+fn said(id: u64, text: &str) -> Entry {
+    Entry {
+        id: EntryId(id),
+        kind: EntryKind::User {
+            text: text.to_owned(),
+            files: 0,
+        },
+    }
+}
+
+/// A chat continued from a log that holds a note sent from the phone.
+fn continued() -> Harness {
+    let mut history = Transcript::new("Claude".to_owned());
+    history.entries = vec![
+        said(1, &format!("{SAID_ON_PHONE}\nshow me the mockups")),
+        said(2, SAID_ON_PHONE),
+    ];
+    let mut harness = harness_with(Config {
+        history: Some(history),
+        system_prompt: Some("Be brief.".to_owned()),
+        ..config()
+    });
+    harness.session.start();
+    let id = harness.last_request("initialize")["id"].as_i64().unwrap();
+    harness.respond(id, json!({"protocolVersion": 1, "agentCapabilities": {}}));
+    let id = harness.last_request("session/new")["id"].as_i64().unwrap();
+    harness.respond(id, json!({"sessionId": "s1"}));
+    harness
+}
+
+#[test]
+fn a_restored_chat_hides_its_notes() {
+    let harness = continued();
+    let users: Vec<_> = harness
+        .transcript()
+        .entries
+        .iter()
+        .filter(|entry| matches!(entry.kind, EntryKind::User { .. }))
+        .collect();
+    assert_eq!(users, [&said(1, "show me the mockups")]);
+}
+
+#[test]
+fn a_restored_chat_tells_again_only_on_another_device() {
+    let mut harness = continued();
+    harness.command(0, from(Some(PHONE), "and the dark variant"));
+    let (id, sent) = sent_prompt(&harness);
+    assert_eq!(sent, ["and the dark variant"]);
+    finish(&mut harness, id);
+    harness.command(0, from(Some(DESKTOP), "at my desk now"));
+    let (_, sent) = sent_prompt(&harness);
+    assert!(sent[0].starts_with("<sheprd device=\"desktop\">"));
+    assert!(!sent[0].contains("Be brief."), "{}", sent[0]);
+}
+
+#[test]
+fn a_replayed_conversation_hides_its_notes_and_counts_them_told() {
+    let mut harness = harness_with(Config {
+        load: Some("old".to_owned()),
+        system_prompt: Some("Be brief.".to_owned()),
+        ..config()
+    });
+    harness.session.start();
+    let id = harness.last_request("initialize")["id"].as_i64().unwrap();
+    harness.respond(
+        id,
+        json!({"protocolVersion": 1, "agentCapabilities": {"loadSession": true}}),
+    );
+    let load = harness.last_request("session/load");
+    for text in [SAID_ON_PHONE, "earlier"] {
+        harness.input(Input::Agent(Inbound::Notification {
+            method: "session/update".to_owned(),
+            params: json!({"sessionId": "old", "update": {"sessionUpdate": "user_message_chunk",
+                "content": {"type": "text", "text": text}}}),
+        }));
+    }
+    harness.respond(load["id"].as_i64().unwrap(), json!({}));
+    let texts: Vec<_> = harness
+        .transcript()
+        .entries
+        .iter()
+        .filter_map(|entry| entry.kind.text())
+        .collect();
+    assert_eq!(texts, ["earlier"]);
+    harness.command(0, from(Some(PHONE), "hi"));
+    assert_eq!(sent_prompt(&harness).1, ["hi"]);
 }

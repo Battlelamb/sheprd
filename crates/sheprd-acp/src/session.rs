@@ -173,7 +173,11 @@ pub(crate) struct Session<R: FnMut(Update)> {
 impl<R: FnMut(Update)> Session<R> {
     pub(crate) fn new(mut config: Config, outbox: rpc::Outbox, report: R) -> Self {
         let mut transcript = Transcript::new(config.agent.clone());
-        if let Some(history) = config.history.take() {
+        // The saved conversation keeps Sheprd's notes; the chat shows the
+        // person's words only, and the notes say what not to tell again.
+        let mut told = crate::context::Told::default();
+        if let Some(mut history) = config.history.take() {
+            told = crate::context::hide(&mut history);
             transcript.entries = history.entries;
             transcript.truncated = history.truncated;
             transcript.usage = history.usage;
@@ -182,7 +186,7 @@ impl<R: FnMut(Update)> Session<R> {
             .entries
             .last()
             .map_or_else(Projector::default, |entry| Projector::after(entry.id));
-        let context = Context::new(config.system_prompt.take());
+        let context = Context::new(config.system_prompt.take(), told);
         Self {
             accepts: crate::files::Accepts::default(),
             acp_session: None,

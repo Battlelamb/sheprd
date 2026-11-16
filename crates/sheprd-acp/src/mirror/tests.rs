@@ -5,6 +5,7 @@ use crate::session::Attach;
 use sheprd_chat_protocol::{Command, CommandId, Entry, EntryId, EntryKind, PermissionId, Status};
 
 mod activities;
+mod notes;
 
 fn transcript(lines: &[&str]) -> Transcript {
     Transcript {

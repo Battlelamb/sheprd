@@ -398,7 +398,10 @@ conversation with the user's next prompt, as a block of quoted context ahead
 of what the user wrote: the first prompt, the latest prompt and reply, then
 the newest entries within about 16,000 tokens, each cut at 4 KiB. Reasoning,
 turn summaries, and the program's notices are left out, and the transcript
-says how much went and how much was left out for length. An agent switched
+says how much went and how much was left out for length. The quote is
+fenced by a boundary made at random for each handoff, and every quoted line
+starts with `| `, so nothing in a reply or tool output can end the quote or
+pass for a request. An agent switched
 back to continues its own earlier session (`session/load`, or `--resume` for
 an agent reached natively), whose replay of its history is ignored, and is
 handed only what happened since it last took part. When it cannot continue

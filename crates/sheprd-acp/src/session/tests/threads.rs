@@ -123,7 +123,7 @@ fn the_agent_taking_over_gets_the_conversation_with_the_next_prompt_only() {
     let (turn, blocks) = sent_prompt(&mut harness, &codex, "next");
     assert_eq!(blocks.len(), 2);
     assert!(blocks[0].contains("with Claude"));
-    assert!(blocks[0].contains("User: hello\nAgent: Hi there\n"));
+    assert!(blocks[0].contains("| User: hello\n| Agent: Hi there\n"));
     assert_eq!(blocks[1], "next");
     // What the user typed is what the transcript shows.
     assert!(!harness.transcript().entries.iter().any(|entry| matches!(
@@ -166,7 +166,7 @@ fn an_agent_switched_back_to_resumes_its_session_and_hears_only_what_followed() 
     let (_, blocks) = sent_prompt(&mut harness, &claude, "back to you");
     assert!(blocks[0].contains("your earlier session"));
     assert!(blocks[0].contains("with Codex"));
-    assert!(blocks[0].contains("User: next\nAgent: Done by Codex\n"));
+    assert!(blocks[0].contains("| User: next\n| Agent: Done by Codex\n"));
     assert!(!blocks[0].contains("User: hello"));
     assert_eq!(blocks[1], "back to you");
 }

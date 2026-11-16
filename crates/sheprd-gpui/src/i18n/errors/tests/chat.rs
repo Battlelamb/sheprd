@@ -125,6 +125,7 @@ fn every_chat_rejection_has_a_message() {
         Rejection::NotWorking,
         Rejection::UnknownPermission,
         Rejection::UnknownOption,
+        Rejection::InvalidAnswer,
         Rejection::UnknownMode,
         Rejection::UnknownSetting,
         Rejection::UnknownActivity,

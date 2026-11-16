@@ -94,6 +94,7 @@ error-chat-rejection-not-working = no turn is running
 error-chat-rejection-unknown-permission = that permission request was already answered
 error-chat-rejection-unknown-activity = that work has already ended or cannot be stopped
 error-chat-rejection-unknown-option = that is not one of the request's options
+error-chat-rejection-invalid-answer = the answer is empty, too long, or has more choices than the question takes
 error-chat-rejection-unknown-mode = the agent has no such mode
 error-chat-rejection-unknown-setting = the agent has no such setting, or it does not take that value
 error-chat-rejection-unknown-queued = that prompt is no longer queued

@@ -372,8 +372,11 @@ Standalone phone PR/check/log reads are opt-in per computer. After signing in
 with `gh auth login` on that host, set `[remote] github_cli = true` and restart
 its remote-control service. The foreground daemon accepts
 `sheprd-remote-control serve --state-dir DIR --github-cli`. This permits paired
-phones to read the listed workspaces using that host's GitHub CLI credential;
-pairing never copies the desktop's credential. See the
+phones to read the listed workspaces using that host's GitHub CLI credential.
+Separately, the iPhone app may borrow a GitHub sign-in to read GitHub itself,
+only while the phone's **Share GitHub sign-in** switch is on (each device in
+`devices --json` has `share_github`); the switch is set in the pairing dialog
+and in Settings, never from this command. See the
 [scope, cache and access policy](../crates/sheprd-remote-control/README.md#workspace-pull-requests-and-titles).
 
 ```sh

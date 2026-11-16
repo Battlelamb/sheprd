@@ -93,6 +93,10 @@ and nothing goes through your phone.
    - `-openTerm PANE` opens a terminal; `-type TEXT` then types into it
      (a newline presses Enter).
    - `-homeSearch TEXT` types into Home's search.
+   - `-homeJump N` scrolls Home to the bottom, then jumps to section N as
+     its edge index does; `-homeJumpRow YES` jumps to that section's first
+     row, as its first dot does, and `-homeJumpSweep YES` first crosses every
+     entry from the bottom up, as a drag along the index does.
    - `-tab workspaces|settings` opens that tab, and `-openWorkspace ID`
      opens that workspace's screen in it.
    - `-otherAgents YES` unfolds a workspace's other agents.

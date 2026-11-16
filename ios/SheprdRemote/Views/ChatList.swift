@@ -12,9 +12,6 @@ struct ChatList: View {
     @Environment(AppModel.self) private var model
     @AppStorage(HomeRow.sortKey) private var sort = AgentSort.priority
     var sections: [AgentSort.Section<HomeRow>]
-    /// Where the list is scrolled, so a jump from the edge index can bring
-    /// a section's header out from under the search field.
-    @State private var position = ScrollPosition(idType: String.self)
     /// Where each section's header is, so a jump can clear the bars.
     @State private var headerJump = HeaderJump()
     /// What a swipe or long press asked to close, waiting for confirmation.
@@ -81,7 +78,6 @@ struct ChatList: View {
                         .padding(.trailing, 2)
                 }
             }
-            .scrollPosition($position)
             #if DEBUG
             .task { await followJumpArgument(proxy) }
             #endif
@@ -94,32 +90,41 @@ struct ChatList: View {
         .closeConfirmation($closing)
     }
 
-    /// Scrolls a section's header to just below the search field: the
-    /// first section to the very top, the others by their header's place
-    /// (`HeaderJump`), as a list's own jump leaves it behind the field.
+    /// Scrolls to a header or row of the edge index, a header to just
+    /// below the search field (`HeaderJump`), as a list's own jump leaves
+    /// it behind the field. A section's first row shows its header too.
     private func jump(to target: String, proxy: ScrollViewProxy) {
-        if target == sections.first.map({ Self.headerID(Self.key($0, sort: sort)) }) {
-            position.scrollTo(edge: .top)
-            return
-        }
-        proxy.scrollTo(target, anchor: .top)
-        Task { @MainActor in
-            await Task.yield()
-            headerJump.settle(target)
-        }
+        let header = sections.first { $0.items.first?.id == target }
+            .map { Self.headerID(Self.key($0, sort: sort)) }
+        headerJump.go(to: header ?? target, proxy: proxy)
     }
 
     #if DEBUG
     /// For the simulator loop, which cannot drag the edge index:
-    /// `-homeJump N` scrolls to the bottom, then jumps to section N.
+    /// `-homeJump N` scrolls to the bottom, then jumps to section N, or
+    /// with `-homeJumpRow YES` to its first row, as its first dot does;
+    /// `-homeJumpSweep YES` first crosses every entry from the bottom up,
+    /// a frame apart, as a finger dragging up the index does.
     private func followJumpArgument(_ proxy: ScrollViewProxy) async {
         let index = UserDefaults.standard.integer(forKey: "homeJump")
         guard UserDefaults.standard.object(forKey: "homeJump") != nil else { return }
         try? await Task.sleep(for: .seconds(5))
-        position.scrollTo(edge: .bottom)
+        if let last = sections.last?.items.last { proxy.scrollTo(last.id, anchor: .bottom) }
         try? await Task.sleep(for: .seconds(2))
         guard sections.indices.contains(index) else { return }
-        jump(to: Self.headerID(Self.key(sections[index], sort: sort)), proxy: proxy)
+        let section = sections[index]
+        if UserDefaults.standard.bool(forKey: "homeJumpSweep") {
+            for part in indexParts.reversed() {
+                for row in part.rows.reversed() {
+                    jump(to: row.id, proxy: proxy)
+                    try? await Task.sleep(for: .milliseconds(16))
+                }
+                jump(to: part.target, proxy: proxy)
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+        }
+        let row = UserDefaults.standard.bool(forKey: "homeJumpRow") ? section.items.first?.id : nil
+        jump(to: row ?? Self.headerID(Self.key(section, sort: sort)), proxy: proxy)
     }
     #endif
 

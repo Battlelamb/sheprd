@@ -1,3 +1,5 @@
+// Only the worktree test, which runs `git` on Unix, uses the crate root.
+#[cfg(unix)]
 use super::*;
 use crate::checkout::branch_of;
 

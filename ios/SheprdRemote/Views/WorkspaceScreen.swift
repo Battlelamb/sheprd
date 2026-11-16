@@ -7,6 +7,7 @@ import SwiftUI
 struct WorkspaceScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.routeOpener) private var opener
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let key: WorkspaceKey
     @State private var agents: [AgentChoice] = []
     /// What a tap is starting: an agent's id, or `terminal`.
@@ -86,10 +87,14 @@ struct WorkspaceScreen: View {
             } header: {
                 let count = chats.count + terminals.count
                 Text(count == 1 ? "1 tab" : "\(count) tabs")
+                    .contentTransition(.numericText(value: Double(count)))
             }
             WorkspacePictures(pictures: pictures, chats: chats, open: show)
             launcher(workspace, online: isOnline(machine))
         }
+        // Tabs the computer opens or closes slide in and out, and the
+        // count rolls, rather than the rows jumping into place.
+        .animation(reduceMotion ? nil : .snappy, value: chats.map(\.id) + terminals.map(\.id))
         .navigationTitle(workspace.label)
         .navigationBarTitleDisplayMode(.inline)
         // The iPad's sidebar keeps its tabs below a workspace.

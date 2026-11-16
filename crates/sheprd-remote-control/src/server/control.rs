@@ -112,10 +112,18 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
             allow,
             code,
             hosts,
-        } => state
-            .auth()
-            .answer_with_hosts(&id, allow, &code, &hosts, now)
-            .map(Response::Pairing),
+        } => {
+            let answered = state
+                .auth()
+                .answer_with_hosts(&id, allow, &code, &hosts, now)
+                .map(Response::Pairing);
+            // An approved phone that sent relay keys reaches this computer
+            // through them at once.
+            if let (Ok(_), Some(relay)) = (&answered, &state.relay) {
+                relay.devices_changed();
+            }
+            answered
+        }
         Request::CancelPairing { id } => state.auth().cancel(&id).map(|()| Response::Done),
         // Sheprd relays these from a phone over Bluetooth; the code the
         // phone shows is what authenticates it, as over the network.
@@ -125,10 +133,14 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
             .map(Response::NearbyStarted),
         Request::NearbyReveal { session, nonce } => {
             let origins = state.origins();
-            state
-                .auth()
-                .nearby_reveal(&session, &nonce, &state.fingerprint, &origins, now)
-                .map(Response::NearbyRevealed)
+            let revealed = {
+                let mut auth = state.auth();
+                crate::relay::refresh_offer(state.relay.as_deref(), &mut auth);
+                auth.nearby_reveal(&session, &nonce, &state.fingerprint, &origins, now)
+                    .map(Response::NearbyRevealed)
+            };
+            crate::relay::open_pairing(state);
+            revealed
         }
         Request::PresenceChallenge { hint } => presence_challenge(state, &hint, now),
         Request::PresenceProve { nonce, signature } => {
@@ -213,6 +225,18 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
                 },
             };
         }
+        Request::Shortcuts { offer } => {
+            let Some(offer) = offer else {
+                return Response::Shortcuts(state.shortcuts.current());
+            };
+            return match state.shortcuts.offer(offer, now) {
+                Ok(shortcuts) => Response::Shortcuts(shortcuts),
+                Err(error) => Response::Error {
+                    code: ErrorCode::Unsaved,
+                    message: error.to_string(),
+                },
+            };
+        }
         Request::Indicators { set } => {
             return match state.look.set(crate::web::Indicators::from_config(&set)) {
                 Ok(()) => Response::Done,
@@ -251,7 +275,21 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
                     message: "The daemon layout changed".into(),
                 };
             }
-            if state.pull_requests.borrow().as_ref() != &snapshot {
+            if state.github.enabled() {
+                state.pull_requests.send_if_modified(|current| {
+                    let mut merged = snapshot.clone();
+                    merged.entries = if current.boot_id == snapshot.boot_id {
+                        current.entries.clone()
+                    } else {
+                        Vec::new()
+                    };
+                    if current.as_ref() == &merged {
+                        return false;
+                    }
+                    *current = Arc::new(merged);
+                    true
+                });
+            } else if state.pull_requests.borrow().as_ref() != &snapshot {
                 state.pull_requests.send_replace(Arc::new(snapshot));
             }
             return Response::Done;
@@ -321,5 +359,10 @@ fn status(state: &State) -> Status {
         chats: layout.chats().count(),
         devices: state.auth().devices().len(),
         connected: state.connected().len(),
+        relays: state
+            .relay
+            .as_ref()
+            .map(|relay| relay.status())
+            .unwrap_or_default(),
     }
 }

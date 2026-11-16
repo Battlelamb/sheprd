@@ -2,8 +2,7 @@
 //! worktrees, so the app makes, lists, and removes checkouts itself through
 //! `sheprd_remote::work`, as fan-out and dispatch do on Herdr 2, and keeps a
 //! workspace for each new checkout, whose first tab lands where the dialog
-//! said: its shell, or an agent started in one. Kept workspaces are on this
-//! computer, so every script runs here, off the UI thread.
+//! said: its shell, or an agent started in one, on the originating host.
 
 use crate::{
     SheprdWindow,
@@ -12,7 +11,7 @@ use crate::{
 };
 use gpui::*;
 use sheprd_client::ConnectTarget;
-use sheprd_remote::{teleport::Host, work};
+use sheprd_remote::work;
 use std::{path::Path, sync::atomic::AtomicBool};
 
 /// What a kept workspace's new worktree dialog asked for.
@@ -78,6 +77,7 @@ pub(crate) enum KeptDone {
         /// The host the workspace is kept for, whichever is shown when the
         /// removal finishes.
         scope: crate::browser::Scope,
+        target: ConnectTarget,
         workspace: String,
         result: crate::Result<()>,
     },
@@ -96,6 +96,7 @@ pub(crate) struct Landing {
     repo: Option<String>,
     /// The device the checkout was asked on, which that ranking names.
     endpoint: String,
+    target: ConnectTarget,
     /// The pull request or issue note the new checkout gets.
     note: Option<crate::menu::worktree_source::Note>,
     /// A reused checkout's pull result, shown once its workspace opens.
@@ -110,30 +111,27 @@ pub(crate) struct Landing {
 impl Landing {
     /// A landing in a shell, named `label`, for tests that finish Git work
     /// without running Git.
-    pub(crate) fn shell(endpoint: &str, label: Option<&str>) -> Self {
+    pub(crate) fn shell(label: Option<&str>, target: ConnectTarget) -> Self {
         Self {
             label: label.map(str::to_owned),
             chosen: None,
             group: None,
             repo: None,
-            endpoint: endpoint.to_owned(),
+            endpoint: crate::endpoint::LOCAL.into(),
+            target,
             note: None,
             notice: None,
             setup: None,
         }
     }
 
-    pub(crate) fn reused(endpoint: &str, pulled: crate::Result<()>) -> Self {
+    pub(crate) fn reused(endpoint: &str, target: ConnectTarget, pulled: crate::Result<()>) -> Self {
         Self {
+            endpoint: endpoint.to_owned(),
             notice: Some(super::reuse::pull_notice(pulled)),
-            ..Self::shell(endpoint, None)
+            ..Self::shell(None, target)
         }
     }
-}
-
-/// The host kept workspaces live on: this computer.
-fn this_computer() -> crate::Result<Host> {
-    Ok(Host::new(&ConnectTarget::Local)?)
 }
 
 struct CarriedOut {
@@ -144,13 +142,16 @@ struct CarriedOut {
 
 /// `checkout`, made or opened as `ask` says. Blocking.
 fn carry_out(
+    target: &ConnectTarget,
     checkout: &str,
     ask: Ask,
     remote: Option<(String, String)>,
 ) -> crate::Result<CarriedOut> {
+    let host = work::host_for_kept(target)?;
+    let cancelled = AtomicBool::new(false);
     let mut pulled = None;
     let path = match &ask {
-        Ask::Open { path } => path.clone(),
+        Ask::Open { path } => work::open(&host, checkout, path, &cancelled)?,
         Ask::Create {
             branch,
             base,
@@ -164,8 +165,6 @@ fn carry_out(
                 base,
                 label: label.as_deref(),
             };
-            let host = this_computer()?;
-            let cancelled = AtomicBool::new(false);
             match work::create(&host, &repository, &new, &cancelled) {
                 Ok(created) => created.path,
                 Err(error) => {
@@ -212,16 +211,17 @@ fn carry_out(
 impl SheprdWindow {
     /// The folder of the kept workspace the menu is for, which its
     /// repository is read and branched through.
-    /// `None` for a workspace kept on another host, whose folder is there.
     pub(in crate::menu) fn kept_checkout(&self) -> Option<String> {
-        if self.selected_is_remote() {
-            return None;
-        }
         let target = self
             .menu
             .target
             .as_ref()
             .filter(|target| target.keeper == sheprd_session::Keeper::App)?;
+        // Git runs on the shown host, so a menu left on a workspace another
+        // host keeps must not reach its folder through this one.
+        if !self.is_kept_workspace(&target.id) {
+            return None;
+        }
         match &target.source {
             super::Source::Directory(cwd) if !cwd.is_empty() => Some(cwd.clone()),
             _ => None,
@@ -235,6 +235,9 @@ impl SheprdWindow {
         let Some(checkout) = self.kept_checkout() else {
             return;
         };
+        let endpoint = &self.endpoints[self.selected_endpoint];
+        let scope = crate::browser::scope(endpoint);
+        let target = endpoint.connection.target.clone();
         // Marked as asked, so a search or tab switch meanwhile does not ask
         // again; no daemon answer can carry this name.
         let Some(source) = self
@@ -248,7 +251,7 @@ impl SheprdWindow {
         let request = format!("kept-{}", uuid::Uuid::new_v4().simple());
         source.checkouts.request = Some(request.clone());
         let listed = cx.background_executor().spawn(async move {
-            let host = this_computer()?;
+            let host = work::host_for_kept(&target)?;
             Ok::<_, crate::Error>(work::list(&host, &checkout, &AtomicBool::new(false))?)
         });
         cx.spawn(async move |this, cx| {
@@ -258,7 +261,9 @@ impl SheprdWindow {
                     let open: Vec<_> = match &result {
                         Ok(checkouts) => checkouts
                             .iter()
-                            .map(|checkout| this.kept_workspace_at(Path::new(&checkout.path)))
+                            .map(|checkout| {
+                                this.kept_workspace_in(&scope, Path::new(&checkout.path), cx)
+                            })
                             .collect(),
                         Err(_) => Vec::new(),
                     };
@@ -328,6 +333,10 @@ impl SheprdWindow {
                 .map(|tree| tree.key.clone()),
             repo: self.menu.dispatch_repo(),
             endpoint: self.endpoints[self.selected_endpoint].id.clone(),
+            target: self.endpoints[self.selected_endpoint]
+                .connection
+                .target
+                .clone(),
             note: matches!(ask, Ask::Create { .. })
                 .then(|| self.worktree_note())
                 .flatten(),
@@ -343,9 +352,10 @@ impl SheprdWindow {
                 .as_ref()
                 .and_then(|source| source.pending.as_ref()),
         );
+        let target = landing.target.clone();
         let work = cx
             .background_executor()
-            .spawn(async move { carry_out(&checkout, ask, remote) });
+            .spawn(async move { carry_out(&target, &checkout, ask, remote) });
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
@@ -405,9 +415,16 @@ impl SheprdWindow {
             KeptDone::Removed {
                 request,
                 scope,
+                target,
                 workspace,
                 result,
-            } => self.finish_kept_removal(&request, &scope, &workspace, result, window, cx),
+            } => {
+                if self.endpoints.iter().any(|endpoint| {
+                    crate::browser::scope(endpoint) == scope && endpoint.connection.target == target
+                }) {
+                    self.finish_kept_removal(&request, &scope, &workspace, result, window, cx);
+                }
+            }
         }
     }
 
@@ -425,6 +442,7 @@ impl SheprdWindow {
         // Pulling an existing checkout may finish after its host was left.
         // Preserve its result as feedback without reopening it on another host.
         if matches!(ask, Ask::Open { .. })
+            && landing.notice.is_some()
             && self.endpoints[self.selected_endpoint].id != landing.endpoint
         {
             if let Some(notice) = landing.notice {
@@ -442,6 +460,12 @@ impl SheprdWindow {
                 );
                 self.local_transfer_notice(&fl!("worktree-source-already-exists"), body, cx);
             }
+            return;
+        }
+        // An endpoint ID can be edited to point elsewhere while Git runs.
+        // Never land the old host's path or terminal on its replacement.
+        if !self.select_worktree_host(&landing.endpoint, &landing.target, cx) {
+            self.local_error = Some(crate::Error::StaleWorkspace.localize());
             return;
         }
         if matches!(ask, Ask::Create { .. }) {
@@ -569,6 +593,30 @@ impl SheprdWindow {
         self.remove_kept_checkout_for(request, workspace, path, force, None, cx);
     }
 
+    pub(crate) fn remove_archived_kept_checkout(
+        &mut self,
+        scope: &crate::browser::Scope,
+        target: &ConnectTarget,
+        workspace: String,
+        path: String,
+        force: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.endpoints.iter().position(|endpoint| {
+            crate::browser::scope(endpoint) == *scope && endpoint.connection.target == *target
+        }) else {
+            return;
+        };
+        self.remove_kept_checkout_at(
+            (index, format!("kept-{}", uuid::Uuid::new_v4().simple())),
+            workspace,
+            path,
+            force,
+            None,
+            cx,
+        );
+    }
+
     pub(crate) fn remove_merged_kept_checkout(
         &mut self,
         workspace: String,
@@ -589,14 +637,48 @@ impl SheprdWindow {
         merged: Option<crate::merged_cleanup::Candidate>,
         cx: &mut Context<Self>,
     ) {
-        // Kept for this computer, whichever host is shown when it finishes.
-        let index = self.core_host().unwrap_or(self.selected_endpoint);
+        self.remove_kept_checkout_at(
+            (self.selected_endpoint, request),
+            workspace,
+            path,
+            force,
+            merged,
+            cx,
+        );
+    }
+
+    fn remove_kept_checkout_at(
+        &mut self,
+        request: (usize, String),
+        workspace: String,
+        path: String,
+        force: bool,
+        merged: Option<crate::merged_cleanup::Candidate>,
+        cx: &mut Context<Self>,
+    ) {
+        let (index, request) = request;
         let scope = crate::browser::scope(&self.endpoints[index]);
+        let target = self.endpoints[index].connection.target.clone();
+        let expected = target.clone();
+        let identity = self.sessions(index).core.as_ref().and_then(|session| {
+            let workspace = session.workspace(&workspace)?;
+            let tree = workspace.worktree.as_ref().filter(|tree| tree.linked)?;
+            Some((tree.key.clone(), workspace.branch.clone()))
+        });
         let removed = cx.background_executor().spawn(async move {
-            let host = this_computer()?;
+            let host = work::host_for_kept(&target)?;
             let cancelled = AtomicBool::new(false);
+            // A directory can be replaced while a dialog or archive is
+            // open. Its old workspace never authorizes the replacement.
+            let (key, branch) = identity.ok_or(crate::Error::StaleWorkspace)?;
+            let current = work::identity(&host, &path, &cancelled)?;
+            if !current.linked || current.key != key || current.branch != branch {
+                return Err(crate::Error::StaleWorkspace);
+            }
             if let Some(candidate) = merged {
-                crate::merged_cleanup::verify_kept_removal(&candidate, &path, &cancelled)?;
+                crate::merged_cleanup::verify_kept_removal_on(
+                    &target, &candidate, &path, &cancelled,
+                )?;
             }
             work::remove(&host, &path, force, &cancelled).map_err(crate::Error::from)
         });
@@ -606,6 +688,7 @@ impl SheprdWindow {
                 this.kept_worktree_done.push(KeptDone::Removed {
                     request,
                     scope,
+                    target: expected,
                     workspace,
                     result,
                 });

@@ -83,12 +83,14 @@ fn the_daemon_runs_with_every_setting_as_an_argument() {
         },
         device_idle_days: 9,
         enabled: true,
+        github_cli: false,
         keep_running: false,
         live_activities: Default::default(),
         notifications: Privacy::Excerpt,
         port: 9443,
         // Sheprd's own: presence runs beside the daemon, not in its args.
         presence: true,
+        relays: vec!["https://relay.example.org".into()],
     };
     assert_eq!(
         words(&custom.args()),
@@ -108,6 +110,8 @@ fn the_daemon_runs_with_every_setting_as_an_argument() {
             "excerpt",
             "--device-idle-days",
             "9",
+            "--relay",
+            "https://relay.example.org",
         ]
     );
 }
@@ -315,6 +319,7 @@ fn status(version: &str) -> Response {
         chats: 0,
         devices: 0,
         connected: 0,
+        relays: Default::default(),
     })
 }
 
@@ -497,6 +502,7 @@ fn a_failed_load_is_reported_with_its_cause() {
     assert!(std::error::Error::source(&error).is_some());
 }
 
+mod github;
 mod release;
 mod restart;
 mod update;

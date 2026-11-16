@@ -9,6 +9,7 @@ fn a_reused_checkout_finishing_on_another_host_keeps_focus_and_reports_its_resul
         view.update(cx, |view, cx| {
             let origin = view.endpoints[0].id.clone();
             let scope = crate::browser::scope(&view.endpoints[0]);
+            let target = view.endpoints[0].connection.target.clone();
             view.endpoints[0].label = "Original host".into();
             view.endpoints.push(crate::endpoint::Endpoint::new(
                 "ssh:other".into(),
@@ -33,7 +34,7 @@ fn a_reused_checkout_finishing_on_another_host_keeps_focus_and_reports_its_resul
                 let success = pulled.is_ok();
                 view.kept_worktree_done.push(KeptDone::Checkout {
                     request: "kept-reuse".into(),
-                    landing: Box::new(KeptLanding::reused(&origin, pulled)),
+                    landing: Box::new(KeptLanding::reused(&origin, target.clone(), pulled)),
                     result: Ok((Ask::Open { path: NEW.into() }, NEW.into())),
                 });
                 view.poll_kept_worktree(window, cx);
@@ -74,7 +75,11 @@ fn a_reused_checkout_still_opens_when_its_host_is_selected_after_dismissing_the_
             view.menu.reset();
             view.kept_worktree_done.push(KeptDone::Checkout {
                 request: "kept-reuse".into(),
-                landing: Box::new(KeptLanding::reused(&origin, Ok(()))),
+                landing: Box::new(KeptLanding::reused(
+                    &origin,
+                    view.endpoints[0].connection.target.clone(),
+                    Ok(()),
+                )),
                 result: Ok((Ask::Open { path: NEW.into() }, NEW.into())),
             });
             view.poll_kept_worktree(window, cx);

@@ -105,6 +105,7 @@ impl Localize for Error {
             Self::LinkedFileMissing { path: file } => {
                 fl!("error-linked-file-missing", path = path(file))
             }
+            Self::LinkHandlers(error) => error.localize(),
             Self::LinkOnAnotherHost { host } => {
                 fl!("error-link-on-another-host", host = host.as_str())
             }
@@ -155,6 +156,7 @@ impl Localize for Error {
             Self::PortForward(error) => error.localize(),
             Self::PreferencesPath => fl!("error-preferences-path"),
             Self::Processes(error) => error.localize(),
+            Self::PublicRelays(error) => error.localize(),
             Self::Px0(error) => error.localize(),
             Self::RelativeConfigRoot => fl!("error-relative-config-root"),
             Self::Remote(error) => error.localize(),
@@ -162,6 +164,7 @@ impl Localize for Error {
                 fl!("error-remote-agent-tools", error = source.localize())
             }
             Self::RemoteControl(error) => error.localize(),
+            Self::RemoteUpdate(error) => error.localize(),
             Self::Request { method, source } => fl!(
                 "error-request",
                 method = method.to_string(),

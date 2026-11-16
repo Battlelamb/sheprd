@@ -15,6 +15,16 @@ enum Route: Codable, Hashable {
     case workspace(WorkspaceKey)
     case changes(WorkspaceKey)
 
+    /// Whether this opens the same tab as `other`, whatever either's title:
+    /// a renamed chat, or a tab opened before its name arrived, is still it.
+    func opensSameTab(as other: Route) -> Bool {
+        switch (self, other) {
+        case let (.chat(one, _), .chat(two, _)), let (.term(one, _), .term(two, _)): one == two
+        case let (.workspace(one), .workspace(two)), let (.changes(one), .changes(two)): one == two
+        default: false
+        }
+    }
+
     /// Whether this shows the terminal of `pane`, under whatever title.
     func showsTerminal(_ pane: PaneKey) -> Bool {
         if case let .term(key, _) = self { key == pane } else { false }
@@ -33,6 +43,17 @@ final class AppModel {
             presence.computers = computers
         }
     }
+    /// The relays kept for later (`SavedRelays`): those the computers named
+    /// and those typed in Settings. Kept on this phone across launches.
+    private(set) var savedRelays = AppModel.loadRelays() {
+        didSet {
+            fleet.savedRelays = savedRelays.relays
+            if let data = try? JSONEncoder().encode(savedRelays) {
+                UserDefaults.standard.set(data, forKey: Self.relaysKey)
+            }
+        }
+    }
+    private static let relaysKey = "savedRelays"
     var message: String?
     /// Set by a deep link; the root view shows it and clears it.
     var pendingRoute: Route?
@@ -242,7 +263,15 @@ final class AppModel {
         // Property observers do not run during `init`.
         tokens.computers = computers
         fleet.sync(computers)
+        // Every relay a paired computer named is kept, so it is there to
+        // pick from, and to dial, when that computer cannot be asked.
+        var relays = savedRelays
+        relays.learn(computers.compactMap(\.relay).flatMap(\.relays))
+        keep(relays)
+        // Unchanged, the property's observer did not run.
+        fleet.savedRelays = savedRelays.relays
         presence.onAddresses = { [weak self] fingerprint, origins in self?.update(fingerprint, origins: origins) }
+        fleet.onRelay = { [weak self] device, record in self?.setRelay(device, record) }
         // Back in range after iOS relaunched the app: tokens may be stale.
         presence.onWake = { [weak self] in
             guard let self else { return }
@@ -254,6 +283,18 @@ final class AppModel {
         fleet.onOnline = { [weak self] in self?.hostLinks.check($0) }
         fleet.onTags = { [weak self] in self?.tagsArrived($0, for: $1) }
         fleet.onTagsAnswer = { [weak self] in self?.tagsAnswered($0, for: $1) }
+        shortcuts.perform = { [weak fleet] actions in
+            for action in actions {
+                switch action {
+                case let .fetch(device): fleet?.fetchShortcuts(from: device)
+                case let .offer(copy, device): fleet?.offerShortcuts(copy, to: device)
+                }
+            }
+        }
+        fleet.onShortcutsReported = { [shortcuts] in shortcuts.reported($0, by: $1) }
+        fleet.onShortcuts = { [shortcuts] in shortcuts.received($0, offered: $1, from: $2) }
+        fleet.onShortcutsFetchFailed = { [shortcuts] in shortcuts.fetchFailed($0) }
+        fleet.onOffline = { [shortcuts] in shortcuts.offline($0) }
         fleet.onSummary = { [spotlight] in
             let summary = WidgetSummary.load()
             spotlight.update(summary)
@@ -276,6 +317,7 @@ final class AppModel {
         computers.removeAll { $0.fingerprint == computer.fingerprint || $0.device == computer.device }
         computers.append(computer)
         save()
+        learnRelays(of: computer.relay)
         Task { await AppDelegate.enableAlerts() }
         Task { await tokens.sync(only: computer.fingerprint) }
         hostLinks.check(computer, force: true)
@@ -319,6 +361,57 @@ final class AppModel {
         }
     }
 
+    /// How this phone reaches a computer through its relays, once sent.
+    private func setRelay(_ device: String, _ record: RelayRecord?) {
+        guard let index = computers.firstIndex(where: { $0.device == device }),
+              computers[index].relay != record
+        else { return }
+        computers[index].relay = record
+        save()
+        learnRelays(of: record)
+    }
+
+    private static func loadRelays() -> SavedRelays {
+        UserDefaults.standard.data(forKey: relaysKey)
+            .flatMap { try? JSONDecoder().decode(SavedRelays.self, from: $0) } ?? SavedRelays()
+    }
+
+    /// Replaces the kept relays, when they changed; the property saves
+    /// them and hands them to the fleet.
+    private func keep(_ relays: SavedRelays) {
+        guard relays != savedRelays else { return }
+        savedRelays = relays
+    }
+
+    /// Keeps the relays a computer named over a path the phone trusted.
+    private func learnRelays(of record: RelayRecord?) {
+        guard let record else { return }
+        var relays = savedRelays
+        relays.learn(record.relays)
+        keep(relays)
+    }
+
+    /// Keeps the relay typed in Settings, and says what became of it.
+    func addRelay(_ text: String) -> SavedRelays.Added {
+        var relays = savedRelays
+        let added = relays.add(text)
+        keep(relays)
+        return added
+    }
+
+    /// Forgets a relay no paired computer names any more.
+    func removeRelay(_ relay: RelayEndpoint) {
+        guard computers(naming: relay).isEmpty else { return }
+        var relays = savedRelays
+        relays.remove(relay)
+        keep(relays)
+    }
+
+    /// The paired computers that said they listen on `relay`.
+    func computers(naming relay: RelayEndpoint) -> [Computer] {
+        computers.filter { $0.relay?.relays.contains(relay) == true }
+    }
+
     /// Addresses a computer sent over Bluetooth, sealed to this phone.
     private func update(_ fingerprint: Fingerprint, origins: [String]) {
         guard let index = computers.firstIndex(where: { $0.fingerprint == fingerprint }) else { return }
@@ -335,6 +428,7 @@ final class AppModel {
         try? NotifyKey.forget(computer.fingerprint)
         hostLinks.forget(computer)
         collapsed.computers.forget(computer.device)
+        shortcuts.offline(computer.device)
         Task { await sessions.forget(computer) }
     }
 

@@ -46,7 +46,7 @@ struct TerminalScreen: View {
         GeometryReader { geometry in
             if let screen = store?.screen {
                 // In cells: the computer counts a wide character as one.
-                let columns = screen.rows.reduce(screen.columns) { widest, row in max(widest, Self.span(row)) }
+                let columns = screen.fitColumns(held: store?.size)
                 let fitted = fit(columns: columns, width: geometry.size.width - 16)
                 let size = min(28, max(4, fitted * zoom * pinch))
                 let paper = Self.paper(screen)
@@ -111,7 +111,7 @@ struct TerminalScreen: View {
                 // down; with a selection, it clears it first.
                 .onTapGesture { if selection != nil { selection = nil } else { keyboard.toggle() } }
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                TermWaitingView(store: store)
             }
         }
         // Measured here, inside the key rows and the bars, so the rows

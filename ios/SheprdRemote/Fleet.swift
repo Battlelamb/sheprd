@@ -97,6 +97,28 @@ final class Fleet {
     @ObservationIgnored private var termViewers: [PaneKey: Int] = [:]
     /// One client per computer, kept while its address and CA stay.
     @ObservationIgnored private var clients: [String: RemoteClient] = [:]
+    /// Each computer's relay proxy while its link runs (`RelayProxy`).
+    @ObservationIgnored private var proxies: [String: RelayProxy] = [:]
+    /// Each running proxy's origin, raced after the computer's own
+    /// addresses, so a direct path wins when there is one.
+    @ObservationIgnored private var relayOrigins: [String: String] = [:]
+    /// The relays kept in Settings, dialed for every computer after the
+    /// ones it named. A change restarts the running proxies, which open
+    /// their sessions with the list they started with.
+    @ObservationIgnored var savedRelays: [RelayEndpoint] = [] {
+        didSet {
+            guard savedRelays != oldValue else { return }
+            for device in Array(proxies.keys) {
+                stopRelay(device)
+                if let computer = machines.first(where: { $0.id == device })?.computer { startRelay(computer) }
+            }
+        }
+    }
+    /// Computers whose relay keys are being checked or sent.
+    @ObservationIgnored private var enrolling: Set<String> = []
+    /// A computer's relay record changed, or it stopped listening on
+    /// relays (nil): the app keeps it with the computer.
+    var onRelay: ((String, RelayRecord?) -> Void)?
     /// Calls that got no answer, for the computer's log once it is back.
     @ObservationIgnored private var unreported: [String: UnreportedFailures] = [:]
     /// Addresses named in a report, which the daemon cuts at 600 characters.
@@ -128,11 +150,16 @@ final class Fleet {
                 // Addresses learned since (over Bluetooth, say) go to the
                 // running link too, which otherwise keeps the old ones.
                 if known.computer.origins != computer.origins, let link = links[computer.device] {
-                    let origins = computer.origins
+                    let origins = self.origins(computer)
                     Task {
                         await link.updateOrigins(origins)
                         await link.networkChanged()
                     }
+                }
+                // New relay keys, or none: the proxy follows.
+                if known.computer.relay != computer.relay, links[computer.device] != nil {
+                    stopRelay(computer.device)
+                    startRelay(computer)
                 }
                 known.computer = computer
                 return known
@@ -168,6 +195,8 @@ final class Fleet {
     }
 
     func networkChanged() {
+        // The phone's round trips to relays were for the old network.
+        Task { await RelayProbes.shared.forget() }
         for link in links.values { Task { await link.networkChanged() } }
     }
 
@@ -299,6 +328,18 @@ final class Fleet {
     /// Devices with an offer of tags on its way, so a home arriving
     /// meanwhile does not send it again.
     @ObservationIgnored private var tagOffers = TagOffers<Computer>()
+    /// When the text shortcuts a computer's home reports were edited; `nil`
+    /// from a computer too old to keep them.
+    @ObservationIgnored var onShortcutsReported: ((UInt64?, String) -> Void)?
+    /// A computer's copy of the text shortcuts, as fetched, or as it stood
+    /// after the offer that goes with it.
+    @ObservationIgnored var onShortcuts: ((TextShortcuts, _ offered: TextShortcuts?, String) -> Void)?
+    /// A computer's shortcuts could not be read.
+    @ObservationIgnored var onShortcutsFetchFailed: ((String) -> Void)?
+    /// A computer's link is not online, or the computer was forgotten.
+    @ObservationIgnored var onOffline: ((String) -> Void)?
+    /// Offers of text shortcuts on their way, one at a time per computer.
+    @ObservationIgnored private var shortcutOffers = TagOffers<TextShortcuts>()
 
     // MARK: Views
 
@@ -326,8 +367,35 @@ final class Fleet {
         if let open = terms[key] { return open }
         let store = TermStore(key: key)
         terms[key] = store
+        let status = machines.first { $0.id == key.device }.map { String(describing: $0.status) } ?? "not paired"
+        log.notice("opening terminal \(key.pane, privacy: .public) on \(key.device, privacy: .public), which is \(status, privacy: .public)")
         Task { await links[key.device]?.watch(.term(pane: key.pane)) }
         return store
+    }
+
+    /// Asks for a terminal again, from scratch, after it did not show.
+    func retryTerm(_ store: TermStore) {
+        guard terms[store.key] === store else { return }
+        store.askedAgain()
+        let key = store.key
+        let size = store.size
+        log.notice("asking again for terminal \(key.pane, privacy: .public) on \(key.device, privacy: .public)")
+        let offline = if case .online = status(of: key.device) { false } else { true }
+        // One task, so the computer drops the old view before the new one.
+        Task {
+            guard let link = links[key.device] else { return }
+            await link.unwatch(.term(pane: key.pane))
+            // Closed while the old view was dropped: nobody watches it now.
+            guard terms[key] === store else { return }
+            await link.watch(.term(pane: key.pane), size: size)
+            // Down: try every address now rather than after the backoff.
+            if offline { await link.networkChanged() }
+        }
+    }
+
+    /// The link status of `device`, nil when it is not paired.
+    func status(of device: String) -> LinkStatus? {
+        machines.first { $0.id == device }?.status
     }
 
     /// Scrolls a terminal's history by `lines`, above zero going back.
@@ -476,6 +544,37 @@ final class Fleet {
         }
     }
 
+    /// Reads a computer's text shortcuts. A failure leaves the copy here;
+    /// the computer's next report after it is back asks again.
+    func fetchShortcuts(from device: String) {
+        Task {
+            do {
+                let copy = try await call(device) { client, token in try await client.shortcuts(bearer: token) }
+                onShortcuts?(copy, nil, device)
+            } catch {
+                log.error("could not read shortcuts: \(String(describing: error), privacy: .public)")
+                onShortcutsFetchFailed?(device)
+            }
+        }
+    }
+
+    /// Offers a computer this phone's text shortcuts. An edit made while
+    /// another offer goes waits for it, and only the latest does.
+    func offerShortcuts(_ offer: TextShortcuts, to device: String) {
+        guard shortcutOffers.begin(device, offer, edit: offer.updatedMs) else { return }
+        Task {
+            defer {
+                if let next = shortcutOffers.finish(device) { offerShortcuts(next, to: device) }
+            }
+            do {
+                let answer = try await call(device) { client, token in try await client.offerShortcuts(offer, bearer: token) }
+                onShortcuts?(answer, offer, device)
+            } catch {
+                log.error("could not offer shortcuts: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
     /// Closes the pane a chat runs in, which stops its agent in Sheprd.
     func closeChatPane(_ key: PaneKey) async throws {
         let pane = key.pane
@@ -508,10 +607,11 @@ final class Fleet {
         guard links[computer.device] == nil else { return }
         let link = ComputerLink(
             fingerprint: computer.fingerprint.hex,
-            origins: computer.origins,
+            origins: origins(computer),
             io: LiveSocket.io(for: computer, sessions: sessions)
         )
         links[computer.device] = link
+        startRelay(computer)
         let device = computer.device
         let watching = chats.filter { $0.key.device == device }.map { ($0.key.pane, $0.value.cursor) }
         let terminals = terms.filter { $0.key.device == device }.map { ($0.key.pane, $0.value.size) }
@@ -526,7 +626,77 @@ final class Fleet {
         }
     }
 
+    // MARK: Relays
+
+    /// The addresses a computer's link races: its own, then its relay's.
+    private func origins(_ computer: Computer) -> [String] {
+        computer.origins + (relayOrigins[computer.device].map { [$0] } ?? [])
+    }
+
+    /// Starts the computer's relay proxy, when it has relays, and adds its
+    /// origin to the running link once it listens.
+    private func startRelay(_ computer: Computer) {
+        let saved = savedRelays
+        guard let relay = computer.relay, proxies[computer.device] == nil,
+              let proxy = try? RelayProxy(open: { try await relay.open(saved: saved) })
+        else { return }
+        let device = computer.device
+        proxies[device] = proxy
+        Task {
+            guard let port = try? await proxy.start() else { return }
+            guard proxies[device] === proxy, let link = links[device],
+                  let computer = machines.first(where: { $0.id == device })?.computer
+            else {
+                proxy.stop()
+                return
+            }
+            relayOrigins[device] = "https://127.0.0.1:\(port)"
+            await link.updateOrigins(origins(computer))
+            await link.networkChanged()
+        }
+    }
+
+    private func stopRelay(_ device: String) {
+        proxies.removeValue(forKey: device)?.stop()
+        relayOrigins[device] = nil
+    }
+
+    /// Asks the computer, while it answers directly, how to reach it
+    /// through its relays, and sends this phone's keys when they are new.
+    private func enrollRelay(_ device: String) {
+        guard !enrolling.contains(device) else { return }
+        enrolling.insert(device)
+        let known = machines.first { $0.id == device }?.computer.relay
+        Task {
+            defer { enrolling.remove(device) }
+            let answer: API.RelayInfo?
+            do {
+                answer = try await call(device) { client, token in try await client.relayInfo(bearer: token) }
+            } catch {
+                return
+            }
+            guard let info = answer else {
+                if known != nil { onRelay?(device, nil) }
+                return
+            }
+            if let known, known.matches(info) {
+                // Same keys; only the computer's nearest relays may differ.
+                if let refreshed = known.refreshed(with: info) { onRelay?(device, refreshed) }
+                return
+            }
+            guard let record = RelayRecord.make(from: info), let keys = record.enrollment else { return }
+            do {
+                try await call(device) { client, token in try await client.enrollRelay(keys, bearer: token) }
+                log.notice("sent relay keys to \(device, privacy: .public)")
+                onRelay?(device, record)
+            } catch {
+                log.error("could not send relay keys: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     private func stopLink(_ device: String) {
+        stopRelay(device)
         clients[device] = nil
         readers.removeValue(forKey: device)?.cancel()
         if let link = links.removeValue(forKey: device) { Task { await link.stop() } }
@@ -538,11 +708,19 @@ final class Fleet {
         case let .status(status):
             log.notice("\(self.machines[index].computer.name, privacy: .public) is \(String(describing: status), privacy: .public)")
             machines[index].status = status
-            if case .online = status {} else { machines[index].watching = false }
+            if case .online = status {} else {
+                machines[index].watching = false
+                onOffline?(device)
+            }
             if case .revoked = status { stopLink(device) }
             if case .online = status {
                 onOnline?(machines[index].computer)
                 reportFailures(of: device)
+            }
+            // Over a path it already trusts, the phone learns the
+            // computer's relays and sends its keys for them.
+            if case let .online(origin) = status, origin != relayOrigins[device] {
+                enrollRelay(device)
             }
         case let .unreachable(failures):
             // Kept for the computer's log, which shows only silence for
@@ -552,6 +730,7 @@ final class Fleet {
             unreported[device, default: UnreportedFailures()].add(line)
         case let .event(.home(home)):
             if let tags = home.tags { onTags?(tags, machines[index].computer) }
+            onShortcutsReported?(home.shortcutsMs, device)
             // The computer's load moves every few seconds; only the header
             // shows it, so the cache, widgets, and Spotlight wait for a
             // change to the workspaces.
@@ -578,8 +757,20 @@ final class Fleet {
             publishSummary()
         case let .event(.error(message)):
             log.error("\(self.machines[index].computer.name, privacy: .public) refused: \(message, privacy: .public)")
+        case let .event(.refused(view, message)):
+            log.error("\(self.machines[index].computer.name, privacy: .public) refused \(String(describing: view), privacy: .public): \(message, privacy: .public)")
+            if case let .term(pane) = view, let store = terms[PaneKey(device: device, pane: pane)], store.screen == nil {
+                store.problem = message
+            }
+        case let .event(.reload(.term(pane))):
+            log.notice("\(self.machines[index].computer.name, privacy: .public) reloads terminal \(pane, privacy: .public)")
         case let .event(.termScreen(screen)):
-            terms[PaneKey(device: device, pane: screen.pane)]?.apply(screen)
+            guard let store = terms[PaneKey(device: device, pane: screen.pane)] else { return }
+            if store.screen == nil {
+                let waited = ContinuousClock.now - store.asked
+                log.notice("terminal \(screen.pane, privacy: .public) showed after \(waited, privacy: .public)")
+            }
+            store.apply(screen)
         case let .event(event):
             guard let pane = event.pane, let store = chats[PaneKey(device: device, pane: pane)] else { return }
             let before = store.diverged

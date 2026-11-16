@@ -9,7 +9,7 @@
 
 use crate::teleport::Host;
 use sheprd_client::{ConnectTarget, ScriptLimits};
-use sheprd_remote_control::control::host_relay::{Outcome, Request};
+use sheprd_remote_control::control::host_relay::{self, Outcome, Request};
 use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
@@ -30,7 +30,14 @@ if [ -x \"$program\" ]; then \"$program\" relay-enroll 2>/dev/null || true; fi
 cat >/dev/null
 ";
 
+/// How long one request's search may run, so its answer reaches the near
+/// daemon while it still waits for it.
+pub(crate) const BUDGET: Duration = Duration::from_millis(host_relay::CARRY_MS);
+
 /// Tries each of `targets` in order; what carrying `request` came to.
+/// Stopped by `cancelled` (the app quit, or `BUDGET` ran out), it failed:
+/// the phone tries again later, where `Elsewhere` would leave the computer
+/// alone for a day.
 pub(crate) fn carry<'a>(
     request: &Request,
     targets: impl IntoIterator<Item = &'a ConnectTarget>,
@@ -39,7 +46,7 @@ pub(crate) fn carry<'a>(
     let mut failed = None;
     for target in targets {
         if cancelled.load(Ordering::Relaxed) {
-            break;
+            return failed.unwrap_or_else(timed_out);
         }
         match ask(request, target, cancelled) {
             // Only the computer the request names can sign for it; any
@@ -57,7 +64,16 @@ pub(crate) fn carry<'a>(
             Some(Outcome::Elsewhere) | None => {}
         }
     }
+    if cancelled.load(Ordering::Relaxed) {
+        return failed.unwrap_or_else(timed_out);
+    }
     failed.unwrap_or(Outcome::Elsewhere)
+}
+
+fn timed_out() -> Outcome {
+    Outcome::Failed {
+        reason: "no host answered in time".into(), // i18n: data
+    }
 }
 
 /// The host's answer; `None` when it has no program that answers.

@@ -13,7 +13,13 @@ use sheprd_remote_control::{
         hosts::{Host, HostId, HostOutcome, HostPairing, HostRevoke},
     },
 };
-use std::{collections::HashSet, sync::atomic::AtomicBool};
+use std::{
+    collections::HashSet,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 /// How often the host list is sent again unchanged, for a daemon that
 /// restarted between polls, and the revocations owed are asked for.
@@ -247,9 +253,22 @@ impl Supervisor {
             )
             .cloned()
             .collect();
+        // The search stops once its budget is spent, mid-host too, so its
+        // answer reaches the near daemon while it still waits for it.
+        let stop = Arc::new(AtomicBool::new(false));
+        let timer = cx.background_executor().timer(links::relay::BUDGET);
+        cx.background_executor()
+            .spawn({
+                let stop = Arc::clone(&stop);
+                async move {
+                    timer.await;
+                    stop.store(true, Ordering::Relaxed);
+                }
+            })
+            .detach();
         let task = cx.background_executor().spawn({
             let request = job.request.clone();
-            async move { links::relay::carry(&request, &targets, &AtomicBool::new(false)) }
+            async move { links::relay::carry(&request, &targets, &stop) }
         });
         cx.spawn(async move |cx| {
             let outcome = task.await;

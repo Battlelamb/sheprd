@@ -18,11 +18,16 @@ final class RelayCarrier {
 
     /// How often a pending request is read again.
     private static let poll: Duration = .seconds(3)
-    /// How long the phone follows one request; Sheprd may be trying hosts
-    /// over SSH one after another.
-    private static let patience: Duration = .seconds(10 * 60)
+    /// How long the phone follows one request: Sheprd may take a few
+    /// minutes to pick it up, then tries hosts over SSH one after another
+    /// for up to eight (`host_relay::CARRY_MS`).
+    private static let patience: Duration = .seconds(15 * 60)
 
     private var plan = HostRelayPlan()
+    /// Bumped for a computer reached directly or forgotten, so an attempt
+    /// that started before then saves nothing: the phone may have sent
+    /// newer keys to it directly since.
+    private var generations: [String: Int] = [:]
     private let carry: Carry
     private let onRelay: (String, RelayRecord) -> Void
 
@@ -35,7 +40,7 @@ final class RelayCarrier {
     /// relay record, and has an online computer to ask.
     func check(_ machines: [(computer: Computer, status: LinkStatus)]) {
         for (computer, status) in machines {
-            if case .online = status { plan.forget(computer.device) }
+            if case .online = status { forget(computer.device) }
         }
         for pick in plan.due(machines, at: .now) {
             Task {
@@ -47,11 +52,18 @@ final class RelayCarrier {
 
     func forget(_ device: String) {
         plan.forget(device)
+        generations[device, default: 0] += 1
+    }
+
+    /// Whether an attempt started at `generation` still speaks for `device`.
+    private func current(_ device: String, _ generation: Int) -> Bool {
+        generations[device, default: 0] == generation
     }
 
     /// Follows one attempt; whether its answer holds for a while.
     private func follow(_ pick: HostRelayPlan.Pick) async -> Bool {
         let far = pick.far
+        let generation = generations[far.device, default: 0]
         let keys = RelayKeyPair()
         let request: API.HostRelayRequest
         do {
@@ -61,7 +73,7 @@ final class RelayCarrier {
             return false
         }
         let deadline = ContinuousClock.now + Self.patience
-        while ContinuousClock.now < deadline {
+        while ContinuousClock.now < deadline, current(far.device, generation) {
             let state: API.HostRelayState
             do {
                 state = try await carry(pick.near.device, request)
@@ -80,6 +92,9 @@ final class RelayCarrier {
                     log.error("an answer for \(far.name, privacy: .public) was not signed by it")
                     return false
                 }
+                // Reached directly meanwhile: what it holds now came from
+                // there, and these keys would replace them here.
+                guard current(far.device, generation) else { return false }
                 guard let record = RelayRecord.make(from: info, keys: keys) else { return false }
                 log.notice("\(pick.near.name, privacy: .public) carried relay keys to \(far.name, privacy: .public)")
                 onRelay(far.device, record)

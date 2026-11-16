@@ -22,8 +22,9 @@ const MAX_ASKS: usize = 256;
 /// signature lasts.
 const QUEUED_TTL_MS: u64 = host_relay::MAX_AGE_MS;
 /// How long Sheprd may take to carry a request it took, trying each host
-/// over SSH, before the phone hears it failed.
-pub(crate) const TAKEN_TTL_MS: u64 = 10 * 60 * 1000;
+/// over SSH, before the phone hears it failed: its own limit
+/// (`host_relay::CARRY_MS`) and time to report.
+pub(crate) const TAKEN_TTL_MS: u64 = host_relay::CARRY_MS + 2 * 60 * 1000;
 /// How long an answer waits for the phone to read it.
 const DONE_TTL_MS: u64 = 60 * 60 * 1000;
 
@@ -38,6 +39,8 @@ pub enum Error {
     NotCarrying,
     #[error("the relay keys were signed too long ago, or in the future")]
     Stale,
+    #[error("the phone sent newer relay keys since it signed these")]
+    Superseded,
     #[error("too many relay keys are being carried; try again shortly")]
     TooMany,
     // keep-sorted end
@@ -232,7 +235,15 @@ pub(crate) fn keep(
         .verifying_key()?
         .verify(&message, &signature)
         .map_err(|_| Error::Invalid)?;
-    if record.relay.as_ref() != Some(&keys) && !devices.set_relay(&request.device, keys)? {
+    if record.relay.as_ref() == Some(&keys) {
+        return Ok(true);
+    }
+    // Keys the phone sent since, directly or carried, win over these,
+    // which may have spent minutes finding this computer.
+    if record.relay_ms.is_some_and(|set| request.signed_ms <= set) {
+        return Err(Error::Superseded.into());
+    }
+    if !devices.set_relay(&request.device, keys, now_ms)? {
         return Err(super::Error::UnknownDevice);
     }
     Ok(true)

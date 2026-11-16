@@ -44,6 +44,10 @@ pub const MAX_CERTIFICATE: usize = 8192;
 pub const MAX_AGE_MS: u64 = 24 * 60 * 60 * 1000;
 /// How far ahead of the far computer's clock a request may be signed.
 pub const MAX_SKEW_MS: u64 = 10 * 60 * 1000;
+/// How long Sheprd tries hosts for one request it took, over SSH one
+/// after another; the near daemon waits a little longer for its answer
+/// (`auth::host_relays`), and the phone longer still.
+pub const CARRY_MS: u64 = 8 * 60 * 1000;
 /// The most relays one computer may name.
 pub const MAX_RELAYS: usize = 16;
 /// The longest field accepted: a relay URL, or the tunnel identity

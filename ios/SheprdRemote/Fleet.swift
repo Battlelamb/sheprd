@@ -147,7 +147,11 @@ final class Fleet {
                 guard let self else { throw CancellationError() }
                 return try await self.call(near) { client, token in try await client.carryRelay(request, bearer: token) }
             },
-            onRelay: { [weak self] device, record in self?.onRelay?(device, record) }
+            onRelay: { [weak self] device, record in
+                // A record the phone made since, sending keys directly, wins.
+                guard let self, machines.first(where: { $0.id == device })?.computer.relay == nil else { return }
+                onRelay?(device, record)
+            }
         )
     }
 

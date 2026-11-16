@@ -131,6 +131,36 @@ fn the_far_computer_keeps_keys_its_own_phone_signed() {
 }
 
 #[test]
+fn keys_carried_late_do_not_replace_newer_ones() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut far = auth(dir.path());
+    let key = signing_key(1);
+    let device = pair(&mut far, &key, T0);
+    // Signed first, but still finding this computer over SSH when the
+    // phone reached it directly and sent other keys.
+    let late = signed(&key, &device, keys(5), T0);
+    assert!(
+        far.devices_mut()
+            .set_relay(&device, keys(6), T0 + 60_000)
+            .unwrap()
+    );
+    assert!(matches!(
+        far.keep_relay(&late, &far_fingerprint(), T0 + 120_000),
+        Err(Error::HostRelay(RelayError::Superseded))
+    ));
+    assert_eq!(far.devices().get(&device).unwrap().relay, Some(keys(6)));
+    // Keys signed after those replace them, and are dated when kept.
+    let newer = signed(&key, &device, keys(7), T0 + 90_000);
+    assert!(
+        far.keep_relay(&newer, &far_fingerprint(), T0 + 120_000)
+            .unwrap()
+    );
+    let record = far.devices().get(&device).unwrap();
+    assert_eq!(record.relay, Some(keys(7)));
+    assert_eq!(record.relay_ms, Some(T0 + 120_000));
+}
+
+#[test]
 fn another_computer_says_the_request_is_not_for_it() {
     let dir = tempfile::tempdir().unwrap();
     let mut other = auth(dir.path());

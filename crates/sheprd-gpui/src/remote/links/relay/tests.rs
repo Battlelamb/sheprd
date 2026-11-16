@@ -49,13 +49,19 @@ fn with_no_host_to_ask_the_computer_is_elsewhere() {
 }
 
 #[test]
-fn a_cancelled_job_asks_no_host() {
+fn a_cancelled_job_asks_no_host_and_fails_so_the_phone_retries() {
     let target = ConnectTarget::Ssh {
         target: "unreachable.invalid".into(),
         session: "default".into(),
     };
     let outcome = carry(&request(), [&target], &AtomicBool::new(true));
-    assert_eq!(outcome, Outcome::Elsewhere);
+    assert!(matches!(outcome, Outcome::Failed { .. }));
+}
+
+#[test]
+fn the_search_ends_before_the_near_daemon_stops_waiting() {
+    use sheprd_remote_control::control::host_relay::CARRY_MS;
+    assert_eq!(BUDGET, Duration::from_millis(CARRY_MS));
 }
 
 #[test]

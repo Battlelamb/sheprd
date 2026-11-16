@@ -13,6 +13,9 @@ use p256::ecdsa::{Signature, SigningKey, signature::Signer as _};
 use quinn::{ClientConfig, Connection, Endpoint, RecvStream, SendStream};
 use std::{net::SocketAddr, sync::Arc};
 
+mod reach;
+pub use reach::{first_reachable, reach};
+
 /// Why reaching a relay, or a step on it, failed.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -25,14 +28,22 @@ pub enum Error {
     Connection(#[from] quinn::ConnectionError),
     #[error("the connection offers no TLS exporter to prove a key over")]
     Exporter,
+    #[error("the relay's /v1/info could not be read")]
+    Info(#[from] Box<ureq::Error>),
+    #[error("the relay's /v1/info is not what a relay answers")]
+    InfoFormat,
     #[error("the relay sent something that is not its protocol")]
     Malformed,
+    #[error("the relay offers no QUIC")]
+    NoQuic,
     #[error("could not trust the relay's certificate")]
     Pin(#[from] pin::Error),
     #[error("could not read from the relay")]
     Read(#[from] quinn::ReadExactError),
     #[error("the relay answered {0:?}")]
     Refused(Status),
+    #[error("the relay's host name did not resolve")]
+    Resolve(#[source] std::io::Error),
     #[error("could not write to the relay")]
     Write(#[from] quinn::WriteError),
     // keep-sorted end

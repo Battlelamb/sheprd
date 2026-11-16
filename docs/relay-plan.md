@@ -458,8 +458,9 @@ never need a token. Settings > Computers > a computer lists its relays, and
 had one.
 
 **Sheprd to SSH machines.** `sheprd-relay-agent --relay ENDPOINT
-[--token-file FILE]`, repeatable, and Devices lets the user pick which of
-the computer's relays to dial.
+[--token-file FILE]`, repeatable. Enrolling a device from Sheprd sets the
+agent's relays to this computer's, and the device's record keeps them
+(Clients, Sheprd and SSH machines).
 
 **What is not built yet.** The `[remote] relays` setting, the token store,
 Settings, the command, and the phone's side arrive with the daemon and iOS
@@ -745,13 +746,105 @@ last uses its own domain.
 
 ### Sheprd and SSH machines
 
-- `sheprd-relay-agent`, a small listener on the SSH machine, accepts streams
-  and forwards each, after the Noise handshake, to `127.0.0.1:22`. Each SSH
-  session is one QUIC stream, so several share a connection.
-- Sheprd connects with `ssh -o ProxyCommand='sheprd relay connect ROUTE'`,
-  so SSH keys, host keys, and `known_hosts` work as before.
-- Devices > Discover gains a "Through relay" source beside Tailscale, which
-  stays supported for people who have it.
+Sheprd reaches every other host through an `ssh` child it starts itself
+(`sheprd-client`'s `ssh`), so the relay goes in as that child's
+`ProxyCommand` and nothing above SSH changes. The machines are usually
+servers running Herdr and not Sheprd, so `sheprd-remote-control` is not
+there to listen: a dedicated agent is. Reusing the daemon on a host that
+does run Sheprd is a later shortcut, not a substitute.
+
+```text
+Sheprd ─ssh─▶ sheprd relay connect ──QUIC──▶ relay ◀──QUIC── sheprd-relay-agent ─▶ 127.0.0.1:22
+              └──────────── tunnel (IKpsk2 + ML-KEM-768), then SSH inside ────────────┘
+```
+
+**The agent (`crates/sheprd-relay-agent`).** A small Tokio binary, no
+GPUI, built on `sheprd_relay::client` and `sheprd-tunnel` exactly as the
+daemon is.
+
+- Its own P-256 route key and tunnel identity live in its state directory
+  (`$XDG_STATE_HOME/sheprd-relay-agent`, or `~/Library/Application
+  Support` on macOS), 0600. It listens on each relay in its config
+  (`--relay ENDPOINT [--token-file FILE]`, repeatable, or `"default"` for
+  Sheprd's signed list), over QUIC with the WebSocket fallback, with the
+  daemon's reconnect backoff.
+- `authorized` in the same directory holds one line per desktop allowed to
+  dial it: the desktop's dial key, its tunnel key, and a label. The agent
+  names those dial keys to every relay and admits only those tunnel keys,
+  so any other dial hears `offline` at the relay or nothing past it. It
+  reloads the file when it changes and names the keys again: removing a
+  line ends that desktop's sessions at once.
+- Each admitted stream is spliced, inside the tunnel, to `127.0.0.1:22`
+  (the port is a flag). Each SSH session is one QUIC stream, so several
+  share a connection. It never runs a command or opens another port.
+- It runs as a systemd user unit on Linux and a launchd agent on macOS,
+  started at login (or with lingering), and logs no address or route.
+- `sheprd-relay-agent status --json` reports each relay (listening, last
+  error) and the number of authorized desktops, for the app to read over
+  SSH.
+
+**`sheprd relay connect`.** A mode of the `sheprd` executable that SSH
+runs as its `ProxyCommand`, parsed before GPUI starts, as the setup relay's
+attach mode is. Tokio runs only in this short-lived child, never in the
+app.
+
+- Arguments: `--direct %h:%p`, the device's route, its relays, and the
+  pinned agent identity; its keys come from the credential store, never
+  the command line.
+- It races the connection as the phone does: a direct TCP connection to
+  `%h:%p` first, then, 750 ms later, every relay at once, QUIC first and
+  the WebSocket fallback 300 ms after it. The first `ok` wins and the rest
+  are dropped, so a reachable direct path costs nothing extra.
+- Over a relay it runs the tunnel initiator against the pinned identity,
+  then copies bytes between its stdin and stdout and the tunnel. A refusal
+  or a wrong identity exits non-zero with a reason SSH shows, so
+  `sheprd-client`'s failure classification can name it.
+- `%h` is unchanged, so `known_hosts`, host key approval, and
+  `ControlPath` multiplexing behave exactly as they do today.
+
+**Keys and records.** The desktop's dial key and tunnel key are made once
+and kept in `sheprd-credentials`. Each enrolled device keeps a record of
+the agent's route, relays, and tunnel identity with the saved device.
+`sheprd-client` adds `-o ProxyCommand=…` only for a device with a record;
+every other host is reached as before.
+
+**Enrolling.** Turning on "Reach from anywhere" in a device's host menu,
+while the host answers directly (LAN, Tailscale, or a public address),
+opens the app's confirmation dialog, then, over the SSH connection that
+already works:
+
+1. installs or updates the agent from the release Sheprd ships, built for
+   the host's platform, and enables its user service;
+2. appends this desktop's keys to `authorized`;
+3. reads back the route, relays, and identity from `status --json`, and
+   saves the record.
+
+SSH is the trusted channel, so this needs no QR code or pairing secret,
+and the agent's relays default to the ones this computer uses. Turning it
+off removes this desktop's line; the agent stays for other desktops until
+the user removes it from the same menu.
+
+**Interface and command line.**
+
+- Devices > Discover gains a "Through relay" source for enrolled devices,
+  beside Tailscale, which stays supported for people who have it.
+- The host indicator says which path a connection took ("Direct",
+  "Through relay (fra1)").
+- `sheprd device relay enable|disable|status HOST`: enabling and disabling
+  open the confirmation dialog; `status` reports the record and the
+  agent's state. It goes in `docs/cli.md` and the skill's command table.
+
+**What it does not cover.** Only `ssh` children the app starts use the
+relay. Herdr's own machine connections, `git` over SSH, and an `ssh` the
+user types in a terminal still go direct. The app never edits
+`~/.ssh/config`; the host menu offers a `ProxyCommand` snippet the user can
+add for those.
+
+**Tests.** The agent and `relay connect` against a real relay on loopback,
+as the daemon's relay tests do: the direct path preferred when it answers,
+the relay when it does not, an unlisted dial or tunnel key refused, and
+removing a line in `authorized` ending a live session. Pure tests for the
+`ProxyCommand` arguments and for parsing `status --json`.
 
 ## Deployment
 
@@ -799,6 +892,10 @@ holds no relay secrets and deploys nothing.
    setting and token store, `sheprd remote relays`, the pairing flow above
    (QR fields, pairing keys, the `IKpsk2` handshake, approval), revocation,
    the connection race, status, and settings text. Live tests on a phone over cellular with Wi-Fi off.
-4. **SSH machines**: `sheprd-relay-agent`, `sheprd relay connect`, Devices.
+4. **SSH machines**, in this order: `sheprd-relay-agent` with its
+   `authorized` file, service units, and `status --json`; `sheprd relay
+   connect` and its direct-then-relay race; the desktop keys, device
+   records, and `ProxyCommand` in `sheprd-client`; enrolling over SSH;
+   then Devices, the host indicator, and `sheprd device relay`.
 5. **Our relays**: image publishing, a few regions, a Prometheus scrape
    and alerts on refusals and bandwidth.

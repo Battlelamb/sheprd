@@ -99,7 +99,10 @@ fn status_text(enabled: bool, status: Option<&Status>, error: Option<&str>) -> S
         use sheprd_remote_control::control::RelayState;
         match state {
             RelayState::Connecting => format!("Relay: {relay} — connecting"),
-            RelayState::Listening => format!("Relay: {relay} — listening"),
+            RelayState::Listening { rtt_ms: None } => format!("Relay: {relay} — listening"),
+            RelayState::Listening {
+                rtt_ms: Some(rtt_ms),
+            } => format!("Relay: {relay} — listening, {rtt_ms} ms"),
             RelayState::Failed { error } => format!("Relay: {relay} — failed: {error}"),
         }
     }));

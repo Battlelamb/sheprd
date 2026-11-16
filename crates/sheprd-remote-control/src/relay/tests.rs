@@ -95,7 +95,7 @@ async fn listening(relays: &Relays) {
         if relays
             .status()
             .values()
-            .any(|state| *state == Status::Listening)
+            .any(|state| matches!(state, Status::Listening { .. }))
         {
             // A listening relay's round trip is known at once.
             assert!(!relays.info().rtt_ms.is_empty());

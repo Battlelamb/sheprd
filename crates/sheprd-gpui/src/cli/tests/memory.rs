@@ -27,6 +27,21 @@ fn memory_lists_by_default_and_takes_scope_and_limit() {
             limit: 5
         })
     );
+    // The list flags work without the verb too.
+    assert_eq!(
+        memory(&["--all"]).unwrap(),
+        ControlCommand::Memory(MemoryCommand::List {
+            all: true,
+            limit: 20
+        })
+    );
+    assert_eq!(
+        memory(&["--limit", "5"]).unwrap(),
+        ControlCommand::Memory(MemoryCommand::List {
+            all: false,
+            limit: 5
+        })
+    );
     assert!(memory(&["list", "--limit", "0"]).is_err());
     assert!(memory(&["list", "--limit", "201"]).is_err());
 }
@@ -75,6 +90,8 @@ fn memory_forget_needs_a_numeric_id() {
         ControlCommand::Memory(MemoryCommand::Forget { id: 12 })
     );
     assert!(memory(&["forget", "x"]).is_err());
+    assert!(memory(&["forget", "12", "--all"]).is_err());
+    assert!(memory(&["add", "--limit", "3", "text"]).is_err());
     assert!(memory(&["forget"]).is_err());
     assert!(memory(&["remember", "x"]).is_err());
 }

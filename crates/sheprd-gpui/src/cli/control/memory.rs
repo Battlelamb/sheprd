@@ -28,37 +28,36 @@ pub enum MemoryCommand {
 
 const DEFAULT_LIMIT: usize = 20;
 
-fn limit(args: &mut Args) -> Result<usize, CliError> {
-    Ok(args
-        .number("--limit", 1..=MAX_LIMIT)?
-        .unwrap_or(DEFAULT_LIMIT))
-}
-
 pub(super) fn memory(args: &mut Args) -> Result<MemoryCommand, CliError> {
+    // Read before the verb, so `memory --all` lists as `memory list --all`
+    // does rather than taking the flag for a verb.
+    let all = args.flag("--all");
+    let given = args.number("--limit", 1..=MAX_LIMIT)?;
+    let limit = given.unwrap_or(DEFAULT_LIMIT);
+    // `add` and `forget` refuse them rather than ignore them.
+    let listing = || {
+        if all || given.is_some() {
+            return Err(CliError::InvalidValue(
+                "--all and --limit go with memory list and memory search",
+            ));
+        }
+        Ok(())
+    };
     let Some(verb) = args.verb() else {
-        return Ok(MemoryCommand::List {
-            all: args.flag("--all"),
-            limit: limit(args)?,
-        });
+        return Ok(MemoryCommand::List { all, limit });
     };
     Ok(match verb.to_str() {
-        Some("list") => MemoryCommand::List {
-            all: args.flag("--all"),
-            limit: limit(args)?,
+        Some("list") => MemoryCommand::List { all, limit },
+        Some("search") => MemoryCommand::Search {
+            query: args.words()?.ok_or(CliError::MissingArgument {
+                command: "memory search",
+                what: "WORDS",
+            })?,
+            all,
+            limit,
         },
-        Some("search") => {
-            let all = args.flag("--all");
-            let limit = limit(args)?;
-            MemoryCommand::Search {
-                query: args.words()?.ok_or(CliError::MissingArgument {
-                    command: "memory search",
-                    what: "WORDS",
-                })?,
-                all,
-                limit,
-            }
-        }
         Some("add") => {
+            listing()?;
             let branch = args.flag("--branch");
             let kind = match args.text_option("--kind")? {
                 Some(kind) => kind.parse().map_err(|_| CliError::InvalidValue("--kind"))?,
@@ -73,12 +72,15 @@ pub(super) fn memory(args: &mut Args) -> Result<MemoryCommand, CliError> {
             }
             MemoryCommand::Add { branch, kind, text }
         }
-        Some("forget") => MemoryCommand::Forget {
-            id: args
-                .required_text("ID")?
-                .parse()
-                .map_err(|_| CliError::InvalidValue("ID"))?,
-        },
+        Some("forget") => {
+            listing()?;
+            MemoryCommand::Forget {
+                id: args
+                    .required_text("ID")?
+                    .parse()
+                    .map_err(|_| CliError::InvalidValue("ID"))?,
+            }
+        }
         _ => return Err(unknown("memory", verb)),
     })
 }

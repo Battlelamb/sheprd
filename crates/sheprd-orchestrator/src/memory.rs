@@ -45,8 +45,10 @@ const FILE: &str = "memory.sqlite3";
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 const SCHEMA_V1: &str = "
+-- AUTOINCREMENT: an ID is never reused, so a `forget` from an agent that
+-- saw an entry before another forgot it cannot remove a newer one.
 CREATE TABLE IF NOT EXISTS memories (
-    id INTEGER PRIMARY KEY NOT NULL,
+    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     branch TEXT,
     kind TEXT NOT NULL,
     text TEXT NOT NULL,

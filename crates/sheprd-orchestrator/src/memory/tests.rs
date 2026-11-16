@@ -253,3 +253,16 @@ fn a_newer_schema_is_refused() {
         Err(Error::NewerSchema { found, known: SCHEMA_VERSION }) if found == SCHEMA_VERSION + 1
     ));
 }
+
+#[test]
+fn a_forgotten_id_is_never_given_to_a_new_entry() {
+    let mut memory = Memory::in_memory().unwrap();
+    memory.add(None, Kind::Fact, "first", NOW).unwrap();
+    let last = memory.add(None, Kind::Fact, "second", NOW).unwrap().id();
+    assert!(memory.forget(last).unwrap());
+    let next = memory.add(None, Kind::Fact, "third", NOW).unwrap().id();
+    assert!(next > last, "{next} reused {last}");
+    // A stale forget of the old ID leaves the new entry alone.
+    assert!(!memory.forget(last).unwrap());
+    assert_eq!(memory.list(Scope::All, 10).unwrap().len(), 2);
+}

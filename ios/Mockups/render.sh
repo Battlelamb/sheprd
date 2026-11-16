@@ -24,6 +24,8 @@ case "$round" in
      ipad="" ;;
   voice) phone="voice-A-0 voice-A-1 voice-A-2 voice-A-3 voice-B-0 voice-B-1 voice-B-2 voice-B-3 voice-C-0 voice-C-1 voice-C-2 voice-C-3 voice-D-0 voice-D-1 voice-D-2 voice-D-3"
      ipad="" ;;
+  github) phone="prhead-A-0 prhead-A-1 prhead-B-0 prhead-B-1 prhead-C-0 prhead-C-1 prhead-D-0 prhead-D-1 prdetail-A-0 prdetail-A-1 prdetail-B-0 prdetail-B-1 prdetail-C-0 prdetail-C-1 prdetail-D-0 prdetail-D-1 prlist-A-0 prlist-A-1 prlist-B-0 prlist-B-1 prlist-C-0 prlist-C-1 prlist-D-0 prlist-D-1 ghsettings-A-0 ghsettings-A-1 ghsettings-B-0 ghsettings-C-0 ghsettings-D-0"
+     ipad="" ;;
   *) echo "unknown round $round" >&2; exit 2 ;;
 esac
 

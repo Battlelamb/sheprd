@@ -153,3 +153,16 @@ fn failures_are_told_apart() {
     assert!(matches!(slow, Err(Error::TimedOut)));
     assert!(started.elapsed() < Duration::from_secs(4));
 }
+
+#[cfg(unix)]
+#[test]
+fn a_process_holding_the_output_open_cannot_outlast_the_deadline() {
+    let started = Instant::now();
+    let held = run_first(
+        [sh("cat > /dev/null; sleep 30 & echo Done.")],
+        "x",
+        Duration::from_millis(300),
+    );
+    assert!(matches!(held, Err(Error::TimedOut)), "{held:?}");
+    assert!(started.elapsed() < Duration::from_secs(5));
+}

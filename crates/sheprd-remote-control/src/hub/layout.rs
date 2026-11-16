@@ -50,6 +50,10 @@ pub(crate) struct Chat {
     /// The agent's name as Herdr reports it, such as `claude`.
     pub(crate) agent: Option<String>,
     pub(crate) title: String,
+    /// Whether the pane's label or its agent set `title`, rather than the
+    /// tab's label standing in for one; a phone prefers the first prompt to
+    /// a stand-in.
+    pub(crate) named: bool,
     pub(crate) status: AgentStatus,
 }
 
@@ -229,14 +233,16 @@ pub(crate) fn project_with(snapshot: &ClientShellSnapshot, listed: Chats) -> Lay
         .filter_map(|agent| {
             let endpoint = endpoint(&agent.tokens)?;
             seen.insert(agent.pane_id.clone()).then(|| {
-                let title = snapshot
+                let named = snapshot
                     .panes
                     .iter()
                     .find(|pane| pane.pane_id == agent.pane_id)
                     .and_then(|pane| pane.label.as_deref())
                     .and_then(sheprd_client::text::caption)
                     .or_else(|| agent_title(agent))
-                    .map(str::to_owned)
+                    .map(str::to_owned);
+                let title = named
+                    .clone()
                     .unwrap_or_else(|| tab_label(snapshot, &agent.tab_id));
                 (
                     agent.workspace_id.clone(),
@@ -245,6 +251,7 @@ pub(crate) fn project_with(snapshot: &ClientShellSnapshot, listed: Chats) -> Lay
                         tab: agent.tab_id.clone(),
                         endpoint,
                         agent: agent_kind(agent),
+                        named: named.is_some(),
                         title,
                         status: agent.agent_status,
                     },

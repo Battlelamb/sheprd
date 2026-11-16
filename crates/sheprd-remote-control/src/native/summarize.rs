@@ -26,6 +26,9 @@ pub(crate) async fn summarize(
 ) -> Result<Accepted, ApiError> {
     state.hub.layout().chat(&pane).ok_or(ApiError::NotFound)?;
     let link = state.hub.chat(&pane).ok_or(ApiError::NotFound)?;
+    // The summary speaks for the chat as it stood here, so a turn that ends
+    // while the agent reads still counts as newer than it.
+    let asked_ms = now_ms();
     let (transcript, _) = link.base();
     let input = row_summary::excerpt_of(&transcript);
     if input.is_empty() {
@@ -33,7 +36,7 @@ pub(crate) async fn summarize(
     }
     let slot = row_summary::Slot::take()
         .map_err(|_| ApiError::Invalid("too many summaries are running; try again in a moment"))?;
-    if !link.begin_summary(now_ms()) {
+    if !link.begin_summary(asked_ms) {
         return Ok(accepted());
     }
     tokio::spawn(async move {
@@ -45,15 +48,15 @@ pub(crate) async fn summarize(
         let summary = match answer {
             Ok(Ok(text)) => RowSummary::Ready {
                 text,
-                at_ms: now_ms(),
+                at_ms: asked_ms,
             },
             Ok(Err(error)) => RowSummary::Failed {
                 reason: error.to_string(),
-                at_ms: now_ms(),
+                at_ms: asked_ms,
             },
             Err(_) => RowSummary::Failed {
                 reason: row_summary::Error::Failed.to_string(),
-                at_ms: now_ms(),
+                at_ms: asked_ms,
             },
         };
         link.finish_summary(summary);

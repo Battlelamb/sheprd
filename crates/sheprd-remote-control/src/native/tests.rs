@@ -4,6 +4,7 @@ use sheprd_chat_protocol::{EndpointId, PermissionId};
 use sheprd_client::protocol::AgentStatus;
 
 mod agent_name;
+mod chat_title;
 mod create;
 mod create_start;
 mod fixtures;
@@ -43,6 +44,7 @@ pub(super) fn layout(endpoint: EndpointId) -> Layout {
                 endpoint,
                 agent: Some("claude".into()),
                 title: "Equalize splits".into(),
+                named: true,
                 status: AgentStatus::Working,
             }],
             terminals: vec![crate::hub::Terminal {

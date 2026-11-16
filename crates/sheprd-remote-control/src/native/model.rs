@@ -418,10 +418,16 @@ fn chat(row: &ChatRow, summaries: &mut HashMap<String, Summary>) -> Chat {
         .filter(|agent| !agent.is_empty())
         .map(str::to_owned)
         .or_else(|| row.agent.clone());
+    // A chat no one named shows its first prompt over the tab's label.
+    let title = summary
+        .as_ref()
+        .and_then(|summary| summary.first_prompt.clone())
+        .filter(|_| !row.named)
+        .unwrap_or_else(|| row.title.clone());
     Chat {
         pane: row.pane.clone(),
         tab: row.tab.clone(),
-        title: row.title.clone(),
+        title,
         agent,
         status: row.status,
         summary: summary.map(ChatSummary::from),

@@ -170,6 +170,9 @@ fn run_one(
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
+        // Its own group, so a timeout stops whatever it started too.
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(&mut command, 0);
         match command.spawn() {
             Ok(child) => answer(child, input.to_owned(), wait),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(Error::NoAgent),
@@ -178,6 +181,8 @@ fn run_one(
     }
 }
 
+/// The agent's answer within `wait`, counted until its output closes, not
+/// only until it exits: a process it started may hold the pipe open.
 fn answer(mut child: std::process::Child, input: String, wait: Duration) -> Result<String, Error> {
     if let Some(mut stdin) = child.stdin.take() {
         // A failed write shows as the agent's own failure or empty answer.
@@ -185,31 +190,36 @@ fn answer(mut child: std::process::Child, input: String, wait: Duration) -> Resu
             let _ = stdin.write_all(input.as_bytes());
         });
     }
-    let reader = child.stdout.take().map(|stdout| {
+    let (sender, output) = std::sync::mpsc::sync_channel(1);
+    if let Some(stdout) = child.stdout.take() {
         thread::spawn(move || {
             let mut bytes = Vec::new();
             let mut limited = stdout.take(MAX_OUTPUT_BYTES);
             let _ = limited.read_to_end(&mut bytes);
             // The rest is drained so the agent never blocks on a full pipe.
             let _ = std::io::copy(&mut limited.into_inner(), &mut std::io::sink());
-            bytes
-        })
-    });
+            let _ = sender.send(bytes);
+        });
+    } else {
+        let _ = sender.send(Vec::new());
+    }
     let deadline = Instant::now() + wait;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() < deadline => thread::sleep(POLL),
             Ok(None) | Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                stop(&mut child);
                 return Err(Error::TimedOut);
             }
         }
     };
-    let bytes = reader
-        .and_then(|reader| reader.join().ok())
-        .unwrap_or_default();
+    let left = deadline.saturating_duration_since(Instant::now());
+    let Ok(bytes) = output.recv_timeout(left) else {
+        // The agent exited, but something it started still holds its output.
+        stop(&mut child);
+        return Err(Error::TimedOut);
+    };
     if !status.success() {
         return Err(Error::Failed);
     }
@@ -218,6 +228,17 @@ fn answer(mut child: std::process::Child, input: String, wait: Duration) -> Resu
         return Err(Error::Empty);
     }
     Ok(text)
+}
+
+/// Stops the agent and, on Unix, every process in its group, then reaps it.
+fn stop(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        let group = rustix::process::Pid::from_child(child);
+        let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[cfg(test)]

@@ -113,6 +113,7 @@ fn home() -> Home {
         endpoint: EndpointId::random(),
         agent: None,
         title: "Starting".into(),
+        named: true,
         status: AgentStatus::Unknown,
     });
     let summary = Summary {

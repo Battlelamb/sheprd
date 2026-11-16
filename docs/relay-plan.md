@@ -782,6 +782,11 @@ daemon is.
 - `sheprd-relay-agent status --json` reports each relay (listening, last
   error) and the number of authorized desktops, for the app to read over
   SSH.
+- **Built:** `run`, `status [--json]`, `authorize`, and `revoke`, over QUIC
+  to private relays, with tests on a loopback relay. `status` makes the
+  keys when they are missing, so enrolling reads the route before the
+  agent first runs. Still to come: the service units, the WebSocket
+  fallback, and `"default"` (Sheprd's signed list).
 
 **`sheprd relay connect`.** A mode of the `sheprd` executable that SSH
 runs as its `ProxyCommand`, parsed before GPUI starts, as the setup relay's

@@ -271,24 +271,34 @@ is on. Every worktree, terminal tab, and chat of that repository there
 shares it, so what one agent learns the next one can find. It needs no
 running app.
 
-- **Before a task**, search for what earlier agents learned about the area:
-  `sheprd memory search parser fixtures`. Words match as prefixes, best
-  first. `sheprd memory` lists the repository's entries and your branch's.
+- **When you start**, run `sheprd memory index`: pinned entries, your
+  branch's own (such as where the last agent stopped), and the most
+  recently used. Then search for the area of your task:
+  `sheprd memory search parser fixtures` (every word as a prefix, else any).
+  `sheprd memory get ID` shows an entry's details.
+- **Entries may be out of date.** They are notes from earlier agents: check
+  one against the code before relying on it, and fix or forget it when it
+  is wrong.
 - **After you learn something** that the next agent would otherwise have to
   find out again, add it in a sentence or two. Good candidates: a build or
   test command that works, a trap and what to do instead, a decision and its
   reason, and how the user wants things done.
-  Use `--kind fact|gotcha|command|decision|preference|handoff`:
   `sheprd memory add --kind gotcha "just test-core needs an absolute path to herdr-core"`.
+  Kinds are `fact`, `gotcha`, `command`, `decision`, `preference`, and
+  `handoff`. Put a longer story in `--details TEXT`.
+- **Give lasting entries a name**, so the next add updates them instead of
+  adding a near-duplicate: `sheprd memory add --name test-commands --kind command "..."`.
+  Search before adding.
 - **For this branch's work only**, such as where you stopped, add `--branch`:
   `sheprd memory add --branch --kind handoff "Parser done; error recovery next"`.
-  A new tab or chat on the branch then finds it.
-- **When an entry is wrong**, remove it with `sheprd memory forget ID`
-  (`list` and `search` print IDs).
+- **Pin** what every agent must see (`sheprd memory pin ID`, at most 50),
+  and remove a wrong entry with `sheprd memory forget ID`.
 
-Keep entries short and true, and add what the code or its docs do not
-already say. Never add secrets, credentials, tokens, or private terminal
-output. `list` and `search` exit 4 when they find nothing.
+Keep entries short and true, and add only what the code, `AGENTS.md`, and
+other docs do not already say. Never add secrets, credentials, tokens, or
+private terminal output: Sheprd refuses them. If your agent keeps a memory
+of its own, prefer this one for what other agents of the repository should
+know. `list`, `search`, and `index` exit 4 when they find nothing.
 
 ## More of Sheprd from the command line
 
@@ -306,7 +316,7 @@ what Sheprd shows or keeps.
 | Ask the user to restart an owned orchestrator run, or adopt a legacy run's current process | `sheprd orchestrator restart RUN` / `sheprd orchestrator adopt RUN` (loaded project; confirmation required) |
 | Open px0 to browse, edit, or review your local checkout (macOS/Windows) | `sheprd px0 open` |
 | Get notes the user sent this pane (pages, reviews, terminals) | `sheprd feedback --wait 600` |
-| Find what earlier agents learned about this repository, before a task | `sheprd memory search WORDS`, `sheprd memory` |
+| Find what earlier agents learned about this repository, before a task | `sheprd memory index`, `sheprd memory search WORDS` |
 | Leave what you learned for the next agent in any worktree or tab | `sheprd memory add --kind gotcha TEXT` (`--branch` for this branch only) |
 | Keep a note on this worktree (repository and branch) | `sheprd notes set waiting on CI` |
 | Silence this worktree's notifications | `sheprd worktree mute` |

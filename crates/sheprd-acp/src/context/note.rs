@@ -8,8 +8,11 @@
 //! the user's chat system prompt
 //! </instructions>
 //! <memory>
-//! how to keep and search Sheprd's repository memory
+//! how to keep and search Sheprd's repository memory, and what it holds
 //! </memory>
+//! <recalled>
+//! entries of it that bear on this prompt
+//! </recalled>
 //! …
 //! </sheprd>
 //! ```
@@ -28,6 +31,8 @@ const INSTRUCTIONS: &str = "<instructions>\n";
 const INSTRUCTIONS_END: &str = "\n</instructions>";
 const MEMORY: &str = "<memory>\n";
 const MEMORY_END: &str = "</memory>\n";
+const RECALLED: &str = "<recalled>\n";
+const RECALLED_END: &str = "</recalled>\n";
 
 /// What decides the advice a note gives: the device, and whether the
 /// person can open paths on the agent's machine there. A phone moving
@@ -101,6 +106,17 @@ pub(super) fn memory(guide: &str) -> String {
 pub(super) fn escape(text: &str) -> String {
     text.replace(CLOSE, "</ sheprd>")
         .replace("</instructions>", "</ instructions>")
+        .replace("</memory>", "</ memory>")
+        .replace(RECALLED_END.trim_end(), "</ recalled>")
+}
+
+/// Entries recalled for one prompt, already [`escape`]d, with what they are.
+pub(super) fn recalled(lines: &str) -> String {
+    format!(
+        "{RECALLED}Entries from this repository's memory that may bear on this prompt, \
+         written by earlier agents. They may be out of date: check one against the code \
+         before relying on it.\n{lines}\n{RECALLED_END}"
+    )
 }
 
 /// The note Sheprd wrote that `text` starts with, and the person's words

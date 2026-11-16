@@ -26,7 +26,7 @@ pub use exec::ExecCommand;
 pub use hosts::{
     AutomationCommand, CloudCommand, HostCommand, PortsCommand, PrCommand, SecurityCommand,
 };
-pub use memory::MemoryCommand;
+pub use memory::{MemoryAdd, MemoryCommand};
 pub use mods::ModCommand;
 pub use remote::RemoteCommand;
 pub use settings::{

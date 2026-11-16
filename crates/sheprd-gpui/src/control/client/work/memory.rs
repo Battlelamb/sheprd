@@ -4,20 +4,14 @@
 //! lives on the host the repository is on.
 use super::super::{Context, Output};
 use crate::{
-    cli::control::MemoryCommand,
+    cli::control::{MemoryAdd, MemoryCommand},
     control::{Error as ControlError, ErrorCode},
 };
-use sheprd_orchestrator::{
-    Repository,
-    memory::{self, Added, Entry, Memory, Scope},
-};
+use sheprd_memory::{Added, Checkout, Entry, Error, Memory, New, Scope};
 use std::fmt::Write as _;
 
-/// The repository and branch of the current directory, with its memory open.
-struct Here {
-    memory: Memory,
-    branch: Option<String>,
-}
+/// The longest line a listing prints for one entry, in characters.
+const LINE: usize = 200;
 
 fn rejected(code: ErrorCode, message: impl Into<String>) -> crate::Error {
     ControlError::Rejected {
@@ -27,31 +21,29 @@ fn rejected(code: ErrorCode, message: impl Into<String>) -> crate::Error {
     .into()
 }
 
-fn failed(error: memory::Error) -> crate::Error {
+/// The display boundary: the message, and the exit status it deserves.
+fn failed(error: Error) -> crate::Error {
     let code = match error {
-        memory::Error::Empty | memory::Error::Kind(_) | memory::Error::TooLong { .. } => {
-            ErrorCode::InvalidRequest
-        }
+        Error::Empty
+        | Error::Kind(_)
+        | Error::Name { .. }
+        | Error::NotInCheckout
+        | Error::SameText { .. }
+        | Error::TooLong { .. }
+        | Error::TooManyPinned { .. }
+        | Error::Unsafe(_) => ErrorCode::InvalidRequest,
         _ => ErrorCode::Failed,
     };
     rejected(code, error.to_string())
 }
 
-fn here() -> crate::Result<Here> {
+/// The current directory's memory, and the branch checked out there.
+fn here() -> crate::Result<(Memory, Option<String>)> {
     let dir = std::env::current_dir().map_err(crate::Error::LocalGit)?;
-    let (common, branch) = super::here::repository(&dir).map_err(|error| match error {
-        crate::Error::NotInCheckout => rejected(
-            ErrorCode::InvalidRequest,
-            "Memory is kept per Git repository; run this inside a checkout",
-        ),
-        error => error,
-    })?;
-    let path = memory::path(&Repository::Local(common))
-        .ok_or_else(|| failed(memory::Error::NoStateDirectory))?;
-    Ok(Here {
-        memory: Memory::open(&path).map_err(failed)?,
-        branch,
-    })
+    let checkout = Checkout::find(&dir).map_err(failed)?;
+    let path =
+        sheprd_memory::path(&checkout.common_dir).ok_or_else(|| failed(Error::NoStateDirectory))?;
+    Ok((Memory::open(&path).map_err(failed)?, checkout.branch()))
 }
 
 fn now() -> i64 {
@@ -62,20 +54,22 @@ fn now() -> i64 {
         })
 }
 
-/// One line per entry: its ID, kind, branch when it has one, and text.
+/// One line per entry.
 pub(super) fn describe(entries: &[Entry]) -> String {
     let mut text = String::new();
     for entry in entries {
-        let _ = write!(text, "#{} [{}]", entry.id, entry.kind);
-        if let Some(branch) = &entry.branch {
-            let _ = write!(text, " ({branch})");
-        }
-        // An entry is one paragraph; its own line breaks would read as
-        // separate entries.
-        let flat: Vec<&str> = entry.text.split_whitespace().collect();
-        let _ = writeln!(text, " {}", flat.join(" "));
+        let _ = writeln!(text, "{}", entry.line(LINE));
     }
     text.trim_end().to_owned()
+}
+
+/// An entry in full: its line, then its text and details unwrapped.
+pub(super) fn describe_one(entry: &Entry) -> String {
+    let mut text = format!("{}\n\n{}", entry.line(LINE), entry.text);
+    if let Some(details) = &entry.details {
+        let _ = write!(text, "\n\n{details}");
+    }
+    text
 }
 
 fn entries(entries: Vec<Entry>, empty: &str) -> crate::Result<Output> {
@@ -94,63 +88,96 @@ fn scope(all: bool, branch: Option<&str>) -> Scope<'_> {
     }
 }
 
+fn missing(id: i64) -> crate::Error {
+    rejected(
+        ErrorCode::NotFound,
+        format!("This repository's memory has no #{id}"),
+    )
+}
+
+fn add(memory: &mut Memory, branch: Option<&str>, add: &MemoryAdd) -> crate::Result<Output> {
+    let target = match (add.branch, branch) {
+        (false, _) => None,
+        (true, Some(branch)) => Some(branch),
+        (true, None) => {
+            return Err(rejected(
+                ErrorCode::InvalidRequest,
+                "--branch needs a checked-out branch, and HEAD is detached",
+            ));
+        }
+    };
+    let new = New {
+        branch: target,
+        name: add.name.as_deref(),
+        kind: add.kind,
+        text: &add.text,
+        details: add.details.as_deref(),
+        pinned: add.pinned,
+    };
+    let added = memory.add(&new, now()).map_err(failed)?;
+    let place = target.map_or_else(|| "the repository".to_owned(), str::to_owned);
+    let message = match added {
+        Added::New(id) => format!("Remembered #{id} for {place}"),
+        Added::Updated(id) => format!("Updated #{id} for {place}"),
+        Added::Again(id) => format!("Already remembered as #{id} for {place}"),
+    };
+    let state = match added {
+        Added::New(_) => "new",
+        Added::Updated(_) => "updated",
+        Added::Again(_) => "again",
+    };
+    Output::data(
+        message,
+        &serde_json::json!({ "id": added.id(), "added": state }),
+    )
+}
+
 pub(in crate::control::client) fn memory(
     command: MemoryCommand,
     _: &Context,
 ) -> crate::Result<Output> {
-    let mut here = here()?;
-    let branch = here.branch.as_deref();
+    let (mut memory, branch) = here()?;
+    let branch = branch.as_deref();
     match command {
         MemoryCommand::List { all, limit } => entries(
-            here.memory
-                .list(scope(all, branch), limit)
-                .map_err(failed)?,
+            memory.list(scope(all, branch), limit).map_err(failed)?,
             "This repository has no memory yet",
         ),
         MemoryCommand::Search { query, all, limit } => entries(
-            here.memory
-                .search(scope(all, branch), &query, limit, now())
+            memory
+                .search(scope(all, branch), &query, limit, Some(now()))
                 .map_err(failed)?,
             "Nothing in memory matches",
         ),
-        MemoryCommand::Add {
-            branch: on_branch,
-            kind,
-            text,
-        } => {
-            let target = match (on_branch, branch) {
-                (false, _) => None,
-                (true, Some(branch)) => Some(branch),
-                (true, None) => {
-                    return Err(rejected(
-                        ErrorCode::InvalidRequest,
-                        "--branch needs a checked-out branch, and HEAD is detached",
-                    ));
-                }
-            };
-            let added = here
-                .memory
-                .add(target, kind, &text, now())
-                .map_err(failed)?;
-            let place = target.map_or_else(|| "the repository".to_owned(), str::to_owned);
-            let message = match added {
-                Added::New(id) => format!("Remembered #{id} for {place}"),
-                Added::Again(id) => format!("Already remembered as #{id} for {place}"),
-            };
-            Output::data(
-                message,
-                &serde_json::json!({ "id": added.id(), "new": matches!(added, Added::New(_)) }),
-            )
+        MemoryCommand::Index { chars } => {
+            let index = memory.index(branch, chars).map_err(failed)?;
+            let output = Output::data(index.text(), &index)?;
+            Ok(if index.total == 0 {
+                Output::data("This repository has no memory yet", &index)?.nothing()
+            } else {
+                output
+            })
+        }
+        MemoryCommand::Get { id } => {
+            let entry = memory
+                .get(id, now())
+                .map_err(failed)?
+                .ok_or_else(|| missing(id))?;
+            Output::data(describe_one(&entry), &entry)
+        }
+        MemoryCommand::Add(command) => add(&mut memory, branch, &command),
+        MemoryCommand::Pin { id, pinned } => {
+            if !memory.pin(id, pinned).map_err(failed)? {
+                return Err(missing(id));
+            }
+            let verb = if pinned { "Pinned" } else { "Unpinned" };
+            Ok(Output::message(format!("{verb} #{id}")))
         }
         MemoryCommand::Forget { id } => {
-            if here.memory.forget(id).map_err(failed)? {
-                Ok(Output::message(format!("Forgot #{id}")))
-            } else {
-                Err(rejected(
-                    ErrorCode::NotFound,
-                    format!("This repository's memory has no #{id}"),
-                ))
+            if !memory.forget(id).map_err(failed)? {
+                return Err(missing(id));
             }
+            Ok(Output::message(format!("Forgot #{id}")))
         }
     }
 }

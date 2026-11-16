@@ -28,6 +28,9 @@ pub enum Error {
     Relay(#[from] crate::relay::Error),
     #[cfg(feature = "server")]
     #[error(transparent)]
+    SharedRelays(#[from] crate::relay::shared::Error),
+    #[cfg(feature = "server")]
+    #[error(transparent)]
     Tls(#[from] crate::tls::Error),
     // keep-sorted end
 }

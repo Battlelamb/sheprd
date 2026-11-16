@@ -29,14 +29,14 @@ fn plain(line: String) -> String {
 #[test]
 fn a_labelled_row_names_its_address_description_and_tags() {
     assert_eq!(
-        plain(relay_line(&fra3(), &Standing::Listening)),
+        plain(relay_line(&fra3(), &Standing::Listening(None))),
         "Listening · https://fra3.example.org · not for public use · Tags: eu, private"
     );
     // A relay without a label is titled by its address, said once.
     assert_eq!(
         plain(relay_line(
             &"https://sfo3.example.org".into(),
-            &Standing::Listening
+            &Standing::Listening(None)
         )),
         "Listening"
     );

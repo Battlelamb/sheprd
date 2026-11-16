@@ -111,3 +111,51 @@ fn a_nearby_offer_carries_the_round_trips_measured_since_start() {
     assert_eq!(offer["relay"]["relays"][0], "https://near.example.org");
     assert_eq!(offer["relay"]["rtt_ms"]["https://near.example.org"], 15);
 }
+
+#[test]
+fn status_reports_a_listening_relays_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    let all = endpoints(&["https://a.example.org", "https://b.example.org"]);
+    let relays = Relays::load(dir.path(), listened(&all)).unwrap();
+    relays.set_status(&all[0], Status::Listening { rtt_ms: None });
+    relays.set_status(&all[1], Status::Connecting);
+    assert_eq!(
+        relays.status()["https://a.example.org"].state,
+        Status::Listening { rtt_ms: None }
+    );
+    relays.set_rtt(&all[0], Some(Duration::from_millis(42)));
+    relays.set_rtt(&all[1], Some(Duration::from_millis(7)));
+    let status = relays.status();
+    assert_eq!(
+        status["https://a.example.org"].state,
+        Status::Listening { rtt_ms: Some(42) }
+    );
+    assert_eq!(status["https://b.example.org"].state, Status::Connecting);
+}
+
+/// The state as an app from before round trips declares it.
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "snake_case", tag = "state")]
+enum OlderState {
+    Connecting,
+    Listening,
+    Failed { error: String },
+}
+
+#[test]
+fn the_round_trip_reads_in_older_apps_and_from_older_daemons() {
+    let newer = serde_json::to_string(&Status::Listening { rtt_ms: Some(42) }).unwrap();
+    assert_eq!(newer, r#"{"state":"listening","rtt_ms":42}"#);
+    assert_eq!(
+        serde_json::from_str::<OlderState>(&newer).unwrap(),
+        OlderState::Listening
+    );
+    assert_eq!(
+        serde_json::from_str::<Status>(r#"{"state":"listening"}"#).unwrap(),
+        Status::Listening { rtt_ms: None }
+    );
+    assert_eq!(
+        serde_json::to_string(&Status::Listening { rtt_ms: None }).unwrap(),
+        r#"{"state":"listening"}"#
+    );
+}

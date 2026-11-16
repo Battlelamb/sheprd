@@ -387,7 +387,13 @@ impl From<RelayState> for RelayStatus {
 #[serde(rename_all = "snake_case", tag = "state")]
 pub enum RelayState {
     Connecting,
-    Listening,
+    Listening {
+        /// The round trip to the relay, in milliseconds, which tells how
+        /// near it is; absent until measured, or from an older daemon. An
+        /// older app reads the state and ignores it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rtt_ms: Option<u32>,
+    },
     /// The last attempt failed; another follows.
     Failed {
         error: String,

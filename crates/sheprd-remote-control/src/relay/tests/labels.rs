@@ -83,15 +83,18 @@ fn status_names_each_relay_with_its_label() {
     let dir = tempfile::tempdir().unwrap();
     let relays = labelled(dir.path());
     for endpoint in &relays.endpoints {
-        relays.set_status(endpoint, Status::Listening);
+        relays.set_status(endpoint, Status::Listening { rtt_ms: None });
     }
     let status = relays.status();
     assert_eq!(
         status["https://fra3.example.org"],
         RelayStatus {
             label: fra3(),
-            state: Status::Listening,
+            state: Status::Listening { rtt_ms: None },
         }
     );
-    assert_eq!(status["https://sfo3.example.org"], Status::Listening.into());
+    assert_eq!(
+        status["https://sfo3.example.org"],
+        Status::Listening { rtt_ms: None }.into()
+    );
 }

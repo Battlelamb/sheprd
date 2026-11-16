@@ -204,16 +204,22 @@ impl Relays {
         self.changed.send_modify(|revision| *revision += 1);
     }
 
-    /// Each relay's state, and its label.
+    /// Each relay's state, with the latest round trip of those listening,
+    /// and its label.
     pub(crate) fn status(&self) -> BTreeMap<String, RelayStatus> {
+        let rtt = nearest::millis(&self.rtt.lock().unwrap_or_else(PoisonError::into_inner));
         self.status
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
             .map(|(endpoint, state)| {
+                let mut state = state.clone();
+                if let Status::Listening { rtt_ms } = &mut state {
+                    *rtt_ms = rtt.get(endpoint).copied();
+                }
                 let status = RelayStatus {
                     label: self.labels.get(endpoint).cloned().unwrap_or_default(),
-                    state: state.clone(),
+                    state,
                 };
                 (endpoint.clone(), status)
             })

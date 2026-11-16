@@ -111,7 +111,10 @@ fn relay_line(relay: &str, status: &sheprd_remote_control::control::RelayStatus)
     let label = &status.label;
     let state = match &status.state {
         RelayState::Connecting => "connecting".to_owned(),
-        RelayState::Listening => "listening".to_owned(),
+        RelayState::Listening { rtt_ms: None } => "listening".to_owned(),
+        RelayState::Listening {
+            rtt_ms: Some(rtt_ms),
+        } => format!("listening, {rtt_ms} ms"),
         RelayState::Failed { error } => format!("failed: {error}"),
     };
     let mut line = match &label.name {

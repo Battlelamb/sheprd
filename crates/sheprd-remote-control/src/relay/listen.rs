@@ -90,7 +90,7 @@ async fn session(
     add_pairing(relays, &mut listener).await;
     // The round trip first, so whoever sees `Listening` sees it too.
     relays.set_rtt(endpoint, Some(listener.rtt()));
-    relays.set_status(endpoint, Status::Listening);
+    relays.set_status(endpoint, Status::Listening { rtt_ms: None });
     tracing::info!(relay = %endpoint, rtt = ?listener.rtt(), "listening on a relay");
     // Listening worked: the next failure starts the backoff over.
     *wait = FIRST;

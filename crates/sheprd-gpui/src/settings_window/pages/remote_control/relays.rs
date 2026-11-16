@@ -42,7 +42,8 @@ pub(in crate::settings_window) enum Offered {
 pub(in crate::settings_window) enum Standing {
     /// The daemon does not run, so it reports nothing.
     Off,
-    Listening,
+    /// With the round trip in milliseconds, once measured.
+    Listening(Option<u32>),
     Connecting,
     Failed(String),
     /// Between a save and the daemon's restart, or an older daemon.
@@ -62,7 +63,7 @@ impl Standing {
                 .and_then(|address| status.relays.get(&address))
         });
         match reported.map(|reported| &reported.state) {
-            Some(RelayState::Listening) => Self::Listening,
+            Some(RelayState::Listening { rtt_ms }) => Self::Listening(*rtt_ms),
             Some(RelayState::Connecting) => Self::Connecting,
             Some(RelayState::Failed { error }) => Self::Failed(error.clone()),
             None => Self::Unreported,
@@ -73,7 +74,8 @@ impl Standing {
     pub(in crate::settings_window) fn line(&self) -> String {
         match self {
             Self::Off => fl!("settings-remote-while-running"),
-            Self::Listening => fl!("settings-remote-relay-listening"),
+            Self::Listening(None) => fl!("settings-remote-relay-listening"),
+            Self::Listening(Some(ms)) => fl!("settings-remote-relay-listening-rtt", ms = ms),
             Self::Connecting => fl!("settings-remote-relay-connecting"),
             Self::Failed(error) => fl!(
                 "settings-remote-relay-failed",
@@ -87,7 +89,7 @@ impl Standing {
     /// connecting, and quiet when there is nothing to say.
     fn color(&self, theme: &Theme) -> u32 {
         match self {
-            Self::Listening => theme.ink(theme.palette[2]),
+            Self::Listening(_) => theme.ink(theme.palette[2]),
             Self::Failed(_) => theme.ink(theme.palette[1]),
             Self::Connecting => theme.ink(theme.palette[3]),
             Self::Off | Self::Unreported => theme.muted,

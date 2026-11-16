@@ -37,6 +37,9 @@ pub struct Options {
     pub device_idle: Option<Duration>,
     /// Explicit permission to read this machine's GitHub CLI credential.
     pub github_cli: bool,
+    /// GitHub Enterprise Server hosts besides those `gh` is signed in to,
+    /// whose remotes a phone is told are on GitHub.
+    pub github_hosts: Vec<String>,
     /// The Herdr daemon's client socket, as Sheprd resolved it; `None`
     /// discovers it from this process's environment. A service manager's
     /// environment may lack the shell's `XDG_CONFIG_HOME`.
@@ -160,6 +163,8 @@ Options:
   --chat-dir DIR           Where chat sockets live (default: discovered)
   --github-cli             Read PRs/checks/logs using this host's gh sign-in;
                            permits paired phones to read accessible repositories
+  --github-host HOST       Count HOST as a GitHub Enterprise Server host for
+                           phones, besides those gh is signed in to; repeatable
   --wsl-catalog FILE       The saved WSL distributions (default: discovered)
   --privacy generic|excerpt
                            Whether notifications may quote the chat (default excerpt)
@@ -237,6 +242,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
     let (mut core_socket, mut core_session) = (None, None);
     let mut bonjour = true;
     let mut github_cli = false;
+    let mut github_hosts = Vec::new();
     let mut relays = Vec::new();
     while let Some(arg) = args.next() {
         let name = arg.to_str().unwrap_or_default().to_owned();
@@ -326,6 +332,15 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
             }
             "--no-bonjour" => bonjour = false,
             "--github-cli" => github_cli = true,
+            "--github-host" => {
+                let host = text(value("--github-host")?, "--github-host")?;
+                if !crate::control::github::valid_host(&host) {
+                    return Err(ParseError::Value {
+                        option: "--github-host",
+                    });
+                }
+                github_hosts.push(host);
+            }
             "-h" | "--help" => return Ok(Invocation::Help),
             _ => return Err(ParseError::Unknown(name)),
         }
@@ -362,6 +377,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
         core_endpoint,
         device_idle: (idle_days != 0).then(|| Duration::from_secs(idle_days * 24 * 60 * 60)),
         github_cli,
+        github_hosts,
         herdr_socket,
         live_activities,
         port,

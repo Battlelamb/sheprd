@@ -301,7 +301,10 @@ This authorizes every paired phone to read PR information for the workspaces
 that computer lists. A paired SSH/cloud machine uses **its own** `gh` sign-in;
 enrollment does not copy the desktop's GitHub credential or enable this option.
 The daemon reads `gh auth token --hostname github.com` through the existing
-bounded credential reader. It never saves the token or sends it to a phone.
+bounded credential reader. These reads never save the token or send it to a
+phone. Lending a sign-in to the iPhone app (`GET /api/v2/github/token`) is a
+separate, per-device choice, the **Share GitHub sign-in** switch, and does
+not depend on this option (`docs/ios-github-plan.md`).
 Remove the option and restart the service to disable standalone reads; `gh auth
 logout` revokes use of the CLI sign-in after cached answers expire.
 

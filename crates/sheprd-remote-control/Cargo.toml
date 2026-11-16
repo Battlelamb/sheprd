@@ -31,7 +31,6 @@ server = [
     "dep:pulldown-cmark",
     "dep:rcgen",
     "dep:rustls",
-    "dep:secrecy",
     "dep:sheprd-apns",
     "sheprd-relay/client",
     "dep:sheprd-terminal",
@@ -52,7 +51,8 @@ path              = "src/main.rs"
 required-features = ["server"]
 
 [dependencies]
-secrecy                        = { optional = true, workspace = true }
+# A borrowed GitHub token on the control socket, redacted in `Debug`.
+secrecy.workspace              = true
 sheprd-apns                    = { optional = true, workspace = true }
 sheprd-chat-protocol.workspace = true
 sheprd-client.workspace        = true

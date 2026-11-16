@@ -362,20 +362,25 @@ impl Edit {
             Self::Relays(relays) => {
                 // Written as the daemon names them, each once, so the
                 // list matches the relays its status reports.
-                let mut listed = toml_edit::Array::new();
-                let mut seen = Vec::new();
+                // A relay named twice keeps its first place and the label
+                // the daemon goes by: the last one given.
+                let mut merged: Vec<(String, RelayLabel)> = Vec::new();
                 for Relay { endpoint, label } in relays {
                     let address = relay_address(&endpoint)?;
-                    if seen.contains(&address) {
-                        continue;
-                    }
                     label.check().map_err(|source| Error::RelayLabel {
                         relay: address.clone(),
                         source,
                     })?;
-                    listed.push(relay_value(&address, label));
-                    seen.push(address);
+                    match merged.iter_mut().find(|(listed, _)| *listed == address) {
+                        Some((_, kept)) if !label.is_empty() => *kept = label,
+                        Some(_) => {}
+                        None => merged.push((address, label)),
+                    }
                 }
+                let listed = merged
+                    .into_iter()
+                    .map(|(address, label)| relay_value(&address, label))
+                    .collect();
                 ("relays", toml_edit::Value::Array(listed))
             }
         })

@@ -114,3 +114,41 @@ fn saving_the_list_from_settings_keeps_each_label() -> anyhow::Result<()> {
     assert_eq!(fs::read_to_string(&path)?, before);
     Ok(())
 }
+
+#[test]
+fn a_relay_named_twice_keeps_its_place_and_the_label_the_daemon_uses() -> anyhow::Result<()> {
+    use crate::config::{preferences::Preference, remote::Edit};
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("local.toml");
+    let named = |name: &str| Relay {
+        endpoint: "https://fra3.example.org".into(),
+        label: RelayLabel {
+            name: Some(name.into()),
+            ..RelayLabel::default()
+        },
+    };
+    // Plain first, then labelled, then plain again, as a hand-edited list
+    // may name it: the label survives, as the daemon would read it.
+    Config::save_preference_path(
+        Preference::Remote(Edit::Relays(vec![
+            "https://fra3.example.org".into(),
+            "https://sfo3.example.org".into(),
+            named("fra3"),
+            "https://fra3.example.org/".into(),
+        ])),
+        &path,
+    )?;
+    let saved = Config::parse(&fs::read_to_string(&path)?)?.remote.relays;
+    assert_eq!(
+        saved,
+        [named("fra3"), Relay::from("https://sfo3.example.org")]
+    );
+    // Of two labels, the later one, as the daemon takes it.
+    Config::save_preference_path(
+        Preference::Remote(Edit::Relays(vec![named("old"), named("new")])),
+        &path,
+    )?;
+    let saved = Config::parse(&fs::read_to_string(&path)?)?.remote.relays;
+    assert_eq!(saved, [named("new")]);
+    Ok(())
+}

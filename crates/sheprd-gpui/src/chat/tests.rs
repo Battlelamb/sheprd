@@ -16,6 +16,8 @@ use std::{
 };
 
 mod activity;
+mod agent_advice;
+mod agent_picker;
 mod agent_row_rescroll;
 mod attachments;
 mod chats;

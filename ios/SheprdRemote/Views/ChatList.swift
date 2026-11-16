@@ -26,10 +26,16 @@ struct ChatList: View {
             List {
                 UnpairedCards()
                 if !counts.isEmpty {
-                    CountChips(counts: counts) { status in open(status, proxy: proxy) }
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
+                    // Its own section, kept close to the search above and
+                    // the first section below: a grouped list would leave a
+                    // whole section's gap on each side of one row of chips.
+                    Section {
+                        CountChips(counts: counts) { status in open(status, proxy: proxy) }
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                    .listSectionSpacing(0)
                 }
                 ForEach(sections) { section in
                     let key = Self.key(section, sort: sort)
@@ -45,6 +51,7 @@ struct ChatList: View {
                 }
             }
         }
+        .contentMargins(.top, 0, for: .scrollContent)
         .refreshable { model.fleet.networkChanged() }
         .closeConfirmation($closing)
     }

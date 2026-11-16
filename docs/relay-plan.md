@@ -20,7 +20,7 @@ work from any network, not a detour for traffic that has a better route.
 | Who can dial | Only devices the computer names. A computer gives the relay the public dial keys of its paired devices; any other dial hears `offline`, as if the computer were not there, and never reaches it. Revoking a device ends its sessions at once. |
 | End-to-end encryption | Hybrid post-quantum Noise inside the stream (below). TLS to the relay protects only metadata. |
 | State | None. Memory only; a restart drops sessions and listeners reconnect. No database, no volume. |
-| Many relays | Relays share nothing. A computer listens on every relay it knows, and a client dials whichever answers first. Adding a region is starting a droplet. |
+| Many relays | Relays share nothing and never forward to each other. A computer listens on every relay it knows; a dialer only ever dials the computer's relays, never its own, so two machines near different relays still meet. The dialer tries the relay with the shortest whole path first (Choosing the nearest relay). Adding a region is starting a droplet. |
 | Choosing a relay | Sheprd's relays by default, listed in one static file, `https://sheprd.org/relays.json`, so they are added or all removed without a release; or the user's own: any number of private endpoints, which can replace ours entirely (below). |
 | Zero config | Every setting has a safe default. The image runs with no settings; `deploy/relay` serves it at `IP.sslip.io` with a Let's Encrypt certificate and no DNS work. |
 | Operator safety | Limits on connections (total and per address), listeners, sessions (total and per route), frame size, bandwidth (per session and total), idle and total session time, and dial and listen rates. |
@@ -466,7 +466,50 @@ Settings, the command, and the phone's side arrive with the daemon and iOS
 work (phase 3). Until then no client reads a relay endpoint, so none of
 these is exposed as if it worked.
 
-## Many users, kept apart
+### Choosing the nearest relay
+
+With relays in several regions (say Asia, Europe, US east and west), a
+session's path is phone → relay → computer, and its latency is both legs.
+A relay near either end is close to the direct path, so the one to avoid
+is a relay far from both.
+
+- **The computer measures its leg.** Each listener reads its QUIC
+  connection's smoothed round trip when it starts listening and every
+  30 s (`Listener::rtt`), and forgets it when the relay drops it.
+  `GET /api/relay`, and the nearby offer, list the relays nearest first
+  and add `rtt_ms`, each listening relay's round trip in milliseconds;
+  a relay the computer is not listening on now has no entry and comes
+  last. Older phones ignore the field.
+- **The phone measures its own leg** in the background
+  (`RelayProbes`): two `GET /v1/info` per relay, timing the second so TLS
+  setup is not counted, kept 5 minutes and forgotten when the network
+  changes. Opening a session never waits for a probe; the first one after
+  launch uses the computer's order alone.
+- **The phone ranks the computer's relays** (`RelayNearness.ranked`) by
+  the sum of both legs: relays the computer listens on before those it
+  does not, relays the phone reached before those it could not, then the
+  shortest path, ties in the computer's order. It tries them in that
+  order, as before.
+- The phone saves a computer's new order when it next answers directly,
+  keeping its keys, and only when the order changed or a round trip moved
+  by more than 20 ms and a quarter, so jitter does not rewrite the
+  Keychain.
+
+**Why relays do not forward to each other.** A mesh would let each side
+use the relay nearest to itself, with the relays carrying the session
+between them. It would buy little: over the public internet, phone →
+nearby relay → far relay → computer is no shorter than phone → the far
+relay → computer, and it doubles the relays' bandwidth. It would cost
+the design's simplest properties: relays would have to trust and
+authenticate each other, share every listener's dial keys or route
+lookups, and keep state about where each computer is; and a private relay
+could not take part without joining Sheprd's mesh. Listening on each
+relay costs a computer one idle QUIC connection per region, which is
+cheap for the handful of regions planned. If the list grows large, a
+computer can listen on only its nearest few, since phones already try
+every relay the computer names and an `offline` answer is immediate.
+
+
 
 One relay serves many people's computers and phones. It keeps them apart
 without accounts, so a public relay holds nothing worth stealing, and

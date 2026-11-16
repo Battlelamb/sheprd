@@ -133,10 +133,12 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
             .map(Response::NearbyStarted),
         Request::NearbyReveal { session, nonce } => {
             let origins = state.origins();
-            let revealed = state
-                .auth()
-                .nearby_reveal(&session, &nonce, &state.fingerprint, &origins, now)
-                .map(Response::NearbyRevealed);
+            let revealed = {
+                let mut auth = state.auth();
+                crate::relay::refresh_offer(state.relay.as_deref(), &mut auth);
+                auth.nearby_reveal(&session, &nonce, &state.fingerprint, &origins, now)
+                    .map(Response::NearbyRevealed)
+            };
             crate::relay::open_pairing(state);
             revealed
         }

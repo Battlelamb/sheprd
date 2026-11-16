@@ -55,11 +55,7 @@ pub(crate) struct DeviceRecord {
 /// A device's keys for relays, as it sent them, base64url: its tunnel
 /// static key (X25519), which the end-to-end handshake proves, and its
 /// dial key (P-256, SEC1 compressed), which the relay lets through.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct RelayKeys {
-    pub(crate) dial: String,
-    pub(crate) tunnel: String,
-}
+pub(crate) use crate::control::host_relay::Keys as RelayKeys;
 
 impl RelayKeys {
     /// The tunnel key, when it is one.

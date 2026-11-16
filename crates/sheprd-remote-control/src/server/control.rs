@@ -201,6 +201,18 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
                 origins: state.origins(),
             })
         }),
+        Request::HostRelays => Ok(Response::HostRelays {
+            jobs: state.auth().take_host_relays(now),
+        }),
+        Request::HostRelayed {
+            device,
+            relay,
+            outcome,
+        } => state
+            .auth()
+            .host_relayed(&device, &relay, outcome, now)
+            .map(|()| Response::Done),
+        Request::RelayEnroll(request) => return relay_enroll(state, &request, now),
         Request::Revoke { device } => match state.auth().revoke(&device) {
             Ok(true) => Ok(Response::Done),
             Ok(false) => {
@@ -296,6 +308,33 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
     result.unwrap_or_else(|error| Response::Error {
         code: ErrorCode::from(&error),
         message: error.to_string(),
+    })
+}
+
+/// Keeps a phone's relay keys carried here from another computer, and
+/// answers with this computer's relays.
+fn relay_enroll(state: &State, request: &control::host_relay::Request, now: u64) -> Response {
+    use control::host_relay::Outcome;
+    let Some(fingerprint) = crate::auth::nearby::fingerprint_bytes(&state.fingerprint) else {
+        return Response::Relayed(Outcome::Failed {
+            reason: "this computer has no fingerprint".into(), // i18n: data
+        });
+    };
+    let kept = state.auth().keep_relay(request, &fingerprint, now);
+    Response::Relayed(match kept {
+        Ok(false) => Outcome::Elsewhere,
+        Ok(true) => match &state.relay {
+            Some(relay) => {
+                relay.devices_changed();
+                Some(relay.info())
+                    .filter(control::host_relay::Info::valid)
+                    .map_or(Outcome::Kept, Outcome::Relayed)
+            }
+            None => Outcome::Kept,
+        },
+        Err(error) => Outcome::Failed {
+            reason: error.to_string(),
+        },
     })
 }
 

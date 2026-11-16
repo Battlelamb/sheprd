@@ -21,7 +21,6 @@ pub use error::Error;
 pub(crate) use error::Result;
 
 pub(crate) use crate::control::RelayState as Status;
-use serde::Serialize;
 use sheprd_relay::Endpoint;
 use sheprd_relay::wire::Key;
 use std::{
@@ -74,15 +73,7 @@ pub(crate) struct Relays {
 }
 
 /// What a paired phone needs to reach this computer through its relays.
-#[derive(Debug, Serialize)]
-pub(crate) struct Info {
-    /// The tunnel identity to pin: X25519 then ML-KEM-768, base64url.
-    pub(crate) identity: String,
-    /// The relays this computer listens on.
-    pub(crate) relays: Vec<String>,
-    /// This computer's route, base64url.
-    pub(crate) route: String,
-}
+pub(crate) use crate::control::host_relay::Info;
 
 impl Relays {
     /// Loads or makes the relay keys in `state_dir`. Blocking.

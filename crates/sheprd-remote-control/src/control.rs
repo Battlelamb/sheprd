@@ -12,6 +12,7 @@ use sheprd_chat_protocol::{read_frame, write_frame};
 pub mod app_update;
 pub mod changes;
 pub mod edited;
+pub mod host_relay;
 pub mod hosts;
 pub mod layout;
 pub mod pull_requests;
@@ -230,6 +231,20 @@ pub enum Request {
         id: changes::AskId,
         answer: layout::Answer,
     },
+    /// Takes the phones' requests to carry their relay keys to another of
+    /// their computers (`host_relay`) that Sheprd has not taken yet. An
+    /// older daemon refuses it, and Sheprd then carries none.
+    HostRelays,
+    /// What carrying `relay` came to.
+    HostRelayed {
+        /// The phone, as this computer knows it.
+        device: DeviceId,
+        relay: host_relay::Request,
+        outcome: host_relay::Outcome,
+    },
+    /// On a host: keeps a phone's relay keys, signed with its own device
+    /// key there, as `herdr-remote-control relay-enroll` asks.
+    RelayEnroll(host_relay::Request),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -285,6 +300,10 @@ pub enum Response {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         layout: Vec<layout::Ask>,
     },
+    HostRelays {
+        jobs: Vec<host_relay::Job>,
+    },
+    Relayed(host_relay::Outcome),
 }
 
 /// The daemon's answer to a nearby phone's first step, the same JSON over

@@ -8,7 +8,10 @@ use crate::remote::links::{self, Job, Known};
 use sheprd_client::ConnectTarget;
 use sheprd_remote_control::{
     app::enroll::Apns,
-    control::hosts::{Host, HostId, HostOutcome, HostPairing, HostRevoke},
+    control::{
+        host_relay,
+        hosts::{Host, HostId, HostOutcome, HostPairing, HostRevoke},
+    },
 };
 use std::{collections::HashSet, sync::atomic::AtomicBool};
 
@@ -35,6 +38,8 @@ pub(crate) struct Links {
     /// ask the user.
     asks: Vec<Job>,
     revoking: HashSet<HostRevoke>,
+    /// Relay keys being carried to another computer, by phone.
+    relaying: HashSet<(DeviceId, host_relay::Request)>,
 }
 
 /// What a poll sends about hosts.
@@ -47,6 +52,7 @@ pub(super) struct Outgoing {
 pub(super) struct Incoming {
     sent: Option<Vec<Host>>,
     pairings: Vec<HostPairing>,
+    relays: Vec<host_relay::Job>,
     revokes: Option<Vec<HostRevoke>>,
 }
 
@@ -96,6 +102,11 @@ pub(super) fn exchange(address: &Path, send: Send, outgoing: Outgoing) -> Incomi
         Ok(Response::HostPairings { pairings }) => pairings,
         _ => Vec::new(),
     };
+    // An older daemon refuses this: it has none to carry.
+    let relays = match send(address, &Request::HostRelays) {
+        Ok(Response::HostRelays { jobs }) => jobs,
+        _ => Vec::new(),
+    };
     let revokes = outgoing
         .revokes
         .then(|| match send(address, &Request::HostRevokes) {
@@ -106,6 +117,7 @@ pub(super) fn exchange(address: &Path, send: Send, outgoing: Outgoing) -> Incomi
     Incoming {
         sent,
         pairings,
+        relays,
         revokes,
     }
 }
@@ -207,6 +219,57 @@ impl Supervisor {
         for revoke in incoming.revokes.into_iter().flatten() {
             Self::run_host_revoke(cx, revoke);
         }
+        for job in incoming.relays {
+            Self::run_relay_job(cx, job);
+        }
+    }
+
+    /// Carries a phone's relay keys to the host the job names, then to
+    /// every other machine this app connects to, until one keeps them.
+    fn run_relay_job(cx: &mut App, job: host_relay::Job) {
+        let Some(client) = Self::client(cx) else {
+            return;
+        };
+        let links = &mut cx.global_mut::<Self>().links;
+        let key = (job.device.clone(), job.request.clone());
+        if !links.relaying.insert(key.clone()) {
+            return;
+        }
+        let first = job.host.as_ref().and_then(|host| links.target(host));
+        let targets: Vec<ConnectTarget> = first
+            .iter()
+            .chain(
+                links
+                    .known
+                    .iter()
+                    .map(|known| &known.target)
+                    .filter(|target| Some(*target) != first.as_ref()),
+            )
+            .cloned()
+            .collect();
+        let task = cx.background_executor().spawn({
+            let request = job.request.clone();
+            async move { links::relay::carry(&request, &targets, &AtomicBool::new(false)) }
+        });
+        cx.spawn(async move |cx| {
+            let outcome = task.await;
+            if let host_relay::Outcome::Failed { reason } = &outcome {
+                tracing::info!(%reason, "Could not carry a phone's relay keys");
+            }
+            // A lost answer fails on the daemon once it waited long enough,
+            // and the phone signs its keys again.
+            let _ = client
+                .request(Request::HostRelayed {
+                    device: job.device,
+                    relay: job.request,
+                    outcome,
+                })
+                .await;
+            cx.update(|cx| {
+                cx.global_mut::<Self>().links.relaying.remove(&key);
+            });
+        })
+        .detach();
     }
 
     fn run_host_job(cx: &mut App, mut job: Job) {

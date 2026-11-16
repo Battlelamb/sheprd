@@ -80,6 +80,11 @@ pub enum Invocation {
     Enroll {
         state_dir: Option<PathBuf>,
     },
+    /// Keeps a phone's relay keys another computer's Sheprd carried here,
+    /// read as JSON from standard input (`app::relay_enroll`).
+    RelayEnroll {
+        state_dir: Option<PathBuf>,
+    },
     /// Revokes a device that other computer enrolled.
     Revoke {
         state_dir: Option<PathBuf>,
@@ -104,6 +109,7 @@ pub const USAGE: &str = "\
 Usage: sheprd-remote-control serve --state-dir DIR [options]
        sheprd-remote-control enroll [--state-dir DIR] < REQUEST.json
        sheprd-remote-control revoke --device ID [--state-dir DIR]
+       sheprd-remote-control relay-enroll [--state-dir DIR] < REQUEST.json
        sheprd-remote-control tags [--offer] [--state-dir DIR] [< TAGS.json]
        sheprd-remote-control shortcuts [--offer] [--state-dir DIR] [< SHORTCUTS.json]
 
@@ -142,7 +148,10 @@ Options:
 enroll and revoke are what Sheprd on another computer runs here over SSH,
 so a phone paired there also reaches this computer. enroll starts the
 daemon when it does not run and prints this computer's answer as JSON.
-Their state directory defaults to the one Sheprd on this computer uses.
+relay-enroll keeps a phone's relay keys, signed with its own key here, so
+the phone reaches this computer through its relays, and prints the outcome
+as JSON; it needs the daemon running. Their state directory defaults to
+the one Sheprd on this computer uses.
 ";
 
 pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, ParseError> {
@@ -150,6 +159,13 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
     match args.next().as_deref().and_then(|arg| arg.to_str()) {
         Some("serve") => {}
         Some(verb @ ("enroll" | "revoke")) => return parse_host(verb == "enroll", args),
+        // Takes `enroll`'s options, `--state-dir` alone.
+        Some("relay-enroll") => {
+            return parse_host(true, args).map(|invocation| match invocation {
+                Invocation::Enroll { state_dir } => Invocation::RelayEnroll { state_dir },
+                other => other,
+            });
+        }
         Some("shortcuts") => {
             return parse_edited(args, |state_dir, offer| Invocation::Shortcuts {
                 state_dir,

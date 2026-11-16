@@ -224,6 +224,19 @@ asks the running daemon to add the phone (`Enroll`). Then it prints the
 machine's fingerprint and addresses. `sheprd-remote-control revoke --device ID`
 undoes it.
 
+A phone also gets its relay keys to a computer it cannot reach through
+one it can (`control::host_relay`, `auth::host_relays`). It signs fresh
+keys with the device key it holds for the far computer and posts them to
+`POST /api/v2/hosts/relay` on the near one, posting the same request again
+to read where it stands. Sheprd takes each request (`HostRelays`) and runs
+`sheprd-remote-control relay-enroll` over SSH, first on the machine the
+phone's pairing names, then on every other one, without installing it
+anywhere. The machine whose fingerprint the request names checks the
+signature against the phone's own key, keeps the keys, and answers with its
+relays (`RelayEnroll`); Sheprd reports that back (`HostRelayed`). Because
+the phone signs, the near computer cannot attach keys to a device it does
+not hold, and this works for a computer the phone paired directly too.
+
 The pairing QR prefers a Tailscale address when one is available, then a LAN
 address. The desktop dialog highlights the Tailscale connection and reveals
 alternatives under **Other addresses**. Each address names its interfaces on

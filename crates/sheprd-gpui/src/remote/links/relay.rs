@@ -1,0 +1,89 @@
+//! Carrying a phone's relay keys to another of its computers
+//! (`sheprd_remote_control::control::host_relay`). The phone signed them
+//! with its own key there; this app only finds the host. It asks the host
+//! the phone's pairing names first, then every other machine it connects
+//! to, running `herdr-remote-control relay-enroll` there until one says it
+//! is the computer the request names. Nothing is installed: a host without
+//! the program holds no phone. Everything here blocks.
+
+use crate::teleport::Host;
+use sheprd_client::{ConnectTarget, ScriptLimits};
+use sheprd_remote_control::control::host_relay::{Outcome, Request};
+use std::{
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
+
+/// What `relay-enroll` may print: one outcome, at most a relay list.
+const OUTPUT: u64 = 64 * 1024;
+const IDLE: Duration = Duration::from_secs(20);
+
+/// Finds the program as `device_tags::sync` does, without installing it.
+/// An older build refuses `relay-enroll` and prints nothing. Standard input
+/// is drained when no program reads it.
+pub(crate) const SCRIPT: &str = "\
+program=$(command -v sheprd-remote-control || command -v herdr-remote-control || true)
+[ -n \"$program\" ] || program=\"$HOME/.local/bin/sheprd-remote-control\"
+[ -x \"$program\" ] || program=\"$HOME/.local/bin/herdr-remote-control\"
+if [ -x \"$program\" ]; then \"$program\" relay-enroll 2>/dev/null || true; fi
+cat >/dev/null
+";
+
+/// Tries each of `targets` in order; what carrying `request` came to.
+pub(crate) fn carry<'a>(
+    request: &Request,
+    targets: impl IntoIterator<Item = &'a ConnectTarget>,
+    cancelled: &AtomicBool,
+) -> Outcome {
+    let mut failed = None;
+    for target in targets {
+        if cancelled.load(Ordering::Relaxed) {
+            break;
+        }
+        match ask(request, target, cancelled) {
+            Some(outcome @ (Outcome::Relayed(_) | Outcome::Kept)) => return outcome,
+            // The first failure is kept, in case it was that computer's.
+            Some(outcome @ Outcome::Failed { .. }) => {
+                failed.get_or_insert(outcome);
+            }
+            Some(Outcome::Elsewhere) | None => {}
+        }
+    }
+    failed.unwrap_or(Outcome::Elsewhere)
+}
+
+/// The host's answer; `None` when it has no program that answers.
+fn ask(request: &Request, target: &ConnectTarget, cancelled: &AtomicBool) -> Option<Outcome> {
+    let host = Host::new(target).ok()?;
+    let input = serde_json::to_vec(request).ok()?;
+    let mut output = Vec::new();
+    if let Err(error) = host.stream(
+        SCRIPT,
+        input.as_slice(),
+        &mut output,
+        ScriptLimits {
+            output: OUTPUT,
+            idle: IDLE,
+        },
+        cancelled,
+    ) {
+        tracing::info!(%error, "Could not ask a host to keep a phone's relay keys");
+        return None;
+    }
+    parse(&output)
+}
+
+/// The host's answer, refused unless it is in bounds; `None` when it
+/// printed nothing.
+pub(crate) fn parse(output: &[u8]) -> Option<Outcome> {
+    if output.iter().all(u8::is_ascii_whitespace) {
+        return None;
+    }
+    serde_json::from_slice::<Outcome>(output)
+        .ok()
+        .filter(Outcome::valid)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;

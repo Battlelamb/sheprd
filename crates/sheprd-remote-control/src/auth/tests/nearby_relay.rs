@@ -12,6 +12,7 @@ fn info() -> Info {
         labels: Default::default(),
         relays: vec!["https://relay.example.org".into()],
         route: "route".into(),
+        rtt_ms: std::collections::BTreeMap::new(),
     }
 }
 

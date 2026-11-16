@@ -61,10 +61,21 @@ fn the_phone_learns_each_labelled_relays_label() {
 #[test]
 fn the_nearby_offer_leaves_the_labels_out() {
     let dir = tempfile::tempdir().unwrap();
-    let info = labelled(dir.path()).info().without_labels();
-    let offer = serde_json::to_value(&info).unwrap();
+    let relays = labelled(dir.path());
+    let offer = serde_json::to_value(relays.offer()).unwrap();
     assert!(offer.get("labels").is_none());
     assert_eq!(offer["relays"].as_array().map(Vec::len), Some(2));
+    // Nor when it is refreshed before each offer is sealed.
+    let mut auth = crate::auth::Auth::load(dir.path(), crate::auth::Limits::default()).unwrap();
+    refresh_offer(Some(&relays), &mut auth);
+    let sealed = serde_json::to_value(crate::auth::nearby::Offer {
+        token: "t".into(),
+        origins: &[],
+        relay: auth.relay_offer(),
+    })
+    .unwrap();
+    assert!(sealed["relay"].get("labels").is_none(), "{sealed}");
+    assert_eq!(sealed["relay"]["relays"].as_array().map(Vec::len), Some(2));
 }
 
 #[test]

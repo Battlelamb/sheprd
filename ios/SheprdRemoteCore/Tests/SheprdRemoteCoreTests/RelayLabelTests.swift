@@ -46,11 +46,11 @@ struct RelayLabelTests {
         let record = try #require(RelayRecord.make(from: try Self.info(labels: nil)))
         let renamed = try Self.info(labels: ["https://fra3.example.org": Self.fra3])
         #expect(record.matches(renamed))
-        let relabeled = try #require(record.relabeled(renamed))
+        let relabeled = try #require(record.refreshed(with: renamed))
         #expect(relabeled.labels["https://fra3.example.org"] == Self.fra3)
         #expect(relabeled.dialKey == record.dialKey)
         #expect(relabeled.tunnelKey == record.tunnelKey)
-        #expect(relabeled.relabeled(renamed) == nil)
+        #expect(relabeled.refreshed(with: renamed) == nil)
     }
 
     @Test func recordsSavedBeforeLabelsReadWithNone() throws {
@@ -63,5 +63,9 @@ struct RelayLabelTests {
         let read = try JSONDecoder().decode(RelayRecord.self, from: older)
         #expect(read.labels.isEmpty)
         #expect(read.dialKey == record.dialKey)
+        // The computer's round trips, saved beside the labels, are kept.
+        var timed = record
+        timed.listenerRtt = ["https://fra3.example.org": 12]
+        #expect(try JSONDecoder().decode(RelayRecord.self, from: JSONEncoder().encode(timed)) == timed)
     }
 }

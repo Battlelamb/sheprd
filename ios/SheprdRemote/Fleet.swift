@@ -195,6 +195,8 @@ final class Fleet {
     }
 
     func networkChanged() {
+        // The phone's round trips to relays were for the old network.
+        Task { await RelayProbes.shared.forget() }
         for link in links.values { Task { await link.networkChanged() } }
     }
 
@@ -678,9 +680,9 @@ final class Fleet {
                 return
             }
             if let known, known.matches(info) {
-                // The keys hold; only what the owner calls the relays may
-                // have changed.
-                if let relabeled = known.relabeled(info) { onRelay?(device, relabeled) }
+                // Same keys; only the computer's nearest relays, or what its
+                // owner calls them, may differ.
+                if let refreshed = known.refreshed(with: info) { onRelay?(device, refreshed) }
                 return
             }
             guard let record = RelayRecord.make(from: info), let keys = record.enrollment else { return }

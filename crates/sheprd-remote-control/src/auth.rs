@@ -449,6 +449,12 @@ impl Auth {
         self.relay_offer = Some(offer);
     }
 
+    /// What nearby offers say about the relays now.
+    #[cfg(test)]
+    pub(crate) fn relay_offer(&self) -> Option<&crate::relay::Info> {
+        self.relay_offer.as_ref()
+    }
+
     /// The token last sealed to a nearby phone, once, for the relays to
     /// let that phone dial in and claim from another network.
     pub(crate) fn take_relay_pairing(&mut self) -> Option<[u8; SECRET_LEN]> {

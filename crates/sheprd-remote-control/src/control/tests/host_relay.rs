@@ -35,6 +35,7 @@ fn info() -> Info {
         identity: "identity".into(),
         relays: vec!["https://relay.example.org".into()],
         route: "route".into(),
+        rtt_ms: Default::default(),
     }
 }
 
@@ -281,6 +282,7 @@ fn the_answer_message_is_the_request_then_what_it_claims() {
             identity: "ID".into(),
             relays: vec!["https://a".into(), "https://b".into()],
             route: "RT".into(),
+            rtt_ms: Default::default(),
         },
         proof: proof(),
     };

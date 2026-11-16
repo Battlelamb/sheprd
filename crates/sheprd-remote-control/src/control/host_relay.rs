@@ -29,6 +29,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 
 /// What a phone signs, before the fields of [`Request::message`].
 pub const PREFIX: &[u8] = b"sheprd-host-relay-v1";
@@ -66,10 +67,17 @@ pub struct Keys {
 pub struct Info {
     /// The tunnel identity to pin: X25519 then ML-KEM-768, base64url.
     pub identity: String,
-    /// The relays the computer listens on.
+    /// The relays the computer listens on, nearest first; those not
+    /// listening now keep their configured order, after the rest.
     pub relays: Vec<String>,
     /// The computer's route, base64url.
     pub route: String,
+    /// Each listening relay's round trip from the computer, in
+    /// milliseconds, so the phone can add its own leg. Older phones ignore
+    /// it. A carried answer does not sign it: it only orders relays the
+    /// signature names.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub rtt_ms: BTreeMap<String, u32>,
 }
 
 impl Info {
@@ -79,6 +87,8 @@ impl Info {
             && !self.relays.is_empty()
             && self.relays.len() <= MAX_RELAYS
             && self.relays.iter().all(|relay| field(relay))
+            && self.rtt_ms.len() <= MAX_RELAYS
+            && self.rtt_ms.keys().all(|relay| field(relay))
     }
 }
 

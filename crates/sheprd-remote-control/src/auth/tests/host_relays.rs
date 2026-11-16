@@ -100,6 +100,7 @@ fn info() -> Info {
         identity: "identity".into(),
         relays: vec!["https://relay.example.org".into()],
         route: "route".into(),
+        rtt_ms: Default::default(),
     }
 }
 

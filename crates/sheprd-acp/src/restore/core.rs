@@ -144,6 +144,15 @@ pub(super) fn opened(keeper: &super::Keeper, session: &str) -> anyhow::Result<()
     Ok(())
 }
 
+pub(super) fn switching(keeper: &super::Keeper) -> anyhow::Result<()> {
+    chat_recovery::switching(
+        &connect(keeper.socket.clone())?,
+        &keeper.endpoint,
+        &keeper.pane,
+    )?;
+    Ok(())
+}
+
 pub(super) fn closed(keeper: &super::Keeper) -> anyhow::Result<()> {
     chat_recovery::closed(&connect(keeper.socket.clone())?, &keeper.endpoint)?;
     Ok(())

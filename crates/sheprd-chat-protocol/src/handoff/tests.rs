@@ -205,3 +205,35 @@ fn quoted_text_cannot_close_the_quote_or_pass_for_sheprds_lines() {
     let again = build(&entries, full(), &[Agent::Claude], BUDGET).unwrap();
     assert!(!again.text.contains(boundary));
 }
+
+#[test]
+fn the_budget_counts_what_quoting_adds() {
+    // Entries of nothing but line breaks grow most when every line is quoted.
+    let breaks = "\n".repeat(1000);
+    let mut entries = vec![user(1, "first")];
+    for id in 2..100 {
+        entries.push(agent(id, &breaks));
+    }
+    entries.push(user(100, "latest"));
+    entries.push(agent(101, "answer"));
+    let budget = 16 * 1024;
+    let handoff = build(&entries, full(), &[], budget).unwrap();
+    let quoted: usize = handoff
+        .text
+        .lines()
+        .filter(|line| line.starts_with(QUOTED))
+        .map(|line| line.len() + 1)
+        .sum();
+    // The left-out markers are the only quoted lines outside the budget.
+    let markers: usize = handoff
+        .text
+        .lines()
+        .filter(|line| line.ends_with(" left out]"))
+        .map(|line| line.len() + 1)
+        .sum();
+    assert!(
+        quoted - markers <= budget,
+        "{quoted} quoted bytes for a {budget} budget"
+    );
+    assert!(handoff.omitted > 0);
+}

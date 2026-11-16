@@ -155,14 +155,14 @@ fn choose(lines: &[String], kinds: &[Kind], scope: Scope<'_>, budget: usize) -> 
     for at in always {
         if !chosen[at] {
             chosen[at] = true;
-            used += lines[at].len() + 1;
+            used += quoted_len(&lines[at]);
         }
     }
     for at in (0..lines.len()).rev() {
         if chosen[at] {
             continue;
         }
-        let size = lines[at].len() + 1;
+        let size = quoted_len(&lines[at]);
         if used + size > budget {
             break;
         }
@@ -170,6 +170,14 @@ fn choose(lines: &[String], kinds: &[Kind], scope: Scope<'_>, budget: usize) -> 
         used += size;
     }
     chosen
+}
+
+/// What [`quote`] adds for `line`: every line of it gains [`QUOTED`], which
+/// the budget must count, as a line of nothing but line breaks would
+/// otherwise grow threefold past it.
+fn quoted_len(line: &str) -> usize {
+    let lines = line.matches('\n').count() + 1;
+    line.len() + lines * (QUOTED.len() + 1) - lines + 1
 }
 
 /// Adds `line` to `text`, each of its lines behind [`QUOTED`].

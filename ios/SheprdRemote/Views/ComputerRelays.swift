@@ -1,28 +1,6 @@
 import SheprdRemoteCore
 import SwiftUI
 
-/// The relays a computer listens on, as its page lists them: what its
-/// owner calls each one in `[remote] relays`, its description and tags,
-/// and its address. Hidden while the computer listens on none.
-struct ComputerRelaysSection: View {
-    let record: RelayRecord
-
-    var body: some View {
-        Section {
-            // By position: a list written by hand may name a relay twice.
-            ForEach(Array(record.relays.enumerated()), id: \.offset) { _, relay in
-                RelayLabelView(relay: relay, label: record.label(for: relay))
-                    .padding(.vertical, 2)
-                    .accessibilityElement(children: .combine)
-            }
-        } header: {
-            Text("Relays")
-        } footer: {
-            Text("When no address answers, this phone reaches the computer through the first relay that does. Relays see only encrypted traffic.")
-        }
-    }
-}
-
 /// A relay as its owner labelled it: the name over the address when it has
 /// one, else the address, then its description and tags. The address keeps
 /// its scheme, so `http://` and `https://` relays on one host differ.

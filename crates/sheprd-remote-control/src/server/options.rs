@@ -109,6 +109,12 @@ pub enum Invocation {
         state_dir: Option<PathBuf>,
         device: String,
     },
+    /// Lists the relays this computer listens on, taking any another
+    /// computer shares on standard input (`control::relays::Offer`).
+    Relays {
+        state_dir: Option<PathBuf>,
+        offer: bool,
+    },
     /// Reads this computer's text shortcuts, offering any given on standard
     /// input.
     Shortcuts {
@@ -130,6 +136,7 @@ Usage: sheprd-remote-control serve --state-dir DIR [options]
        sheprd-remote-control revoke --device ID [--state-dir DIR]
        sheprd-remote-control tags [--offer] [--state-dir DIR] [< TAGS.json]
        sheprd-remote-control shortcuts [--offer] [--state-dir DIR] [< SHORTCUTS.json]
+       sheprd-remote-control relays [--offer] [--state-dir DIR] [< RELAYS.json]
 
 Serves this computer's Herdr chats to paired phones over HTTPS. Sheprd
 starts it when Remote control is on.
@@ -170,6 +177,9 @@ Options:
 enroll and revoke are what Sheprd on another computer runs here over SSH,
 so a phone paired there also reaches this computer. enroll starts the
 daemon when it does not run and prints this computer's answer as JSON.
+relays --offer takes {\"source\", \"relays\"}, the relays Sheprd on
+another computer listens on, replacing what that computer shared before:
+the daemon listens on them too, beside its own [remote] relays.
 Their state directory defaults to the one Sheprd on this computer uses.
 ";
 
@@ -178,6 +188,12 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
     match args.next().as_deref().and_then(|arg| arg.to_str()) {
         Some("serve") => {}
         Some(verb @ ("enroll" | "revoke")) => return parse_host(verb == "enroll", args),
+        Some("relays") => {
+            return parse_edited(args, |state_dir, offer| Invocation::Relays {
+                state_dir,
+                offer,
+            });
+        }
         Some("shortcuts") => {
             return parse_edited(args, |state_dir, offer| Invocation::Shortcuts {
                 state_dir,
@@ -388,7 +404,7 @@ fn parse_host(
     })
 }
 
-/// `tags` or `shortcuts`, then `[--offer] [--state-dir DIR]`, as `made`.
+/// `tags`, `shortcuts`, or `relays`, then `[--offer] [--state-dir DIR]`, as `made`.
 fn parse_edited(
     mut args: impl Iterator<Item = OsString>,
     made: fn(Option<PathBuf>, bool) -> Invocation,

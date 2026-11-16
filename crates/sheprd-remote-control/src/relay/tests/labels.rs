@@ -31,7 +31,7 @@ fn labelled(dir: &Path) -> Relays {
 #[test]
 fn the_phone_learns_each_labelled_relays_label() {
     let dir = tempfile::tempdir().unwrap();
-    let info = serde_json::to_value(labelled(dir.path()).info()).unwrap();
+    let info = serde_json::to_value(labelled(dir.path()).info().unwrap()).unwrap();
     assert_eq!(
         info["relays"],
         serde_json::json!(["https://sfo3.example.org", "https://fra3.example.org"])
@@ -51,7 +51,7 @@ fn the_phone_learns_each_labelled_relays_label() {
     )
     .unwrap();
     assert!(
-        serde_json::to_value(plain.info())
+        serde_json::to_value(plain.info().unwrap())
             .unwrap()
             .get("labels")
             .is_none()
@@ -62,7 +62,7 @@ fn the_phone_learns_each_labelled_relays_label() {
 fn the_nearby_offer_leaves_the_labels_out() {
     let dir = tempfile::tempdir().unwrap();
     let relays = labelled(dir.path());
-    let offer = serde_json::to_value(relays.offer()).unwrap();
+    let offer = serde_json::to_value(relays.offer().unwrap()).unwrap();
     assert!(offer.get("labels").is_none());
     assert_eq!(offer["relays"].as_array().map(Vec::len), Some(2));
     // Nor when it is refreshed before each offer is sealed.
@@ -82,8 +82,15 @@ fn the_nearby_offer_leaves_the_labels_out() {
 fn status_names_each_relay_with_its_label() {
     let dir = tempfile::tempdir().unwrap();
     let relays = labelled(dir.path());
-    for endpoint in &relays.endpoints {
-        relays.set_status(endpoint, Status::Listening { rtt_ms: None });
+    for endpoint in relays.endpoints() {
+        // Only a running listener's state is recorded.
+        relays
+            .running
+            .lock()
+            .unwrap()
+            .listeners
+            .insert(endpoint.to_string(), watch::Sender::new(false));
+        relays.set_status(&endpoint, Status::Listening { rtt_ms: None });
     }
     let status = relays.status();
     assert_eq!(

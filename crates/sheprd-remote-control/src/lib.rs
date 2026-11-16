@@ -32,3 +32,6 @@ mod tls;
 mod web;
 
 pub use error::{Error, Result};
+/// `sheprd-remote-control relays --offer`: relays another computer shares.
+#[cfg(feature = "server")]
+pub use relay::shared as shared_relays;

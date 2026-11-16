@@ -71,9 +71,9 @@ fn a_relay_that_stopped_listening_is_no_longer_offered_as_nearest() {
     let relays = Relays::load(dir.path(), listened(&all)).unwrap();
     relays.set_rtt(&all[0], Some(Duration::from_millis(200)));
     relays.set_rtt(&all[1], Some(Duration::from_millis(20)));
-    assert_eq!(relays.info().relays[0], "https://near.example.org");
+    assert_eq!(relays.info().unwrap().relays[0], "https://near.example.org");
     relays.set_rtt(&all[1], None);
-    let info = relays.info();
+    let info = relays.info().unwrap();
     assert_eq!(
         info.relays,
         ["https://far.example.org", "https://near.example.org"]
@@ -88,7 +88,7 @@ fn a_computer_listening_nowhere_sends_no_round_trips() {
     let dir = tempfile::tempdir().unwrap();
     let relays =
         Relays::load(dir.path(), listened(&endpoints(&["https://a.example.org"]))).unwrap();
-    let json = serde_json::to_value(relays.info()).unwrap();
+    let json = serde_json::to_value(relays.info().unwrap()).unwrap();
     assert!(json.get("rtt_ms").is_none());
 }
 
@@ -117,6 +117,15 @@ fn status_reports_a_listening_relays_round_trip() {
     let dir = tempfile::tempdir().unwrap();
     let all = endpoints(&["https://a.example.org", "https://b.example.org"]);
     let relays = Relays::load(dir.path(), listened(&all)).unwrap();
+    // Only a running listener's state is recorded.
+    for endpoint in &all {
+        relays
+            .running
+            .lock()
+            .unwrap()
+            .listeners
+            .insert(endpoint.to_string(), watch::Sender::new(false));
+    }
     relays.set_status(&all[0], Status::Listening { rtt_ms: None });
     relays.set_status(&all[1], Status::Connecting);
     assert_eq!(

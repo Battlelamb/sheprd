@@ -90,16 +90,25 @@ if (typeof document !== 'undefined') {
     return suffix;
   }
 
+  // The token whose keys the list shows. Set only once they load, so a
+  // failed request can be retried by pasting the same token again.
   let keysFor = null;
+  const noKeysHint = $('rd-keys-none').textContent;
   async function loadKeys() {
     const token = $('rd-token').value.trim();
     const list = $('rd-keys');
     if (!token || token === keysFor) return;
-    keysFor = token;
+    keysFor = null;
     list.replaceChildren();
+    // A request for an earlier token may finish after this one: only the
+    // answer for the token still in the field may fill the list.
+    const current = () => $('rd-token').value.trim() === token;
     try {
       const body = await api(token, '/account/keys?per_page=200');
+      if (!current()) return;
       const keys = body.ssh_keys || [];
+      list.replaceChildren();
+      $('rd-keys-none').textContent = noKeysHint;
       $('rd-keys-none').hidden = keys.length > 0;
       for (const key of keys) {
         const label = document.createElement('label');
@@ -110,7 +119,9 @@ if (typeof document !== 'undefined') {
         label.append(box, ` ${key.name}`);
         list.append(label);
       }
+      keysFor = token;
     } catch (error) {
+      if (!current()) return;
       $('rd-keys-none').hidden = false;
       $('rd-keys-none').textContent = `SSH keys could not be listed (${error.message}). The droplets will be reachable from DigitalOcean's web console.`;
     }
@@ -169,16 +180,21 @@ if (typeof document !== 'undefined') {
       return;
     }
     row.state('installing (a few minutes)…');
-    // An opaque answer means TLS and Caddy are up; a refusal or a
-    // certificate error rejects, so keep trying for a quarter of an hour.
+    // Only the relay's own `ok` counts: Caddy answers 502 while the relay
+    // is down, and a refusal or certificate error rejects, so keep trying
+    // for a quarter of an hour. The Caddyfile allows this one cross-origin
+    // read.
     for (let tries = 0; tries < 90; tries++) {
       try {
-        await fetch(`${address}/healthz`, { mode: 'no-cors', cache: 'no-store' });
-        row.state('ready: add it in Sheprd.');
-        return;
+        const response = await fetch(`${address}/healthz`, { cache: 'no-store' });
+        if (response.ok && (await response.text()).trim() === 'ok') {
+          row.state('ready: add it in Sheprd.');
+          return;
+        }
       } catch {
-        await pause(10000);
+        // Not answering yet.
       }
+      await pause(10000);
     }
     row.state('not answering yet: see /var/log/cloud-init-output.log on the droplet.');
   }

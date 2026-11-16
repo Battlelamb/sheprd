@@ -2,6 +2,11 @@
 //! inside their prompts, so a write that hides text, imitates Sheprd's own
 //! markup, tells the reader to drop its instructions, or carries a
 //! credential is refused rather than kept and repeated.
+//!
+//! This is a backstop, not the boundary: a phrase list cannot catch every
+//! rewording. Readers treat entries as untrusted data instead: every line
+//! quotes an entry's text (`Entry::line`), and the notes and skill that
+//! show entries to agents say they are notes, never instructions.
 
 /// Why a write was refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]

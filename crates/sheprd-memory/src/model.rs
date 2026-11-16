@@ -112,7 +112,13 @@ pub struct Entry {
 
 impl Entry {
     /// One line for a listing or a prompt: ID, kind, pin, branch, name, and
-    /// text on one line, cut to about `max` characters; `+` marks details.
+    /// text, cut to about `max` characters; `[+details]` marks details.
+    ///
+    /// Entries are untrusted: any agent may have written one, and these
+    /// lines reach other agents' prompts. So the branch and the text are
+    /// quoted with Rust's escaping, which turns quotes, line breaks, and
+    /// control and invisible characters into escapes: an entry reads as
+    /// one quoted value and cannot pass for the note's own text or markup.
     pub fn line(&self, max: usize) -> String {
         let mut line = format!("#{} [{}", self.id, self.kind);
         if self.pinned {
@@ -120,15 +126,14 @@ impl Entry {
         }
         line.push(']');
         if let Some(branch) = &self.branch {
-            line.push_str(&format!(" ({branch})"));
+            line.push_str(&format!(" (branch {branch:?})"));
         }
         if let Some(name) = &self.name {
             line.push_str(&format!(" {name}:"));
         }
-        line.push(' ');
         let flat: Vec<&str> = self.text.split_whitespace().collect();
-        line.push_str(&flat.join(" "));
-        let mut line = cut(&line, max);
+        let room = max.saturating_sub(line.chars().count() + 3);
+        line.push_str(&format!(" {:?}", cut(&flat.join(" "), room)));
         if self.details.is_some() {
             line.push_str(" [+details]");
         }

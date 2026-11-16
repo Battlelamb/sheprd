@@ -24,7 +24,7 @@ fn memory_entries_read_one_per_line() {
             entry(3, Some("feat/x"), Kind::Handoff, "Parser half done"),
             entry(1, None, Kind::Command, "Run\n  just test-core\n"),
         ]),
-        "#3 [handoff] (feat/x) Parser half done\n#1 [command] Run just test-core"
+        "#3 [handoff] (branch \"feat/x\") \"Parser half done\"\n#1 [command] \"Run just test-core\""
     );
 }
 
@@ -36,6 +36,6 @@ fn one_memory_entry_reads_in_full() {
     full.details = Some("Vectors can come later.".into());
     assert_eq!(
         memory::describe_one(&full),
-        "#5 [decision, pinned] search: Use FTS5 [+details]\n\nUse FTS5\n\nVectors can come later."
+        "#5 [decision, pinned] search: \"Use FTS5\" [+details]\n\nUse FTS5\n\nVectors can come later."
     );
 }

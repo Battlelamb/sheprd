@@ -73,3 +73,62 @@ fn an_unsigned_claim_does_not_end_the_search() {
     .unwrap();
     assert!(!claim.proven(&request()));
 }
+
+fn ssh(target: &str) -> ConnectTarget {
+    ConnectTarget::Ssh {
+        target: target.into(),
+        session: "default".into(),
+    }
+}
+
+#[test]
+fn a_host_out_of_reach_fails_the_search_so_the_phone_retries() {
+    let hosts = [ssh("down"), ssh("other")];
+    let outcome = search(
+        &request(),
+        &hosts,
+        &AtomicBool::new(false),
+        |target| match target {
+            ConnectTarget::Ssh { target, .. } if target == "down" => Answer::Unreached,
+            _ => Answer::Said(Outcome::Elsewhere),
+        },
+    );
+    assert!(matches!(outcome, Outcome::Failed { .. }));
+}
+
+#[test]
+fn every_host_asked_and_none_the_computer_is_elsewhere() {
+    let hosts = [ssh("old"), ssh("other")];
+    let mut asked = Vec::new();
+    let outcome = search(&request(), &hosts, &AtomicBool::new(false), |target| {
+        asked.push(target.clone());
+        match target {
+            ConnectTarget::Ssh { target, .. } if target == "old" => Answer::Silent,
+            _ => Answer::Said(Outcome::Elsewhere),
+        }
+    });
+    assert_eq!(outcome, Outcome::Elsewhere);
+    assert_eq!(asked, hosts);
+}
+
+#[test]
+fn a_failure_the_computer_reported_is_kept_over_an_unreached_host() {
+    let hosts = [ssh("far"), ssh("down")];
+    let outcome = search(
+        &request(),
+        &hosts,
+        &AtomicBool::new(false),
+        |target| match target {
+            ConnectTarget::Ssh { target, .. } if target == "far" => Answer::Said(Outcome::Failed {
+                reason: "disk full".into(),
+            }),
+            _ => Answer::Unreached,
+        },
+    );
+    assert_eq!(
+        outcome,
+        Outcome::Failed {
+            reason: "disk full".into()
+        }
+    );
+}

@@ -34,40 +34,74 @@ cat >/dev/null
 /// daemon while it still waits for it.
 pub(crate) const BUDGET: Duration = Duration::from_millis(host_relay::CARRY_MS);
 
+/// What one host said about a request.
+#[derive(Debug)]
+pub(crate) enum Answer {
+    /// It ran `relay-enroll` and answered.
+    Said(Outcome),
+    /// It was reached but has no program that answers: an older build, or
+    /// none, so not a computer that can keep relay keys.
+    Silent,
+    /// It could not be asked: SSH refused, timed out, or was cut off. It
+    /// may be the computer the request names.
+    Unreached,
+}
+
 /// Tries each of `targets` in order; what carrying `request` came to.
-/// Stopped by `cancelled` (the app quit, or `BUDGET` ran out), it failed:
-/// the phone tries again later, where `Elsewhere` would leave the computer
-/// alone for a day.
+/// `Elsewhere` only when every host was asked and none is that computer:
+/// the phone then leaves it alone for a day. A host that could not be
+/// reached, or a search stopped by `cancelled` (the app quit, or `BUDGET`
+/// ran out), fails instead, so the phone tries again soon.
 pub(crate) fn carry<'a>(
     request: &Request,
     targets: impl IntoIterator<Item = &'a ConnectTarget>,
     cancelled: &AtomicBool,
 ) -> Outcome {
+    search(request, targets, cancelled, |target| {
+        ask(request, target, cancelled)
+    })
+}
+
+/// [`carry`] with `ask` putting the request to one host.
+pub(crate) fn search<'a>(
+    request: &Request,
+    targets: impl IntoIterator<Item = &'a ConnectTarget>,
+    cancelled: &AtomicBool,
+    mut ask: impl FnMut(&ConnectTarget) -> Answer,
+) -> Outcome {
     let mut failed = None;
+    let mut unreached = false;
     for target in targets {
         if cancelled.load(Ordering::Relaxed) {
             return failed.unwrap_or_else(timed_out);
         }
-        match ask(request, target, cancelled) {
+        match ask(target) {
             // Only the computer the request names can sign for it; any
             // other host claiming to be it is passed over.
-            Some(outcome @ (Outcome::Relayed { .. } | Outcome::Kept { .. })) => {
+            Answer::Said(outcome @ (Outcome::Relayed { .. } | Outcome::Kept { .. })) => {
                 if outcome.proven(request) {
                     return outcome;
                 }
                 tracing::warn!("A host answered for another computer's relay keys; passed over");
             }
             // The first failure is kept, in case it was that computer's.
-            Some(outcome @ Outcome::Failed { .. }) => {
+            Answer::Said(outcome @ Outcome::Failed { .. }) => {
                 failed.get_or_insert(outcome);
             }
-            Some(Outcome::Elsewhere) | None => {}
+            Answer::Said(Outcome::Elsewhere) | Answer::Silent => {}
+            Answer::Unreached => unreached = true,
         }
     }
     if cancelled.load(Ordering::Relaxed) {
         return failed.unwrap_or_else(timed_out);
     }
-    failed.unwrap_or(Outcome::Elsewhere)
+    match failed {
+        Some(failed) => failed,
+        None if unreached => Outcome::Failed {
+            reason: "a host could not be reached over SSH".into(), // i18n: data
+        },
+        None => Outcome::Elsewhere,
+    }
 }
 
 fn timed_out() -> Outcome {
@@ -76,10 +110,18 @@ fn timed_out() -> Outcome {
     }
 }
 
-/// The host's answer; `None` when it has no program that answers.
-fn ask(request: &Request, target: &ConnectTarget, cancelled: &AtomicBool) -> Option<Outcome> {
-    let host = Host::new(target).ok()?;
-    let input = serde_json::to_vec(request).ok()?;
+/// The host's answer to `request`.
+fn ask(request: &Request, target: &ConnectTarget, cancelled: &AtomicBool) -> Answer {
+    let Ok(input) = serde_json::to_vec(request) else {
+        return Answer::Unreached;
+    };
+    let host = match Host::new(target) {
+        Ok(host) => host,
+        Err(error) => {
+            tracing::info!(%error, "Could not ask a host to keep a phone's relay keys");
+            return Answer::Unreached;
+        }
+    };
     let mut output = Vec::new();
     if let Err(error) = host.stream(
         SCRIPT,
@@ -92,9 +134,9 @@ fn ask(request: &Request, target: &ConnectTarget, cancelled: &AtomicBool) -> Opt
         cancelled,
     ) {
         tracing::info!(%error, "Could not ask a host to keep a phone's relay keys");
-        return None;
+        return Answer::Unreached;
     }
-    parse(&output)
+    parse(&output).map_or(Answer::Silent, Answer::Said)
 }
 
 /// The host's answer, refused unless it is in bounds; `None` when it

@@ -140,6 +140,9 @@ pub(crate) struct Config {
     /// Fail rather than start a new session when the agent cannot continue
     /// `load`.
     pub require_load: bool,
+    /// The `sheprd` command the first note tells the agent to keep the
+    /// repository's memory with; `None` leaves memory out of it.
+    pub sheprd: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -222,7 +225,14 @@ impl<R: FnMut(Update)> Session<R> {
             agent: config.agent.clone(),
             cwd: config.cwd.display().to_string(),
         };
-        let context = Context::new(std::mem::take(&mut config.prompts), facts, told);
+        // Memory opens here, on the session's thread, which also runs the
+        // prompts that recall from it.
+        let recall = config
+            .sheprd
+            .as_ref()
+            .and_then(|_| crate::context::Recall::open(&config.cwd));
+        let context = Context::new(std::mem::take(&mut config.prompts), facts, told)
+            .with_memory(config.sheprd.as_deref(), recall);
         Self {
             accepts: crate::files::Accepts::default(),
             acp_session: None,

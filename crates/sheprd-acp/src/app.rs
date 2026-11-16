@@ -351,6 +351,7 @@ pub(crate) fn run_owned(
         pane: target.map(|target| target.pane),
         prompts,
         require_load: options.require_load,
+        sheprd: crate::context::sheprd_executable(),
     };
     let launcher = inputs.clone();
     let session_thread = thread::Builder::new()

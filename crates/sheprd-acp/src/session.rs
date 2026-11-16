@@ -17,12 +17,12 @@ use std::{
 use acp::v1 as wire;
 use crossbeam_channel::{Sender, TrySendError};
 use sheprd_chat_protocol::{
-    Agent, ByeReason, Change, Command, CommandId, Cursor, Harnesses, PermissionId, Queued,
+    Agent, ByeReason, Change, Command, CommandId, Cursor, Harnesses, Origin, PermissionId, Queued,
     Rejection, ServerMessage, Status, Transcript, VERSION,
 };
 use uuid::Uuid;
 
-use crate::{project::Projector, rpc};
+use crate::{context::Context, project::Projector, rpc};
 
 /// Changes kept for clients that reconnect with a cursor.
 const LOG: usize = 8192;
@@ -137,6 +137,8 @@ pub(crate) struct Config {
     /// Fail rather than start a new session when the agent cannot continue
     /// `load`.
     pub require_load: bool,
+    /// The user's chat system prompt, sent ahead of the first prompt.
+    pub system_prompt: Option<String>,
 }
 
 #[derive(Debug)]
@@ -167,6 +169,8 @@ pub(crate) struct Session<R: FnMut(Update)> {
     activity: Option<Activity>,
     asked: HashMap<PermissionId, Asked>,
     config: Config,
+    /// What the agent has been told besides the person's words.
+    context: Context,
     epoch: Uuid,
     handled: VecDeque<(CommandId, Option<Rejection>)>,
     /// The agent process heard now.
@@ -182,6 +186,9 @@ pub(crate) struct Session<R: FnMut(Update)> {
     pending: HashMap<i64, Pending>,
     pictures: pictures::Pictures,
     projector: Projector,
+    /// Where each queued prompt was typed, by its command; the transcript's
+    /// queue does not carry it, as no client needs it.
+    queued_origins: HashMap<CommandId, Origin>,
     ready: bool,
     report: R,
     seq: u64,
@@ -193,7 +200,11 @@ pub(crate) struct Session<R: FnMut(Update)> {
 impl<R: FnMut(Update)> Session<R> {
     pub(crate) fn new(mut config: Config, outbox: rpc::Outbox, report: R) -> Self {
         let mut transcript = Transcript::new(config.agent.clone());
-        if let Some(history) = config.history.take() {
+        // The saved conversation keeps Sheprd's notes; the chat shows the
+        // person's words only, and the notes say what not to tell again.
+        let mut told = crate::context::Told::default();
+        if let Some(mut history) = config.history.take() {
+            told = crate::context::hide(&mut history);
             transcript.entries = history.entries;
             transcript.truncated = history.truncated;
             transcript.usage = history.usage;
@@ -206,12 +217,14 @@ impl<R: FnMut(Update)> Session<R> {
             .entries
             .last()
             .map_or_else(Projector::default, |entry| Projector::after(entry.id));
+        let context = Context::new(config.system_prompt.take(), told);
         Self {
             accepts: crate::files::Accepts::default(),
             acp_session: None,
             activity: None,
             asked: HashMap::new(),
             config,
+            context,
             epoch: Uuid::new_v4(),
             handled: VecDeque::new(),
             harness: HarnessId::default(),
@@ -224,6 +237,7 @@ impl<R: FnMut(Update)> Session<R> {
             pending: HashMap::new(),
             pictures: pictures::Pictures::default(),
             projector,
+            queued_origins: HashMap::new(),
             ready: false,
             report,
             seq: 0,
@@ -390,6 +404,8 @@ impl<R: FnMut(Update)> Session<R> {
     }
 
     fn queue_changed(&mut self, queued: Vec<Queued>) {
+        self.queued_origins
+            .retain(|id, _| queued.iter().any(|waiting| waiting.id == *id));
         self.emit(Change::Queue { queued });
     }
 

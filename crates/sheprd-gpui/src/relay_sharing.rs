@@ -92,7 +92,15 @@ impl RelaySharing {
         crate::config::watch::follow(
             cx,
             "remote relays", // i18n: data
-            |config| config.remote.relays,
+            // Addresses only: a relay's label is this computer's own words.
+            |config| {
+                config
+                    .remote
+                    .relays
+                    .into_iter()
+                    .map(|relay| relay.endpoint)
+                    .collect()
+            },
             Self::set_relays,
         )
         .detach();

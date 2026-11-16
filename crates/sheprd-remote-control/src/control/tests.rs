@@ -6,6 +6,7 @@ mod changes;
 mod github;
 mod layout;
 mod pull_requests;
+mod relays;
 
 #[test]
 fn requests_and_responses_keep_their_wire_names() {

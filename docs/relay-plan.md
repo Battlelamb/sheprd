@@ -449,6 +449,27 @@ relays = "default"   # Sheprd's relays (the default). Or one of:
   unreachable in Settings and `sheprd remote status`; the others keep
   working.
 - Changing the list restarts only the listen sockets, not the daemon.
+- An endpoint may be a table that also labels it, so lists tell relays
+  apart (`sheprd_remote_control::relay_label`, built):
+
+  ```toml
+  relays = [
+    "https://relay.example.org",
+    { endpoint = "https://fra3.example.org", name = "fra3",
+      description = "not for public use", tags = ["eu", "private"] },
+  ]
+  ```
+
+  The label is the user's own words and never reaches a relay, nor the
+  machines Sheprd shares its relays with, which get the addresses only. Sheprd
+  passes it to the daemon as `--relay-name`, `--relay-description`, and
+  `--relay-tag` after that `--relay`; `sheprd remote status` shows it, and
+  paired phones receive it in `GET /api/relay` as `labels`, keyed by
+  endpoint, and list it on the computer's page. The nearby offer leaves it
+  out, keeping the sealed Bluetooth payload as the vectors fix it. Names
+  are at most 64 characters, descriptions 256, and tags 32, with at most 8
+  tags, none blank or with a control character; a misspelt key is an
+  error rather than a dropped label.
 
 **The phone.** Pairing (QR, Nearby, Bonjour) carries the computer's
 endpoints, and every connection refreshes them, so editing the list on the

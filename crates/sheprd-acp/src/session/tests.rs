@@ -59,6 +59,7 @@ fn config() -> Config {
         pane: Some("p_1".to_owned()),
         prompts: Default::default(),
         require_load: false,
+        sheprd: None,
     }
 }
 

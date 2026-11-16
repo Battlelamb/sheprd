@@ -107,6 +107,11 @@ pub enum Invocation {
     Enroll {
         state_dir: Option<PathBuf>,
     },
+    /// Keeps a phone's relay keys another computer's Sheprd carried here,
+    /// read as JSON from standard input (`app::relay_enroll`).
+    RelayEnroll {
+        state_dir: Option<PathBuf>,
+    },
     /// Revokes a device that other computer enrolled.
     Revoke {
         state_dir: Option<PathBuf>,
@@ -137,6 +142,7 @@ pub const USAGE: &str = "\
 Usage: sheprd-remote-control serve --state-dir DIR [options]
        sheprd-remote-control enroll [--state-dir DIR] < REQUEST.json
        sheprd-remote-control revoke --device ID [--state-dir DIR]
+       sheprd-remote-control relay-enroll [--state-dir DIR] < REQUEST.json
        sheprd-remote-control tags [--offer] [--state-dir DIR] [< TAGS.json]
        sheprd-remote-control shortcuts [--offer] [--state-dir DIR] [< SHORTCUTS.json]
        sheprd-remote-control relays [--offer] [--state-dir DIR] [< RELAYS.json]
@@ -182,6 +188,9 @@ Options:
 enroll and revoke are what Sheprd on another computer runs here over SSH,
 so a phone paired there also reaches this computer. enroll starts the
 daemon when it does not run and prints this computer's answer as JSON.
+relay-enroll keeps a phone's relay keys, signed with its own key here, so
+the phone reaches this computer through its relays, and prints the outcome
+as JSON; it needs the daemon running.
 relays --offer takes {\"source\", \"relays\"}, the relays Sheprd on
 another computer listens on, replacing what that computer shared before:
 the daemon listens on them too, beside its own [remote] relays.
@@ -193,6 +202,13 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
     match args.next().as_deref().and_then(|arg| arg.to_str()) {
         Some("serve") => {}
         Some(verb @ ("enroll" | "revoke")) => return parse_host(verb == "enroll", args),
+        // Takes `enroll`'s options, `--state-dir` alone.
+        Some("relay-enroll") => {
+            return parse_host(true, args).map(|invocation| match invocation {
+                Invocation::Enroll { state_dir } => Invocation::RelayEnroll { state_dir },
+                other => other,
+            });
+        }
         Some("relays") => {
             return parse_edited(args, |state_dir, offer| Invocation::Relays {
                 state_dir,

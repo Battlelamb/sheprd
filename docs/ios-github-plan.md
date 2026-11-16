@@ -127,7 +127,8 @@ replaces that promise, so the user has to opt in:
   in logs, errors, or `Debug`).
 - Sheprd: answers lease asks from its credential store on a background
   thread; shows the switch in the pairing dialog and in Settings.
-- Phone (`SheprdRemoteCore/GitHub/`): `TokenStore` (Keychain), `Lease`
+- Phone (the `SheprdGitHub` target in `ios/SheprdRemoteCore`, which only
+  the app links): `TokenStore` (Keychain), `Lease`
   (expiry, refetch on a 401, the computer it came from), and the choice of
   computer when several lend the same host: the most recently reachable one.
 

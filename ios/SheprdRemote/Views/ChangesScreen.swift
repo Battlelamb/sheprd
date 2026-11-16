@@ -1,3 +1,4 @@
+import SheprdGitHub
 import SheprdRemoteCore
 import SwiftUI
 
@@ -635,7 +636,8 @@ extension Fleet {
 
     private func lease(_ host: GitHubHost, from device: String) async throws -> LeaseFetch {
         do {
-            return .lease(try await call(device) { client, token in try await client.githubToken(host: host, bearer: token) })
+            let answer: LeaseAnswer = try await call(device) { client, token in try await client.githubToken(host: host.name, bearer: token) }
+            return .lease(answer)
         } catch let RemoteError.status(status, _) {
             return .status(status)
         }

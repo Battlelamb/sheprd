@@ -145,6 +145,12 @@ public struct Home: Codable, Hashable, Sendable {
         public var url: String
         public var tone: Tone
 
+        public init(number: UInt64, url: String, tone: Tone) {
+            self.number = number
+            self.url = url
+            self.tone = tone
+        }
+
         /// What the badge says, before a theme colors it.
         public enum Tone: String, Codable, Hashable, Sendable {
             case attention, held, merged, ready, waiting, other

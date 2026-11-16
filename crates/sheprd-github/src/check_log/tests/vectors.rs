@@ -19,7 +19,7 @@ struct Vector {
 #[test]
 fn the_phone_and_the_computer_cut_the_same_excerpts() {
     let vectors: Vectors = serde_json::from_str(include_str!(
-        "../../../../../ios/SheprdRemoteCore/Tests/SheprdRemoteCoreTests/Fixtures/check_log_vectors.json"
+        "../../../../../ios/SheprdRemoteCore/Tests/SheprdGitHubTests/Fixtures/check_log_vectors.json"
     ))
     .unwrap();
     assert_eq!(vectors.max_excerpt, MAX_EXCERPT);

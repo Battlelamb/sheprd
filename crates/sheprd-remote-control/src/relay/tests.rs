@@ -24,7 +24,6 @@ use tokio::{
     net::TcpListener,
 };
 
-mod addresses;
 mod labels;
 mod nearest;
 mod shared;

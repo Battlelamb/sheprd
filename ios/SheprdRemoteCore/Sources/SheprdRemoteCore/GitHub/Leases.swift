@@ -26,6 +26,9 @@ public actor GitHubLeases {
     /// Leases read this run, so a read does not go to the Keychain.
     private var held: [GitHubHost: GitHubLease] = [:]
     private var backoff: [GitHubHost: Backoff] = [:]
+    /// How many times each computer was forgotten, so an answer it gave
+    /// while being forgotten cannot put its token back.
+    private var forgets: [String: Int] = [:]
 
     public init(store: TokenStore, now: @escaping @Sendable () -> Date = { Date() }) {
         self.store = store
@@ -72,6 +75,7 @@ public actor GitHubLeases {
         for lender in candidates {
             try Task.checkCancellation()
             let answer: LeaseFetch
+            let forgotten = forgets[lender.device, default: 0]
             do {
                 answer = try await fetch(lender.device, host)
             } catch is CancellationError {
@@ -80,6 +84,7 @@ public actor GitHubLeases {
                 if failure == .refused { failure = .unreachable }
                 continue
             }
+            guard forgets[lender.device, default: 0] == forgotten else { continue }
             switch answer {
             case let .lease(answer):
                 guard GitHubHost(answer.host) == host, !answer.token.isEmpty else {
@@ -129,6 +134,7 @@ public actor GitHubLeases {
 
     /// Forgets everything computer `device` lent, as forgetting it does.
     public func forget(lender device: String) {
+        forgets[device, default: 0] += 1
         store.forget(lender: device)
         held = held.filter { $0.value.lender != device }
     }

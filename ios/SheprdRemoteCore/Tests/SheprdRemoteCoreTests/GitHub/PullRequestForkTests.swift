@@ -36,3 +36,32 @@ struct PullRequestForkTests {
         }
     }
 }
+
+/// A reused branch: the owner's older pull request ended at the
+/// checkout's commit, and a newer one is open.
+struct PullRequestReusedBranchTests {
+    @Test func theOwnersOpenPullRequestWinsOverAnOlderOneAtTheCheckoutsCommit() throws {
+        let old = "1111111111111111111111111111111111111111"
+        var json = try #require(try JSONSerialization.jsonObject(with: GitHubFixtures.data("forks")) as? [String: Any])
+        var data = try #require(json["data"] as? [String: Any])
+        var repository = try #require(data["repository"] as? [String: Any])
+        var branch = try #require(repository["b0"] as? [String: Any])
+        var nodes = try #require(branch["nodes"] as? [[String: Any]])
+        nodes[0]["headRepositoryOwner"] = ["login": "acme"]
+        nodes[0]["state"] = "CLOSED"
+        nodes[0]["headRefOid"] = old
+        nodes[1]["headRepositoryOwner"] = ["login": "acme"]
+        branch["nodes"] = nodes
+        repository["b0"] = branch
+        data["repository"] = repository
+        json["data"] = data
+        let response = GitHubResponse(status: 200, headers: [:], body: try JSONSerialization.data(withJSONObject: json))
+        let found = try PullRequestAnswer.parse(
+            response,
+            query: PullRequestQuery(owner: "acme", repo: "app", branches: ["main"]),
+            headOwner: { _ in "acme" }, headOid: { _ in old },
+            host: GitHubFixtures.host, now: GitHubFixtures.start
+        )
+        #expect(try found["main"]?.get()?.number == 51)
+    }
+}

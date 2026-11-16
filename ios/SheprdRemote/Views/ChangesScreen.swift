@@ -53,6 +53,19 @@ struct ChangesScreen: View {
         var number: UInt64?
         var branch: String?
         var cwd: String?
+        /// The repository GitHub is asked about, which the computer may
+        /// name only after it has read the checkout.
+        var github: Home.GitHubRepository?
+        /// Which computers lend which hosts, which may arrive after the
+        /// first home: a direct read becomes possible then.
+        var lenders: [String]
+    }
+
+    /// Each computer and the GitHub hosts it lends, in a stable order.
+    private var lenderKeys: [String] {
+        model.fleet.machines.flatMap { machine in
+            (machine.home?.githubHosts ?? []).map { "\(machine.id)/\($0.host)" }
+        }.sorted()
     }
 
     var body: some View {
@@ -92,7 +105,8 @@ struct ChangesScreen: View {
         .refreshable { await reload() }
         .task(id: Reading(scope: scope, status: machine?.status)) { await loadFiles() }
         .task(id: ChecksReading(status: machine?.status, number: workspace?.pullRequest?.number,
-                               branch: workspace?.branch, cwd: workspace?.cwd)) { await loadChecks() }
+                               branch: workspace?.branch, cwd: workspace?.cwd,
+                               github: workspace?.github, lenders: lenderKeys)) { await loadChecks() }
         .sheet(item: $sending) { check in SendLogSheet(key: key, check: check) }
         #if DEBUG
         .navigationDestination(item: $debugFile) { FileDiffScreen(key: key, scope: scope, file: $0) }
@@ -144,6 +158,7 @@ struct ChangesScreen: View {
         let branch = workspace?.branch
         let cwd = workspace?.cwd
         let number = workspace?.pullRequest?.number
+        let github = workspace?.github
         checksError = nil
         let fleet = model.fleet
         let ask: @Sendable () async throws -> PullRequestChecks = {
@@ -159,14 +174,14 @@ struct ChangesScreen: View {
             }
             guard !Task.isCancelled, checksGeneration == generation,
                   branch == workspace?.branch, cwd == workspace?.cwd,
-                  number == workspace?.pullRequest?.number else { return }
+                  number == workspace?.pullRequest?.number, github == workspace?.github else { return }
             checks = read.value.checks
             pullRequest = read.value.pullRequest
             checksOrigin = read.origin
         } catch {
             guard !Task.isCancelled, checksGeneration == generation,
                   branch == workspace?.branch, cwd == workspace?.cwd,
-                  number == workspace?.pullRequest?.number else { return }
+                  number == workspace?.pullRequest?.number, github == workspace?.github else { return }
             checks = nil
             pullRequest = nil
             checksOrigin = nil

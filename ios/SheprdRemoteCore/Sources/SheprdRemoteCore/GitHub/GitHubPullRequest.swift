@@ -120,25 +120,34 @@ enum PullRequestAnswer {
     /// The one pull request a branch stands for: among several, only its
     /// head owner's; then the single open one, else the most recently
     /// updated, which GitHub lists first. Two open ones stay ambiguous.
-    /// A pull request whose head is the checkout's own commit (`headOid`)
-    /// is the branch's whoever owns its head: a fork's pull request on the
+    /// The head owner's pull requests come first, so an open one there is
+    /// the branch's even when an older one ends at the checkout's commit
+    /// (a reused branch). Only when the owner has no open one does the
+    /// checkout's commit (`headOid`) decide: a fork's pull request on the
     /// upstream repository the computer names.
     static func pick(_ nodes: [Node], branch: String, headOwner: String, headOid: String? = nil, host: GitHubHost) throws(GitHubError) -> GitHubPullRequest? {
-        let ours = { (node: Node) in
-            node.headRepositoryOwner?.login.caseInsensitiveCompare(headOwner) == .orderedSame
-                || (headOid.map { !$0.isEmpty && node.headRefOid.caseInsensitiveCompare($0) == .orderedSame } ?? false)
+        guard !nodes.isEmpty else { return nil }
+        let oid = headOid.flatMap { $0.isEmpty ? nil : $0 }
+        let byOwner = nodes.filter { $0.headRepositoryOwner?.login.caseInsensitiveCompare(headOwner) == .orderedSame }
+        let byOid = oid.map { oid in nodes.filter { $0.headRefOid.caseInsensitiveCompare(oid) == .orderedSame } } ?? []
+        let isOpen = { (node: Node) in node.state == "OPEN" }
+        let candidates: [Node]
+        if byOwner.contains(where: isOpen) {
+            candidates = byOwner
+        } else if byOid.contains(where: isOpen) {
+            candidates = byOid
+        } else if !byOwner.isEmpty {
+            candidates = byOwner
+        } else if !byOid.isEmpty {
+            candidates = byOid
+        } else {
+            // Nobody's head here is the branch's.
+            throw nodes.count > 1 ? .ambiguous : .malformed
         }
-        var nodes = nodes
-        if let oid = headOid, !oid.isEmpty, nodes.contains(where: { $0.headRefOid.caseInsensitiveCompare(oid) == .orderedSame }) {
-            nodes.removeAll { $0.headRefOid.caseInsensitiveCompare(oid) != .orderedSame }
-        } else if nodes.count > 1 {
-            nodes.removeAll { !ours($0) }
-            if nodes.isEmpty { throw .ambiguous }
-        }
-        let open = nodes.filter { $0.state == "OPEN" }
+        let open = candidates.filter(isOpen)
         guard open.count <= 1 else { throw .ambiguous }
-        guard let node = open.first ?? nodes.first else { return nil }
-        guard node.number > 0, node.headRefName == branch, ours(node) else { throw .malformed }
+        guard let node = open.first ?? candidates.first else { return nil }
+        guard node.number > 0, node.headRefName == branch else { throw .malformed }
         return node.pullRequest(host: host)
     }
 

@@ -12,6 +12,7 @@ struct SettingsView: View {
     @State private var editMode = EditMode.inactive
     #if DEBUG
     @State private var showingRelays = false
+    @State private var showingGitHub = false
     #endif
     @AppStorage(AppLock.setting, store: AppLock.store) private var requireFaceID = false
     @AppStorage(AppAppearance.key) private var appearance = AppAppearance.system
@@ -73,6 +74,11 @@ struct SettingsView: View {
                 Text("Connection")
             } footer: {
                 Text("A relay joins this \(UIDevice.current.model) to a computer when they are on different networks.")
+            }
+            Section {
+                GitHubSettingsRow()
+            } footer: {
+                Text("This \(UIDevice.current.model) reads pull requests and checks from GitHub with its own sign-in, or one a computer lends.")
             }
             Section {
                 Picker("Lines per Row", selection: $rowLines) {
@@ -177,6 +183,8 @@ struct SettingsView: View {
         .task { if UserDefaults.standard.bool(forKey: "editComputers") { editMode = .active } }
         .navigationDestination(isPresented: $showingRelays) { RelaysView() }
         .task { if UserDefaults.standard.bool(forKey: "openRelays") { showingRelays = true } }
+        .navigationDestination(isPresented: $showingGitHub) { GitHubSettingsView() }
+        .task { if UserDefaults.standard.bool(forKey: "openGitHub") { showingGitHub = true } }
         #endif
     }
 }

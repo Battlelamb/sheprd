@@ -146,6 +146,8 @@ fn home() -> Home {
         }],
     };
     Home::project(Sources {
+        checkouts: &Default::default(),
+        recognized: &Default::default(),
         computer: "MacBook Pro",
         fingerprint: &"AB".repeat(32),
         layout: &layout,

@@ -61,6 +61,9 @@ struct SessionSheet: View {
                     .submitLabel(.done)
                     .focused($naming)
                     .onSubmit { rename(draft ?? name) }
+                    // The suggestion replaces the name when it comes, so
+                    // nothing typed meanwhile is lost to it.
+                    .disabled(suggesting)
                 if renaming {
                     ProgressView()
                 } else if naming {

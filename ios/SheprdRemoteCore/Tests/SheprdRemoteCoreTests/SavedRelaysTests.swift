@@ -120,6 +120,17 @@ struct SavedRelaysTests {
         #expect(settled.forEveryComputer == [endpoint("https://typed.example.org")])
     }
 
+    @Test func choicesMadeBeforeAnOlderListSettlesAreKept() throws {
+        let older = Data(#"["https://named.example.org","https://gone.example.org"]"#.utf8)
+        var read = try JSONDecoder().decode(SavedRelays.self, from: older)
+        // Added while the paired computers could not be read, then saved.
+        _ = read.add("named.example.org")
+        read.unshare(endpoint("https://gone.example.org"))
+        var again = try JSONDecoder().decode(SavedRelays.self, from: JSONEncoder().encode(read))
+        again.settle(named: [endpoint("https://named.example.org")])
+        #expect(again.forEveryComputer == [endpoint("https://named.example.org")])
+    }
+
     @Test func aSharedRelayCanBeUnsharedAndStaysForItsComputer() {
         var saved = SavedRelays([endpoint("https://named.example.org")])
         _ = saved.add("named.example.org")

@@ -23,6 +23,9 @@ public struct SavedRelays: Codable, Equatable, Sendable {
     /// the paired computers leaves the decision to a later one; until
     /// then no saved relay is tried beyond the computers that named it.
     private var unsettled = false
+    /// While unsettled, the relays the user added or stopped sharing
+    /// since: `settle` leaves those choices as they are.
+    private var decided: Set<RelayEndpoint> = []
 
     public init(_ relays: [RelayEndpoint] = []) {
         self.relays = []
@@ -54,11 +57,13 @@ public struct SavedRelays: Codable, Equatable, Sendable {
         if relays.contains(endpoint) {
             // Typing a relay a computer named makes it the user's choice
             // for every computer.
+            decide(endpoint)
             return typed.insert(endpoint).inserted ? .added(endpoint) : .known
         }
         guard relays.count < Self.limit else { return .full }
         relays.append(endpoint)
         typed.insert(endpoint)
+        decide(endpoint)
         return .added(endpoint)
     }
 
@@ -83,6 +88,12 @@ public struct SavedRelays: Codable, Equatable, Sendable {
     /// computers that name it.
     public mutating func unshare(_ endpoint: RelayEndpoint) {
         typed.remove(endpoint)
+        decide(endpoint)
+    }
+
+    /// Records a choice the user made before an older list was settled.
+    private mutating func decide(_ endpoint: RelayEndpoint) {
+        if unsettled { decided.insert(endpoint) }
     }
 
     /// Decides, once, for a list kept before typed relays were told apart:
@@ -93,11 +104,13 @@ public struct SavedRelays: Codable, Equatable, Sendable {
     public mutating func settle(named: Set<RelayEndpoint>) {
         guard unsettled else { return }
         unsettled = false
-        typed = Set(relays.filter { !named.contains($0) })
+        let undecided = relays.filter { !decided.contains($0) }
+        typed.formUnion(undecided.filter { !named.contains($0) })
+        decided = []
     }
 
     private enum CodingKeys: String, CodingKey {
-        case relays, typed, unsettled
+        case decided, relays, typed, unsettled
     }
 
     public init(from decoder: Decoder) throws {
@@ -114,13 +127,20 @@ public struct SavedRelays: Codable, Equatable, Sendable {
         let typed = read(try container.decodeIfPresent([String].self, forKey: .typed) ?? [])
         self.typed = Set(typed.filter(relays.contains))
         unsettled = try container.decodeIfPresent(Bool.self, forKey: .unsettled) ?? false
+        if unsettled {
+            let decided = read(try container.decodeIfPresent([String].self, forKey: .decided) ?? [])
+            self.decided = Set(decided.filter(relays.contains))
+        }
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(relays.map(\.description), forKey: .relays)
         try container.encode(forEveryComputer.map(\.description), forKey: .typed)
-        if unsettled { try container.encode(true, forKey: .unsettled) }
+        if unsettled {
+            try container.encode(true, forKey: .unsettled)
+            try container.encode(relays.filter(decided.contains).map(\.description), forKey: .decided)
+        }
     }
 }
 

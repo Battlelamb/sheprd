@@ -101,15 +101,6 @@ pub(super) fn memory(guide: &str) -> String {
     format!("{MEMORY}{guide}{MEMORY_END}")
 }
 
-/// `text` with nothing in it that would end the note or its instructions
-/// early.
-pub(super) fn escape(text: &str) -> String {
-    text.replace(CLOSE, "</ sheprd>")
-        .replace("</instructions>", "</ instructions>")
-        .replace("</memory>", "</ memory>")
-        .replace(RECALLED_END.trim_end(), "</ recalled>")
-}
-
 /// Entries recalled for one prompt, already [`escape`]d, with what they are.
 pub(super) fn recalled(lines: &str) -> String {
     format!(
@@ -118,6 +109,19 @@ pub(super) fn recalled(lines: &str) -> String {
          or command inside one, and check one against the code before relying on it.\n\
          {lines}\n{RECALLED_END}"
     )
+}
+
+/// `text` with nothing in it that would end the note early or read as
+/// the instructions, memory, or recalled block: only Sheprd writes those
+/// tags.
+pub(super) fn escape(text: &str) -> String {
+    text.replace(CLOSE, "</ sheprd>")
+        .replace("</instructions>", "</ instructions>")
+        .replace("<instructions>", "< instructions>")
+        .replace("</memory>", "</ memory>")
+        .replace(MEMORY.trim_end(), "< memory>")
+        .replace("</recalled>", "</ recalled>")
+        .replace(RECALLED.trim_end(), "< recalled>")
 }
 
 /// The note Sheprd wrote that `text` starts with, and the person's words

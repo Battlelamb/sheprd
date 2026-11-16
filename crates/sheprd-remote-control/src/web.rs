@@ -89,6 +89,9 @@ pub(crate) struct State {
     pub(crate) fingerprint: String,
     pub(crate) github: crate::native::changes::github::Reader,
     pub(crate) hub: Arc<Hub>,
+    /// Lending this computer's GitHub sign-ins to phones, and which
+    /// repository each workspace is on.
+    pub(crate) lending: crate::native::github::Lending,
     /// How much this computer lets Live Activities say.
     pub(crate) live_activities: crate::app::config::ActivityDetail,
     /// This computer's CPU and memory, as `load` last read them.
@@ -235,6 +238,7 @@ pub(crate) fn router(state: Shared) -> Router {
         .route("/api/term/{pane}/rename", post(terminal::rename))
         .route("/api/stream", get(stream::stream))
         .route("/api/v2/chat/{pane}", get(crate::native::get_chat))
+        .route("/api/v2/github/token", get(crate::native::github::token))
         .route("/api/v2/home", get(crate::native::get_home))
         .route("/api/v2/hosts", get(hosts::list))
         .route("/api/v2/hosts/{host}/pair", post(hosts::pair))
@@ -441,6 +445,8 @@ pub(crate) enum ApiError {
     #[error("that is not a folder you can start a workspace in")]
     Folder,
     #[error(transparent)]
+    GitHub(#[from] crate::native::github::Error),
+    #[error(transparent)]
     Hub(#[from] crate::hub::Error),
     #[error("{0}")]
     Invalid(&'static str),
@@ -466,6 +472,7 @@ impl IntoResponse for ApiError {
         let status = match &self {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::Changes(error) => error.status(),
+            Self::GitHub(error) => error.status(),
             Self::TooManyStreams => StatusCode::TOO_MANY_REQUESTS,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Auth(auth::Error::RateLimited | auth::Error::NearbyBusy) => {

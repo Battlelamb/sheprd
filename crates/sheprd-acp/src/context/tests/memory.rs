@@ -17,8 +17,12 @@ fn the_memory_guide_goes_once_with_the_first_prompt() {
 fn without_sheprd_the_note_says_nothing_of_memory() {
     let mut context = Context::default().with_memory(None, None);
     assert_eq!(context.before(None), None);
-    let mut context =
-        Context::new(Some("Be brief.".to_owned()), Told::default()).with_memory(None, None);
+    let mut context = Context::new(
+        Prompts::with_instructions("Be brief."),
+        Facts::default(),
+        Told::default(),
+    )
+    .with_memory(None, None);
     assert!(!context.before(None).unwrap().contains("<memory>"));
 }
 
@@ -30,7 +34,8 @@ fn a_continued_chat_that_heard_the_guide_is_not_told_again() {
     told.heard(split(&sent).unwrap().0);
     assert!(told.memory);
 
-    let mut continued = Context::new(None, told).with_memory(Some(Path::new(SHEPRD)), None);
+    let mut continued = Context::new(Prompts::default(), Facts::default(), told)
+        .with_memory(Some(Path::new(SHEPRD)), None);
     assert_eq!(continued.before(None), None);
 
     // A note replayed after the context was made counts too.

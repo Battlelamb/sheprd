@@ -4,6 +4,9 @@ local function run(command: string)
 	return { command = command }
 end
 
+-- A usage segment's height, and so the one line of them the bar shows.
+local SEGMENT_HEIGHT = 20
+
 -- Each usage provider's logo among Moonframe's bundled ones, which cannot
 -- draw Sheprd's own (`assets/icons/providers`); a robot for the rest.
 local LOGOS = {
@@ -31,6 +34,7 @@ local function usage_segment(segment: any, theme: any)
 	local row: any = {
 		class = "usage-segment",
 		align = "center",
+		height = SEGMENT_HEIGHT,
 		shrink = false,
 		tooltip = segment.name,
 		msg = { usage = segment.id },
@@ -67,12 +71,22 @@ local function usage_segment(segment: any, theme: any)
 end
 
 -- The usage segments, then the button that reads them again; a host that
--- could not be read says so while there is nothing older.
+-- could not be read says so while there is nothing older. The segments
+-- take what width the bar has left: they wrap onto a second line it clips,
+-- so one that does not fit hides whole, as in Sheprd's own bar, and the
+-- refresh button and the items after it stay in the window.
 local function usage(state: any, theme: any)
-	local row: any = { class = "sheprd-usage", align = "center", shrink = false, style = { gap = 4 } }
+	local segments: any = {
+		class = "sheprd-usage-segments",
+		align = "center",
+		wrap = true,
+		height = SEGMENT_HEIGHT,
+		style = { gap = 4, clip = true },
+	}
 	for _, segment in state.segments do
-		table.insert(row, usage_segment(segment, theme))
+		table.insert(segments, usage_segment(segment, theme))
 	end
+	local row: any = { class = "sheprd-usage", align = "center", style = { gap = 4 }, ui.row(segments) }
 	if state.error then
 		table.insert(row, ui.text { state.unavailable, tooltip = state.error, style = { color = theme.muted } })
 	end

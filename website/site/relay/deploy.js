@@ -148,6 +148,16 @@ if (typeof document !== 'undefined') {
 
   const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+  // The relay's `/healthz` answers `ok`; the Caddyfile lets this page read it.
+  async function healthy(address) {
+    try {
+      const response = await fetch(`${address}/healthz`, { cache: 'no-store' });
+      return response.ok && (await response.text()).trim() === 'ok';
+    } catch {
+      return false;
+    }
+  }
+
   async function follow(token, droplet, row, region, suffix) {
     let ip = '';
     for (let tries = 0; tries < 60 && !ip; tries++) {
@@ -169,16 +179,16 @@ if (typeof document !== 'undefined') {
       return;
     }
     row.state('installing (a few minutes)…');
-    // An opaque answer means TLS and Caddy are up; a refusal or a
-    // certificate error rejects, so keep trying for a quarter of an hour.
+    // Ready only when the relay itself answers its health check: Caddy
+    // alone answers 502 while the relay starts or after it crashes. A
+    // refusal or a certificate error rejects, so keep trying for a quarter
+    // of an hour.
     for (let tries = 0; tries < 90; tries++) {
-      try {
-        await fetch(`${address}/healthz`, { mode: 'no-cors', cache: 'no-store' });
+      if (await healthy(address)) {
         row.state('ready: add it in Sheprd.');
         return;
-      } catch {
-        await pause(10000);
       }
+      await pause(10000);
     }
     row.state('not answering yet: see /var/log/cloud-init-output.log on the droplet.');
   }

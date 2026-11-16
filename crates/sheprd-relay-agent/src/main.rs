@@ -81,20 +81,16 @@ fn execute(command: Command, state_dir: &Path) -> Result<()> {
             Ok(())
         }
         Command::Authorize(entry) => {
-            let mut authorized = Authorized::load(state_dir)?;
-            authorized
-                .insert(entry)
-                .map_err(|_| Error::AuthorizedFull {
-                    path: state_dir.join(sheprd_relay_agent::authorized::FILE),
-                })?;
-            authorized.save(state_dir)
+            let path = state_dir.join(sheprd_relay_agent::authorized::FILE);
+            Authorized::update(state_dir, |authorized| {
+                authorized
+                    .insert(entry)
+                    .map_err(|_| Error::AuthorizedFull { path })?;
+                Ok(true)
+            })
         }
         Command::Revoke(dial) => {
-            let mut authorized = Authorized::load(state_dir)?;
-            if authorized.remove(&dial) {
-                authorized.save(state_dir)?;
-            }
-            Ok(())
+            Authorized::update(state_dir, |authorized| Ok(authorized.remove(&dial)))
         }
         Command::Run(run) => {
             let relays = run

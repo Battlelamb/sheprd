@@ -3,7 +3,7 @@
 //! desktop is removed from `authorized`.
 
 use crate::{Error, Result, agent::Agent};
-use sheprd_relay::{RouteId, client::Incoming};
+use sheprd_relay::{RouteId, client::Pending};
 use sheprd_tunnel::{Responder, stream};
 use std::{sync::Arc, time::Duration};
 use tokio::{
@@ -16,13 +16,16 @@ const HANDSHAKE: Duration = Duration::from_secs(10);
 
 /// Serves one dial until it ends. Failures end the session alone; the log
 /// names no address or key.
-pub(crate) async fn session(agent: Arc<Agent>, incoming: Incoming, route: RouteId) {
-    if let Err(error) = serve(&agent, incoming, route).await {
+pub(crate) async fn session(agent: Arc<Agent>, pending: Pending, route: RouteId) {
+    if let Err(error) = serve(&agent, pending, route).await {
         tracing::debug!(error = %error, "a relay session ended");
     }
 }
 
-async fn serve(agent: &Agent, incoming: Incoming, route: RouteId) -> Result<()> {
+async fn serve(agent: &Agent, pending: Pending, route: RouteId) -> Result<()> {
+    let incoming = tokio::time::timeout(HANDSHAKE, pending.incoming())
+        .await
+        .map_err(|_| sheprd_tunnel::Error::Closed)??;
     let tunnel_keys = &agent.keys.tunnel;
     let responder = Responder::session(tunnel_keys, route.as_bytes())?;
     let mut authorized = agent.authorized();

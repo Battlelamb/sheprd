@@ -108,9 +108,23 @@ impl Authorized {
         Ok(authorized)
     }
 
-    /// Writes the file at `state_dir`. Blocking.
+    /// Writes the file at `state_dir`. Blocking. Changing the file from
+    /// what was read takes [`Authorized::update`] instead.
     pub fn save(&self, state_dir: &Path) -> Result<()> {
         files::write_private(&state_dir.join(FILE), self.render().as_bytes())
+    }
+
+    /// Reads the file at `state_dir`, lets `change` edit it, and writes it
+    /// back when `change` returns that it changed, all under the state
+    /// directory's lock: concurrent `authorize` and `revoke` commands each
+    /// see the other's result, so none is lost or undone. Blocking.
+    pub fn update(state_dir: &Path, change: impl FnOnce(&mut Self) -> Result<bool>) -> Result<()> {
+        let _lock = files::Lock::acquire(state_dir)?;
+        let mut authorized = Self::load(state_dir)?;
+        if change(&mut authorized)? {
+            authorized.save(state_dir)?;
+        }
+        Ok(())
     }
 
     fn render(&self) -> String {

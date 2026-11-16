@@ -58,8 +58,11 @@ async fn session(agent: &Arc<Agent>, relay: &Relay, wait: &mut Duration) -> Resu
     *wait = FIRST;
     loop {
         tokio::select! {
-            incoming = listener.accept() => {
-                tokio::spawn(serve::session(Arc::clone(agent), incoming?, listener.route()));
+            // Only taking the stream waits here, which is cancel-safe: its
+            // header is read in the session's own task, so a change to the
+            // desktops never drops a dial half read.
+            pending = listener.next_stream() => {
+                tokio::spawn(serve::session(Arc::clone(agent), pending?, listener.route()));
             }
             changed = authorized.changed() => {
                 if changed.is_err() {

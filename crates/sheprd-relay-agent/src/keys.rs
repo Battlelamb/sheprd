@@ -32,8 +32,11 @@ impl std::fmt::Debug for Keys {
 }
 
 impl Keys {
-    /// The keys in `state_dir`, made and saved the first time. Blocking.
+    /// The keys in `state_dir`, made and saved the first time. The state
+    /// directory's lock is held throughout, so callers racing on a fresh
+    /// directory all end up with the one set of keys saved. Blocking.
     pub fn load_or_create(state_dir: &Path) -> Result<Self> {
+        let _lock = files::Lock::acquire(state_dir)?;
         let path = state_dir.join(FILE);
         let stored = || Error::StoredKey { path: path.clone() };
         if let Some(bytes) = files::read_bounded(&path, LEN as u64)? {

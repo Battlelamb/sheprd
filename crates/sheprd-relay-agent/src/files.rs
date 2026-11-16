@@ -104,6 +104,36 @@ pub fn read_bounded(path: &Path, limit: u64) -> Result<Option<Vec<u8>>> {
     Ok(Some(bytes))
 }
 
+/// An exclusive lock on the state directory, held until dropped. Every
+/// read-change-write of the agent's files takes it, so two commands (or a
+/// command and the running agent) never both make keys, and an
+/// `authorize` never writes back a desktop a `revoke` just removed.
+#[derive(Debug)]
+pub struct Lock {
+    _file: fs::File,
+}
+
+const LOCK: &str = "lock";
+
+impl Lock {
+    /// Waits for the lock on `state_dir`, creating the directory and its
+    /// lock file when missing. Blocking.
+    pub fn acquire(state_dir: &Path) -> Result<Self> {
+        create_private_dir(state_dir)?;
+        let path = state_dir.join(LOCK);
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(&path).map_err(io_error(&path))?;
+        file.lock().map_err(io_error(&path))?;
+        Ok(Self { _file: file })
+    }
+}
+
 /// Removes `path`, when it exists. Blocking.
 pub fn remove(path: &Path) -> Result<()> {
     match fs::remove_file(path) {

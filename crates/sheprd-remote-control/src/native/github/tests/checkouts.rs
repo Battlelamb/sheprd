@@ -64,6 +64,7 @@ fn a_checkout_names_its_remotes_branch_and_commit() {
             upstream: None,
             branch: Some("main".into()),
             head: Some(head),
+            tracked: None,
         })
     );
 }
@@ -96,6 +97,7 @@ fn a_fork_names_its_upstream_repository() {
             repo: "app".into(),
             branch: Some("main".into()),
             head: Some(head),
+            head_owner: Some("me".into()),
         }
     );
 }
@@ -107,6 +109,7 @@ fn an_upstream_off_github_leaves_origin_named() {
         upstream: on("gitlab.com", "org", "app"),
         branch: Some("topic".into()),
         head: None,
+        tracked: None,
     };
     let named = WorkspaceGitHub::of(&checkout, &Recognized::default()).unwrap();
     assert_eq!((named.owner.as_str(), named.head), ("me", None));
@@ -148,6 +151,7 @@ fn enterprise_hosts_are_named_only_once_recognized() {
         upstream: None,
         branch: Some("main".into()),
         head: None,
+        tracked: None,
     };
     assert_eq!(WorkspaceGitHub::of(&checkout, &Recognized::default()), None);
     let configured = Recognized {

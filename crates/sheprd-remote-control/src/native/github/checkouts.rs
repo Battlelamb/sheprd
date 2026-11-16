@@ -1,6 +1,6 @@
 //! What repository each listed workspace's checkout is on, for a phone to
-//! read GitHub itself: its `upstream` and `origin` remotes, branch, and
-//! commit. Read with Git on the blocking pool while a phone looks, never
+//! read GitHub itself: its `upstream` and `origin` remotes, branch, the
+//! remote that branch tracks, and commit. Read with Git on the blocking pool while a phone looks, never
 //! while a home is drawn, which only looks the folder up here.
 
 use super::remote::{self, Repository};
@@ -23,6 +23,8 @@ const LOOKING: Duration = Duration::from_secs(120);
 const FRESH: Duration = Duration::from_secs(10);
 /// The longest branch name kept.
 const MAX_BRANCH: usize = 255;
+/// The longest remote name read from a branch's `remote`.
+const MAX_REMOTE: usize = 255;
 
 /// What one checkout is on.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -33,6 +35,18 @@ pub(crate) struct Checkout {
     pub(crate) branch: Option<String>,
     /// `None` before the first commit.
     pub(crate) head: Option<String>,
+    /// The repository of the remote the branch tracks
+    /// (`branch.<name>.remote`); `None` when it tracks none, or one this
+    /// parser does not read.
+    pub(crate) tracked: Option<Repository>,
+}
+
+impl Checkout {
+    /// The repository the branch is pushed to: the one it tracks, else
+    /// `origin`.
+    pub(crate) fn pushed(&self) -> Option<&Repository> {
+        self.tracked.as_ref().or(self.origin.as_ref())
+    }
 }
 
 /// The checkouts read, by folder, and when a phone last wanted them.
@@ -164,7 +178,40 @@ pub(crate) fn read(cwd: &Path) -> Option<Checkout> {
         return None;
     }
     (checkout.branch, checkout.head) = head(cwd);
+    checkout.tracked = checkout
+        .branch
+        .as_deref()
+        .and_then(|branch| tracked(cwd, branch, &checkout));
     Some(checkout)
+}
+
+/// The repository of the remote `branch` tracks. `origin` and `upstream`
+/// were read already; another remote costs one more Git call. A branch
+/// tracking a local one (`.`) tracks no repository.
+fn tracked(cwd: &Path, branch: &str, checkout: &Checkout) -> Option<Repository> {
+    let remote = git(
+        cwd,
+        &["config", "--get", &format!("branch.{branch}.remote")],
+    )
+    .ok()?;
+    let remote = remote.trim();
+    match remote {
+        "origin" => checkout.origin.clone(),
+        "upstream" => checkout.upstream.clone(),
+        "" | "." => None,
+        _ if remote.len() > MAX_REMOTE
+            || remote
+                .bytes()
+                .any(|b| b.is_ascii_whitespace() || b.is_ascii_control()) =>
+        {
+            None
+        }
+        _ => {
+            let url = git(cwd, &["config", "--get", &format!("remote.{remote}.url")]).ok()?;
+            // `--get` prints the last value, as Git itself uses.
+            remote::parse(url.trim())
+        }
+    }
 }
 
 /// The branch checked out, unless HEAD is detached, and its commit.

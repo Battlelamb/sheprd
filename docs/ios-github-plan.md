@@ -109,10 +109,12 @@ replaces that promise, so the user has to opt in:
 ### 1. The computer names the repository (Rust)
 
 - Each workspace in `home` gains `github: {"host", "owner", "repo",
-  "branch", "head"}`, from the remote `native/changes/local.rs` already
-  reads; left out when the remote is not a GitHub host. A fork with an
-  `upstream` remote names the upstream repository, where its pull request
-  lives.
+  "branch", "head", "head_owner"}`, from the remote `native/changes/local.rs`
+  already reads; left out when the remote is not a GitHub host. A fork with
+  an `upstream` remote names the upstream repository, where its pull request
+  lives, and `head_owner` names the fork's owner (the branch's tracked
+  remote, else `origin`) only when it differs from `owner`; `head` is the
+  commit checked out.
 - Enterprise hosts are recognized from the hosts `gh` is signed in to and
   from `[github] hosts` in the config, not guessed from the URL.
 - Tests: SSH, HTTPS and `ssh://` URLs, Enterprise and GHE.com hosts, forks,

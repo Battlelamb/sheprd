@@ -5,6 +5,7 @@
 use crate::{
     ansi::{self, Color, Style},
     control::{
+        github::valid_login,
         pull_requests::{PullRequests, Tone, WorkspacePullRequest},
         tags::ComputerTags,
     },
@@ -108,6 +109,11 @@ pub(crate) struct WorkspaceGitHub {
     /// The commit checked out; absent before the first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) head: Option<String>,
+    /// The owner of the repository the branch is pushed to, such as a
+    /// fork's, so a phone can match a pull request's head; absent when it
+    /// is `owner` or unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) head_owner: Option<String>,
 }
 
 impl WorkspaceGitHub {
@@ -118,12 +124,19 @@ impl WorkspaceGitHub {
             .into_iter()
             .flatten()
             .find(|repository| recognized.is_github(&repository.host))?;
+        let head_owner = checkout
+            .pushed()
+            .filter(|pushed| pushed.host == repository.host)
+            .map(|pushed| pushed.owner.as_str())
+            .filter(|owner| valid_login(owner) && !owner.eq_ignore_ascii_case(&repository.owner))
+            .map(str::to_owned);
         Some(Self {
             host: repository.host.clone(),
             owner: repository.owner.clone(),
             repo: repository.repo.clone(),
             branch: checkout.branch.clone(),
             head: checkout.head.clone(),
+            head_owner,
         })
     }
 }

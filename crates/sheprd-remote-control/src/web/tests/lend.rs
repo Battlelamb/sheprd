@@ -331,6 +331,7 @@ async fn home_names_each_workspaces_repository_and_the_accounts_lent() {
                 upstream: None,
                 branch: Some("topic".into()),
                 head: Some("a".repeat(40)),
+                tracked: None,
             },
         )]
         .into(),

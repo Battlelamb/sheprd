@@ -214,7 +214,8 @@ pub(crate) fn lent_hosts(state: &Server, device: &DeviceId) -> Vec<LentHost> {
 
 /// Reads `gh`'s hosts now and every [`GH_HOSTS_EVERY`].
 pub(crate) async fn follow_gh_hosts(state: Shared) {
-    let Some(path) = hosts::file() else {
+    // Probing the login shell blocks, once; the path is kept after.
+    let Ok(Some(path)) = tokio::task::spawn_blocking(hosts::file).await else {
         return;
     };
     let mut tick = tokio::time::interval(GH_HOSTS_EVERY);

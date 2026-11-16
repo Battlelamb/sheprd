@@ -1,5 +1,6 @@
 use super::*;
-use crate::native::github::hosts::{GhHost, Recognized, parse, read};
+use crate::native::github::hosts::{GhHost, Recognized, file_in, parse, read};
+use std::{ffi::OsString, path::PathBuf};
 
 const HOSTS_YML: &str = "\
 github.com:
@@ -91,4 +92,51 @@ fn configured_hosts_that_are_not_host_names_are_dropped() {
         |_| Err(sheprd_github::Error::Token),
     );
     assert_eq!(lending.recognized().configured, ["ghe.example.com"]);
+}
+
+/// A lookup that reads `login` first and `process` after, as
+/// `login_env::var` does.
+fn lookup<'a>(
+    login: &'a [(&str, &str)],
+    process: &'a [(&str, &str)],
+) -> impl Fn(&str) -> Option<OsString> + 'a {
+    move |name| {
+        login
+            .iter()
+            .chain(process)
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| OsString::from(value))
+    }
+}
+
+#[test]
+fn the_login_shells_gh_config_dir_wins_over_the_daemons() {
+    let found = file_in(lookup(
+        &[("GH_CONFIG_DIR", "/login/gh")],
+        &[("GH_CONFIG_DIR", "/daemon/gh"), ("HOME", "/home/me")],
+    ));
+    assert_eq!(found, Some(PathBuf::from("/login/gh/hosts.yml")));
+    let found = file_in(lookup(
+        &[("XDG_CONFIG_HOME", "/login/config")],
+        &[("HOME", "/home/me")],
+    ));
+    assert_eq!(found, Some(PathBuf::from("/login/config/gh/hosts.yml")));
+}
+
+#[test]
+fn hosts_file_falls_back_when_the_variables_are_unset_or_empty() {
+    let found = file_in(lookup(
+        &[("GH_CONFIG_DIR", ""), ("XDG_CONFIG_HOME", "")],
+        &[("HOME", "/home/me")],
+    ));
+    assert_eq!(
+        found,
+        Some(
+            PathBuf::from("/home/me")
+                .join(".config")
+                .join("gh")
+                .join("hosts.yml")
+        )
+    );
+    assert_eq!(file_in(lookup(&[], &[])), None);
 }

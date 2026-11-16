@@ -393,11 +393,16 @@ also says which repository each workspace is on and which accounts this
 computer lends the device asking:
 
 - Each workspace gains `"github": {"host", "owner", "repo", "branch"?,
-  "head"?}`: its `upstream` remote's repository when that is on a GitHub
-  host, as a fork's pull requests live there, else its `origin`'s. SSH
-  (`git@host:o/r`), `ssh://`, and `https://` remotes are read; a user name
-  or token in the URL is dropped. `branch` is absent on a detached HEAD and
-  `head` before the first commit. The field is absent when neither remote
+  "head"?, "head_owner"?}`: its `upstream` remote's repository when that
+  is on a GitHub host, as a fork's pull requests live there, else its
+  `origin`'s. SSH (`git@host:o/r`), `ssh://`, and `https://` remotes are
+  read; a user name or token in the URL is dropped. `branch` is absent on
+  a detached HEAD and `head`, the commit checked out, before the first
+  commit. `head_owner` is the owner of the repository the branch is pushed
+  to (the remote `branch.<name>.remote` names, else `origin`), so a fork's
+  pull request is matched by `head_owner:branch`; it is present only when
+  it is a GitHub login on the same host that differs, ignoring case, from
+  `owner`. The field is absent when neither remote
   is on a GitHub host: github.com, a GHE.com `*.ghe.com` host, a host `gh`
   is signed in to on the computer, or one listed in `[remote]
   github_hosts`. The daemon reads the checkouts with Git off the request

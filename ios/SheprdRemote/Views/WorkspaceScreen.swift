@@ -244,6 +244,12 @@ struct WorkspaceScreen: View {
         askedAgent = agent
         Task {
             defer { askedAgent = nil }
+            // Only this prompt's answer counts: an earlier identical prompt
+            // that failed would otherwise answer a retry still queued.
+            let before = try? await model.fleet.call(device) { client, token in
+                try await client.chat(pane, bearer: token)
+            }
+            let after = before?.transcript.entries.last?.id
             do {
                 let refused = try await model.fleet.call(device) { client, token in
                     try await client.command(.prompt(text: prompt), pane: pane, bearer: token)
@@ -264,7 +270,7 @@ struct WorkspaceScreen: View {
                 guard let snapshot = try? await model.fleet.call(device, { client, token in
                     try await client.chat(pane, bearer: token)
                 }) else { continue }
-                switch WorkspaceNaming.answer(to: prompt, in: snapshot.transcript) {
+                switch WorkspaceNaming.answer(to: prompt, in: snapshot.transcript, after: after) {
                 case let .name(name)?:
                     askedAgent = nil
                     rename(to: name, from: current)

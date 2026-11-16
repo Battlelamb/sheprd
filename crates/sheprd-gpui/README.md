@@ -2098,6 +2098,14 @@ checkouts without Herdr 1, using the device's GitHub account selection. See
 isolation, merged-checkout discovery, and the remaining cloud/WSL PR-origin
 limitation shared by both terminal backends.
 
+If **New worktree** finds that the requested branch already has a checkout,
+Sheprd warns that it already exists, pulls its remote with a fast-forward-only
+update, and opens that checkout. Fork pull requests update from their PR ref.
+A failed pull is shown as a warning and the checkout still opens. Reopening
+does not rerun setup scripts or launch another agent. If you switch hosts while
+an existing Herdr 2 checkout is being pulled, its result is reported with the
+original host's name without switching you back or opening the checkout.
+
 A repository can commit scripts that prepare, start, and clean up its
 worktrees, in `.herdr/worktree.toml` at the repository root:
 
@@ -3697,11 +3705,18 @@ installed: `claude`, `codex` and `pi` (which `sheprd-acp` drives without an
 ACP adapter), `copilot --acp`, `gemini --acp`, or `opencode acp`. The program can
 also be started by hand in any pane: `sheprd-acp claude`.
 
-**One click.** Each tab strip also offers a button per installed agent that
-starts its chat in a new tab of that group; the chat's tab looks like any
-other, and **+** still opens a terminal tab. Each button takes the shape
-the tab layout gives **+**. `[chat] launcher` places the buttons: `plus`
-(the default) deals them out from under **+** while the pointer is over it,
+**One click.** Each tab strip also offers an **Agent** button right after
+**+** that starts a chat in a new tab of that group, with the agent last
+started (else the first installed), or, when that agent's plan is spent or
+close to its limit, the installed agent with the most room, as the tooltip
+and composer then say (see [Choosing the agent](../../docs/rich-chat.md#choosing-the-agent)); the chat's tab looks like any other, and
+**+** still opens a terminal tab. Until its first prompt, the chat's composer
+offers the other installed agents in its own button, first among the
+settings; picking one restarts the chat with that agent, and the launcher
+starts the next chat with it too. Chats on an SSH host keep the agent they
+start with, since the host's `sheprd-acp` may be older. The button takes the
+shape the tab layout gives **+**. `[chat] launcher` places it, or a button
+per installed agent instead: `agent` is the default, `plus` deals them out from under **+** while the pointer is over it,
 to the right, or to the left when the window has no room there, `beside` keeps them right after **+**, `leading` puts them before
 the tabs, `trailing` at the strip's right end, and `button` shows one named
 button for the agent last started, the others sliding out beside it; `off`

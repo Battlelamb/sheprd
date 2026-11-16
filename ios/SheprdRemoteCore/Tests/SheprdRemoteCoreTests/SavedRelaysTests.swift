@@ -70,6 +70,76 @@ struct SavedRelaysTests {
         #expect(record.candidates(saved: []) == [own])
     }
 
+    @Test func onlyTypedRelaysAreForEveryComputer() {
+        var saved = SavedRelays()
+        saved.learn([endpoint("https://named.example.org")])
+        _ = saved.add("https://typed.example.org")
+        #expect(saved.relays.count == 2)
+        #expect(saved.forEveryComputer == [endpoint("https://typed.example.org")])
+        // Typing a relay a computer named makes it the user's choice.
+        let result = saved.add("named.example.org")
+        #expect(result == .added(endpoint("https://named.example.org")))
+        #expect(Set(saved.forEveryComputer) == Set(saved.relays))
+        saved.remove(endpoint("https://typed.example.org"))
+        #expect(saved.forEveryComputer == [endpoint("https://named.example.org")])
+    }
+
+    @Test func whichWereTypedSurvivesBeingSaved() throws {
+        var saved = SavedRelays([endpoint("https://named.example.org")])
+        _ = saved.add("https://typed.example.org")
+        let read = try JSONDecoder().decode(SavedRelays.self, from: JSONEncoder().encode(saved))
+        #expect(read == saved)
+        #expect(read.forEveryComputer == [endpoint("https://typed.example.org")])
+    }
+
+    @Test func anOlderListGivesItsComputersRelaysBackToThem() throws {
+        let older = Data(#"["https://named.example.org","https://typed.example.org"]"#.utf8)
+        var read = try JSONDecoder().decode(SavedRelays.self, from: older)
+        read.settle(named: [endpoint("https://named.example.org")])
+        #expect(read.relays.count == 2)
+        #expect(read.forEveryComputer == [endpoint("https://typed.example.org")])
+        // Only once: later lists say which were typed themselves.
+        read.settle(named: [])
+        #expect(read.forEveryComputer == [endpoint("https://typed.example.org")])
+        var current = SavedRelays([endpoint("https://named.example.org")])
+        current.settle(named: [])
+        #expect(current.forEveryComputer.isEmpty)
+    }
+
+    @Test func anOlderListWaitsToBeSettledAcrossASave() throws {
+        // A launch that could not read the paired computers saves the list
+        // unsettled: nothing is shared until a later launch decides.
+        let older = Data(#"["https://named.example.org","https://typed.example.org"]"#.utf8)
+        let read = try JSONDecoder().decode(SavedRelays.self, from: older)
+        #expect(read.forEveryComputer.isEmpty)
+        var again = try JSONDecoder().decode(SavedRelays.self, from: JSONEncoder().encode(read))
+        #expect(again.forEveryComputer.isEmpty)
+        again.settle(named: [endpoint("https://named.example.org")])
+        #expect(again.forEveryComputer == [endpoint("https://typed.example.org")])
+        let settled = try JSONDecoder().decode(SavedRelays.self, from: JSONEncoder().encode(again))
+        #expect(settled.forEveryComputer == [endpoint("https://typed.example.org")])
+    }
+
+    @Test func choicesMadeBeforeAnOlderListSettlesAreKept() throws {
+        let older = Data(#"["https://named.example.org","https://gone.example.org"]"#.utf8)
+        var read = try JSONDecoder().decode(SavedRelays.self, from: older)
+        // Added while the paired computers could not be read, then saved.
+        _ = read.add("named.example.org")
+        read.unshare(endpoint("https://gone.example.org"))
+        var again = try JSONDecoder().decode(SavedRelays.self, from: JSONEncoder().encode(read))
+        again.settle(named: [endpoint("https://named.example.org")])
+        #expect(again.forEveryComputer == [endpoint("https://named.example.org")])
+    }
+
+    @Test func aSharedRelayCanBeUnsharedAndStaysForItsComputer() {
+        var saved = SavedRelays([endpoint("https://named.example.org")])
+        _ = saved.add("named.example.org")
+        #expect(saved.forEveryComputer == [endpoint("https://named.example.org")])
+        saved.unshare(endpoint("https://named.example.org"))
+        #expect(saved.forEveryComputer.isEmpty)
+        #expect(saved.relays == [endpoint("https://named.example.org")])
+    }
+
     @Test func aRelaySaysWhatItIsAtItsInfoAddress() {
         #expect(endpoint("relay.example.org/sheprd/").info?.absoluteString == "https://relay.example.org/sheprd/v1/info")
         let info = Data(#"{"protocol":1,"version":"0.1","listen_token":false,"quic":{"port":443,"pin":"x"},"websocket":true}"#.utf8)

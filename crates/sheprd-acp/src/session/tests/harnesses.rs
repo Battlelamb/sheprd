@@ -194,6 +194,7 @@ fn prompts_waiting_for_the_old_agent_go_to_the_new_one() {
     harness.command(
         1,
         Command::Prompt {
+            origin: None,
             text: "fix the build".to_owned(),
             attachments: Vec::new(),
         },

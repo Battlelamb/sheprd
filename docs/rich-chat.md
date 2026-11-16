@@ -549,6 +549,34 @@ host. Embedded HTML pages use the platform webview; see the
 [Linux browser plan](linux-browser-plan.md). Rich chat does not provide hosted
 ChatGPT services such as account history, voice/video chat or hosted tools.
 
+## What the agent is told
+
+`Command::Prompt` carries an optional `Origin`: the device (`desktop`,
+`terminal`, `phone_app`, `phone_web`) and the connection (`local`, `remote`,
+`lan`, `tailscale`, `relay`). The client that relays a prompt sets it: the
+app from the chat's route, the program's own view as `terminal`/`local`, and
+the remote control daemon from the request, its relay marker, the peer
+address, the name dialed (`*.ts.net`), and whether the User-Agent is a
+browser's. The daemon replaces any origin a phone sends.
+
+`sheprd-acp` (`context.rs`) sends the agent a `<sheprd>` text block ahead of
+the prompt's own: the user's `herdr/chat-system-prompt.md` from the
+configuration root, at most 16 KiB, with the first prompt, and a
+description of the origin whenever the device, or whether the person can
+open paths there, differs from the last one told. A queued prompt keeps its
+origin. The note's opening tag names both and a checksum of its body
+(`<sheprd device="phone_app" paths="elsewhere" sum="…">`), and the
+instructions sit in an `<instructions>` block. A restored chat (Claude and
+Codex logs, or an ACP agent's `session/load` replay) and a mirrored log hide
+the notes whose checksum matches, leaving text the person typed that only
+looks like one, and learn what the agent last heard: the instructions go
+again only when they differ from the last ones sent, and the origin only on
+another device or a change between this machine and SSH. Where the person cannot open paths on the
+agent's machine, the note asks the agent to link pictures as Markdown images,
+which [linked pictures](#messages-and-controls) attach to the chat, and to
+render HTML mockups to screenshots. The transcript shows only the person's
+words. An older program ignores the field, and an older client sends none.
+
 ## Existing CLI sessions
 
 Discovery checks Herdr's session metadata and the foreground process identity.

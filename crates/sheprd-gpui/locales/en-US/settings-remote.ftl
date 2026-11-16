@@ -46,6 +46,7 @@ settings-remote-relays = Reach this computer from any network
 settings-remote-relays-none = No relay. Phones reach this computer on your network, or over Tailscale when it runs.
 settings-remote-relays-note = Paired phones go through a relay when they have no direct path. A relay sees only encrypted traffic. A phone learns of a new relay the next time it connects directly.
 settings-remote-relay-listening = Listening
+settings-remote-relay-listening-rtt = Listening · { $ms } ms
 settings-remote-relay-connecting = Connecting…
 settings-remote-relay-failed = Failed: { $error }
 settings-remote-relay-unreported = The daemon has not reported on it yet.

@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod memory;
+
 const PHONE: Origin = Origin::new(Device::PhoneApp, Via::Relay);
 const DESKTOP: Origin = Origin::new(Device::Desktop, Via::Local);
 
@@ -60,6 +62,7 @@ fn a_note_names_where_the_person_is_and_reads_back() {
         Told {
             place: Some(PHONE.into()),
             instructions: Some("Be brief.".to_owned()),
+            memory: false,
         }
     );
 }
@@ -85,6 +88,7 @@ fn a_continued_chat_tells_only_what_the_agent_has_not_heard() {
     let told = Told {
         place: Some(PHONE.into()),
         instructions: Some("Be brief.".to_owned()),
+        memory: false,
     };
     let mut context = Context::new(Some("Be brief.".to_owned()), told.clone());
     assert_eq!(context.before(Some(PHONE)), None);
@@ -192,6 +196,7 @@ fn hiding_notes_keeps_the_persons_words_and_drops_empty_messages() {
         Told {
             place: Some(PHONE.into()),
             instructions: Some("Be brief.".to_owned()),
+            memory: false,
         }
     );
     assert_eq!(

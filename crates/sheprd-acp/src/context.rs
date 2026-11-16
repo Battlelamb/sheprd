@@ -4,8 +4,13 @@
 //! see. A phone cannot open a path on this computer, so there the agent is
 //! told to put pictures in the chat instead.
 //!
-//! ACP has no system prompt every agent takes, so both go as a text block
-//! ahead of the prompt's own. The transcript shows only the person's words.
+//! With the first prompt it also tells the agent how to use Sheprd's
+//! repository memory, shared by every worktree, tab, and chat of the
+//! repository on this host, when a `sheprd` command is here to use it.
+//!
+//! ACP has no system prompt every agent takes, so all of it goes as a text
+//! block ahead of the prompt's own. The transcript shows only the person's
+//! words.
 
 use std::path::{Path, PathBuf};
 
@@ -38,6 +43,46 @@ pub(crate) fn read_system_prompt(path: &Path) -> Option<String> {
     (!text.is_empty()).then(|| text.to_owned())
 }
 
+/// The `sheprd` command beside this program, as releases install them, or
+/// else on `PATH`: the one the memory guide names.
+pub(crate) fn sheprd_executable() -> Option<PathBuf> {
+    let name = format!("sheprd{}", std::env::consts::EXE_SUFFIX);
+    let beside = std::env::current_exe()
+        .ok()
+        .and_then(|program| Some(program.parent()?.join(&name)));
+    let on_path = || {
+        std::env::split_paths(&std::env::var_os("PATH")?)
+            .map(|dir| dir.join(&name))
+            .find(|path| path.is_file())
+    };
+    beside.filter(|path| path.is_file()).or_else(on_path)
+}
+
+/// How the agent keeps and searches the repository's memory with `sheprd`.
+pub(crate) fn memory_guide(sheprd: &Path) -> String {
+    let text = sheprd.display().to_string();
+    let sheprd = if text.contains(char::is_whitespace) {
+        format!("\"{text}\"")
+    } else {
+        text
+    };
+    format!(
+        "Sheprd keeps a memory for this Git repository, shared by every worktree, tab, and \
+         chat of it on this computer, so what one agent learns the next one can find:\n\
+         - Before you start a task, search it for what earlier agents learned about that \
+         area: `{sheprd} memory search WORDS`. `{sheprd} memory` lists the repository's \
+         entries and this branch's.\n\
+         - When you learn something the next agent would otherwise have to find out again \
+         (a build or test command that works, a trap and what to do instead, a decision \
+         and its reason, how the person wants things done), add it in a sentence or two: \
+         `{sheprd} memory add --kind fact|gotcha|command|decision|preference TEXT`.\n\
+         - For this branch's work only, such as where you stopped, add `--branch --kind \
+         handoff`. Remove a wrong entry with `{sheprd} memory forget ID`.\n\
+         Keep entries short and true, and add what the code and its docs do not already \
+         say. Never add secrets, credentials, tokens, or private output.\n"
+    )
+}
+
 /// What the agent has been told in this conversation.
 #[derive(Debug, Default)]
 pub(crate) struct Context {
@@ -46,6 +91,9 @@ pub(crate) struct Context {
     /// What the agent last heard, from notes sent, restored, or replayed.
     /// Compared only when a prompt goes, so a replay may run in any order.
     told: Told,
+    /// How to use the repository's memory, escaped for the note; `None`
+    /// without a `sheprd` command to use it with.
+    memory: Option<String>,
 }
 
 impl Context {
@@ -54,7 +102,15 @@ impl Context {
         Self {
             system_prompt: system_prompt.map(|text| note::escape(&text)),
             told,
+            memory: None,
         }
+    }
+
+    /// Tells the agent, with the first prompt, how to use the memory
+    /// `sheprd` keeps, unless an earlier note of this conversation did.
+    pub(crate) fn with_memory(mut self, sheprd: Option<&Path>) -> Self {
+        self.memory = sheprd.map(|sheprd| note::escape(&memory_guide(sheprd)));
+        self
     }
 
     /// Takes in a note the agent replayed from its saved conversation.
@@ -71,8 +127,9 @@ impl Context {
             .system_prompt
             .clone()
             .filter(|text| self.told.instructions.as_ref() != Some(text));
+        let memory = self.memory.clone().filter(|_| !self.told.memory);
         let origin = origin.filter(|origin| self.told.place != Some(Place::from(*origin)));
-        if system_prompt.is_none() && origin.is_none() {
+        if system_prompt.is_none() && memory.is_none() && origin.is_none() {
             return None;
         }
         let mut body = String::from(
@@ -83,6 +140,11 @@ impl Context {
             body.push_str("\nThe person's instructions for every chat:\n");
             body.push_str(&note::instructions(&system_prompt));
             self.told.instructions = Some(system_prompt);
+        }
+        if let Some(memory) = memory {
+            body.push('\n');
+            body.push_str(&note::memory(&memory));
+            self.told.memory = true;
         }
         let place = origin.map(Place::from);
         if let Some(origin) = origin {

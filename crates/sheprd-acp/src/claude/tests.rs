@@ -112,6 +112,7 @@ fn a_whole_turn_reaches_the_transcript_through_the_bridge() {
         login_hint: None,
         pane: None,
         require_load: false,
+        sheprd: None,
         system_prompt: None,
     };
     let mut session = Session::new(config, outbox, |_| {});

@@ -7,6 +7,9 @@
 //! <instructions>
 //! the user's chat system prompt
 //! </instructions>
+//! <memory>
+//! how to keep and search Sheprd's repository memory
+//! </memory>
 //! …
 //! </sheprd>
 //! ```
@@ -23,6 +26,8 @@ const OPEN: &str = "<sheprd";
 const CLOSE: &str = "</sheprd>";
 const INSTRUCTIONS: &str = "<instructions>\n";
 const INSTRUCTIONS_END: &str = "\n</instructions>";
+const MEMORY: &str = "<memory>\n";
+const MEMORY_END: &str = "</memory>\n";
 
 /// What decides the advice a note gives: the device, and whether the
 /// person can open paths on the agent's machine there. A phone moving
@@ -49,6 +54,8 @@ pub(crate) struct Told {
     pub(crate) place: Option<Place>,
     /// The instructions as the note wrote them, see [`escape`].
     pub(crate) instructions: Option<String>,
+    /// Whether a note explained Sheprd's repository memory.
+    pub(crate) memory: bool,
 }
 
 impl Told {
@@ -59,6 +66,7 @@ impl Told {
         if let Some(instructions) = instructions_of(note) {
             self.instructions = Some(instructions.to_owned());
         }
+        self.memory |= note.contains(MEMORY);
     }
 }
 
@@ -81,6 +89,11 @@ pub(super) fn wrap(place: Option<Place>, body: &str) -> String {
 /// The instructions block for `instructions`, already [`escape`]d.
 pub(super) fn instructions(instructions: &str) -> String {
     format!("{INSTRUCTIONS}{instructions}{INSTRUCTIONS_END}\n")
+}
+
+/// The memory block for `guide`, which Sheprd writes itself.
+pub(super) fn memory(guide: &str) -> String {
+    format!("{MEMORY}{guide}{MEMORY_END}")
 }
 
 /// `text` with nothing in it that would end the note or its instructions

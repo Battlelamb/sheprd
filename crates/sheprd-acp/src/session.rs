@@ -114,6 +114,9 @@ pub(crate) struct Config {
     /// Fail rather than start a new session when the agent cannot continue
     /// `load`.
     pub require_load: bool,
+    /// The `sheprd` command the first note tells the agent to keep the
+    /// repository's memory with; `None` leaves memory out of it.
+    pub sheprd: Option<PathBuf>,
     /// The user's chat system prompt, sent ahead of the first prompt.
     pub system_prompt: Option<String>,
 }
@@ -186,7 +189,8 @@ impl<R: FnMut(Update)> Session<R> {
             .entries
             .last()
             .map_or_else(Projector::default, |entry| Projector::after(entry.id));
-        let context = Context::new(config.system_prompt.take(), told);
+        let context =
+            Context::new(config.system_prompt.take(), told).with_memory(config.sheprd.as_deref());
         Self {
             accepts: crate::files::Accepts::default(),
             acp_session: None,

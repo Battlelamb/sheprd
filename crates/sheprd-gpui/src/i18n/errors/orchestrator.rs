@@ -16,6 +16,7 @@ impl Localize for Error {
             Self::ActionLock(error) => {
                 fl!("error-orchestrator-action-lock", error = error.to_string())
             }
+            Self::Memory(error) => fl!("error-orchestrator-memory", error = error.to_string()),
             Self::NoDataDirectory => fl!("error-orchestrator-no-data-directory"),
             Self::Private(error) => error.localize(),
             Self::Database(error) => fl!("error-orchestrator-database", error = error.to_string()),

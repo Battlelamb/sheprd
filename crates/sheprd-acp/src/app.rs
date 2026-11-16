@@ -242,6 +242,7 @@ pub(crate) fn run_owned(
         login_hint: agent.login_hint,
         pane: target.map(|target| target.pane),
         require_load: options.require_load,
+        sheprd: crate::context::sheprd_executable(),
         system_prompt: crate::context::system_prompt_path()
             .and_then(|path| crate::context::read_system_prompt(&path)),
     };

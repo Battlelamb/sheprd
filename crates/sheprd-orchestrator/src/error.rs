@@ -11,6 +11,8 @@ pub enum Error {
     #[error(transparent)]
     ActionLock(#[from] crate::actions::lock::Error),
     #[error(transparent)]
+    Memory(#[from] crate::memory::Error),
+    #[error(transparent)]
     OwnedAgent(#[from] sheprd_remote::work::owned_agent::Error),
     #[error("No state directory is available for orchestrator state")]
     NoDataDirectory,

@@ -1,6 +1,6 @@
 ---
 name: herdr-gpui-browser
-description: "Open a browser tab in Sheprd beside your terminal to show the user a web page, HTML file, or mockup, and get back their notes and picks. Use it in Herdr (HERDR_ENV=1 or HC_TERMINAL_ID set) when the user asks to open, start, or show a browser tab, page, preview, or mockup, to explain or visualize how something works, or to mock up UI variants to pick from; prefer it there over other browser skills, a system browser, or long explanations. Also use it for what Sheprd, not the herdr daemon, shows or keeps: a file at a line, a review of your changes, worktree notes, checkpoints and their diffs, your branch's pull request and CI, vulnerability reports and Dependabot alerts, asking the user to approve an automation script you wrote, forwarding, opening, or stopping ports, creating, running commands on, or deleting cloud machines, remote control from a phone, listing or focusing its windows and tabs, waiting for a tab to close or the user's notes, Sheprd settings, themes, and fonts, and keeping the machine awake."
+description: "Open a browser tab in Sheprd beside your terminal to show the user a web page, HTML file, or mockup, and get back their notes and picks. Use it in Herdr (HERDR_ENV=1 or HC_TERMINAL_ID set) when the user asks to open, start, or show a browser tab, page, preview, or mockup, to explain or visualize how something works, or to mock up UI variants to pick from; prefer it there over other browser skills or a system browser. Also use it for what Sheprd, not the herdr daemon, shows or keeps: a file at a line, a review of your changes, repository memory shared by worktrees and tabs (search it before a task, add what you learn), worktree notes, checkpoints and their diffs, your branch's pull request and CI, vulnerability reports and Dependabot alerts, asking the user to approve an automation script you wrote, forwarding or stopping ports, cloud machines, remote control from a phone, its windows and tabs, waiting for a tab to close or the user's notes, Sheprd settings, themes, and fonts, and keeping the machine awake."
 ---
 <!-- herdr-gpui-managed-skill v1: Sheprd keeps this file up to date. Edit a copy under another name to keep your changes. -->
 
@@ -264,6 +264,32 @@ browser, and local files and annotations are not available.
 
 Run `sheprd browser --help` for the full usage.
 
+## Memory shared across worktrees, tabs, and chats
+
+Sheprd keeps a memory for each Git repository, on the host the repository
+is on. Every worktree, terminal tab, and chat of that repository there
+shares it, so what one agent learns the next one can find. It needs no
+running app.
+
+- **Before a task**, search for what earlier agents learned about the area:
+  `sheprd memory search parser fixtures`. Words match as prefixes, best
+  first. `sheprd memory` lists the repository's entries and your branch's.
+- **After you learn something** that the next agent would otherwise have to
+  find out again, add it in a sentence or two. Good candidates: a build or
+  test command that works, a trap and what to do instead, a decision and its
+  reason, and how the user wants things done.
+  Use `--kind fact|gotcha|command|decision|preference|handoff`:
+  `sheprd memory add --kind gotcha "just test-core needs an absolute path to herdr-core"`.
+- **For this branch's work only**, such as where you stopped, add `--branch`:
+  `sheprd memory add --branch --kind handoff "Parser done; error recovery next"`.
+  A new tab or chat on the branch then finds it.
+- **When an entry is wrong**, remove it with `sheprd memory forget ID`
+  (`list` and `search` print IDs).
+
+Keep entries short and true, and add what the code or its docs do not
+already say. Never add secrets, credentials, tokens, or private terminal
+output. `list` and `search` exit 4 when they find nothing.
+
 ## More of Sheprd from the command line
 
 The same executable drives the rest of Sheprd's own features. For Herdr 1,
@@ -280,6 +306,8 @@ what Sheprd shows or keeps.
 | Ask the user to restart an owned orchestrator run, or adopt a legacy run's current process | `sheprd orchestrator restart RUN` / `sheprd orchestrator adopt RUN` (loaded project; confirmation required) |
 | Open px0 to browse, edit, or review your local checkout (macOS/Windows) | `sheprd px0 open` |
 | Get notes the user sent this pane (pages, reviews, terminals) | `sheprd feedback --wait 600` |
+| Find what earlier agents learned about this repository, before a task | `sheprd memory search WORDS`, `sheprd memory` |
+| Leave what you learned for the next agent in any worktree or tab | `sheprd memory add --kind gotcha TEXT` (`--branch` for this branch only) |
 | Keep a note on this worktree (repository and branch) | `sheprd notes set waiting on CI` |
 | Silence this worktree's notifications | `sheprd worktree mute` |
 | List app-kept Git workspaces on your host | `sheprd worktree list` |

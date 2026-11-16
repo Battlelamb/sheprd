@@ -162,10 +162,21 @@ and builds without embedded pages return exit 8. See [px0](../crates/sheprd-gpui
 
 ### Worktrees and agents
 
+Memory is kept per Git repository on the host the repository is on, in
+`repositories/<id>/memory.sqlite3` under Sheprd's state directory, keyed by
+the Git common directory every worktree of it shares. Each repository keeps
+at most 2000 entries; the least recently used go first. Agents learn when to
+use it from the managed skill and, in `sheprd-acp` chats, from the note sent
+ahead of the first prompt.
+
 | Command | What it does |
 | --- | --- |
 | `notes [list]` | Every worktree note |
 | `notes get\|clear`, `notes set TEXT` | The note on your checkout (its repository and branch) |
+| `memory [list] [--all] [--limit N]` | What agents learned about the current directory's repository, most recently used first: the repository's entries and the current branch's (`--all`: every branch's). Exits 4 when there are none (no app needed) |
+| `memory search WORDS [--all] [--limit N]` | Entries matching any of the words as prefixes, best first; each found counts as used. Exits 4 when nothing matches (no app needed) |
+| `memory add [--branch] [--kind KIND] TEXT` | Keep TEXT (at most 2000 bytes) for the next agent in any worktree, tab, or chat of the repository, or with `--branch` for the current branch only. KIND is `fact` (default), `gotcha`, `command`, `decision`, `preference`, or `handoff`. The same text again only marks it used (no app needed) |
+| `memory forget ID` | Remove an entry; exits 5 when there is none (no app needed) |
 | `worktree [status]`, `worktree mute\|unmute` | Whether your worktree's notifications are muted; silence them or let them through again |
 | `worktree list` | List app-kept Git workspaces on the caller's host, with host, workspace, path, branch and linked-checkout status; unopened Git checkouts are in the Existing picker |
 | `worktree create [BRANCH]`, `worktree open`, `worktree delete` | Open the caller's Herdr 2 new-worktree, existing-checkout, or deletion dialog; the user confirms in the app. Host identity follows the caller, including SSH, cloud and WSL devices |

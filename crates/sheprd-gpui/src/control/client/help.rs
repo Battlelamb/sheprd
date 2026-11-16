@@ -90,6 +90,9 @@ fn family(name: &str) -> &'static str {
         "notes" => {
             "sheprd notes [list]\n    Every worktree note, most recently edited first.\nsheprd notes get|clear\nsheprd notes set TEXT...\n    The note on the caller's checkout (its repository and branch), or the\n    focused workspace's outside a Herdr pane. Notes are one line of at most\n    500 characters. `list` and `get` exit 4 when there is none."
         }
+        "memory" => {
+            "sheprd memory [list] [--all] [--limit N]\n    What agents learned about the current directory's repository, most\n    recently used first: the repository's entries and this branch's\n    (--all: every branch's too).\nsheprd memory search WORDS... [--all] [--limit N]\n    Entries matching any of the words, best first. Search before starting\n    a task; `list` and `search` exit 4 when nothing is found.\nsheprd memory add [--branch] [--kind KIND] TEXT...\n    Keep TEXT (at most 2000 bytes) for the next agent in any worktree of\n    this repository, or with --branch only for this branch's work. KIND is\n    fact (default), gotcha, command, decision, preference, or handoff.\n    Never keep secrets or private output.\nsheprd memory forget ID\n    Remove an entry that is wrong or no longer true.\n    These run here, on the host the repository is on; Sheprd need not run.\n    Every worktree, tab, and chat of the repository there shares them."
+        }
         "worktree" => {
             "sheprd worktree list\n    List app-kept Git workspaces on the caller's host.\nsheprd worktree create [BRANCH]\nsheprd worktree open\nsheprd worktree delete\n    Open the create, existing-checkout, or delete dialog for the caller's\n    Herdr 2 workspace; the user confirms in Sheprd.\nsheprd worktree [status]\n    Whether the caller's worktree is muted.\nsheprd worktree mute|unmute\n    Silence its notifications, or let them through again. Mutes stay in\n    this app; nothing reaches the daemon."
         }

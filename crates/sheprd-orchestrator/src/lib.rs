@@ -20,6 +20,7 @@ pub mod git;
 pub mod github;
 pub mod gitlab;
 pub mod location;
+pub mod memory;
 pub mod model;
 pub mod naming;
 pub mod private_file;

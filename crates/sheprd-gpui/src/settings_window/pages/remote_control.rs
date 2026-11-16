@@ -29,7 +29,7 @@ mod relays;
 
 pub(in crate::settings_window) use relays::Offered;
 #[cfg(test)]
-pub(in crate::settings_window) use relays::{Standing, public_title};
+pub(in crate::settings_window) use relays::{Standing, public_title, relay_line};
 
 /// The page's state while it shows.
 #[derive(Default)]
@@ -299,6 +299,12 @@ impl SettingsWindow {
                 None,
             ))
             .child(switch_row)
+            .when(Supervisor::approval_per_build(cx), |page| {
+                page.child(
+                    ui::row(theme, "remote-firewall", fl!("settings-remote-firewall"))
+                        .description(fl!("settings-remote-firewall-note")),
+                )
+            })
             .child(
                 ui::row(
                     theme,

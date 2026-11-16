@@ -239,12 +239,13 @@ pub enum Request {
     HostRelayed {
         /// The phone, as this computer knows it.
         device: DeviceId,
-        relay: host_relay::Request,
-        outcome: host_relay::Outcome,
+        /// Boxed, as the largest request, so every request stays small.
+        relay: Box<host_relay::Request>,
+        outcome: Box<host_relay::Outcome>,
     },
     /// On a host: keeps a phone's relay keys, signed with its own device
     /// key there, as `herdr-remote-control relay-enroll` asks.
-    RelayEnroll(host_relay::Request),
+    RelayEnroll(Box<host_relay::Request>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

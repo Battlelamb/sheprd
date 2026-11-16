@@ -261,8 +261,8 @@ impl Supervisor {
             let _ = client
                 .request(Request::HostRelayed {
                     device: job.device,
-                    relay: job.request,
-                    outcome,
+                    relay: Box::new(job.request),
+                    outcome: Box::new(outcome),
                 })
                 .await;
             cx.update(|cx| {

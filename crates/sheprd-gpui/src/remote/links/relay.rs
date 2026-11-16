@@ -3,7 +3,8 @@
 //! with its own key there; this app only finds the host. It asks the host
 //! the phone's pairing names first, then every other machine it connects
 //! to, running `herdr-remote-control relay-enroll` there until one says it
-//! is the computer the request names. Nothing is installed: a host without
+//! is the computer the request names and signs its answer with that
+//! computer's certificate authority. Nothing is installed: a host without
 //! the program holds no phone. Everything here blocks.
 
 use crate::teleport::Host;
@@ -41,7 +42,14 @@ pub(crate) fn carry<'a>(
             break;
         }
         match ask(request, target, cancelled) {
-            Some(outcome @ (Outcome::Relayed(_) | Outcome::Kept)) => return outcome,
+            // Only the computer the request names can sign for it; any
+            // other host claiming to be it is passed over.
+            Some(outcome @ (Outcome::Relayed { .. } | Outcome::Kept { .. })) => {
+                if outcome.proven(request) {
+                    return outcome;
+                }
+                tracing::warn!("A host answered for another computer's relay keys; passed over");
+            }
             // The first failure is kept, in case it was that computer's.
             Some(outcome @ Outcome::Failed { .. }) => {
                 failed.get_or_insert(outcome);

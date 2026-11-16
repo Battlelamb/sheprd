@@ -713,7 +713,9 @@ last uses its own domain.
   one (`POST /api/v2/hosts/relay`), whose Sheprd runs
   `sheprd-remote-control relay-enroll` over SSH on its machines until the
   one with that fingerprint checks the signature, keeps the keys, and
-  answers with its relays (`control::host_relay`). Still to come: a dial
+  answers with its relays, signed with its CA key (`control::host_relay`).
+  Sheprd, the near daemon, and the phone each check that signature against
+  the pinned fingerprint, so no other host can answer for that computer. Still to come: a dial
   key per relay, Sheprd's signed list (`"default"`), the WebSocket
   fallback, and pairing over a relay from the QR.
 
@@ -736,11 +738,13 @@ sequenceDiagram
     loop The host the pairing names, then each SSH and cloud machine
         S->>F: ssh: sheprd-remote-control relay-enroll
         F->>F: Fingerprint mine? Signature by this phone's key?<br/>Keep the keys, name them to the relays
-        F-->>S: relayed (route, relays, tunnel identity)<br/>or elsewhere
+        F-->>S: relayed (route, relays, tunnel identity),<br/>signed with its CA key, or elsewhere
+        S->>S: Signed by the CA the request pins?<br/>If not, pass over and ask the next host
     end
     S->>N: HostRelayed (outcome)
     P->>N: POST /api/v2/hosts/relay (same request)
     N-->>P: done: relayed
+    P->>P: Check the CA signature against the<br/>fingerprint pinned at pairing, keep the record
     P->>R: Dial the far computer's route
     R->>F: Let the phone's dial key through
     F-->>P: End-to-end tunnel, then the same API

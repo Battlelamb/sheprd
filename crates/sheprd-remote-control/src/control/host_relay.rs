@@ -16,12 +16,27 @@
 //! The signature is what lets this reach a phone paired with the far
 //! computer directly: the near computer only carries the request, and
 //! cannot attach keys to a device it does not hold.
+//!
+//! The far computer signs its answer in turn ([`Proof`]), with the key of
+//! the certificate authority whose fingerprint the phone pinned at pairing,
+//! over the request and what it answers. Every host Sheprd asks could
+//! otherwise claim to be that computer and hand the phone relays that lead
+//! nowhere; an answer that does not check out is passed over, and the phone
+//! checks it again before keeping it.
 
 use super::{DeviceId, hosts::HostId};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// What a phone signs, before the fields of [`Request::message`].
 pub const PREFIX: &[u8] = b"sheprd-host-relay-v1";
+/// What the far computer signs, before the request's message and its
+/// answer ([`Outcome::message`]).
+pub const ANSWER_PREFIX: &[u8] = b"sheprd-host-relay-answer-v1";
+/// The largest certificate an answer may carry, base64url.
+pub const MAX_CERTIFICATE: usize = 8192;
 /// How old a signed request may be when it arrives: a near computer keeps a
 /// request a day for Sheprd to take, and a replay inside it can only put
 /// back keys the phone itself chose.
@@ -130,9 +145,15 @@ impl Request {
 #[serde(rename_all = "snake_case", tag = "outcome")]
 pub enum Outcome {
     /// The far computer keeps the keys and listens on these relays.
-    Relayed(Info),
+    Relayed {
+        #[serde(flatten)]
+        info: Info,
+        proof: Proof,
+    },
     /// The far computer keeps the keys but listens on no relay yet.
-    Kept,
+    Kept {
+        proof: Proof,
+    },
     /// This host is not the computer the request names.
     Elsewhere,
     Failed {
@@ -140,14 +161,107 @@ pub enum Outcome {
     },
 }
 
+/// The far computer's signature over its answer: its certificate
+/// authority's certificate (DER), that certificate's key (P-256, SEC1
+/// uncompressed), and an ECDSA P-256 SHA-256 signature, `r || s`, over
+/// [`Outcome::message`], all base64url.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Proof {
+    pub certificate: String,
+    pub key: String,
+    pub signature: String,
+}
+
+impl Proof {
+    fn valid(&self) -> bool {
+        !self.certificate.is_empty()
+            && self.certificate.len() <= MAX_CERTIFICATE
+            && field(&self.key)
+            && field(&self.signature)
+    }
+}
+
 impl Outcome {
     pub fn valid(&self) -> bool {
         match self {
-            Self::Relayed(info) => info.valid(),
+            Self::Relayed { info, proof } => info.valid() && proof.valid(),
+            Self::Kept { proof } => proof.valid(),
             Self::Failed { reason } => reason.len() <= MAX_REASON * 4,
-            Self::Kept | Self::Elsewhere => true,
+            Self::Elsewhere => true,
         }
     }
+
+    /// What the far computer signs for `request`: [`ANSWER_PREFIX`], the
+    /// request's message, then `1` and the relays' identity, route, count
+    /// (big-endian `u16`), and each relay, every text after its length as a
+    /// big-endian `u16`; or `2` for keys kept without relays. `None` for an
+    /// answer that claims nothing, or fields out of bounds.
+    pub fn message(&self, request: &Request) -> Option<Vec<u8>> {
+        let mut message = ANSWER_PREFIX.to_vec();
+        message.extend(request.message()?);
+        match self {
+            Self::Relayed { info, .. } => {
+                message.push(1);
+                push_text(&mut message, &info.identity)?;
+                push_text(&mut message, &info.route)?;
+                message.extend_from_slice(&u16::try_from(info.relays.len()).ok()?.to_be_bytes());
+                for relay in &info.relays {
+                    push_text(&mut message, relay)?;
+                }
+            }
+            Self::Kept { .. } => message.push(2),
+            Self::Elsewhere | Self::Failed { .. } => return None,
+        }
+        Some(message)
+    }
+
+    /// Whether this answer comes from the computer `request` names: its
+    /// certificate hashes to the request's fingerprint, holds the key the
+    /// proof names, and that key signed [`Outcome::message`]. An answer that
+    /// claims nothing proves nothing and is false too.
+    pub fn proven(&self, request: &Request) -> bool {
+        let (Self::Relayed { proof, .. } | Self::Kept { proof }) = self else {
+            return false;
+        };
+        let Some(message) = self.message(request).filter(|_| self.valid()) else {
+            return false;
+        };
+        let decode = |text: &str| URL_SAFE_NO_PAD.decode(text).ok();
+        let (Some(certificate), Some(key), Some(signature)) = (
+            decode(&proof.certificate),
+            decode(&proof.key),
+            decode(&proof.signature),
+        ) else {
+            return false;
+        };
+        let pinned = fingerprint_bytes(&request.fingerprint);
+        let hashed: [u8; 32] = Sha256::digest(&certificate).into();
+        // The key must be the certificate's own: a certificate that hashes
+        // to the pinned fingerprint cannot be changed, and the only point
+        // in it whose private key anyone holds is its owner's.
+        if pinned != Some(hashed)
+            || key.len() != 65
+            || key[0] != 0x04
+            || !certificate
+                .windows(key.len())
+                .any(|window| window == key.as_slice())
+        {
+            return false;
+        }
+        let (Ok(key), Ok(signature)) = (
+            VerifyingKey::from_sec1_bytes(&key),
+            Signature::from_slice(&signature),
+        ) else {
+            return false;
+        };
+        key.verify(&message, &signature).is_ok()
+    }
+}
+
+fn push_text(message: &mut Vec<u8>, text: &str) -> Option<()> {
+    message.extend_from_slice(&u16::try_from(text.len()).ok()?.to_be_bytes());
+    message.extend_from_slice(text.as_bytes());
+    Some(())
 }
 
 /// Where a phone's request stands on the near computer, as

@@ -210,7 +210,7 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
             outcome,
         } => state
             .auth()
-            .host_relayed(&device, &relay, outcome, now)
+            .host_relayed(&device, &relay, *outcome, now)
             .map(|()| Response::Done),
         Request::RelayEnroll(request) => return relay_enroll(state, &request, now),
         Request::Revoke { device } => match state.auth().revoke(&device) {
@@ -312,30 +312,57 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
 }
 
 /// Keeps a phone's relay keys carried here from another computer, and
-/// answers with this computer's relays.
+/// answers with this computer's relays, signed with its CA's key so the
+/// phone knows the answer is this computer's.
 fn relay_enroll(state: &State, request: &control::host_relay::Request, now: u64) -> Response {
-    use control::host_relay::Outcome;
-    let Some(fingerprint) = crate::auth::nearby::fingerprint_bytes(&state.fingerprint) else {
-        return Response::Relayed(Outcome::Failed {
-            reason: "this computer has no fingerprint".into(), // i18n: data
-        });
+    use control::host_relay::{Info, Outcome, Proof};
+    let failed = |reason: &str| {
+        Response::Relayed(Outcome::Failed {
+            reason: reason.to_owned(),
+        })
     };
-    let kept = state.auth().keep_relay(request, &fingerprint, now);
-    Response::Relayed(match kept {
-        Ok(false) => Outcome::Elsewhere,
-        Ok(true) => match &state.relay {
-            Some(relay) => {
-                relay.devices_changed();
-                Some(relay.info())
-                    .filter(control::host_relay::Info::valid)
-                    .map_or(Outcome::Kept, Outcome::Relayed)
+    let Some(fingerprint) = crate::auth::nearby::fingerprint_bytes(&state.fingerprint) else {
+        return failed("this computer has no fingerprint"); // i18n: data
+    };
+    // A computer serving the user's own certificate has no CA key to sign
+    // with, as for presence.
+    let Some(authority) = &state.authority else {
+        return failed("this computer cannot sign with its certificate authority"); // i18n: data
+    };
+    match state.auth().keep_relay(request, &fingerprint, now) {
+        Ok(true) => {}
+        Ok(false) => return Response::Relayed(Outcome::Elsewhere),
+        Err(error) => return failed(&error.to_string()),
+    }
+    let unsigned = Proof {
+        certificate: crate::auth::encode(authority.ca_der()),
+        key: String::new(),
+        signature: String::new(),
+    };
+    let mut outcome = match &state.relay {
+        Some(relay) => {
+            relay.devices_changed();
+            match Some(relay.info()).filter(Info::valid) {
+                Some(info) => Outcome::Relayed {
+                    info,
+                    proof: unsigned,
+                },
+                None => Outcome::Kept { proof: unsigned },
             }
-            None => Outcome::Kept,
-        },
-        Err(error) => Outcome::Failed {
-            reason: error.to_string(),
-        },
-    })
+        }
+        None => Outcome::Kept { proof: unsigned },
+    };
+    let signed = outcome
+        .message(request)
+        .and_then(|message| Some((authority.public_key()?, authority.sign(&message)?)));
+    let Some((key, signature)) = signed else {
+        return failed("this computer could not sign its answer"); // i18n: data
+    };
+    if let Outcome::Relayed { proof, .. } | Outcome::Kept { proof } = &mut outcome {
+        proof.key = crate::auth::encode(&key);
+        proof.signature = crate::auth::encode(&signature);
+    }
+    Response::Relayed(outcome)
 }
 
 /// A nonce for the phone whose hint is `hint`, signed with this computer's

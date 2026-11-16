@@ -1,4 +1,6 @@
+import CryptoKit
 import Foundation
+import Security
 
 /// Carrying this phone's relay keys to a computer it cannot reach, through
 /// one it can (`crates/sheprd-remote-control/src/control/host_relay.rs`).
@@ -8,6 +10,9 @@ import Foundation
 public enum HostRelay {
     /// What the phone signs, before the fields of `message`.
     public static let prefix = Data("sheprd-host-relay-v1".utf8)
+    /// What the far computer signs, before the request's message and its
+    /// answer.
+    public static let answerPrefix = Data("sheprd-host-relay-answer-v1".utf8)
 
     /// What the phone signs: the prefix, the far computer's fingerprint,
     /// then the device id, the dial key, and the tunnel key as their wire
@@ -23,6 +28,53 @@ public enum HostRelay {
         }
         message.append(contentsOf: (0..<8).reversed().map { UInt8((signedMs >> ($0 * 8)) & 0xff) })
         return message
+    }
+
+    /// What the far computer signs for `request`: the answer prefix, the
+    /// request's message, then `1` and the relays' identity, route, count
+    /// (big-endian `UInt16`), and each relay, every text after its length
+    /// as a big-endian `UInt16`; or `2` for keys kept without relays (nil
+    /// `info`).
+    public static func answerMessage(for request: API.HostRelayRequest, info: API.RelayInfo?) -> Data? {
+        guard let fingerprint = Fingerprint(request.fingerprint),
+              let signed = message(fingerprint: fingerprint, device: request.device, keys: request.keys, signedMs: request.signedMs)
+        else { return nil }
+        var message = answerPrefix + signed
+        guard let info else {
+            message.append(2)
+            return message
+        }
+        message.append(1)
+        func push(_ text: String) -> Bool {
+            let bytes = Data(text.utf8)
+            guard let length = UInt16(exactly: bytes.count) else { return false }
+            message.append(contentsOf: [UInt8(length >> 8), UInt8(length & 0xff)])
+            message.append(bytes)
+            return true
+        }
+        guard push(info.identity), push(info.route), let count = UInt16(exactly: info.relays.count) else { return nil }
+        message.append(contentsOf: [UInt8(count >> 8), UInt8(count & 0xff)])
+        for relay in info.relays where !push(relay) { return nil }
+        return message
+    }
+
+    /// Whether an answer comes from the computer `request` names: its
+    /// certificate hashes to the request's fingerprint, and that
+    /// certificate's key signed the answer. Any other host Sheprd asked
+    /// could claim to be it.
+    public static func proven(_ proof: API.RelayProof, info: API.RelayInfo?, for request: API.HostRelayRequest) -> Bool {
+        guard let der = Base64URL.decode(proof.certificate),
+              let pinned = Fingerprint(request.fingerprint),
+              Fingerprint(certificate: der) == pinned,
+              let message = answerMessage(for: request, info: info),
+              let raw = Base64URL.decode(proof.signature),
+              let signature = try? P256.Signing.ECDSASignature(rawRepresentation: raw),
+              let certificate = SecCertificateCreateWithData(nil, der as CFData),
+              let key = SecCertificateCopyKey(certificate),
+              let point = SecKeyCopyExternalRepresentation(key, nil) as Data?,
+              let publicKey = try? P256.Signing.PublicKey(x963Representation: point)
+        else { return false }
+        return publicKey.isValidSignature(signature, for: message)
     }
 }
 
@@ -53,20 +105,34 @@ extension API {
         }
     }
 
+    /// The far computer's signature over its answer: its CA certificate
+    /// (DER), that certificate's key, and the signature, base64url.
+    public struct RelayProof: Codable, Equatable, Sendable {
+        public let certificate: String
+        public let key: String
+        public let signature: String
+
+        public init(certificate: String, key: String, signature: String) {
+            self.certificate = certificate
+            self.key = key
+            self.signature = signature
+        }
+    }
+
     /// Where a carried request stands, tagged by `state` and, once done,
     /// `outcome`.
     public enum HostRelayState: Decodable, Equatable, Sendable {
         /// Waiting for Sheprd on the near computer.
         case pending
         /// The far computer keeps the keys and listens on these relays.
-        case relayed(RelayInfo)
+        case relayed(RelayInfo, RelayProof)
         /// The far computer keeps the keys but listens on no relay yet.
-        case kept
+        case kept(RelayProof)
         /// No host the near computer's Sheprd connects to is the far one.
         case elsewhere
         case failed(reason: String)
 
-        enum CodingKeys: String, CodingKey { case state, outcome, reason }
+        enum CodingKeys: String, CodingKey { case state, outcome, reason, proof }
 
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -76,8 +142,9 @@ extension API {
             }
             let outcome = try container.decode(String.self, forKey: .outcome)
             switch outcome {
-            case "relayed": self = .relayed(try RelayInfo(from: decoder))
-            case "kept": self = .kept
+            case "relayed":
+                self = .relayed(try RelayInfo(from: decoder), try container.decode(RelayProof.self, forKey: .proof))
+            case "kept": self = .kept(try container.decode(RelayProof.self, forKey: .proof))
             case "elsewhere": self = .elsewhere
             case "failed": self = .failed(reason: try container.decode(String.self, forKey: .reason))
             default:

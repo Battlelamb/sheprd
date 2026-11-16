@@ -68,11 +68,16 @@ fn the_daemon_keeps_relay_keys_its_phone_signed_and_says_so() {
         panic!("not enrolled");
     };
     let request = signed(&key, &state.fingerprint, &enrolled.device);
-    // This computer listens on no relay: the keys wait for one.
-    assert_eq!(
-        control::answer(&state, &stop, Request::RelayEnroll(request)),
-        Response::Relayed(Outcome::Kept)
-    );
+    // This computer listens on no relay: the keys wait for one. The answer
+    // is signed with its CA, as the phone pinned it.
+    let Response::Relayed(outcome @ Outcome::Kept { .. }) = control::answer(
+        &state,
+        &stop,
+        Request::RelayEnroll(Box::new(request.clone())),
+    ) else {
+        panic!("not kept");
+    };
+    assert!(outcome.proven(&request));
     assert!(
         state
             .auth()
@@ -84,7 +89,7 @@ fn the_daemon_keeps_relay_keys_its_phone_signed_and_says_so() {
     );
     let elsewhere = signed(&key, &"AB".repeat(32), &enrolled.device);
     assert_eq!(
-        control::answer(&state, &stop, Request::RelayEnroll(elsewhere)),
+        control::answer(&state, &stop, Request::RelayEnroll(Box::new(elsewhere))),
         Response::Relayed(Outcome::Elsewhere)
     );
     let forged = signed(
@@ -93,7 +98,7 @@ fn the_daemon_keeps_relay_keys_its_phone_signed_and_says_so() {
         &enrolled.device,
     );
     assert!(matches!(
-        control::answer(&state, &stop, Request::RelayEnroll(forged)),
+        control::answer(&state, &stop, Request::RelayEnroll(Box::new(forged))),
         Response::Relayed(Outcome::Failed { .. })
     ));
 }

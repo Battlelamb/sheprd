@@ -233,7 +233,11 @@ to read where it stands. Sheprd takes each request (`HostRelays`) and runs
 phone's pairing names, then on every other one, without installing it
 anywhere. The machine whose fingerprint the request names checks the
 signature against the phone's own key, keeps the keys, and answers with its
-relays (`RelayEnroll`); Sheprd reports that back (`HostRelayed`). Because
+relays, signed with its CA key over the request and the answer
+(`RelayEnroll`). Sheprd passes over an answer whose certificate does not
+hash to the request's fingerprint or whose signature does not check out,
+and reports the first one that does (`HostRelayed`); this daemon and the
+phone check it again. Because
 the phone signs, the near computer cannot attach keys to a device it does
 not hold, and this works for a computer the phone paired directly too.
 

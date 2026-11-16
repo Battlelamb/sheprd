@@ -52,8 +52,8 @@ fn a_relay_request_is_carried_once_and_answered(cx: &mut TestAppContext) {
         answers,
         vec![Request::HostRelayed {
             device: DeviceId("d1".into()),
-            relay: job().request,
-            outcome: Outcome::Elsewhere,
+            relay: Box::new(job().request),
+            outcome: Box::new(Outcome::Elsewhere),
         }]
     );
     cx.update(|cx| assert!(cx.global::<Supervisor>().links.relaying.is_empty()));

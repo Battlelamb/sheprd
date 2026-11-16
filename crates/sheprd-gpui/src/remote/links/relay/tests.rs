@@ -27,14 +27,17 @@ fn a_host_that_prints_nothing_or_too_much_did_not_answer() {
     assert_eq!(parse(b""), None);
     assert_eq!(parse(b" \n"), None);
     assert_eq!(parse(b"usage"), None);
-    assert_eq!(parse(br#"{"outcome":"kept"}"#), Some(Outcome::Kept));
+    // A claim without the far computer's signature does not read.
+    assert_eq!(parse(br#"{"outcome":"kept"}"#), None);
     assert_eq!(
         parse(br#"{"outcome":"elsewhere"}"#),
         Some(Outcome::Elsewhere)
     );
     // Relays with none named are not an answer.
     assert_eq!(
-        parse(br#"{"outcome":"relayed","identity":"i","relays":[],"route":"r"}"#),
+        parse(
+            br#"{"outcome":"relayed","identity":"i","relays":[],"route":"r","proof":{"certificate":"c","key":"k","signature":"s"}}"#
+        ),
         None
     );
 }
@@ -53,4 +56,14 @@ fn a_cancelled_job_asks_no_host() {
     };
     let outcome = carry(&request(), [&target], &AtomicBool::new(true));
     assert_eq!(outcome, Outcome::Elsewhere);
+}
+
+#[test]
+fn an_unsigned_claim_does_not_end_the_search() {
+    // Read but not proven: a host claiming the computer without its CA.
+    let claim = parse(
+        br#"{"outcome":"kept","proof":{"certificate":"Y2VydA","key":"a2V5","signature":"c2ln"}}"#,
+    )
+    .unwrap();
+    assert!(!claim.proven(&request()));
 }

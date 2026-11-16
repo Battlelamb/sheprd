@@ -18,7 +18,7 @@ pub fn relay_enroll(request: &host_relay::Request, state_dir: &Path) -> Outcome 
     let failed = |reason: &str| Outcome::Failed {
         reason: reason.to_owned(),
     };
-    match control::request(&address, &Request::RelayEnroll(request.clone())) {
+    match control::request(&address, &Request::RelayEnroll(Box::new(request.clone()))) {
         Ok(Response::Relayed(outcome)) => outcome,
         // A daemon from before relays carried through other computers.
         Ok(_) | Err(control::Error::NoAnswer | control::Error::Frame(_)) => {

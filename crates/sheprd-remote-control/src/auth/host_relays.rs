@@ -141,7 +141,9 @@ impl HostRelays {
         now_ms: u64,
     ) -> Result<()> {
         self.refresh(now_ms);
-        if !outcome.valid() {
+        // A claim the far computer did not sign is no answer.
+        let claims = matches!(outcome, Outcome::Relayed { .. } | Outcome::Kept { .. });
+        if !outcome.valid() || (claims && !outcome.proven(request)) {
             return Err(Error::Invalid.into());
         }
         let fingerprint =

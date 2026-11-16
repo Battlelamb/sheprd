@@ -9,8 +9,9 @@ private let log = Logger(subsystem: "so.pen.herdr.remote", category: "relay")
 /// was away otherwise stays out of reach until the phone meets it on its
 /// network again. The phone signs fresh keys with its device key for the
 /// far computer and posts them to an online one, whose Sheprd carries them
-/// over SSH; the far computer answers with its relays, which become its
-/// relay record here.
+/// over SSH; the far computer answers with its relays, signed with the
+/// certificate this phone pinned for it, which become its relay record
+/// here.
 @MainActor
 final class RelayCarrier {
     typealias Carry = (_ near: String, _ request: API.HostRelayRequest) async throws -> API.HostRelayState
@@ -74,12 +75,20 @@ final class RelayCarrier {
             switch state {
             case .pending:
                 do { try await Task.sleep(for: Self.poll) } catch { return false }
-            case let .relayed(info):
+            case let .relayed(info, proof):
+                guard HostRelay.proven(proof, info: info, for: request) else {
+                    log.error("an answer for \(far.name, privacy: .public) was not signed by it")
+                    return false
+                }
                 guard let record = RelayRecord.make(from: info, keys: keys) else { return false }
                 log.notice("\(pick.near.name, privacy: .public) carried relay keys to \(far.name, privacy: .public)")
                 onRelay(far.device, record)
                 return true
-            case .kept:
+            case let .kept(proof):
+                guard HostRelay.proven(proof, info: nil, for: request) else {
+                    log.error("an answer for \(far.name, privacy: .public) was not signed by it")
+                    return false
+                }
                 log.info("\(far.name, privacy: .public) keeps relay keys but listens on no relay")
                 return true
             case .elsewhere:

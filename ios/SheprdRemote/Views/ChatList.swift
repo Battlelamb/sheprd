@@ -7,11 +7,16 @@ import SwiftUI
 ///
 /// Each section folds to its header as a computer does in the Workspaces
 /// tab, a status section's header shows its colored dot, and a long list
-/// gets an index on its edge, as Workspaces has.
+/// gets an index on its edge with a letter per section and a dot per agent.
 struct ChatList: View {
     @Environment(AppModel.self) private var model
     @AppStorage(HomeRow.sortKey) private var sort = AgentSort.priority
     var sections: [AgentSort.Section<HomeRow>]
+    /// Where the list is scrolled, so a jump from the edge index can bring
+    /// a section's header out from under the search field.
+    @State private var position = ScrollPosition(idType: String.self)
+    /// Where each section's header is, so a jump can clear the bars.
+    @State private var headerJump = HeaderJump()
     /// What a swipe or long press asked to close, waiting for confirmation.
     @State private var closing: CloseTarget?
 
@@ -31,26 +36,56 @@ struct ChatList: View {
         sections.map { [$0.id] + $0.items.map(\.id) }
     }
 
+    /// The id a section's header scrolls by.
+    private static func headerID(_ key: String) -> String { "section/\(key)" }
+
+    /// The sections as the edge index reads them: a folded one keeps only
+    /// its letter.
+    private var indexParts: [EdgeIndex.Part] {
+        sections.map { section in
+            let key = Self.key(section, sort: sort)
+            let folded = model.collapsed.home.contains(key)
+            return EdgeIndex.Part(
+                target: Self.headerID(key),
+                title: section.title,
+                rows: folded ? [] : section.items.map { ($0.id, $0.status) }
+            )
+        }
+    }
+
     var body: some View {
         let open = sections
             .filter { !model.collapsed.home.contains(Self.key($0, sort: sort)) }
             .reduce(0) { $0 + $1.items.count }
-        List {
-            UnpairedCards()
-            ForEach(sections) { section in
-                let key = Self.key(section, sort: sort)
-                let folded = model.collapsed.home.contains(key)
-                Section {
-                    if !folded { ForEach(section.items) { row($0) } }
-                } header: {
-                    SectionHeader(title: section.title, count: section.items.count, status: section.status, folded: folded) {
-                        withAnimation(.snappy) { model.collapsed.home.toggle(key) }
+        ScrollViewReader { proxy in
+            List {
+                UnpairedCards()
+                ForEach(sections) { section in
+                    let key = Self.key(section, sort: sort)
+                    let folded = model.collapsed.home.contains(key)
+                    Section {
+                        if !folded { ForEach(section.items) { row($0) } }
+                    } header: {
+                        SectionHeader(title: section.title, count: section.items.count, status: section.status, folded: folded) {
+                            withAnimation(.snappy) { model.collapsed.home.toggle(key) }
+                        }
+                        .id(Self.headerID(key))
+                        .background(HeaderMark(jump: headerJump, key: Self.headerID(key)))
                     }
                 }
-                .sectionIndexLabel(section.title.first.map { String($0).uppercased() })
             }
+            .overlay(alignment: .trailing) {
+                if open >= Self.indexedFrom {
+                    EdgeIndexStrip(parts: indexParts) { target in jump(to: target, proxy: proxy) }
+                        .padding(.vertical, 24)
+                        .padding(.trailing, 2)
+                }
+            }
+            .scrollPosition($position)
+            #if DEBUG
+            .task { await followJumpArgument(proxy) }
+            #endif
         }
-        .listSectionIndexVisibility(sections.count > 1 && open >= Self.indexedFrom ? .visible : .hidden)
         // Updates arrive from the computers unanimated; an agent going from
         // idle to working to done moves its row between sections, which the
         // list animates when the arrangement it shows changes.
@@ -58,6 +93,35 @@ struct ChatList: View {
         .refreshable { model.fleet.networkChanged() }
         .closeConfirmation($closing)
     }
+
+    /// Scrolls a section's header to just below the search field: the
+    /// first section to the very top, the others by their header's place
+    /// (`HeaderJump`), as a list's own jump leaves it behind the field.
+    private func jump(to target: String, proxy: ScrollViewProxy) {
+        if target == sections.first.map({ Self.headerID(Self.key($0, sort: sort)) }) {
+            position.scrollTo(edge: .top)
+            return
+        }
+        proxy.scrollTo(target, anchor: .top)
+        Task { @MainActor in
+            await Task.yield()
+            headerJump.settle(target)
+        }
+    }
+
+    #if DEBUG
+    /// For the simulator loop, which cannot drag the edge index:
+    /// `-homeJump N` scrolls to the bottom, then jumps to section N.
+    private func followJumpArgument(_ proxy: ScrollViewProxy) async {
+        let index = UserDefaults.standard.integer(forKey: "homeJump")
+        guard UserDefaults.standard.object(forKey: "homeJump") != nil else { return }
+        try? await Task.sleep(for: .seconds(5))
+        position.scrollTo(edge: .bottom)
+        try? await Task.sleep(for: .seconds(2))
+        guard sections.indices.contains(index) else { return }
+        jump(to: Self.headerID(Self.key(sections[index], sort: sort)), proxy: proxy)
+    }
+    #endif
 
     @ViewBuilder
     private func row(_ row: HomeRow) -> some View {

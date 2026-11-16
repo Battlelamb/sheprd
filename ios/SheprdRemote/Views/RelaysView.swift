@@ -36,7 +36,7 @@ struct RelaysView: View {
                 Text("Relays")
             } footer: {
                 if !relays.isEmpty {
-                    Text("Each computer is tried on the relays it named, then on the others here. A relay sees only encrypted traffic.")
+                    Text("Each computer is tried on the relays it named, then on the ones you added. A relay sees only encrypted traffic.")
                 }
             }
             Section {

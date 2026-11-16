@@ -47,7 +47,7 @@ final class AppModel {
     /// and those typed in Settings. Kept on this phone across launches.
     private(set) var savedRelays = AppModel.loadRelays() {
         didSet {
-            fleet.savedRelays = savedRelays.relays
+            fleet.savedRelays = savedRelays.forEveryComputer
             if let data = try? JSONEncoder().encode(savedRelays) {
                 UserDefaults.standard.set(data, forKey: Self.relaysKey)
             }
@@ -266,10 +266,12 @@ final class AppModel {
         // Every relay a paired computer named is kept, so it is there to
         // pick from, and to dial, when that computer cannot be asked.
         var relays = savedRelays
-        relays.learn(computers.compactMap(\.relay).flatMap(\.relays))
+        let named = computers.compactMap(\.relay).flatMap(\.relays)
+        relays.settle(named: Set(named))
+        relays.learn(named)
         keep(relays)
         // Unchanged, the property's observer did not run.
-        fleet.savedRelays = savedRelays.relays
+        fleet.savedRelays = savedRelays.forEveryComputer
         presence.onAddresses = { [weak self] fingerprint, origins in self?.update(fingerprint, origins: origins) }
         fleet.onRelay = { [weak self] device, record in self?.setRelay(device, record) }
         // Back in range after iOS relaunched the app: tokens may be stale.

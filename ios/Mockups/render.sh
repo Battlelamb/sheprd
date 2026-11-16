@@ -22,6 +22,11 @@ case "$round" in
      ipad="" ;;
   newtab) phone="newtab-A-0 newtab-B-0 newtab-B-1 newtab-C-0 newtab-C-1 newtab-D-0 newtab-D-1"
      ipad="" ;;
+  tabs) phone="tabs-Now-0 tabs-A-0 tabs-B-0 tabs-C-0 tabs-D-0"
+     [ -n "${MOCKUP_RECORD:-}" ] && phone="tabs-Now-1 tabs-A-1 tabs-B-1 tabs-C-1 tabs-D-1"
+     ipad="" ;;
+  counts) phone="counts-A-0 counts-A-1 counts-B-0 counts-B-1 counts-C-0 counts-C-1 counts-D-0 counts-D-1"
+     ipad="" ;;
   asked) phone="ask-A-0 ask-A-1 ask-A-2 ask-A-3"
      ipad="" ;;
   ask) phone="ask-A-0 ask-A-1 ask-B-0 ask-B-1 ask-C-0 ask-C-1 ask-D-0 ask-D-1"
@@ -50,6 +55,15 @@ render() {
     screen=${shot%%-*}; rest=${shot#*-}; variant=${rest%%-*}; state=${rest#*-}
     xcrun simctl launch --terminate-running-process "$udid" so.pen.herdr-mockups \
       -screen "$screen" -variant "$variant" -state "$state" >/dev/null
+    if [ -n "${MOCKUP_RECORD:-}" ]; then
+      # Video of an animated state, for a GIF.
+      sleep 1
+      xcrun simctl io "$udid" recordVideo --codec h264 --force "out/$shot-$appearance.mov" >/dev/null 2>&1 &
+      recorder=$!
+      sleep "$MOCKUP_RECORD"
+      kill -INT "$recorder"; wait "$recorder" || true
+      continue
+    fi
     sleep 3
     xcrun simctl io "$udid" screenshot "out/$shot-$appearance.png" >/dev/null 2>&1
   done

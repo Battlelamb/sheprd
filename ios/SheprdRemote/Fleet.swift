@@ -49,6 +49,10 @@ struct TerminalItem: Identifiable, Hashable {
     /// The agent Herdr detects in it, such as `claude` run in a shell.
     var agent: Home.TerminalRow.DetectedAgent? { terminal.agent }
     var title: String { agent?.title ?? terminal.label }
+    /// What closing its row closes: the whole tab.
+    var closeTarget: CloseTarget? {
+        terminal.firstPane.map { .tab(PaneKey(device: computer.device, pane: $0.pane), title: terminal.label) }
+    }
     var needsYou: Bool { agent?.status == .blocked }
     /// When the computer saw its agent last change state.
     var changed: Date? { agent?.changedMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
@@ -595,6 +599,14 @@ final class Fleet {
         let pane = key.pane
         return try await call(key.device) { client, token in
             try await client.suggestTitle(pane: pane, bearer: token)
+        }
+    }
+
+    /// Closes the terminal tab a pane is in, with every pane in it.
+    func closeTab(_ key: PaneKey) async throws {
+        let pane = key.pane
+        _ = try await call(key.device) { client, token in
+            try await client.termAction(.closeTab, pane: pane, bearer: token)
         }
     }
 

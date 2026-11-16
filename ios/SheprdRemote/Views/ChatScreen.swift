@@ -226,6 +226,8 @@ private struct ChatDocument: View {
             .padding(.bottom, 24)
         }
         .defaultScrollAnchor(.bottom)
+        // A picture opened full screen swipes through the chat's others.
+        .environment(\.chatPictures, transcript.pictures.map(GalleryPicture.init))
         .opacity(store.stale ? 0.6 : 1)
         .safeAreaInset(edge: .bottom) {
             // The running turn's status sits where the turn grows, just

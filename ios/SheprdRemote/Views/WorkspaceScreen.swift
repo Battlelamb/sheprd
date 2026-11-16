@@ -22,6 +22,15 @@ struct WorkspaceScreen: View {
     @State private var newName = ""
     /// Why the last rename failed, shown apart from a tab that did not start.
     @State private var renameProblem: String?
+    /// The name a rename asked for, shown with a spinner until the
+    /// computer's next `home` carries it, the request fails, or it times out.
+    @State private var pendingName: String?
+    /// What a row's swipe asked to close, waiting for confirmation.
+    @State private var closing: CloseTarget?
+    /// The agent asked for a name, shown with a spinner until it answers.
+    @State private var askedAgent: String?
+    /// The pictures in the workspace's chats, its tabs combined.
+    @State private var pictures = WorkspacePictureStore()
 
     private static let terminal = "terminal"
 
@@ -39,6 +48,9 @@ struct WorkspaceScreen: View {
         let chats = model.fleet.chatItems.filter { $0.computer.device == key.device && $0.workspace.id == key.workspace }
         let terminals = model.fleet.terminalItems.filter { $0.computer.device == key.device && $0.workspace.id == key.workspace }
         let repository = machine.home?.repositories.first { $0.workspaces.contains { $0.id == key.workspace } }
+        // The chat answered last knows best what the workspace is about.
+        let namer = chats.filter { $0.chat.summary?.connected == true }
+            .max { ($0.lastAnswer ?? .distantPast) < ($1.lastAnswer ?? .distantPast) }
         return List {
             Section {
                 Summary(workspace: workspace, place: [model.displayName(machine.computer), repository?.label].compactMap { $0 }.joined(separator: " · "))
@@ -54,11 +66,13 @@ struct WorkspaceScreen: View {
             Section {
                 ForEach(chats) { item in
                     RouteLink(.chat(item.key, title: item.chat.title)) { ChatRowLabel(item: item, showsComputer: false, showsWorkspace: false) }
+                        .closeSwipe(.chat(item.key, title: item.chat.title), closing: $closing)
                         .summarizeSwipe(item.key)
                 }
                 ForEach(terminals.filter { $0.agent != nil }) { item in
                     if let route = item.route {
                         RouteLink(route) { AgentTerminalRowLabel(item: item, showsComputer: false, showsWorkspace: false) }
+                            .closeSwipe(item.closeTarget, closing: $closing)
                     }
                 }
                 ForEach(terminals.filter { $0.agent == nil }) { item in
@@ -66,12 +80,14 @@ struct WorkspaceScreen: View {
                         RouteLink(.term(PaneKey(device: key.device, pane: pane.pane), title: item.terminal.label)) {
                             TerminalRowLabel(terminal: item.terminal)
                         }
+                        .closeSwipe(item.closeTarget, closing: $closing)
                     }
                 }
             } header: {
                 let count = chats.count + terminals.count
                 Text(count == 1 ? "1 tab" : "\(count) tabs")
             }
+            WorkspacePictures(pictures: pictures, chats: chats, open: show)
             launcher(workspace, online: isOnline(machine))
         }
         .navigationTitle(workspace.label)
@@ -81,18 +97,41 @@ struct WorkspaceScreen: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 Button {
+                    // A rename on its way ends before another starts. Not
+                    // `.disabled`, which would fade the dimmed name further.
+                    guard pendingName == nil, askedAgent == nil else { return }
                     newName = workspace.label
                     renaming = true
                 } label: {
+                    let busy = pendingName != nil || askedAgent != nil
                     HStack(spacing: 4) {
-                        Text(workspace.label).font(.headline).lineLimit(1)
-                        Image(systemName: "pencil.circle.fill").font(.caption).foregroundStyle(.tertiary)
+                        Text(pendingName ?? workspace.label).font(.headline).lineLimit(1)
+                            .foregroundStyle(busy ? .secondary : .primary)
+                        if busy {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Image(systemName: "pencil.circle.fill").font(.caption).foregroundStyle(.tertiary)
+                        }
                     }
+                    .animation(.default, value: pendingName)
+                    .animation(.default, value: askedAgent)
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint("Renames the workspace")
+                .accessibilityValue(askedAgent.map { "Asking \($0) for a name" } ?? (pendingName == nil ? "" : "Renaming"))
             }
         }
+        // The computer's next `home` carries the new name; stop waiting then.
+        .onChange(of: workspace.label) { pendingName = nil }
+        #if DEBUG
+        // `-askAgentName YES` asks the workspace's chat for a name, as Ask
+        // does, once the chat is listed.
+        .onChange(of: namer?.id, initial: true) {
+            guard let namer, askedAgent == nil, UserDefaults.standard.bool(forKey: "askAgentName") else { return }
+            UserDefaults.standard.removeObject(forKey: "askAgentName")
+            askName(of: namer, current: workspace.label)
+        }
+        #endif
         .onAppear {
             model.recentDevice = key.device
             #if DEBUG
@@ -101,6 +140,14 @@ struct WorkspaceScreen: View {
             if UserDefaults.standard.bool(forKey: "otherAgents") { showsOthers = true }
             // `-openChanges YES` opens the workspace's changes.
             if UserDefaults.standard.bool(forKey: "openChanges"), opened == nil { opened = .changes(key) }
+            // `-summarizeFirst YES` asks for the summary of the first chat
+            // with a reply, as its row's swipe does.
+            if UserDefaults.standard.bool(forKey: "summarizeFirst"),
+               let chat = model.fleet.chatItems.first(where: { $0.computer.device == key.device && $0.workspace.id == key.workspace && $0.chat.summary?.lastText != nil }) {
+                Task { try? await model.fleet.summarize(chat.key) }
+            }
+            // `-renamePending NAME` shows a rename on its way, sending nothing.
+            if let name = UserDefaults.standard.string(forKey: "renamePending") { pendingName = name }
             if UserDefaults.standard.bool(forKey: "renameWorkspace") {
                 newName = workspace.label
                 renaming = true
@@ -122,6 +169,10 @@ struct WorkspaceScreen: View {
                 try? await Task.sleep(for: .seconds(3))
             }
         }
+        // Again on each return, as the chats may hold more pictures since.
+        .task(id: WorkspacePictureStore.Load(panes: chats.map(\.chat.pane), online: isOnline(machine))) {
+            await pictures.load(.init(panes: chats.map(\.chat.pane), online: isOnline(machine)), device: key.device, fleet: model.fleet)
+        }
         // Again on each return, as an agent may have changed more since.
         .task(id: machine.status) {
             guard isOnline(machine), workspace.branch != nil else { return }
@@ -130,6 +181,7 @@ struct WorkspaceScreen: View {
                 try await client.changes(workspace: id, scope: .uncommitted, bearer: token)
             }.total
         }
+        .closeConfirmation($closing)
         .alert("The tab did not start", isPresented: Binding(get: { problem != nil }, set: { if !$0 { problem = nil } })) {
         } message: {
             Text(problem ?? "")
@@ -138,10 +190,17 @@ struct WorkspaceScreen: View {
             TextField("Name", text: $newName)
                 .textInputAutocapitalization(.never)
             Button("Cancel", role: .cancel) {}
-            Button("Rename") { rename(to: newName) }
+            if let namer {
+                Button("Ask \(agentName(namer))") { askName(of: namer, current: workspace.label) }
+            }
+            Button("Rename") { rename(to: newName, from: workspace.label) }
                 .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
         } message: {
-            Text("The name shows in Sheprd and in your lists.")
+            if let namer {
+                Text("The name shows in Sheprd and in your lists. \(agentName(namer)) can suggest a short one from its chat.")
+            } else {
+                Text("The name shows in Sheprd and in your lists.")
+            }
         }
         .alert("The workspace was not renamed", isPresented: Binding(get: { renameProblem != nil }, set: { if !$0 { renameProblem = nil } })) {
         } message: {
@@ -149,13 +208,75 @@ struct WorkspaceScreen: View {
         }
     }
 
-    private func rename(to label: String) {
+    private func rename(to label: String, from current: String) {
+        let label = label.trimmingCharacters(in: .whitespaces)
+        // The same name changes nothing, so no `home` would end the wait.
+        guard label != current else { return }
+        pendingName = label
         Task {
             do {
                 try await model.fleet.renameWorkspace(key, to: label)
             } catch {
+                pendingName = nil
                 renameProblem = error.localizedDescription
+                return
             }
+            // Accepted; the name usually arrives with the next `home`, but
+            // a computer that does not resend it must not spin forever.
+            try? await Task.sleep(for: .seconds(10))
+            if pendingName == label { pendingName = nil }
+        }
+    }
+
+    private func agentName(_ item: ChatItem) -> String {
+        let agent = item.chat.agent ?? ""
+        return agents.first { $0.id == agent }?.name ?? (agent.isEmpty ? String(localized: "Agent") : agent.capitalized)
+    }
+
+    /// Asks the workspace's chat for a short name, then renames the
+    /// workspace to it. The prompt and its answer stay in that chat, where
+    /// it waits its turn behind anything the agent is doing; the phone
+    /// reads the answer from the transcript, as no agent can rename a
+    /// workspace Sheprd keeps for Herdr 2.
+    private func askName(of item: ChatItem, current: String) {
+        let prompt = WorkspaceNaming.prompt(current: current)
+        let (device, pane, agent) = (key.device, item.chat.pane, agentName(item))
+        askedAgent = agent
+        Task {
+            defer { askedAgent = nil }
+            do {
+                let refused = try await model.fleet.call(device) { client, token in
+                    try await client.command(.prompt(text: prompt), pane: pane, bearer: token)
+                }
+                if let refused {
+                    renameProblem = refused
+                    return
+                }
+            } catch {
+                renameProblem = error.localizedDescription
+                return
+            }
+            // Long enough for a busy agent to finish first, bounded so the
+            // title does not spin forever; a dropped link is tried again.
+            let deadline = ContinuousClock.now + .seconds(180)
+            while ContinuousClock.now < deadline {
+                try? await Task.sleep(for: .seconds(2))
+                guard let snapshot = try? await model.fleet.call(device, { client, token in
+                    try await client.chat(pane, bearer: token)
+                }) else { continue }
+                switch WorkspaceNaming.answer(to: prompt, in: snapshot.transcript) {
+                case let .name(name)?:
+                    askedAgent = nil
+                    rename(to: name, from: current)
+                    return
+                case .noName?:
+                    renameProblem = String(localized: "\(agent) did not suggest a name.")
+                    return
+                case nil:
+                    continue
+                }
+            }
+            renameProblem = String(localized: "\(agent) did not answer in time.")
         }
     }
 
@@ -380,7 +501,9 @@ private struct ChangesRow: View {
     }
 }
 
-/// A terminal tab without an agent: its name and folder.
+/// A terminal tab without an agent: its name, and what runs in it. A
+/// computer that does not say (Herdr 1) gets its folder's name instead,
+/// so the second line is never blank.
 private struct TerminalRowLabel: View {
     var terminal: Home.TerminalRow
 
@@ -390,11 +513,23 @@ private struct TerminalRowLabel: View {
                 .frame(width: 28, height: 28).background(.fill.secondary, in: .rect(cornerRadius: 28 * 0.28))
             VStack(alignment: .leading, spacing: 2) {
                 Text(terminal.label).lineLimit(1)
-                if let cwd = terminal.firstPane?.cwd ?? terminal.cwd {
-                    Text(cwd).font(.subheadline).foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.head)
+                switch terminal.firstPane?.job {
+                case let .running(command)?:
+                    Text(verbatim: command).font(.subheadline.monospaced()).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.tail)
+                case .idle?:
+                    Text("Idle").font(.subheadline).foregroundStyle(.tertiary)
+                case .other?, nil:
+                    Text(folder).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
         }
+    }
+
+    /// The last part of the tab's folder, or a plain word when it has none.
+    private var folder: String {
+        let path = terminal.firstPane?.cwd ?? terminal.cwd ?? ""
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        return path.isEmpty || name.isEmpty || name == "/" ? String(localized: "Terminal") : name
     }
 }

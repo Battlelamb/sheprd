@@ -11,8 +11,9 @@ struct HomeTab: View {
     @State private var query = ""
 
     var body: some View {
+        let sections = HomeRow.sections(sort, chats: model.fleet.chatItems, agents: model.fleet.agentTerminals)
         Group {
-            if query.isEmpty { chats } else { SearchResults(query: query, workspacesAsRoutes: true) }
+            if query.isEmpty { chats(sections) } else { SearchResults(query: query, workspacesAsRoutes: true) }
         }
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Workspaces, chats, terminals")
         .navigationBarTitleDisplayMode(.inline)
@@ -23,6 +24,18 @@ struct HomeTab: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .topBarLeading) { AgentSortMenu(sort: $sort) }
+            if query.isEmpty, sections.count > 1 {
+                ToolbarItem(placement: .topBarTrailing) {
+                    let shown = sections.map { ChatList.key($0, sort: sort) }
+                    let folded = model.collapsed.home.allCollapsed(shown)
+                    Button(
+                        folded ? "Expand All" : "Collapse All",
+                        systemImage: folded ? "rectangle.expand.vertical" : "rectangle.compress.vertical"
+                    ) {
+                        withAnimation(.snappy) { model.collapsed.home.toggleAll(shown) }
+                    }
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Talk to Sheprd", systemImage: "waveform") { model.talk() }
                     .disabled(model.fleet.machines.isEmpty)
@@ -34,8 +47,8 @@ struct HomeTab: View {
         }
     }
 
-    private var chats: some View {
-        ChatList()
+    private func chats(_ sections: [AgentSort.Section<HomeRow>]) -> some View {
+        ChatList(sections: sections)
             .nearbyBanner()
             .overlay {
                 if model.computers.isEmpty {

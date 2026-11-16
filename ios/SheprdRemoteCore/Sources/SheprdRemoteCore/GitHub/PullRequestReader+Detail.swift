@@ -74,10 +74,18 @@ extension PullRequestReader {
             let detail = try await api.pullRequestDetail(
                 host: target.host, owner: target.owner, repo: target.repo, number: target.number, token: token
             )
-            // The conversation still shows when the files cannot be read.
-            let files = try? await api.pullRequestFiles(
-                host: target.host, owner: target.owner, repo: target.repo, number: target.number, token: token
-            )
+            // The conversation still shows when the files cannot be read,
+            // but a refused token goes back so it is renewed and retried.
+            let files: PullRequestFiles?
+            do {
+                files = try await api.pullRequestFiles(
+                    host: target.host, owner: target.owner, repo: target.repo, number: target.number, token: token
+                )
+            } catch GitHubError.unauthorized {
+                throw GitHubError.unauthorized
+            } catch {
+                files = nil
+            }
             return PullRequestReading(detail: detail, files: files)
         }
     }

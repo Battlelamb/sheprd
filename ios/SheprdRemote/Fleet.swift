@@ -102,6 +102,18 @@ final class Fleet {
     /// Each running proxy's origin, raced after the computer's own
     /// addresses, so a direct path wins when there is one.
     @ObservationIgnored private var relayOrigins: [String: String] = [:]
+    /// The relays kept in Settings, dialed for every computer after the
+    /// ones it named. A change restarts the running proxies, which open
+    /// their sessions with the list they started with.
+    @ObservationIgnored var savedRelays: [RelayEndpoint] = [] {
+        didSet {
+            guard savedRelays != oldValue else { return }
+            for device in Array(proxies.keys) {
+                stopRelay(device)
+                if let computer = machines.first(where: { $0.id == device })?.computer { startRelay(computer) }
+            }
+        }
+    }
     /// Computers whose relay keys are being checked or sent.
     @ObservationIgnored private var enrolling: Set<String> = []
     /// A computer's relay record changed, or it stopped listening on
@@ -183,6 +195,8 @@ final class Fleet {
     }
 
     func networkChanged() {
+        // The phone's round trips to relays were for the old network.
+        Task { await RelayProbes.shared.forget() }
         for link in links.values { Task { await link.networkChanged() } }
     }
 
@@ -622,8 +636,9 @@ final class Fleet {
     /// Starts the computer's relay proxy, when it has relays, and adds its
     /// origin to the running link once it listens.
     private func startRelay(_ computer: Computer) {
+        let saved = savedRelays
         guard let relay = computer.relay, proxies[computer.device] == nil,
-              let proxy = try? RelayProxy(open: { try await relay.open() })
+              let proxy = try? RelayProxy(open: { try await relay.open(saved: saved) })
         else { return }
         let device = computer.device
         proxies[device] = proxy
@@ -664,7 +679,11 @@ final class Fleet {
                 if known != nil { onRelay?(device, nil) }
                 return
             }
-            if let known, known.matches(info) { return }
+            if let known, known.matches(info) {
+                // Same keys; only the computer's nearest relays may differ.
+                if let refreshed = known.refreshed(with: info) { onRelay?(device, refreshed) }
+                return
+            }
             guard let record = RelayRecord.make(from: info), let keys = record.enrollment else { return }
             do {
                 try await call(device) { client, token in try await client.enrollRelay(keys, bearer: token) }

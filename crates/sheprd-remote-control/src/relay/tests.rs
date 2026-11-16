@@ -24,6 +24,8 @@ use tokio::{
     net::TcpListener,
 };
 
+mod nearest;
+
 /// A relay serving QUIC and HTTP on loopback ports: its HTTP address, and
 /// its QUIC address and pin.
 async fn relay() -> (SocketAddr, SocketAddr, sheprd_relay::pin::Pin) {
@@ -94,6 +96,8 @@ async fn listening(relays: &Relays) {
             .values()
             .any(|state| *state == Status::Listening)
         {
+            // A listening relay's round trip is known at once.
+            assert!(!relays.info().rtt_ms.is_empty());
             return;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;

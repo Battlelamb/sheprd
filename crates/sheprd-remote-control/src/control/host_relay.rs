@@ -74,8 +74,8 @@ pub struct Info {
     pub identity: String,
     /// What the user calls each relay, by endpoint as `relays` writes it;
     /// unlabelled relays are left out, and the field with them. A carried
-    /// answer leaves them all out: the phone learns them from
-    /// `GET /api/relay` once it reaches the computer.
+    /// answer leaves them all out: the phone reads them from
+    /// `GET /api/relay` once it reaches the computer, through the relay too.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub labels: BTreeMap<String, RelayLabel>,
     /// The relays the computer listens on, nearest first; those not

@@ -25,6 +25,7 @@
 //! checks it again before keeping it.
 
 use super::{DeviceId, hosts::HostId};
+use crate::relay_label::RelayLabel;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
 use serde::{Deserialize, Serialize};
@@ -71,6 +72,12 @@ pub struct Keys {
 pub struct Info {
     /// The tunnel identity to pin: X25519 then ML-KEM-768, base64url.
     pub identity: String,
+    /// What the user calls each relay, by endpoint as `relays` writes it;
+    /// unlabelled relays are left out, and the field with them. A carried
+    /// answer leaves them all out: the phone learns them from
+    /// `GET /api/relay` once it reaches the computer.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub labels: BTreeMap<String, RelayLabel>,
     /// The relays the computer listens on, nearest first; those not
     /// listening now keep their configured order, after the rest.
     pub relays: Vec<String>,
@@ -93,6 +100,21 @@ impl Info {
             && self.relays.iter().all(|relay| field(relay))
             && self.rtt_ms.len() <= MAX_RELAYS
             && self.rtt_ms.keys().all(|relay| field(relay))
+            && self.labels.len() <= MAX_RELAYS
+            && self
+                .labels
+                .iter()
+                .all(|(relay, label)| field(relay) && label.check().is_ok())
+    }
+
+    /// The info without labels, as nearby offers and carried answers send
+    /// it.
+    #[must_use]
+    pub fn without_labels(self) -> Self {
+        Self {
+            labels: BTreeMap::new(),
+            ..self
+        }
     }
 }
 

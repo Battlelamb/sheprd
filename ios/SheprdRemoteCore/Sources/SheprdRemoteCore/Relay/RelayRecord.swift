@@ -20,10 +20,13 @@ public struct RelayRecord: Codable, Hashable, Sendable {
     public var dialKey: Data
     /// This phone's tunnel static key for the computer (X25519, raw).
     public var tunnelKey: Data
+    /// What the computer's owner calls each relay, keyed by the endpoint's
+    /// `description`; refreshed whenever the computer says, without new keys.
+    public var labels: [String: RelayLabel]
 
     public init(
         relays: [RelayEndpoint], route: Data, identity: Data, dialKey: Data, tunnelKey: Data,
-        listenerRtt: [String: Int]? = nil
+        listenerRtt: [String: Int]? = nil, labels: [String: RelayLabel] = [:]
     ) {
         self.relays = relays
         self.listenerRtt = listenerRtt
@@ -31,6 +34,21 @@ public struct RelayRecord: Codable, Hashable, Sendable {
         self.identity = identity
         self.dialKey = dialKey
         self.tunnelKey = tunnelKey
+        self.labels = labels
+    }
+
+    enum CodingKeys: String, CodingKey { case relays, listenerRtt, route, identity, dialKey, tunnelKey, labels }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        relays = try c.decode([RelayEndpoint].self, forKey: .relays)
+        listenerRtt = try c.decodeIfPresent([String: Int].self, forKey: .listenerRtt)
+        route = try c.decode(Data.self, forKey: .route)
+        identity = try c.decode(Data.self, forKey: .identity)
+        dialKey = try c.decode(Data.self, forKey: .dialKey)
+        tunnelKey = try c.decode(Data.self, forKey: .tunnelKey)
+        // Records saved before relays had labels have none.
+        labels = try c.decodeIfPresent([String: RelayLabel].self, forKey: .labels) ?? [:]
     }
 
     /// A record for what `info` says, with fresh keys for this phone; nil
@@ -54,20 +72,22 @@ public struct RelayRecord: Codable, Hashable, Sendable {
             identity: identity,
             dialKey: keys.dialKey,
             tunnelKey: keys.tunnelKey,
-            listenerRtt: info.rttMs
+            listenerRtt: info.rttMs,
+            labels: labels(from: info)
         )
     }
 
-    /// This record with the order and round trips `info` reports now, keys
-    /// kept, for when `matches(info)`; nil when nothing changed enough to
-    /// save: the order is the same and no round trip moved by more than
-    /// 20 ms and a quarter, so jitter does not rewrite the Keychain on
-    /// every connection.
+    /// This record with the order, round trips, and labels `info` reports
+    /// now, keys kept, for when `matches(info)`; nil when nothing changed
+    /// enough to save: the order and labels are the same and no round trip
+    /// moved by more than 20 ms and a quarter, so jitter does not rewrite
+    /// the Keychain on every connection.
     public func refreshed(with info: API.RelayInfo) -> RelayRecord? {
         var record = self
         record.relays = info.relays.compactMap(RelayEndpoint.init)
         record.listenerRtt = info.rttMs
-        guard record.relays == relays else { return record }
+        record.labels = Self.labels(from: info)
+        guard record.relays == relays, record.labels == labels else { return record }
         let old = listenerRtt ?? [:]
         let new = info.rttMs ?? [:]
         guard Set(old.keys) == Set(new.keys) else { return record }
@@ -99,7 +119,8 @@ public struct RelayRecord: Codable, Hashable, Sendable {
     }
 
     /// Whether `info` still names the same computer and relays, so the
-    /// keys already sent hold.
+    /// keys already sent hold. Order, round trips, and labels do not count
+    /// (`refreshed(with:)`).
     public func matches(_ info: API.RelayInfo) -> Bool {
         Base64URL.decode(info.route) == route
             && Base64URL.decode(info.identity) == identity
@@ -170,17 +191,24 @@ extension API {
         /// The computer's round trip to each relay it listens on, in
         /// milliseconds; nil from an older daemon.
         public let rttMs: [String: Int]?
+        /// What the owner calls each relay, by endpoint; nil from a daemon
+        /// without labels, or none to give.
+        public let labels: [String: RelayLabel]?
 
         enum CodingKeys: String, CodingKey {
-            case identity, relays, route
+            case identity, relays, route, labels
             case rttMs = "rtt_ms"
         }
 
-        public init(identity: String, relays: [String], route: String, rttMs: [String: Int]? = nil) {
+        public init(
+            identity: String, relays: [String], route: String,
+            rttMs: [String: Int]? = nil, labels: [String: RelayLabel]? = nil
+        ) {
             self.identity = identity
             self.relays = relays
             self.route = route
             self.rttMs = rttMs
+            self.labels = labels
         }
     }
 

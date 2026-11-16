@@ -4,6 +4,11 @@
 use super::*;
 use std::collections::BTreeMap;
 
+/// The relays to listen on, unlabelled.
+fn listened(endpoints: &[Endpoint]) -> Vec<Relay> {
+    endpoints.iter().cloned().map(Relay::from).collect()
+}
+
 fn endpoints(names: &[&str]) -> Vec<Endpoint> {
     names
         .iter()
@@ -63,7 +68,7 @@ fn a_sub_millisecond_round_trip_reads_as_one() {
 fn a_relay_that_stopped_listening_is_no_longer_offered_as_nearest() {
     let dir = tempfile::tempdir().unwrap();
     let all = endpoints(&["https://far.example.org", "https://near.example.org"]);
-    let relays = Relays::load(dir.path(), all.clone()).unwrap();
+    let relays = Relays::load(dir.path(), listened(&all)).unwrap();
     relays.set_rtt(&all[0], Some(Duration::from_millis(200)));
     relays.set_rtt(&all[1], Some(Duration::from_millis(20)));
     assert_eq!(relays.info().unwrap().relays[0], "https://near.example.org");
@@ -81,7 +86,8 @@ fn a_relay_that_stopped_listening_is_no_longer_offered_as_nearest() {
 #[test]
 fn a_computer_listening_nowhere_sends_no_round_trips() {
     let dir = tempfile::tempdir().unwrap();
-    let relays = Relays::load(dir.path(), endpoints(&["https://a.example.org"])).unwrap();
+    let relays =
+        Relays::load(dir.path(), listened(&endpoints(&["https://a.example.org"]))).unwrap();
     let json = serde_json::to_value(relays.info().unwrap()).unwrap();
     assert!(json.get("rtt_ms").is_none());
 }
@@ -90,7 +96,7 @@ fn a_computer_listening_nowhere_sends_no_round_trips() {
 fn a_nearby_offer_carries_the_round_trips_measured_since_start() {
     let dir = tempfile::tempdir().unwrap();
     let all = endpoints(&["https://far.example.org", "https://near.example.org"]);
-    let relays = Relays::load(dir.path(), all.clone()).unwrap();
+    let relays = Relays::load(dir.path(), listened(&all)).unwrap();
     let mut auth = crate::auth::Auth::load(dir.path(), crate::auth::Limits::default()).unwrap();
     // At start nothing listens yet.
     refresh_offer(Some(&relays), &mut auth);
@@ -110,7 +116,7 @@ fn a_nearby_offer_carries_the_round_trips_measured_since_start() {
 fn status_reports_a_listening_relays_round_trip() {
     let dir = tempfile::tempdir().unwrap();
     let all = endpoints(&["https://a.example.org", "https://b.example.org"]);
-    let relays = Relays::load(dir.path(), all.clone()).unwrap();
+    let relays = Relays::load(dir.path(), listened(&all)).unwrap();
     // Only a running listener's state is recorded.
     for endpoint in &all {
         relays
@@ -123,17 +129,17 @@ fn status_reports_a_listening_relays_round_trip() {
     relays.set_status(&all[0], Status::Listening { rtt_ms: None });
     relays.set_status(&all[1], Status::Connecting);
     assert_eq!(
-        relays.status()["https://a.example.org"],
+        relays.status()["https://a.example.org"].state,
         Status::Listening { rtt_ms: None }
     );
     relays.set_rtt(&all[0], Some(Duration::from_millis(42)));
     relays.set_rtt(&all[1], Some(Duration::from_millis(7)));
     let status = relays.status();
     assert_eq!(
-        status["https://a.example.org"],
+        status["https://a.example.org"].state,
         Status::Listening { rtt_ms: Some(42) }
     );
-    assert_eq!(status["https://b.example.org"], Status::Connecting);
+    assert_eq!(status["https://b.example.org"].state, Status::Connecting);
 }
 
 /// The state as an app from before round trips declares it.

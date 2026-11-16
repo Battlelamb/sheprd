@@ -98,6 +98,7 @@ fn signed(key: &SigningKey, device: &DeviceId, keys: Keys, signed_ms: u64) -> Re
 fn info() -> Info {
     Info {
         identity: "identity".into(),
+        labels: Default::default(),
         relays: vec!["https://relay.example.org".into()],
         route: "route".into(),
         rtt_ms: Default::default(),

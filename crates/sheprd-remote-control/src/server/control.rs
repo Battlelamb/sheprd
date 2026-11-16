@@ -359,7 +359,8 @@ fn relay_enroll(state: &State, request: &control::host_relay::Request, now: u64)
     let mut outcome = match &state.relay {
         Some(relay) => {
             relay.devices_changed();
-            match relay.info().filter(Info::valid) {
+            // Labels are not signed; the phone reads them once it gets through.
+            match relay.offer().filter(Info::valid) {
                 Some(info) => Outcome::Relayed {
                     info,
                     proof: unsigned,

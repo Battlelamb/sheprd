@@ -29,7 +29,7 @@ mod relays;
 
 pub(in crate::settings_window) use relays::Offered;
 #[cfg(test)]
-pub(in crate::settings_window) use relays::{Standing, public_title};
+pub(in crate::settings_window) use relays::{Standing, public_title, relay_line};
 
 /// The page's state while it shows.
 #[derive(Default)]

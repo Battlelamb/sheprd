@@ -67,9 +67,13 @@ struct ComputerScreen: View {
                         Label("Connected through a relay", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                     }
-                    ForEach(computer.relayHosts, id: \.self) { host in
-                        LabeledContent(Computer.relayLabel) {
-                            Text(host).textSelection(.enabled)
+                    if let record = computer.relay {
+                        // By position: a list written by hand may name a
+                        // relay twice.
+                        ForEach(Array(record.relays.enumerated()), id: \.offset) { _, relay in
+                            RelayLabelView(relay: relay, label: record.label(for: relay))
+                                .padding(.vertical, 2)
+                                .accessibilityElement(children: .combine)
                         }
                     }
                 } header: {

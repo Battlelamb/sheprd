@@ -33,6 +33,7 @@ fn proof() -> Proof {
 fn info() -> Info {
     Info {
         identity: "identity".into(),
+        labels: Default::default(),
         relays: vec!["https://relay.example.org".into()],
         route: "route".into(),
         rtt_ms: Default::default(),
@@ -123,6 +124,39 @@ fn relay_info_is_bounded() {
     let mut unsigned = proof();
     unsigned.signature.clear();
     assert!(!Outcome::Kept { proof: unsigned }.valid());
+}
+
+#[test]
+fn labels_are_bounded_and_left_out_of_carried_answers() {
+    use crate::relay_label::RelayLabel;
+    let mut labelled = info();
+    labelled.labels.insert(
+        "https://relay.example.org".into(),
+        RelayLabel {
+            name: Some("Home".into()),
+            ..RelayLabel::default()
+        },
+    );
+    assert!(labelled.valid());
+    let json = serde_json::to_value(&labelled).unwrap();
+    assert_eq!(json["labels"]["https://relay.example.org"]["name"], "Home");
+    // Unsigned, so a carried answer sends none.
+    assert_eq!(labelled.clone().without_labels(), info());
+    assert!(
+        serde_json::to_value(info())
+            .unwrap()
+            .get("labels")
+            .is_none()
+    );
+    let mut broken = labelled;
+    broken.labels.insert(
+        "https://other.example.org".into(),
+        RelayLabel {
+            name: Some("line\nbreak".into()),
+            ..RelayLabel::default()
+        },
+    );
+    assert!(!broken.valid());
 }
 
 #[test]
@@ -280,6 +314,7 @@ fn the_answer_message_is_the_request_then_what_it_claims() {
     let relayed = Outcome::Relayed {
         info: Info {
             identity: "ID".into(),
+            labels: Default::default(),
             relays: vec!["https://a".into(), "https://b".into()],
             route: "RT".into(),
             rtt_ms: Default::default(),

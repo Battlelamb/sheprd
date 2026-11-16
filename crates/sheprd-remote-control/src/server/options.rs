@@ -1,6 +1,6 @@
 //! Command-line options, parsed from OS strings before any runtime starts.
 
-use crate::{app::config::ActivityDetail, push::Privacy};
+use crate::{app::config::ActivityDetail, push::Privacy, relay_label::RelayLabel};
 use std::{
     ffi::OsString,
     net::{IpAddr, Ipv6Addr},
@@ -46,11 +46,27 @@ pub struct Options {
     pub privacy: Privacy,
     /// The relays to listen on, so paired phones reach this computer from
     /// any network; none when empty.
-    pub relays: Vec<sheprd_relay::Endpoint>,
+    pub relays: Vec<Relay>,
     pub state_dir: PathBuf,
     /// The saved WSL distributions, as Sheprd resolved them; `None` resolves
     /// them from this process's environment.
     pub wsl_catalog: Option<PathBuf>,
+}
+
+/// A relay to listen on, and what the user calls it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Relay {
+    pub endpoint: sheprd_relay::Endpoint,
+    pub label: RelayLabel,
+}
+
+impl From<sheprd_relay::Endpoint> for Relay {
+    fn from(endpoint: sheprd_relay::Endpoint) -> Self {
+        Self {
+            endpoint,
+            label: RelayLabel::default(),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error, Eq, PartialEq)]
@@ -62,8 +78,16 @@ pub enum ParseError {
     CorePair,
     #[error("{0} needs a value")]
     Missing(&'static str),
+    #[error("{option} names no relay: put it after a --relay")]
+    NoRelay { option: &'static str },
     #[error("--state-dir is required")]
     NoStateDir,
+    #[error("--relay {relay} has a label it cannot use")]
+    RelayLabel {
+        relay: String,
+        #[source]
+        source: crate::relay_label::Error,
+    },
     #[error("unknown option {0}")]
     Unknown(String),
     #[error("{option} has an invalid value")]
@@ -146,6 +170,10 @@ Options:
                            (default 30)
   --relay URL              Listen on this relay too, so paired phones reach
                            this computer from any network; repeatable
+  --relay-name NAME        What the --relay before it is called, such as fra3
+  --relay-description TEXT A line about the --relay before it, such as
+                           not for public use
+  --relay-tag TAG          A tag for the --relay before it; repeatable
   --no-bonjour             Do not advertise over Bonjour; phones then pair
                            by QR code only (on macOS, Sheprd advertises
                            while its pairing dialog is open instead)
@@ -280,14 +308,36 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
                 let endpoint = text(value("--relay")?, "--relay")?;
                 relays.push(
                     sheprd_relay::Endpoint::parse(&endpoint)
-                        .map_err(|_| ParseError::Value { option: "--relay" })?,
+                        .map_err(|_| ParseError::Value { option: "--relay" })?
+                        .into(),
                 );
+            }
+            "--relay-name" => {
+                let name = text(value("--relay-name")?, "--relay-name")?;
+                last_label(&mut relays, "--relay-name")?.name = Some(name);
+            }
+            "--relay-description" => {
+                let description = text(value("--relay-description")?, "--relay-description")?;
+                last_label(&mut relays, "--relay-description")?.description = Some(description);
+            }
+            "--relay-tag" => {
+                let tag = text(value("--relay-tag")?, "--relay-tag")?;
+                last_label(&mut relays, "--relay-tag")?.tags.push(tag);
             }
             "--no-bonjour" => bonjour = false,
             "--github-cli" => github_cli = true,
             "-h" | "--help" => return Ok(Invocation::Help),
             _ => return Err(ParseError::Unknown(name)),
         }
+    }
+    for relay in &relays {
+        relay
+            .label
+            .check()
+            .map_err(|source| ParseError::RelayLabel {
+                relay: relay.endpoint.to_string(),
+                source,
+            })?;
     }
     let certificate = match (cert, key) {
         (None, None) => Certificate::Own,
@@ -320,6 +370,17 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
         state_dir: state_dir.ok_or(ParseError::NoStateDir)?,
         wsl_catalog,
     })))
+}
+
+/// The label of the `--relay` that `option` follows.
+fn last_label<'a>(
+    relays: &'a mut [Relay],
+    option: &'static str,
+) -> Result<&'a mut RelayLabel, ParseError> {
+    relays
+        .last_mut()
+        .map(|relay| &mut relay.label)
+        .ok_or(ParseError::NoRelay { option })
 }
 
 /// `enroll [--state-dir DIR]` and `revoke --device ID [--state-dir DIR]`.

@@ -32,6 +32,9 @@ pub(crate) use error::Result;
 
 use crate::control;
 pub(crate) use crate::control::RelayState as Status;
+use crate::control::RelayStatus;
+use crate::relay_label::RelayLabel;
+use crate::server::Relay;
 use sheprd_relay::Endpoint;
 use sheprd_relay::wire::Key;
 use std::{
@@ -75,7 +78,7 @@ pub(crate) fn open_pairing(state: &crate::web::State) {
 /// listened: called before each offer is sealed.
 pub(crate) fn refresh_offer(relays: Option<&Relays>, auth: &mut crate::auth::Auth) {
     if let Some(relays) = relays {
-        auth.set_relay_offer(relays.info());
+        auth.set_relay_offer(relays.offer());
     }
 }
 
@@ -88,6 +91,9 @@ pub(crate) struct Relays {
     /// The relays `[remote] relays` names, listened on first.
     configured: Vec<Endpoint>,
     keys: keys::Keys,
+    /// What `[remote] relays` calls each relay, by endpoint; unlabelled
+    /// relays are left out.
+    labels: BTreeMap<String, RelayLabel>,
     /// The open pairing dial, if any, and a revision listeners follow.
     pairing: Mutex<Option<Pairing>>,
     pairing_changed: watch::Sender<u64>,
@@ -122,12 +128,18 @@ pub(crate) use crate::control::host_relay::Info;
 impl Relays {
     /// Loads or makes the relay keys in `state_dir`, and the relays other
     /// computers shared with it. Blocking.
-    pub(crate) fn load(state_dir: &Path, configured: Vec<Endpoint>) -> Result<Self> {
+    pub(crate) fn load(state_dir: &Path, relays: Vec<Relay>) -> Result<Self> {
         let shared_file = shared::file(state_dir);
+        let labels = relays
+            .iter()
+            .filter(|relay| !relay.label.is_empty())
+            .map(|relay| (relay.endpoint.to_string(), relay.label.clone()))
+            .collect();
         Ok(Self {
             changed: watch::Sender::new(0),
-            configured,
+            configured: relays.into_iter().map(|relay| relay.endpoint).collect(),
             keys: keys::Keys::load_or_create(state_dir)?,
+            labels,
             pairing: Mutex::default(),
             pairing_changed: watch::Sender::new(0),
             rtt: Mutex::default(),
@@ -151,6 +163,13 @@ impl Relays {
         all
     }
 
+    /// What nearby offers carry: [`Self::info`] without labels, as their
+    /// sealed bytes cross Bluetooth and match shared vectors; the phone
+    /// learns the labels from `GET /api/relay` once paired.
+    pub(crate) fn offer(&self) -> Option<Info> {
+        self.info().map(Info::without_labels)
+    }
+
     /// What `GET /api/relay` answers, while this computer listens on any
     /// relay.
     pub(crate) fn info(&self) -> Option<Info> {
@@ -162,6 +181,7 @@ impl Relays {
         let rtt = self.rtt.lock().unwrap_or_else(PoisonError::into_inner);
         Some(Info {
             identity: URL_SAFE_NO_PAD.encode(self.keys.tunnel.identity().to_bytes()),
+            labels: self.labels.clone(),
             relays: nearest::first(&endpoints, &rtt),
             route: self.keys.route().to_string(),
             rtt_ms: nearest::millis(&rtt),
@@ -226,20 +246,26 @@ impl Relays {
         self.changed.send_modify(|revision| *revision += 1);
     }
 
-    /// Each relay's state, with the latest round trip of those listening.
-    pub(crate) fn status(&self) -> BTreeMap<String, Status> {
+    /// Each relay's state, with the latest round trip of those listening,
+    /// and its label.
+    pub(crate) fn status(&self) -> BTreeMap<String, RelayStatus> {
         let rtt = nearest::millis(&self.rtt.lock().unwrap_or_else(PoisonError::into_inner));
-        let mut status = self
-            .status
+        self.status
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        for (endpoint, state) in &mut status {
-            if let Status::Listening { rtt_ms } = state {
-                *rtt_ms = rtt.get(endpoint).copied();
-            }
-        }
-        status
+            .iter()
+            .map(|(endpoint, state)| {
+                let mut state = state.clone();
+                if let Status::Listening { rtt_ms } = &mut state {
+                    *rtt_ms = rtt.get(endpoint).copied();
+                }
+                let status = RelayStatus {
+                    label: self.labels.get(endpoint).cloned().unwrap_or_default(),
+                    state,
+                };
+                (endpoint.clone(), status)
+            })
+            .collect()
     }
 
     /// Records `endpoint`'s round trip while it listens; `None` forgets it,

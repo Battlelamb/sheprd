@@ -24,10 +24,13 @@ struct RelaysView: View {
                 }
                 ForEach(relays, id: \.self) { relay in
                     let naming = model.computers(naming: relay)
-                    RelayRow(relay: relay, reach: reach[relay], naming: naming.map(model.displayName))
+                    // What a computer naming it calls it, in `[remote] relays`.
+                    let label = naming.lazy.compactMap { $0.relay?.label(for: relay) }.first
+                    RelayRow(relay: relay, label: label, reach: reach[relay], naming: naming.map(model.displayName))
                         // A relay a computer names comes back with it, so
-                        // only the others can be removed.
-                        .deleteDisabled(!naming.isEmpty)
+                        // removing one only stops trying it for the others,
+                        // which only one you added is.
+                        .deleteDisabled(!naming.isEmpty && !model.savedRelays.typed.contains(relay))
                 }
                 .onDelete { offsets in
                     for relay in offsets.map({ relays[$0] }) { model.removeRelay(relay) }
@@ -36,7 +39,7 @@ struct RelaysView: View {
                 Text("Relays")
             } footer: {
                 if !relays.isEmpty {
-                    Text("Each computer is tried on the relays it named, then on the others here. A relay sees only encrypted traffic.")
+                    Text("Each computer is tried on the relays it named, then on the ones you added. A relay sees only encrypted traffic.")
                 }
             }
             Section {
@@ -100,10 +103,12 @@ struct RelaysView: View {
     }
 }
 
-/// One relay: a dot for whether it answers, its address, then that in
-/// words and which computers named it.
+/// One relay: a dot for whether it answers, its name or address, then that
+/// in words and which computers named it, and its label's description and
+/// tags.
 private struct RelayRow: View {
     var relay: RelayEndpoint
+    var label: RelayLabel?
     var reach: RelayReach?
     var naming: [String]
 
@@ -113,10 +118,7 @@ private struct RelayRow: View {
                 .font(.system(size: 9))
                 .foregroundStyle(color)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(relay.description).lineLimit(1).truncationMode(.middle)
-                Text(line).font(.caption).foregroundStyle(.secondary)
-            }
+            RelayLabelView(relay: relay, label: label, status: line)
         }
         .accessibilityElement(children: .combine)
     }

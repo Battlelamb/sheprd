@@ -4,7 +4,7 @@ use super::*;
 use sheprd_chat_protocol::{Question, QuestionOption};
 
 fn ask_question(harness: &mut Harness, request: i64, multiple: bool) -> PermissionId {
-    harness.input(Input::Agent(Inbound::Request {
+    harness.input(Input::Agent(HarnessId::default(), Inbound::Request {
         id: wire::RequestId::Number(request),
         method: "session/request_permission".to_owned(),
         params: json!({"sessionId": "s1",

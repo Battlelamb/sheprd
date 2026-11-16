@@ -92,12 +92,14 @@ and nothing goes through your phone.
      opens a chat, as tapping a Live Activity does.
    - `-openTerm PANE` opens a terminal; `-type TEXT` then types into it
      (a newline presses Enter).
-   - `-homeSearch TEXT` types into Home's search.
+   - `-homeSearch TEXT` types into Home's search, and `-pullRequestSearch TEXT`
+     into the Pull Requests tab's. With `-gitHubDemo signedIn`,
+     `-gitHubDemoLoading N` holds the Pull Requests tab loading N seconds.
    - `-homeJump N` scrolls Home to the bottom, then jumps to section N as
      its edge index does; `-homeJumpRow YES` jumps to that section's first
      row, as its first dot does, and `-homeJumpSweep YES` first crosses every
      entry from the bottom up, as a drag along the index does.
-   - `-tab workspaces|settings` opens that tab, and `-openWorkspace ID`
+   - `-tab workspaces|pullRequests|settings` opens that tab, and `-openWorkspace ID`
      opens that workspace's screen in it.
    - `-otherAgents YES` unfolds a workspace's other agents.
    - With `-openWorkspace`, `-openChanges YES` opens its changes; then

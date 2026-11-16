@@ -115,6 +115,10 @@ pub(crate) async fn follow(state: Shared) {
                 .layout()
                 .workspaces
                 .iter()
+                // A WSL folder is not this computer's to read with its own
+                // Git; those workspaces name no repository, and the phone
+                // asks the computer about them instead.
+                .filter(|workspace| !crate::hub::in_wsl(&workspace.id))
                 .map(|workspace| workspace.cwd.clone())
                 .filter(|cwd| !cwd.is_empty() && cwd.len() <= 4096)
                 .collect();

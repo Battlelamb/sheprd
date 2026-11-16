@@ -499,8 +499,9 @@ impl Home {
                     }
                 }),
                 unopened_commits: unopened_commits(pull_requests, &layout.boot, workspace),
-                github: checkouts
-                    .get(&workspace.cwd)
+                github: (!hub::in_wsl(&workspace.id))
+                    .then(|| checkouts.get(&workspace.cwd))
+                    .flatten()
                     .and_then(|checkout| WorkspaceGitHub::of(checkout, recognized)),
                 chats: workspace
                     .chats

@@ -1,3 +1,4 @@
+#[cfg(unix)]
 use super::*;
 use crate::checkout::branch_of;
 

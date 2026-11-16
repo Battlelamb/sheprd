@@ -318,6 +318,7 @@ pub(crate) fn run_owned(
     };
     let report = reporter.as_ref().map(Reporter::handle);
     let mut session_keeper = keeper.clone();
+    let switch_keeper = keeper.clone();
     let adapter = adapter(&options);
 
     let harness = match &options.agent {
@@ -382,8 +383,16 @@ pub(crate) fn run_owned(
                     Flow::Continue => {}
                     Flow::Exit => return (expected, current, stopping),
                     Flow::Launch { agent, harness } => {
+                        let held = switch_keeper
+                            .as_ref()
+                            .map_or(Ok(()), |keeper| keeper.hold_for_switch());
+                        // The session left the old agent either way.
                         if let Some(old) = current.take() {
                             stopping.extend(stop_later(old));
+                        }
+                        if let Err(error) = held {
+                            session.launch_failed(&error);
+                            continue;
                         }
                         let next = builtin(agent, None, adapter, &cwd);
                         match start(next.start, &cwd, &launcher, harness) {

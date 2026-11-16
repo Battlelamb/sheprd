@@ -52,3 +52,31 @@ fn a_switch_whose_agent_cannot_be_recorded_forgets_the_one_before() {
     // switched-away agent's end for this one's.
     assert_eq!(recorded_pid(&keeper), None);
 }
+
+#[test]
+fn a_core_chat_whose_recovery_cannot_be_held_refuses_to_switch() {
+    let dir = tempfile::tempdir().unwrap();
+    let endpoint = ENDPOINT.parse().unwrap();
+    // No core listens on the keeper's socket.
+    let keeper = core(dir.path(), &endpoint);
+    assert!(matches!(
+        keeper.hold_for_switch(),
+        Err(crate::Error::RecoveryHold(_))
+    ));
+}
+
+#[test]
+fn a_herdr_1_chat_has_no_core_recovery_to_hold() {
+    let dir = tempfile::tempdir().unwrap();
+    let endpoint = ENDPOINT.parse().unwrap();
+    let keeper = Keeper::new(
+        Some(dir.path().to_owned()),
+        Some(&target()),
+        Some(&endpoint),
+        &builtin(Vec::new()),
+        false,
+        &abs("/work"),
+    )
+    .unwrap();
+    keeper.hold_for_switch().unwrap();
+}

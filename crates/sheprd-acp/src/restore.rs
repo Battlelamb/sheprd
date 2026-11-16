@@ -129,17 +129,21 @@ impl Keeper {
     /// The chat switched to `agent` before its first prompt; the session
     /// that opens next is that agent's. The record of the agent before goes
     /// at once: should the new one fail to start, a restore must not bring
-    /// back the agent the user switched away from. A core chat's automatic
-    /// recovery is fenced too, before the old agent stops, so a chat program
-    /// lost mid-switch is not relaunched with the old agent and its session.
+    /// back the agent the user switched away from.
     pub(crate) fn switched(&mut self, agent: Agent) {
         restore::remove(&self.dir, &self.endpoint);
-        if self.core
-            && let Err(error) = core::switching(self)
-        {
-            eprintln!("sheprd-acp: could not hold automatic chat recovery: {error:#}");
-        }
         self.agent = agent;
+    }
+
+    /// Holds a core chat's automatic recovery before a switch stops the
+    /// agent its record names, so a chat program lost mid-switch is never
+    /// relaunched with that agent and its session beside the new one. A
+    /// switch that cannot hold it must start no other agent.
+    pub(crate) fn hold_for_switch(&self) -> crate::Result<()> {
+        if !self.core {
+            return Ok(());
+        }
+        core::switching(self).map_err(crate::Error::RecoveryHold)
     }
 
     /// The agent a switch asked for started as `pid`. A core chat records it

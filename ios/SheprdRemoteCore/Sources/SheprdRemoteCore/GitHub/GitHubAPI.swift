@@ -94,6 +94,11 @@ public actor GitHubAPI {
         return CheckLog.excerpt(String(decoding: log.body, as: UTF8.self))
     }
 
+    /// Whether GitHub asked to wait before `host` is read again.
+    func isPaused(_ host: GitHubHost) -> Bool {
+        paused[host].map { $0 > now() } ?? false
+    }
+
     /// Sends `request` unless `host` is paused, and pauses it when GitHub
     /// says to wait.
     func send(_ request: URLRequest, host: GitHubHost, limit: BodyLimit) async throws -> GitHubResponse {

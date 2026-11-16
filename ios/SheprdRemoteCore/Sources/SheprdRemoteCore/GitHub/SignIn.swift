@@ -15,15 +15,19 @@ public enum GitHubSignInState: Equatable, Sendable {
 /// The phone's own sign-in to github.com through the device flow, and the
 /// token reads use with it. It renews the pair shortly before expiry or
 /// when GitHub refuses the access token, one renewal at a time, and keeps
-/// the rotated pair in the Keychain before anything uses it: GitHub
-/// invalidates the old pair as it answers, as `sheprd-github`'s `token.rs`
-/// notes. A refresh token GitHub no longer takes signs out.
+/// the rotated pair in the Keychain. GitHub invalidates the old pair as it
+/// answers, as `sheprd-github`'s `token.rs` notes, so a rotated pair the
+/// Keychain refuses is still the one used, held in memory and saved again
+/// on the next read or renewal. A refresh token GitHub no longer takes
+/// signs out.
 public actor GitHubSignIn {
     private let flow: GitHubDeviceFlow
     private let store: GitHubSignInStore
     private var loaded = false
     private var loadFailure: GitHubSignInError?
     private var held: GitHubSignInCredential?
+    /// `held` is a rotated pair the Keychain has not taken yet.
+    private var unsaved = false
     private var access = GitHubAppAccess.unknown
     private var current = GitHubSignInState.idle
     /// Bumped by each start, cancel, and sign-out, so work they superseded
@@ -115,6 +119,7 @@ public actor GitHubSignIn {
         generation += 1
         renewal = nil
         held = nil
+        unsaved = false
         access = .unknown
         do {
             try store.delete()
@@ -127,10 +132,12 @@ public actor GitHubSignIn {
     }
 
     /// The access token for a read, renewed first when it nears its
-    /// expiry. When renewing fails for a reason other than GitHub refusing
-    /// the refresh token, a token not yet expired is still used.
+    /// expiry. When renewing fails before GitHub rotated the pair, for a
+    /// reason other than GitHub refusing the refresh token, a token not yet
+    /// expired is still used.
     public func token() async throws -> GitHubToken {
         let credential = try credential()
+        saveUnsaved()
         let now = flow.now()
         guard credential.renewalDue(at: now) else { return credential.accessToken }
         do {
@@ -178,6 +185,7 @@ public actor GitHubSignIn {
         } catch GitHubSignInError.refreshRejected {
             if mine == generation {
                 held = nil
+                unsaved = false
                 access = .unknown
                 try? store.delete()
                 set(.failed(.refreshRejected))
@@ -187,9 +195,24 @@ public actor GitHubSignIn {
         // Signed out, or signed in anew, while renewing: this pair is not
         // the one held any more.
         guard mine == generation else { throw GitHubSignInError.signedOut }
-        try store.save(renewed)
+        // The old pair is gone on GitHub now: the new one is used even when
+        // the Keychain refuses it, and saved again later.
         held = renewed
+        unsaved = true
+        saveUnsaved()
         return renewed
+    }
+
+    /// Saves a rotated pair the Keychain refused before; it stays held,
+    /// for the next try, when the Keychain refuses it again.
+    private func saveUnsaved() {
+        guard unsaved, let held else { return }
+        do {
+            try store.save(held)
+            unsaved = false
+        } catch {
+            // Kept in memory: this phone stays signed in until it quits.
+        }
     }
 
     /// Polls for `code`, reads the account, and keeps the sign-in.
@@ -200,6 +223,7 @@ public actor GitHubSignIn {
             guard mine == generation else { return }
             try store.save(credential)
             held = credential
+            unsaved = false
             access = .unknown
             polling = nil
             set(.signedIn(login: credential.login, access: .unknown))

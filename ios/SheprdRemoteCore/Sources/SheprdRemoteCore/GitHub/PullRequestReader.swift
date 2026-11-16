@@ -113,17 +113,24 @@ public actor PullRequestReader {
         }
         var found: [String: GitHubPullRequest?] = [:]
         for (repository, members) in groups {
-            // A branch's head owner, for branches several forks share.
-            let owners = Dictionary(members.map { ($0.head.branch, $0.head.owner) }) { first, _ in first }
-            let oids = Dictionary(members.compactMap { member in member.oid.map { (member.head.branch, $0) } }) { first, _ in first }
+            let rounds = HeadRounds(members.map { (owner: $0.head.owner, branch: $0.head.branch, oid: $0.oid) })
             let answers = await attempt(host: repository.host, source: source) { api, token in
-                try await api.pullRequests(
-                    host: repository.host, owner: repository.owner, repo: repository.repo,
-                    branches: members.map(\.head.branch), headOwner: { owners[$0] ?? repository.owner }, headOid: { oids[$0] }, token: token
-                )
+                var answers: [[String: Result<GitHubPullRequest?, GitHubError>]] = []
+                for round in rounds.rounds {
+                    answers.append(try await api.pullRequests(
+                        host: repository.host, owner: repository.owner, repo: repository.repo,
+                        branches: round.branches, headOwner: { round.heads[$0]?.owner ?? repository.owner },
+                        headOid: { round.heads[$0]?.oid }, token: token
+                    ))
+                }
+                return answers
             }
+            guard let answers else { continue }
             for member in members {
-                if case let .success(pullRequest)? = answers?[member.head.branch] { found[member.id] = pullRequest }
+                guard let index = rounds.round(owner: member.head.owner, branch: member.head.branch),
+                      case let .success(pullRequest)? = answers[index][member.head.branch]
+                else { continue }
+                found[member.id] = pullRequest
             }
         }
         return found
@@ -140,7 +147,9 @@ public actor PullRequestReader {
     ) async -> Value? {
         if let ownSignIn, host == Self.signInHost, let value = await own(ownSignIn, read) { return value }
         for _ in 0..<2 {
-            guard !Task.isCancelled,
+            // A host GitHub asked to wait for is not read, nor a lease
+            // fetched for it, until the wait is over.
+            guard !Task.isCancelled, await !api.isPaused(host),
                   let lease = try? await leases.lease(for: host, lenders: source.lenders, fetch: source.fetch)
             else { return nil }
             do {
@@ -177,5 +186,37 @@ public actor PullRequestReader {
             }
         }
         return nil
+    }
+}
+
+/// A repository's heads split into rounds that each name a branch once:
+/// forks pushing the same branch name to their own repositories are
+/// different pull requests, so each is asked with its own head owner.
+/// Usually there is one round.
+struct HeadRounds: Sendable {
+    struct Round: Sendable {
+        var branches: [String] = []
+        var heads: [String: (owner: String, oid: String?)] = [:]
+    }
+
+    private(set) var rounds: [Round] = []
+    /// The round each head is asked in, by lowercased owner and branch.
+    private var index: [String: [String: Int]] = [:]
+
+    init(_ heads: [(owner: String, branch: String, oid: String?)]) {
+        for head in heads {
+            let owner = head.owner.lowercased()
+            guard index[owner]?[head.branch] == nil else { continue }
+            let at = rounds.firstIndex { $0.heads[head.branch] == nil } ?? rounds.count
+            if at == rounds.count { rounds.append(Round()) }
+            rounds[at].branches.append(head.branch)
+            rounds[at].heads[head.branch] = (head.owner, head.oid)
+            index[owner, default: [:]][head.branch] = at
+        }
+    }
+
+    /// The round `owner`'s `branch` is asked in.
+    func round(owner: String, branch: String) -> Int? {
+        index[owner.lowercased()]?[branch]
     }
 }

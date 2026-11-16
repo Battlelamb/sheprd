@@ -21,7 +21,8 @@ struct HomeGitHubTests {
          "github_hosts":[{"host":"github.com","login":"ana"},{"host":"GHE.Example.com","login":"ana-corp"}],
          "workspaces":[
            {"id":"w","label":"w","branch":"feature","cwd":"/w","chats":[],"terminals":[],
-            "github":{"host":"github.com","owner":"acme","repo":"app","branch":"feature","head":"ana:feature"}},
+            "github":{"host":"github.com","owner":"acme","repo":"app","branch":"feature",
+                      "head":"0123456789abcdef0123456789abcdef01234567","head_owner":"ana"}},
            {"id":"d","label":"d","cwd":"/d","chats":[],"terminals":[],
             "github":{"host":"github.com","owner":"acme","repo":"app"}}]}
         """#
@@ -29,7 +30,10 @@ struct HomeGitHubTests {
         #expect(home.github == true)
         #expect(home.githubHosts == [.init(host: "github.com", login: "ana"), .init(host: "GHE.Example.com", login: "ana-corp")])
         let github = try #require(home.workspaces[0].github)
-        #expect(github == .init(host: "github.com", owner: "acme", repo: "app", branch: "feature", head: "ana:feature"))
+        #expect(github == .init(
+            host: "github.com", owner: "acme", repo: "app", branch: "feature",
+            head: "0123456789abcdef0123456789abcdef01234567", headOwner: "ana"
+        ))
         #expect(github.headRef?.owner == "ana")
         #expect(github.headRef?.branch == "feature")
         // A detached HEAD has no branch to look a pull request up by.

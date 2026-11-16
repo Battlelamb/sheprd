@@ -13,13 +13,21 @@ struct PullRequestDetailScreen: View {
     /// Where it lives; nil when the workspace names no GitHub repository.
     let target: PullRequestTarget?
     let summary: PullRequestSummary
-    @State private var reading: PullRequestReading?
+    /// What GitHub answered, stamped with `GitHubDirect.signOuts` when it
+    /// was asked: an answer read before the phone signed out may have used
+    /// that account, and is not shown.
+    @State private var held: (reading: PullRequestReading, signOuts: Int)?
     @State private var tried = false
     /// A link from GitHub's text, waiting for the reader to confirm it.
     @State private var pendingLink: URL?
 
     /// How often the screen reads again while it stays in front.
     static let refresh: Duration = .seconds(60)
+
+    private var reading: PullRequestReading? {
+        guard let held, held.signOuts == GitHubDirect.shared.signOuts else { return nil }
+        return held.reading
+    }
 
     private var page: URL? {
         reading.flatMap { PullRequestLink.https($0.detail.url) } ?? summary.page
@@ -59,10 +67,16 @@ struct PullRequestDetailScreen: View {
             }
         }
         .refreshable { await load() }
+        .onAppear { GitHubDirect.shared.watchSignIn() }
         // Reads on appearing and every minute while in front; leaving the
         // screen or the app cancels the loop, so nothing reads in the
-        // background.
-        .task(id: phase == .active) {
+        // background. Signing out reads again at once, with whatever token
+        // is left.
+        .task(id: Refresh(active: phase == .active, signOuts: GitHubDirect.shared.signOuts)) {
+            if let held, held.signOuts != GitHubDirect.shared.signOuts {
+                self.held = nil
+                tried = false
+            }
             guard phase == .active else { return }
             while !Task.isCancelled {
                 await load()
@@ -88,22 +102,34 @@ struct PullRequestDetailScreen: View {
         }
     }
 
+    private struct Refresh: Equatable {
+        var active: Bool
+        var signOuts: Int
+    }
+
     private func load() async {
+        let signOuts = GitHubDirect.shared.signOuts
         guard let target else {
             tried = true
             return
         }
         #if DEBUG
         if let demo = await PullRequestDemo.reading(target) {
-            reading = demo
+            held = (demo, signOuts)
             tried = true
             return
         }
         #endif
         let read = await GitHubReads.reader.detail(target, source: model.fleet.gitHubLenders)
-        guard !Task.isCancelled else { return }
-        // A failed refresh keeps what was read before.
-        if let read { reading = read }
+        // An answer begun before a sign-out may have used that account.
+        guard !Task.isCancelled, signOuts == GitHubDirect.shared.signOuts else { return }
+        // A failed refresh keeps what was read before, unless that was read
+        // before a sign-out.
+        if let read {
+            held = (read, signOuts)
+        } else if let held, held.signOuts != signOuts {
+            self.held = nil
+        }
         tried = true
     }
 

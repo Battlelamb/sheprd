@@ -35,7 +35,9 @@ final class GitHubDirect {
     @ObservationIgnored private var readingBadges = false
     @ObservationIgnored private var readingLists = false
     /// Bumped when signing out, so reads begun before it keep nothing.
-    @ObservationIgnored private var generation = 0
+    /// Screens holding their own GitHub answers stamp them with it, and
+    /// drop and read again those stamped before a sign-out.
+    private(set) var signOuts = 0
 
     /// How often what is on screen is read again.
     static let refresh: Duration = .seconds(60)
@@ -82,7 +84,7 @@ final class GitHubDirect {
     /// Drops every answer read from GitHub; the next refresh reads again
     /// with whatever token is left.
     func forgetDirectReads() {
-        generation += 1
+        signOuts += 1
         badges = DirectBadges()
         lists = .unread
         Task { await reader.forgetAnswers() }
@@ -93,14 +95,14 @@ final class GitHubDirect {
         guard !readingBadges else { return }
         readingBadges = true
         defer { readingBadges = false }
-        let mine = generation
+        let mine = signOuts
         let (asked, branches) = DirectBadges.requests(workspaces)
         guard !asked.isEmpty else {
             badges = DirectBadges()
             return
         }
         let found = await reader.pullRequests(workspaces: asked, source: source)
-        guard mine == generation, !Task.isCancelled else { return }
+        guard mine == signOuts, !Task.isCancelled else { return }
         let next = DirectBadges.answered(found, branches: branches)
         if next != badges { badges = next }
     }
@@ -110,9 +112,9 @@ final class GitHubDirect {
         guard !readingLists else { return }
         readingLists = true
         defer { readingLists = false }
-        let mine = generation
+        let mine = signOuts
         let read = await reader.pullRequestLists(source: source)
-        guard mine == generation, !Task.isCancelled else { return }
+        guard mine == signOuts, !Task.isCancelled else { return }
         switch read {
         case let .found(found): lists = .read(found)
         case .noAccount: lists = .noAccount

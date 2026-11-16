@@ -13,22 +13,37 @@ private enum Loading<Value> {
 /// what it sends. The one thing it sends back is a prompt, after asking.
 struct ChangesScreen: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var phase
     let key: WorkspaceKey
     @State private var scope = ChangeScope.uncommitted
     @State private var files = Loading<ChangeList>.waiting
-    @State private var checks: PullRequestChecks?
+    @State private var readChecks: PullRequestChecks?
     /// The branch's pull request when GitHub answered: title, state, review.
-    @State private var pullRequest: GitHubPullRequest?
+    @State private var readPullRequest: GitHubPullRequest?
     @State private var checksError: String?
     /// Who answered the checks: GitHub, or the computer when no lease
     /// answered.
-    @State private var checksOrigin: ReadOrigin?
+    @State private var readOrigin: ReadOrigin?
+    /// `GitHubDirect.signOuts` when the checks were asked for: GitHub's
+    /// answer from before a sign-out may have used that account, and is
+    /// not shown.
+    @State private var checksSignOuts = 0
     @State private var checksGeneration = UUID()
     @State private var sending: PullRequestCheck?
     #if DEBUG
     /// The simulator loop's `-openDiff PATH` opens that file's diff.
     @State private var debugFile: ChangedFile?
     #endif
+
+    /// Whether the checks shown came from GitHub before the phone signed
+    /// out.
+    private var checksStale: Bool {
+        readOrigin == .github && checksSignOuts != GitHubDirect.shared.signOuts
+    }
+
+    private var checks: PullRequestChecks? { checksStale ? nil : readChecks }
+    private var pullRequest: GitHubPullRequest? { checksStale ? nil : readPullRequest }
+    private var checksOrigin: ReadOrigin? { checksStale ? nil : readOrigin }
 
     private var machine: Fleet.Machine? {
         model.fleet.machines.first { $0.id == key.device }
@@ -59,6 +74,10 @@ struct ChangesScreen: View {
         /// Which computers lend which hosts, which may arrive after the
         /// first home: a direct read becomes possible then.
         var lenders: [String]
+        /// Read every minute while the app is active, and not otherwise.
+        var active: Bool
+        /// Signing out reads again at once, with whatever token is left.
+        var signOuts: Int
     }
 
     /// Each computer and the GitHub hosts it lends, in a stable order.
@@ -106,7 +125,19 @@ struct ChangesScreen: View {
         .task(id: Reading(scope: scope, status: machine?.status)) { await loadFiles() }
         .task(id: ChecksReading(status: machine?.status, number: workspace?.pullRequest?.number,
                                branch: workspace?.branch, cwd: workspace?.cwd,
-                               github: workspace?.github, lenders: lenderKeys)) { await loadChecks() }
+                               github: workspace?.github, lenders: lenderKeys,
+                               active: phase == .active, signOuts: GitHubDirect.shared.signOuts)) {
+            if checksStale { forgetChecks() }
+            // Reads on appearing and every minute while in front, as the
+            // pull request's screen does; leaving the screen or the app
+            // cancels the loop.
+            guard phase == .active else { return }
+            while !Task.isCancelled {
+                await loadChecks()
+                try? await Task.sleep(for: PullRequestDetailScreen.refresh)
+            }
+        }
+        .onAppear { GitHubDirect.shared.watchSignIn() }
         .sheet(item: $sending) { check in SendLogSheet(key: key, check: check) }
         #if DEBUG
         .navigationDestination(item: $debugFile) { FileDiffScreen(key: key, scope: scope, file: $0) }
@@ -159,6 +190,7 @@ struct ChangesScreen: View {
         let cwd = workspace?.cwd
         let number = workspace?.pullRequest?.number
         let github = workspace?.github
+        let signOuts = GitHubDirect.shared.signOuts
         checksError = nil
         let fleet = model.fleet
         let ask: @Sendable () async throws -> PullRequestChecks = {
@@ -175,18 +207,26 @@ struct ChangesScreen: View {
             guard !Task.isCancelled, checksGeneration == generation,
                   branch == workspace?.branch, cwd == workspace?.cwd,
                   number == workspace?.pullRequest?.number, github == workspace?.github else { return }
-            checks = read.value.checks
-            pullRequest = read.value.pullRequest
-            checksOrigin = read.origin
+            // GitHub's answer begun before a sign-out may have used that
+            // account: the read that sign-out started stands instead.
+            if read.origin == .github, signOuts != GitHubDirect.shared.signOuts { return }
+            readChecks = read.value.checks
+            readPullRequest = read.value.pullRequest
+            readOrigin = read.origin
+            checksSignOuts = signOuts
         } catch {
             guard !Task.isCancelled, checksGeneration == generation,
                   branch == workspace?.branch, cwd == workspace?.cwd,
                   number == workspace?.pullRequest?.number, github == workspace?.github else { return }
-            checks = nil
-            pullRequest = nil
-            checksOrigin = nil
+            forgetChecks()
             checksError = error.localizedDescription
         }
+    }
+
+    private func forgetChecks() {
+        readChecks = nil
+        readPullRequest = nil
+        readOrigin = nil
     }
 
     @ViewBuilder private var filesSection: some View {
@@ -515,7 +555,8 @@ private struct SendLogSheet: View {
                     Button("Send") { send() }.disabled(!ready || sendingNow)
                 }
             }
-            .task { await load() }
+            // Signing out hides a log GitHub gave and reads it again.
+            .task(id: GitHubDirect.shared.signOuts) { await load() }
         }
     }
 
@@ -526,6 +567,11 @@ private struct SendLogSheet: View {
     private func load() async {
         pane = pane ?? chats.first?.chat.pane
         guard let job = check.job else { return }
+        let signOuts = GitHubDirect.shared.signOuts
+        if excerptOrigin == .github {
+            excerpt = .waiting
+            excerptOrigin = nil
+        }
         let (device, id) = (key.device, key.workspace)
         let fleet = model.fleet
         let ask: @Sendable () async throws -> CheckLogExcerpt = {
@@ -539,9 +585,11 @@ private struct SendLogSheet: View {
             } else {
                 Sourced(try await ask(), from: .computer(machine?.computer.name ?? ""))
             }
+            guard !Task.isCancelled, signOuts == GitHubDirect.shared.signOuts else { return }
             excerpt = .loaded(read.value.excerpt)
             excerptOrigin = read.origin
         } catch {
+            guard !Task.isCancelled, signOuts == GitHubDirect.shared.signOuts else { return }
             excerpt = .failed(error.localizedDescription)
         }
     }

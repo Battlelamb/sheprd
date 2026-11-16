@@ -273,6 +273,12 @@ extension GitHubAPI {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let response = try await send(request, host: host, limit: .whole(max: Self.graphQLLimit))
         guard response.status == 200 else { throw GitHubHTTP.failure(response, now: now()) }
-        return try PullRequestSearchAnswer.parse(response, host: host, now: now())
+        do {
+            return try PullRequestSearchAnswer.parse(response, host: host, now: now())
+        } catch {
+            // GraphQL says to wait with a 200, as the branch reads hear it.
+            if case let .rateLimited(until) = error { paused[host] = until }
+            throw error
+        }
     }
 }

@@ -84,20 +84,6 @@ struct SignInTests {
         #expect(kept.login == "ana")
     }
 
-    @Test func aRotatedPairThatCannotBeKeptIsNotUsed() async throws {
-        let failing = SecretVault(
-            read: { _ in try JSONEncoder().encode(SignInFixtures.credential(expiresIn: 60)) },
-            write: { _, _ in throw Keychain.Failure(status: -25308) },
-            delete: { _ in },
-            accounts: { [] }
-        )
-        transport.enqueue(SignInFixtures.token("ghu_a2", refresh: "ghr_r2"))
-        let signIn = GitHubSignIn(flow: GitHubDeviceFlow(transport: transport.transport, now: clock.read), store: GitHubSignInStore(vault: failing))
-        // The old token is still valid for a minute, so the read goes on with
-        // it rather than with a pair the Keychain did not take.
-        #expect(try await signIn.token() == GitHubToken("ghu_a1"))
-    }
-
     @Test func aRefusedTokenIsRenewedOnceForConcurrentReads() async throws {
         try store.save(SignInFixtures.credential())
         transport.enqueue(SignInFixtures.token("ghu_a2", refresh: "ghr_r2"))

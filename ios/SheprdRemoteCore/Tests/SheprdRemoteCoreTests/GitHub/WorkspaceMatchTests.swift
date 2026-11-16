@@ -14,8 +14,8 @@ struct WorkspaceMatchTests {
         ComputerWorkspaces(device: name.lowercased(), computer: name, workspaces: workspaces)
     }
 
-    private func workspace(_ id: String, host: String = "github.com", owner: String = "sheprd-labs", repo: String = "sheprd", branch: String? = "feat/x", head: String? = nil) -> Home.Workspace {
-        GitHubFixtures.workspace(id: id, github: .init(host: host, owner: owner, repo: repo, branch: branch, head: head))
+    private func workspace(_ id: String, host: String = "github.com", owner: String = "sheprd-labs", repo: String = "sheprd", branch: String? = "feat/x", headOwner: String? = nil) -> Home.Workspace {
+        GitHubFixtures.workspace(id: id, github: .init(host: host, owner: owner, repo: repo, branch: branch, headOwner: headOwner))
     }
 
     @Test func aWorkspaceOnTheBranchMatchesAcrossComputers() {
@@ -48,8 +48,8 @@ struct WorkspaceMatchTests {
     @Test func aForksBranchMatchesItsHeadOwner() {
         var fork = pull
         fork.headOwner = "octocat"
-        // The computer names the upstream repository and the fork's head.
-        let forked = workspace("a", head: "octocat:feat/x")
+        // The computer names the upstream repository and the fork's owner.
+        let forked = workspace("a", headOwner: "octocat")
         #expect(ComputerWorkspaces.places(of: fork, in: [computer("m", forked)]).count == 1)
         // The same branch name on upstream itself is another pull request.
         #expect(ComputerWorkspaces.places(of: fork, in: [computer("m", workspace("b"))]).isEmpty)

@@ -70,8 +70,10 @@ import Testing
     @Test func aSessionOpenedAfterAnotherWonIsClosed() async throws {
         let log = Log()
         let winner = try await race(["slow", "fast"], stagger: .milliseconds(20), log: log) { relay in
-            // Opens anyway, as a dial already past its last wait would.
-            if relay == "slow" { try? await Task.sleep(for: .milliseconds(200)) }
+            // Opens anyway once cancelled, as a dial already past its last
+            // wait would. The race cancels it only after another won, so
+            // the order does not depend on how fast the machine runs.
+            if relay == "slow" { try? await Task.sleep(for: .seconds(3_600)) }
             return relay
         }
         #expect(winner == "fast")

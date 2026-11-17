@@ -109,6 +109,9 @@ and nothing goes through your phone.
      `-askAgentName YES` asks the workspace's most recent agent chat for a
      short name and renames the workspace to it, as the alert's Ask button
      does; that prompts the chat's agent once.
+   - A workspace's screen ends with Close Workspace and, for a linked
+     worktree, Delete Worktree. Both act on the paired computer's real
+     workspaces, so try them on one made for the purpose.
    - `-newWorkspace YES` opens the new workspace form.
    - `-computerTags work,lab` tags the first computer, `-computerTagFilter work`
      filters Workspaces by a tag, and `-openComputer YES` opens the first

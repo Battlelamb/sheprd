@@ -33,7 +33,7 @@ const PROGRAM: &str = if cfg!(windows) {
 } else {
     "herdr-acp"
 };
-/// Lets the chat switch to another installed agent until its first prompt.
+/// Lets the chat switch to another installed agent whenever it is idle.
 /// Only a program that offers it is asked: one on an SSH host, or an older
 /// one found on `PATH` here, would refuse the option and start nothing.
 pub(crate) const CHOOSE: &str = "--choose";
@@ -43,7 +43,7 @@ const HELP_LIMIT: u64 = 64 * 1024;
 /// output open must not leave the question unanswered.
 const HELP_DEADLINE: Duration = Duration::from_secs(3);
 
-/// Whether a new chat may switch agents before its first prompt.
+/// Whether a new chat may switch agents.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) enum AgentChoice {
     /// It keeps the agent it starts with, as a program without

@@ -132,6 +132,8 @@ and nothing goes through your phone.
      simulator has no microphone, and `-voiceConfirm YES` then presses Start
      which creates what the card shows. Run it
      against a sandboxed Herdr, not your own.
+   - `-sampleChat YES` opens a made-up chat that needs no daemon, for
+     screenshots of the chat screen without real prompts.
    - With `-openLink`, `-session YES` opens the chat's session sheet and
      `-draft TEXT` types into its composer (`-draft /` lists the slash
      commands).

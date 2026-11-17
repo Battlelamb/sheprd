@@ -1,4 +1,5 @@
 import SheprdRemoteCore
+import SheprdNearby
 import SwiftUI
 
 enum RootTab: Hashable { case home, workspaces, settings }

@@ -23,6 +23,8 @@ pub(crate) enum Page {
     AgentSkill,
     /// The Linux window's application menu, from the native menu definitions.
     Application,
+    /// The one-time offer to move `Herdr.app` to `Sheprd.app`.
+    AppRename,
     AppUpdate,
     /// Approving an automation script, or enabling automations on a host.
     Automation,

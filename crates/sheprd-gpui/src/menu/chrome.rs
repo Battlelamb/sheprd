@@ -57,6 +57,9 @@ impl SheprdWindow {
         {
             crate::agent_skill::AgentSkill::choose(crate::agent_skill::Choice::Declined, cx);
         }
+        if self.menu.page == Some(Page::AppRename) {
+            crate::app_rename::AppRename::choose(crate::app_rename::Choice::Declined, cx);
+        }
         let application = self.menu.application.as_ref();
         let return_focus = (application.and_then(|menu| menu.return_focus.clone()))
             .or_else(|| self.core_menu_return_focus(cx));
@@ -569,6 +572,7 @@ impl SheprdWindow {
                     page,
                     Page::Install
                         | Page::AgentSkill
+                        | Page::AppRename
                         | Page::VersionMismatch
                         | Page::OpenCheckout
                         | Page::OpenLink
@@ -756,6 +760,8 @@ impl SheprdWindow {
             panel = panel.child(self.render_about(cx));
         } else if page == Page::AgentSkill {
             panel = panel.child(self.render_agent_skill_offer(cx));
+        } else if page == Page::AppRename {
+            panel = panel.child(self.render_app_rename_offer(cx));
         } else if page == Page::VersionMismatch {
             panel = panel.child(self.render_version_mismatch(cx));
         } else if page == Page::WorktreeScript {

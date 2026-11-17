@@ -37,6 +37,7 @@ impl Page {
             Self::AddWsl => fl!("menu-page-add-wsl-distribution"),
             Self::AgentSkill => fl!("menu-page-install-the-agent-skill"),
             Self::Application => fl!("menu-page-menu"),
+            Self::AppRename => fl!("menu-page-rename-the-app"),
             Self::AppUpdate | Self::Update => fl!("menu-page-update"),
             Self::Automation => fl!("menu-page-automations"),
             Self::AzureDevOps => fl!("menu-page-azure-devops-tokens"),

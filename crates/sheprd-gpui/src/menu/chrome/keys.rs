@@ -363,6 +363,9 @@ impl SheprdWindow {
             "enter" if self.menu.page == Some(Page::AgentSkill) => {
                 self.install_browser_skill(window, cx);
             }
+            "enter" if self.menu.page == Some(Page::AppRename) => {
+                self.confirm_app_rename(window, cx);
+            }
             "enter" if self.menu.page == Some(Page::OpenLink) => {
                 self.confirm_open_link(window, cx);
             }

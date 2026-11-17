@@ -47,6 +47,7 @@ pub(crate) mod prefix;
 mod recent_panes;
 mod reconnecting;
 mod regions;
+mod rename_offer;
 mod render;
 pub(crate) use render::NoticeCard;
 mod report_issue;
@@ -677,6 +678,7 @@ impl SheprdWindow {
         self.poll_remote_browser(window, cx);
         self.poll_remote_work(window, cx);
         self.poll_chats(window, cx);
+        self.offer_app_rename(window, cx);
         self.offer_browser_skill(window, cx);
         self.poll_sessions(cx);
         self.flush_scrollbar(cx);

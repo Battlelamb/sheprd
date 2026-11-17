@@ -197,6 +197,8 @@ pub(crate) struct ChatPane {
     pub(crate) text_geometry: super::view::selection::Geometry,
     /// Files being copied to the chat's SSH host to attach there.
     pub(crate) uploading: usize,
+    /// The dropped files among them, with how far each has come.
+    pub(crate) uploads: Vec<crate::upload_chips::Upload>,
     /// The picture shown large over the chat, while one is.
     pub(crate) viewer: Option<super::view::viewer::Viewer>,
     /// Interactive message state, scoped to this pane and transcript revision.
@@ -303,6 +305,7 @@ impl ChatPane {
             text_focus: None,
             text_geometry: Default::default(),
             uploading: 0,
+            uploads: Vec::new(),
             viewer: None,
             widgets: Default::default(),
         }

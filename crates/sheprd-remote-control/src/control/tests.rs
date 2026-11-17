@@ -8,6 +8,7 @@ mod host_relay;
 mod layout;
 mod pull_requests;
 mod relays;
+mod workspace_changes;
 
 #[test]
 fn requests_and_responses_keep_their_wire_names() {
@@ -27,6 +28,7 @@ fn requests_and_responses_keep_their_wire_names() {
             device_name: "iPhone".into(),
             code: "428913".into(),
             app: None,
+            ssh: false,
         }))
         .unwrap(),
         json!({"response": "pairing", "state": "claimed", "device_name": "iPhone", "code": "428913"})

@@ -23,6 +23,7 @@ mod settings;
 mod shortcuts;
 mod summary;
 mod text;
+mod uploads;
 pub(super) mod viewer;
 mod widgets;
 mod working;

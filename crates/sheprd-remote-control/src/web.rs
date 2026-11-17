@@ -30,6 +30,7 @@ mod terminal;
 mod typed;
 mod update;
 mod uploads;
+mod workspace;
 
 pub(crate) use api::{NEW_CHAT_WAIT, check_new_workspace, parse_agent};
 pub(crate) use fragments::folders;
@@ -289,6 +290,14 @@ pub(crate) fn router(state: Shared) -> Router {
             "/api/v2/workspaces/{workspace}/rename",
             post(terminal::rename_workspace),
         )
+        .route(
+            "/api/v2/workspaces/{workspace}/close",
+            post(workspace::close),
+        )
+        .route(
+            "/api/v2/workspaces/{workspace}/remove-worktree",
+            post(workspace::remove_worktree),
+        )
         .route("/f/home", get(fragments::home))
         .route("/f/board", get(fragments::board))
         .route("/f/chat/{pane}", get(fragments::chat))
@@ -496,10 +505,20 @@ impl IntoResponse for ApiError {
                     auth::host_relays::Error::Busy | auth::host_relays::Error::TooMany,
                 ),
             ) => StatusCode::TOO_MANY_REQUESTS,
+            Self::Auth(auth::Error::SshAccess(
+                crate::ssh_access::Error::ServerOff | crate::ssh_access::Error::Unsupported,
+            )) => StatusCode::CONFLICT,
             Self::Auth(
                 auth::Error::Store { .. }
                 | auth::Error::StoreFormat { .. }
-                | auth::Error::Random(_),
+                | auth::Error::Random(_)
+                | auth::Error::SshAccess(
+                    crate::ssh_access::Error::File { .. }
+                    | crate::ssh_access::Error::Linked { .. }
+                    | crate::ssh_access::Error::NoHome
+                    | crate::ssh_access::Error::TooLarge { .. }
+                    | crate::ssh_access::Error::UnknownUser,
+                ),
             ) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Update(update::Error::AppClosed) => StatusCode::CONFLICT,
             Self::App(_) | Self::Upload(uploads::Error::Write(_)) => {

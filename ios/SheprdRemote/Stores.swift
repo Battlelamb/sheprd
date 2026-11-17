@@ -236,20 +236,32 @@ final class TermKeyStore {
     }
 }
 
-/// The tag the Workspaces tab shows computers of, kept on this phone and
-/// shared by its windows. Read it through `ComputerTags.active`: the tag may
-/// have left every computer since.
+/// The tag and computer Home, the iPad sidebar, and Workspaces show agents
+/// and workspaces of, kept on this phone and shared by its windows. Read
+/// them through `ComputerTags.active` or `shown`: the tag may have left
+/// every computer since, and the computer been forgotten.
 @MainActor
 @Observable
 final class TagFilterStore {
     private static let key = "computerTagFilter"
+    private static let deviceKey = "computerDeviceFilter"
 
     var tag: String? {
         didSet { UserDefaults.standard.set(tag, forKey: Self.key) }
     }
 
+    var device: String? {
+        didSet { UserDefaults.standard.set(device, forKey: Self.deviceKey) }
+    }
+
     init() {
         tag = UserDefaults.standard.string(forKey: Self.key)
+        device = UserDefaults.standard.string(forKey: Self.deviceKey)
+    }
+
+    /// The devices the filter leaves among `computers`.
+    func shown(among computers: [Computer]) -> Set<String> {
+        ComputerTags.shown(tag: tag, device: device, among: computers)
     }
 }
 

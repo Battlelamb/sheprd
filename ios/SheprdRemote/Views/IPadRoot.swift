@@ -200,7 +200,8 @@ struct IPadRoot: View {
     }
 }
 
-/// The sidebar: the agents in the order the person chose, then terminals.
+/// The sidebar: the agents in the order the person chose, then terminals,
+/// of the computers the tag filter leaves, as Home on a phone shows them.
 private struct AttentionList: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
@@ -208,12 +209,14 @@ private struct AttentionList: View {
     @Binding var selection: Route?
 
     var body: some View {
-        let chats = model.fleet.chatItems
-        let terminals = model.fleet.terminalItems
+        let shown = model.tagFilter.shown(among: model.computers)
+        let chats = model.fleet.chatItems.filter { shown.contains($0.computer.device) }
+        let terminals = model.fleet.terminalItems.filter { shown.contains($0.computer.device) }
         // Tabs with an agent list with the chats; the rest under Terminals.
         let agents = terminals.filter { $0.agent != nil }
         let shells = terminals.filter { $0.agent == nil }
         List(selection: $selection) {
+            TagFilterBar()
             ForEach(HomeRow.sections(sort, chats: chats, agents: agents)) { section in
                 Section(section.title) { ForEach(section.items) { row($0) } }
             }

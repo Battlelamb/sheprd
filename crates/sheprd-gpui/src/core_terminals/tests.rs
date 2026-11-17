@@ -19,6 +19,7 @@ mod focus;
 mod folders;
 mod history;
 mod images;
+mod kept_chat;
 mod kept_checkouts;
 mod kept_ports;
 mod kept_workspaces;

@@ -28,6 +28,10 @@ ignore = [
     # Field and variant order is part of protocol compatibility, so this is not
     # a swappable dependency. Revisit if an actual vulnerability is filed.
     { id = "RUSTSEC-2025-0141", reason = "bincode 2 is the daemon wire format; unmaintained, not vulnerable" },
+    # chrono is unmaintained (no vulnerability filed). GPUI, gpui-component and
+    # Moonframe depend on it too, so moving the workspace's own crates to jiff
+    # would not take it out of the tree; revisit when those move.
+    { id = "RUSTSEC-2026-0543", reason = "chrono: unmaintained, not vulnerable; GPUI and Moonframe still depend on it" },
     # `pgp` (sheprd-relay's `signed-directory`, checking Sheprd's relay list)
     # pulls in `rsa` and the 0.13 elliptic-curve crates. Both advisories are
     # timing side channels in private-key operations (RSA decryption and

@@ -129,6 +129,8 @@ struct ChatRowLabel: View {
     /// Off on the workspace's own screen, which names it already.
     var showsWorkspace = true
     /// Off on the workspace's own screen, which lists its pull request.
+    /// When on, its pill says the state to VoiceOver, so the detail line does
+    /// not repeat that it merged.
     var showsPullRequest = true
 
     var body: some View {
@@ -157,7 +159,7 @@ struct ChatRowLabel: View {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityValue(showsWorkspace && item.workspace.merged ? "Pull request merged" : "")
+                        .accessibilityValue(showsWorkspace && !showsPullRequest && item.workspace.merged ? "Pull request merged" : "")
                     // Its workspace's pull request, colored by state, says at a
                     // glance whether the agent's work is ready or failing.
                     if showsPullRequest { WorkspacePullRequestBadge(workspace: item.workspace).fixedSize() }
@@ -203,6 +205,8 @@ struct AgentTerminalRowLabel: View {
     /// instead.
     var showsWorkspace = true
     /// Off on the workspace's own screen, which lists its pull request.
+    /// When on, its pill says the state to VoiceOver, so the detail line does
+    /// not repeat that it merged.
     var showsPullRequest = true
 
     var body: some View {
@@ -218,7 +222,7 @@ struct AgentTerminalRowLabel: View {
                     Text(place)
                         .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityValue(showsWorkspace && item.workspace.merged ? "Pull request merged" : "")
+                        .accessibilityValue(showsWorkspace && !showsPullRequest && item.workspace.merged ? "Pull request merged" : "")
                     if showsPullRequest { WorkspacePullRequestBadge(workspace: item.workspace).fixedSize() }
                 }
             }

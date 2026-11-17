@@ -392,6 +392,12 @@ fn a_lent_token_never_reaches_the_log() {
         .with_max_level(tracing::Level::TRACE)
         .with_writer(move || writer.clone())
         .finish();
+    // While a single dispatcher is registered, tracing-core caches a
+    // callsite's interest from whichever thread registers it first, so a
+    // parallel test reaching the log line with no subscriber would cache
+    // "never" for this thread too. A second live dispatcher makes it ask
+    // every registered dispatcher instead, under its lock.
+    let _other = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
     let _default = tracing::subscriber::set_default(subscriber);
     // Parallel tests may have met the log's callsite with no subscriber.
     tracing::callsite::rebuild_interest_cache();

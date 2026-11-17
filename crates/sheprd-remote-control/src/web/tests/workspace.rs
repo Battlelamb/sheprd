@@ -3,7 +3,7 @@
 use super::*;
 use crate::{
     hub::{ApiMethod, Workspace},
-    web::workspace::{Action, herdr_call, needs_archive},
+    web::workspace::{Action, herdr_call, needs_archive, wsl_archive_script},
 };
 use sheprd_client::protocol::ClientShellWorktree;
 
@@ -88,6 +88,21 @@ fn an_archive_script_or_an_unreadable_script_file_leaves_deletion_to_sheprd() {
     assert!(needs_archive(dir.path()));
     std::fs::write(&file, "#".repeat(64 * 1024 + 1)).unwrap();
     assert!(needs_archive(dir.path()), "too large to read");
+}
+
+#[test]
+fn wsl_archive_script_output_fails_closed_and_reads_the_checkout_root() {
+    assert!(!wsl_archive_script(b"missing\n"));
+    assert!(!wsl_archive_script(
+        b"present\n[scripts]\nsetup = \"make\"\n"
+    ));
+    assert!(wsl_archive_script(
+        b"present\n[scripts]\narchive = \"./save.sh\"\n"
+    ));
+    assert!(wsl_archive_script(b"unexpected\n"));
+    assert!(wsl_archive_script(
+        format!("present\n{}", "#".repeat(64 * 1024 + 1)).as_bytes()
+    ));
 }
 
 #[tokio::test]

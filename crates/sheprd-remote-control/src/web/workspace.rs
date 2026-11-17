@@ -14,7 +14,8 @@ use axum::{
     extract::{Path, State},
 };
 use serde_json::{Value, json};
-use std::{io::Read as _, path::Path as FsPath};
+use sheprd_client::{ConnectTarget, ScriptHost, ScriptLimits, run_script, shell_quote};
+use std::{io::Read as _, path::Path as FsPath, sync::atomic::AtomicBool, time::Duration};
 
 /// Where a checkout's worktree scripts live, as Sheprd reads them.
 const SCRIPTS: &str = ".herdr/worktree.toml";
@@ -56,15 +57,6 @@ pub(crate) fn herdr_call(action: Action, workspace: &str) -> (ApiMethod, Value) 
 /// Whether the worktree scripts at `checkout` name an archive script, or
 /// cannot be read to tell: either way Sheprd should delete it.
 pub(crate) fn needs_archive(checkout: &std::path::Path) -> bool {
-    #[derive(serde::Deserialize, Default)]
-    struct File {
-        #[serde(default)]
-        scripts: Scripts,
-    }
-    #[derive(serde::Deserialize, Default)]
-    struct Scripts {
-        archive: Option<String>,
-    }
     let file = match std::fs::File::open(checkout.join(SCRIPTS)) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return false,
@@ -79,7 +71,22 @@ pub(crate) fn needs_archive(checkout: &std::path::Path) -> bool {
     {
         return true;
     }
-    toml::from_str::<File>(&text).map_or(true, |file| {
+    needs_archive_text(&text)
+}
+
+#[derive(serde::Deserialize, Default)]
+struct WorktreeFile {
+    #[serde(default)]
+    scripts: WorktreeScripts,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct WorktreeScripts {
+    archive: Option<String>,
+}
+
+fn needs_archive_text(text: &str) -> bool {
+    toml::from_str::<WorktreeFile>(text).map_or(true, |file| {
         file.scripts
             .archive
             .is_some_and(|script| !script.trim().is_empty())
@@ -89,8 +96,46 @@ pub(crate) fn needs_archive(checkout: &std::path::Path) -> bool {
 /// Checks the archive script at the Git checkout root of `cwd`. Workspaces
 /// may use a subdirectory as their working directory; failing to resolve the
 /// root must leave deletion to Sheprd rather than skip its cleanup script.
-fn needs_archive_for(cwd: &FsPath) -> bool {
-    let Ok(root) = crate::native::changes::local::root(cwd) else {
+pub(super) fn wsl_archive_script(output: &[u8]) -> bool {
+    const MISSING: &[u8] = b"missing\n";
+    let Some(text) = output.strip_prefix(b"present\n") else {
+        return output != MISSING;
+    };
+    if text.len() as u64 > MAX_SCRIPTS {
+        return true;
+    }
+    std::str::from_utf8(text).map_or(true, needs_archive_text)
+}
+
+fn needs_archive_for(target: &ConnectTarget, cwd: &str) -> bool {
+    if let ConnectTarget::Wsl { distro, .. } = target {
+        let script = format!(
+            r#"root=$(git -C {} rev-parse --show-toplevel) || exit 1
+directory="$root/.herdr"
+if [ ! -e "$directory" ]; then printf 'missing\n'; exit 0; fi
+if [ ! -d "$directory" ] || [ ! -r "$directory" ] || [ ! -x "$directory" ]; then exit 1; fi
+file="$directory/worktree.toml"
+if [ ! -e "$file" ]; then printf 'missing\n'; exit 0; fi
+printf 'present\n'
+head -c {} "$file""#,
+            shell_quote(cwd),
+            MAX_SCRIPTS + 1
+        );
+        let mut output = Vec::new();
+        let result = run_script(
+            ScriptHost::Wsl(distro),
+            &script,
+            std::io::empty(),
+            &mut output,
+            ScriptLimits {
+                output: MAX_SCRIPTS + 16,
+                idle: Duration::from_secs(5),
+            },
+            &AtomicBool::new(false),
+        );
+        return result.is_err() || wsl_archive_script(&output);
+    }
+    let Ok(root) = crate::native::changes::local::root(FsPath::new(cwd)) else {
         return true;
     };
     needs_archive(&root)
@@ -113,10 +158,14 @@ pub(super) async fn remove_worktree(
 }
 
 async fn act(state: &Shared, workspace: String, action: Action) -> Result<Json<Value>, ApiError> {
-    let (cwd, worktree) = {
+    let (cwd, worktree, target) = {
         let layout = state.hub.layout();
         let listed = layout.workspace(&workspace).ok_or(ApiError::NotFound)?;
-        (listed.cwd.clone(), listed.worktree.clone())
+        (
+            listed.cwd.clone(),
+            listed.worktree.clone(),
+            state.hub.workspace_target(listed.session.as_deref()),
+        )
     };
     if action == Action::RemoveWorktree {
         if worktree.is_some_and(|tree| !tree.is_linked_worktree) {
@@ -127,8 +176,7 @@ async fn act(state: &Shared, workspace: String, action: Action) -> Result<Json<V
                 "this workspace has no checkout to delete",
             ));
         }
-        let checkout = std::path::PathBuf::from(&cwd);
-        let archive = tokio::task::spawn_blocking(move || needs_archive_for(&checkout))
+        let archive = tokio::task::spawn_blocking(move || needs_archive_for(&target, &cwd))
             .await
             .unwrap_or(true);
         if archive {

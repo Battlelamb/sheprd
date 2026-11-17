@@ -10855,6 +10855,7 @@ dependencies = [
  "sheprd-t3",
  "tempfile",
  "thiserror 2.0.21",
+ "tungstenite 0.30.0",
  "unicode-width",
  "url",
  "uuid",

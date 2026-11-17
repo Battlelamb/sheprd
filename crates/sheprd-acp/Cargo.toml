@@ -30,7 +30,8 @@ url.workspace                 = true
 uuid.workspace                = true
 
 [dev-dependencies]
-tempfile.workspace = true
+tempfile.workspace    = true
+tungstenite.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true

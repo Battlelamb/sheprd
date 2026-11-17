@@ -7,7 +7,10 @@
 //! main loop a fresh transcript after each chunk; when the connection ends,
 //! the chat says why and keeps showing what it had.
 
-use std::{io::Write as _, thread};
+use std::{
+    io::{Read, Write},
+    thread,
+};
 
 use anyhow::Context as _;
 use crossbeam_channel::{bounded, select};
@@ -127,7 +130,7 @@ pub(crate) fn run(options: T3Options) -> anyhow::Result<()> {
 
     // One transcript in flight: the worker waits while the loop takes the
     // last, which holds the server's next chunk back too.
-    let (updates, changes) = bounded::<Step>(1);
+    let (updates, mut changes) = bounded::<Step>(1);
     thread::Builder::new()
         .name("t3-thread".to_owned())
         .spawn(move || follow(connection, follower, &updates))?;
@@ -148,7 +151,10 @@ pub(crate) fn run(options: T3Options) -> anyhow::Result<()> {
                     };
                     mirror.update(shown.clone());
                 }
-                Ok(Step::Same) | Err(_) => {}
+                Ok(Step::Same) => {}
+                // The worker is done; a disconnected channel is always
+                // ready, so stop selecting on it.
+                Err(_) => changes = crossbeam_channel::never(),
             },
         }
     }
@@ -156,17 +162,30 @@ pub(crate) fn run(options: T3Options) -> anyhow::Result<()> {
 }
 
 /// Reads the stream until it ends, passing each change on.
-fn follow(
-    mut connection: Connection<std::net::TcpStream>,
+///
+/// A quiet read sends one ping; a second quiet read with that ping still
+/// unanswered means the server is gone even if its socket stays open.
+fn follow<S: Read + Write>(
+    mut connection: Connection<S>,
     mut follower: Follower,
     updates: &crossbeam_channel::Sender<Step>,
 ) {
+    let mut pinged = false;
     loop {
         let step = match connection.next_frame() {
-            Ok(frame) => follower.frame(frame),
+            Ok(frame) => {
+                pinged = false;
+                follower.frame(frame)
+            }
+            Err(sheprd_t3::Error::Idle) if pinged => {
+                Step::Ended("T3 Code stopped answering.".to_owned())
+            }
             // A quiet thread: check the server is still there.
             Err(sheprd_t3::Error::Idle) => match connection.ping() {
-                Ok(()) => Step::Same,
+                Ok(()) => {
+                    pinged = true;
+                    Step::Same
+                }
                 Err(error) => Step::Ended(error.to_string()),
             },
             Err(error) => Step::Ended(error.to_string()),

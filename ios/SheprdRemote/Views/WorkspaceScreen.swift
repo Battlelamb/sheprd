@@ -27,6 +27,8 @@ struct WorkspaceScreen: View {
     @State private var pendingName: String?
     /// The agent asked for a name, shown with a spinner until it answers.
     @State private var askedAgent: String?
+    /// What a row's swipe asked to close, waiting for confirmation.
+    @State private var closing: CloseTarget?
     /// What the person is asked to confirm: closing, or deleting the worktree.
     @State private var confirming: Ending?
     /// What is on its way to the computer.
@@ -69,10 +71,13 @@ struct WorkspaceScreen: View {
             Section {
                 ForEach(chats) { item in
                     RouteLink(.chat(item.key, title: item.chat.title)) { ChatRowLabel(item: item, showsComputer: false, showsWorkspace: false, showsPullRequest: false) }
+                        .closeSwipe(.chat(item.key, title: item.chat.title), closing: $closing)
+                        .summarizeSwipe(item.key)
                 }
                 ForEach(terminals.filter { $0.agent != nil }) { item in
                     if let route = item.route {
                         RouteLink(route) { AgentTerminalRowLabel(item: item, showsComputer: false, showsWorkspace: false, showsPullRequest: false) }
+                            .closeSwipe(item.closeTarget, closing: $closing)
                     }
                 }
                 ForEach(terminals.filter { $0.agent == nil }) { item in
@@ -80,6 +85,7 @@ struct WorkspaceScreen: View {
                         RouteLink(.term(PaneKey(device: key.device, pane: pane.pane), title: item.terminal.label)) {
                             TerminalRowLabel(terminal: item.terminal)
                         }
+                        .closeSwipe(item.closeTarget, closing: $closing)
                     }
                 }
             } header: {
@@ -139,6 +145,12 @@ struct WorkspaceScreen: View {
             if UserDefaults.standard.bool(forKey: "otherAgents") { showsOthers = true }
             // `-openChanges YES` opens the workspace's changes.
             if UserDefaults.standard.bool(forKey: "openChanges"), opened == nil { opened = .changes(key) }
+            // `-summarizeFirst YES` asks for the summary of the first chat
+            // with a reply, as its row's swipe does.
+            if UserDefaults.standard.bool(forKey: "summarizeFirst"),
+               let chat = model.fleet.chatItems.first(where: { $0.computer.device == key.device && $0.workspace.id == key.workspace && $0.chat.summary?.lastText != nil }) {
+                Task { try? await model.fleet.summarize(chat.key) }
+            }
             // `-renamePending NAME` shows a rename on its way, sending nothing.
             if let name = UserDefaults.standard.string(forKey: "renamePending") { pendingName = name }
             if UserDefaults.standard.bool(forKey: "renameWorkspace") {
@@ -170,6 +182,7 @@ struct WorkspaceScreen: View {
                 try await client.changes(workspace: id, scope: .uncommitted, bearer: token)
             }.total
         }
+        .closeConfirmation($closing)
         .alert("The tab did not start", isPresented: Binding(get: { problem != nil }, set: { if !$0 { problem = nil } })) {
         } message: {
             Text(problem ?? "")
@@ -591,7 +604,9 @@ private struct ChangesRow: View {
     }
 }
 
-/// A terminal tab without an agent: its name and folder.
+/// A terminal tab without an agent: its name, and what runs in it. A
+/// computer that does not say (Herdr 1) gets its folder's name instead,
+/// so the second line is never blank.
 private struct TerminalRowLabel: View {
     var terminal: Home.TerminalRow
 
@@ -601,11 +616,23 @@ private struct TerminalRowLabel: View {
                 .frame(width: 28, height: 28).background(.fill.secondary, in: .rect(cornerRadius: 28 * 0.28))
             VStack(alignment: .leading, spacing: 2) {
                 Text(terminal.label).lineLimit(1)
-                if let cwd = terminal.firstPane?.cwd ?? terminal.cwd {
-                    Text(cwd).font(.subheadline).foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.head)
+                switch terminal.firstPane?.job {
+                case let .running(command)?:
+                    Text(verbatim: command).font(.subheadline.monospaced()).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.tail)
+                case .idle?:
+                    Text("Idle").font(.subheadline).foregroundStyle(.tertiary)
+                case .other?, nil:
+                    Text(folder).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
         }
+    }
+
+    /// The last part of the tab's folder, or a plain word when it has none.
+    private var folder: String {
+        let path = terminal.firstPane?.cwd ?? terminal.cwd ?? ""
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        return path.isEmpty || name.isEmpty || name == "/" ? String(localized: "Terminal") : name
     }
 }

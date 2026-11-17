@@ -239,6 +239,10 @@ pub(crate) fn router(state: Shared) -> Router {
         .route("/api/term/{pane}/rename", post(terminal::rename))
         .route("/api/stream", get(stream::stream))
         .route("/api/v2/chat/{pane}", get(crate::native::get_chat))
+        .route(
+            "/api/v2/chat/{pane}/summarize",
+            post(crate::native::summarize),
+        )
         .route("/api/v2/github/token", get(crate::native::github::token))
         .route("/api/v2/home", get(crate::native::get_home))
         .route("/api/v2/hosts", get(hosts::list))

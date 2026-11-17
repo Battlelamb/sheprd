@@ -10,11 +10,13 @@ pub(crate) mod github;
 mod live;
 mod model;
 mod search;
+mod summarize;
 mod wire;
 
 pub(crate) use convert::convert;
 pub(crate) use create::{create_workspace, new_options, new_terminal, start_chat};
 pub(crate) use search::search;
+pub(crate) use summarize::summarize;
 
 use crate::{
     control::DeviceId,

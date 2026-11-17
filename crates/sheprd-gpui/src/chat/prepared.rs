@@ -553,11 +553,19 @@ fn message(text: &str, author: Author, visuals: &mut Visuals) -> Vec<Part> {
             {
                 flush(&mut markdown, &mut parts, visuals);
                 bubbles += 1;
-                // A bubble still streaming reaches the end of the message.
-                let inner: String = lines
-                    .by_ref()
-                    .take_while(|line| !super::effects::bubble_closing(line))
-                    .collect();
+                // A bubble still streaming reaches the end of the message;
+                // a `:::` inside a code fence is the code's, not its end.
+                let mut inner = String::new();
+                let mut code: Option<Fence<'_>> = None;
+                for line in lines.by_ref() {
+                    match &code {
+                        Some(fence) if fence.closes(line) => code = None,
+                        Some(_) => {}
+                        None if super::effects::bubble_closing(line) => break,
+                        None => code = Fence::open(line),
+                    }
+                    inner.push_str(line);
+                }
                 if !inner.trim().is_empty() {
                     parts.push(match prose(&inner, visuals) {
                         Part::Rich(blocks) => Part::Bubble(effect, blocks),

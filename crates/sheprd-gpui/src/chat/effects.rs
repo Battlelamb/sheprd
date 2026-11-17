@@ -162,10 +162,6 @@ fn gist(body: &Body) -> String {
 /// Characters of a message an effect draws.
 const GIST: usize = 48;
 
-/// Entries at the end of the transcript a live update looks at: a new
-/// message arrives last, or just before the steps that follow it.
-const TAIL: usize = 4;
-
 /// A pane effect playing.
 #[derive(Clone, Debug)]
 pub(crate) struct Playing {
@@ -189,6 +185,9 @@ impl Playing {
 /// play now.
 #[derive(Debug, Default)]
 pub(crate) struct Effects {
+    /// The revision of each entry last looked at, so a live update looks
+    /// only at the entries it changed, wherever they are.
+    revisions: HashMap<EntryId, u64>,
     /// Bubbles met in each message, so only a new one plays.
     bubbles: HashMap<EntryId, usize>,
     /// Messages whose pane effect was met.
@@ -204,7 +203,7 @@ pub(crate) struct Effects {
 impl Effects {
     /// Meets the effects of the transcript's messages. `history` is a whole
     /// transcript loaded at once, whose effects are only noted; otherwise
-    /// the effects new at its end play. With reduce motion on, the view
+    /// the effects new in the entries it changed play. With reduce motion on, the view
     /// draws each at rest.
     pub(crate) fn sync(
         &mut self,
@@ -214,20 +213,25 @@ impl Effects {
         now: Instant,
     ) {
         if history {
+            self.revisions.clear();
             self.bubbles.clear();
             self.screens.clear();
             self.started.clear();
             self.playing = None;
         }
-        let from = if history {
-            0
-        } else {
-            keys.len().saturating_sub(TAIL)
-        };
-        for (entry, _) in &keys[from..] {
+        for (entry, revision) in keys {
+            if self.revisions.insert(*entry, *revision) == Some(*revision) {
+                continue;
+            }
             let Some(body) = bodies(*entry) else {
                 continue;
             };
+            // The words an effect draws stream in after its directive.
+            if let Some(playing) = self.playing.as_mut()
+                && playing.entry == *entry
+            {
+                playing.text = gist(&body);
+            }
             let (bubbles, screen) = found(&body);
             let met = self.bubbles.get(entry).copied().unwrap_or(0);
             if bubbles > met {

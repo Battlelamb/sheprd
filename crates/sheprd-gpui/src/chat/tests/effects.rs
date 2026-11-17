@@ -95,8 +95,11 @@ fn prepared(texts: &[&str]) -> (Prepared, Vec<(EntryId, u64)>) {
         .enumerate()
         .map(|(index, text)| agent(index as u64 + 1, text))
         .collect();
-    let keys: Vec<_> = (1..=texts.len() as u64)
-        .map(|id| (EntryId(id), 1))
+    // A changed text is a new revision, as the reducer makes it.
+    let keys: Vec<_> = texts
+        .iter()
+        .enumerate()
+        .map(|(index, text)| (EntryId(index as u64 + 1), text.len() as u64))
         .collect();
     let mut prepared = Prepared::default();
     prepared.update(&transcript, &keys);
@@ -191,4 +194,38 @@ fn a_replay_plays_an_effect_again() {
     assert_eq!(effects.bubble_since(EntryId(1), 0), Some(later));
     effects.replay_screen(EntryId(1), &prepared.body(EntryId(1)).unwrap(), later);
     assert_eq!(effects.playing(later).unwrap().effect, Screen::Love);
+}
+
+#[test]
+fn a_fenced_closing_line_stays_in_the_bubble() {
+    assert_eq!(
+        shape(":::slam\n```markdown\n:::\n```\nafter\n:::\nOutside"),
+        ["bubble:slam", "text:Outside"]
+    );
+}
+
+#[test]
+fn an_effect_followed_by_many_entries_in_one_update_still_plays() {
+    let now = Instant::now();
+    let mut effects = Effects::default();
+    sync(&mut effects, &["earlier"], true, now);
+    let mut live = vec!["earlier", ":::loud\nDone\n:::\n::confetti"];
+    live.extend(["step"; 8]);
+    sync(&mut effects, &live, false, now);
+    assert_eq!(effects.playing(now).unwrap().entry, EntryId(2));
+    assert_eq!(effects.bubble_since(EntryId(2), 0), Some(now));
+}
+
+#[test]
+fn the_words_an_effect_draws_follow_its_message_as_it_streams() {
+    let now = Instant::now();
+    let mut effects = Effects::default();
+    sync(&mut effects, &[], true, now);
+    let (first, keys) = prepared(&["::echo\n"]);
+    effects.sync(|entry| first.body(entry), &keys, false, now);
+    assert_eq!(effects.playing(now).unwrap().text, "");
+    let (grown, grown_keys) = prepared(&["::echo\nMerged!"]);
+    effects.sync(|entry| grown.body(entry), &grown_keys, false, now);
+    let playing = effects.playing(now).unwrap();
+    assert_eq!((playing.text.as_str(), playing.since), ("Merged!", now));
 }

@@ -167,13 +167,17 @@ impl Emulator {
         scanner.feed(bytes, |run| match run {
             Run::Bytes(bytes) => processor.advance(term, bytes),
             Run::Graphics(command) => {
-                // An image goes where the cursor is after what came before
-                // it, so output a synchronized update holds lands first.
-                if processor.sync_timeout().pending_timeout() {
+                // Resolve the cursor before placing, but keep the enclosing
+                // synchronized frame atomic across chunked image commands.
+                let synchronized = processor.sync_timeout().pending_timeout();
+                if synchronized {
                     processor.stop_sync(term);
                 }
                 if let Some(placed) = graphics.command(command) {
                     place(term, processor, graphics, placed);
+                }
+                if synchronized {
+                    processor.advance(term, b"\x1b[?2026h");
                 }
             }
         });
@@ -228,6 +232,12 @@ impl Emulator {
 
     /// What changed since the previous take; the first take is always full.
     pub fn take_damage(&mut self) -> Damage {
+        if self.sync_pending() {
+            return Damage::Rows {
+                rows: Vec::new(),
+                cursor: None,
+            };
+        }
         let alt_screen = self.term.mode().contains(TermMode::ALT_SCREEN);
         self.damage.take(&mut self.term, alt_screen)
     }
@@ -287,7 +297,7 @@ impl Emulator {
     /// graphics placements as Herdr's graphics scene, with the bytes of each
     /// image the last scene did not show.
     pub fn take_graphics(&mut self) -> Option<SurfaceGraphicsScene> {
-        if !self.graphics.active() {
+        if self.sync_pending() || !self.graphics.active() {
             return None;
         }
         let found = self.markers();

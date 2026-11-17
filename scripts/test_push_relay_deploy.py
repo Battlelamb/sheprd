@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import tempfile
@@ -36,12 +37,15 @@ def rendered(environment: str) -> str:
     )
 
 
-def secrets_block(text: str) -> str:
-    """start.sh from its secrets check to the swap of new secrets."""
-    block = re.search(r"\n(\s*)check_secrets\(\) \{\n.*?\n\1mkdir -p secrets/apns data\n", text, re.S)
-    assert block, "start.sh's secrets check is missing"
-    lines = [line.strip() for line in block.group(0).splitlines()]
-    return "\n".join(lines[:-1])
+def functions(*names: str) -> str:
+    """start.sh's shell functions NAMES, unindented, to run on their own."""
+    text = rendered("production")
+    out = []
+    for name in names:
+        block = re.search(rf"\n(\s*){name}\(\) \{{\n.*?\n\1\}}\n", text, re.S)
+        assert block, f"start.sh's {name} is missing"
+        out.append("\n".join(line.strip() for line in block.group(0).splitlines()))
+    return "\n".join(out)
 
 
 def write_secrets(directory: str, sandbox: bool, marker: str = "") -> None:
@@ -54,71 +58,113 @@ def write_secrets(directory: str, sandbox: bool, marker: str = "") -> None:
                 file.write(marker)
 
 
-def start(environment: str, directory: str, new: bool) -> subprocess.CompletedProcess:
-    """Runs start.sh's secrets handling in DIRECTORY, as this relay's
-    ENVIRONMENT, with NEW_SECRETS set when NEW."""
-    script = f'environment="{environment}"\n{secrets_block(rendered(environment))}\n'
-    script += "check_secrets secrets\n"
-    env = {"PATH": os.environ["PATH"], "NEW_SECRETS": "1" if new else ""}
-    return subprocess.run(
-        ["sh", "-c", script], cwd=directory, capture_output=True, text=True, env=env
-    )
+def shell(directory: str, script: str, environment: str = "production",
+          stdin: bytes = b"") -> subprocess.CompletedProcess:
+    """Runs SCRIPT after start.sh's secrets functions, in DIRECTORY, as the
+    relay for ENVIRONMENT."""
+    body = f'environment="{environment}"\n'
+    body += functions("check_secrets", "stage_secrets", "swap_secrets", "restore_secrets",
+                      "refuse_new")
+    body += "\n" + script + "\n"
+    return subprocess.run(["sh", "-c", body], cwd=directory, capture_output=True,
+                          input=stdin, env={"PATH": os.environ["PATH"]})
 
 
-def marker(directory: str) -> str:
-    with open(os.path.join(directory, "secrets", "relay-key.pem"), encoding="utf-8") as file:
+def marker(directory: str, name: str = "secrets") -> str:
+    with open(os.path.join(directory, name, "relay-key.pem"), encoding="utf-8") as file:
         return file.read()
+
+
+def tar_of(directory: str) -> bytes:
+    return subprocess.run(["tar", "-C", directory, "-cf", "-", *SECRETS], check=True,
+                          capture_output=True, env={"PATH": os.environ["PATH"],
+                                                    "COPYFILE_DISABLE": "1"}).stdout
 
 
 @unittest.skipUnless(shutil.which("jq"), "jq is not installed")
 class SecretsTest(unittest.TestCase):
-    def test_secrets_for_this_environment_start(self) -> None:
+    def test_secrets_for_this_environment_pass(self) -> None:
         for environment, sandbox in (("production", False), ("sandbox", True)):
             with self.subTest(environment=environment), tempfile.TemporaryDirectory() as d:
                 write_secrets(os.path.join(d, "secrets"), sandbox)
-                result = start(environment, d, new=False)
+                result = shell(d, "check_secrets secrets", environment)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_a_key_for_the_other_environment_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             write_secrets(os.path.join(d, "secrets"), sandbox=True)
-            result = start("production", d, new=False)
+            result = shell(d, "check_secrets secrets")
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("for the other APNs environment", result.stderr)
+            self.assertIn(b"for the other APNs environment", result.stderr)
 
     def test_a_missing_secret_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             write_secrets(os.path.join(d, "secrets"), sandbox=False)
             os.remove(os.path.join(d, "secrets", "credential-secret"))
-            result = start("production", d, new=False)
+            result = shell(d, "check_secrets secrets")
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("credential-secret", result.stderr)
+            self.assertIn(b"credential-secret", result.stderr)
 
-    def test_new_secrets_replace_the_old_once_they_check_out(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
+    def test_new_secrets_arrive_on_stdin_into_staging(self) -> None:
+        with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as d:
+            write_secrets(source, sandbox=False, marker="new")
             write_secrets(os.path.join(d, "secrets"), sandbox=False, marker="old")
-            write_secrets(os.path.join(d, "secrets.new"), sandbox=False, marker="new")
-            result = start("production", d, new=True)
+            result = shell(d, "stage_secrets && check_secrets secrets.new", stdin=tar_of(source))
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(marker(d), "new")
-            self.assertEqual(sorted(os.listdir(d)), ["secrets"])
+            self.assertEqual(marker(d, "secrets.new"), "new")
+            self.assertEqual(marker(d), "old")
 
     def test_refused_new_secrets_leave_the_old_in_place(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             write_secrets(os.path.join(d, "secrets"), sandbox=False, marker="old")
             write_secrets(os.path.join(d, "secrets.new"), sandbox=True, marker="new")
-            result = start("production", d, new=True)
+            result = shell(d, "check_secrets secrets.new || refuse_new")
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("the running relay is unchanged", result.stderr)
+            self.assertIn(b"unchanged", result.stderr)
+            self.assertEqual(marker(d), "old")
+            self.assertEqual(sorted(os.listdir(d)), ["secrets"])
+
+    def test_the_old_secrets_wait_until_the_relay_answers(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            write_secrets(os.path.join(d, "secrets"), sandbox=False, marker="old")
+            write_secrets(os.path.join(d, "secrets.new"), sandbox=False, marker="new")
+            result = shell(d, "swap_secrets")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(marker(d), "new")
+            self.assertEqual(marker(d, "secrets.old"), "old")
+            result = shell(d, "restore_secrets")
+            self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(marker(d), "old")
             self.assertEqual(sorted(os.listdir(d)), ["secrets"])
 
     def test_the_first_secrets_need_no_old_ones(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             write_secrets(os.path.join(d, "secrets.new"), sandbox=True, marker="new")
-            result = start("sandbox", d, new=True)
+            result = shell(d, "swap_secrets", "sandbox")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(marker(d), "new")
+
+
+@unittest.skipUnless(shutil.which("flock"), "flock is not installed")
+class LockTest(unittest.TestCase):
+    def test_a_second_run_refuses_while_one_holds_the_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            take = functions("take_lock") + "\ntake_lock\n"
+            # Its own process group, so the sleep holding the lock's
+            # descriptor goes with it.
+            holder = subprocess.Popen(["sh", "-c", take + "echo held; sleep 30"], cwd=d,
+                                      stdout=subprocess.PIPE, start_new_session=True)
+            try:
+                self.assertEqual(holder.stdout.readline(), b"held\n")
+                second = subprocess.run(["sh", "-c", take], cwd=d, capture_output=True)
+                self.assertNotEqual(second.returncode, 0)
+                self.assertIn(b"running already", second.stderr)
+            finally:
+                os.killpg(holder.pid, signal.SIGKILL)
+                holder.wait()
+                holder.stdout.close()
+            again = subprocess.run(["sh", "-c", take], cwd=d, capture_output=True)
+            self.assertEqual(again.returncode, 0, again.stderr)
 
 
 class StartTest(unittest.TestCase):
@@ -132,11 +178,28 @@ class StartTest(unittest.TestCase):
         self.assertIn(f"--certificate-identity {IDENTITY}", text)
         self.assertIn("ghcr.io/sheprd-labs/sheprd-push-relay:latest", text)
 
-    def test_secrets_are_checked_before_the_image_runs(self) -> None:
+    def test_the_order_of_a_run(self) -> None:
         text = rendered("production")
-        self.assertLess(text.index("check_secrets secrets || exit 1"), text.index("docker compose"))
-        self.assertLess(text.index("image=$(verified_image) || exit 1"), text.index("docker compose"))
-        self.assertIn("up -d --force-recreate relay", text)
+        steps = [
+            "take_lock || exit 1",
+            "stage_secrets\n",
+            "check_secrets secrets.new || refuse_new",
+            "if ! image=$(verified_image); then",
+            "--secrets /secrets --check",
+            "swap_secrets\n",
+            "up -d --force-recreate relay",
+            "if ! relay_answers; then",
+            "rm -rf secrets.old\n      echo",
+        ]
+        at = [text.index(step, text.index("take_lock || exit 1")) for step in steps]
+        self.assertEqual(at, sorted(at), steps)
+
+    def test_new_secrets_are_checked_by_the_relay_in_the_image_about_to_run(self) -> None:
+        text = rendered("production")
+        run = text[text.index("docker run --rm"):text.index("|| refuse_new\n        swap_secrets")]
+        self.assertIn('"$image" --secrets /secrets --check', run)
+        self.assertIn("--network none", run)
+        self.assertIn('secrets.new:/secrets:ro', run)
 
     def test_cosign_matches_the_relays_pinned_hashes(self) -> None:
         pattern = r"(amd64|arm64)\) cosign_sha256=([0-9a-f]{64}) ;;"

@@ -110,23 +110,31 @@ Adding a DigitalOcean Cloud Firewall in front is worth it: inbound TCP 80 and
 
 ### What a droplet runs
 
-`/opt/sheprd-push-relay/start.sh`, which the user data writes:
+`/opt/sheprd-push-relay/start.sh`, which the user data writes. One run at a
+time holds its lock, from staging new secrets to the relay answering; a
+second run while one is going refuses to start.
 
 1. It checks the secrets: every file is there, and `apns/config.json` is for
    the environment this droplet serves. New secrets from
-   `install-secrets.sh` arrive in `secrets.new` and replace the old ones
-   only once they pass; refused ones are deleted and nothing else changes.
-2. It gives them, and `data/`, to the image's user (65532), private to it.
-3. Like the relay's droplets, it installs cosign by pinned SHA-256, verifies
+   `install-secrets.sh` arrive on stdin and are unpacked into `secrets.new`.
+2. Like the relay's droplets, it installs cosign by pinned SHA-256, verifies
    `ghcr.io/sheprd-labs/sheprd-push-relay:latest` against
    `push-relay-image.yml` on `main`, and writes the digest the signature
    covers to `compose.env`. A missing or foreign signature leaves the running
    relay alone.
-4. It recreates the relay container, which reads its secrets only as it
+3. New secrets then go through that image's `sheprd-push-relay --check`,
+   which loads them exactly as the relay does, so an empty or malformed key
+   is refused here. Refused ones are deleted and nothing else changes.
+   Accepted ones become `secrets`, and the old ones wait in `secrets.old`.
+4. It gives the secrets and `data/` to the image's user (65532), private to
+   it, recreates the relay container, which reads its secrets only as it
    starts, and makes sure Caddy runs.
+5. It asks the relay for `/healthz` from Caddy's container for up to 30
+   seconds. With an answer, `secrets.old` goes; without one, the old secrets
+   come back and the relay is recreated on them.
 
-At first boot it stops at step 1, with `waiting for secrets` in
-`/var/log/cloud-init-output.log`, until `install-secrets.sh` runs it again.
+At first boot it stops at step 1, with `no secrets/apns/config.json` in
+`/var/log/cloud-init-output.log`, until `install-secrets.sh` runs it.
 
 The relay keeps revocations in SQLite at `/opt/sheprd-push-relay/data`, so
 they survive restarts (`--store`, plan "Storage"). Nothing there is useful
@@ -161,9 +169,9 @@ Try it once on the sandbox relay before production is offered to anyone.
 1. Revoke the APNs key in the Apple Developer site (Certificates, Identifiers
    & Profiles > Keys), and make a new one for the same environment.
 2. Make new secrets with `make-secrets.sh` into a new directory.
-3. Delete the droplet, and make a clean one with `create-droplet.sh`; move
-   the reserved IP to it (`doctl compute reserved-ip-action assign IP
-   DROPLET_ID`) rather than changing DNS.
+3. Delete the droplet, and make a clean one in the same region, keeping its
+   reserved IP so DNS needs no change:
+   `PUSH_RELAY_RESERVED_IP=IP PUSH_RELAY_SSH_KEYS=… deploy/push-relay/create-droplet.sh ENVIRONMENT REGION`.
 4. `install-secrets.sh` the new secrets.
 5. Sign the new relay key with the offline root key, and publish the
    signature where phones fetch it (with attestation, not built yet).

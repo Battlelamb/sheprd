@@ -11,6 +11,9 @@
 #                        copies the secrets over SSH, since user data is no
 #                        place for them.
 #   PUSH_RELAY_SIZE      droplet size (default s-1vcpu-1gb)
+#   PUSH_RELAY_RESERVED_IP  an existing reserved IP to move to the new droplet,
+#                        as recovery does, instead of making a new one; DNS
+#                        already points at it.
 #   PUSH_RELAY_DOMAIN    the name to serve (default push.sheprd.org, or
 #                        push-sandbox.sheprd.org): the daemon reaches only
 #                        those two, so change it only for a trial.
@@ -37,6 +40,16 @@ if doctl compute droplet list --tag-name sheprd-push-relay --format Name --no-he
   exit 1
 fi
 
+# A reserved IP moves only within its region: check before making a droplet
+# it could not reach.
+if [ -n "${PUSH_RELAY_RESERVED_IP:-}" ]; then
+  reserved_region=$(doctl compute reserved-ip get "$PUSH_RELAY_RESERVED_IP" --format Region --no-header)
+  if [ "$reserved_region" != "$region" ]; then
+    echo "$PUSH_RELAY_RESERVED_IP is in ${reserved_region:-no region}; create the droplet there: $0 $environment $reserved_region" >&2
+    exit 2
+  fi
+fi
+
 data=$(mktemp)
 trap 'rm -f "$data"' EXIT
 compose=$(base64 < "$here/compose.yml" | tr -d '\n')
@@ -57,13 +70,20 @@ id=$(doctl compute droplet create "$name" \
   --user-data-file "$data" \
   --wait \
   --format ID --no-header)
-address=$(doctl compute reserved-ip create --droplet-id "$id" --format IP --no-header)
+if [ -n "${PUSH_RELAY_RESERVED_IP:-}" ]; then
+  address=$PUSH_RELAY_RESERVED_IP
+  doctl compute reserved-ip-action assign "$address" "$id" >/dev/null
+  dns="$domain already points at $address, now this droplet's; check it does."
+else
+  address=$(doctl compute reserved-ip create --droplet-id "$id" --format IP --no-header)
+  dns="Point $domain at it: an A record for $address."
+fi
 
 cat <<NOTE
 
 $name is up in $region, at the reserved IP $address.
 
-1. Point $domain at it: an A record for $address.
+1. $dns
 2. Make its secrets, once, on your own machine, and keep a copy offline:
      deploy/push-relay/make-secrets.sh $environment AuthKey_KEYID.p8 TEAM_ID KEY_ID DIR
 3. Copy them over; this starts the relay:

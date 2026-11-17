@@ -5,8 +5,9 @@
 #   deploy/push-relay/install-secrets.sh ~/push-sandbox root@203.0.113.7
 #
 # They replace the droplet's secrets as a whole, once its start.sh has
-# checked them: it refuses a missing file or an APNs key for the other
-# environment, and leaves the running relay and its secrets alone then.
+# checked them: it refuses a missing file, an APNs key for the other
+# environment, or any key the relay cannot load, and keeps the old secrets
+# until the relay answers with the new ones.
 set -euo pipefail
 
 [ "$#" -eq 2 ] || { echo "usage: $0 DIR USER@HOST" >&2; exit 2; }
@@ -20,14 +21,9 @@ if [ -f "$dir/relay-key-previous.pem" ]; then
   files+=(relay-key-previous.pem)
 fi
 
-# Into a fresh directory first, so a dropped connection leaves the old
-# secrets in place; start.sh moves them over once they check out. macOS tar
-# adds no AppleDouble files with COPYFILE_DISABLE.
+# start.sh unpacks them into a fresh directory under its lock, so a dropped
+# connection or a second install leaves the old secrets in place, and swaps
+# them in only once the relay's own --check accepts them. macOS tar adds no
+# AppleDouble files with COPYFILE_DISABLE.
 COPYFILE_DISABLE=1 tar -C "$dir" -cf - "${files[@]}" |
-  ssh "$host" 'set -eu
-    cd /opt/sheprd-push-relay
-    umask 077
-    rm -rf secrets.new
-    mkdir secrets.new
-    tar -C secrets.new --no-same-owner -xf -
-    NEW_SECRETS=1 ./start.sh'
+  ssh "$host" NEW_SECRETS=1 /opt/sheprd-push-relay/start.sh

@@ -37,6 +37,15 @@ write_files:
       # secrets and data, private to it: the relay refuses a key others can
       # read.
       umask 077
+      # One run at a time, from staging new secrets to the relay answering,
+      # so a retried install cannot pull secrets out from under another.
+      take_lock() {
+        exec 9>.lock
+        if ! flock -n 9; then
+          echo "sheprd-push-relay: start.sh is running already; try again once it finishes" >&2
+          return 1
+        fi
+      }
       # Whether DIR holds every secret, for the APNs environment this relay
       # serves. One relay serves one environment, and clients reach each by
       # its own name, so a key for the other one here is a mistake.
@@ -56,24 +65,46 @@ write_files:
             ;;
         esac
       }
-      # install-secrets.sh unpacks new secrets into secrets.new and runs this
-      # with NEW_SECRETS=1: they replace the old ones only once they check
-      # out, so refused ones leave the running relay and its secrets alone.
-      if [ -n "${NEW_SECRETS:-}" ]; then
-        if ! check_secrets secrets.new; then
-          rm -rf secrets.new
-          echo "sheprd-push-relay: the new secrets were refused; the running relay is unchanged" >&2
-          exit 1
-        fi
+      # New secrets, a tar on stdin from install-secrets.sh, into secrets.new.
+      stage_secrets() {
+        rm -rf secrets.new
+        mkdir secrets.new
+        tar -C secrets.new --no-same-owner -xf -
+      }
+      # secrets.new becomes secrets; the old ones wait in secrets.old until
+      # the relay answers with the new ones.
+      swap_secrets() {
         rm -rf secrets.old
         if [ -d secrets ]; then mv secrets secrets.old; fi
         mv secrets.new secrets
-        rm -rf secrets.old
+      }
+      restore_secrets() {
+        rm -rf secrets
+        mv secrets.old secrets
+      }
+      refuse_new() {
+        rm -rf secrets.new
+        echo "sheprd-push-relay: the new secrets were refused; the running relay and its secrets are unchanged" >&2
+        exit 1
+      }
+      own() {
+        chown -R 65532:65532 "$@"
+        chmod -R u=rwX,go= "$@"
+      }
+      take_lock || exit 1
+      # install-secrets.sh streams new secrets on stdin with NEW_SECRETS=1.
+      # They replace the old ones only once the files, their environment,
+      # and the relay's own loaders (--check, below) accept them.
+      new="${NEW_SECRETS:-}"
+      if [ -n "$new" ]; then
+        stage_secrets
+        check_secrets secrets.new || refuse_new
+      else
+        mkdir -p secrets/apns
+        check_secrets secrets || exit 1
       fi
-      mkdir -p secrets/apns data
-      chown -R 65532:65532 secrets data
-      chmod -R u=rwX,go= secrets data
-      check_secrets secrets || exit 1
+      mkdir -p data
+      own data
       # cosign, pinned to the release push-relay-image.yml signs with, and
       # checked against the SHA-256 in that release's signed
       # cosign_checksums.txt; deploy/relay pins the same one.
@@ -123,15 +154,51 @@ write_files:
         fi
         printf '%s@%s' "$repository" "$digest"
       }
-      image=$(verified_image) || exit 1
+      if ! image=$(verified_image); then
+        rm -rf secrets.new
+        exit 1
+      fi
+      if [ -n "$new" ]; then
+        own secrets.new
+        # The relay's own loaders, in the image about to run: an empty or
+        # malformed key fails here, not after the swap.
+        docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+          --network none -v "$PWD/secrets.new:/secrets:ro" "$image" --secrets /secrets --check \
+          || refuse_new
+        swap_secrets
+      fi
+      own secrets
       (umask 022; printf 'PUSH_RELAY_DOMAIN=%s\nPUSH_RELAY_IMAGE=%s\n' "$domain" "$image" > compose.env)
       # Set here too: a PUSH_RELAY_IMAGE in the environment would otherwise
       # win over compose.env's verified digest. The relay reads its secrets
       # only as it starts, so it is recreated every time, new secrets or
       # not; pushes carry everything they need and keep working.
       export PUSH_RELAY_IMAGE="$image"
+      # Whether the relay answers /healthz, asked from Caddy's container:
+      # the relay publishes no port, and its image has no shell.
+      relay_answers() {
+        for _ in $(seq 1 30); do
+          if docker compose --env-file compose.env exec -T caddy \
+            wget -q -T 2 -O - http://relay:8080/healthz 2>/dev/null | grep -qx ok; then
+            return 0
+          fi
+          sleep 1
+        done
+        return 1
+      }
       docker compose --env-file compose.env up -d --force-recreate relay
       docker compose --env-file compose.env up -d
+      if ! relay_answers; then
+        if [ -n "$new" ] && [ -d secrets.old ]; then
+          restore_secrets
+          docker compose --env-file compose.env up -d --force-recreate relay
+          echo "sheprd-push-relay: the relay did not answer with the new secrets; it is back on the old ones" >&2
+        else
+          echo "sheprd-push-relay: the relay did not answer; see docker compose --env-file compose.env logs relay" >&2
+        fi
+        exit 1
+      fi
+      rm -rf secrets.old
       echo "sheprd-push-relay: running $image at https://$domain ($environment)" >&2
 
 runcmd:

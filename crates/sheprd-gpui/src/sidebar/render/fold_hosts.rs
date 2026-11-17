@@ -18,7 +18,7 @@ impl SheprdWindow {
         look: SidebarLook,
         cx: &mut Context<Self>,
     ) -> Option<Stateful<Div>> {
-        let folded = self.hosts_folded()?;
+        let folded = self.hosts_folded(cx)?;
         let font = &self.config.sidebar;
         let theme = &self.theme;
         let height = line_height(font) + 2. * look.density.header_padding();
@@ -32,12 +32,12 @@ impl SheprdWindow {
         .into();
         let (foreground, surface) = (theme.foreground, theme.surface);
         let hint = label.clone();
+        let button = div()
+            .id("sidebar-fold-hosts")
+            .debug_selector(|| "sidebar-fold-hosts".into());
         Some(
-            div()
-                .id("sidebar-fold-hosts")
-                .debug_selector(|| "sidebar-fold-hosts".into())
-                .role(Role::Button)
-                .aria_label(label)
+            // A keyboard stop, as the sidebar's other buttons are.
+            self.sidebar_button(button, label)
                 .flex_none()
                 .size(px(size))
                 // The icon's edge lines up with the rows' status column.

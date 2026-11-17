@@ -397,20 +397,26 @@ impl SheprdWindow {
         cx.notify();
     }
 
-    /// The hosts the sidebar heads under the current filters, by endpoint
-    /// index: what collapsing them all acts on.
-    fn headed_hosts(&self) -> Vec<usize> {
-        self.displayed_devices()
+    /// The host headers the spaces list shows, by endpoint index: under the
+    /// device and tag filters and, in the Devices layout, its search, as
+    /// render lists them. What collapsing them all acts on.
+    fn headed_hosts(&self, cx: &App) -> Vec<usize> {
+        let devices = !self.config.layout.mode.lists_workspaces();
+        let query = if devices && self.config.show_sidebar_search {
+            self.device_tree_query(cx)
+        } else {
+            String::new()
+        };
+        self.listed_headers(devices, &query)
             .into_iter()
-            .filter(|(_, endpoint)| self.device_visible(&endpoint.id))
             .map(|(index, _)| index)
             .collect()
     }
 
     /// Whether every headed host is collapsed, or `None` when fewer than two
     /// are headed and collapsing them all would mean nothing.
-    pub(crate) fn hosts_folded(&self) -> Option<bool> {
-        let hosts = self.headed_hosts();
+    pub(crate) fn hosts_folded(&self, cx: &App) -> Option<bool> {
+        let hosts = self.headed_hosts(cx);
         (hosts.len() > 1).then(|| {
             hosts
                 .iter()
@@ -421,10 +427,10 @@ impl SheprdWindow {
     /// Collapses every headed host, or expands them all when they all
     /// already are, as the phone's Workspaces tab does.
     pub(crate) fn toggle_all_devices(&mut self, cx: &mut Context<Self>) {
-        let Some(folded) = self.hosts_folded() else {
+        let Some(folded) = self.hosts_folded(cx) else {
             return;
         };
-        for index in self.headed_hosts() {
+        for index in self.headed_hosts(cx) {
             if let Some(endpoint) = self.endpoints.get_mut(index) {
                 endpoint.collapsed = !folded;
             }

@@ -187,6 +187,7 @@ struct IPadRoot: View {
         .toolbar {
             hideSidebar
             ToolbarItem(placement: .topBarLeading) { AgentSortMenu(sort: $sort) }
+            ToolbarItem(placement: .topBarLeading) { AgentScopeMenu() }
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Talk to Sheprd", systemImage: "waveform") { model.talk() }
                     .disabled(model.fleet.machines.isEmpty)
@@ -201,7 +202,8 @@ struct IPadRoot: View {
 }
 
 /// The sidebar: the agents in the order the person chose, then terminals,
-/// of the computers the tag filter leaves, as Home on a phone shows them.
+/// of the computers the tag filter leaves and the repository or workspace
+/// chosen, as Home on a phone shows them.
 private struct AttentionList: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
@@ -209,14 +211,15 @@ private struct AttentionList: View {
     @Binding var selection: Route?
 
     var body: some View {
-        let shown = model.tagFilter.shown(among: model.computers)
-        let chats = model.fleet.chatItems.filter { shown.contains($0.computer.device) }
-        let terminals = model.fleet.terminalItems.filter { shown.contains($0.computer.device) }
+        let listed = model.agentListFilter()
+        let chats = model.fleet.chatItems.filter { listed($0.computer, $0.workspace) }
+        let terminals = model.fleet.terminalItems.filter { listed($0.computer, $0.workspace) }
         // Tabs with an agent list with the chats; the rest under Terminals.
         let agents = terminals.filter { $0.agent != nil }
         let shells = terminals.filter { $0.agent == nil }
         List(selection: $selection) {
             TagFilterBar()
+            AgentScopeBar()
             ForEach(HomeRow.sections(sort, chats: chats, agents: agents)) { section in
                 Section(section.title) { ForEach(section.items) { row($0) } }
             }

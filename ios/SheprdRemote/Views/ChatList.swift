@@ -12,15 +12,16 @@ struct ChatList: View {
     @State private var problem: String?
 
     var body: some View {
-        let shown = model.tagFilter.shown(among: model.computers)
+        let listed = model.agentListFilter()
         let sections = HomeRow.sections(
             sort,
-            chats: model.fleet.chatItems.filter { shown.contains($0.computer.device) },
-            agents: model.fleet.agentTerminals.filter { shown.contains($0.computer.device) }
+            chats: model.fleet.chatItems.filter { listed($0.computer, $0.workspace) },
+            agents: model.fleet.agentTerminals.filter { listed($0.computer, $0.workspace) }
         )
         List {
             UnpairedCards()
             TagFilterBar()
+            AgentScopeBar()
             ForEach(sections) { section in
                 Section(section.title) { ForEach(section.items) { row($0) } }
             }

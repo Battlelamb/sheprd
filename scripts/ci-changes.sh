@@ -83,9 +83,11 @@ fi
 # The macOS release builds differ from the debug checks in their profile,
 # target (x86_64 under Rosetta), and release-mode CLI suite, so they run when
 # what those depend on changes; the release workflow builds them regardless.
+# `crates/*/*.rs` is each build script and the helpers beside it, which
+# `build.rs` loads with `mod` (`build_identity.rs`, `locales.rs`, ...).
 macos_release=$(changed \
   ':(glob)**/Cargo.toml' Cargo.lock rust-toolchain.toml .cargo \
-  ':(glob)crates/*/build.rs' crates/sheprd-gpui/tests/cli.rs crates/sheprd-gpui/tests/cli \
+  ':(glob)crates/*/*.rs' crates/sheprd-gpui/tests/cli.rs crates/sheprd-gpui/tests/cli \
   scripts/ci-changes.sh .github/workflows/ci.yml)
 # The docs link into READMEs, docs/ and the example config, so any Markdown or
 # build input can break a page; the check takes seconds.

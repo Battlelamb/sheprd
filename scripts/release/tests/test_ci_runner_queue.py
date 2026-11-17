@@ -121,6 +121,8 @@ class MacosReleaseChanges(GitFixture):
     def test_release_inputs_run_the_macos_builds(self):
         for path in ("Cargo.lock", "Cargo.toml", "crates/sheprd-gpui/Cargo.toml",
                      "rust-toolchain.toml", ".cargo/config.toml", "crates/sheprd-gpui/build.rs",
+                     "crates/sheprd-gpui/build_identity.rs", "crates/sheprd-gpui/locales.rs",
+                     "crates/sheprd-gpui/release_version.rs", "crates/sheprd-launcher/build.rs",
                      "crates/sheprd-gpui/tests/cli.rs", "crates/sheprd-gpui/tests/cli/help.rs",
                      ".github/workflows/ci.yml"):
             self.base = self.git("rev-parse", "HEAD").strip()
@@ -128,7 +130,8 @@ class MacosReleaseChanges(GitFixture):
             self.assertEqual(self.outputs()["macos_release"], "true", path)
 
     def test_source_changes_skip_the_macos_builds(self):
-        for path in ("crates/sheprd-gpui/src/app.rs", "assets/app.css", "README.md"):
+        for path in ("crates/sheprd-gpui/src/app.rs", "crates/sheprd-gpui/src/main.rs",
+                     "crates/sheprd-gpui/tests/live_gui.rs", "assets/app.css", "README.md"):
             self.base = self.git("rev-parse", "HEAD").strip()
             self.commit_path(path)
             self.assertEqual(self.outputs()["macos_release"], "false", path)

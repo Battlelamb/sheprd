@@ -2,6 +2,9 @@ import ActivityKit
 import Foundation
 import os
 import SheprdRemoteCore
+import SheprdNearby
+import SheprdRelay
+import SheprdVoice
 import Network
 import UIKit
 
@@ -440,6 +443,7 @@ final class AppModel {
         collapsed.computers.forget(computer.device)
         shortcuts.offline(computer.device)
         Task { await sessions.forget(computer) }
+        Task { await GitHubReads.reader.tokens.forget(lender: computer.device) }
     }
 
     private func save() {

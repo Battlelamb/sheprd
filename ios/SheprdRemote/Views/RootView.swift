@@ -1,4 +1,5 @@
 import SheprdRemoteCore
+import SheprdNearby
 import SwiftUI
 
 enum RootTab: Hashable { case home, workspaces, settings }
@@ -38,6 +39,10 @@ struct RootView: View {
             }
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
+        #if DEBUG
+        // The simulator loop's made-up pull request (`-githubDemo`).
+        .overlay { PullRequestDemoRoot() }
+        #endif
         .environment(window)
         // Along the top edge on every screen; sheets carry their own.
         .overlay(alignment: .top) { SyncBar().ignoresSafeArea(edges: .top) }

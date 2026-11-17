@@ -141,6 +141,12 @@ impl<S: Read + Write> Connection<S> {
         }
     }
 
+    /// Checks the server is still there after a quiet spell
+    /// ([`Error::Idle`]); its `Pong` comes as a frame.
+    pub fn ping(&mut self) -> Result<()> {
+        self.send(&ClientFrame::Ping)
+    }
+
     /// Asks the server to stop the stream `request_id`.
     pub fn interrupt(&mut self, request_id: &str) -> Result<()> {
         self.send(&ClientFrame::Interrupt {

@@ -117,8 +117,8 @@ and nothing goes through your phone.
      short name and renames the workspace to it, as the alert's Ask button
      does; that prompts the chat's agent once.
    - `-summarizeFirst YES` asks for the row summary of a workspace's first
-     chat with a reply, as its row's swipe does. It runs that chat's agent
-     once, which costs a model call.
+     chat with a reply, as its row's swipe does. It runs Claude Code once
+     on the computer, which costs a model call.
    - A workspace's screen ends with Close Workspace and, for a linked
      worktree, Delete Worktree. Both act on the paired computer's real
      workspaces, so try them on one made for the purpose.

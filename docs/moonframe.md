@@ -3,14 +3,15 @@
 Sheprd opens in a window [Moonframe](https://moonframe.dev) lays out: the
 `moonframe` feature of `sheprd-gpui`, on by default, so releases ship it. A
 plain launch opens this window; `sheprd` commands and `--socket` or `--session`
-launches stay the app's own, as without the feature. CI builds and tests it
-with every leg and loads its Luau with `--check`, both the copy compiled in
-and the sources.
+launches stay the app's own, as without the feature. Releases ship it as a
+beta that is on by default: anyone can go back to the classic window as below.
+CI builds and tests it with every leg and loads its Luau with `--check`, both
+the copy compiled in and the sources.
 
 ## The classic window
 
-Turn off **Settings > General > Moonframe window** (`moonframe_window = false`
-under `[features]`) and Sheprd opens its classic window from the next launch.
+Turn off **Settings > General > Moonframe window (beta)**
+(`moonframe_window = false` under `[features]`) and Sheprd opens its classic window from the next launch.
 `sheprd --classic` opens the classic window once, whatever the setting says.
 On macOS, hold ⌥ Option as Sheprd starts (from Finder, the Dock, `open`, or
 `just run`) to open the other window from the one the setting keeps, without

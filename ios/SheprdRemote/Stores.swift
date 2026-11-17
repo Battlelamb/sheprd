@@ -237,8 +237,8 @@ final class TermKeyStore {
 }
 
 /// The tag and computer Home, the iPad sidebar, and Workspaces show agents
-/// and workspaces of, kept on this phone and shared by its windows. Read
-/// them through `ComputerTags.active` or `shown`: the tag may have left
+/// and workspaces of (`AgentFilterMenu`, `TagFilterBar`), kept on this
+/// phone and shared by its windows. Read them through `ComputerTags.active` or `shown`: the tag may have left
 /// every computer since, and the computer been forgotten.
 @MainActor
 @Observable
@@ -257,6 +257,12 @@ final class TagFilterStore {
     init() {
         tag = UserDefaults.standard.string(forKey: Self.key)
         device = UserDefaults.standard.string(forKey: Self.deviceKey)
+    }
+
+    /// Filters by `tag`, dropping a chosen computer that lacks it.
+    func choose(tag: String?, among computers: [Computer]) {
+        self.tag = tag
+        if ComputerTags.active(device: device, tag: tag, among: computers) == nil { device = nil }
     }
 
     /// The devices the filter leaves among `computers`.

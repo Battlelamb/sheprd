@@ -50,43 +50,76 @@ extension AppModel {
     }
 }
 
-/// Chooses the repository, or one of its workspaces, whose agents Home and
-/// the iPad sidebar list.
-struct AgentScopeMenu: View {
+/// Narrows Home's and the iPad sidebar's agents, from beside their sort
+/// menu: to the computers with a tag, to one computer, and to a repository
+/// or one of its workspaces. Filled while any of them applies.
+struct AgentFilterMenu: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let active = model.agentScope
+        let computers = model.computers
+        let tags = ComputerTags.all(in: computers)
+        let tag = ComputerTags.active(model.tagFilter.tag, among: computers)
+        let device = ComputerTags.active(device: model.tagFilter.device, tag: tag, among: computers)
+        let hosts = computers.filter { $0.matches(tag: tag) }
+        let scope = model.agentScope
         let choices = AgentScope.choices(among: model.shownHomes)
+        let filtered = tag != nil || device != nil || scope != nil
         Menu {
-            option("All Repositories", scope: nil, active: active)
-            Section {
-                ForEach(choices) { choice in
-                    let chosen = active == choice.scope || choice.places.contains { $0.scope == active }
-                    Menu {
-                        option("All of \(choice.name)", scope: choice.scope, active: active)
-                        Section {
-                            ForEach(choice.places) { place in
-                                option(label(place, in: choice), scope: place.scope, active: active)
-                            }
+            Button("Show All Agents", systemImage: "xmark.circle") {
+                withAnimation(.snappy) {
+                    model.tagFilter.tag = nil
+                    model.tagFilter.device = nil
+                    model.agentScopeStore.scope = nil
+                }
+            }
+            .disabled(!filtered)
+            if !tags.isEmpty {
+                Section("Tags") {
+                    ForEach(tags, id: \.self) { name in
+                        toggle(name, on: name == tag) { model.tagFilter.choose(tag: $0 ? name : nil, among: computers) }
+                    }
+                }
+            }
+            if hosts.count > 1 {
+                Section("Computers") {
+                    ForEach(hosts, id: \.device) { computer in
+                        toggle(model.displayName(computer), on: computer.device == device) {
+                            model.tagFilter.device = $0 ? computer.device : nil
                         }
-                    } label: {
-                        Label(choice.name, systemImage: chosen ? "checkmark" : "folder")
+                    }
+                }
+            }
+            if !choices.isEmpty {
+                Section("Repositories") {
+                    ForEach(choices) { choice in
+                        let chosen = scope == choice.scope || choice.places.contains { $0.scope == scope }
+                        Menu {
+                            option("All of \(choice.name)", scope: choice.scope, active: scope)
+                            Section {
+                                ForEach(choice.places) { place in
+                                    option(label(place, in: choice), scope: place.scope, active: scope)
+                                }
+                            }
+                        } label: {
+                            Label(choice.name, systemImage: chosen ? "checkmark" : "folder")
+                        }
                     }
                 }
             }
         } label: {
-            Image(systemName: active == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+            Image(systemName: filtered ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
         }
-        .accessibilityLabel("Filter agents by repository or workspace")
-        .disabled(choices.isEmpty && active == nil)
+        .accessibilityLabel(filtered ? "Filter agents, filtered" : "Filter agents")
+        .disabled(!filtered && tags.isEmpty && hosts.count < 2 && choices.isEmpty)
     }
 
-    private func option(_ title: String, scope: AgentScope?, active: AgentScope?) -> some View {
-        Toggle(title, isOn: Binding(
-            get: { active == scope },
-            set: { on in withAnimation(.snappy) { model.agentScopeStore.scope = on ? scope : nil } }
-        ))
+    private func toggle(_ title: String, on: Bool, set: @escaping (Bool) -> Void) -> some View {
+        Toggle(title, isOn: Binding(get: { on }, set: { value in withAnimation(.snappy) { set(value) } }))
+    }
+
+    private func option(_ title: String, scope: AgentScope, active: AgentScope?) -> some View {
+        toggle(title, on: active == scope) { model.agentScopeStore.scope = $0 ? scope : nil }
     }
 
     /// The workspace's branch when it is the repository's own checkout, as
@@ -98,40 +131,5 @@ struct AgentScopeMenu: View {
         guard Set(choice.places.map(\.device)).count > 1,
               let computer = model.computers.first(where: { $0.device == place.device }) else { return name }
         return "\(name) · \(model.displayName(computer))"
-    }
-}
-
-/// The chosen repository or workspace, leading the filter bar above an
-/// agent list, a tap away from showing them all again.
-struct AgentScopePill: View {
-    @Environment(AppModel.self) private var model
-    var scope: AgentScope
-
-    var body: some View {
-        Button {
-            withAnimation(.snappy) { model.agentScopeStore.scope = nil }
-        } label: {
-            TagPill(tag: title, selected: true, symbol: "xmark", icon: icon, neutral: true)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Show agents of every repository")
-    }
-
-    private var title: String {
-        switch scope {
-        case let .repository(name):
-            return name
-        case let .workspace(device, id):
-            let workspace = model.fleet.machines.first { $0.id == device }?.home?.workspaces.first { $0.id == id }
-            guard let workspace else { return id }
-            return workspace.label == workspace.repositoryName ? workspace.label : "\(workspace.repositoryName) / \(workspace.label)"
-        }
-    }
-
-    private var icon: String {
-        switch scope {
-        case .repository: "folder"
-        case .workspace: "square.stack.3d.up"
-        }
     }
 }

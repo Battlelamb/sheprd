@@ -64,34 +64,27 @@ struct PillFlow: Layout {
     }
 }
 
-/// The tags in use and the computers, above the Home and Workspaces lists
-/// and the iPad sidebar: a tap shows only the computers with that tag, or
-/// only that computer, and another shows them all again. Computers appear
-/// once two could be chosen. Above an agent list, the repository or
-/// workspace chosen leads the row (`AgentScopePill`).
+/// The tags in use and the computers, above the Workspaces list: a tap
+/// shows only the computers with that tag, or only that computer, and
+/// another shows them all again. Computers appear once two could be chosen.
+/// The agent lists offer the same choices in their filter menu
+/// (`AgentFilterMenu`).
 struct TagFilterBar: View {
     @Environment(AppModel.self) private var model
-    /// Above an agent list, which the repository filter also narrows.
-    var agents = false
 
     var body: some View {
-        let scope = agents ? model.agentScope : nil
         let computers = model.computers
         let tags = ComputerTags.all(in: computers)
         let active = ComputerTags.active(model.tagFilter.tag, among: computers)
         let device = ComputerTags.active(device: model.tagFilter.device, tag: active, among: computers)
         let hosts = computers.filter { $0.matches(tag: active) }
-        if !tags.isEmpty || hosts.count > 1 || scope != nil {
+        if !tags.isEmpty || hosts.count > 1 {
             Section {
                 ScrollView(.horizontal) {
                     HStack(spacing: 6) {
-                        if let scope {
-                            AgentScopePill(scope: scope)
-                            if !tags.isEmpty || hosts.count > 1 { Divider().frame(height: 16) }
-                        }
                         ForEach(tags, id: \.self) { tag in
                             Button {
-                                withAnimation(.snappy) { choose(tag: tag == active ? nil : tag) }
+                                withAnimation(.snappy) { model.tagFilter.choose(tag: tag == active ? nil : tag, among: computers) }
                             } label: {
                                 TagPill(tag: tag, selected: tag == active)
                             }
@@ -121,13 +114,6 @@ struct TagFilterBar: View {
                 .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
             }
         }
-    }
-
-    /// Filters by `tag`, dropping a chosen computer that lacks it.
-    private func choose(tag: String?) {
-        let filter = model.tagFilter
-        filter.tag = tag
-        if ComputerTags.active(device: filter.device, tag: tag, among: model.computers) == nil { filter.device = nil }
     }
 }
 
@@ -182,7 +168,7 @@ struct ComputerTagsSection: View {
         } header: {
             Text("Tags")
         } footer: {
-            Text("Tags sync through this computer to the phones and desktops paired with it. Filter by them at the top of Home and Workspaces.")
+            Text("Tags sync through this computer to the phones and desktops paired with it. Filter by them from the filter menu on Home and at the top of Workspaces.")
         }
     }
 

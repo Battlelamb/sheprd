@@ -33,7 +33,7 @@ struct HomeTab: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { AgentSortMenu(sort: $sort) }
-                ToolbarItem(placement: .topBarLeading) { AgentScopeMenu() }
+                ToolbarItem(placement: .topBarLeading) { AgentFilterMenu() }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Talk to Sheprd", systemImage: "waveform") { model.talk() }
                         .disabled(model.fleet.machines.isEmpty)

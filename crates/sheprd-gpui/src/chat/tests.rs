@@ -55,6 +55,7 @@ mod pinned;
 mod prepared;
 mod questions;
 mod rail;
+mod rail_resize;
 mod recall;
 mod relocale;
 mod restore;

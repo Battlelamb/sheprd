@@ -63,8 +63,10 @@ class CiScopeTest(unittest.TestCase):
         self.assertEqual(outputs["gpui"], "false")
 
     def test_shared_inputs_reach_the_whole_workspace(self):
-        for path in ("Cargo.lock", "assets/icons/app.png", "scripts/check-sorted.py",
-                     "crates/test-support/sandbox.rs", "crates/embed-resource/src/lib.rs"):
+        for path in ("assets/icons/app.png", "scripts/check-sorted.py",
+                     "crates/test-support/sandbox.rs", "crates/embed-resource/src/lib.rs",
+                     "skills/herdr-mods/SKILL.md", "website/site/relays.json",
+                     "website/site/relays.json.asc"):
             with self.subTest(path=path):
                 outputs = self.plan(["crates/relay/src/main.rs", path])
                 self.assertEqual(outputs["full"], "false")
@@ -72,7 +74,9 @@ class CiScopeTest(unittest.TestCase):
                 self.assertEqual(outputs["gpui"], "true")
 
     def test_unread_paths_select_no_crate(self):
-        outputs = self.plan(["docs/cli.md", "site/index.html", ".github/workflows/ios.yml"])
+        outputs = self.plan(["docs/cli.md", "README.md", "site/index.html",
+                             "website/site/index.html", "website/docs/install.md",
+                             ".github/workflows/ios.yml"])
         self.assertEqual(outputs["cargo_scope"], "")
         self.assertEqual(outputs["gpui"], "false")
 
@@ -90,10 +94,19 @@ class CiScopeTest(unittest.TestCase):
                 self.assert_full(self.plan(["crates/relay/src/main.rs"], labels=["bug", label]))
         self.assertEqual(self.plan(["crates/relay/src/main.rs"], labels=["linux"])["full"], "false")
 
+    def test_dependencies_and_toolchain_run_everything(self):
+        # A target table, or a crate only one platform compiles, changes what
+        # that platform builds; the lockfile carries both.
+        for path in ("Cargo.lock", "Cargo.toml", "crates/client/Cargo.toml",
+                     "rust-toolchain.toml", ".cargo/config.toml"):
+            with self.subTest(path=path):
+                self.assert_full(self.plan([path]))
+
     def test_platform_paths_run_everything(self):
         for path in ("crates/sheprd-gpui/src/avatars/cache/windows.rs", "macos/sheprd-nearby/main.swift",
                      "crates/sheprd-gpui/windows.manifest", "crates/client/src/macos_keychain.rs",
-                     ".github/workflows/ci.yml", "scripts/ci-scope.py", "scripts/ci-changes.sh"):
+                     ".github/workflows/ci.yml", "scripts/ci-scope.py", "scripts/ci-changes.sh",
+                     "scripts/set-display-resolution.ps1"):
             with self.subTest(path=path):
                 self.assert_full(self.plan([path]))
         for path in ("crates/client/src/window.rs", "crates/client/src/windowing.rs"):
@@ -102,7 +115,8 @@ class CiScopeTest(unittest.TestCase):
 
     def test_platform_cfg_lines_run_everything(self):
         for line in ('+#[cfg(windows)]', '-#[cfg(target_os = "macos")]', '+    if cfg!(unix) {',
-                     '+#[cfg(all(test, not(windows)))]'):
+                     '+#[cfg(all(test, not(windows)))]', '+#[cfg_attr(windows, allow(dead_code))]',
+                     '-    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {'):
             with self.subTest(line=line):
                 self.assert_full(self.plan(["crates/client/src/lib.rs"], lines=[line]))
         self.assertEqual(self.plan(["crates/client/src/lib.rs"],

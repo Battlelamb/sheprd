@@ -3,11 +3,11 @@
 
 A pull request runs on Linux alone and lints and tests only the crates its
 changes can reach: each changed crate and every crate that depends on it, by
-any dependency kind. Any other build input (the lockfile, `assets/`,
-`scripts/`, `crates/test-support`) reaches every crate. The merge queue, main,
-and pull requests that touch platform code or ask for it with a label run
-every platform over the whole workspace, so a release still requires the full
-matrix on main (scripts/release/check-ci.py).
+any dependency kind. Any other build input (`assets/`, `scripts/`, `skills/`,
+`crates/test-support`) reaches every crate. The merge queue, main, and pull
+requests that touch platform code or dependencies, or ask for it with a
+label, run every platform over the whole workspace, so a release still
+requires the full matrix on main (scripts/release/check-ci.py).
 
 Prints GitHub step outputs:
   full           `true` for every platform and the whole workspace
@@ -28,12 +28,21 @@ ROOT = Path(__file__).resolve().parent.parent
 FULL_LABELS = frozenset({"full-ci", "macos", "windows"})
 # A change to how CI picks its work has to prove itself on every platform.
 FULL_PATHS = frozenset({".github/workflows/ci.yml", "scripts/ci-changes.sh", "scripts/ci-scope.py"})
-# Code only a Windows or macOS runner compiles: platform files, and cfg gates.
-PLATFORM_PATH = re.compile(r"(^|[/_.-])(windows|win32|macos|darwin)([/_.-]|$)", re.IGNORECASE)
-PLATFORM_CFG = re.compile(r"\bcfg!?\(.*\b(windows|macos|target_os|target_vendor|target_family|unix)\b")
-# Outside a crate, what no crate builds or tests read. Anything else there
-# (assets, scripts, the lockfile, test-support) reaches every crate.
-UNREAD = re.compile(r"\.md$|^(website|site|\.github)/")
+# What each platform builds: dependencies (a manifest's target tables, and
+# crates only one platform compiles, change with the lockfile) and the
+# toolchain.
+BUILD_PATH = re.compile(r"(^|/)Cargo\.toml$|^Cargo\.lock$|^rust-toolchain\.toml$|^\.cargo/")
+# Code only a Windows or macOS runner compiles or runs: platform files,
+# PowerShell, cfg gates, and build scripts reading the target.
+PLATFORM_PATH = re.compile(r"(^|[/_.-])(windows|win32|macos|darwin)([/_.-]|$)|\.ps1$", re.IGNORECASE)
+PLATFORM_CFG = re.compile(
+    r"\bcfg(!|_attr)?\(.*\b(windows|macos|target_os|target_vendor|target_family|unix)\b"
+    r"|CARGO_CFG_TARGET_(OS|VENDOR|FAMILY)\b")
+# Outside a crate, what no crate builds or tests read: Markdown but the
+# skills the app embeds, the website but the relay list sheprd-relay's tests
+# check, the hosted site, and other workflows. Anything else there reaches
+# every crate.
+UNREAD = re.compile(r"^(?!skills/).*\.md$|^website/(?!site/relays\.json)|^(site|\.github)/")
 # Patched into GPUI's build, which no member manifest names.
 WORKSPACE_WIDE_CRATES = frozenset({"crates/embed-resource"})
 DEPENDENCY_TABLES = ("dependencies", "dev-dependencies", "build-dependencies")
@@ -84,7 +93,8 @@ def plan(event, labels, changed, diff_lines, members, dependents):
     """The step outputs. `changed` is None when the run has no usable base."""
     full = (event != "pull_request" or changed is None
             or bool(FULL_LABELS & set(labels))
-            or any(path in FULL_PATHS or PLATFORM_PATH.search(path) for path in changed)
+            or any(path in FULL_PATHS or BUILD_PATH.search(path) or PLATFORM_PATH.search(path)
+                   for path in changed)
             or any(PLATFORM_CFG.search(line) for line in diff_lines))
     if full:
         return {"full": "true", "cargo_scope": "--workspace", "gpui": "true"}

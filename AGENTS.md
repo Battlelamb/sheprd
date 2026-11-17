@@ -262,7 +262,8 @@ what was deferred to CI.
   behavior that appears to work.
 - Pull requests run CI on `ubuntu-24.04` alone and lint and test only the
   crates their changes reach (`scripts/ci-scope.py`). The merge queue, `main`,
-  and a pull request that changes a platform `cfg` line or file, or the CI
+  and a pull request that changes a platform `cfg` line or file, a
+  dependency (any `Cargo.toml`, `Cargo.lock`) or the toolchain, or the CI
   selection itself, or carries the `windows`, `macos`, or `full-ci` label,
   run every platform over the whole workspace.
 - A `cfg` gate is only proven on the platform it names. For changes that touch

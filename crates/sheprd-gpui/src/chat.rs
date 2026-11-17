@@ -44,6 +44,7 @@ mod start;
 mod summary;
 mod terminal;
 mod text;
+mod upload;
 mod view;
 pub(crate) mod visual;
 pub(crate) mod widgets;

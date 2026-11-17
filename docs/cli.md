@@ -598,6 +598,11 @@ download first is left out.
 
 Files dropped on a remote chat are copied to the host first, into private
 temporary files under its `${TMPDIR:-/tmp}`, and the copies are attached.
+While they copy, each file's chip in the composer fills as its bytes go
+out, the footer shows the bytes sent of the total, and a chip's × cancels
+the whole drop, removing what already reached the host. Files dropped on a
+Herdr 2 terminal on another host show the same chips along the pane's foot
+until their paths are pasted; × or Escape cancels the copy there.
 
 Herdr 2 chats also use saved cloud connectors and, on Windows, the selected
 WSL distribution. ACP installed for phone pairing by this release is reused

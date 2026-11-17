@@ -259,19 +259,41 @@ pub(crate) fn wanted(args: &[std::ffi::OsString], chosen: impl FnOnce() -> bool)
     }
 }
 
-/// Whether the user keeps the Luau window: `moonframe_window` under
-/// `[features]`. Read as the first frame's settings are, writing nothing; a
-/// file that does not parse leaves the default, and the app reports it.
+/// Whether this plain launch opens the Luau window: the `moonframe_window`
+/// setting under `[features]`, or the other window while ⌥ Option is held
+/// as the app starts, to try one without changing the setting. The setting
+/// is read as the first frame's settings are, writing nothing; a file that
+/// does not parse leaves the default, and the app reports it.
 pub(crate) fn chosen() -> bool {
     // A launch from Finder or a desktop launcher may lack the login shell's
     // `XDG_CONFIG_HOME`; without adopting it first, this would read another
     // folder's settings and miss `moonframe_window = false`. Both startups
     // adopt it again, which then finds it already set.
     crate::login_env::adopt_config_home();
-    crate::config::Config::load_startup().map_or_else(
+    let kept = crate::config::Config::load_startup().map_or_else(
         |_| crate::config::Features::default().moonframe_window,
         |config| config.features.moonframe_window,
-    )
+    );
+    choose(kept, other_window_held())
+}
+
+/// The window a launch opens: the one the setting keeps, or the other.
+fn choose(kept: bool, other: bool) -> bool {
+    kept != other
+}
+
+/// Whether ⌥ Option is down as the app starts, read from the keyboard's
+/// state, so a launch from Finder, the Dock or `open` can ask for it.
+#[cfg(target_os = "macos")]
+fn other_window_held() -> bool {
+    use objc2_app_kit::{NSEvent, NSEventModifierFlags};
+    NSEvent::modifierFlags_class().contains(NSEventModifierFlags::Option)
+}
+
+/// Elsewhere a launch has no key to read; `--classic` and the setting choose.
+#[cfg(not(target_os = "macos"))]
+fn other_window_held() -> bool {
+    false
 }
 
 /// Runs the app in the Luau window until it quits. The app's private entry

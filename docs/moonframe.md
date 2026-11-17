@@ -12,6 +12,10 @@ and the sources.
 Turn off **Settings > General > Moonframe window** (`moonframe_window = false`
 under `[features]`) and Sheprd opens its classic window from the next launch.
 `sheprd --classic` opens the classic window once, whatever the setting says.
+On macOS, hold ⌥ Option as Sheprd starts (from Finder, the Dock, `open`, or
+`just run`) to open the other window from the one the setting keeps, without
+changing it: the classic window while the setting is on, Moonframe's while it
+is off.
 The setting is off by default on Windows: Moonframe finds its folders through
 `HOME` and the XDG variables, which Windows does not set for the apps it
 starts, so it would remember no window placement and write its files to a new

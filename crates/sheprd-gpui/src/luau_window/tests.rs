@@ -162,3 +162,11 @@ fn the_setting_chooses_only_for_a_plain_launch() {
     // `--check` loads the layout without a window, whichever one the user keeps.
     assert!(super::wanted(&args(&["--check"]), || false));
 }
+
+#[test]
+fn option_at_launch_opens_the_other_window() {
+    assert!(super::choose(true, false));
+    assert!(!super::choose(true, true));
+    assert!(!super::choose(false, false));
+    assert!(super::choose(false, true));
+}

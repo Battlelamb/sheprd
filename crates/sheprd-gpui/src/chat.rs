@@ -26,6 +26,7 @@ mod glide;
 mod harnesses;
 mod link;
 mod list;
+pub(crate) mod modes;
 pub(crate) mod page;
 pub(crate) mod pasted;
 mod pick;

@@ -163,6 +163,8 @@ pub(crate) struct ChatPane {
     /// The search field over a long menu while one is open, with the
     /// subscription that redraws the menu as it changes.
     pub(crate) menu_search: Option<(Entity<SearchInput>, gpui::Subscription)>,
+    /// The agent whose remembered mode this chat was last settled for.
+    pub(crate) mode_settled: Option<String>,
     /// The web pages live in the chat's messages, oldest first.
     pub(crate) pages: Vec<super::page::ChatPage>,
     /// Trying again cannot help: the program speaks another version.
@@ -282,6 +284,7 @@ impl ChatPane {
             list_snapshots: 0,
             menu: None,
             menu_search: None,
+            mode_settled: None,
             pages: Vec::new(),
             permanent: false,
             prepared,

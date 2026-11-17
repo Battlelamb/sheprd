@@ -8,6 +8,7 @@ use gpui::App;
 pub(crate) struct Stores {
     agent_skill: crate::agent_skill::AgentSkill,
     browser_tabs: crate::browser::Store,
+    chat_modes: crate::chat::modes::Remembered,
     dispatch_history: crate::dispatch::History,
     fan_out_journal: crate::fan_out::Journal,
     group_layouts: crate::browser::Layouts,
@@ -48,6 +49,7 @@ impl Stores {
         Ok(Self {
             agent_skill: read(personal, crate::agent_skill::AgentSkill::load),
             browser_tabs,
+            chat_modes: read(personal, crate::chat::modes::Remembered::load),
             dispatch_history: read(personal, crate::dispatch::History::load),
             fan_out_journal: read(personal, crate::fan_out::Journal::load),
             group_layouts: read(personal, crate::browser::Layouts::load),
@@ -85,6 +87,7 @@ impl Stores {
         self.palette_frecency.install(cx);
         self.dispatch_history.install(cx);
         self.worktree_landing.install(cx);
+        self.chat_modes.install(cx);
         self.fan_out_journal.install(cx);
         self.agent_skill.install_global(cx);
         self.keychain_grants.install(cx);

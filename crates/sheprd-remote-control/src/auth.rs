@@ -8,8 +8,9 @@
 //! `std::sync::Mutex` and passes every time explicitly, in milliseconds
 //! since the Unix epoch, so the rules are tested without clocks or sockets.
 
-mod devices;
+pub(crate) mod devices;
 mod handoff;
+pub(crate) mod host_relays;
 mod limits;
 pub(crate) mod links;
 pub(crate) mod nearby;
@@ -56,6 +57,8 @@ pub enum Error {
     Encode(#[source] serde_json::Error),
     #[error("this pairing token expired")]
     ExpiredToken,
+    #[error(transparent)]
+    HostRelay(#[from] host_relays::Error),
     #[error("the device key is not a P-256 public key")]
     InvalidKey,
     #[error("a device name must be 1 to 64 characters with no control characters")]
@@ -288,11 +291,18 @@ pub(crate) struct Auth {
     challenge_limit: RateLimiter<IpAddr>,
     devices: Devices,
     handoffs: Handoffs,
+    host_relays: host_relays::HostRelays,
     links: links::Links,
     nearby: NearbySessions,
     pair_limit: RateLimiter<IpAddr>,
     pairings: Pairings,
     presence: Presences,
+    /// What a nearby offer says about this computer's relays, when it
+    /// listens on any (`set_relay_offer`).
+    relay_offer: Option<crate::relay::Info>,
+    /// The token last sealed to a nearby phone, for the relays to open a
+    /// pairing dial with, until taken.
+    relay_pairing: Option<[u8; SECRET_LEN]>,
     /// Bumped whenever sessions end early, so open streams check again.
     revoked: watch::Sender<u64>,
     sessions: Sessions,
@@ -311,6 +321,7 @@ impl Auth {
             ),
             devices,
             handoffs: Handoffs::load(state_dir),
+            host_relays: host_relays::HostRelays::default(),
             links: links::Links::load(state_dir),
             nearby: NearbySessions::default(),
             pair_limit: RateLimiter::new(
@@ -320,6 +331,8 @@ impl Auth {
             ),
             pairings: Pairings::default(),
             presence: Presences::default(),
+            relay_offer: None,
+            relay_pairing: None,
             revoked: watch::Sender::new(0),
             sessions: Sessions::default(),
         })
@@ -427,9 +440,31 @@ impl Auth {
             return Err(Error::NoPairing);
         }
         let token = random_bytes::<SECRET_LEN>()?;
-        let (revealed, code) = started.reveal(nonce, fingerprint, &token, origins)?;
+        let relay = self.relay_offer.as_ref();
+        let (revealed, code) = started.reveal(nonce, fingerprint, &token, origins, relay)?;
         self.pairings.set_nearby(&token, code, now_ms)?;
+        if relay.is_some() {
+            self.relay_pairing = Some(token);
+        }
         Ok(revealed)
+    }
+
+    /// Lets nearby offers say how to claim through this computer's relays.
+    /// Nearby offers name no relays while this computer listens on none.
+    pub(crate) fn set_relay_offer(&mut self, offer: Option<crate::relay::Info>) {
+        self.relay_offer = offer;
+    }
+
+    /// What nearby offers say about the relays now.
+    #[cfg(test)]
+    pub(crate) fn relay_offer(&self) -> Option<&crate::relay::Info> {
+        self.relay_offer.as_ref()
+    }
+
+    /// The token last sealed to a nearby phone, once, for the relays to
+    /// let that phone dial in and claim from another network.
+    pub(crate) fn take_relay_pairing(&mut self) -> Option<[u8; SECRET_LEN]> {
+        self.relay_pairing.take()
     }
 
     /// A nonce for the paired phone whose daily hint is `hint` to sign.
@@ -459,6 +494,11 @@ impl Auth {
         self.pairings.claimed_from(claim, origin);
     }
 
+    /// Keeps the relay keys the phone sent with `claim`.
+    pub(crate) fn claimed_relay(&mut self, claim: &ClaimId, keys: devices::RelayKeys) {
+        self.pairings.claimed_relay(claim, keys);
+    }
+
     pub(crate) fn claim_status(&mut self, id: &ClaimId, now_ms: u64) -> Result<PairingState> {
         self.pairings.claim_status(id, now_ms)
     }
@@ -474,16 +514,18 @@ impl Auth {
         shown: &str,
         now_ms: u64,
     ) -> Result<PairingState> {
-        self.answer_with_hosts(id, allow, shown, &[], now_ms)
+        self.answer_with_hosts(id, allow, shown, &[], true, now_ms)
     }
 
-    /// [`Self::answer`], allowing the device on the hosts the desktop ticked.
+    /// [`Self::answer`], allowing the device on the hosts the desktop ticked,
+    /// and to borrow the GitHub sign-in when `share_github` says so.
     pub(crate) fn answer_with_hosts(
         &mut self,
         id: &PairingId,
         allow: bool,
         shown: &str,
         hosts: &[HostId],
+        share_github: bool,
         now_ms: u64,
     ) -> Result<PairingState> {
         if allow {
@@ -499,7 +541,7 @@ impl Auth {
         let devices = &mut self.devices;
         let links = self.links.allowed(hosts);
         self.pairings.answer(id, allow, now_ms, |device| {
-            devices.add_with(device.clone(), now_ms, None, links)
+            devices.add_with(device.clone(), now_ms, None, links, share_github)
         })?;
         self.sync_apps();
         self.pairings.state(id, now_ms)
@@ -574,6 +616,7 @@ impl Auth {
         if let Some(record) = self.devices.get(device) {
             self.links.forget(record)?;
         }
+        self.host_relays.forget(device);
         // The device goes either way; a stale digest only names a device
         // that no longer exists.
         let _ = self.handoffs.forget(device);
@@ -644,6 +687,44 @@ impl Auth {
         self.links.revoked(revoke)
     }
 
+    /// The phone asks for its relay keys to be carried to another of its
+    /// computers (`control::host_relay`).
+    pub(crate) fn ask_host_relay(
+        &mut self,
+        device: &DeviceId,
+        request: control::host_relay::Request,
+        now_ms: u64,
+    ) -> Result<control::host_relay::State> {
+        let record = self.devices.get(device).ok_or(Error::UnknownDevice)?;
+        self.host_relays.ask(record, request, now_ms)
+    }
+
+    pub(crate) fn take_host_relays(&mut self, now_ms: u64) -> Vec<control::host_relay::Job> {
+        self.host_relays.take(now_ms)
+    }
+
+    pub(crate) fn host_relayed(
+        &mut self,
+        device: &DeviceId,
+        request: &control::host_relay::Request,
+        outcome: control::host_relay::Outcome,
+        now_ms: u64,
+    ) -> Result<()> {
+        self.host_relays.finish(device, request, outcome, now_ms)
+    }
+
+    /// On the far computer, whose CA has `fingerprint`: keeps a phone's
+    /// relay keys it signed with its own key here; false when `request`
+    /// names another computer. Blocking.
+    pub(crate) fn keep_relay(
+        &mut self,
+        request: &control::host_relay::Request,
+        fingerprint: &[u8; 32],
+        now_ms: u64,
+    ) -> Result<bool> {
+        host_relays::keep(&mut self.devices, request, fingerprint, now_ms)
+    }
+
     /// On a host: adds a phone another computer's user allowed. A device it
     /// replaces goes only when it too was enrolled that way, so a computer
     /// cannot revoke a phone paired here directly. Blocking.
@@ -666,10 +747,14 @@ impl Auth {
                 id: id.clone(),
                 name,
                 public_key,
+                relay: None,
             },
             now_ms,
             Some(via),
             Vec::new(),
+            // As a phone paired here directly: on until the user turns it
+            // off in this host's Sheprd.
+            true,
         )?;
         Ok(id)
     }

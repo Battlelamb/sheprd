@@ -269,6 +269,15 @@ impl Hub {
         self.layout.borrow().clone()
     }
 
+    /// Where checkout work for a workspace runs: its named Herdr session
+    /// when present, else this hub's primary endpoint.
+    pub(crate) fn workspace_target(&self, session: Option<&str>) -> ConnectTarget {
+        session
+            .and_then(|name| self.sessions.get(name))
+            .map(|session| session.api.target())
+            .unwrap_or_else(|| self.api.target())
+    }
+
     pub(crate) fn watch_layout(&self) -> watch::Receiver<Arc<Layout>> {
         self.layout.clone()
     }
@@ -781,6 +790,12 @@ fn direct_command_line(program: &Path, agent: Agent) -> String {
     } else {
         format!(" {} {agent}", sheprd_client::shell_quote(&program))
     }
+}
+
+/// Whether workspace `id` lives inside a WSL distribution, whose folders
+/// this computer's own processes cannot read.
+pub(crate) fn in_wsl(id: &str) -> bool {
+    sessions::in_wsl(id)
 }
 
 /// A terminal row, for other modules' tests.

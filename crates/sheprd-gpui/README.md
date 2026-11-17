@@ -1071,8 +1071,9 @@ by the next error too. The app does not change permissions automatically.
 Existing native theme selections remain overrides. Choose **Follow Herdr** to
 use the shared theme, all 18 upstream palettes, custom colors, and automatic
 light/dark selection. Selecting a shared theme disables upstream auto-switching,
-as in the TUI. Status indicators always use the shared status colors,
-independent of a native terminal theme override, drawn with the set picked on
+as in the TUI. Status indicators use the shared status colors; when Herdr's
+effective theme is `terminal`, they use the app theme's colors instead. They
+are drawn with the set picked on
 **Settings > Appearance > Indicators** and saved as `status_icons` in
 `config-gpui.local.toml`. This app draws only its own sets and ignores Herdr's
 `ui.status_indicators`, which the TUI keeps for itself; unset means **Dots**.
@@ -1799,6 +1800,30 @@ a strip squeezed by the sidebar, a panel, or a split gives up its tabs' room
 first, then drops the pair whole before the trailing controls would be
 pushed out.
 
+Ctrl-Tab (`recent_pane`) switches to the pane this window focused most
+recently before the current one across all connected machines, including
+herdr-core tabs and the fallback shell. Herdr 1 panes require surface fencing
+support; older unfenced daemons show an unsupported-command notice. A quick tap
+goes back and forth between two panes. Holding Ctrl while pressing Tab again
+walks the history without reordering intermediate panes. Releasing Ctrl makes
+the selected pane most recent once its focus is confirmed. Releasing before
+that confirmation waits; a failed selection never becomes a visit.
+Ctrl-Shift-Tab (`recent_pane_reverse`) goes the other way, starting from the
+least recently used pane. If another pane gains focus during the hold, that
+pane becomes most recent on release. Each window remembers at most 100 panes.
+Closed panes and unavailable machines are skipped. Reconnecting to the same
+daemon boot preserves its history. A restarted Herdr 1 daemon loses only
+its Herdr 1 panes. A removed machine loses its destinations. Core panes
+remain independent of Herdr 1 restarts.
+A further press while a recent selection is pending is ignored. Core panes
+can still switch locally during an unrelated Herdr 1 outage or activation.
+An unavailable selected machine can still switch to a reachable pane on
+another machine.
+The palette and the devices rail keep Ctrl-Tab for their own filters while
+they are open. A terminal program no longer receives Ctrl-Tab or
+Ctrl-Shift-Tab; unbind or rebind the two commands in `[keybindings]` to give
+the keys back.
+
 macOS keeps `Some(TitlebarOptions)` and the native Herdr window title/traffic lights,
 with transparent chrome and lights positioned at (9, 9) logical pixels. A full-width
 34px header blends `theme.surface` roughly 10% toward white, subtly lifting dark
@@ -2093,6 +2118,14 @@ checkouts without Herdr 1, using the device's GitHub account selection. See
 [desktop SSH pull requests](../../docs/desktop-ssh-pull-requests.md) for cache
 isolation, merged-checkout discovery, and the remaining cloud/WSL PR-origin
 limitation shared by both terminal backends.
+
+If **New worktree** finds that the requested branch already has a checkout,
+Sheprd warns that it already exists, pulls its remote with a fast-forward-only
+update, and opens that checkout. Fork pull requests update from their PR ref.
+A failed pull is shown as a warning and the checkout still opens. Reopening
+does not rerun setup scripts or launch another agent. If you switch hosts while
+an existing Herdr 2 checkout is being pulled, its result is reported with the
+original host's name without switching you back or opening the checkout.
 
 A repository can commit scripts that prepare, start, and clean up its
 worktrees, in `.herdr/worktree.toml` at the repository root:
@@ -3693,11 +3726,18 @@ installed: `claude`, `codex` and `pi` (which `sheprd-acp` drives without an
 ACP adapter), `copilot --acp`, `gemini --acp`, or `opencode acp`. The program can
 also be started by hand in any pane: `sheprd-acp claude`.
 
-**One click.** Each tab strip also offers a button per installed agent that
-starts its chat in a new tab of that group; the chat's tab looks like any
-other, and **+** still opens a terminal tab. Each button takes the shape
-the tab layout gives **+**. `[chat] launcher` places the buttons: `plus`
-(the default) deals them out from under **+** while the pointer is over it,
+**One click.** Each tab strip also offers an **Agent** button right after
+**+** that starts a chat in a new tab of that group, with the agent last
+started (else the first installed), or, when that agent's plan is spent or
+close to its limit, the installed agent with the most room, as the tooltip
+and composer then say (see [Choosing the agent](../../docs/rich-chat.md#choosing-the-agent)); the chat's tab looks like any other, and
+**+** still opens a terminal tab. Until its first prompt, the chat's composer
+offers the other installed agents in its own button, first among the
+settings; picking one restarts the chat with that agent, and the launcher
+starts the next chat with it too. Chats on an SSH host keep the agent they
+start with, since the host's `sheprd-acp` may be older. The button takes the
+shape the tab layout gives **+**. `[chat] launcher` places it, or a button
+per installed agent instead: `agent` is the default, `plus` deals them out from under **+** while the pointer is over it,
 to the right, or to the left when the window has no room there, `beside` keeps them right after **+**, `leading` puts them before
 the tabs, `trailing` at the strip's right end, and `button` shows one named
 button for the agent last started, the others sliding out beside it; `off`
@@ -4787,6 +4827,9 @@ Ctrl+Shift+U is left unbound for
   through the sidebar's rows on every listed host and wrap around,
   `switch_workspace` counts the selected host's rows, `focus_agent` counts the
   agent panel's, `last_pane` returns to the pane focused before this one,
+  `recent_pane`/`recent_pane_reverse` (Ctrl-Tab and Ctrl-Shift-Tab) step
+  through this window's recently used panes on every connected machine while
+  their modifier stays held,
   `move_tab_previous`/`_next` wrap a tab at either end to the other, and
   `[keys.indexed]` combos bind the digits 1-9. On macOS, the prefix, its
   chords, and custom command shortcuts recognize a shifted key such as

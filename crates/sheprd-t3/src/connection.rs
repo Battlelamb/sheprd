@@ -45,17 +45,34 @@ impl Connection<TcpStream> {
             .host_str()
             .ok_or(Error::Url(url::ParseError::EmptyHost))?;
         let port = url.port_or_known_default().unwrap_or(80);
-        let address = (host, port)
-            .to_socket_addrs()
-            .map_err(Error::Connect)?
-            .next()
-            .ok_or(Error::NoServer)?;
-        let stream = TcpStream::connect_timeout(&address, TIMEOUT).map_err(Error::Connect)?;
+        let addresses = (host, port).to_socket_addrs().map_err(Error::Connect)?;
+        let stream = connect_any(addresses, |address| {
+            TcpStream::connect_timeout(address, TIMEOUT)
+        })?;
         stream
             .set_read_timeout(Some(TIMEOUT))
             .map_err(Error::Connect)?;
         Self::handshake(url, stream)
     }
+}
+
+/// The first of `addresses` that `connect` reaches, in resolver order.
+///
+/// A name such as `localhost` resolves to both `::1` and `127.0.0.1`, and a
+/// local server often listens on only one, so every address is tried before
+/// giving up with the last failure.
+fn connect_any<A, T>(
+    addresses: impl IntoIterator<Item = A>,
+    mut connect: impl FnMut(&A) -> std::io::Result<T>,
+) -> Result<T> {
+    let mut failure = None;
+    for address in addresses {
+        match connect(&address) {
+            Ok(stream) => return Ok(stream),
+            Err(error) => failure = Some(error),
+        }
+    }
+    Err(failure.map_or(Error::NoServer, Error::Connect))
 }
 
 impl<S: Read + Write> Connection<S> {

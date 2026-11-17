@@ -375,30 +375,6 @@ async fn home_names_each_workspaces_repository_and_the_accounts_lent() {
 #[test]
 fn a_lent_token_never_reaches_the_log() {
     use std::sync::{Arc, Mutex};
-
-    // A global subscriber captures events from all threads. Install it in a
-    // separate test process so parallel tests cannot change its callsite
-    // interest or have their events captured here.
-    const CHILD: &str = "SHEPRD_TEST_LENT_TOKEN_LOG_CHILD";
-    if std::env::var_os(CHILD).is_none() {
-        let output = sheprd_client::new_command(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "web::tests::lend::a_lent_token_never_reaches_the_log",
-            ])
-            .env(CHILD, "1")
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success()
-                && String::from_utf8_lossy(&output.stdout).contains("test result: ok. 1 passed;"),
-            "child test failed:\n{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return;
-    }
-
     #[derive(Clone, Default)]
     struct Log(Arc<Mutex<Vec<u8>>>);
     impl std::io::Write for Log {
@@ -416,7 +392,15 @@ fn a_lent_token_never_reaches_the_log() {
         .with_max_level(tracing::Level::TRACE)
         .with_writer(move || writer.clone())
         .finish();
-    tracing::subscriber::set_global_default(subscriber).unwrap();
+    // While a single dispatcher is registered, tracing-core caches a
+    // callsite's interest from whichever thread registers it first, so a
+    // parallel test reaching the log line with no subscriber would cache
+    // "never" for this thread too. A second live dispatcher makes it ask
+    // every registered dispatcher instead, under its lock.
+    let _other = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
+    let _default = tracing::subscriber::set_default(subscriber);
+    // Parallel tests may have met the log's callsite with no subscriber.
+    tracing::callsite::rebuild_interest_cache();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

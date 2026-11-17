@@ -166,6 +166,7 @@ mod titlebar;
 mod toggles;
 mod truncate;
 mod update_panel;
+mod upload_chips;
 mod usage;
 mod window;
 mod window_state;

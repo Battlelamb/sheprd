@@ -52,6 +52,7 @@ mod split_shown;
 mod stale;
 mod tab_status;
 mod unended;
+mod upload_chips;
 mod wanted;
 mod window_asks;
 mod worker;

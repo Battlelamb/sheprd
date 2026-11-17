@@ -72,6 +72,7 @@ mod tool_glance;
 mod tool_indent;
 mod tool_previews;
 mod typography;
+mod uploads;
 mod user_messages;
 mod viewer;
 mod visual;

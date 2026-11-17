@@ -48,27 +48,28 @@ impl SheprdWindow {
         let Some(Legacy::Standalone(bundle)) = AppRename::bundle(cx).cloned() else {
             return;
         };
-        // Saved before quitting, so the restarted app never asks.
+        // Saved whatever the outcome, so the app never asks again.
         let saved = AppRename::choose(Choice::Renamed, cx);
         self.close_app_rename(window, cx);
         let rename = cx
             .background_executor()
             .spawn(async move { bundle.rename_and_relaunch() });
-        cx.spawn(async move |this, cx| match rename.await {
-            Ok(()) => {
-                saved.await;
-                cx.update(|cx| cx.quit())
-            }
-            Err(error) => {
-                tracing::warn!(%error, "Cannot rename the app");
-                this.update(cx, |this, cx| {
-                    let flash = Flash::warning(fl!(
-                        "window-notices-rename-failed",
-                        error = error.localize()
-                    ));
-                    this.show_flash(flash, cx);
-                })
-                .ok();
+        cx.spawn(async move |this, cx| {
+            let renamed = rename.await;
+            saved.await;
+            match renamed {
+                Ok(()) => cx.update(|cx| cx.quit()),
+                Err(error) => {
+                    tracing::warn!(%error, "Cannot rename the app");
+                    this.update(cx, |this, cx| {
+                        let flash = Flash::warning(fl!(
+                            "window-notices-rename-failed",
+                            error = error.localize()
+                        ));
+                        this.show_flash(flash, cx);
+                    })
+                    .ok();
+                }
             }
         })
         .detach();

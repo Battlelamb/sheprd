@@ -14,6 +14,8 @@ pub(crate) enum Page {
     #[cfg(feature = "coder")]
     AddCoder,
     AddDevice,
+    /// Adding a nearby Sheprd over Bluetooth, reached through its relays.
+    AddNearby,
     /// Add Device's tiles of the cloud providers its rail leaves out.
     #[cfg(feature = "cloud")]
     AddProvider,

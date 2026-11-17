@@ -496,10 +496,20 @@ impl IntoResponse for ApiError {
                     auth::host_relays::Error::Busy | auth::host_relays::Error::TooMany,
                 ),
             ) => StatusCode::TOO_MANY_REQUESTS,
+            Self::Auth(auth::Error::SshAccess(
+                crate::ssh_access::Error::ServerOff | crate::ssh_access::Error::Unsupported,
+            )) => StatusCode::CONFLICT,
             Self::Auth(
                 auth::Error::Store { .. }
                 | auth::Error::StoreFormat { .. }
-                | auth::Error::Random(_),
+                | auth::Error::Random(_)
+                | auth::Error::SshAccess(
+                    crate::ssh_access::Error::File { .. }
+                    | crate::ssh_access::Error::Linked { .. }
+                    | crate::ssh_access::Error::NoHome
+                    | crate::ssh_access::Error::TooLarge { .. }
+                    | crate::ssh_access::Error::UnknownUser,
+                ),
             ) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Update(update::Error::AppClosed) => StatusCode::CONFLICT,
             Self::App(_) | Self::Upload(uploads::Error::Write(_)) => {

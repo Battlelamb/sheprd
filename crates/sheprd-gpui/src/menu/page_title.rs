@@ -31,7 +31,7 @@ impl Page {
             Self::AddCloud(_) => fl!("menu-page-add-device"),
             #[cfg(feature = "coder")]
             Self::AddCoder => fl!("menu-page-add-coder-workspace"),
-            Self::AddDevice => fl!("menu-page-add-device"),
+            Self::AddDevice | Self::AddNearby => fl!("menu-page-add-device"),
             #[cfg(feature = "cloud")]
             Self::AddProvider => fl!("menu-page-add-cloud-provider"),
             Self::AddWsl => fl!("menu-page-add-wsl-distribution"),

@@ -12,7 +12,7 @@ impl SheprdWindow {
     /// dialog. Runs every tick; asking claims the question app-wide.
     pub(crate) fn offer_app_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let ready = self.menu.page.is_none() && self.active && self.live.snapshot.is_some();
-        if !ready || !AppRename::take_ask(cx) {
+        if !ready || !AppRename::take_ask(window.window_handle().window_id(), cx) {
             return;
         }
         if self.open_menu(window, cx) {
@@ -27,7 +27,7 @@ impl SheprdWindow {
             Some(Legacy::Standalone(_)) => self.rename_app(window, cx),
             Some(Legacy::Homebrew(homebrew)) => {
                 cx.write_to_clipboard(ClipboardItem::new_string(homebrew.commands()));
-                AppRename::choose(Choice::Copied, cx);
+                AppRename::choose(Choice::Copied, cx).detach();
                 self.close_app_rename(window, cx);
                 let flash = Flash::success(fl!("window-notices-rename-commands-copied"));
                 self.show_flash(flash, cx);
@@ -48,13 +48,17 @@ impl SheprdWindow {
         let Some(Legacy::Standalone(bundle)) = AppRename::bundle(cx).cloned() else {
             return;
         };
-        AppRename::choose(Choice::Renamed, cx);
+        // Saved before quitting, so the restarted app never asks.
+        let saved = AppRename::choose(Choice::Renamed, cx);
         self.close_app_rename(window, cx);
         let rename = cx
             .background_executor()
             .spawn(async move { bundle.rename_and_relaunch() });
         cx.spawn(async move |this, cx| match rename.await {
-            Ok(()) => cx.update(|cx| cx.quit()),
+            Ok(()) => {
+                saved.await;
+                cx.update(|cx| cx.quit())
+            }
             Err(error) => {
                 tracing::warn!(%error, "Cannot rename the app");
                 this.update(cx, |this, cx| {

@@ -19,7 +19,7 @@ fn offered(
     &mut gpui::VisualTestContext,
 ) {
     use crate::sidebar::layout_tests::fixture_window;
-    cx.update(|cx| AppRename::unasked(bundle).install(cx));
+    cx.update(|cx| AppRename::unasked(bundle, None).install(cx));
     let (view, cx) = cx.add_window_view(fixture_window);
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
@@ -104,4 +104,25 @@ fn a_development_build_never_asks() {
         let rename = AppRename::load();
         assert!(!rename.ask && rename.bundle.is_none() && rename.path.is_none());
     }
+}
+
+#[gpui::test]
+fn closing_the_window_while_asked_saves_not_now(cx: &mut gpui::TestAppContext) {
+    use crate::sidebar::layout_tests::fixture_window;
+    let (root, bundle) = legacy(None);
+    let saved = root.path().join("app-rename.json");
+    cx.update(|cx| AppRename::unasked(bundle, Some(saved.clone())).install(cx));
+    let (view, vcx) = cx.add_window_view(fixture_window);
+    vcx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.active = true;
+            view.offer_app_rename(window, cx);
+            assert_eq!(view.menu.page, Some(Page::AppRename));
+        });
+    });
+    vcx.update(|window, _| window.remove_window());
+    cx.run_until_parked();
+    cx.update(|cx| assert!(AppRename::bundle(cx).is_none()));
+    let saved: Saved = serde_json::from_slice(&std::fs::read(&saved).unwrap()).unwrap();
+    assert_eq!(saved.choice, Choice::Declined);
 }

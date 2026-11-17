@@ -85,9 +85,13 @@ pub(super) mod install {
 }
 
 /// Only a macOS bundle carries the legacy `Herdr.app` name, so none is ever
-/// found here and these types have no values.
+/// found here and these types have no values. `Legacy` keeps the macOS
+/// variants so the app's matches compile on every target.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Legacy {}
+pub enum Legacy {
+    Standalone(LegacyBundle),
+    Homebrew(HomebrewBundle),
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LegacyBundle {}
@@ -108,7 +112,10 @@ impl Legacy {
     }
 
     pub fn path(&self) -> &std::path::Path {
-        match *self {}
+        match self {
+            Self::Standalone(legacy) => match *legacy {},
+            Self::Homebrew(homebrew) => match *homebrew {},
+        }
     }
 }
 

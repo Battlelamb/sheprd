@@ -6,7 +6,7 @@
 //! only a link.
 // i18n: migrated
 use crate::state_file;
-use gpui::{App, Global};
+use gpui::{App, Global, Task, WindowId};
 use serde::{Deserialize, Serialize};
 use sheprd_updater::Legacy;
 use std::path::PathBuf;
@@ -33,6 +33,8 @@ pub(crate) struct AppRename {
     /// Asked at most once per run, by the first window ready to.
     ask: bool,
     path: Option<PathBuf>,
+    /// The window showing the offer, once one asked.
+    shown_in: Option<WindowId>,
 }
 
 impl Global for AppRename {}
@@ -65,21 +67,41 @@ impl AppRename {
             ask: bundle.is_some(),
             bundle,
             path,
+            shown_in: None,
         }
     }
 
-    /// An app running from `bundle` that has not been asked yet, saving nowhere.
+    /// An app running from `bundle` that has not been asked yet, saving its
+    /// answer at `path`.
     #[cfg(all(test, unix))]
-    pub(crate) fn unasked(bundle: Legacy) -> Self {
+    pub(crate) fn unasked(bundle: Legacy, path: Option<PathBuf>) -> Self {
         Self {
             bundle: Some(bundle),
             ask: true,
-            path: None,
+            path,
+            shown_in: None,
         }
     }
 
+    /// Closing the window showing the offer, or quitting while it is shown,
+    /// answers "Not now", as dismissing it does, so the app asks only once.
     pub(crate) fn install(self, cx: &mut App) {
         cx.set_global(self);
+        cx.on_window_closed(|cx, closed| {
+            if Self::showing(cx).is_some_and(|window| window == closed) {
+                Self::choose(Choice::Declined, cx).detach();
+            }
+        })
+        .detach();
+        cx.on_app_quit(|cx| {
+            let save = Self::showing(cx).map(|_| Self::choose(Choice::Declined, cx));
+            async move {
+                if let Some(save) = save {
+                    save.await;
+                }
+            }
+        })
+        .detach();
     }
 
     /// The bundle to move, while the offer stands.
@@ -88,38 +110,44 @@ impl AppRename {
             .and_then(|rename| rename.bundle.as_ref())
     }
 
-    /// Whether this window should ask now; claims the question so no other
+    /// Whether `window` should ask now; claims the question so no other
     /// window asks too.
-    pub(crate) fn take_ask(cx: &mut App) -> bool {
+    pub(crate) fn take_ask(window: WindowId, cx: &mut App) -> bool {
         let ask = cx.try_global::<Self>().is_some_and(|rename| rename.ask);
         if ask {
-            cx.global_mut::<Self>().ask = false;
+            let rename = cx.global_mut::<Self>();
+            rename.ask = false;
+            rename.shown_in = Some(window);
         }
         ask
+    }
+
+    /// The window showing the offer, while it is unanswered.
+    fn showing(cx: &App) -> Option<WindowId> {
+        let rename = cx.try_global::<Self>()?;
+        rename.bundle.as_ref().and(rename.shown_in)
     }
 
     /// Records the user's answer, saved off the UI thread, and withdraws the
     /// offer: a failed move is not offered again either, so the app never
     /// asks twice; the user can still rename the app in Finder.
-    pub(crate) fn choose(choice: Choice, cx: &mut App) {
+    pub(crate) fn choose(choice: Choice, cx: &mut App) -> Task<()> {
         if !cx.has_global::<Self>() {
-            return;
+            return Task::ready(());
         }
         let rename = cx.global_mut::<Self>();
         rename.ask = false;
         if rename.bundle.take().is_none() {
-            return;
+            return Task::ready(());
         }
         let Some(path) = rename.path.clone() else {
-            return;
+            return Task::ready(());
         };
-        cx.background_executor()
-            .spawn(async move {
-                if let Err(error) = state_file::write(&path, &Saved { choice }) {
-                    tracing::warn!(%error, "Cannot save the app rename choice");
-                }
-            })
-            .detach();
+        cx.background_executor().spawn(async move {
+            if let Err(error) = state_file::write(&path, &Saved { choice }) {
+                tracing::warn!(%error, "Cannot save the app rename choice");
+            }
+        })
     }
 }
 

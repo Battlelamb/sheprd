@@ -58,7 +58,7 @@ impl SheprdWindow {
             crate::agent_skill::AgentSkill::choose(crate::agent_skill::Choice::Declined, cx);
         }
         if self.menu.page == Some(Page::AppRename) {
-            crate::app_rename::AppRename::choose(crate::app_rename::Choice::Declined, cx);
+            crate::app_rename::AppRename::choose(crate::app_rename::Choice::Declined, cx).detach();
         }
         let application = self.menu.application.as_ref();
         let return_focus = (application.and_then(|menu| menu.return_focus.clone()))

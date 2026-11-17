@@ -1,5 +1,6 @@
 import Foundation
 import SheprdRemoteCore
+import SheprdRelay
 import Observation
 import os
 import WidgetKit

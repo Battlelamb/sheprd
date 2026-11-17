@@ -238,8 +238,9 @@ final class TermKeyStore {
 
 /// The tag and computer Home, the iPad sidebar, and Workspaces show agents
 /// and workspaces of (`AgentFilterMenu`, `TagFilterBar`), kept on this
-/// phone and shared by its windows. Read them through `ComputerTags.active` or `shown`: the tag may have left
-/// every computer since, and the computer been forgotten.
+/// phone and shared by its windows. Read them through `ComputerTags.active`
+/// or `shown`: the tag may have left every computer since, and the computer
+/// been forgotten.
 @MainActor
 @Observable
 final class TagFilterStore {

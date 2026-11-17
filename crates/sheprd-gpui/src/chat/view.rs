@@ -8,6 +8,7 @@ mod activity;
 mod composer;
 mod copy;
 mod disclosure;
+mod effects;
 mod embeds;
 mod entries;
 mod jump;
@@ -486,6 +487,7 @@ impl SheprdWindow {
                     )
                     .children(self.render_chat_rail(chat, bounds, cx)),
             )
+            .children(self.render_chat_screen(chat, cx))
             .children(self.render_chat_viewer(chat, bounds, cx))
             .into_any_element()
     }

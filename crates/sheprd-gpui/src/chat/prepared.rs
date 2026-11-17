@@ -184,6 +184,11 @@ pub(crate) struct ToolSummary {
 pub(crate) enum Part {
     Text(Rc<[Line]>),
     Rich(Rc<[super::rich::Block]>),
+    /// Markdown an agent wrapped in a bubble effect, as `:::slam` does.
+    Bubble(super::effects::Bubble, Rc<[super::rich::Block]>),
+    /// The pane effect an agent's message asks for, as a `::confetti` line
+    /// does; it draws as the link that plays it again.
+    Screen(super::effects::Screen),
     Widget(Rc<super::widgets::Document>),
     /// A Mermaid fence, with its source as code lines for when it cannot be
     /// drawn.
@@ -235,8 +240,10 @@ impl Body {
                 let (own, blocks): (_, &[super::rich::Block]) = match part {
                     Part::Diagram(id, _) | Part::Remote { id, .. } => (Some(*id), &[]),
                     Part::Html { code } => (Some(code.id), &[]),
-                    Part::Rich(blocks) => (None, blocks),
-                    Part::Text(_) | Part::Widget(_) | Part::Picture { .. } => (None, &[]),
+                    Part::Rich(blocks) | Part::Bubble(_, blocks) => (None, blocks),
+                    Part::Text(_) | Part::Widget(_) | Part::Picture { .. } | Part::Screen(_) => {
+                        (None, &[])
+                    }
                 };
                 own.into_iter()
                     .chain(blocks.iter().flat_map(super::rich::Block::visuals))
@@ -321,7 +328,7 @@ impl Prepared {
             Body::Message(parts) | Body::Answers { parts, .. } => {
                 for part in parts {
                     match part {
-                        Part::Rich(blocks) => {
+                        Part::Rich(blocks) | Part::Bubble(_, blocks) => {
                             for block in &**blocks {
                                 block.request_visible(&self.visuals);
                             }
@@ -526,13 +533,40 @@ fn message(text: &str, author: Author, visuals: &mut Visuals) -> Vec<Part> {
         text.clear();
     };
     let mut lines = text.split_inclusive('\n');
-    let (mut diagrams, mut pages, mut widgets) = (0, 0, 0);
+    let (mut diagrams, mut pages, mut widgets, mut bubbles) = (0, 0, 0, 0);
+    let mut screen = None;
     while let Some(line) = lines.next() {
         let trimmed = line.trim_start();
         let indentation = &line[..line.len() - trimmed.len()];
         if indentation.len() > 3 || !indentation.chars().all(|ch| ch == ' ') {
             markdown.push_str(line);
             continue;
+        }
+        if author == Author::Agent {
+            // Only the first pane effect plays; later ones are dropped too.
+            if let Some(effect) = super::effects::screen_line(line) {
+                screen = screen.or(Some(effect));
+                continue;
+            }
+            if let Some(effect) = super::effects::bubble_opening(line)
+                && bubbles < BUBBLES
+            {
+                flush(&mut markdown, &mut parts, visuals);
+                bubbles += 1;
+                // A bubble still streaming reaches the end of the message.
+                let inner: String = lines
+                    .by_ref()
+                    .take_while(|line| !super::effects::bubble_closing(line))
+                    .collect();
+                if !inner.trim().is_empty() {
+                    parts.push(match prose(&inner, visuals) {
+                        Part::Rich(blocks) => Part::Bubble(effect, blocks),
+                        // Too large to be rich: shown, but without its effect.
+                        text => text,
+                    });
+                }
+                continue;
+            }
         }
         if let Some(part) = picture(line) {
             flush(&mut markdown, &mut parts, visuals);
@@ -608,6 +642,7 @@ fn message(text: &str, author: Author, visuals: &mut Visuals) -> Vec<Part> {
     if !markdown.trim().is_empty() || parts.is_empty() {
         parts.push(prose(&markdown, visuals));
     }
+    parts.extend(screen.map(Part::Screen));
     if cut {
         let note = release_notes::note(&cut_note());
         match parts.last_mut() {
@@ -627,6 +662,9 @@ enum Embed {
     Page,
     Widget,
 }
+
+/// Bubble effects per message; later openings stay text.
+const BUBBLES: usize = 8;
 
 /// Cards per message; excess cards remain readable source.
 const WIDGETS: usize = 4;

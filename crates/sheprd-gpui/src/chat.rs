@@ -21,6 +21,7 @@ mod code_choices;
 mod convert;
 pub(crate) mod core_pane;
 mod discovery;
+pub(crate) mod effects;
 mod existing;
 mod glide;
 mod harnesses;

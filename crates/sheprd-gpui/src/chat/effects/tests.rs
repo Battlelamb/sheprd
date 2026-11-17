@@ -1,6 +1,6 @@
 use super::{
     Bubble, Pose, Screen,
-    scene::{Mark, Rect, scene, speck},
+    scene::{Mark, Rect, Words, scene, speck},
 };
 
 const PANE: Rect = Rect {
@@ -12,7 +12,7 @@ const PANE: Rect = Rect {
 
 fn marks(effect: Screen, t: f32) -> Vec<Mark> {
     let mut marks = Vec::new();
-    scene(effect, t, PANE, None, &mut marks);
+    scene(effect, t, PANE, None, 20, &mut marks);
     marks
 }
 
@@ -60,7 +60,7 @@ fn a_spotlight_settles_on_its_message() {
         h: 40.,
     };
     let mut marks = Vec::new();
-    scene(Screen::Spotlight, 2., PANE, Some(target), &mut marks);
+    scene(Screen::Spotlight, 2., PANE, Some(target), 20, &mut marks);
     let [
         Mark::Veil {
             hole: Some(hole), ..
@@ -87,6 +87,7 @@ fn an_empty_pane_draws_nothing() {
         1.,
         Rect { w: 0., ..PANE },
         None,
+        20,
         &mut marks,
     );
     assert!(marks.is_empty());
@@ -121,4 +122,47 @@ fn specks_stay_inside_the_text_they_hide() {
         }
     }
     assert_ne!(speck(3, 1), speck(3, 2), "they shimmer from frame to frame");
+}
+
+#[test]
+fn zap_shoots_down_every_letter_before_it_ends() {
+    let letters = |t: f32| {
+        let mut marks = Vec::new();
+        scene(Screen::Zap, t, PANE, None, 20, &mut marks);
+        marks
+            .iter()
+            .filter(|mark| {
+                matches!(
+                    mark,
+                    Mark::Words {
+                        words: Words::Letter(_),
+                        ..
+                    }
+                )
+            })
+            .count()
+    };
+    assert_eq!(letters(0.1), 20, "the whole formation shows at first");
+    let end = Screen::Zap.length().as_secs_f32();
+    assert_eq!(letters(end - 0.6), 0, "every letter is hit by the end");
+    assert!(letters(2.) < 20, "some are hit along the way");
+}
+
+#[test]
+fn zap_draws_at_most_its_formation() {
+    let mut marks = Vec::new();
+    scene(Screen::Zap, 0.1, PANE, None, 500, &mut marks);
+    let shown = marks
+        .iter()
+        .filter(|mark| {
+            matches!(
+                mark,
+                Mark::Words {
+                    words: Words::Letter(_),
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(shown, super::scene::MAX_TARGETS);
 }

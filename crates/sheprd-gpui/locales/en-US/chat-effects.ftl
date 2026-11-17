@@ -12,5 +12,6 @@ chat-effects-loud = Loud
 chat-effects-love = Love
 chat-effects-slam = Slam
 chat-effects-spotlight = Spotlight
+chat-effects-zap = Zap
 # The link under a message that plays its effect again.
 chat-effects-replay = Replay { $effect }

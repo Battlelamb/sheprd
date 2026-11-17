@@ -570,9 +570,11 @@ All 214 tests pass.
   specks until the pointer is over it. A message holds at most eight; one
   still streaming reaches the end of the message.
 - A line `::balloons`, `::celebration`, `::confetti`, `::echo`,
-  `::fireworks`, `::lasers`, `::love`, or `::spotlight` plays over the chat's
-  own pane for three to four seconds, never over the terminals, tabs, or
-  sidebar, and never takes the pointer. A message plays its first; another
+  `::fireworks`, `::lasers`, `::love`, `::spotlight`, or `::zap` plays over
+  the chat's own pane for three to five seconds. In `zap`, the message's first
+  letters line up as a swaying formation and three pixel ships shoot them
+  down, each bursting into pixels. Effects stay in the chat's pane, never over
+  the terminals, tabs, or sidebar, and never take the pointer. A message plays its first; another
   arriving while one plays is dropped, not queued.
 
 Only an agent's replies play effects; a user's message shows its directives as

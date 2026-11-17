@@ -90,6 +90,7 @@ effects! {
         Lasers = "lasers", "chat-effects-lasers", 3600;
         Love = "love", "chat-effects-love", 3000;
         Spotlight = "spotlight", "chat-effects-spotlight", 3300;
+        Zap = "zap", "chat-effects-zap", 4600;
         // keep-sorted end
     }
 }

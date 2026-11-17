@@ -21,6 +21,9 @@ use sheprd_chat_protocol::EntryId;
 
 /// Golds a celebration's sparks take, whatever the theme.
 const GOLD: [u32; GOLDS] = [0x00ff_d76a, 0x00ff_e9a8, 0x00ff_c23d, 0x00ff_f4d6];
+/// The bright colors of zap's rows, by their order in the theme: yellow,
+/// cyan, and magenta, which read on dark and light grounds.
+const ROW_HUES: [usize; 3] = [2, 5, 4];
 /// Specks of invisible ink per square point of the text they hide.
 const INK_DENSITY: f32 = 1. / 18.;
 /// The most specks one bubble paints.
@@ -219,7 +222,12 @@ impl SheprdWindow {
                         h: target.size.height.into(),
                     });
                     let mut marks = Vec::new();
-                    scene::scene(playing.effect, t, pane, target, &mut marks);
+                    let letters = playing
+                        .text
+                        .chars()
+                        .filter(|ch| !ch.is_whitespace())
+                        .count();
+                    scene::scene(playing.effect, t, pane, target, letters, &mut marks);
                     for mark in marks {
                         paint(&mark, bounds, &playing, &palette, &font, window, cx);
                     }
@@ -305,6 +313,10 @@ fn paint(
                 Words::Message => (playing.text.as_str(), palette.ink),
                 Words::Heart => ("❤️", white()),
                 Words::SmallHeart => ("💗", white()),
+                Words::Letter(index) => (
+                    letter(&playing.text, index),
+                    palette.hue(Hue::Bright(ROW_HUES[index / scene::ROW % ROW_HUES.len()])),
+                ),
             };
             if text.is_empty() {
                 return;
@@ -365,6 +377,14 @@ fn paint(
             }
         }
     }
+}
+
+/// The `index`th letter of `text` that is not a space, or nothing.
+fn letter(text: &str, index: usize) -> &str {
+    text.char_indices()
+        .filter(|(_, ch)| !ch.is_whitespace())
+        .nth(index)
+        .map_or("", |(at, ch)| &text[at..at + ch.len_utf8()])
 }
 
 /// Invisible ink's specks over `bounds`, scattered for `frame`.

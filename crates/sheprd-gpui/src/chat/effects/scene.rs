@@ -5,7 +5,13 @@
 //! scatter by a fixed hash, so an effect plays the same way each time.
 
 use super::Screen;
+
+mod zap;
+
 use std::f32::consts::{PI, TAU};
+#[cfg(test)]
+pub(crate) use zap::MAX_TARGETS;
+pub(crate) use zap::ROW;
 
 /// A box in the pane, from its top left corner.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -39,6 +45,8 @@ pub(crate) enum Words {
     Message,
     Heart,
     SmallHeart,
+    /// One letter of the message's: the `n`th that is not a space.
+    Letter(usize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -99,12 +107,14 @@ fn envelope(t: f32, length: f32, rise: f32, fall: f32) -> f32 {
 }
 
 /// What `effect` draws `t` seconds in, over a pane of `pane`'s size; the
-/// message that asked for it sits at `target`, when it shows.
+/// message that asked for it sits at `target`, when it shows, and has
+/// `letters` letters that are not spaces.
 pub(crate) fn scene(
     effect: Screen,
     t: f32,
     pane: Rect,
     target: Option<Rect>,
+    letters: usize,
     marks: &mut Vec<Mark>,
 ) {
     let length = effect.length().as_secs_f32();
@@ -121,6 +131,7 @@ pub(crate) fn scene(
         Screen::Lasers => lasers(t, length, w, h, marks),
         Screen::Love => love(t, length, w, h, marks),
         Screen::Spotlight => spotlight(t, length, w, h, target, marks),
+        Screen::Zap => zap::zap(t, length, w, h, letters, marks),
     }
 }
 

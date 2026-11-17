@@ -52,8 +52,8 @@ Tests :big[pass]: :huge[214 of 214]. :small[CI took 4 min.]
   lands a key finding, `:::loud` a warning, `:::gentle` a soft note, and
   `:::ink` hides a spoiler or secret until hovered. A line `::confetti` (or
   `balloons`, `celebration`, `fireworks`, `love`, `lasers`, `echo`,
-  `spotlight`) fills the chat pane for a moment, when long work finally
-  succeeds. Never use them in routine replies.
+  `spotlight`, or `zap`, where pixel ships shoot down the message's letters)
+  fills the chat pane for a moment, when long work finally succeeds. Never use them in routine replies.
 - Terminal views and the phone show the directives as plain text, so the reply
   still reads well there.
 

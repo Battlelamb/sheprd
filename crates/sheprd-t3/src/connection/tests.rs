@@ -147,3 +147,35 @@ fn only_a_plain_local_socket_is_opened() {
     let url = Url::parse("wss://example.invalid/ws").unwrap();
     assert!(matches!(Connection::open(&url), Err(Error::Scheme(scheme)) if scheme == "wss"));
 }
+
+#[test]
+fn open_tries_every_resolved_address() {
+    let mut tried = Vec::new();
+    let stream = connect_any(["::1", "127.0.0.1"], |address| {
+        tried.push(*address);
+        if *address == "::1" {
+            Err(std::io::ErrorKind::ConnectionRefused.into())
+        } else {
+            Ok(*address)
+        }
+    })
+    .unwrap();
+    assert_eq!(stream, "127.0.0.1");
+    assert_eq!(tried, ["::1", "127.0.0.1"]);
+}
+
+#[test]
+fn open_keeps_the_last_failure_or_reports_no_server() {
+    let error = connect_any(["::1", "127.0.0.1"], |_| -> std::io::Result<()> {
+        Err(std::io::ErrorKind::ConnectionRefused.into())
+    })
+    .unwrap_err();
+    assert!(
+        matches!(&error, Error::Connect(source) if source.kind() == std::io::ErrorKind::ConnectionRefused)
+    );
+    let error = connect_any(std::iter::empty::<&str>(), |_| -> std::io::Result<()> {
+        Ok(())
+    })
+    .unwrap_err();
+    assert!(matches!(error, Error::NoServer));
+}

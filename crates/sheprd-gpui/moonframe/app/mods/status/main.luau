@@ -115,10 +115,10 @@ local function load_item(load: any)
 		return ui.text { load.unavailable, style = { color = load.label_color } }
 	end
 	local function label(text: string)
-		return ui.text { text, shrink = false, style = { color = load.label_color } }
+		return ui.text { text, style = { color = load.label_color } }
 	end
 	local function share(value: number, color: string)
-		return ui.text { `{math.floor(value + 0.5)}%`, shrink = false, style = { color = color } }
+		return ui.text { `{math.floor(value + 0.5)}%`, style = { color = color } }
 	end
 	local cpu: any = { class = "sheprd-load-cpu", align = "center", shrink = false, style = { gap = 5 }, label(load.cpu_label) }
 	if load.history then

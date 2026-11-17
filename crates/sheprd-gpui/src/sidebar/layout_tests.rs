@@ -45,6 +45,8 @@ mod device_tag_groups;
 #[cfg(test)]
 mod devices_layout;
 #[cfg(test)]
+mod fold_all_hosts;
+#[cfg(test)]
 mod gpu_line;
 #[cfg(test)]
 mod host_agents;

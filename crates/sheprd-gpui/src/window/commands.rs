@@ -630,6 +630,10 @@ impl SheprdWindow {
                 cx.notify();
                 return;
             }
+            Command::ToggleAllHosts => {
+                self.toggle_all_devices(cx);
+                return;
+            }
             Command::ToggleZenMode => {
                 self.toggle_zen(window, cx);
                 return;

@@ -396,6 +396,7 @@ impl SheprdWindow {
                 | Command::ToggleStatusBar
                 | Command::ToggleMenuBar
                 | Command::ToggleModPanel
+                | Command::ToggleAllHosts
                 | Command::FocusNextRegion
                 | Command::FocusPreviousRegion
                 | Command::ToggleZenMode

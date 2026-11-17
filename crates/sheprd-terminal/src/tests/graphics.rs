@@ -22,6 +22,66 @@ fn placements(emulator: &mut Emulator) -> Vec<SurfaceGraphicsPlacement> {
 }
 
 #[test]
+fn synchronized_chunked_replacement_never_publishes_the_deleted_frame() {
+    let mut emulator = emulator(10, 4);
+    let placed = "a=T,t=d,f=32,s=1,v=1,i=1,p=1,c=1,r=1,C=1";
+    emulator.feed(&command(placed, &[1, 2, 3, 255]));
+    assert_eq!(placements(&mut emulator).len(), 1);
+    let _ = emulator.take_damage();
+
+    emulator.feed(b"\x1b[?2026h\x1b[3;5H");
+    emulator.feed(&command("a=d,d=i,i=1,p=1", &[]));
+    assert!(emulator.sync_pending(), "graphics must not end the frame");
+    assert!(
+        emulator.take_graphics().is_none(),
+        "do not publish deletion"
+    );
+    assert!(
+        emulator.take_damage().is_empty(),
+        "do not publish partial cells"
+    );
+
+    emulator.feed(&command(&format!("{placed},m=1"), &[9, 8, 7]));
+    assert!(emulator.sync_pending());
+    assert!(emulator.take_graphics().is_none());
+    emulator.feed(&command("m=0", &[255]));
+    assert!(emulator.sync_pending());
+    assert!(emulator.take_graphics().is_none(), "wait for the frame end");
+    emulator.feed(b"\x1b[?2026l");
+    assert!(!emulator.sync_pending());
+    let scene = emulator.take_graphics().unwrap();
+    assert_eq!(scene.placements.len(), 1);
+    assert_eq!(scene.assets[0].data, [9, 8, 7, 255]);
+    assert_eq!((scene.placements[0].x, scene.placements[0].y), (4, 2));
+}
+
+#[test]
+fn synchronized_graphics_timeout_releases_an_intentional_delete() {
+    let mut emulator = emulator(10, 4);
+    emulator.feed(&command("a=T,f=32,s=1,v=1,i=1,C=1", &[1, 2, 3, 255]));
+    assert_eq!(placements(&mut emulator).len(), 1);
+    emulator.feed(b"\x1b[?2026h");
+    emulator.feed(&command("a=d,d=i,i=1", &[]));
+    assert!(emulator.sync_pending());
+    assert!(emulator.take_graphics().is_none());
+    emulator.end_sync();
+    assert!(!emulator.sync_pending());
+    assert!(placements(&mut emulator).is_empty());
+}
+
+#[test]
+fn synchronized_graphics_end_releases_an_intentional_delete() {
+    let mut emulator = emulator(10, 4);
+    emulator.feed(&command("a=T,f=32,s=1,v=1,i=1,C=1", &[1, 2, 3, 255]));
+    assert_eq!(placements(&mut emulator).len(), 1);
+    emulator.feed(b"\x1b[?2026h");
+    emulator.feed(&command("a=d,d=i,i=1", &[]));
+    assert!(emulator.take_graphics().is_none());
+    emulator.feed(b"\x1b[?2026l");
+    assert!(placements(&mut emulator).is_empty());
+}
+
+#[test]
 fn a_placed_png_shows_at_the_cursor_and_moves_it() {
     let mut emulator = fed(20, 6, b"ab");
     emulator.set_cell_pixels(10, 20);

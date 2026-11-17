@@ -230,6 +230,8 @@ impl sheprd_backend::Terminal for CoreTerminal {
             // request changed (a scroll, a clear) is still shown.
             Some(End::Closed(_)) => {
                 let mut updates = Vec::new();
+                // No byte can end a held update now: show what it held.
+                self.emulator.end_sync();
                 self.push_view(&mut updates);
                 return Ok(updates);
             }
@@ -246,6 +248,10 @@ impl sheprd_backend::Terminal for CoreTerminal {
         let chunk = self.attachment.read(timeout)?;
         self.emulator.feed(&chunk.bytes);
         self.release_stale_sync();
+        if matches!(chunk.end, Some(End::Closed(_))) {
+            // The program is gone, so its synchronized update never ends.
+            self.emulator.end_sync();
+        }
         let mut updates: Vec<SurfaceUpdate> = self
             .emulator
             .take_events()

@@ -265,6 +265,38 @@ fn a_synchronized_update_that_never_ends_is_shown_in_time() {
     );
 }
 
+#[test]
+fn a_program_that_exits_inside_a_synchronized_update_shows_what_it_held() {
+    let (backend, mut mock) = backend();
+    let mut terminal = attached(&backend, &mut mock, Role::Active);
+    let _ = terminal.next(Duration::from_millis(20)).unwrap();
+    mock.send(5, Kind::Data, b"\x1b[?2026hheld");
+    mock.send(5, Kind::Close, br#"{"reason":"exited","exit_code":0}"#);
+    let mut text = String::new();
+    let start = std::time::Instant::now();
+    loop {
+        let updates = terminal.next(Duration::from_millis(50)).unwrap();
+        for update in &updates {
+            match update {
+                SurfaceUpdate::Frame(frame) => {
+                    text.extend(frame.cells.iter().map(|cell| cell.symbol.as_str()))
+                }
+                SurfaceUpdate::Rows { rows, .. } => text.extend(
+                    rows.iter()
+                        .flat_map(|row| row.cells.iter().map(|cell| cell.symbol.as_str())),
+                ),
+                _ => {}
+            }
+        }
+        if updates.iter().any(|u| matches!(u, SurfaceUpdate::Ended(_))) {
+            break;
+        }
+        assert!(start.elapsed() < WAIT, "never ended");
+    }
+    // No later byte or timer can end the update, so the end shows it.
+    assert!(text.contains("held"), "held output lost: {text:?}");
+}
+
 /// Reads until an update equal to `wanted` arrives, within `WAIT`. A read
 /// may wake before the bytes it waits for, so the update the last bytes
 /// sent cause can come a read later than the one that follows them.

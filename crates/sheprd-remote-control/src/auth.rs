@@ -346,7 +346,22 @@ impl Auth {
     }
 
     /// Lets desktops paired with an SSH key in through `access`.
+    /// Lines left for devices that are gone, whose removal failed when
+    /// they were revoked, are removed here, when the daemon starts.
+    /// Blocking.
     pub(crate) fn set_ssh_access(&mut self, access: SshAccess) {
+        let devices = &self.devices;
+        let kept = |id: &str| {
+            devices
+                .records()
+                .iter()
+                .any(|record| record.id.0 == id && record.ssh.is_some())
+        };
+        match access.keys.sweep(kept) {
+            Ok(0) => {}
+            Ok(swept) => tracing::info!(swept, "removed SSH keys of desktops no longer paired"),
+            Err(error) => tracing::warn!(error = %error, "could not check authorized_keys"),
+        }
         self.ssh_access = Some(access);
     }
 

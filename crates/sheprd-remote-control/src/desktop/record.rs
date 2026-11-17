@@ -50,6 +50,16 @@ impl Record {
     /// kept for it. Returns its id. Blocking.
     pub(crate) fn save(&self, state_dir: &Path, host_keys: &[String]) -> Result<String> {
         let id = self.id()?;
+        // The id is only the route's first eight bytes: another machine
+        // whose route shares them must not take over this one's record
+        // and host keys. The same machine paired again may update both.
+        match Self::load(state_dir, &id) {
+            Ok(kept) if kept.route != self.route || kept.identity != self.identity => {
+                return Err(Error::RecordConflict(id));
+            }
+            Ok(_) | Err(Error::Record(_)) => {}
+            Err(error) => return Err(error),
+        }
         let json = serde_json::to_vec_pretty(self).map_err(|_| Error::RecordFormat)?;
         files::write_private(&path(state_dir, &id), &json)?;
         let known = directory(state_dir).join(KNOWN_HOSTS);

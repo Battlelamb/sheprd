@@ -23,6 +23,7 @@ use tokio::{
 };
 
 mod exchange;
+mod record;
 
 /// A stand-in SSH server that greets each connection, then echoes.
 async fn ssh_server() -> SocketAddr {

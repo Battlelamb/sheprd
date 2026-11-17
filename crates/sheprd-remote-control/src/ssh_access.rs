@@ -217,6 +217,23 @@ impl AuthorizedKeys {
         Ok(removed)
     }
 
+    /// Removes every line Sheprd wrote for a device `keep` does not keep:
+    /// one whose removal failed when it was revoked, or that a restored
+    /// device list no longer has. The user's own lines stay. Returns how
+    /// many went. Blocking.
+    pub(crate) fn sweep(&self, keep: impl Fn(&str) -> bool) -> Result<usize> {
+        if !self.path.exists() {
+            return Ok(0);
+        }
+        let mut swept = 0;
+        self.rewrite(|lines| {
+            let before = lines.len();
+            lines.retain(|line| device_of(line).is_none_or(&keep));
+            swept = before - lines.len();
+        })?;
+        Ok(swept)
+    }
+
     /// Reads the file's lines, lets `change` edit them, and replaces the
     /// file atomically, private to this user, only when they changed.
     fn rewrite(&self, change: impl FnOnce(&mut Vec<String>)) -> Result<()> {
@@ -260,10 +277,16 @@ impl AuthorizedKeys {
 
 /// Whether `line` is the one Sheprd wrote for `device`.
 fn ours(line: &str, device: &DeviceId) -> bool {
-    line.split_ascii_whitespace()
-        .last()
-        .and_then(|comment| comment.strip_prefix(MARKER))
-        .is_some_and(|id| id == device.0)
+    device_of(line).is_some_and(|id| id == device.0)
+}
+
+/// The device a line Sheprd wrote names, restricted as Sheprd writes it; a
+/// line the user wrote, even one ending in the marker, names none.
+fn device_of(line: &str) -> Option<&str> {
+    if !line.starts_with(OPTIONS) {
+        return None;
+    }
+    line.split_ascii_whitespace().last()?.strip_prefix(MARKER)
 }
 
 /// The file's text, refusing more than `limit` bytes with

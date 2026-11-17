@@ -140,3 +140,23 @@ fn user_names_are_what_ssh_takes_as_is() {
     assert!(!valid_user("a b"));
     assert!(!valid_user("a@b"));
 }
+
+#[test]
+fn a_sweep_removes_only_lines_of_devices_that_are_gone() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("authorized_keys");
+    let keys = AuthorizedKeys::at(path.clone());
+    keys.allow(&DeviceId("kept".to_owned()), &key()).unwrap();
+    keys.allow(&DeviceId("gone".to_owned()), &key()).unwrap();
+    let mut text = fs::read_to_string(&path).unwrap();
+    // The user's own line, even one ending in the marker, is never Sheprd's.
+    text.push_str("ssh-ed25519 AAAA sheprd-desktop:gone\n");
+    fs::write(&path, text).unwrap();
+
+    assert_eq!(keys.sweep(|id| id == "kept").unwrap(), 1);
+    let text = fs::read_to_string(&path).unwrap();
+    assert!(text.contains("sheprd-desktop:kept\n"));
+    assert!(text.contains("ssh-ed25519 AAAA sheprd-desktop:gone\n"));
+    assert_eq!(text.lines().count(), 2);
+    assert_eq!(keys.sweep(|id| id == "kept").unwrap(), 0);
+}

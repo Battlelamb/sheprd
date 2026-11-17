@@ -5071,7 +5071,8 @@ CI checks formatting, lints every target and feature,
 and runs workspace tests with default and all features on `windows-2025` (x86_64)
 and `windows-11-arm` (ARM64), including headless UI and CLI tests. Its
 `windows-native` job then runs the native tests in both runners' desktop
-sessions: `just test-sidebar`'s fixtures, and on x86_64 `just test-gui` against
+sessions, on main and on pull requests that change what the app is built from
+(`scripts/ci-changes.sh`): `just test-sidebar`'s fixtures, and on x86_64 `just test-gui` against
 a pinned Herdr `herdr.exe` (0.9.5) in the shared test sandbox, with PowerShell
 as the pane shell. Herdr publishes no ARM64 Windows build; emulated on
 `windows-11-arm`, its panes echo typed text but never act on Enter, so CI skips

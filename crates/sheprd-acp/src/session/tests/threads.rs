@@ -291,3 +291,20 @@ fn an_agent_that_failed_to_start_still_resumes_its_session_later() {
         }
     );
 }
+
+#[test]
+fn a_turn_the_agent_rejects_leaves_the_handoff_for_the_next_prompt() {
+    let mut harness = choosing();
+    let codex = handed_to_codex(&mut harness);
+    let (turn, blocks) = sent_prompt(&mut harness, &codex, "next");
+    assert!(blocks[0].contains("User: hello"));
+    fail_as(&mut harness, 1, turn, "turn/start failed");
+
+    let (turn, blocks) = sent_prompt(&mut harness, &codex, "retry");
+    assert_eq!(blocks.len(), 2);
+    assert!(blocks[0].contains("User: hello"));
+    assert_eq!(blocks[1], "retry");
+    respond_as(&mut harness, 1, turn, json!({"stopReason": "end_turn"}));
+    let (_, blocks) = sent_prompt(&mut harness, &codex, "and again");
+    assert_eq!(blocks, ["and again"]);
+}

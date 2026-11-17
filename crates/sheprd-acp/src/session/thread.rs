@@ -37,6 +37,9 @@ pub(super) struct Thread {
     first_prompt: Option<String>,
     /// The text sent ahead of the next prompt, for the agent that took over.
     handoff: Option<String>,
+    /// The handoff the turn under way carried, until the agent answers: one
+    /// it rejects goes with the next prompt again.
+    in_flight: Option<String>,
     /// The agents that held the conversation, oldest first, each once.
     held: Vec<Agent>,
     /// How the agent starting now takes over; `None` for the chat's first.
@@ -47,8 +50,8 @@ pub(super) struct Thread {
     /// already shows: its updates are ignored until it opens.
     replaying: bool,
     /// What the current agent knows of the conversation while its handoff
-    /// has not reached it yet; `None` once a prompt carried it (or for the
-    /// chat's first agent), when it has seen the whole transcript.
+    /// has not reached it yet; `None` once a turn carrying it was taken (or
+    /// for the chat's first agent), when it has seen the whole transcript.
     undelivered: Option<Joining>,
 }
 
@@ -73,10 +76,9 @@ impl Thread {
         self.first_prompt.is_some()
     }
 
-    /// A prompt reached the agent.
-    pub(super) fn prompted(&mut self, shown: &str) {
-        // The prompt carried the handoff, if any: the agent is caught up.
-        self.undelivered = None;
+    /// A prompt carrying `handoff` went to the agent.
+    pub(super) fn prompted(&mut self, shown: &str, handoff: Option<String>) {
+        self.in_flight = handoff;
         if self.first_prompt.is_none() {
             self.first_prompt = Some(shown.to_owned());
         }
@@ -92,6 +94,7 @@ impl Thread {
         to: Agent,
     ) -> Option<String> {
         self.handoff = None;
+        self.in_flight = None;
         if !self.started() {
             // Nothing to hand over: the new agent simply starts.
             self.joining = None;
@@ -193,6 +196,20 @@ impl Thread {
         };
         self.handoff = Some(built.text.clone());
         Some((joining, built))
+    }
+
+    /// The agent answered the turn under way; `failed` when it rejected
+    /// it, so the handoff the turn carried goes with the next prompt.
+    pub(super) fn turn_ended(&mut self, failed: bool) {
+        let in_flight = self.in_flight.take();
+        if failed {
+            if let Some(text) = in_flight {
+                self.handoff.get_or_insert(text);
+            }
+        } else if self.handoff.is_none() {
+            // The handoff, if any, reached it: the agent is caught up.
+            self.undelivered = None;
+        }
     }
 
     /// The handoff to send ahead of the next prompt, once.

@@ -422,6 +422,9 @@ impl<R: FnMut(Update)> Session<R> {
             Ok(Err(_)) => (TurnEnd::Other, None, None),
             Err(error) => (TurnEnd::Failed, None, Some(error.message)),
         };
+        // A turn the agent rejected may not have read the handoff it
+        // carried, so the next prompt carries it again.
+        self.thread.turn_ended(error.is_some());
         if let Some(error) = error {
             let notice = self.projector.notice(NoticeLevel::Error, error);
             self.emit(notice);

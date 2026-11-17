@@ -113,10 +113,13 @@ impl SheprdWindow {
             .text_size(size)
             .text_color(rgb(self.theme.subtext()));
         let transcript = chat.session.transcript();
-        let fresh = !transcript
-            .entries
-            .iter()
-            .any(|entry| matches!(entry.kind, sheprd_chat_protocol::EntryKind::User { .. }));
+        // Trimming may drop every prompt of a long conversation, which a
+        // truncated transcript still had.
+        let fresh = !transcript.truncated
+            && !transcript
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.kind, sheprd_chat_protocol::EntryKind::User { .. }));
         // The Agent button started this agent in place of the one last used.
         let launched = pick(&rooms, self.chats.last_started)?;
         if fresh

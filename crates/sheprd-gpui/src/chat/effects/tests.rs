@@ -168,25 +168,41 @@ fn zap_draws_at_most_its_formation() {
 }
 
 #[test]
-fn zap_keeps_every_letter_inside_a_narrow_pane() {
-    for width in [120., 200., 300., 480., 1200.] {
-        let pane = Rect { w: width, ..PANE };
+fn zap_keeps_every_letter_inside_a_narrow_or_short_pane() {
+    for (width, height) in [
+        (120., 300.),
+        (120., 80.),
+        (200., 160.),
+        (300., 640.),
+        (480., 120.),
+        (1200., 640.),
+    ] {
+        let pane = Rect {
+            w: width,
+            h: height,
+            ..PANE
+        };
         for step in 0..46 {
+            let t = step as f32 * 0.1;
             let mut marks = Vec::new();
-            scene(Screen::Zap, step as f32 * 0.1, pane, None, 24, &mut marks);
+            scene(Screen::Zap, t, pane, None, 24, &mut marks);
             for mark in marks {
                 if let Mark::Words {
                     x,
+                    y,
                     size,
                     words: Words::Letter { .. },
                     ..
                 } = mark
                 {
-                    // A letter is about half as wide as it is tall.
+                    // A letter is about half as wide as it is tall; `y` is its top.
                     assert!(
                         x - size / 2. >= 0. && x + size / 2. <= width,
-                        "width {width}, t {}: letter at {x}",
-                        step as f32 * 0.1
+                        "{width}x{height}, t {t}: letter at x {x}"
+                    );
+                    assert!(
+                        y >= 0. && y + size <= height,
+                        "{width}x{height}, t {t}: letter at y {y}"
                     );
                 }
             }

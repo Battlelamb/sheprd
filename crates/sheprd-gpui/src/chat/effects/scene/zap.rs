@@ -30,17 +30,22 @@ const SHIP: [&str; 4] = ["..#..", "..#..", ".###.", "#####"];
 /// The side of one of a ship's pixels, and of a burst's.
 const PIXEL: f32 = 4.;
 
-/// How the formation fits a pane: letters per row, how far apart, and
-/// how far it sways, so every letter stays inside however narrow it is.
+/// How far the formation sinks each second.
+const DRIFT: f32 = 6.;
+
+/// How the formation fits a pane: how many letters it holds, how many in a
+/// row, how far apart, and how far it sways, so every letter stays inside
+/// however narrow or short the pane is.
 #[derive(Clone, Copy, Debug)]
 struct Formation {
+    count: usize,
     per_row: usize,
     column: f32,
     sway: f32,
 }
 
 impl Formation {
-    fn fit(count: usize, w: f32) -> Self {
+    fn fit(count: usize, w: f32, h: f32) -> Self {
         let sway = (w * 0.06).min(SWAY);
         // A letter's half on either side stays in the pane too.
         let room = (w - 2. * sway - LETTER * 2.).max(0.);
@@ -51,11 +56,22 @@ impl Formation {
             1 => 0.,
             _ => (room / (per_row - 1) as f32).min(COLUMN),
         };
+        // Rows go down to the ships, allowing for how far the formation
+        // sinks before its last letter is hit; a short pane holds fewer.
+        let ships = 12. + SHIP.len() as f32 * PIXEL;
+        let room = h - Self::top(h) - DRIFT * LAST_HIT - ships - LETTER;
+        let rows = (room.max(0.) / LINE) as usize + 1;
         Self {
+            count: count.min(per_row * rows),
             per_row,
             column,
             sway,
         }
+    }
+
+    /// Where the first row's letters start.
+    fn top(h: f32) -> f32 {
+        h * 0.12
     }
 
     /// The row letter `index` stands in.
@@ -69,7 +85,7 @@ impl Formation {
         let left = w / 2. - (self.per_row - 1) as f32 * self.column / 2.;
         (
             left + column as f32 * self.column + (t * 1.6).sin() * self.sway,
-            h * 0.12 + self.row(index) as f32 * LINE + 6. * t + LETTER / 2.,
+            Self::top(h) + self.row(index) as f32 * LINE + DRIFT * t + LETTER / 2.,
         )
     }
 }
@@ -95,9 +111,8 @@ pub(super) fn zap(t: f32, length: f32, w: f32, h: f32, letters: usize, marks: &m
         alpha: 0.6 * fade,
         hole: None,
     });
-    let count = letters.min(MAX_TARGETS);
-    let formation = Formation::fit(count, w);
-    for index in 0..count {
+    let formation = Formation::fit(letters.min(MAX_TARGETS), w, h);
+    for index in 0..formation.count {
         let hit = hit_time(index);
         let shooter = index % SHIPS;
         if t < hit {

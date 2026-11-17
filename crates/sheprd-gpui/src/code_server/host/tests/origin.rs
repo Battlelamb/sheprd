@@ -109,10 +109,7 @@ fn a_hosts_address_carries_its_page_name() {
             "{:?}",
             report.status
         );
-        assert!(
-            Instant::now() < deadline,
-            "no address was published"
-        );
+        assert!(Instant::now() < deadline, "no address was published");
         thread::sleep(Duration::from_millis(10));
     };
     assert_eq!(address.url.host(), page_host("dev@build"));

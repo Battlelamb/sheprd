@@ -6,16 +6,21 @@ use crate::{i18n::fl, machine::Error};
 impl Localize for Error {
     fn localize(&self) -> String {
         match self {
+            Self::Busy(name) => fl!("error-machine-busy", name = name.as_str()),
             Self::Cpus { min, max } => fl!("error-machine-cpus", min = *min, max = *max),
             Self::Delete { path, source } => fl!(
                 "error-machine-delete",
                 path = path.display().to_string(),
                 error = source.to_string()
             ),
+            Self::Exists(name) => fl!("error-machine-exists", name = name.as_str()),
             Self::Framework(message) => {
                 fl!("error-machine-framework", message = message.as_str())
             }
             Self::Hardware => fl!("error-machine-hardware"),
+            Self::ImageNotFound(name) => {
+                fl!("error-machine-image-not-found", name = name.as_str())
+            }
             Self::InvalidDisplay => fl!("error-machine-invalid-display"),
             Self::InvalidName => fl!("error-machine-invalid-name"),
             Self::Memory { min, max } => fl!("error-machine-memory", min = *min, max = *max),
@@ -29,6 +34,7 @@ impl Localize for Error {
                 path = path.display().to_string(),
                 error = source.to_string()
             ),
+            Self::Suspended(name) => fl!("error-machine-suspended", name = name.as_str()),
             Self::Unsupported => fl!("error-machine-unsupported"),
             Self::Write { path, source } => fl!(
                 "error-machine-write",

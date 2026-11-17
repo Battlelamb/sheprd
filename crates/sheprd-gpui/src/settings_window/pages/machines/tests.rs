@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used)]
-use super::{Listing, MachinesPage, Name, gigabytes};
+use super::{Deletion, Image, Listing, MachinesPage, Name, gigabytes};
 use crate::machine::Settings;
 use crate::settings_window::{Section, SettingsWindow, tests::skill_fixture};
 use gpui::{TestAppContext, VisualTestContext};
@@ -25,7 +25,8 @@ fn page<'a>(
         view.section = Section::Machines;
         view.machines = MachinesPage {
             listings: Some(listings),
-            confirming: confirming.map(|name| Name::try_from(name.to_owned()).unwrap()),
+            confirming: confirming
+                .map(|name| Deletion::Machine(Name::try_from(name.to_owned()).unwrap())),
             ..MachinesPage::default()
         };
     });
@@ -86,5 +87,49 @@ fn cancelling_keeps_the_machine_and_its_button(cx: &mut TestAppContext) {
         cx.notify();
     });
     cx.update(|window, cx| crate::sidebar::layout_tests::full_draw(window, cx).clear(cx));
+    assert!(cx.debug_bounds("machine-one-delete").is_some());
+}
+
+/// Settings on this page, showing an image and a stopped machine.
+fn with_image(cx: &mut TestAppContext, confirming: Option<Deletion>) -> &mut VisualTestContext {
+    let (view, cx) = page(cx, vec![listing("one", false)], None);
+    view.update(cx, |view, _| {
+        view.machines.images = Some(vec![Image {
+            name: Name::try_from("base".to_owned()).unwrap(),
+            disk_bytes: 25_300_000_000,
+        }]);
+        view.machines.confirming = confirming;
+    });
+    cx.update(|window, cx| crate::sidebar::layout_tests::full_draw(window, cx).clear(cx));
+    cx
+}
+
+#[gpui::test]
+fn a_stopped_machine_saves_as_an_image_and_an_image_makes_a_machine(cx: &mut TestAppContext) {
+    let cx = with_image(cx, None);
+    for selector in [
+        "machine-one-save-image",
+        "machine-image-base-new",
+        "machine-image-base-delete",
+    ] {
+        assert!(cx.debug_bounds(selector).is_some(), "{selector}");
+    }
+}
+
+#[gpui::test]
+fn a_saved_machine_cannot_become_an_image(cx: &mut TestAppContext) {
+    let (_view, cx) = page(cx, vec![listing("one", true)], None);
+    assert!(cx.debug_bounds("machine-one-save-image").is_none());
+}
+
+#[gpui::test]
+fn deleting_an_image_asks_a_second_time(cx: &mut TestAppContext) {
+    let name = Name::try_from("base".to_owned()).unwrap();
+    let cx = with_image(cx, Some(Deletion::Image(name)));
+    assert!(
+        cx.debug_bounds("machine-image-base-delete-confirm")
+            .is_some()
+    );
+    assert!(cx.debug_bounds("machine-image-base-delete").is_none());
     assert!(cx.debug_bounds("machine-one-delete").is_some());
 }

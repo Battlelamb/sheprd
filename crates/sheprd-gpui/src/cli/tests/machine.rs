@@ -75,3 +75,39 @@ fn machine_has_its_own_help() {
         control::ControlCommand::Help(Some("machine"))
     );
 }
+
+#[test]
+fn machine_new_needs_an_image() {
+    assert_eq!(
+        command(&["machine", "new", "work", "--from", "base"]),
+        control::ControlCommand::Machine(control::MachineCommand::New {
+            name: "work".to_owned(),
+            image: "base".to_owned(),
+        })
+    );
+    assert!(LaunchOptions::parse(["machine", "new", "work"]).is_err());
+}
+
+#[test]
+fn machine_image_lists_saves_and_deletes() {
+    for args in [&["machine", "image"][..], &["machine", "image", "list"]] {
+        assert_eq!(
+            command(args),
+            control::ControlCommand::Machine(control::MachineCommand::ImageList)
+        );
+    }
+    assert_eq!(
+        command(&["machine", "image", "save", "work", "base"]),
+        control::ControlCommand::Machine(control::MachineCommand::ImageSave {
+            machine: "work".to_owned(),
+            image: "base".to_owned(),
+        })
+    );
+    assert_eq!(
+        command(&["machine", "image", "delete", "base"]),
+        control::ControlCommand::Machine(control::MachineCommand::ImageDelete {
+            name: "base".to_owned(),
+        })
+    );
+    assert!(LaunchOptions::parse(["machine", "image", "lsit"]).is_err());
+}

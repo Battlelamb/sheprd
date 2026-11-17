@@ -69,7 +69,23 @@ pub enum TabOp {
     MachineDelete {
         name: String,
     },
+    /// Ask in Settings to delete the image called `name`. The user confirms
+    /// there.
+    MachineImageDelete {
+        name: String,
+    },
+    MachineImageList,
+    /// Keep the shut down virtual Mac called `machine` as image `image`.
+    MachineImageSave {
+        machine: String,
+        image: String,
+    },
     MachineList,
+    /// Make the virtual Mac called `name` from image `image`.
+    MachineNew {
+        name: String,
+        image: String,
+    },
     /// What the virtual Mac called `name` boots with next. Fields left out
     /// keep their value; `display` is `fit` or a size such as `1920x1200`.
     MachineSet {
@@ -106,7 +122,11 @@ impl TabOp {
             | Self::Devices
             | Self::Machine { .. }
             | Self::MachineDelete { .. }
+            | Self::MachineImageDelete { .. }
+            | Self::MachineImageList
+            | Self::MachineImageSave { .. }
             | Self::MachineList
+            | Self::MachineNew { .. }
             | Self::MachineSet { .. }
             | Self::Orchestrator { .. }
             | Self::Review
@@ -209,6 +229,9 @@ pub enum Reply {
     Machines {
         machines: Vec<MachineInfo>,
     },
+    MachineImages {
+        images: Vec<MachineImageInfo>,
+    },
 }
 
 /// What a virtual Mac is doing.
@@ -249,6 +272,14 @@ pub struct MachineInfo {
     /// `fit` or a size such as `1920x1200`.
     pub display: String,
     /// What it really takes on disk.
+    pub disk_bytes: u64,
+}
+
+/// An image new virtual Macs start from.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineImageInfo {
+    pub name: String,
+    /// What its files add up to, shared with the machines made from it.
     pub disk_bytes: u64,
 }
 

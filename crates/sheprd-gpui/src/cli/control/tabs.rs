@@ -56,6 +56,18 @@ pub enum MachineCommand {
     Delete {
         name: String,
     },
+    New {
+        name: String,
+        image: String,
+    },
+    ImageList,
+    ImageSave {
+        machine: String,
+        image: String,
+    },
+    ImageDelete {
+        name: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -152,7 +164,32 @@ pub(super) fn machine(args: &mut Args) -> Result<MachineCommand, CliError> {
         Some("delete") => MachineCommand::Delete {
             name: args.required_text("NAME")?,
         },
+        Some("new") => {
+            let image = args.text_option("--from")?;
+            MachineCommand::New {
+                name: args.required_text("NAME")?,
+                image: image.ok_or(CliError::MissingValue("--from"))?,
+            }
+        }
+        Some("image") => machine_image(args)?,
         _ => return Err(unknown("machine", verb)),
+    })
+}
+
+fn machine_image(args: &mut Args) -> Result<MachineCommand, CliError> {
+    let Some(verb) = args.verb() else {
+        return Ok(MachineCommand::ImageList);
+    };
+    Ok(match verb.to_str() {
+        Some("list") => MachineCommand::ImageList,
+        Some("save") => MachineCommand::ImageSave {
+            machine: args.required_text("MACHINE")?,
+            image: args.required_text("IMAGE")?,
+        },
+        Some("delete") => MachineCommand::ImageDelete {
+            name: args.required_text("IMAGE")?,
+        },
+        _ => return Err(unknown("machine image", verb)),
     })
 }
 

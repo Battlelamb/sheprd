@@ -13,6 +13,8 @@
 mod configuration;
 mod error;
 #[cfg(target_os = "macos")]
+pub(crate) mod image;
+#[cfg(target_os = "macos")]
 mod quit;
 #[cfg(target_os = "macos")]
 mod settings;
@@ -29,7 +31,7 @@ pub(crate) use {
         Listing, discard_state, drain_settings, list, queue_settings, queued_settings,
         update_settings,
     },
-    vm::{Status, delete, release, running, shut_down, start, status, suspend, view},
+    vm::{Status, delete, release, running, save_image, shut_down, start, status, suspend, view},
 };
 
 use serde::{Deserialize, Serialize};
@@ -42,7 +44,7 @@ const MAX_NAME_BYTES: usize = 64;
 /// command line and from saved tabs, so it is checked whenever it is read.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
-pub(crate) struct Name(String);
+pub struct Name(String);
 
 impl Name {
     pub(crate) fn as_str(&self) -> &str {

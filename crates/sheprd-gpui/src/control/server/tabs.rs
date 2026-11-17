@@ -45,7 +45,15 @@ pub(super) fn serve(
         TabOp::Devices => arrive::devices(&caller, incoming, watches, cx),
         TabOp::Machine { name } => arrive::machine(&caller, name, incoming, watches, cx),
         TabOp::MachineDelete { name } => machines::delete(&caller, name, incoming, cx),
+        TabOp::MachineImageDelete { name } => {
+            machines::image_delete(&caller, name, incoming, cx);
+        }
+        TabOp::MachineImageList => machines::image_list(incoming, cx),
+        TabOp::MachineImageSave { machine, image } => {
+            machines::image_save(machine, image, incoming, cx);
+        }
         TabOp::MachineList => machines::list(incoming, cx),
+        TabOp::MachineNew { name, image } => machines::new(name, image, incoming, cx),
         TabOp::MachineSet {
             name,
             cpus,

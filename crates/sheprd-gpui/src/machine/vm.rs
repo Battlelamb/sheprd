@@ -121,7 +121,7 @@ struct Entry {
     /// Every tab's view on it, each shown it once it runs.
     views: Vec<View>,
     /// Its files are going, so nothing may start it.
-    deleting: bool,
+    held: bool,
 }
 
 impl Default for Entry {
@@ -129,7 +129,7 @@ impl Default for Entry {
         Self {
             phase: Phase::Stopped,
             views: Vec::new(),
-            deleting: false,
+            held: false,
         }
     }
 }
@@ -149,7 +149,7 @@ pub(super) fn close() {
 
 /// Whether machine `name` may start.
 fn startable(name: &Name) -> bool {
-    !CLOSED.get() && !with(name, |machine| machine.deleting)
+    !CLOSED.get() && !with(name, |machine| machine.held)
 }
 
 pub(super) fn app() -> Option<AsyncApp> {
@@ -499,7 +499,9 @@ pub(crate) fn shut_down(name: &Name) -> Result<()> {
 /// Stops machine `name` if it runs, then deletes everything it holds. Nothing
 /// starts it meanwhile. `done` hears how that went.
 pub(crate) fn delete(name: &Name, cx: &mut App, done: impl FnOnce(Result<()>, &mut App) + 'static) {
-    with(name, |machine| machine.deleting = true);
+    if with(name, |machine| std::mem::replace(&mut machine.held, true)) {
+        return done(Err(Error::Busy(name.clone())), cx);
+    }
     let name = name.clone();
     cx.spawn(async move |cx: &mut AsyncApp| {
         let removed = match stop_for_delete(&name, cx).await {
@@ -515,10 +517,38 @@ pub(crate) fn delete(name: &Name, cx: &mut App, done: impl FnOnce(Result<()>, &m
             if removed.is_ok() {
                 MACHINES.with(|machines| machines.borrow_mut().remove(&name));
             } else {
-                with(&name, |machine| machine.deleting = false);
+                with(&name, |machine| machine.held = false);
             }
             cx.refresh_windows();
             done(removed, cx);
+        });
+    })
+    .detach();
+}
+
+/// Keeps stopped machine `name` as image `image`. Nothing starts it meanwhile.
+/// `done` hears how that went.
+pub(crate) fn save_image(
+    name: &Name,
+    image: Name,
+    cx: &mut App,
+    done: impl FnOnce(Result<()>, &mut App) + 'static,
+) {
+    if status(name) != Status::Stopped
+        || with(name, |machine| std::mem::replace(&mut machine.held, true))
+    {
+        return done(Err(Error::Busy(name.clone())), cx);
+    }
+    let name = name.clone();
+    cx.spawn(async move |cx: &mut AsyncApp| {
+        let source = name.clone();
+        let saved = cx
+            .background_executor()
+            .spawn(async move { super::image::save(&source, &image) })
+            .await;
+        cx.update(|cx| {
+            with(&name, |machine| machine.held = false);
+            done(saved, cx);
         });
     })
     .detach();

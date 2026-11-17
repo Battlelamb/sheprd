@@ -17,12 +17,12 @@ pub(super) const DISK: &str = "disk.img";
 pub(super) const HARDWARE: &str = "hardware.bin";
 pub(super) const IDENTITY: &str = "identity.bin";
 /// What the user chose, for the next boot.
-const SETTINGS: &str = "machine.json";
+pub(super) const SETTINGS: &str = "machine.json";
 /// What the machine last booted with, which a saved state needs again.
 const BOOTED: &str = "booted.json";
 /// The saved state. It exists only while the machine is suspended: a state
 /// resumed once no longer matches the disk.
-const STATE: &str = "state.vzsave";
+pub(super) const STATE: &str = "state.vzsave";
 
 /// Held across a change to a machine's settings, so that a read and the write
 /// it leads to are one step: the page and the command line both change them.
@@ -43,7 +43,7 @@ pub(crate) struct Listing {
 }
 
 /// The folder that holds every machine.
-fn root() -> Result<PathBuf> {
+pub(super) fn root() -> Result<PathBuf> {
     let state = crate::preferences::state_dir().ok_or(Error::NoStateDir)?;
     Ok(state.join("machines"))
 }
@@ -90,7 +90,7 @@ fn listing(name: Name, folder: &Path) -> Listing {
 
 /// The bytes the folder's files take. Each is listed by `read_dir`, which
 /// does not follow links, and a machine's folder holds no subfolders.
-fn disk_bytes(folder: &Path) -> u64 {
+pub(super) fn disk_bytes(folder: &Path) -> u64 {
     let Ok(entries) = fs::read_dir(folder) else {
         return 0;
     };
@@ -234,7 +234,7 @@ pub(crate) fn delete(name: &Name) -> Result<()> {
     delete_folder(&folder(name)?)
 }
 
-fn delete_folder(folder: &Path) -> Result<()> {
+pub(super) fn delete_folder(folder: &Path) -> Result<()> {
     match fs::remove_dir_all(folder) {
         Err(source) if source.kind() != ErrorKind::NotFound => Err(Error::Delete {
             path: folder.to_owned(),
@@ -265,6 +265,13 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
         .persist(path)
         .map(|_| ())
         .map_err(|error| write_error(error.error))
+}
+
+pub(super) fn write_error(path: &Path, source: std::io::Error) -> Error {
+    Error::Write {
+        path: path.to_owned(),
+        source,
+    }
 }
 
 pub(super) fn read_error(path: &Path, source: std::io::Error) -> Error {

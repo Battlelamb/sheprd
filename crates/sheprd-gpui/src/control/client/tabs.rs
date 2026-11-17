@@ -8,7 +8,7 @@ use crate::{
         ErrorCode,
         protocol::{
             Request, Response,
-            tabs::{MachineInfo, Reply, TabInfo, TabOp},
+            tabs::{MachineImageInfo, MachineInfo, Reply, TabInfo, TabOp},
         },
     },
 };
@@ -172,6 +172,18 @@ pub(super) fn machine(command: MachineCommand, context: &Context) -> crate::Resu
             context.act(Request::Tab, TabOp::MachineSuspend { name })
         }
         MachineCommand::Delete { name } => context.act(Request::Tab, TabOp::MachineDelete { name }),
+        MachineCommand::New { name, image } => {
+            context.act(Request::Tab, TabOp::MachineNew { name, image })
+        }
+        MachineCommand::ImageList => {
+            machine_images(context.call(Request::Tab, TabOp::MachineImageList)?)
+        }
+        MachineCommand::ImageSave { machine, image } => {
+            context.act(Request::Tab, TabOp::MachineImageSave { machine, image })
+        }
+        MachineCommand::ImageDelete { name } => {
+            context.act(Request::Tab, TabOp::MachineImageDelete { name })
+        }
     }
 }
 
@@ -188,6 +200,25 @@ fn machines(response: Response) -> crate::Result<Output> {
     }
     let lines: Vec<String> = machines.iter().map(machine_line).collect();
     Output::data(lines.join("\n"), &json)
+}
+
+fn machine_images(response: Response) -> crate::Result<Output> {
+    let Response::Tab {
+        reply: Reply::MachineImages { images },
+    } = response
+    else {
+        return Err(unexpected(response));
+    };
+    let json = serde_json::json!({ "images": images });
+    if images.is_empty() {
+        return Ok(Output::data("No images", &json)?.nothing());
+    }
+    let lines: Vec<String> = images.iter().map(image_line).collect();
+    Output::data(lines.join("\n"), &json)
+}
+
+fn image_line(image: &MachineImageInfo) -> String {
+    format!("{}\t{:.1} GB", image.name, image.disk_bytes as f64 / 1e9) // i18n: data
 }
 
 fn machine_line(machine: &MachineInfo) -> String {

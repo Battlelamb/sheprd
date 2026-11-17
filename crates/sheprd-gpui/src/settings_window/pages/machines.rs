@@ -6,14 +6,23 @@ use super::{SettingsWindow, ui};
 use crate::{
     SheprdWindow,
     i18n::{Localize as _, fl},
-    machine::{self, Display, Limits, Listing, Name, Patch, Status},
+    machine::{self, Display, Limits, Listing, Name, Patch, Status, image::Image},
     settings_window::Section,
 };
 use gpui::{prelude::*, *};
 use std::collections::HashMap;
 
+mod images;
+
+/// What waits for a second press before it is deleted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Deletion {
+    Image(Name),
+    Machine(Name),
+}
+
 /// Opens Settings on this page, asking to delete `delete` if one is named.
-pub(crate) fn open(source: WeakEntity<SheprdWindow>, delete: Option<Name>, cx: &mut App) {
+pub(crate) fn open(source: WeakEntity<SheprdWindow>, delete: Option<Deletion>, cx: &mut App) {
     crate::settings_window::open(source, cx);
     // Queued after `open`'s own deferred work, so the window exists by now.
     cx.defer(move |cx| {
@@ -35,8 +44,10 @@ pub(crate) fn open(source: WeakEntity<SheprdWindow>, delete: Option<Name>, cx: &
 pub(in crate::settings_window) struct MachinesPage {
     /// `None` until the folders are read.
     listings: Option<Vec<Listing>>,
-    /// The machine whose deletion waits for a second press.
-    confirming: Option<Name>,
+    /// `None` until the folder is read.
+    images: Option<Vec<Image>>,
+    /// What waits for a second press to be deleted.
+    confirming: Option<Deletion>,
     /// Being deleted, whose row stays until it is gone.
     deleting: Option<Name>,
     /// What went wrong last, for the user.
@@ -59,9 +70,11 @@ impl SettingsWindow {
     pub(in crate::settings_window) fn open_machines(&mut self, cx: &mut Context<Self>) {
         self.machines.reads += 1;
         let read_number = self.machines.reads;
-        let read = cx.background_executor().spawn(async { machine::list() });
+        let read = cx
+            .background_executor()
+            .spawn(async { (machine::list(), machine::image::list()) });
         cx.spawn(async move |this, cx| {
-            let listed = read.await;
+            let (listed, images) = read.await;
             let _ = this.update(cx, |this, cx| {
                 if this.machines.reads != read_number {
                     return;
@@ -75,6 +88,10 @@ impl SettingsWindow {
                         }
                         this.machines.listings = Some(listings);
                     }
+                    Err(error) => this.machines.failure = Some(error.localize()),
+                }
+                match images {
+                    Ok(images) => this.machines.images = Some(images),
                     Err(error) => this.machines.failure = Some(error.localize()),
                 }
                 cx.notify();
@@ -348,11 +365,17 @@ impl SettingsWindow {
                 this.forget_machine_state(name, cx);
             },
         );
+        let save_image = button(
+            "save-image",
+            fl!("settings-machines-save-image"),
+            Self::save_machine_image,
+        );
         let row = div().flex().flex_row().gap(px(6.));
         match (status, listing.saved) {
             (Status::Running, _) => row.child(open).child(suspend).child(shut_down),
             (Status::Stopped, true) => row.child(open).child(forget),
-            (Status::Stopped | Status::Failed(_), _) => row.child(open),
+            (Status::Stopped, false) => row.child(open).child(save_image),
+            (Status::Failed(_), _) => row.child(open),
             (Status::Starting | Status::Saving, _) => row,
         }
     }
@@ -363,7 +386,7 @@ impl SettingsWindow {
         let name = &listing.name;
         let size = gigabytes(listing.disk_bytes);
         let row = |id: String, title: String| ui::row(&self.theme, id, title);
-        if self.machines.confirming.as_ref() == Some(name) {
+        if self.machines.confirming.as_ref() == Some(&Deletion::Machine(name.clone())) {
             let target = name.clone();
             let question = if *status == Status::Stopped {
                 fl!(
@@ -429,7 +452,7 @@ impl SettingsWindow {
             )
             .when(enabled, |button| {
                 button.on_click(cx.listener(move |this, _, _, cx| {
-                    this.machines.confirming = Some(target.clone());
+                    this.machines.confirming = Some(Deletion::Machine(target.clone()));
                     cx.notify();
                 }))
             }),
@@ -451,7 +474,11 @@ impl SettingsWindow {
                     .map(|listing| self.render_machine(listing, &limits, cx)),
             ),
         };
-        page.when_some(self.machines.failure.clone(), |page, failure| {
+        let images = self.machines.images.clone().unwrap_or_default();
+        page.when(!images.is_empty(), |page| {
+            page.child(self.render_images(&images, cx))
+        })
+        .when_some(self.machines.failure.clone(), |page, failure| {
             page.child(self.control_note(failure))
         })
     }

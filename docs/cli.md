@@ -118,10 +118,14 @@ Sheprd** entry, which both Windows installers add, runs this command through
 | `code edit FILE[:LINE]` | Your terminal editor, in a new pane beside yours |
 | `devices` | The Devices overview |
 | `machine [open [NAME]]` | The virtual Mac called NAME (default `default`) in a tab, started or resumed if it is not running. Closing the tab leaves it running; quitting Sheprd saves it (Apple silicon Macs) |
-| `machine list` | Each machine's state, CPUs, memory, display, and disk use. Exits 4 when there are none |
+| `machine list` | Each machine's state, CPUs, memory, display, and disk use, which counts blocks shared with its image. Exits 4 when there are none |
 | `machine set NAME [--cpus N] [--memory GB] [--display fit\|WxH]` | What it boots with next, after it next shuts down |
 | `machine suspend NAME` | Save it and stop it; it resumes where it was when next shown |
 | `machine delete NAME` | Ask in Settings to delete it and free its disk; the user confirms there |
+| `machine new NAME --from IMAGE` | Make a machine from an image: an APFS clone that takes no real space until it changes, with its own identity, so several can run at once (macOS allows 2) |
+| `machine image [list]` | The images machines can start from. Exits 4 when there are none |
+| `machine image save MACHINE IMAGE` | Keep a shut down machine as an image. Exits 6 while it runs or is suspended |
+| `machine image delete IMAGE` | Ask in Settings to delete it; the user confirms there. Machines made from it stay |
 | `orchestrator [--repo PATH]` | Show the Issues section narrowed to your checkout's project, or PATH's |
 | `orchestrator items\|issues\|prs\|tasks` | What it last synced, from its local database (no app needed); `tasks` is the repository's Beads tasks, with each one's assignee, priority, and blockers in `--json` |
 | `review` | The review of your workspace's uncommitted changes |

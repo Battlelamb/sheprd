@@ -6,12 +6,15 @@ use super::*;
 use crate::{
     SheprdWindow,
     control::{
-        protocol::tabs::{MachineInfo, MachineState},
+        protocol::tabs::{MachineImageInfo, MachineInfo, MachineState},
         server::window_for,
     },
     i18n::Localize as _,
-    machine::{self, Limits, Listing, Name, Settings, Status},
+    machine::{self, Limits, Listing, Name, Settings, Status, image},
 };
+
+#[cfg(target_os = "macos")]
+use crate::settings_window::MachineDeletion as Asked;
 
 /// What `machine set` changes: CPUs, memory in GB, and the display.
 type Changes = (Option<u16>, Option<u16>, Option<String>);
@@ -41,6 +44,26 @@ pub(super) fn suspend(_: String, incoming: socket::Incoming, _: &mut App) {
 
 #[cfg(not(target_os = "macos"))]
 pub(super) fn delete(_: &Caller, _: String, incoming: socket::Incoming, _: &mut App) {
+    unsupported(incoming);
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(super) fn new(_: String, _: String, incoming: socket::Incoming, _: &mut App) {
+    unsupported(incoming);
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(super) fn image_list(incoming: socket::Incoming, _: &mut App) {
+    unsupported(incoming);
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(super) fn image_save(_: String, _: String, incoming: socket::Incoming, _: &mut App) {
+    unsupported(incoming);
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(super) fn image_delete(_: &Caller, _: String, incoming: socket::Incoming, _: &mut App) {
     unsupported(incoming);
 }
 
@@ -181,7 +204,115 @@ pub(super) fn delete(caller: &Caller, name: String, incoming: socket::Incoming, 
                 .entity(cx)
                 .map(|view: gpui::Entity<SheprdWindow>| view.downgrade());
             if let Ok(source) = source {
-                crate::settings_window::open_machines(source, Some(name), cx);
+                crate::settings_window::open_machines(source, Some(Asked::Machine(name)), cx);
+            }
+        });
+        incoming.respond(Response::done(message));
+    })
+    .detach();
+}
+
+/// What a failure to make or save a machine says to the caller.
+#[cfg(target_os = "macos")]
+fn refused(error: &machine::Error) -> Response {
+    let code = match error {
+        machine::Error::ImageNotFound(_) | machine::Error::NotInstalled(_) => ErrorCode::NotFound,
+        machine::Error::Busy(_) | machine::Error::Suspended(_) => ErrorCode::Busy,
+        machine::Error::Exists(_) => ErrorCode::InvalidRequest,
+        _ => ErrorCode::Failed,
+    };
+    Response::error(code, error.localize())
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn new(name: String, from: String, incoming: socket::Incoming, cx: &mut App) {
+    let Some((name, incoming)) = named(name, incoming) else {
+        return;
+    };
+    let Some((from, incoming)) = named(from, incoming) else {
+        return;
+    };
+    let make = cx.background_executor().spawn(async move {
+        image::create(&name, &from)?;
+        Ok::<_, machine::Error>(name)
+    });
+    cx.spawn(async move |_: &mut gpui::AsyncApp| {
+        incoming.respond(match make.await {
+            Ok(name) => Response::done(format!("Made {name}")), // i18n: data
+            Err(error) => refused(&error),
+        });
+    })
+    .detach();
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn image_list(incoming: socket::Incoming, cx: &mut App) {
+    let read = cx.background_executor().spawn(async { image::list() });
+    cx.spawn(async move |_: &mut gpui::AsyncApp| {
+        incoming.respond(match read.await {
+            Ok(images) => Response::Tab {
+                reply: Reply::MachineImages {
+                    images: images
+                        .into_iter()
+                        .map(|image| MachineImageInfo {
+                            name: image.name.to_string(),
+                            disk_bytes: image.disk_bytes,
+                        })
+                        .collect(),
+                },
+            },
+            Err(error) => failed(&error),
+        });
+    })
+    .detach();
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn image_save(name: String, target: String, incoming: socket::Incoming, cx: &mut App) {
+    let Some((name, incoming)) = named(name, incoming) else {
+        return;
+    };
+    let Some((target, incoming)) = named(target, incoming) else {
+        return;
+    };
+    let message = format!("Saved {name} as {target}"); // i18n: data
+    machine::save_image(&name, target, cx, move |saved, _| {
+        incoming.respond(match saved {
+            Ok(()) => Response::done(message),
+            Err(error) => refused(&error),
+        });
+    });
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn image_delete(
+    caller: &Caller,
+    name: String,
+    incoming: socket::Incoming,
+    cx: &mut App,
+) {
+    let Some((name, incoming)) = named(name, incoming) else {
+        return;
+    };
+    let handle = match window_for(caller, cx) {
+        Ok(handle) => handle,
+        Err(response) => return incoming.respond(response),
+    };
+    let read = cx.background_executor().spawn(async { image::list() });
+    cx.spawn(async move |cx: &mut gpui::AsyncApp| {
+        let found = read
+            .await
+            .is_ok_and(|images| images.iter().any(|image| image.name == name));
+        if !found {
+            return incoming.respond(refused(&machine::Error::ImageNotFound(name)));
+        }
+        let message = format!("Asked in Settings to delete {name}"); // i18n: data
+        cx.update(|cx| {
+            let source = handle
+                .entity(cx)
+                .map(|view: gpui::Entity<SheprdWindow>| view.downgrade());
+            if let Ok(source) = source {
+                crate::settings_window::open_machines(source, Some(Asked::Image(name)), cx);
             }
         });
         incoming.respond(Response::done(message));

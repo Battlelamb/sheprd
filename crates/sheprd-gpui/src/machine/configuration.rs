@@ -45,6 +45,12 @@ fn mac_address(identity: &[u8]) -> String {
     ) // i18n: data
 }
 
+/// A machine identifier no other machine has, as its file holds it.
+pub(super) fn new_identity() -> Vec<u8> {
+    // SAFETY: a plain value object, made and read on this thread.
+    unsafe { VZMacMachineIdentifier::new().dataRepresentation().to_vec() }
+}
+
 /// A machine's files: the small ones read, the large ones found.
 pub(super) struct Bundle {
     hardware: Vec<u8>,

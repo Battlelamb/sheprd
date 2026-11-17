@@ -1,8 +1,11 @@
+use super::Name;
 use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("{0} is in use: shut it down first")]
+    Busy(Name),
     #[error("A machine takes {min} to {max} CPUs on this Mac")]
     Cpus { min: u16, max: u16 },
     #[error("{}: {source}", path.display())]
@@ -10,12 +13,16 @@ pub enum Error {
         path: PathBuf,
         source: std::io::Error,
     },
+    #[error("{0} already exists")]
+    Exists(Name),
     /// What Virtualization said, as its message: an `NSError` cannot leave
     /// the main thread.
     #[error("Virtualization refused the machine: {0}")]
     Framework(String),
     #[error("This machine was made for hardware this Mac does not have")]
     Hardware,
+    #[error("No image is called {0}")]
+    ImageNotFound(Name),
     #[error("A display is `fit` or a size such as 1920x1200")]
     InvalidDisplay,
     #[error(
@@ -33,6 +40,8 @@ pub enum Error {
         path: PathBuf,
         source: std::io::Error,
     },
+    #[error("{0} is suspended: shut it down or forget its saved state first")]
+    Suspended(Name),
     #[error("This Mac cannot run virtual Macs")]
     Unsupported,
     #[error("{}: {source}", path.display())]

@@ -7,6 +7,7 @@ use gpui::App;
 /// defaults, so they never read, overwrite, or ask about the user's data.
 pub(crate) struct Stores {
     agent_skill: crate::agent_skill::AgentSkill,
+    app_rename: crate::app_rename::AppRename,
     browser_tabs: crate::browser::Store,
     dispatch_history: crate::dispatch::History,
     fan_out_journal: crate::fan_out::Journal,
@@ -47,6 +48,7 @@ impl Stores {
         });
         Ok(Self {
             agent_skill: read(personal, crate::agent_skill::AgentSkill::load),
+            app_rename: read(personal, crate::app_rename::AppRename::load),
             browser_tabs,
             dispatch_history: read(personal, crate::dispatch::History::load),
             fan_out_journal: read(personal, crate::fan_out::Journal::load),
@@ -87,6 +89,7 @@ impl Stores {
         self.worktree_landing.install(cx);
         self.fan_out_journal.install(cx);
         self.agent_skill.install_global(cx);
+        self.app_rename.install(cx);
         self.keychain_grants.install(cx);
         self.taskbar.install(cx);
         #[cfg(windows)]

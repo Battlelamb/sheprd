@@ -1,6 +1,8 @@
 //! What the agent sends: responses to the session's requests, session updates,
 //! and its own requests (permission questions).
 
+use std::fmt::Write as _;
+
 use acp::v1 as wire;
 use serde_json::Value;
 use sheprd_chat_protocol::{
@@ -22,6 +24,9 @@ impl<R: FnMut(Update)> Session<R> {
                     self.response(id, pending, result);
                 }
             }
+            // A resumed session replays history the transcript already
+            // shows.
+            Inbound::Notification { .. } if self.thread.replaying() => {}
             Inbound::Notification { method, params } => {
                 if method == "session/update" {
                     self.session_update(params);
@@ -123,6 +128,7 @@ impl<R: FnMut(Update)> Session<R> {
             }
             load => {
                 if load.is_some() {
+                    self.thread.resume_failed();
                     let notice = self.projector.notice(
                         NoticeLevel::Warning,
                         "This agent cannot continue a session; starting a new one.",
@@ -141,6 +147,27 @@ impl<R: FnMut(Update)> Session<R> {
     fn session_opened(&mut self, loaded: bool, result: Result<Value, wire::Error>) {
         let mut value = match result {
             Ok(value) => value,
+            // An agent switched back to that cannot continue its earlier
+            // session starts a new one, and is handed the conversation.
+            Err(error) if loaded && self.thread.replaying() => {
+                self.thread.resume_failed();
+                let notice = self.projector.notice(
+                    NoticeLevel::Warning,
+                    format!(
+                        "{} could not continue its earlier session ({}); starting a new one.",
+                        self.config.agent, error.message
+                    ),
+                );
+                self.emit(notice);
+                self.acp_session = None;
+                let cwd = self.config.cwd.clone();
+                self.request(
+                    "session/new",
+                    &wire::NewSessionRequest::new(cwd),
+                    Pending::NewSession,
+                );
+                return;
+            }
             Err(error) => {
                 let message = if error.code == wire::Error::auth_required().code {
                     match &self.config.login_hint {
@@ -191,8 +218,40 @@ impl<R: FnMut(Update)> Session<R> {
             self.emit(Change::Options { options });
         }
         self.projector.close();
+        self.hand_over(loaded);
         self.status(Status::Idle);
         self.next_queued();
+    }
+
+    /// The agent that took over opened its session: prepare what it is
+    /// handed with the next prompt, and say so.
+    fn hand_over(&mut self, loaded: bool) {
+        let Some(agent) = self.config.harness else {
+            return;
+        };
+        let Some((joining, handoff)) = self.thread.opened(agent, loaded, &self.transcript.entries)
+        else {
+            return;
+        };
+        let what = match joining {
+            super::thread::Joining::Fresh => "the conversation so far",
+            super::thread::Joining::Resume { .. } => "what happened since it last took part",
+        };
+        let mut text = format!(
+            "{} continues this conversation and gets {what} with your next prompt",
+            self.config.agent
+        );
+        if handoff.omitted > 0 {
+            let _ = write!(
+                text,
+                ": {} entries, {} more left out for length.",
+                handoff.kept, handoff.omitted
+            );
+        } else {
+            text.push('.');
+        }
+        let notice = self.projector.notice(NoticeLevel::Info, text);
+        self.emit(notice);
     }
 
     fn session_update(&mut self, params: Value) {
@@ -363,6 +422,9 @@ impl<R: FnMut(Update)> Session<R> {
             Ok(Err(_)) => (TurnEnd::Other, None, None),
             Err(error) => (TurnEnd::Failed, None, Some(error.message)),
         };
+        // A turn the agent rejected may not have read the handoff it
+        // carried, so the next prompt carries it again.
+        self.thread.turn_ended(error.is_some());
         if let Some(error) = error {
             let notice = self.projector.notice(NoticeLevel::Error, error);
             self.emit(notice);

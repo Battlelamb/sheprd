@@ -134,10 +134,10 @@ struct WorkspacesTab: View {
         }
     }
 
-    /// The computers the tag filter leaves.
+    /// The computers the filter leaves.
     private var machines: [Fleet.Machine] {
-        let tag = ComputerTags.active(model.tagFilter.tag, among: model.computers)
-        return model.fleet.machines.filter { $0.computer.matches(tag: tag) }
+        let shown = model.tagFilter.shown(among: model.computers)
+        return model.fleet.machines.filter { shown.contains($0.computer.device) }
     }
 
     private var openWorkspaces: Int {

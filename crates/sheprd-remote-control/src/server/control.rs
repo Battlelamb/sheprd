@@ -278,6 +278,16 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
                 },
             };
         }
+        Request::RelayTokens => {
+            let Some(relay) = &state.relay else {
+                return Response::Error {
+                    code: ErrorCode::Unsupported,
+                    message: "this computer cannot listen on relays".into(),
+                };
+            };
+            relay.reload_tokens();
+            return Response::Done;
+        }
         Request::Shortcuts { offer } => {
             let Some(offer) = offer else {
                 return Response::Shortcuts(state.shortcuts.current());

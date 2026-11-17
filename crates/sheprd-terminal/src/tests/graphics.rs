@@ -13,11 +13,11 @@ fn png(width: u32, height: u32) -> Vec<u8> {
     png
 }
 
-fn command(control: &str, payload: &[u8]) -> Vec<u8> {
+pub(super) fn command(control: &str, payload: &[u8]) -> Vec<u8> {
     format!("\x1b_G{control};{}\x1b\\", STANDARD.encode(payload)).into_bytes()
 }
 
-fn placements(emulator: &mut Emulator) -> Vec<SurfaceGraphicsPlacement> {
+pub(super) fn placements(emulator: &mut Emulator) -> Vec<SurfaceGraphicsPlacement> {
     emulator.take_graphics().unwrap().placements
 }
 
@@ -36,9 +36,19 @@ fn synchronized_chunked_replacement_never_publishes_the_deleted_frame() {
         emulator.take_graphics().is_none(),
         "do not publish deletion"
     );
+    // Only the screen from before the update may show: the cursor the
+    // update moved stays where it was.
+    let moved = |damage: &Damage| match damage {
+        Damage::Full(frame) => frame.cursor.as_ref().map(|c| (c.x, c.y)) == Some((4, 2)),
+        Damage::Rows { cursor, .. } => cursor.as_ref().map(|c| (c.x, c.y)) == Some((4, 2)),
+    };
+    assert!(
+        !moved(&emulator.take_damage()),
+        "do not publish partial cells"
+    );
     assert!(
         emulator.take_damage().is_empty(),
-        "do not publish partial cells"
+        "nothing more until the update ends"
     );
 
     emulator.feed(&command(&format!("{placed},m=1"), &[9, 8, 7]));

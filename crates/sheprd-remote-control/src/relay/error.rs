@@ -6,6 +6,8 @@ pub enum Error {
     Auth(#[from] crate::auth::Error),
     #[error("the relay could not be reached")]
     Client(#[from] sheprd_relay::client::Error),
+    #[error("a desktop's SSH session failed")]
+    Ssh(#[source] std::io::Error),
     #[error("a stored relay key is not one")]
     StoredKey,
     #[error("the end-to-end tunnel failed")]

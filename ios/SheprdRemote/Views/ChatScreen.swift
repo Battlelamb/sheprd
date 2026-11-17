@@ -91,6 +91,12 @@ struct ChatScreen: View {
             }
         }
         .onAppear {
+            #if DEBUG
+            if key == .sample {
+                store = ChatStore(key: key, sample: .sample)
+                return
+            }
+            #endif
             store = model.fleet.openChat(key)
             model.recentDevice = key.device
             #if DEBUG

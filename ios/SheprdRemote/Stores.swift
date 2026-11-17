@@ -31,6 +31,16 @@ final class ChatStore {
         cursor = cached?.cursor
     }
 
+    #if DEBUG
+    /// A chat no computer sends, current as it is (`-sampleChat YES`).
+    init(key: PaneKey, sample: Transcript) {
+        self.key = key
+        transcript = sample
+        connected = true
+        stale = false
+    }
+    #endif
+
     func apply(_ event: LiveEvent) {
         switch event {
         case let .chatSnapshot(snapshot):

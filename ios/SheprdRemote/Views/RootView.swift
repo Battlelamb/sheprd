@@ -194,7 +194,8 @@ extension RootView {
     /// chat, `-session YES` opens its session sheet and `-draft TEXT`
     /// types into the composer. `-voiceSay TEXT` runs a spoken command as
     /// if it were heard, as the simulator has no microphone, and
-    /// `-voiceThen TEXT` follows it with another.
+    /// `-voiceThen TEXT` follows it with another. `-sampleChat YES` opens a
+    /// made-up chat, for screenshots without anyone's real prompts.
     func followLaunchArguments() async {
         let defaults = UserDefaults.standard
         if let link = defaults.string(forKey: "pairLink"),
@@ -241,6 +242,9 @@ extension RootView {
                 tab = .workspaces
                 workspacesPath.append(WorkspaceKey(device: machine.id, workspace: workspace))
             }
+        }
+        if defaults.bool(forKey: "sampleChat") {
+            model.pendingRoute = .chat(.sample, title: "Weather widget")
         }
         if let pane = defaults.string(forKey: "openTerm") {
             try? await Task.sleep(for: .seconds(2))

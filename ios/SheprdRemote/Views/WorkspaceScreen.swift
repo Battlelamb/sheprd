@@ -68,11 +68,11 @@ struct WorkspaceScreen: View {
             }
             Section {
                 ForEach(chats) { item in
-                    RouteLink(.chat(item.key, title: item.chat.title)) { ChatRowLabel(item: item, showsComputer: false, showsWorkspace: false) }
+                    RouteLink(.chat(item.key, title: item.chat.title)) { ChatRowLabel(item: item, showsComputer: false, showsWorkspace: false, showsPullRequest: false) }
                 }
                 ForEach(terminals.filter { $0.agent != nil }) { item in
                     if let route = item.route {
-                        RouteLink(route) { AgentTerminalRowLabel(item: item, showsComputer: false, showsWorkspace: false) }
+                        RouteLink(route) { AgentTerminalRowLabel(item: item, showsComputer: false, showsWorkspace: false, showsPullRequest: false) }
                     }
                 }
                 ForEach(terminals.filter { $0.agent == nil }) { item in

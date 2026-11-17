@@ -73,3 +73,27 @@ fn a_chat_is_remembered_apart_from_its_agent_in_the_terminal() {
         Landing::Terminal
     );
 }
+
+#[test]
+fn a_chat_that_can_no_longer_start_falls_back_while_the_dialog_is_open() {
+    let mut picker = picker_with(Landing::Chat(Agent::Claude), true);
+    picker.offer(Ok(vec![AgentKind::Claude]));
+    assert_eq!(picker.chosen, Landing::Chat(Agent::Claude));
+    // As when the search for herdr-acp ends without finding it.
+    picker.allow_chats(false);
+    assert_eq!(picker.chosen, Landing::Agent(AgentKind::Claude));
+    assert!(picker.offered_chats().is_empty());
+    picker.allow_chats(true);
+    assert_eq!(picker.offered_chats(), [Landing::Chat(Agent::Claude)]);
+}
+
+#[test]
+fn a_chat_whose_agent_the_host_lacks_falls_back_to_the_shell() {
+    let mut picker = picker_with(Landing::Chat(Agent::Copilot), true);
+    picker.offer(Err(sheprd_client::Error::Disconnected));
+    // Every agent is offered when the host could not be looked at.
+    assert_eq!(picker.chosen, Landing::Chat(Agent::Copilot));
+    picker.installed = Some(vec![AgentKind::Claude]);
+    picker.allow_chats(false);
+    assert_eq!(picker.chosen, Landing::Terminal);
+}

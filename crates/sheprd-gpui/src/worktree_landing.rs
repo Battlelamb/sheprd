@@ -224,17 +224,34 @@ impl Picker {
     /// A remembered chat, where no chat can start, lands in its agent's
     /// terminal instead.
     pub(crate) fn new(host: Host, chosen: Landing, chats: bool) -> Self {
-        let chosen = match chosen {
-            Landing::Chat(_) if !chats => chosen.needs().map_or(Landing::Terminal, Landing::Agent),
-            chosen => chosen,
-        };
-        Self {
+        let mut picker = Self {
             chosen,
             chats,
             installed: None,
             host,
             cancelled: Arc::new(AtomicBool::new(false)),
+        };
+        picker.allow_chats(chats);
+        picker
+    }
+
+    /// Show or hide the chat row, as whether a chat can start changes while
+    /// the dialog is open. A chosen chat that can no longer start lands in
+    /// its agent's terminal, or the shell where the host lacks the agent.
+    pub(crate) fn allow_chats(&mut self, chats: bool) {
+        self.chats = chats;
+        if chats || !matches!(self.chosen, Landing::Chat(_)) {
+            return;
         }
+        self.chosen = self
+            .chosen
+            .needs()
+            .filter(|kind| {
+                self.installed
+                    .as_ref()
+                    .is_none_or(|installed| installed.contains(kind))
+            })
+            .map_or(Landing::Terminal, Landing::Agent);
     }
 
     /// Whether the host is still being looked at.
@@ -425,6 +442,15 @@ impl SheprdWindow {
         })
         .detach();
         Some(picker)
+    }
+
+    /// Brings the open dialog's chat row up to date with whether a chat can
+    /// start, such as once the search for the program ends.
+    pub(crate) fn refresh_landing_chats(&mut self) {
+        let chats = self.may_start_chat();
+        if let Some(picker) = &mut self.menu.landing {
+            picker.allow_chats(chats);
+        }
     }
 
     /// Land the checkout the open dialog's request created. Its answer

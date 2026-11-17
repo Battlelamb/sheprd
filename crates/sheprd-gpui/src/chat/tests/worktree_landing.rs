@@ -99,3 +99,29 @@ fn a_created_worktree_lands_in_a_chat(cx: &mut gpui::TestAppContext) {
         }
     );
 }
+
+/// The search for the program ends while the dialog is open: a chat it
+/// can no longer start is not left chosen.
+#[gpui::test]
+fn the_open_dialog_follows_the_program_search(cx: &mut gpui::TestAppContext) {
+    let peer = MockPeer::advertising(&[]);
+    let (view, cx) = cx.add_window_view(fixture_window);
+    cx.update(|_, cx| {
+        view.update(cx, |view, cx| {
+            super::start::local_window(view, &peer, cx);
+            view.chats.program = crate::chat::Program::Looking;
+            let host = crate::teleport::host_for(&sheprd_client::ConnectTarget::Local).unwrap();
+            let mut picker = Picker::new(host, Landing::Chat(Agent::Codex), view.may_start_chat());
+            picker.offer(Ok(vec![crate::teleport::AgentKind::Codex]));
+            view.menu.landing = Some(picker);
+            view.chats.program = crate::chat::Program::Missing;
+            view.refresh_landing_chats();
+            let picker = view.menu.landing.as_ref().unwrap();
+            assert_eq!(
+                picker.chosen,
+                Landing::Agent(crate::teleport::AgentKind::Codex)
+            );
+            assert!(picker.offered_chats().is_empty());
+        })
+    });
+}

@@ -289,6 +289,7 @@ impl SheprdWindow {
             let found = found.await;
             let _ = this.update(cx, |this, cx| {
                 this.chats.program = found.clone().map_or(Program::Missing, Program::Found);
+                this.refresh_landing_chats();
                 cx.notify();
             });
             // Chats start as soon as the program is found; until its help

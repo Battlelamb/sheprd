@@ -411,6 +411,28 @@ impl ImageCache {
         }
     }
 
+    /// A paint placed `serial` as itself, so the lineage shows it now even
+    /// when it is older than the frame shown before: a scene can go A, B,
+    /// then A again, and the next replacement must fall back to A. Serial
+    /// order only guards decodes that finish late. A frame placed earlier
+    /// in this same paint keeps that order too.
+    fn place(&mut self, lineage: u64, serial: u64) {
+        let previous = self.shown.get(&lineage).copied();
+        let earlier = previous.filter(|&shown| {
+            shown != serial
+                && self
+                    .entries
+                    .get(&shown)
+                    .is_none_or(|entry| entry.placed != self.tick)
+        });
+        let Some(previous) = earlier else {
+            self.advance(lineage, serial);
+            return;
+        };
+        self.show(lineage, serial);
+        self.superseded.push(previous);
+    }
+
     /// A ready image used by a paint advances the fallback. So does a finished
     /// decode of the same lineage, but a lineage no scene places is never read.
     fn for_paint(
@@ -421,7 +443,7 @@ impl ImageCache {
     ) -> Option<Arc<RenderImage>> {
         match lookup {
             Lookup::Ready(texture) => {
-                self.advance(image.lineage(), image.serial());
+                self.place(image.lineage(), image.serial());
                 Some(texture)
             }
             Lookup::Decode | Lookup::Wait => {

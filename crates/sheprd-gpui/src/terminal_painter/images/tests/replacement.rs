@@ -450,3 +450,46 @@ fn waiting_for_capacity_does_not_create_a_pending_lineage() {
     assert_eq!(cache.pending.len(), MAX_DECODES);
     assert_eq!(cache.decoding, MAX_DECODES);
 }
+
+#[test]
+fn an_older_frame_placed_again_is_the_next_fallback() {
+    let (mut cache, mut store) = (ImageCache::default(), ImageStore::default());
+    let now = Instant::now();
+    let key_for = |fingerprint| {
+        let mut key = key(SurfaceGraphicsFormat::Rgba, 1, 1);
+        key.data_fingerprint = fingerprint;
+        key
+    };
+    let a = replacement(&mut store, 1);
+    ready(&mut cache, a.serial(), 1, now);
+    cache.begin(now);
+    assert!(paint(&mut cache, &a, now).is_some());
+    // B replaces A, which the scene keeps.
+    let images = scene_images(&mut store, &[2], &[1], true);
+    let b = images.get(&key_for(2)).unwrap().clone();
+    assert_eq!(a.lineage(), b.lineage());
+    ready(&mut cache, b.serial(), 1, now);
+    cache.begin(now);
+    let b_texture = paint(&mut cache, &b, now).unwrap();
+    // A is placed again, B kept; A's own pixels come back.
+    let images = scene_images(&mut store, &[1], &[2], false);
+    let again = images.get(&key_for(1)).unwrap().clone();
+    let mut a_texture = None;
+    for _ in 0..3 {
+        cache.begin(now);
+        if let Lookup::Ready(_) = cache.lookup(again.serial(), now) {
+            a_texture = paint(&mut cache, &again, now);
+            break;
+        }
+        let _ = paint(&mut cache, &again, now);
+        cache.finish(again.serial(), Ok(Arc::new(texture(RgbaImage::new(1, 1)))));
+    }
+    let a_texture = a_texture.unwrap();
+    assert!(!Arc::ptr_eq(&a_texture, &b_texture));
+    // C replaces A: while C decodes, A shows, never B.
+    let images = scene_images(&mut store, &[3], &[], true);
+    let c = images.get(&key_for(3)).unwrap().clone();
+    cache.begin(now);
+    let shown = paint(&mut cache, &c, now).unwrap();
+    assert!(Arc::ptr_eq(&shown, &a_texture), "C fell back to B");
+}

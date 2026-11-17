@@ -28,6 +28,8 @@ case "$round" in
      ipad="" ;;
   ghsignin) phone="ghsettings-A-0 ghsettings-A-1 ghsettings-A-2 ghsettings-A-3 ghsettings-B-0 ghsettings-B-1 ghsettings-C-0 ghsettings-C-1 ghsettings-D-0 ghsettings-D-1 ghsignin-A-0 ghsignin-A-1 ghsignin-A-2 ghsignin-A-3 ghsignin-A-4 ghsignin-B-0 ghsignin-B-1 ghsignin-B-2 ghsignin-B-3 ghsignin-B-4 ghsignin-C-0 ghsignin-C-1 ghsignin-C-2 ghsignin-C-3 ghsignin-C-4"
      ipad="" ;;
+  agentpr) phone="agentpr-A-0 agentpr-B-0 agentpr-C-0"
+     ipad="" ;;
   *) echo "unknown round $round" >&2; exit 2 ;;
 esac
 

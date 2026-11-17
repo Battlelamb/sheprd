@@ -124,6 +124,16 @@ impl Reporter {
         self.0.sent.load(Ordering::Acquire)
     }
 
+    /// Whether the sizes have been read, so the chips can show them.
+    pub(crate) fn measured(&self) -> bool {
+        self.0.sizes.get().is_some()
+    }
+
+    /// Whether the user cancelled from a chip, even after the copy finished.
+    pub(crate) fn was_cancelled(&self) -> bool {
+        self.0.cancelled.load(Ordering::Acquire)
+    }
+
     pub(crate) fn finish(&self) {
         self.0.done.store(true, Ordering::Release);
     }
@@ -295,6 +305,7 @@ pub(crate) fn cancel_button(theme: &Theme, id: &'static str, index: usize) -> St
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests;
 
 #[cfg(test)]

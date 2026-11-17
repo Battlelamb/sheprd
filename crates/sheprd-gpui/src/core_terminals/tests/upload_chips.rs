@@ -69,3 +69,32 @@ fn a_chips_cancel_stops_the_copy(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(cx.debug_bounds("terminal-uploads").is_none());
 }
+
+#[gpui::test]
+fn chips_redraw_once_the_sizes_are_known(cx: &mut TestAppContext) {
+    let (view, cx, _, _) = shown(cx, &["$"], false);
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    std::io::Write::write_all(&mut file, &[0; 4096]).unwrap();
+    let paths = [file.path().to_owned()];
+    let upload = Upload::new(&paths);
+    let reporter = upload.reporter();
+    let _answer = view.update(cx, |view, cx| {
+        view.set_paste_target(Some(ConnectTarget::Ssh {
+            target: "devbox".into(),
+            session: String::new(),
+        }));
+        let answer = view.pending_upload_for_test(upload);
+        cx.notify();
+        answer
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("terminal-upload-0").is_some());
+    assert!(cx.debug_bounds("terminal-upload-status").is_none());
+
+    // No byte has gone out yet, as while SSH connects: the sizes alone
+    // are news to draw.
+    reporter.measure(&paths);
+    cx.update(|window, cx| view.update(cx, |view, cx| view.poll(window, cx)));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("terminal-upload-status").is_some());
+}

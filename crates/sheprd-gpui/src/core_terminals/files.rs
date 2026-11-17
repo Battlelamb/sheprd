@@ -120,7 +120,7 @@ fn copied_paths(
     cancelled: &AtomicBool,
     progress: &mut impl FnMut(u64, u64),
 ) -> Result<Prepared> {
-    let remote = upload_reporting(target, paths, cancelled, progress)?;
+    let remote = upload(target, paths, cancelled, progress)?;
     let mut prepared = Prepared {
         text: String::new(),
         cleanup: (!matches!(target, ConnectTarget::Wsl { .. }))
@@ -181,19 +181,11 @@ fn image_for(
     copied_paths(target, &[file.path().to_owned()], cancelled, progress)
 }
 
-/// Copy to the exact saved host, or map into the exact WSL distribution.
-/// Blocking; callers must retain the returned paths for cancellation cleanup.
+/// Copy to the exact saved host, or map into the exact WSL distribution,
+/// telling `progress` the bytes sent so far and the batch's total as they
+/// go out; a WSL distribution maps paths and sends nothing. Blocking;
+/// callers must retain the returned paths for cancellation cleanup.
 pub(crate) fn upload(
-    target: &ConnectTarget,
-    paths: &[PathBuf],
-    cancelled: &AtomicBool,
-) -> Result<Vec<String>> {
-    upload_reporting(target, paths, cancelled, |_, _| {})
-}
-
-/// [`upload`], telling `progress` the bytes sent so far and the batch's
-/// total as they go out. A WSL distribution maps paths and sends nothing.
-pub(crate) fn upload_reporting(
     target: &ConnectTarget,
     paths: &[PathBuf],
     cancelled: &AtomicBool,

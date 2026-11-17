@@ -78,7 +78,8 @@ fn cancellation_and_path_validation_happen_before_remote_io() {
         upload(
             &target,
             &vec![PathBuf::from("/file"); 257],
-            &AtomicBool::new(false)
+            &AtomicBool::new(false),
+            |_, _| {},
         )
         .is_err()
     );

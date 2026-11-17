@@ -51,7 +51,7 @@ impl SheprdWindow {
         let worker = progress.clone();
         let upload = cx.background_spawn(async move {
             worker.measure(&paths);
-            let uploaded = crate::core_terminals::files::upload_reporting(
+            let uploaded = crate::core_terminals::files::upload(
                 &upload_host,
                 &paths,
                 worker.cancelled(),
@@ -76,6 +76,13 @@ impl SheprdWindow {
                     }
                     pane.uploading = pane.uploading.saturating_sub(count);
                     match &uploaded {
+                        // The user asked for it, so there is nothing to
+                        // report, and copies that arrived before the click
+                        // are removed rather than attached.
+                        _ if progress.was_cancelled() => {
+                            this.redraw_terminal(cx);
+                            false
+                        }
                         Ok(remote) => {
                             if pane.input() != ChatInput::Composer
                                 || remote.len().saturating_add(pane.attachments.len())
@@ -86,15 +93,6 @@ impl SheprdWindow {
                             let remote = remote.iter().map(PathBuf::from).collect();
                             this.add_chat_files(&pane_id, remote, window, cx);
                             true
-                        }
-                        // The user asked for it; there is nothing to report.
-                        Err(_)
-                            if progress
-                                .cancelled()
-                                .load(std::sync::atomic::Ordering::Acquire) =>
-                        {
-                            this.redraw_terminal(cx);
-                            false
                         }
                         Err(error) => {
                             pane.error =
@@ -140,18 +138,19 @@ impl SheprdWindow {
         self.redraw_terminal(cx);
     }
 
-    /// Redraws the chat while bytes are going out, at most every
-    /// [`REFRESH`] and only when more were sent.
+    /// Redraws the chat while the copy runs, at most every [`REFRESH`] and
+    /// only when the chips changed: the sizes became known, or more bytes
+    /// were sent.
     fn refresh_chat_upload(progress: Reporter, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
-            let mut seen = 0;
+            let mut seen = (false, 0);
             while !progress.finished() {
                 cx.background_executor().timer(REFRESH).await;
-                let sent = progress.sent_bytes();
-                if sent == seen {
+                let now = (progress.measured(), progress.sent_bytes());
+                if now == seen {
                     continue;
                 }
-                seen = sent;
+                seen = now;
                 if this
                     .update(cx, |this, cx| this.redraw_terminal(cx))
                     .is_err()

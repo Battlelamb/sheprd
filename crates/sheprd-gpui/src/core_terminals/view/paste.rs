@@ -21,8 +21,9 @@ pub(super) struct Pending {
     bytes: usize,
     fallback: Option<ClientPaneInputEvent>,
     /// Dropped files being copied to the terminal's host, shown as chips,
-    /// and the share of the batch, in tenths of a percent, last drawn.
-    upload: Option<(Upload, u64)>,
+    /// and the share of the batch, in tenths of a percent, last drawn; none
+    /// until the sizes are known.
+    upload: Option<(Upload, Option<u64>)>,
 }
 
 impl Drop for Pending {
@@ -80,7 +81,7 @@ impl CoreTerminalView {
     ) -> mpsc::SyncSender<crate::Result<Prepared>> {
         let tx = self.pending_paste_for_test();
         if let Some(pending) = self.paste_pending.borrow_mut().as_mut() {
-            pending.upload = Some((upload, 0));
+            pending.upload = Some((upload, None));
         }
         tx
     }
@@ -187,7 +188,7 @@ impl CoreTerminalView {
             held: Vec::new(),
             bytes: 0,
             fallback: None,
-            upload: upload.map(|upload| (upload, 0)),
+            upload: upload.map(|upload| (upload, None)),
         });
         cx.background_executor()
             .spawn(async move {
@@ -216,16 +217,16 @@ impl CoreTerminalView {
         Some(read(upload, self.paste_target.as_ref().and_then(host_name)))
     }
 
-    /// Whether the copy's chips need drawing again: the batch moved a
-    /// tenth of a percent since they were last drawn, so a fast copy does
-    /// not redraw the terminal on every tick.
+    /// Whether the copy's chips need drawing again: the sizes became known,
+    /// or the batch moved a tenth of a percent since they were last drawn,
+    /// so a fast copy does not redraw the terminal on every tick.
     fn upload_moved(&self) -> bool {
         let mut pending = self.paste_pending.borrow_mut();
         let Some((upload, shown)) = pending.as_mut().and_then(|pending| pending.upload.as_mut())
         else {
             return false;
         };
-        let sent = upload.bytes().map_or(0, |(sent, total)| {
+        let sent = upload.bytes().map(|(sent, total)| {
             u64::try_from(u128::from(sent) * 1000 / u128::from(total.max(1))).unwrap_or(u64::MAX)
         });
         if sent == *shown {

@@ -88,3 +88,21 @@ fn a_cancel_reaches_the_worker() {
     assert!(reporter.cancelled().load(Ordering::Acquire));
     assert!(upload.cancelled());
 }
+
+#[test]
+fn the_reporter_says_when_sizes_are_known_and_a_cancel_after_the_copy() {
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    std::io::Write::write_all(&mut file, &[0; 300]).unwrap();
+    let upload = Upload::new(&[file.path().to_owned()]);
+    let reporter = upload.reporter();
+    assert!(!reporter.measured());
+    reporter.measure(&[file.path().to_owned()]);
+    assert!(reporter.measured());
+    assert_eq!(upload.bytes(), Some((0, 300)));
+
+    // The copy may finish before the click lands; the cancel still counts.
+    reporter.sent(300);
+    reporter.finish();
+    upload.cancel();
+    assert!(reporter.was_cancelled());
+}

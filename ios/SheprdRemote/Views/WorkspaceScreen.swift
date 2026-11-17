@@ -32,6 +32,13 @@ struct WorkspaceScreen: View {
     @State private var askedAgent: String?
     /// The pictures in the workspace's chats, its tabs combined.
     @State private var pictures = WorkspacePictureStore()
+    /// What the person is asked to confirm: closing, or deleting the worktree.
+    @State private var confirming: Ending?
+    /// What is on its way to the computer.
+    @State private var ending: Ending?
+    /// Why the last close or deletion failed.
+    @State private var endProblem: (Ending, String)?
+    @Environment(\.dismiss) private var dismiss
 
     private static let terminal = "terminal"
 
@@ -52,7 +59,7 @@ struct WorkspaceScreen: View {
         // The chat answered last knows best what the workspace is about.
         let namer = chats.filter { $0.chat.summary?.connected == true }
             .max { ($0.lastAnswer ?? .distantPast) < ($1.lastAnswer ?? .distantPast) }
-        return List {
+        return endingDialogs(List {
             Section {
                 Summary(workspace: workspace, place: [model.displayName(machine.computer), repository?.label].compactMap { $0 }.joined(separator: " · "))
                 if let pullRequest = workspace.pullRequest, let url = URL(string: pullRequest.url) {
@@ -91,6 +98,7 @@ struct WorkspaceScreen: View {
             }
             WorkspacePictures(pictures: pictures, chats: chats, open: show)
             launcher(workspace, online: isOnline(machine))
+            endings(workspace, online: isOnline(machine))
         }
         // Tabs the computer opens or closes slide in and out, and the
         // count rolls, rather than the rows jumping into place.
@@ -211,6 +219,65 @@ struct WorkspaceScreen: View {
         .alert("The workspace was not renamed", isPresented: Binding(get: { renameProblem != nil }, set: { if !$0 { renameProblem = nil } })) {
         } message: {
             Text(renameProblem ?? "")
+        })
+    }
+
+    /// The confirmation and failure of closing the workspace or deleting its
+    /// worktree; apart from the screen's other modifiers, which together are
+    /// more than the type checker takes in one expression.
+    private func endingDialogs(_ content: some View) -> some View {
+        content
+            .confirmationDialog(confirming?.question ?? "", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
+                                titleVisibility: .visible, presenting: confirming) { action in
+                Button(action.title, role: .destructive) { end(action) }
+            } message: { action in
+                Text(action.consequence)
+            }
+            .alert(endProblem?.0.failure ?? "", isPresented: Binding(get: { endProblem != nil }, set: { if !$0 { endProblem = nil } })) {
+            } message: {
+                Text(endProblem?.1 ?? "")
+            }
+    }
+
+    /// Closing the workspace, and deleting its worktree when it is a linked
+    /// one, as its menu in Sheprd offers.
+    private func endings(_ workspace: Home.Workspace, online: Bool) -> some View {
+        Section {
+            endingButton(.close)
+            if workspace.worktree?.linked == true { endingButton(.removeWorktree) }
+        } footer: {
+            if workspace.worktree?.linked == true {
+                Text("Deleting keeps a checkout with uncommitted changes, and leaves one with an archive script for Sheprd.")
+            }
+        }
+        .disabled(!online || ending != nil)
+    }
+
+    private func endingButton(_ action: Ending) -> some View {
+        Button(role: .destructive) { confirming = action } label: {
+            HStack {
+                Label(action.title, systemImage: action.symbol)
+                Spacer()
+                if ending == action { ProgressView() }
+            }
+            .contentShape(.rect)
+        }
+    }
+
+    private func end(_ action: Ending) {
+        ending = action
+        Task {
+            defer { ending = nil }
+            do {
+                switch action {
+                case .close: try await model.fleet.closeWorkspace(key)
+                case .removeWorktree: try await model.fleet.removeWorktree(key)
+                }
+                // Gone from the computer: its lists drop it on the next home.
+                if opener == nil { dismiss() }
+            } catch {
+                endProblem = (action, error.localizedDescription)
+            }
         }
     }
 
@@ -442,6 +509,49 @@ struct WorkspaceScreen: View {
             } catch {
                 problem = error.localizedDescription
             }
+        }
+    }
+}
+
+/// How a workspace ends from the phone.
+private enum Ending: Hashable, Identifiable {
+    case close
+    case removeWorktree
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .close: "Close Workspace"
+        case .removeWorktree: "Delete Worktree"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .close: "xmark.circle"
+        case .removeWorktree: "trash"
+        }
+    }
+
+    var question: String {
+        switch self {
+        case .close: "Close this workspace?"
+        case .removeWorktree: "Delete this worktree?"
+        }
+    }
+
+    var consequence: String {
+        switch self {
+        case .close: "Its tabs close in Sheprd and their agents and programs stop. Its files stay on the computer."
+        case .removeWorktree: "Its checkout is removed from the computer and the workspace closes, ending its tabs. Its branch stays."
+        }
+    }
+
+    var failure: String {
+        switch self {
+        case .close: "The workspace was not closed"
+        case .removeWorktree: "The worktree was not deleted"
         }
     }
 }

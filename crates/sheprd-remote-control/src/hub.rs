@@ -272,6 +272,15 @@ impl Hub {
         self.layout.borrow().clone()
     }
 
+    /// Where checkout work for a workspace runs: its named Herdr session
+    /// when present, else this hub's primary endpoint.
+    pub(crate) fn workspace_target(&self, session: Option<&str>) -> ConnectTarget {
+        session
+            .and_then(|name| self.sessions.get(name))
+            .map(|session| session.api.target())
+            .unwrap_or_else(|| self.api.target())
+    }
+
     pub(crate) fn watch_layout(&self) -> watch::Receiver<Arc<Layout>> {
         self.layout.clone()
     }

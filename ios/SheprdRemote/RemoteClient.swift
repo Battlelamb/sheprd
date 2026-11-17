@@ -404,6 +404,20 @@ final class RemoteClient: Sendable {
         let _: EmptyAnswer = try await send("POST", "/api/v2/workspaces/\(Self.segment(workspace))/rename", body: Body(label: label), bearer: bearer)
     }
 
+    /// Closes a workspace: its tabs close and their programs end. Its
+    /// checkout stays.
+    func closeWorkspace(_ workspace: String, bearer: String) async throws {
+        let _: EmptyAnswer = try await send("POST", "/api/v2/workspaces/\(Self.segment(workspace))/close", bearer: bearer, timeout: 40)
+    }
+
+    /// Deletes a workspace's linked worktree, then closes it. Never forced:
+    /// the computer refuses a checkout with uncommitted changes, or one
+    /// with an archive script, which Sheprd runs first. Git and Sheprd may
+    /// take a while, so this waits longer than most requests.
+    func removeWorktree(_ workspace: String, bearer: String) async throws {
+        let _: EmptyAnswer = try await send("POST", "/api/v2/workspaces/\(Self.segment(workspace))/remove-worktree", bearer: bearer, timeout: 80)
+    }
+
     /// How to reach this computer through its relays; nil from a daemon
     /// that listens on none.
     func relayInfo(bearer: String) async throws -> API.RelayInfo? {

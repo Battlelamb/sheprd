@@ -218,8 +218,7 @@ private struct AttentionList: View {
         let agents = terminals.filter { $0.agent != nil }
         let shells = terminals.filter { $0.agent == nil }
         List(selection: $selection) {
-            TagFilterBar()
-            AgentScopeBar()
+            TagFilterBar(agents: true)
             ForEach(HomeRow.sections(sort, chats: chats, agents: agents)) { section in
                 Section(section.title) { ForEach(section.items) { row($0) } }
             }

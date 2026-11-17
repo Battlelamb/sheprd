@@ -67,20 +67,28 @@ struct PillFlow: Layout {
 /// The tags in use and the computers, above the Home and Workspaces lists
 /// and the iPad sidebar: a tap shows only the computers with that tag, or
 /// only that computer, and another shows them all again. Computers appear
-/// once two could be chosen.
+/// once two could be chosen. Above an agent list, the repository or
+/// workspace chosen leads the row (`AgentScopePill`).
 struct TagFilterBar: View {
     @Environment(AppModel.self) private var model
+    /// Above an agent list, which the repository filter also narrows.
+    var agents = false
 
     var body: some View {
+        let scope = agents ? model.agentScope : nil
         let computers = model.computers
         let tags = ComputerTags.all(in: computers)
         let active = ComputerTags.active(model.tagFilter.tag, among: computers)
         let device = ComputerTags.active(device: model.tagFilter.device, tag: active, among: computers)
         let hosts = computers.filter { $0.matches(tag: active) }
-        if !tags.isEmpty || hosts.count > 1 {
+        if !tags.isEmpty || hosts.count > 1 || scope != nil {
             Section {
                 ScrollView(.horizontal) {
                     HStack(spacing: 6) {
+                        if let scope {
+                            AgentScopePill(scope: scope)
+                            if !tags.isEmpty || hosts.count > 1 { Divider().frame(height: 16) }
+                        }
                         ForEach(tags, id: \.self) { tag in
                             Button {
                                 withAnimation(.snappy) { choose(tag: tag == active ? nil : tag) }

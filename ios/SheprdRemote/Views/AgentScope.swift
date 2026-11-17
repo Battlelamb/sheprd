@@ -101,28 +101,23 @@ struct AgentScopeMenu: View {
     }
 }
 
-/// The chosen repository or workspace above an agent list, a tap away from
-/// showing them all again.
-struct AgentScopeBar: View {
+/// The chosen repository or workspace, leading the filter bar above an
+/// agent list, a tap away from showing them all again.
+struct AgentScopePill: View {
     @Environment(AppModel.self) private var model
+    var scope: AgentScope
 
     var body: some View {
-        if let scope = model.agentScope {
-            Section {
-                Button {
-                    withAnimation(.snappy) { model.agentScopeStore.scope = nil }
-                } label: {
-                    TagPill(tag: title(scope), selected: true, symbol: "xmark", icon: icon(scope), neutral: true)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Show agents of every repository")
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
-            }
+        Button {
+            withAnimation(.snappy) { model.agentScopeStore.scope = nil }
+        } label: {
+            TagPill(tag: title, selected: true, symbol: "xmark", icon: icon, neutral: true)
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Show agents of every repository")
     }
 
-    private func title(_ scope: AgentScope) -> String {
+    private var title: String {
         switch scope {
         case let .repository(name):
             return name
@@ -133,7 +128,7 @@ struct AgentScopeBar: View {
         }
     }
 
-    private func icon(_ scope: AgentScope) -> String {
+    private var icon: String {
         switch scope {
         case .repository: "folder"
         case .workspace: "square.stack.3d.up"

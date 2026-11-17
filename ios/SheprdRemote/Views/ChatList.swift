@@ -20,8 +20,7 @@ struct ChatList: View {
         )
         List {
             UnpairedCards()
-            TagFilterBar()
-            AgentScopeBar()
+            TagFilterBar(agents: true)
             ForEach(sections) { section in
                 Section(section.title) { ForEach(section.items) { row($0) } }
             }

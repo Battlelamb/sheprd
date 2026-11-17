@@ -135,7 +135,7 @@ fn zap_shoots_down_every_letter_before_it_ends() {
                 matches!(
                     mark,
                     Mark::Words {
-                        words: Words::Letter(_),
+                        words: Words::Letter { .. },
                         ..
                     }
                 )
@@ -158,11 +158,38 @@ fn zap_draws_at_most_its_formation() {
             matches!(
                 mark,
                 Mark::Words {
-                    words: Words::Letter(_),
+                    words: Words::Letter { .. },
                     ..
                 }
             )
         })
         .count();
     assert_eq!(shown, super::scene::MAX_TARGETS);
+}
+
+#[test]
+fn zap_keeps_every_letter_inside_a_narrow_pane() {
+    for width in [120., 200., 300., 480., 1200.] {
+        let pane = Rect { w: width, ..PANE };
+        for step in 0..46 {
+            let mut marks = Vec::new();
+            scene(Screen::Zap, step as f32 * 0.1, pane, None, 24, &mut marks);
+            for mark in marks {
+                if let Mark::Words {
+                    x,
+                    size,
+                    words: Words::Letter { .. },
+                    ..
+                } = mark
+                {
+                    // A letter is about half as wide as it is tall.
+                    assert!(
+                        x - size / 2. >= 0. && x + size / 2. <= width,
+                        "width {width}, t {}: letter at {x}",
+                        step as f32 * 0.1
+                    );
+                }
+            }
+        }
+    }
 }

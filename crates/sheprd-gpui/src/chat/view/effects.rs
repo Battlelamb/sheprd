@@ -313,9 +313,9 @@ fn paint(
                 Words::Message => (playing.text.as_str(), palette.ink),
                 Words::Heart => ("❤️", white()),
                 Words::SmallHeart => ("💗", white()),
-                Words::Letter(index) => (
+                Words::Letter { index, row } => (
                     letter(&playing.text, index),
-                    palette.hue(Hue::Bright(ROW_HUES[index / scene::ROW % ROW_HUES.len()])),
+                    palette.hue(Hue::Bright(ROW_HUES[row % ROW_HUES.len()])),
                 ),
             };
             if text.is_empty() {

@@ -11,7 +11,6 @@ mod zap;
 use std::f32::consts::{PI, TAU};
 #[cfg(test)]
 pub(crate) use zap::MAX_TARGETS;
-pub(crate) use zap::ROW;
 
 /// A box in the pane, from its top left corner.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -45,8 +44,12 @@ pub(crate) enum Words {
     Message,
     Heart,
     SmallHeart,
-    /// One letter of the message's: the `n`th that is not a space.
-    Letter(usize),
+    /// One letter of the message's: the `index`th that is not a space,
+    /// standing in a formation's `row`.
+    Letter {
+        index: usize,
+        row: usize,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

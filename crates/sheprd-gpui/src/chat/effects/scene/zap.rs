@@ -8,10 +8,12 @@ use std::f32::consts::TAU;
 
 /// Letters in the formation; a longer message lends only its first ones.
 pub(crate) const MAX_TARGETS: usize = 24;
-/// Letters in a row of the formation.
-pub(crate) const ROW: usize = 12;
-/// How far apart the letters stand, and their rows.
+/// Letters in a row of the formation, at most: a narrow pane holds fewer.
+const ROW: usize = 12;
+/// How far apart the letters stand at most, and their rows.
 const COLUMN: f32 = 30.;
+/// How far the formation sways to either side at most.
+const SWAY: f32 = 40.;
 const LINE: f32 = 38.;
 /// The letters' size.
 const LETTER: f32 = 22.;
@@ -28,16 +30,48 @@ const SHIP: [&str; 4] = ["..#..", "..#..", ".###.", "#####"];
 /// The side of one of a ship's pixels, and of a burst's.
 const PIXEL: f32 = 4.;
 
-/// Where letter `index` of `count` stands at `t`: its center.
-fn letter_at(index: usize, count: usize, t: f32, w: f32, h: f32) -> (f32, f32) {
-    let per_row = count.clamp(1, ROW);
-    let (row, column) = (index / per_row, index % per_row);
-    let left = w / 2. - (per_row - 1) as f32 * COLUMN / 2.;
-    let sway = (t * 1.6).sin() * 40.;
-    (
-        left + column as f32 * COLUMN + sway,
-        h * 0.12 + row as f32 * LINE + 6. * t + LETTER / 2.,
-    )
+/// How the formation fits a pane: letters per row, how far apart, and
+/// how far it sways, so every letter stays inside however narrow it is.
+#[derive(Clone, Copy, Debug)]
+struct Formation {
+    per_row: usize,
+    column: f32,
+    sway: f32,
+}
+
+impl Formation {
+    fn fit(count: usize, w: f32) -> Self {
+        let sway = (w * 0.06).min(SWAY);
+        // A letter's half on either side stays in the pane too.
+        let room = (w - 2. * sway - LETTER * 2.).max(0.);
+        let per_row = ((room / COLUMN) as usize + 1)
+            .clamp(1, ROW)
+            .min(count.max(1));
+        let column = match per_row {
+            1 => 0.,
+            _ => (room / (per_row - 1) as f32).min(COLUMN),
+        };
+        Self {
+            per_row,
+            column,
+            sway,
+        }
+    }
+
+    /// The row letter `index` stands in.
+    fn row(self, index: usize) -> usize {
+        index / self.per_row
+    }
+
+    /// Where letter `index` stands at `t`: its center.
+    fn at(self, index: usize, t: f32, w: f32, h: f32) -> (f32, f32) {
+        let column = index % self.per_row;
+        let left = w / 2. - (self.per_row - 1) as f32 * self.column / 2.;
+        (
+            left + column as f32 * self.column + (t * 1.6).sin() * self.sway,
+            h * 0.12 + self.row(index) as f32 * LINE + 6. * t + LETTER / 2.,
+        )
+    }
 }
 
 /// Where ship `index`'s cannon is at `t`.
@@ -62,17 +96,21 @@ pub(super) fn zap(t: f32, length: f32, w: f32, h: f32, letters: usize, marks: &m
         hole: None,
     });
     let count = letters.min(MAX_TARGETS);
+    let formation = Formation::fit(count, w);
     for index in 0..count {
         let hit = hit_time(index);
         let shooter = index % SHIPS;
         if t < hit {
-            let (x, y) = letter_at(index, count, t, w, h);
+            let (x, y) = formation.at(index, t, w, h);
             marks.push(Mark::Words {
                 x,
                 y: y - LETTER / 2.,
                 size: LETTER,
                 alpha: fade,
-                words: Words::Letter(index),
+                words: Words::Letter {
+                    index,
+                    row: formation.row(index),
+                },
             });
         }
         let fired = hit - FLIGHT;
@@ -81,7 +119,7 @@ pub(super) fn zap(t: f32, length: f32, w: f32, h: f32, letters: usize, marks: &m
             // when it is hit.
             let k = (t - fired) / FLIGHT;
             let (sx, sy) = ship_at(shooter, fired, w, h);
-            let (lx, ly) = letter_at(index, count, hit, w, h);
+            let (lx, ly) = formation.at(index, hit, w, h);
             let (x, y) = (sx + (lx - sx) * k, sy + (ly - sy) * k);
             marks.push(Mark::Box {
                 rect: Rect {
@@ -97,7 +135,7 @@ pub(super) fn zap(t: f32, length: f32, w: f32, h: f32, letters: usize, marks: &m
         }
         let since = t - hit;
         if (0. ..BURST).contains(&since) {
-            let (x, y) = letter_at(index, count, hit, w, h);
+            let (x, y) = formation.at(index, hit, w, h);
             let flash = 1. - since / 0.15;
             if flash > 0. {
                 marks.push(Mark::Box {

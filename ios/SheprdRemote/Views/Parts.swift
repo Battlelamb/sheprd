@@ -122,6 +122,10 @@ struct ChatRowLabel: View {
     var showsComputer = true
     /// Off on the workspace's own screen, which names it already.
     var showsWorkspace = true
+    /// Off on the workspace's own screen, which lists its pull request.
+    /// When on, its pill says the state to VoiceOver, so the detail line does
+    /// not repeat that it merged.
+    var showsPullRequest = true
 
     var body: some View {
         // The timer and status share the title's line, so the detail
@@ -146,9 +150,14 @@ struct ChatRowLabel: View {
                         LastAnswer(date: date)
                     }
                 }
-                detail.font(.subheadline).foregroundStyle(.secondary).lineLimit(RowLines.clamped(lines))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityValue(showsWorkspace && item.workspace.merged ? "Pull request merged" : "")
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    detail.font(.subheadline).foregroundStyle(.secondary).lineLimit(RowLines.clamped(lines))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityValue(showsWorkspace && !showsPullRequest && item.workspace.merged ? "Pull request merged" : "")
+                    // Its workspace's pull request, colored by state, says at a
+                    // glance whether the agent's work is ready or failing.
+                    if showsPullRequest { WorkspacePullRequestBadge(workspace: item.workspace).fixedSize() }
+                }
             }
         }
     }
@@ -213,7 +222,7 @@ struct ChatRowLabel: View {
 /// Where a row's agent runs, on the line under its title.
 enum RowPlace {
     /// A workspace's name, in the color its pull request's badge has once
-    /// merged, as the lists show no badge: that is how they say it is done.
+    /// merged, so a row whose badge is hidden still says it is done.
     static func name(of workspace: Home.Workspace) -> AttributedString {
         var name = AttributedString(workspace.label)
         if workspace.merged { name.foregroundColor = Home.PullRequest.Tone.merged.color }
@@ -236,6 +245,10 @@ struct AgentTerminalRowLabel: View {
     /// Off on the workspace's own screen, which shows the tab's name
     /// instead.
     var showsWorkspace = true
+    /// Off on the workspace's own screen, which lists its pull request.
+    /// When on, its pill says the state to VoiceOver, so the detail line does
+    /// not repeat that it merged.
+    var showsPullRequest = true
 
     var body: some View {
         HStack(spacing: 12) {
@@ -247,9 +260,13 @@ struct AgentTerminalRowLabel: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if !item.needsYou, !item.working, let date = item.changed { LastAnswer(date: date) }
                 }
-                Text(place)
-                    .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                    .accessibilityValue(showsWorkspace && item.workspace.merged ? "Pull request merged" : "")
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(place)
+                        .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityValue(showsWorkspace && !showsPullRequest && item.workspace.merged ? "Pull request merged" : "")
+                    if showsPullRequest { WorkspacePullRequestBadge(workspace: item.workspace).fixedSize() }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

@@ -63,6 +63,7 @@ fn every_chat_start_variant_has_a_message() {
         StartError::Disabled,
         StartError::NotConnected,
         StartError::NotLocal,
+        StartError::Line,
         StartError::NoWorkspace,
         StartError::ProgramMissing,
         StartError::ProgramUnknown,

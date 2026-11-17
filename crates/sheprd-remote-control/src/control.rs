@@ -11,6 +11,7 @@
 use sheprd_chat_protocol::{read_frame, write_frame};
 pub mod app_update;
 pub mod changes;
+pub mod desktop;
 pub mod edited;
 pub mod github;
 pub mod host_relay;
@@ -533,6 +534,11 @@ pub enum PairingState {
         /// computer's API, so the dialog names it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         app: Option<String>,
+        /// Another computer's Sheprd asking to open terminals here over SSH,
+        /// through this computer's relays: approving adds its key to
+        /// `~/.ssh/authorized_keys`, so the dialog says so.
+        #[serde(default, skip_serializing_if = "is_no")]
+        ssh: bool,
     },
     Approved {
         device: DeviceId,
@@ -573,6 +579,11 @@ fn yes() -> bool {
 #[allow(clippy::trivially_copy_pass_by_ref)]
 fn is_yes(value: &bool) -> bool {
     *value
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_no(value: &bool) -> bool {
+    !*value
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]

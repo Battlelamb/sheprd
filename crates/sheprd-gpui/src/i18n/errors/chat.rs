@@ -134,6 +134,7 @@ impl Localize for StartError {
                 )
             }
             Self::Disabled => fl!("error-chat-start-disabled"),
+            Self::Line => fl!("error-chat-start-line"),
             Self::NotConnected => fl!("error-chat-start-not-connected"),
             Self::NotLocal => fl!("error-chat-start-not-local"),
             Self::NoWorkspace => fl!("error-chat-start-no-workspace"),

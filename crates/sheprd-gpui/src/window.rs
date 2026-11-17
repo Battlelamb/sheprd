@@ -155,6 +155,8 @@ pub(crate) struct SheprdWindow {
     pub(crate) catalog: endpoint::Catalog,
     pub(crate) cell_width: f32,
     /// Native views of the `herdr-acp` chats in this daemon's panes.
+    /// The rail beside an agent chat, shared by every chat in the window.
+    pub(crate) chat_rail_width: crate::panel_resize::PanelWidth,
     pub(crate) chats: crate::chat::Chats,
     /// Snapshots of checkouts taken at agent turns, and the dialog listing them.
     pub(crate) checkpoints: crate::checkpoint::Checkpoints,
@@ -567,6 +569,9 @@ impl SheprdWindow {
         }
         if self.mod_panel_width.chosen().is_none() {
             self.mod_panel_width.restore(chrome.mod_panel_width);
+        }
+        if self.chat_rail_width.chosen().is_none() {
+            self.chat_rail_width.restore(chrome.chat_rail_width);
         }
         if self.review_files_width.chosen().is_none() {
             self.review_files_width.restore(chrome.review_files_width);

@@ -439,6 +439,10 @@ Every rail section folds to one line. While anything runs, **Plan** and
 change totals; once nothing runs they open again. Clicking a section's header
 overrides that for as long as the chat is open.
 
+Drag the rail's left edge to resize it, up to half the chat's width; a
+double-click on the edge goes back to the default. Every chat in the window
+shares the width, and it is kept with the window's other panel widths.
+
 When the rail is hidden or the pane is too narrow for it, click the row above
 the composer for a table instead: what each one is, how long it has run or ran,
 and whether it is running, done, failed, or stopped.

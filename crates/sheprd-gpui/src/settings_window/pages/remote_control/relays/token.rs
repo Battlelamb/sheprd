@@ -239,23 +239,24 @@ impl SettingsWindow {
         let Some((relay, token)) = self.remote.token.linked.clone() else {
             return;
         };
+        let offer = (relay.clone(), token.clone());
         let address = relay.clone();
         self.keep_relay_token(
             relay,
             Some(token),
             move |this, cx| {
                 if this.lists_relay(&address) {
-                    this.remote.token.linked = None;
+                    this.drop_linked(&offer);
                     return;
                 }
                 let mut relays = this.config.remote.relays.clone();
                 relays.push(address.into());
                 // Runs inside the save's own update, so the offer is
                 // dropped just after it.
-                let added = |cx: &mut Context<Self>| {
+                let added = move |cx: &mut Context<Self>| {
                     cx.spawn(async move |this, cx| {
                         let _ = this.update(cx, |this, cx| {
-                            this.remote.token.linked = None;
+                            this.drop_linked(&offer);
                             cx.notify();
                         });
                     })
@@ -265,6 +266,14 @@ impl SettingsWindow {
             },
             cx,
         );
+    }
+
+    /// Drops the linked offer, unless a newer link replaced `offer` since
+    /// Add was clicked: that one stays to add.
+    fn drop_linked(&mut self, offer: &(String, ListenToken)) {
+        if self.remote.token.linked.as_ref() == Some(offer) {
+            self.remote.token.linked = None;
+        }
     }
 
     /// The row asking for a token, if one is asked for.

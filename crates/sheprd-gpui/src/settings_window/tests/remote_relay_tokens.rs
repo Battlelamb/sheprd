@@ -237,3 +237,34 @@ fn a_token_can_be_forgotten_while_the_daemon_is_off(cx: &mut TestAppContext) {
     click(cx, "remote-relay-token-forget");
     assert_eq!(kept(), [("https://relay.example.org".to_owned(), None)]);
 }
+
+#[gpui::test]
+fn a_newer_link_survives_the_earlier_ones_save(cx: &mut TestAppContext) {
+    let (view, cx, edits) = private_page(cx);
+    let offer = |view: &Entity<SettingsWindow>, cx: &mut VisualTestContext, relay: &str| {
+        view.update(cx, |view, cx| {
+            let token = ListenToken::parse(TOKEN).unwrap();
+            view.offer_linked_relay(relay.into(), token, cx);
+        });
+    };
+    offer(&view, cx, "https://first.example.org");
+    view.update(cx, |view, cx| view.add_linked_relay(cx));
+    // A second link arrives before the first relay's save finishes.
+    offer(&view, cx, "https://second.example.org");
+    cx.run_until_parked();
+    assert_eq!(
+        *edits.lock().unwrap(),
+        [Preference::Remote(Edit::Relays(vec![
+            "https://first.example.org".into()
+        ]))]
+    );
+    assert_eq!(
+        view.read_with(cx, |view, _| view
+            .remote
+            .token
+            .linked
+            .clone()
+            .map(|(relay, _)| relay)),
+        Some("https://second.example.org".to_owned())
+    );
+}

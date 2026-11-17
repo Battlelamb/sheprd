@@ -11,7 +11,12 @@ struct HomeTab: View {
     @State private var query = ""
 
     var body: some View {
-        let sections = HomeRow.sections(sort, chats: model.fleet.chatItems, agents: model.fleet.agentTerminals)
+        let listed = model.agentListFilter()
+        let sections = HomeRow.sections(
+            sort,
+            chats: model.fleet.chatItems.filter { listed($0.computer, $0.workspace) },
+            agents: model.fleet.agentTerminals.filter { listed($0.computer, $0.workspace) }
+        )
         Group {
             if query.isEmpty { chats(sections) } else { SearchResults(query: query, workspacesAsRoutes: true) }
         }
@@ -24,6 +29,7 @@ struct HomeTab: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .topBarLeading) { AgentSortMenu(sort: $sort) }
+            ToolbarItem(placement: .topBarLeading) { AgentFilterMenu() }
             if query.isEmpty, sections.count > 1 {
                 ToolbarItem(placement: .topBarTrailing) {
                     let shown = sections.map { ChatList.key($0, sort: sort) }

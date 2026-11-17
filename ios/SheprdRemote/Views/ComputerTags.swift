@@ -59,20 +59,27 @@ struct PillFlow: Layout {
     }
 }
 
-/// The tags in use, as a filter in the Workspaces toolbar: a menu of the
-/// tags, each showing only the computers with it, and all of them again.
-/// While a tag is chosen the button names it in its color, so the list
-/// says why it is shorter without a row of its own above it.
+/// The tags in use and the computers, as a filter in the Workspaces
+/// toolbar: a menu showing only the computers with a tag, or only one
+/// computer, and all of them again. Computers appear once two could be
+/// chosen. While one is chosen the button names it, a tag in its color, so
+/// the list says why it is shorter without a row of its own above it. The
+/// agent lists offer the same choices in their filter menu
+/// (`AgentFilterMenu`).
 struct TagFilterMenu: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let tags = ComputerTags.all(in: model.computers)
-        let active = ComputerTags.active(model.tagFilter.tag, among: model.computers)
+        let computers = model.computers
+        let tags = ComputerTags.all(in: computers)
+        let active = ComputerTags.active(model.tagFilter.tag, among: computers)
+        let device = ComputerTags.active(device: model.tagFilter.device, tag: active, among: computers)
+        let hosts = computers.filter { $0.matches(tag: active) }
+        let chosen = computers.first { $0.device == device }.map { model.displayName($0) }
         Menu {
             Picker("Show", selection: Binding(
                 get: { active },
-                set: { tag in withAnimation(.snappy) { model.tagFilter.tag = tag } }
+                set: { tag in withAnimation(.snappy) { model.tagFilter.choose(tag: tag, among: computers) } }
             )) {
                 Label("All Computers", systemImage: "desktopcomputer").tag(String?.none)
                 ForEach(tags, id: \.self) { tag in
@@ -80,22 +87,32 @@ struct TagFilterMenu: View {
                 }
             }
             .pickerStyle(.inline)
+            if hosts.count > 1 {
+                Section("Computers") {
+                    ForEach(hosts, id: \.device) { computer in
+                        Toggle(model.displayName(computer), isOn: Binding(
+                            get: { computer.device == device },
+                            set: { on in withAnimation(.snappy) { model.tagFilter.device = on ? computer.device : nil } }
+                        ))
+                    }
+                }
+            }
         } label: {
-            if let active {
+            if let name = chosen ?? active {
                 // Plain views, as a toolbar shows a `Label` as its icon alone.
-                let color = RepositoryAvatar.tint(active.lowercased())
+                let color = chosen == nil ? RepositoryAvatar.tint(name.lowercased()) : Color.accentColor
                 HStack(spacing: 5) {
                     Image(systemName: "line.3.horizontal.decrease")
-                    Text(active).lineLimit(1)
+                    Text(name).lineLimit(1)
                 }
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(color)
                 .padding(.horizontal, 4)
             } else {
-                Label("Filter by Tag", systemImage: "line.3.horizontal.decrease")
+                Label("Filter Computers", systemImage: "line.3.horizontal.decrease")
             }
         }
-        .accessibilityLabel(active.map { "Showing \($0) computers" } ?? "Filter by Tag")
+        .accessibilityLabel(chosen.map { "Showing only \($0)" } ?? active.map { "Showing \($0) computers" } ?? "Filter Computers")
     }
 }
 

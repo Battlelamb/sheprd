@@ -201,7 +201,10 @@ pub enum Rejection {
     UnknownFile,
     #[error("that work has already ended or cannot be stopped")]
     UnknownActivity,
-    #[error("the chat's agent can no longer change")]
+    /// The chat cannot switch agents now: its agent is in a turn, or, from
+    /// a program before agents could change mid-conversation, a prompt
+    /// already reached it.
+    #[error("the chat's agent cannot change while it is working")]
     AgentFixed,
     #[error("that agent is not installed where the chat runs")]
     AgentMissing,

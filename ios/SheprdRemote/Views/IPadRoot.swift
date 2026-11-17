@@ -192,6 +192,7 @@ struct IPadRoot: View {
         .toolbar {
             hideSidebar
             ToolbarItem(placement: .topBarLeading) { AgentSortMenu(sort: $sort) }
+            ToolbarItem(placement: .topBarLeading) { AgentFilterMenu() }
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Talk to Sheprd", systemImage: "waveform") { model.talk() }
                     .disabled(model.fleet.machines.isEmpty)
@@ -205,7 +206,8 @@ struct IPadRoot: View {
     }
 }
 
-/// The sidebar: the agents in the order the person chose, then terminals.
+/// The sidebar: the agents in the order the person chose, then terminals,
+/// narrowed as Home on a phone is (`AgentFilterMenu`).
 private struct AttentionList: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
@@ -213,8 +215,9 @@ private struct AttentionList: View {
     @Binding var selection: Route?
 
     var body: some View {
-        let chats = model.fleet.chatItems
-        let terminals = model.fleet.terminalItems
+        let listed = model.agentListFilter()
+        let chats = model.fleet.chatItems.filter { listed($0.computer, $0.workspace) }
+        let terminals = model.fleet.terminalItems.filter { listed($0.computer, $0.workspace) }
         // Tabs with an agent list with the chats; the rest under Terminals.
         let agents = terminals.filter { $0.agent != nil }
         let shells = terminals.filter { $0.agent == nil }
@@ -284,7 +287,10 @@ private struct ChatKeys: View {
     }
 
     private func move(_ step: Int) {
-        let items = model.fleet.chatItems
+        // Only the chats the sidebar lists, so a filter hides them from
+        // the shortcuts too.
+        let listed = model.agentListFilter()
+        let items = model.fleet.chatItems.filter { listed($0.computer, $0.workspace) }
         let ordered = items.filter(\.needsYou) + items.filter(\.working) + items.filter { !$0.needsYou && !$0.working }
         let routes = ordered.map { Route.chat($0.key, title: $0.chat.title) }
         guard !routes.isEmpty else { return }

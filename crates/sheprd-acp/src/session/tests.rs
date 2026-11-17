@@ -28,6 +28,7 @@ mod questions;
 mod resume;
 mod settings;
 mod streaming;
+mod threads;
 
 type Reports = Rc<RefCell<Vec<Activity>>>;
 type Prompts = Rc<RefCell<Vec<String>>>;

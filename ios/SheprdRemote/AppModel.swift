@@ -238,6 +238,7 @@ final class AppModel {
     let nearby = NearbyBrowser()
     let collapsed = CollapsedStore()
     let tagFilter = TagFilterStore()
+    let agentScopeStore = AgentScopeStore()
     let shortcuts = ShortcutStore()
     let termKeys = TermKeyStore()
     let bluetooth = NearbyBluetooth()

@@ -21,6 +21,11 @@ enum Choice {
     Deny {
         message: &'static str,
     },
+    /// Pick `label` for the `AskUserQuestion` question being asked, then
+    /// ask the next one or answer them all.
+    Answer {
+        label: String,
+    },
 }
 
 /// A question waiting for its answer.
@@ -30,9 +35,23 @@ pub(super) struct Ask {
     /// The control request it answers.
     control: String,
     input: Value,
-    /// The one question of an `AskUserQuestion` call, which a client may
-    /// answer in its own words or with several choices.
-    question: Option<Question>,
+    /// Where an `AskUserQuestion` call is: the question on screen and the
+    /// answers so far, keyed by question text as Claude Code expects.
+    questions: Option<(usize, Map<String, Value>)>,
+    /// The question on screen as clients show it, which they may answer in
+    /// their own words or with several choices.
+    shown: Option<Box<Question>>,
+    /// What the permission card says.
+    title: String,
+}
+
+/// What the session's answer leads to.
+#[derive(Debug)]
+pub(super) enum Answered {
+    /// The control response for Claude.
+    Reply(Value),
+    /// The next question of the same call, to ask with these options.
+    Next(Vec<wire::PermissionOption>, Ask),
 }
 
 /// The options to offer for one `can_use_tool` request, and the question
@@ -43,13 +62,22 @@ pub(super) fn ask(control: String, request: &Value) -> (Vec<wire::PermissionOpti
         .and_then(Value::as_str)
         .unwrap_or_default();
     let input = request.get("input").cloned().unwrap_or(Value::Null);
+    if tool == tools::QUESTION
+        && let Some(asked) = question(control.clone(), input.clone(), 0, Map::new())
+    {
+        return asked;
+    }
     let suggestions = request
         .get("permission_suggestions")
         .and_then(Value::as_array)
         .filter(|suggestions| !suggestions.is_empty());
     let options = match tool {
         tools::EXIT_PLAN => exit_plan(),
-        tools::QUESTION => question(&input),
+        tools::QUESTION => vec![reject(
+            "reject",
+            "Answer in the chat",
+            "Ask these questions in your reply instead; the user will answer there.",
+        )],
         _ => {
             let mut options = vec![allow_once("allow", "Yes")];
             if let Some(suggestions) = suggestions {
@@ -69,6 +97,21 @@ pub(super) fn ask(control: String, request: &Value) -> (Vec<wire::PermissionOpti
             options
         }
     };
+    let title = tools::title(tool, &input);
+    offer(options, control, input, None, title)
+}
+
+fn offer(
+    options: Vec<Offered>,
+    control: String,
+    input: Value,
+    questions: Option<(usize, Map<String, Value>)>,
+    title: String,
+) -> (Vec<wire::PermissionOption>, Ask) {
+    let shown = questions
+        .as_ref()
+        .and_then(|(index, _)| shown_question(&input, *index))
+        .map(Box::new);
     let (offered, choices) = options
         .into_iter()
         .map(|(option, choice)| {
@@ -81,45 +124,43 @@ pub(super) fn ask(control: String, request: &Value) -> (Vec<wire::PermissionOpti
         Ask {
             choices,
             control,
-            question: (tool == tools::QUESTION)
-                .then(|| shown_question(&input))
-                .flatten(),
             input,
+            questions,
+            shown,
+            title,
         },
     )
 }
 
 impl Ask {
-    /// The permission request's `_meta`: the question in full, when it is
-    /// one a client may answer itself.
+    /// What the permission card says: the tool call's title, or the
+    /// question being asked.
+    pub(super) fn title(&self) -> &str {
+        &self.title
+    }
+
+    /// The permission request's `_meta`: the question on screen in full,
+    /// when it is one a client may answer itself.
     pub(super) fn meta(&self) -> Option<wire::Meta> {
-        let question = serde_json::to_value(self.question.as_ref()?).ok()?;
+        let question = serde_json::to_value(self.shown.as_ref()?).ok()?;
         let mut meta = wire::Meta::new();
         meta.insert(out::QUESTION.to_owned(), question);
         Some(meta)
     }
 
-    /// Claude's input for answers a client gave to the question, joined
-    /// as Claude Code joins several choices.
+    /// The answer a client gave to the question on screen in its own words,
+    /// several choices joined as Claude Code joins them.
     fn answered(&self, answers: &[&str]) -> Option<Choice> {
-        let question = self.question.as_ref()?;
-        if answers.is_empty() {
-            return None;
-        }
-        let mut input = self.input.as_object().cloned().unwrap_or_else(Map::new);
-        input.insert(
-            "answers".to_owned(),
-            json!({ question.text.as_str(): answers.join(", ") }),
-        );
-        Some(Choice::Allow {
-            input: Some(Value::Object(input)),
-            updates: None,
+        self.shown.as_ref()?;
+        (!answers.is_empty()).then(|| Choice::Answer {
+            label: answers.join(", "),
         })
     }
 
     /// The control response for the session's answer: the chosen option,
-    /// or a refusal that also stops the turn when the question was dropped.
-    pub(super) fn answer(self, result: &Result<Value, wire::Error>) -> Value {
+    /// the next question when one is left, or a refusal that also stops
+    /// the turn when the question was dropped.
+    pub(super) fn answer(self, result: &Result<Value, wire::Error>) -> Answered {
         let chosen = result
             .as_ref()
             .ok()
@@ -154,13 +195,31 @@ impl Ask {
                 decision
             }
             Some(Choice::Deny { message }) => json!({"behavior": "deny", "message": message}),
+            Some(Choice::Answer { label }) => {
+                let (index, mut answers) = self.questions.unwrap_or_default();
+                if let Some(asked) = tools::question_at(&self.input, index) {
+                    answers.insert(asked.to_owned(), Value::String(label));
+                }
+                if let Some(next) = question(
+                    self.control.clone(),
+                    self.input.clone(),
+                    index + 1,
+                    answers.clone(),
+                ) {
+                    let (options, ask) = next;
+                    return Answered::Next(options, ask);
+                }
+                let mut input = self.input.as_object().cloned().unwrap_or_default();
+                input.insert("answers".to_owned(), Value::Object(answers));
+                json!({"behavior": "allow", "updatedInput": input})
+            }
             None => json!({
                 "behavior": "deny",
                 "message": "The user cancelled.",
                 "interrupt": true,
             }),
         };
-        super::control_success(&self.control, decision)
+        Answered::Reply(super::control_success(&self.control, decision))
     }
 }
 
@@ -218,42 +277,37 @@ fn exit_plan() -> Vec<Offered> {
     ]
 }
 
-/// One question's choices become the options; the answer goes back as the
-/// tool's input, as Claude Code expects. Several questions at once are
-/// left to the chat.
-fn question(input: &Value) -> Vec<Offered> {
-    let Some(asked) = tools::question(input) else {
-        return vec![reject(
-            "reject",
-            "Answer in the chat",
-            "Ask these questions in your reply instead; the user will answer there.",
-        )];
-    };
-    let labels: Vec<&str> = input
+/// The question at `index` of an `AskUserQuestion` call, its choices as
+/// the options. Claude Code takes every answer at once, so a call with
+/// several questions asks them one after another and answers when the
+/// last is chosen. A multiple-choice question takes one pick. None once
+/// every question is answered, or when the call has no questions.
+fn question(
+    control: String,
+    input: Value,
+    index: usize,
+    answers: Map<String, Value>,
+) -> Option<(Vec<wire::PermissionOption>, Ask)> {
+    let asked = tools::question_at(&input, index)?.to_owned();
+    let count = tools::question_count(&input);
+    let mut options: Vec<Offered> = input
         .get("questions")
-        .and_then(|questions| questions.get(0))
-        .filter(|question| question.get("multiSelect") != Some(&Value::Bool(true)))
+        .and_then(|questions| questions.get(index))
         .and_then(|question| question.get("options"))
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
         .filter_map(|option| option.get("label").and_then(Value::as_str))
-        .collect();
-    let mut options: Vec<Offered> = labels
-        .iter()
         .enumerate()
-        .map(|(index, label)| {
-            let mut answered = input.as_object().cloned().unwrap_or_else(Map::new);
-            answered.insert("answers".to_owned(), json!({ asked: label }));
+        .map(|(number, label)| {
             (
                 out::manual(wire::PermissionOption::new(
-                    format!("answer-{index}"),
-                    *label,
+                    format!("answer-{number}"),
+                    label,
                     wire::PermissionOptionKind::AllowOnce,
                 )),
-                Choice::Allow {
-                    input: Some(Value::Object(answered)),
-                    updates: None,
+                Choice::Answer {
+                    label: label.to_owned(),
                 },
             )
         })
@@ -264,13 +318,24 @@ fn question(input: &Value) -> Vec<Offered> {
         "The user chose not to answer."
     };
     options.push(reject("reject", "Answer in the chat", refusal));
-    options
+    let title = if count > 1 {
+        format!("{asked} ({}/{count})", index + 1)
+    } else {
+        asked
+    };
+    Some(offer(
+        options,
+        control,
+        input,
+        Some((index, answers)),
+        title,
+    ))
 }
 
-/// The one question of an `AskUserQuestion` call as clients show it.
-fn shown_question(input: &Value) -> Option<Question> {
-    let text = tools::question(input)?;
-    let asked = input.get("questions")?.get(0)?;
+/// Question `index` of an `AskUserQuestion` call as clients show it.
+fn shown_question(input: &Value, index: usize) -> Option<Question> {
+    let text = tools::question_at(input, index)?;
+    let asked = input.get("questions")?.get(index)?;
     let field =
         |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned);
     Some(Question {

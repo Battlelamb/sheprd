@@ -115,9 +115,15 @@ impl<R: FnMut(Update)> Session<R> {
         }
         let prompt = self.projector.prompt(&shown, attachments.len());
         self.emit(prompt);
-        let mut blocks = Vec::with_capacity(prepared.len() + 2);
+        let mut blocks = Vec::with_capacity(prepared.len() + 3);
         if let Some(note) = self.context.before_prompt(origin, text) {
             blocks.push(wire::ContentBlock::Text(wire::TextContent::new(note)));
+        }
+        // The agent that took over hears the conversation next, apart from
+        // what the user wrote.
+        let handoff = self.thread.take_handoff();
+        if let Some(handoff) = &handoff {
+            blocks.push(wire::ContentBlock::Text(wire::TextContent::new(handoff)));
         }
         if !text.trim().is_empty() {
             blocks.push(wire::ContentBlock::Text(wire::TextContent::new(text)));
@@ -131,10 +137,10 @@ impl<R: FnMut(Update)> Session<R> {
         }
         let request = wire::PromptRequest::new(session, blocks);
         if self.request("session/prompt", &request, Pending::Prompt) {
-            // Only a prompt the agent received names the chat, and holds
-            // it to this agent.
+            // Only a prompt the agent received names the chat and starts
+            // the conversation a later agent is handed.
+            self.thread.prompted(&shown, handoff);
             (self.report)(Update::Prompt(shown));
-            self.fix_agent();
             self.turn = Some(self.next_request);
             self.emit(Change::Turn {
                 turn: Some(Turn {
@@ -142,6 +148,8 @@ impl<R: FnMut(Update)> Session<R> {
                 }),
             });
             self.status(Status::Working);
+        } else if let Some(handoff) = handoff {
+            self.thread.restore_handoff(handoff);
         }
     }
 

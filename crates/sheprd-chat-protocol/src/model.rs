@@ -46,8 +46,10 @@ pub struct Transcript {
     pub commands: Vec<SlashCommand>,
     #[serde(default)]
     pub entries: Vec<Entry>,
-    /// The agents this chat may still switch to; `None` once its first
-    /// prompt reached the agent, or for a chat started without `--choose`.
+    /// The agents this chat may switch to while its agent is idle; `None`
+    /// for a chat started without `--choose`. Programs before agents could
+    /// change mid-conversation set it to `None` once a prompt reached the
+    /// agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harnesses: Option<crate::Harnesses>,
     #[serde(default)]

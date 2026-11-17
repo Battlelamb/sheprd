@@ -282,7 +282,10 @@ private struct ChatKeys: View {
     }
 
     private func move(_ step: Int) {
-        let items = model.fleet.chatItems
+        // Only the chats the sidebar lists, so a filter hides them from
+        // the shortcuts too.
+        let listed = model.agentListFilter()
+        let items = model.fleet.chatItems.filter { listed($0.computer, $0.workspace) }
         let ordered = items.filter(\.needsYou) + items.filter(\.working) + items.filter { !$0.needsYou && !$0.working }
         let routes = ordered.map { Route.chat($0.key, title: $0.chat.title) }
         guard !routes.isEmpty else { return }

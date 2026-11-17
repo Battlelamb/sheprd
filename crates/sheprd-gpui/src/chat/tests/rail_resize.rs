@@ -56,9 +56,14 @@ fn dragging_the_rail_edge_resizes_it_and_a_double_click_resets(cx: &mut TestAppC
     let wider = cx.debug_bounds("chat-rail").unwrap();
     assert!((wider.size.width - px(300.)).abs() <= px(4.), "{wider:?}");
     assert_eq!(wider.right(), rail.right(), "the far edge stays put");
+    // Released, the width is handed to the chrome save once; that the file
+    // keeps it is `preferences::tests::chat_rail_width`'s concern.
     view.update(cx, |view, _| {
         assert!(view.chat_rail_width.chosen().is_some());
-        assert!(!view.chat_rail_width.take_unsaved(), "saved on release");
+        assert!(
+            !view.chat_rail_width.take_unsaved(),
+            "handed off on release"
+        );
     });
 
     // Never wider than half the chat, however far it is dragged.

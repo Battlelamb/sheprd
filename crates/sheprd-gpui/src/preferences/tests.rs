@@ -368,5 +368,6 @@ fn endpoint_paths_use_stable_fnv1a() {
 
 mod activity_last_opened;
 mod activity_panel;
+mod chat_rail_width;
 mod device_order;
 mod notes_width;

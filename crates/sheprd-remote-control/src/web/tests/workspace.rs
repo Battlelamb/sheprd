@@ -27,7 +27,16 @@ fn workspace(id: &str, cwd: &str, linked: Option<bool>) -> Workspace {
 /// A computer with a main checkout (`main`), a linked worktree (`linked`)
 /// in `checkout`, and a workspace outside Git (`plain`).
 fn with_checkouts(dir: &std::path::Path, checkout: &std::path::Path) -> Shared {
-    let checkout = checkout.to_string_lossy();
+    let nested = checkout.join("src");
+    std::fs::create_dir_all(&nested).unwrap();
+    let initialized = sheprd_client::new_command("git")
+        .arg("-C")
+        .arg(checkout)
+        .args(["init", "-q"])
+        .status()
+        .unwrap();
+    assert!(initialized.success());
+    let checkout = nested.to_string_lossy();
     let layout = Layout {
         connected: true,
         boot: "b".into(),
@@ -84,7 +93,8 @@ fn an_archive_script_or_an_unreadable_script_file_leaves_deletion_to_sheprd() {
 #[tokio::test]
 async fn closing_needs_a_session_and_a_known_workspace() {
     let dir = tempfile::tempdir().unwrap();
-    let state = with_checkouts(dir.path(), dir.path());
+    let checkout = tempfile::tempdir().unwrap();
+    let state = with_checkouts(dir.path(), checkout.path());
     let close = |workspace: &str| post(&format!("/api/v2/workspaces/{workspace}/close"), json!({}));
     assert_eq!(
         send(&state, close("main")).await.0,

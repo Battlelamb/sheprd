@@ -391,7 +391,7 @@ final class RemoteClient: Sendable {
     /// Closes a workspace: its tabs close and their programs end. Its
     /// checkout stays.
     func closeWorkspace(_ workspace: String, bearer: String) async throws {
-        let _: EmptyAnswer = try await send("POST", "/api/v2/workspaces/\(Self.segment(workspace))/close", bearer: bearer)
+        let _: EmptyAnswer = try await send("POST", "/api/v2/workspaces/\(Self.segment(workspace))/close", bearer: bearer, timeout: 40)
     }
 
     /// Deletes a workspace's linked worktree, then closes it. Never forced:
@@ -399,7 +399,7 @@ final class RemoteClient: Sendable {
     /// with an archive script, which Sheprd runs first. Git and Sheprd may
     /// take a while, so this waits longer than most requests.
     func removeWorktree(_ workspace: String, bearer: String) async throws {
-        let _: EmptyAnswer = try await send("POST", "/api/v2/workspaces/\(Self.segment(workspace))/remove-worktree", bearer: bearer, timeout: 40)
+        let _: EmptyAnswer = try await send("POST", "/api/v2/workspaces/\(Self.segment(workspace))/remove-worktree", bearer: bearer, timeout: 80)
     }
 
     /// How to reach this computer through its relays; nil from a daemon

@@ -14,7 +14,7 @@ use axum::{
     extract::{Path, State},
 };
 use serde_json::{Value, json};
-use std::io::Read as _;
+use std::{io::Read as _, path::Path as FsPath};
 
 /// Where a checkout's worktree scripts live, as Sheprd reads them.
 const SCRIPTS: &str = ".herdr/worktree.toml";
@@ -86,6 +86,16 @@ pub(crate) fn needs_archive(checkout: &std::path::Path) -> bool {
     })
 }
 
+/// Checks the archive script at the Git checkout root of `cwd`. Workspaces
+/// may use a subdirectory as their working directory; failing to resolve the
+/// root must leave deletion to Sheprd rather than skip its cleanup script.
+fn needs_archive_for(cwd: &FsPath) -> bool {
+    let Ok(root) = crate::native::changes::local::root(cwd) else {
+        return true;
+    };
+    needs_archive(&root)
+}
+
 pub(super) async fn close(
     State(state): State<Shared>,
     _device: Device,
@@ -118,7 +128,7 @@ async fn act(state: &Shared, workspace: String, action: Action) -> Result<Json<V
             ));
         }
         let checkout = std::path::PathBuf::from(&cwd);
-        let archive = tokio::task::spawn_blocking(move || needs_archive(&checkout))
+        let archive = tokio::task::spawn_blocking(move || needs_archive_for(&checkout))
             .await
             .unwrap_or(true);
         if archive {

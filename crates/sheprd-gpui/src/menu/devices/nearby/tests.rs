@@ -9,7 +9,7 @@ const STUDIO: &str = "1A2B3C4D-5E6F-7081-92A3-B4C5D6E7F809";
 /// The page as it opens, scanning with no helper behind it.
 fn open(view: &mut SheprdWindow) {
     view.menu.nearby_setup = Some(NearbySetup {
-        attempt: 0,
+        attempt: super::next_attempt(),
         found: Vec::new(),
         error: None,
         pairing: None,
@@ -194,4 +194,13 @@ fn each_pick_and_cancel_starts_a_new_attempt(cx: &mut TestAppContext) {
         assert!(picked < cancelled && cancelled < setup(view).attempt);
         assert_eq!(setup(view).step, Step::Connecting(studio()));
     });
+}
+
+#[test]
+fn a_reopened_page_never_reuses_an_attempt() {
+    // A page closed with a save under way and opened again draws a new
+    // number, so the old save's answer finds no match.
+    let closed = super::next_attempt();
+    let reopened = super::next_attempt();
+    assert_ne!(closed, reopened);
 }

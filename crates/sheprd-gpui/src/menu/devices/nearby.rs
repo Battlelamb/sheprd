@@ -30,8 +30,9 @@ const MAX_FOUND: usize = 16;
 const SESSION: &str = "default";
 
 pub(in crate::menu) struct NearbySetup {
-    /// Counts attempts: each pick, and each cancel, starts a new one, so a
-    /// result arriving late for an earlier attempt is dropped.
+    /// The attempt under way ([`next_attempt`]): each opening, pick, and
+    /// cancel starts a new one, so a result arriving late for an earlier
+    /// attempt, even from a page since closed and reopened, is dropped.
     attempt: u64,
     /// Computers showing Pair device, in the order they were found.
     found: Vec<Found>,
@@ -73,6 +74,13 @@ enum Step {
     Saving(String),
 }
 
+/// A number no attempt in this process had before: windows and reopened
+/// pages share it.
+fn next_attempt() -> u64 {
+    static ATTEMPTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// What became of saving a paired machine.
 enum Outcome {
     Saved,
@@ -111,7 +119,7 @@ impl SheprdWindow {
             }
         });
         self.menu.nearby_setup = Some(NearbySetup {
-            attempt: 0,
+            attempt: next_attempt(),
             found: Vec::new(),
             error: None,
             pairing: None,
@@ -304,7 +312,7 @@ impl SheprdWindow {
             return;
         };
         setup.error = None;
-        setup.attempt += 1;
+        setup.attempt = next_attempt();
         Station::send(cx, nearby::connect(&found.peripheral));
         setup.step = Step::Connecting(found);
         cx.notify();
@@ -322,7 +330,7 @@ impl SheprdWindow {
         // way still finishes, as the other computer already allowed it, but
         // its answer no longer moves this page.
         setup.pairing = None;
-        setup.attempt += 1;
+        setup.attempt = next_attempt();
         setup.step = Step::Looking;
         cx.notify();
     }

@@ -12,6 +12,7 @@ pub mod handoff;
 mod harnesses;
 mod media;
 mod model;
+mod origin;
 pub mod restore;
 mod wire;
 
@@ -26,6 +27,7 @@ pub use frame::{MAX_FRAME_SIZE, encode_frame, read_frame, write_frame};
 pub use harnesses::Harnesses;
 pub use media::{Author, Image, ImageType, MAX_IMAGE_DATA};
 pub use model::*;
+pub use origin::{Device, Origin, Via};
 pub use wire::*;
 
 #[cfg(test)]

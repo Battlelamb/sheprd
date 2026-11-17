@@ -65,6 +65,7 @@ fn sent_prompt(
         Command::Prompt {
             text: text.to_owned(),
             attachments: Vec::new(),
+            origin: None,
         },
     );
     let request = requests(outbox)

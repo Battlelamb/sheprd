@@ -32,7 +32,9 @@ A prompt may carry files as `Attachment`s, by absolute path on the machine
 the program runs on, at most `MAX_ATTACHMENTS`. The program reads them when
 the prompt goes out: a picture as an image when the agent takes images, a
 text file as embedded text when it takes embedded context, and anything else
-as a link to the file.
+as a link to the file. Its optional `Origin` says where it was typed (the
+device and the connection), which the program tells the agent so it answers
+in a form the person can see there; a program that predates it ignores it.
 
 Sub-agents and background shells the agent started are `Activity` records
 in `activities`, keyed by the tool call that started them: a label (the

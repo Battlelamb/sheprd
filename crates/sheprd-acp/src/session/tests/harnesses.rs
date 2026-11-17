@@ -199,6 +199,7 @@ fn prompts_waiting_for_the_old_agent_go_to_the_new_one() {
     harness.command(
         1,
         Command::Prompt {
+            origin: None,
             text: "fix the build".to_owned(),
             attachments: Vec::new(),
         },
@@ -268,4 +269,35 @@ fn a_client_that_reconnects_after_a_switch_gets_a_snapshot() {
         matches!(messages.get(1), Some(ServerMessage::Snapshot { transcript, .. })
         if transcript.agent == "Codex")
     );
+}
+
+#[test]
+fn the_note_names_the_agent_switched_to() {
+    let mut harness = harness_with(Config {
+        choices: Some(vec![Agent::Claude, Agent::Codex]),
+        prompts: crate::context::Prompts::with_instructions("You are {{ agent }}."),
+        ..config()
+    });
+    harness.session.start();
+    harness.command(
+        1,
+        Command::Prompt {
+            origin: None,
+            text: "hi".to_owned(),
+            attachments: Vec::new(),
+        },
+    );
+    set_agent(&mut harness, Agent::Codex);
+    let agent = launch(&mut harness);
+    let initialize = requests(&agent)[0]["id"].as_i64().unwrap();
+    respond_second(
+        &mut harness,
+        initialize,
+        json!({"protocolVersion": 1, "agentCapabilities": {}}),
+    );
+    let new = requests(&agent)[0]["id"].as_i64().unwrap();
+    respond_second(&mut harness, new, json!({"sessionId": "c1"}));
+    let sent = requests(&agent);
+    let note = sent[0]["params"]["prompt"][0]["text"].as_str().unwrap();
+    assert!(note.contains("You are Codex."), "{note}");
 }

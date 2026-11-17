@@ -113,7 +113,9 @@ fn a_whole_turn_reaches_the_transcript_through_the_bridge() {
         load: None,
         login_hint: None,
         pane: None,
+        prompts: Default::default(),
         require_load: false,
+        sheprd: None,
     };
     let mut session = Session::new(config, outbox, |_| {});
     session.start();
@@ -142,6 +144,7 @@ fn a_whole_turn_reaches_the_transcript_through_the_bridge() {
 
     session.handle(Input::Command {
         command: Command::Prompt {
+            origin: None,
             text: "Say hello".to_owned(),
             attachments: Vec::new(),
         },

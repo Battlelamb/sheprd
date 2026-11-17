@@ -96,6 +96,7 @@ fn picking_the_running_agent_sends_nothing(cx: &mut TestAppContext) {
     assert_eq!(
         next_command(&mut stream),
         Command::Prompt {
+            origin: Some(TYPED_HERE),
             text: "hello".into(),
             attachments: Vec::new(),
         }

@@ -21,6 +21,7 @@ mod history;
 mod linked_pictures;
 mod media;
 mod opencode;
+mod origin;
 mod permissions;
 mod prompt_titles;
 mod resume;
@@ -57,7 +58,9 @@ fn config() -> Config {
         load: None,
         login_hint: Some("run `claude` and use /login".to_owned()),
         pane: Some("p_1".to_owned()),
+        prompts: Default::default(),
         require_load: false,
+        sheprd: None,
     }
 }
 
@@ -218,6 +221,7 @@ fn prompt(harness: &mut Harness, conn: u64, text: &str) -> i64 {
     harness.command(
         conn,
         Command::Prompt {
+            origin: None,
             text: text.to_owned(),
             attachments: Vec::new(),
         },

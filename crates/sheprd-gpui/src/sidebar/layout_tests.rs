@@ -49,6 +49,8 @@ mod device_tag_groups;
 #[cfg(test)]
 mod devices_layout;
 #[cfg(test)]
+mod fold_all_hosts;
+#[cfg(test)]
 mod gpu_line;
 #[cfg(test)]
 mod host_agents;
@@ -776,6 +778,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         painter: Default::default(),
         backdrop: Default::default(),
         device_themes: Default::default(),
+        recent_panes: Default::default(),
         regions: Vec::new(),
         mark_layer,
         marked: String::new(),

@@ -1,5 +1,6 @@
 import Foundation
 import SheprdRemoteCore
+import SheprdRelay
 import Observation
 import os
 import WidgetKit
@@ -618,6 +619,22 @@ final class Fleet {
         let workspace = key.workspace
         try await call(key.device) { client, token in
             try await client.renameWorkspace(workspace, to: label, bearer: token)
+        }
+    }
+
+    /// Closes a workspace; the next `home` drops it from every list.
+    func closeWorkspace(_ key: WorkspaceKey) async throws {
+        let workspace = key.workspace
+        try await call(key.device) { client, token in
+            try await client.closeWorkspace(workspace, bearer: token)
+        }
+    }
+
+    /// Deletes a workspace's linked worktree and closes the workspace.
+    func removeWorktree(_ key: WorkspaceKey) async throws {
+        let workspace = key.workspace
+        try await call(key.device) { client, token in
+            try await client.removeWorktree(workspace, bearer: token)
         }
     }
 

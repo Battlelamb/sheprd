@@ -349,11 +349,15 @@ relays-sign:
 test-relay-deploy:
     PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_relay_deploy.py
 
+# The push relay's DigitalOcean user data and secrets scripts.
+test-push-relay-deploy:
+    PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_push_relay_deploy.py
+
 # The relay list editor behind `just relays-*`.
 test-relays:
     PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_relays.py
 
-ci: format-check check-file-size check-sorted check-i18n check-artwork lint test test-mockup-wait test-pr-closure test-relay-deploy test-relays
+ci: format-check check-file-size check-sorted check-i18n check-artwork lint test test-mockup-wait test-pr-closure test-relay-deploy test-push-relay-deploy test-relays
 
 # Tools are listed in scripts/setup-ci.sh; Docker for lint-linux is only checked.
 # Install the tools local CI-equivalent runs need, on macOS or Ubuntu.

@@ -12,7 +12,12 @@ struct ChatList: View {
     @State private var problem: String?
 
     var body: some View {
-        let sections = HomeRow.sections(sort, chats: model.fleet.chatItems, agents: model.fleet.agentTerminals)
+        let listed = model.agentListFilter()
+        let sections = HomeRow.sections(
+            sort,
+            chats: model.fleet.chatItems.filter { listed($0.computer, $0.workspace) },
+            agents: model.fleet.agentTerminals.filter { listed($0.computer, $0.workspace) }
+        )
         List {
             UnpairedCards()
             ForEach(sections) { section in

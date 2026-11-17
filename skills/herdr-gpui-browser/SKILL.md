@@ -37,12 +37,25 @@ fenced code and Mermaid. Inline `$...$` / `\(...\)` and display `$$...$$` /
 `\[...\]` equations are typeset automatically. No browser page is needed for
 those messages. Terminal-cell views still display source text.
 
-In the native chat, `:big[words]` (or `small`, `huge`, `giant`) sets words
-larger within a line; a block between `:::slam` and `:::` (or `loud`, `gentle`,
-`ink`, which hides it until hovered) plays an effect; and a line `::confetti`
-(or `balloons`, `celebration`, `echo`, `fireworks`, `lasers`, `love`,
-`spotlight`) fills the chat pane for a moment. Keep them for moments that
-matter.
+In the native chat you can also set words larger or smaller within a line, so
+the person sees at a glance what happened without reading the whole reply:
+
+```markdown
+Tests :big[pass]: :huge[214 of 214]. :small[CI took 4 min.]
+```
+
+- Put the one thing that matters most in `:big[…]` or `:huge[…]`: the
+  outcome, a verdict, a key number, or a warning. `:giant[…]` is for a single
+  word or number. `:small[…]` quiets an aside, such as timings or caveats.
+- Once or twice per reply at most. When everything is large, nothing stands out.
+- For a real milestone, play an effect. A block between `:::slam` and `:::`
+  lands a key finding, `:::loud` a warning, `:::gentle` a soft note, and
+  `:::ink` hides a spoiler or secret until hovered. A line `::confetti` (or
+  `balloons`, `celebration`, `fireworks`, `love`, `lasers`, `echo`,
+  `spotlight`) fills the chat pane for a moment, when long work finally
+  succeeds. Never use them in routine replies.
+- Terminal views and the phone show the directives as plain text, so the reply
+  still reads well there.
 
 For a small interactive selection, put a JSON document in a closed `herdr-ui`
 fence. The catalog supports native controls on Linux as well as macOS/Windows:

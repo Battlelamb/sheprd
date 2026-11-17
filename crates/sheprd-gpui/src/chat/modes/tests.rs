@@ -121,6 +121,21 @@ fn a_chat_under_way_or_only_watched_is_not_fresh() {
         text: "hi".to_owned(),
     });
     assert!(!fresh(&queued));
+    // Trimmed past its last prompt, an old conversation keeps only replies.
+    let mut trimmed = claude("default");
+    trimmed.truncated = true;
+    trimmed.entries.push(Entry {
+        id: EntryId(9),
+        kind: EntryKind::Agent {
+            text: "done".to_owned(),
+        },
+    });
+    assert!(!fresh(&trimmed));
+    let mut remembered = Remembered::default();
+    remembered.set("Claude", "bypassPermissions");
+    let mut settled = None;
+    assert_eq!(settle(&trimmed, &mut settled, Some(&remembered)), None);
+    assert_eq!(settled.as_deref(), Some("Claude"));
     let mut watched = claude("default");
     watched.read_only = true;
     assert!(!fresh(&watched));

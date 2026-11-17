@@ -168,7 +168,9 @@ fn lists_modes(transcript: &Transcript) -> bool {
 /// Whether nothing was said in the chat yet: a mode chosen for new chats
 /// must not change one already under way, or one only watched.
 fn fresh(transcript: &Transcript) -> bool {
+    // A truncated transcript had earlier entries, perhaps every prompt.
     !transcript.read_only
+        && !transcript.truncated
         && transcript.turn.is_none()
         && transcript.queued.is_empty()
         && !transcript

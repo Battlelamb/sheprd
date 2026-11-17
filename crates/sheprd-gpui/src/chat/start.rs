@@ -122,6 +122,8 @@ pub enum Error {
     AgentMissing(Agent),
     #[error("ACP chats are off in Settings")]
     Disabled,
+    #[error("the chat's command cannot be typed into a shell")]
+    Line,
     #[error("Sheprd is not connected")]
     NotConnected,
     #[error("this pane has no supported chat route")]
@@ -191,6 +193,31 @@ pub(crate) fn command_line(agent: Agent, choice: AgentChoice) -> String {
     } else {
         format!(" sh -c 'exec \"${PROGRAM_ENV}\" {choose}{agent}'")
     }
+}
+
+/// [`command_line`] for a shell Herdr opened without the program in its
+/// environment, such as a new worktree's root pane: its path and the
+/// `[chat.env]` variables ride in the line. Read by `sh`, so not for
+/// Windows panes; `None` when a word holds a quote or control character.
+pub(crate) fn shell_line(
+    agent: Agent,
+    program: &Path,
+    choice: AgentChoice,
+    env: &std::collections::BTreeMap<String, String>,
+) -> Option<String> {
+    let assignments: Vec<String> = env
+        .iter()
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect();
+    let mut words = Vec::with_capacity(assignments.len() + 4);
+    if !assignments.is_empty() {
+        words.push("env");
+        words.extend(assignments.iter().map(String::as_str));
+    }
+    words.push(program.to_str()?);
+    words.extend(choice.option());
+    words.push(agent.name());
+    sheprd_client::quoted_line(&words)
 }
 
 /// The line typed into a new tab on an SSH host: the first `herdr-acp`
@@ -290,6 +317,19 @@ impl SheprdWindow {
         }
     }
 
+    /// [`Self::can_start_chat`], counting a local program still looked for,
+    /// whose start then says so, rather than offering no chat meanwhile.
+    pub(crate) fn may_start_chat(&self) -> bool {
+        if !self.config.features.acp_chats {
+            return false;
+        }
+        match self.chat_route() {
+            Some(super::Route::Local) => self.chats.program != Program::Missing,
+            Some(super::Route::Ssh(_) | super::Route::Remote(_)) => true,
+            None => false,
+        }
+    }
+
     pub(super) fn chat_route(&self) -> Option<super::Route> {
         self.endpoints
             .get(self.selected_endpoint)
@@ -302,6 +342,27 @@ impl SheprdWindow {
                         .flatten()
                 })
             })
+    }
+
+    /// The line that starts a chat with `agent` in a shell Herdr already
+    /// opened on the selected host, such as a new worktree's root pane.
+    pub(crate) fn chat_line(&self, agent: Agent) -> Result<String, Error> {
+        if !self.config.features.acp_chats {
+            return Err(Error::Disabled);
+        }
+        if self.chat_agent_missing(agent) {
+            return Err(Error::AgentMissing(agent));
+        }
+        match self.chat_route().ok_or(Error::NotLocal)? {
+            super::Route::Ssh(_) | super::Route::Remote(_) => Ok(remote_command_line(agent)),
+            super::Route::Local => shell_line(
+                agent,
+                self.chats.program.found()?,
+                self.chats.program_choice,
+                &self.config.chat.env,
+            )
+            .ok_or(Error::Line),
+        }
     }
 
     pub(crate) fn chat_starting(&self) -> bool {

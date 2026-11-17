@@ -94,6 +94,39 @@ impl SheprdWindow {
         );
     }
 
+    /// [`Self::new_kept_workspace`] whose first tab is a chat with `agent`
+    /// in `cwd`. A chat that cannot start leaves the shell in its place and
+    /// answers why.
+    pub(crate) fn new_kept_chat_workspace(
+        &mut self,
+        agent: sheprd_chat_protocol::Agent,
+        label: Option<&str>,
+        cwd: PathBuf,
+        cx: &mut Context<Self>,
+    ) -> Result<(), crate::chat::StartError> {
+        let Some(id) = self.keep_new_workspace(label, Some(&cwd), cx) else {
+            return Ok(());
+        };
+        let scope = scope_of(self);
+        let started =
+            self.start_core_chat_tab(agent, scope.clone(), id.clone(), Some(cwd.clone()), cx);
+        if started.is_err() {
+            let spawn = Spawn {
+                cwd: Some(cwd),
+                ..Spawn::default()
+            };
+            self.start_core_program(
+                Purpose::Tab {
+                    scope,
+                    workspace: id,
+                },
+                spawn,
+                cx,
+            );
+        }
+        started
+    }
+
     /// Keeps a new workspace for a checkout at `cwd` whose first tab shows
     /// `location`, such as a herdr-core terminal a worker already started,
     /// and brings it to the front. Answers its ID, or `None` when it could

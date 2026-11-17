@@ -33,7 +33,7 @@ const QUEUE: usize = 16;
 pub(crate) const STOP: &str = r#"{"type":"stop"}"#;
 
 /// One line from the helper.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Event {
     Radio(Radio),
     /// A whole message a phone wrote, and which phone to answer.

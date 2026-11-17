@@ -1043,7 +1043,8 @@ Sheprd A ─ssh─▶ sheprd-remote-control relay-connect ──QUIC──▶ re
 6. A polls on the same connection. Once allowed, it learns the user to
    log in as and B's SSH host keys, keeps the route, relays, and identity
    in `desktop/hosts/ID.json`, and keeps the host keys in
-   `desktop/known_hosts` under `r-ID.sheprd.invalid`. ID is the route's
+   `desktop/known_hosts.d/r-ID.sheprd.invalid`, a file per machine so two
+   pairings finishing at once never write the same one. ID is the route's
    first eight bytes in hex.
 7. Sheprd checks Herdr there through the relay and saves the device as
    `USER@r-ID.sheprd.invalid` without Herdr's CLI, because `machine add`
@@ -1052,7 +1053,8 @@ Sheprd A ─ssh─▶ sheprd-remote-control relay-connect ──QUIC──▶ re
 From then on, every `ssh` that `sheprd-client` starts for a
 `*.sheprd.invalid` target (`relay_host`) gets
 `ProxyCommand=sheprd-remote-control relay-connect --state-dir … %h`,
-that `IdentityFile` with `IdentitiesOnly`, that known hosts file, and
+that `IdentityFile` with `IdentitiesOnly`, the machine's own known hosts
+file (`UserKnownHostsFile=…/known_hosts.d/%h`, OpenSSH 8.4 or later), and
 `StrictHostKeyChecking=yes`, ahead of the user's own options.
 `.invalid` never resolves, so nothing else can reach it. `relay-connect`
 dials B's route with A's dial key on the first relay that lets it

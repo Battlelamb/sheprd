@@ -1,11 +1,11 @@
 //! What this computer keeps about each machine it added: where it listens
-//! (`hosts/ID.json`), and its SSH host keys (`known_hosts`, under the
-//! machine's `r-ID.sheprd.invalid` name, which `ssh` checks strictly).
+//! (`hosts/ID.json`), and its SSH host keys (`known_hosts.d/HOST`, under
+//! the machine's `r-ID.sheprd.invalid` name, which `ssh` checks strictly).
 
 use super::{Error, Result, files};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
-use sheprd_client::relay_host::{self, KNOWN_HOSTS, directory, host_name};
+use sheprd_client::relay_host::{self, directory, host_name};
 use sheprd_relay::RouteId;
 use std::path::{Path, PathBuf};
 
@@ -62,11 +62,9 @@ impl Record {
         }
         let json = serde_json::to_vec_pretty(self).map_err(|_| Error::RecordFormat)?;
         files::write_private(&path(state_dir, &id), &json)?;
-        let known = directory(state_dir).join(KNOWN_HOSTS);
-        let text = files::read_bounded(&known, MAX_FILE)?.unwrap_or_default();
-        let text = String::from_utf8(text).map_err(|_| Error::RecordFormat)?;
-        let updated = known_hosts(&text, &host_name(&id), host_keys);
-        files::write_private(&known, updated.as_bytes())?;
+        let host = host_name(&id);
+        let lines = known_hosts(&host, host_keys);
+        files::write_private(&relay_host::known_hosts(state_dir, &host), lines.as_bytes())?;
         Ok(id)
     }
 
@@ -85,15 +83,7 @@ fn path(state_dir: &Path, id: &str) -> PathBuf {
         .join(format!("{id}.json"))
 }
 
-/// `text` with `host`'s lines replaced by one per key in `keys`.
-pub(crate) fn known_hosts(text: &str, host: &str, keys: &[String]) -> String {
-    let mut lines: Vec<String> = text
-        .lines()
-        .filter(|line| line.split_ascii_whitespace().next() != Some(host))
-        .map(str::to_owned)
-        .collect();
-    lines.extend(keys.iter().map(|key| format!("{host} {key}")));
-    let mut text = lines.join("\n");
-    text.push('\n');
-    text
+/// A known hosts file for `host` with one line per key in `keys`.
+fn known_hosts(host: &str, keys: &[String]) -> String {
+    keys.iter().map(|key| format!("{host} {key}\n")).collect()
 }

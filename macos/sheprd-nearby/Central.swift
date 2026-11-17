@@ -23,6 +23,14 @@ final class Central: NSObject {
     private var incoming: [UUID: Reassembly] = [:]
     /// Chunks waiting for the write before them to be acknowledged.
     private var pending: [UUID: [Data]] = [:]
+    /// Each computer's `info`, read again while scanning: a computer seen
+    /// before its Pair device opened names itself only then, and one whose
+    /// dialog closed stops naming itself.
+    private var infos: [UUID: CBCharacteristic] = [:]
+    /// The computers Sheprd was told about with `found`, which it is told
+    /// about again when they leave.
+    private var listed: Set<UUID> = []
+    private var refresh: Timer?
 
     private static let service = CBUUID(string: IDs.service)
     private static let info = CBUUID(string: IDs.info)
@@ -32,16 +40,51 @@ final class Central: NSObject {
     /// leaves alone the one being paired with.
     func scan(_ on: Bool) {
         scanning = on
-        if manager == nil {
+        if let manager {
+            // A page opened again learns the radio at once, not at its next
+            // change; a new manager reports it on its own.
+            if on { reportState(manager.state) }
+        } else {
             manager = CBCentralManager(delegate: self, queue: nil)
         }
         apply()
-        if !on {
+        refresh?.invalidate()
+        refresh = nil
+        if on {
+            refresh = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
+                MainActor.assumeIsolated { self.readInfos() }
+            }
+        } else {
             for (id, peripheral) in peripherals where !wanted.contains(id) {
                 manager?.cancelPeripheralConnection(peripheral)
-                peripherals[id] = nil
+                left(id)
+                forget(id)
             }
         }
+    }
+
+    /// Reads `info` again from every computer found and not being paired.
+    private func readInfos() {
+        for (id, info) in infos where !wanted.contains(id) {
+            guard let peripheral = peripherals[id], peripheral.state == .connected else { continue }
+            peripheral.readValue(for: info)
+        }
+    }
+
+    /// Tells Sheprd that `id`, if it was listed or being paired, is gone.
+    private func left(_ id: UUID) {
+        let known = listed.remove(id) != nil
+        if wanted.remove(id) != nil || known {
+            emit(["type": "peripheral_disconnected", "peripheral": id.uuidString])
+        }
+    }
+
+    private func reportState(_ state: CBManagerState) {
+        let names: [CBManagerState: String] = [
+            .poweredOn: "powered_on", .poweredOff: "powered_off", .unauthorized: "unauthorized",
+            .unsupported: "unsupported", .resetting: "resetting",
+        ]
+        emit(["type": "central_state", "state": names[state] ?? "unknown"])
     }
 
     /// Subscribes to `id`'s `pair` characteristic; `connected` follows.
@@ -60,10 +103,20 @@ final class Central: NSObject {
         }
     }
 
+    /// Lets go of the computer being paired with. It stays listed while
+    /// scanning, as another attempt may pick it again.
     func disconnect(_ id: UUID) {
         wanted.remove(id)
-        if let peripheral = peripherals[id] { manager?.cancelPeripheralConnection(peripheral) }
-        forget(id)
+        guard let peripheral = peripherals[id] else { return }
+        if scanning {
+            if let pair = pairs[id] { peripheral.setNotifyValue(false, for: pair) }
+            incoming[id] = nil
+            pending[id] = nil
+        } else {
+            manager?.cancelPeripheralConnection(peripheral)
+            listed.remove(id)
+            forget(id)
+        }
     }
 
     /// Writes one message to `id`, in chunks it acknowledges one by one.
@@ -92,6 +145,7 @@ final class Central: NSObject {
     private func forget(_ id: UUID) {
         peripherals[id] = nil
         pairs[id] = nil
+        infos[id] = nil
         incoming[id] = nil
         pending[id] = nil
     }
@@ -99,11 +153,7 @@ final class Central: NSObject {
 
 extension Central {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        let names: [CBManagerState: String] = [
-            .poweredOn: "powered_on", .poweredOff: "powered_off", .unauthorized: "unauthorized",
-            .unsupported: "unsupported", .resetting: "resetting",
-        ]
-        emit(["type": "central_state", "state": names[central.state] ?? "unknown"])
+        reportState(central.state)
         apply()
     }
 
@@ -124,19 +174,14 @@ extension Central {
     func centralManager(
         _ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?
     ) {
-        if wanted.contains(peripheral.identifier) {
-            emit(["type": "peripheral_disconnected", "peripheral": peripheral.identifier.uuidString])
-        }
-        wanted.remove(peripheral.identifier)
+        left(peripheral.identifier)
         forget(peripheral.identifier)
     }
 
     func centralManager(
         _ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?
     ) {
-        if wanted.remove(peripheral.identifier) != nil {
-            emit(["type": "peripheral_disconnected", "peripheral": peripheral.identifier.uuidString])
-        }
+        left(peripheral.identifier)
         forget(peripheral.identifier)
     }
 }
@@ -153,6 +198,7 @@ extension Central {
         let id = peripheral.identifier
         for characteristic in service.characteristics ?? [] {
             if characteristic.uuid == Self.info {
+                infos[id] = characteristic
                 peripheral.readValue(for: characteristic)
             } else if characteristic.uuid == Self.pair {
                 pairs[id] = characteristic
@@ -177,19 +223,27 @@ extension Central {
         _ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?
     ) {
         let id = peripheral.identifier
-        guard error == nil, let value = characteristic.value else { return }
         if characteristic.uuid == Self.info {
             // Only a computer showing Pair device names itself; one
-            // advertising for presence alone does not.
+            // advertising for presence alone does not, nor does one whose
+            // dialog closed, which refuses the read.
             guard
+                error == nil, let value = characteristic.value,
                 let fields = try? JSONSerialization.jsonObject(with: value) as? [String: Any],
                 let name = fields["name"] as? String
-            else { return }
+            else {
+                if !wanted.contains(id), listed.remove(id) != nil {
+                    emit(["type": "peripheral_disconnected", "peripheral": id.uuidString])
+                }
+                return
+            }
+            guard listed.insert(id).inserted else { return }
             emit([
                 "type": "found", "peripheral": id.uuidString, "name": String(name.prefix(64)),
                 "fp": (fields["fp"] as? String) ?? "",
             ])
         } else if characteristic.uuid == Self.pair {
+            guard error == nil, let value = characteristic.value else { return }
             var assembly = incoming[id] ?? Reassembly()
             switch assembly.add(value) {
             case let .complete(message):

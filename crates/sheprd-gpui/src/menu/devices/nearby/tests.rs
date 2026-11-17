@@ -9,6 +9,7 @@ const STUDIO: &str = "1A2B3C4D-5E6F-7081-92A3-B4C5D6E7F809";
 /// The page as it opens, scanning with no helper behind it.
 fn open(view: &mut SheprdWindow) {
     view.menu.nearby_setup = Some(NearbySetup {
+        attempt: 0,
         found: Vec::new(),
         error: None,
         pairing: None,
@@ -175,5 +176,22 @@ fn escape_cancels_a_pairing_before_closing_the_page(cx: &mut TestAppContext) {
         view.add_nearby_key(&escape, window, cx);
         assert_eq!(setup(view).step, Step::Looking);
         assert_eq!(view.menu.page, Some(Page::AddNearby));
+    });
+}
+
+#[gpui::test]
+fn each_pick_and_cancel_starts_a_new_attempt(cx: &mut TestAppContext) {
+    let (view, cx) = window(cx);
+    view.update_in(cx, |view, _, cx| {
+        view.nearby_event(found(STUDIO, "Studio"), cx);
+        view.pair_nearby(STUDIO, cx);
+        let picked = setup(view).attempt;
+        view.stop_nearby_pairing(cx);
+        let cancelled = setup(view).attempt;
+        view.pair_nearby(STUDIO, cx);
+        // A save or a child started for an earlier attempt finds another
+        // number and leaves this one alone.
+        assert!(picked < cancelled && cancelled < setup(view).attempt);
+        assert_eq!(setup(view).step, Step::Connecting(studio()));
     });
 }

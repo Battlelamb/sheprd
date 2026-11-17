@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::desktop::record::Record;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 
 fn route(last: u8) -> String {
     let mut bytes = [7; 32];
@@ -55,6 +55,10 @@ fn the_same_machine_updates_its_record_and_another_is_refused() {
     }
     let kept = Record::load(here.path(), &id).unwrap();
     assert_eq!(kept, again);
-    let known = std::fs::read_to_string(here.path().join("desktop").join("known_hosts")).unwrap();
+    let known = std::fs::read_to_string(sheprd_client::relay_host::known_hosts(
+        here.path(),
+        &sheprd_client::relay_host::host_name(&id),
+    ))
+    .unwrap();
     assert!(known.contains("ssh-ed25519 BBBB") && !known.contains("ssh-ed25519 AAAA"));
 }

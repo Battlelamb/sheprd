@@ -42,10 +42,13 @@ fn proxy(state_dir: &str) -> RelayProxy {
     }
 }
 
+// Windows paths have backslashes, which the proxy refuses: adding a nearby
+// Sheprd is not offered there.
+#[cfg(unix)]
 #[test]
 fn a_relay_machine_gets_the_proxy_identity_and_its_own_known_hosts() {
     let options =
-        proxy_options(&proxy("/Users/me/Library/Application Support/100%/remote")).unwrap();
+        proxy_options(&proxy("/Users/me/Library/Application Support/100%h/remote")).unwrap();
     let values: Vec<&str> = options
         .iter()
         .skip(1)
@@ -55,16 +58,17 @@ fn a_relay_machine_gets_the_proxy_identity_and_its_own_known_hosts() {
     assert!(options.iter().step_by(2).all(|flag| flag == "-o"));
     assert_eq!(
         values[0],
-        "ProxyCommand=\"/Applications/Sheprd.app/Contents/MacOS/sheprd-remote-control\" relay-connect --state-dir \"/Users/me/Library/Application Support/100%%/remote\" %h"
+        "ProxyCommand=\"/Applications/Sheprd.app/Contents/MacOS/sheprd-remote-control\" relay-connect --state-dir \"/Users/me/Library/Application Support/100%%h/remote\" %h"
     );
     assert_eq!(
         values[1],
-        "IdentityFile=\"/Users/me/Library/Application Support/100%%/remote/desktop/id_ed25519\""
+        "IdentityFile=\"/Users/me/Library/Application Support/100%%h/remote/desktop/id_ed25519\""
     );
     assert!(values.contains(&"IdentitiesOnly=yes"));
     assert!(values.contains(&"StrictHostKeyChecking=yes"));
     assert!(values.contains(
-        &"UserKnownHostsFile=\"/Users/me/Library/Application Support/100%%/remote/desktop/known_hosts\""
+        // OpenSSH expands `%h` to the machine's host name: a file each.
+        &"UserKnownHostsFile=\"/Users/me/Library/Application Support/100%%h/remote/desktop/known_hosts.d/%h\""
     ));
 }
 

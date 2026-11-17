@@ -118,27 +118,45 @@ fn desktop(state: &Shared, remote: &[u8; 32]) -> Option<(DeviceId, SocketAddr)> 
 
 /// Splices a desktop's tunnel to the SSH server on loopback, whose own
 /// encryption and host key run inside it, and marks the desktop seen so it
-/// is not forgotten as idle while it uses only SSH.
+/// is not forgotten as idle while it uses only SSH. Revoking the desktop,
+/// or its expiring, ends the session here at once, whatever the relay does
+/// with its dial key.
 async fn ssh(
     state: &Shared,
     device: DeviceId,
     server: SocketAddr,
     mut tunnel: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 ) -> Result<()> {
+    let mut revoked = state.auth().watch_revocations();
     let touched = state.clone();
+    let seen = device.clone();
     let _ = tokio::task::spawn_blocking(move || {
         touched
             .auth()
             .devices_mut()
-            .touch(&device, crate::web::now_ms())
+            .touch(&seen, crate::web::now_ms())
     })
     .await;
     let mut server = tokio::net::TcpStream::connect(server)
         .await
         .map_err(super::Error::Ssh)?;
-    tokio::io::copy_bidirectional(&mut tunnel, &mut server)
-        .await
-        .map_err(super::Error::Ssh)?;
+    let gone = async {
+        loop {
+            if state.auth().devices().get(&device).is_none() {
+                return;
+            }
+            if revoked.changed().await.is_err() {
+                // The daemon is shutting down; the copy ends with it.
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    tokio::select! {
+        copied = tokio::io::copy_bidirectional(&mut tunnel, &mut server) => {
+            copied.map_err(super::Error::Ssh)?;
+        }
+        () = gone => tracing::info!("ended the SSH session of a desktop no longer paired"),
+    }
     Ok(())
 }
 

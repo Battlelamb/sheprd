@@ -25,8 +25,10 @@ pub const ID_LEN: usize = 16;
 pub const DIRECTORY: &str = "desktop";
 /// The SSH key this computer logs in to relay machines with.
 pub const IDENTITY: &str = "id_ed25519";
-/// The host keys pairing learned, one line per machine.
-pub const KNOWN_HOSTS: &str = "known_hosts";
+/// The folder of host keys pairing learned: one file per machine, named
+/// for its host name, so two pairings finishing at once never write the
+/// same file.
+pub const KNOWN_HOSTS: &str = "known_hosts.d";
 
 /// The program and state directory `relay-connect` runs with.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -80,6 +82,12 @@ pub fn is_relay_target(target: &str) -> bool {
     host_id(target_host(target)).is_some()
 }
 
+/// The file holding the host keys of the machine named `host`.
+#[must_use]
+pub fn known_hosts(state_dir: &Path, host: &str) -> PathBuf {
+    directory(state_dir).join(KNOWN_HOSTS).join(host)
+}
+
 /// The folder pairing keeps its files in, under `state_dir`.
 #[must_use]
 pub fn directory(state_dir: &Path) -> PathBuf {
@@ -106,7 +114,10 @@ fn proxy_options(proxy: &RelayProxy) -> Option<Vec<String>> {
     let program = quoted(&proxy.program)?;
     let state_dir = quoted(&proxy.state_dir)?;
     let identity = quoted(&directory.join(IDENTITY))?;
-    let known_hosts = quoted(&directory.join(KNOWN_HOSTS))?;
+    // `%h` is OpenSSH's token for the host name, added after quoting so
+    // it is not escaped as the path's own `%` signs are.
+    let folder = quoted(&directory.join(KNOWN_HOSTS))?;
+    let known_hosts = format!("{}/%h\"", folder.strip_suffix('"')?);
     Some(
         [
             format!("ProxyCommand={program} relay-connect --state-dir {state_dir} %h"),

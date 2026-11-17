@@ -30,6 +30,9 @@ const MAX_FOUND: usize = 16;
 const SESSION: &str = "default";
 
 pub(in crate::menu) struct NearbySetup {
+    /// Counts attempts: each pick, and each cancel, starts a new one, so a
+    /// result arriving late for an earlier attempt is dropped.
+    attempt: u64,
     /// Computers showing Pair device, in the order they were found.
     found: Vec<Found>,
     /// Why the last attempt stopped, in the person's words.
@@ -108,6 +111,7 @@ impl SheprdWindow {
             }
         });
         self.menu.nearby_setup = Some(NearbySetup {
+            attempt: 0,
             found: Vec::new(),
             error: None,
             pairing: None,
@@ -173,6 +177,7 @@ impl SheprdWindow {
                     return;
                 }
                 let found = found.clone();
+                let attempt = setup.attempt;
                 setup.step = Step::Exchanging(found.clone());
                 let name = nearby::host_name();
                 let started = cx
@@ -184,7 +189,7 @@ impl SheprdWindow {
                         let Some(setup) = &mut this.menu.nearby_setup else {
                             return;
                         };
-                        if setup.step != Step::Exchanging(found) {
+                        if setup.attempt != attempt || setup.step != Step::Exchanging(found) {
                             return;
                         }
                         match started {
@@ -299,6 +304,7 @@ impl SheprdWindow {
             return;
         };
         setup.error = None;
+        setup.attempt += 1;
         Station::send(cx, nearby::connect(&found.peripheral));
         setup.step = Step::Connecting(found);
         cx.notify();
@@ -312,8 +318,11 @@ impl SheprdWindow {
         if let Some(found) = setup.step.computer() {
             Station::send(cx, nearby::disconnect(&found.peripheral));
         }
-        // Dropping the child closes its input, which cancels.
+        // Dropping the child closes its input, which cancels. A save under
+        // way still finishes, as the other computer already allowed it, but
+        // its answer no longer moves this page.
         setup.pairing = None;
+        setup.attempt += 1;
         setup.step = Step::Looking;
         cx.notify();
     }
@@ -326,6 +335,11 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let attempt = self
+            .menu
+            .nearby_setup
+            .as_ref()
+            .map_or(0, |setup| setup.attempt);
         let saved = cx
             .background_executor()
             .spawn(async move { save(&target, &label) });
@@ -335,6 +349,9 @@ impl SheprdWindow {
                 let Some(setup) = &mut this.menu.nearby_setup else {
                     return;
                 };
+                if setup.attempt != attempt {
+                    return;
+                }
                 match outcome {
                     Outcome::Saved if this.menu.page != Some(Page::AddNearby) => {
                         this.menu.nearby_setup = None;

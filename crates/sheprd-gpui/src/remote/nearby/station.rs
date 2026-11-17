@@ -34,8 +34,9 @@ pub(crate) struct Station {
     pairing: Option<(Weak<()>, String)>,
     presence: bool,
     radio: Option<Radio>,
-    /// Where scanning's events go while its [`Scanner`] lives.
-    scanning: Option<(Weak<()>, mpsc::SyncSender<Event>)>,
+    /// Where scanning's events go, one entry per [`Scanner`]: each window's
+    /// Add Device sees every computer while its scanner lives.
+    scanners: Vec<(Weak<()>, mpsc::SyncSender<Event>)>,
     // keep-sorted end
 }
 
@@ -97,7 +98,7 @@ impl Station {
         let token = Rc::new(());
         let (events_in, events) = mpsc::sync_channel(SCANNED);
         let station = cx.global_mut::<Self>();
-        station.scanning = Some((Rc::downgrade(&token), events_in));
+        station.scanners.push((Rc::downgrade(&token), events_in));
         if let Some(lines) = &station.lines {
             let _ = lines.send(scan(true));
         }
@@ -118,7 +119,7 @@ impl Station {
         }
     }
 
-    /// Passes a scanning event on to the [`Scanner`], if it still lives.
+    /// Passes a scanning event on to every [`Scanner`] that still lives.
     fn scanned(cx: &mut App, generation: u64, event: Event) {
         let Some(station) = cx.try_global::<Self>() else {
             return;
@@ -126,10 +127,10 @@ impl Station {
         if station.generation != generation {
             return;
         }
-        if let Some((token, events)) = &station.scanning
-            && token.strong_count() > 0
-        {
-            let _ = events.try_send(event);
+        for (token, events) in &station.scanners {
+            if token.strong_count() > 0 {
+                let _ = events.try_send(event.clone());
+            }
         }
     }
 
@@ -161,9 +162,9 @@ impl Station {
                 .as_ref()
                 .is_some_and(|(token, _)| token.strong_count() > 0)
             || self
-                .scanning
-                .as_ref()
-                .is_some_and(|(token, _)| token.strong_count() > 0)
+                .scanners
+                .iter()
+                .any(|(token, _)| token.strong_count() > 0)
     }
 
     /// Starts a helper when one is wanted and none runs.
@@ -179,7 +180,7 @@ impl Station {
         if station.presence {
             let _ = lines.send(advertise_presence(true));
         }
-        if station.scanning.is_some() {
+        if !station.scanners.is_empty() {
             let _ = lines.send(scan(true));
         }
         station.generation += 1;
@@ -225,15 +226,12 @@ impl Station {
             station.pairing = None;
             stop_pairing = true;
         }
-        let mut stop_scanning = false;
-        if station
-            .scanning
-            .as_ref()
-            .is_some_and(|(token, _)| token.strong_count() == 0)
-        {
-            station.scanning = None;
-            stop_scanning = true;
-        }
+        // Scanning stops once the last scanner went.
+        let scanned = !station.scanners.is_empty();
+        station
+            .scanners
+            .retain(|(token, _)| token.strong_count() > 0);
+        let stop_scanning = scanned && station.scanners.is_empty();
         if station.wanted() {
             Check::Run {
                 stop_pairing,
@@ -355,3 +353,6 @@ async fn run(
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

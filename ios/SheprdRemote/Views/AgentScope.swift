@@ -19,9 +19,12 @@ final class AgentScopeStore {
 }
 
 extension AppModel {
-    /// The scope the agent lists show, while a workspace still falls in it.
+    /// The scope the agent lists show, while a workspace on a computer the
+    /// tag filter leaves still falls in it. One the tag or computer chosen
+    /// since hides would otherwise empty the list, with no choice left in
+    /// the menu to clear it; it applies again once its computer shows.
     var agentScope: AgentScope? {
-        AgentScope.active(agentScopeStore.scope, among: homes { _ in true })
+        AgentScope.active(agentScopeStore.scope, among: shownHomes)
     }
 
     /// Whether the agent lists show what runs in `workspace` on `computer`:
@@ -35,16 +38,12 @@ extension AppModel {
         }
     }
 
-    /// The homes of the computers the tag filter leaves, for the scopes to
-    /// offer.
+    /// The homes of the computers the tag filter leaves, which the scopes
+    /// offered and applied come from.
     var shownHomes: [(device: String, home: Home)] {
         let shown = tagFilter.shown(among: computers)
-        return homes { shown.contains($0) }
-    }
-
-    private func homes(_ include: (String) -> Bool) -> [(device: String, home: Home)] {
-        fleet.machines.compactMap { machine in
-            guard include(machine.id), let home = machine.home else { return nil }
+        return fleet.machines.compactMap { machine in
+            guard shown.contains(machine.id), let home = machine.home else { return nil }
             return (machine.id, home)
         }
     }

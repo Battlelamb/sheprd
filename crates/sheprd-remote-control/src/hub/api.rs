@@ -35,9 +35,11 @@ pub(crate) enum ApiMethod {
     TabClose,
     TabCreate,
     TabRename,
+    WorkspaceClose,
     WorkspaceCreate,
     WorkspaceRename,
     WorktreeCreate,
+    WorktreeRemove,
     // keep-sorted end
 }
 
@@ -57,9 +59,11 @@ impl ApiMethod {
             Self::TabClose => "tab.close",
             Self::TabCreate => "tab.create",
             Self::TabRename => "tab.rename",
+            Self::WorkspaceClose => "workspace.close",
             Self::WorkspaceCreate => "workspace.create",
             Self::WorkspaceRename => "workspace.rename",
             Self::WorktreeCreate => "worktree.create",
+            Self::WorktreeRemove => "worktree.remove",
         }
     }
 }

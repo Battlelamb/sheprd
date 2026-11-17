@@ -8,6 +8,7 @@ mod host_relay;
 mod layout;
 mod pull_requests;
 mod relays;
+mod workspace_changes;
 
 #[test]
 fn requests_and_responses_keep_their_wire_names() {

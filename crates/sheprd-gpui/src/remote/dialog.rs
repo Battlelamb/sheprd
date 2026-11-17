@@ -12,10 +12,7 @@ use super::{
 use crate::{SheprdWindow, config::Theme, fonts::StyledFont, i18n::fl, menu::Page};
 use gpui::{prelude::*, *};
 use sheprd_remote_control::control::Request;
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{sync::Arc, time::Duration};
 
 mod addresses;
 mod hosts;
@@ -121,13 +118,14 @@ impl SheprdWindow {
     }
 
     /// Sends what the pairing asks for, one request at a time, until the
-    /// dialog closes.
+    /// dialog closes. The pairing is timed on the executor's clock, the one
+    /// its timer sleeps on, so tests that advance it reach the next poll.
     fn drive_pairing(client: Client, cx: &mut Context<Self>) -> Task<()> {
         cx.spawn(async move |this, cx| {
             loop {
                 let next = this.update(cx, |view, cx| {
                     let dialog = view.menu.remote_pairing.as_mut()?;
-                    let now = Instant::now();
+                    let now = cx.background_executor().now();
                     let ticket = dialog.pairing.next(now);
                     if ticket.is_none() && dialog.pairing.countdown(now).is_some() {
                         cx.notify();
@@ -151,7 +149,9 @@ impl SheprdWindow {
                         &result,
                         Ok(sheprd_remote_control::control::Response::Offer(_))
                     );
-                    dialog.pairing.receive(&ticket, result, Instant::now());
+                    dialog
+                        .pairing
+                        .receive(&ticket, result, cx.background_executor().now());
                     if new_offer {
                         dialog.reveal_selected_address();
                     }
@@ -394,7 +394,8 @@ impl SheprdWindow {
             Phase::Showing { offer, qr, .. } => Some((offer, qr.clone())),
             _ => None,
         });
-        let countdown = pairing.and_then(|pairing| pairing.countdown(Instant::now()));
+        let countdown =
+            pairing.and_then(|pairing| pairing.countdown(cx.background_executor().now()));
         let square = match &showing {
             Some((_, qr)) => qr_square(qr.clone()).into_any_element(),
             None => div()

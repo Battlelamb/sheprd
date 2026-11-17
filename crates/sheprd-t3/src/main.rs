@@ -24,14 +24,16 @@ fn main() -> ExitCode {
     let options = match cli::parse(std::env::args_os().skip(1)) {
         Ok(options) => options,
         Err(error) => {
-            eprintln!("sheprd-t3: {error}");
+            eprintln!("sheprd-t3: {}", cli::plain(&error.to_string()));
             return ExitCode::from(2);
         }
     };
     match run(options) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("sheprd-t3: {error:#}");
+            // A failed call carries the server's own text; keep its escapes
+            // away from the terminal, as normal output does.
+            eprintln!("sheprd-t3: {}", cli::plain(&format!("{error:#}")));
             ExitCode::FAILURE
         }
     }

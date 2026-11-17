@@ -117,6 +117,7 @@ impl SheprdWindow {
         changed |= self.chats.recode(&self.config.chat);
         changed |= self.chats.relocale(crate::i18n::shown_locale());
         changed |= self.chats.poll(now);
+        self.settle_chat_modes(cx);
         // Observed panes, whether a discovered agent or a `[chat.mirrors]`
         // entry, take their status from the daemon; live chats ignore it.
         for pane in self.chats.panes_mut() {
@@ -401,6 +402,7 @@ impl SheprdWindow {
 
     /// Sends `command` to the chat over `pane_id`; a failure shows in the view.
     pub(super) fn chat_send(&mut self, pane_id: &str, command: Command, cx: &mut Context<Self>) {
+        self.remember_chat_mode(pane_id, &command, cx);
         let Some(pane) = self.chats.pane_mut(pane_id) else {
             return;
         };

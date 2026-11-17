@@ -1,5 +1,3 @@
-#[cfg(unix)]
-use super::*;
 use crate::checkout::branch_of;
 
 #[test]
@@ -18,6 +16,8 @@ fn head_names_a_branch_or_none() {
 #[cfg(unix)]
 #[test]
 fn every_worktree_finds_the_same_repository_and_its_own_branch() {
+    use crate::{Checkout, Error};
+
     let root = tempfile::tempdir().unwrap();
     let git = |dir: &std::path::Path, args: &[&str]| {
         let status = std::process::Command::new("git")

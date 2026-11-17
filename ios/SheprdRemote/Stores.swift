@@ -1,5 +1,6 @@
 import Foundation
 import SheprdRemoteCore
+import SheprdTerminal
 import Observation
 
 /// Which computer and pane a view is about.

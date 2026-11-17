@@ -2,6 +2,9 @@ import ActivityKit
 import Foundation
 import os
 import SheprdRemoteCore
+import SheprdNearby
+import SheprdRelay
+import SheprdVoice
 import Network
 import UIKit
 

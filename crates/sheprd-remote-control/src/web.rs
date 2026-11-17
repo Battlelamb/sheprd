@@ -31,6 +31,7 @@ mod terminal;
 mod typed;
 mod update;
 mod uploads;
+mod workspace;
 
 pub(crate) use api::{NEW_CHAT_WAIT, check_new_workspace, parse_agent};
 pub(crate) use fragments::folders;
@@ -293,6 +294,14 @@ pub(crate) fn router(state: Shared) -> Router {
         .route(
             "/api/v2/workspaces/{workspace}/rename",
             post(terminal::rename_workspace),
+        )
+        .route(
+            "/api/v2/workspaces/{workspace}/close",
+            post(workspace::close),
+        )
+        .route(
+            "/api/v2/workspaces/{workspace}/remove-worktree",
+            post(workspace::remove_worktree),
         )
         .route("/f/home", get(fragments::home))
         .route("/f/board", get(fragments::board))

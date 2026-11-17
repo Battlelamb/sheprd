@@ -17,6 +17,7 @@ use std::{
 
 mod activity;
 mod attachments;
+mod auto_accept_config;
 mod chats;
 mod code;
 mod composer;

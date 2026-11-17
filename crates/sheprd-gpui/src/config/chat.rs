@@ -2,6 +2,7 @@
 //!
 //! ```toml
 //! [chat]
+//! auto_accept = false # opt in to allow permission requests in attached chats
 //! glide = true
 //! launcher = "plus"
 //! layout = "cards"
@@ -42,6 +43,7 @@ const RESERVED: [&str; 1] = [crate::chat::PROGRAM_ENV];
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct ChatConfig {
+    pub auto_accept: bool,
     pub env: BTreeMap<String, String>,
     pub glide: bool,
     pub launcher: ChatLauncher,
@@ -59,6 +61,7 @@ pub struct ChatConfig {
 impl Default for ChatConfig {
     fn default() -> Self {
         Self {
+            auto_accept: false,
             env: BTreeMap::new(),
             glide: false,
             launcher: ChatLauncher::default(),

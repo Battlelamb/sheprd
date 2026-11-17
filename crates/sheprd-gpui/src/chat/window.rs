@@ -116,6 +116,7 @@ impl SheprdWindow {
         changed |= self.chats.rewidth(self.config.chat.max_width);
         changed |= self.chats.relocale(crate::i18n::shown_locale());
         changed |= self.chats.poll(now);
+        changed |= self.chats.auto_accept(self.config.chat.auto_accept);
         // Observed panes, whether a discovered agent or a `[chat.mirrors]`
         // entry, take their status from the daemon; live chats ignore it.
         for pane in self.chats.panes_mut() {

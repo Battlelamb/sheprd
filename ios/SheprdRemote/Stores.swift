@@ -195,19 +195,27 @@ final class TermStore {
     }
 }
 
-/// The computers collapsed in the Workspaces tab, kept on this phone and
-/// shared by its windows.
+/// The computers collapsed in the Workspaces tab and the sections
+/// collapsed on Home, kept on this phone and shared by its windows.
 @MainActor
 @Observable
 final class CollapsedStore {
     private static let key = "collapsedComputers"
 
+    private static let homeKey = "collapsedHomeSections"
+
     var computers: CollapsedComputers {
         didSet { UserDefaults.standard.set(computers.devices.sorted(), forKey: Self.key) }
     }
 
+    /// Home's sections fold as computers do, by `ChatList.key(_:sort:)`.
+    var home: CollapsedComputers {
+        didSet { UserDefaults.standard.set(home.devices.sorted(), forKey: Self.homeKey) }
+    }
+
     init() {
         computers = CollapsedComputers(UserDefaults.standard.stringArray(forKey: Self.key) ?? [])
+        home = CollapsedComputers(UserDefaults.standard.stringArray(forKey: Self.homeKey) ?? [])
     }
 }
 
@@ -238,7 +246,7 @@ final class TermKeyStore {
 }
 
 /// The tag and computer Home, the iPad sidebar, and Workspaces show agents
-/// and workspaces of (`AgentFilterMenu`, `TagFilterBar`), kept on this
+/// and workspaces of (`AgentFilterMenu`, `TagFilterMenu`), kept on this
 /// phone and shared by its windows. Read them through `ComputerTags.active`
 /// or `shown`: the tag may have left every computer since, and the computer
 /// been forgotten.

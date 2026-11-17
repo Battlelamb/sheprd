@@ -8,15 +8,10 @@ struct TagPill: View {
     var selected = false
     /// The mark after the name, for a pill that adds or removes the tag.
     var symbol: String?
-    /// The mark before the name, for a pill naming a computer.
-    var icon: String?
-    /// Drawn in the accent color rather than the one the name picks.
-    var neutral = false
 
     var body: some View {
-        let color = neutral ? Color.accentColor : RepositoryAvatar.tint(tag.lowercased())
+        let color = RepositoryAvatar.tint(tag.lowercased())
         HStack(spacing: 3) {
-            if let icon { Image(systemName: icon).imageScale(.small) }
             Text(tag).lineLimit(1)
             if let symbol { Image(systemName: symbol).imageScale(.small) }
         }
@@ -64,12 +59,14 @@ struct PillFlow: Layout {
     }
 }
 
-/// The tags in use and the computers, above the Workspaces list: a tap
-/// shows only the computers with that tag, or only that computer, and
-/// another shows them all again. Computers appear once two could be chosen.
-/// The agent lists offer the same choices in their filter menu
+/// The tags in use and the computers, as a filter in the Workspaces
+/// toolbar: a menu showing only the computers with a tag, or only one
+/// computer, and all of them again. Computers appear once two could be
+/// chosen. While one is chosen the button names it, a tag in its color, so
+/// the list says why it is shorter without a row of its own above it. The
+/// agent lists offer the same choices in their filter menu
 /// (`AgentFilterMenu`).
-struct TagFilterBar: View {
+struct TagFilterMenu: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -78,42 +75,44 @@ struct TagFilterBar: View {
         let active = ComputerTags.active(model.tagFilter.tag, among: computers)
         let device = ComputerTags.active(device: model.tagFilter.device, tag: active, among: computers)
         let hosts = computers.filter { $0.matches(tag: active) }
-        if !tags.isEmpty || hosts.count > 1 {
-            Section {
-                ScrollView(.horizontal) {
-                    HStack(spacing: 6) {
-                        ForEach(tags, id: \.self) { tag in
-                            Button {
-                                withAnimation(.snappy) { model.tagFilter.choose(tag: tag == active ? nil : tag, among: computers) }
-                            } label: {
-                                TagPill(tag: tag, selected: tag == active)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Show \(tag) computers")
-                            .accessibilityAddTraits(tag == active ? .isSelected : [])
-                        }
-                        if hosts.count > 1 {
-                            if !tags.isEmpty { Divider().frame(height: 16) }
-                            ForEach(hosts, id: \.device) { computer in
-                                let name = model.displayName(computer)
-                                let selected = computer.device == device
-                                Button {
-                                    withAnimation(.snappy) { model.tagFilter.device = selected ? nil : computer.device }
-                                } label: {
-                                    TagPill(tag: name, selected: selected, icon: "desktopcomputer", neutral: true)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("Show only \(name)")
-                                .accessibilityAddTraits(selected ? .isSelected : [])
-                            }
-                        }
+        let chosen = computers.first { $0.device == device }.map { model.displayName($0) }
+        Menu {
+            Picker("Show", selection: Binding(
+                get: { active },
+                set: { tag in withAnimation(.snappy) { model.tagFilter.choose(tag: tag, among: computers) } }
+            )) {
+                Label("All Computers", systemImage: "desktopcomputer").tag(String?.none)
+                ForEach(tags, id: \.self) { tag in
+                    Label(tag, systemImage: "tag").tag(Optional(tag))
+                }
+            }
+            .pickerStyle(.inline)
+            if hosts.count > 1 {
+                Section("Computers") {
+                    ForEach(hosts, id: \.device) { computer in
+                        Toggle(model.displayName(computer), isOn: Binding(
+                            get: { computer.device == device },
+                            set: { on in withAnimation(.snappy) { model.tagFilter.device = on ? computer.device : nil } }
+                        ))
                     }
                 }
-                .scrollIndicators(.hidden)
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
+            }
+        } label: {
+            if let name = chosen ?? active {
+                // Plain views, as a toolbar shows a `Label` as its icon alone.
+                let color = chosen == nil ? RepositoryAvatar.tint(name.lowercased()) : Color.accentColor
+                HStack(spacing: 5) {
+                    Image(systemName: "line.3.horizontal.decrease")
+                    Text(name).lineLimit(1)
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(color)
+                .padding(.horizontal, 4)
+            } else {
+                Label("Filter Computers", systemImage: "line.3.horizontal.decrease")
             }
         }
+        .accessibilityLabel(chosen.map { "Showing only \($0)" } ?? active.map { "Showing \($0) computers" } ?? "Filter Computers")
     }
 }
 
@@ -168,7 +167,7 @@ struct ComputerTagsSection: View {
         } header: {
             Text("Tags")
         } footer: {
-            Text("Tags sync through this computer to the phones and desktops paired with it. Filter by them from the filter menu on Home and at the top of Workspaces.")
+            Text("Tags sync through this computer to the phones and desktops paired with it. Filter by them at the top of Workspaces.")
         }
     }
 

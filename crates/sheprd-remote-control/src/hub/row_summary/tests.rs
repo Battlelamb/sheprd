@@ -23,18 +23,29 @@ fn agent(id: u64, text: &str) -> Entry {
 }
 
 #[test]
-fn claude_runs_with_no_tools_no_mcp_servers_and_no_session() {
-    let (program, args) = claude();
-    assert_eq!(program, "claude");
+fn claude_runs_with_no_tools_mcp_servers_project_settings_or_session() {
+    let claude = claude_args(PROMPT);
     assert!(
-        args.windows(2)
+        claude
+            .windows(2)
             .any(|pair| pair[0] == "--tools" && pair[1].is_empty())
     );
-    assert!(args.contains(&"--strict-mcp-config".into()));
-    // No MCP config is given, so none loads.
-    assert!(!args.contains(&"--mcp-config".into()));
-    assert!(args.contains(&"--no-session-persistence".into()));
-    assert_eq!(args.last(), Some(&PROMPT.into()));
+    assert!(claude.contains(&"--no-session-persistence".into()));
+    assert!(claude.contains(&"--strict-mcp-config".into()));
+    assert!(
+        claude
+            .windows(2)
+            .any(|pair| pair[0] == "--setting-sources" && pair[1] == "user")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn what_the_agent_leaves_running_does_not_hold_the_run() {
+    let started = Instant::now();
+    let text = run_first([sh("cat > /dev/null; sleep 30 & echo Done.")], "x", WAIT).unwrap();
+    assert_eq!(text, "Done.");
+    assert!(started.elapsed() < Duration::from_secs(10));
 }
 
 #[test]
@@ -152,17 +163,4 @@ fn failures_are_told_apart() {
     let slow = run_first([sh("sleep 5")], "x", Duration::from_millis(200));
     assert!(matches!(slow, Err(Error::TimedOut)));
     assert!(started.elapsed() < Duration::from_secs(4));
-}
-
-#[cfg(unix)]
-#[test]
-fn a_process_holding_the_output_open_cannot_outlast_the_deadline() {
-    let started = Instant::now();
-    let held = run_first(
-        [sh("cat > /dev/null; sleep 30 & echo Done.")],
-        "x",
-        Duration::from_millis(300),
-    );
-    assert!(matches!(held, Err(Error::TimedOut)), "{held:?}");
-    assert!(started.elapsed() < Duration::from_secs(5));
 }

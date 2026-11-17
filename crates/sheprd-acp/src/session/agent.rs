@@ -6,8 +6,8 @@ use std::fmt::Write as _;
 use acp::v1 as wire;
 use serde_json::Value;
 use sheprd_chat_protocol::{
-    Change, NoticeLevel, Permission, PermissionId, PermissionKind, PermissionOption, Status,
-    TurnEnd, TurnSummary,
+    Change, NoticeLevel, Permission, PermissionId, PermissionKind, PermissionOption, Question,
+    Status, TurnEnd, TurnSummary,
 };
 
 use super::{Asked, Pending, Session, Update, now_ms};
@@ -310,6 +310,11 @@ impl<R: FnMut(Update)> Session<R> {
             }
         };
         let call_id = request.tool_call.tool_call_id.0.to_string();
+        let question = request
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get(crate::harness::out::QUESTION))
+            .and_then(|question| serde_json::from_value::<Question>(question.clone()).ok());
         let fields = request.tool_call.fields;
         let title = fields.title.clone();
         let tool = self.projector.tool(&self.transcript, &call_id, |tool| {
@@ -362,6 +367,7 @@ impl<R: FnMut(Update)> Session<R> {
                 call_id: Some(call_id),
                 id: permission,
                 options,
+                question,
                 title,
             },
         });
@@ -370,14 +376,31 @@ impl<R: FnMut(Update)> Session<R> {
 
     /// Answers one permission request, with an option or as cancelled.
     pub(super) fn resolve(&mut self, permission: PermissionId, option: Option<&str>) {
-        let Some(asked) = self.asked.remove(&permission) else {
-            return;
-        };
         let outcome = match option {
             Some(option) => wire::RequestPermissionOutcome::Selected(
                 wire::SelectedPermissionOutcome::new(option.to_owned()),
             ),
             None => wire::RequestPermissionOutcome::Cancelled,
+        };
+        self.respond(permission, outcome);
+    }
+
+    /// Answers a question with the person's choices or words, through the
+    /// option the agent's bridge reads them from.
+    pub(super) fn resolve_answers(&mut self, permission: PermissionId, answers: Vec<String>) {
+        let mut meta = serde_json::Map::new();
+        meta.insert(crate::harness::out::ANSWERS.to_owned(), answers.into());
+        let selected =
+            wire::SelectedPermissionOutcome::new(crate::harness::out::ANSWERS).meta(Some(meta));
+        self.respond(
+            permission,
+            wire::RequestPermissionOutcome::Selected(selected),
+        );
+    }
+
+    fn respond(&mut self, permission: PermissionId, outcome: wire::RequestPermissionOutcome) {
+        let Some(asked) = self.asked.remove(&permission) else {
+            return;
         };
         let response = wire::RequestPermissionResponse::new(outcome);
         let result = serde_json::to_value(response).map_err(|_| wire::Error::internal_error());

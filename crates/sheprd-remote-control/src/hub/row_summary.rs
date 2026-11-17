@@ -1,14 +1,7 @@
-//! A smarter line for a chat's row: Claude Code, run once on its own with
-//! no tools and no MCP servers, reads the end of the transcript and says
-//! where the chat stands. The chat's session, history, and context are
-//! untouched, as nothing is sent to it; the summary is the daemon's and
-//! lives with the chat's link.
-//!
-//! The transcript is untrusted: an agent may have read a web page or an
-//! issue written to steer whatever reads it next. So the summarizer gets
-//! no tool to act or read with, only the text, and its answer is one
-//! bounded line shown on the person's own phone. Codex and Gemini are not
-//! used, as neither offers a headless mode with every tool off.
+//! A smarter line for a chat's row: Claude, run once on its own, reads the
+//! end of the chat's transcript and says where it stands.
+//! The chat's session, history, and context are untouched, as nothing is
+//! sent to it; the summary is the daemon's and lives with the chat's link.
 
 mod error;
 
@@ -21,7 +14,10 @@ use std::{
     ffi::OsString,
     io::{Read, Write},
     process::Stdio,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -40,6 +36,8 @@ const MAX_SUMMARY_CHARS: usize = 280;
 const MAX_RUNNING: usize = 3;
 /// How often a running agent is checked for having exited.
 const POLL: Duration = Duration::from_millis(100);
+/// How long the agent's output may take to close once it has exited.
+const DRAIN: Duration = Duration::from_secs(2);
 
 /// What the agent is asked; the transcript follows on its input.
 const PROMPT: &str = "The input is the end of a conversation between a person and a coding \
@@ -66,20 +64,26 @@ pub(crate) enum RowSummary {
     },
 }
 
-/// Claude Code's headless mode with no built-in tools, no MCP servers
-/// (`--strict-mcp-config` with none given), and no saved session.
-fn claude() -> (OsString, Vec<OsString>) {
-    let args = [
+/// Claude's arguments for one answer to `prompt`: no tools, no saved
+/// session, only the user's own settings, and no MCP server. Every chat is
+/// answered by Claude, whatever its agent: Codex and Gemini cannot be run
+/// without tools or MCP servers that reach past the answer.
+fn claude_args(prompt: &str) -> Vec<OsString> {
+    [
         "-p",
         "--tools",
         "",
-        "--strict-mcp-config",
         "--no-session-persistence",
+        "--setting-sources",
+        "user",
+        "--strict-mcp-config",
         "--output-format",
         "text",
-        PROMPT,
-    ];
-    ("claude".into(), args.iter().map(OsString::from).collect())
+        prompt,
+    ]
+    .iter()
+    .map(OsString::from)
+    .collect()
 }
 
 /// The person's prompts and the agent's answers, oldest first, as much of
@@ -127,9 +131,15 @@ impl Drop for Slot {
     }
 }
 
-/// Blocking: Claude's summary of `input`.
+/// Blocking: the summary of `input`.
 pub(crate) fn run(input: &str) -> Result<String, Error> {
-    run_first([claude()], input, WAIT)
+    ask(PROMPT, input)
+}
+
+/// Blocking: Claude's answer to `prompt` about `input`, cut to
+/// [`MAX_SUMMARY_CHARS`].
+pub(crate) fn ask(prompt: &str, input: &str) -> Result<String, Error> {
+    run_first([("claude".into(), claude_args(prompt))], input, WAIT)
 }
 
 /// The answer of the first of `candidates` that gives one, each run for at
@@ -158,21 +168,28 @@ fn run_one(
     input: &str,
     wait: Duration,
 ) -> Result<String, Error> {
+    // A fresh folder only this user can enter, removed after the run: a
+    // shared one such as Linux's `/tmp` could hold another user's agent
+    // settings, hooks, or MCP servers, which the agent would load.
+    let folder = tempfile::Builder::new()
+        .prefix("sheprd-agent-")
+        .tempdir()
+        .map_err(Error::Start)?;
     {
         let mut command = sheprd_client::new_command(&program);
         // A user service's `PATH` is bare; the login shell's finds the
         // agents the user's own shell runs.
         sheprd_client::login_env::apply(&mut command);
+        // Its own process group, so what it starts ends with it.
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(&mut command, 0);
         // Away from any checkout, so the agent reads only what it is given.
         command
             .args(args)
-            .current_dir(std::env::temp_dir())
+            .current_dir(folder.path())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
-        // Its own group, so a timeout stops whatever it started too.
-        #[cfg(unix)]
-        std::os::unix::process::CommandExt::process_group(&mut command, 0);
         match command.spawn() {
             Ok(child) => answer(child, input.to_owned(), wait),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(Error::NoAgent),
@@ -181,8 +198,6 @@ fn run_one(
     }
 }
 
-/// The agent's answer within `wait`, counted until its output closes, not
-/// only until it exits: a process it started may hold the pipe open.
 fn answer(mut child: std::process::Child, input: String, wait: Duration) -> Result<String, Error> {
     if let Some(mut stdin) = child.stdin.take() {
         // A failed write shows as the agent's own failure or empty answer.
@@ -190,7 +205,7 @@ fn answer(mut child: std::process::Child, input: String, wait: Duration) -> Resu
             let _ = stdin.write_all(input.as_bytes());
         });
     }
-    let (sender, output) = std::sync::mpsc::sync_channel(1);
+    let (sender, output) = mpsc::sync_channel(1);
     if let Some(stdout) = child.stdout.take() {
         thread::spawn(move || {
             let mut bytes = Vec::new();
@@ -200,8 +215,6 @@ fn answer(mut child: std::process::Child, input: String, wait: Duration) -> Resu
             let _ = std::io::copy(&mut limited.into_inner(), &mut std::io::sink());
             let _ = sender.send(bytes);
         });
-    } else {
-        let _ = sender.send(Vec::new());
     }
     let deadline = Instant::now() + wait;
     let status = loop {
@@ -209,17 +222,17 @@ fn answer(mut child: std::process::Child, input: String, wait: Duration) -> Resu
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() < deadline => thread::sleep(POLL),
             Ok(None) | Err(_) => {
-                stop(&mut child);
+                end_group(&child);
+                let _ = child.kill();
+                let _ = child.wait();
                 return Err(Error::TimedOut);
             }
         }
     };
-    let left = deadline.saturating_duration_since(Instant::now());
-    let Ok(bytes) = output.recv_timeout(left) else {
-        // The agent exited, but something it started still holds its output.
-        stop(&mut child);
-        return Err(Error::TimedOut);
-    };
+    // What it started and left running would hold the output open, and the
+    // run's slot with it.
+    end_group(&child);
+    let bytes = output.recv_timeout(DRAIN).unwrap_or_default();
     if !status.success() {
         return Err(Error::Failed);
     }
@@ -230,15 +243,19 @@ fn answer(mut child: std::process::Child, input: String, wait: Duration) -> Resu
     Ok(text)
 }
 
-/// Stops the agent and, on Unix, every process in its group, then reaps it.
-fn stop(child: &mut std::process::Child) {
+/// Kills what is left of the agent's process group. Windows has none here;
+/// the bounded wait for the output keeps a leftover child from holding
+/// the run there.
+fn end_group(child: &std::process::Child) {
     #[cfg(unix)]
+    if let Some(group) = i32::try_from(child.id())
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
     {
-        let group = rustix::process::Pid::from_child(child);
         let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
     }
-    let _ = child.kill();
-    let _ = child.wait();
+    #[cfg(not(unix))]
+    let _ = child;
 }
 
 #[cfg(test)]

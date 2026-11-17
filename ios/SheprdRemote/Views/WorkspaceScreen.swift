@@ -7,6 +7,7 @@ import SwiftUI
 struct WorkspaceScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.routeOpener) private var opener
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let key: WorkspaceKey
     @State private var agents: [AgentChoice] = []
     /// What a tap is starting: an agent's id, or `terminal`.
@@ -25,10 +26,12 @@ struct WorkspaceScreen: View {
     /// The name a rename asked for, shown with a spinner until the
     /// computer's next `home` carries it, the request fails, or it times out.
     @State private var pendingName: String?
-    /// The agent asked for a name, shown with a spinner until it answers.
-    @State private var askedAgent: String?
     /// What a row's swipe asked to close, waiting for confirmation.
     @State private var closing: CloseTarget?
+    /// The agent asked for a name, shown with a spinner until it answers.
+    @State private var askedAgent: String?
+    /// The pictures in the workspace's chats, its tabs combined.
+    @State private var pictures = WorkspacePictureStore()
     /// What the person is asked to confirm: closing, or deleting the worktree.
     @State private var confirming: Ending?
     /// What is on its way to the computer.
@@ -56,7 +59,7 @@ struct WorkspaceScreen: View {
         // The chat answered last knows best what the workspace is about.
         let namer = chats.filter { $0.chat.summary?.connected == true }
             .max { ($0.lastAnswer ?? .distantPast) < ($1.lastAnswer ?? .distantPast) }
-        return List {
+        return endingDialogs(List {
             Section {
                 Summary(workspace: workspace, place: [model.displayName(machine.computer), repository?.label].compactMap { $0 }.joined(separator: " · "))
                 if let pullRequest = workspace.pullRequest, let url = URL(string: pullRequest.url) {
@@ -91,10 +94,15 @@ struct WorkspaceScreen: View {
             } header: {
                 let count = chats.count + terminals.count
                 Text(count == 1 ? "1 tab" : "\(count) tabs")
+                    .contentTransition(.numericText(value: Double(count)))
             }
+            WorkspacePictures(pictures: pictures, chats: chats, open: show)
             launcher(workspace, online: isOnline(machine))
             endings(workspace, online: isOnline(machine))
         }
+        // Tabs the computer opens or closes slide in and out, and the
+        // count rolls, rather than the rows jumping into place.
+        .animation(reduceMotion ? nil : .snappy, value: chats.map(\.id) + terminals.map(\.id))
         .navigationTitle(workspace.label)
         .navigationBarTitleDisplayMode(.inline)
         // The iPad's sidebar keeps its tabs below a workspace.
@@ -174,6 +182,10 @@ struct WorkspaceScreen: View {
                 try? await Task.sleep(for: .seconds(3))
             }
         }
+        // Again on each return, as the chats may hold more pictures since.
+        .task(id: WorkspacePictureStore.Load(panes: chats.map(\.chat.pane), online: isOnline(machine))) {
+            await pictures.load(.init(panes: chats.map(\.chat.pane), online: isOnline(machine)), device: key.device, fleet: model.fleet)
+        }
         // Again on each return, as an agent may have changed more since.
         .task(id: machine.status) {
             guard isOnline(machine), workspace.branch != nil else { return }
@@ -207,17 +219,24 @@ struct WorkspaceScreen: View {
         .alert("The workspace was not renamed", isPresented: Binding(get: { renameProblem != nil }, set: { if !$0 { renameProblem = nil } })) {
         } message: {
             Text(renameProblem ?? "")
-        }
-        .confirmationDialog(confirming?.question ?? "", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
-                            titleVisibility: .visible, presenting: confirming) { action in
-            Button(action.title, role: .destructive) { end(action) }
-        } message: { action in
-            Text(action.consequence)
-        }
-        .alert(endProblem?.0.failure ?? "", isPresented: Binding(get: { endProblem != nil }, set: { if !$0 { endProblem = nil } })) {
-        } message: {
-            Text(endProblem?.1 ?? "")
-        }
+        })
+    }
+
+    /// The confirmation and failure of closing the workspace or deleting its
+    /// worktree; apart from the screen's other modifiers, which together are
+    /// more than the type checker takes in one expression.
+    private func endingDialogs(_ content: some View) -> some View {
+        content
+            .confirmationDialog(confirming?.question ?? "", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
+                                titleVisibility: .visible, presenting: confirming) { action in
+                Button(action.title, role: .destructive) { end(action) }
+            } message: { action in
+                Text(action.consequence)
+            }
+            .alert(endProblem?.0.failure ?? "", isPresented: Binding(get: { endProblem != nil }, set: { if !$0 { endProblem = nil } })) {
+            } message: {
+                Text(endProblem?.1 ?? "")
+            }
     }
 
     /// Closing the workspace, and deleting its worktree when it is a linked
@@ -298,13 +317,13 @@ struct WorkspaceScreen: View {
         askedAgent = agent
         Task {
             defer { askedAgent = nil }
-            // Where the transcript ends before asking: an earlier ask with
-            // the same words, already answered, is not this one's answer.
-            let sent: EntryId?
+            // Only this prompt's answer counts: an earlier identical prompt
+            // that failed would otherwise answer a retry still queued.
+            let before = try? await model.fleet.call(device) { client, token in
+                try await client.chat(pane, bearer: token)
+            }
+            let after = before?.transcript.entries.last?.id
             do {
-                sent = try await model.fleet.call(device) { client, token in
-                    try await client.chat(pane, bearer: token)
-                }.transcript.entries.last?.id
                 let refused = try await model.fleet.call(device) { client, token in
                     try await client.command(.prompt(text: prompt), pane: pane, bearer: token)
                 }
@@ -324,7 +343,7 @@ struct WorkspaceScreen: View {
                 guard let snapshot = try? await model.fleet.call(device, { client, token in
                     try await client.chat(pane, bearer: token)
                 }) else { continue }
-                switch WorkspaceNaming.answer(to: prompt, in: snapshot.transcript, after: sent) {
+                switch WorkspaceNaming.answer(to: prompt, in: snapshot.transcript, after: after) {
                 case let .name(name)?:
                     askedAgent = nil
                     rename(to: name, from: current)

@@ -8,13 +8,13 @@ use model::{Home, Sources};
 fn home(layout: &Layout) -> Home {
     Home::project(Sources {
         checkouts: &Default::default(),
+        recognized: &Default::default(),
         computer: "Studio",
         fingerprint: "FP",
         layout,
         load: None,
         summaries: HashMap::new(),
         pull_requests: &Default::default(),
-        recognized: &Default::default(),
         shortcuts_ms: 0,
         tags: Default::default(),
         version: "20261109.1",

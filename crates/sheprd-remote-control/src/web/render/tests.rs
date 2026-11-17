@@ -54,6 +54,7 @@ pub(super) fn question(title: &str) -> Permission {
     Permission {
         call_id: None,
         id: PermissionId(7),
+        question: None,
         title: title.into(),
         options: vec![
             PermissionOption {

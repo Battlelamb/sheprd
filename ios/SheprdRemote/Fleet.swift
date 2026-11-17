@@ -617,6 +617,14 @@ final class Fleet {
         }
     }
 
+    /// A short title for a chat from Claude, run once on its own.
+    func suggestTitle(_ key: PaneKey) async throws -> String {
+        let pane = key.pane
+        return try await call(key.device) { client, token in
+            try await client.suggestTitle(pane: pane, bearer: token)
+        }
+    }
+
     /// Closes the terminal tab a pane is in, with every pane in it.
     func closeTab(_ key: PaneKey) async throws {
         let pane = key.pane

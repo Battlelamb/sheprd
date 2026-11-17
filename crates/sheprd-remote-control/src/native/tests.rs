@@ -96,6 +96,7 @@ pub(super) fn permission(id: u64) -> sheprd_chat_protocol::Permission {
                 name: "Deny".into(),
             },
         ],
+        question: None,
         title: "Run `git push origin fix/mise`?".into(),
     }
 }

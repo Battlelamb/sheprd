@@ -1,5 +1,5 @@
-//! `POST /api/v2/chat/{pane}/summarize`: asks Claude Code, run once on its
-//! own with no tools, where the chat stands. It answers at once; the summary
+//! `POST /api/v2/chat/{pane}/summarize`: asks Claude, run once on its own,
+//! where the chat stands. It answers at once; the summary
 //! reaches every phone's list on `home` when the agent is done.
 
 use crate::{
@@ -26,17 +26,18 @@ pub(crate) async fn summarize(
 ) -> Result<Accepted, ApiError> {
     state.hub.layout().chat(&pane).ok_or(ApiError::NotFound)?;
     let link = state.hub.chat(&pane).ok_or(ApiError::NotFound)?;
-    // The summary speaks for the chat as it stood here, so a turn that ends
-    // while the agent reads still counts as newer than it.
-    let asked_ms = now_ms();
     let (transcript, _) = link.base();
+    // The summary describes the chat as it was read, so it carries that
+    // time: a turn that ends while Claude works is newer, and its row
+    // shows the reply rather than the summary.
+    let read_ms = now_ms();
     let input = row_summary::excerpt_of(&transcript);
     if input.is_empty() {
         return Err(ApiError::Invalid("nothing has been said in this chat yet"));
     }
     let slot = row_summary::Slot::take()
         .map_err(|_| ApiError::Invalid("too many summaries are running; try again in a moment"))?;
-    if !link.begin_summary(asked_ms) {
+    if !link.begin_summary(now_ms()) {
         return Ok(accepted());
     }
     tokio::spawn(async move {
@@ -45,21 +46,26 @@ pub(crate) async fn summarize(
             row_summary::run(&input)
         })
         .await;
-        let summary = match answer {
-            Ok(Ok(text)) => RowSummary::Ready {
-                text,
-                at_ms: asked_ms,
-            },
-            Ok(Err(error)) => RowSummary::Failed {
-                reason: error.to_string(),
-                at_ms: asked_ms,
-            },
-            Err(_) => RowSummary::Failed {
-                reason: row_summary::Error::Failed.to_string(),
-                at_ms: asked_ms,
-            },
-        };
-        link.finish_summary(summary);
+        let answer = answer.unwrap_or(Err(row_summary::Error::Failed));
+        link.finish_summary(finished(answer, read_ms));
     });
     Ok(accepted())
 }
+
+/// The row's summary from Claude's answer to the transcript read at
+/// `read_ms`.
+fn finished(answer: Result<String, row_summary::Error>, read_ms: u64) -> RowSummary {
+    match answer {
+        Ok(text) => RowSummary::Ready {
+            text,
+            at_ms: read_ms,
+        },
+        Err(error) => RowSummary::Failed {
+            reason: error.to_string(),
+            at_ms: read_ms,
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests;

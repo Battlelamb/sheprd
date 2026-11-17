@@ -2,7 +2,7 @@ import SheprdRemoteCore
 import SheprdNearby
 import SwiftUI
 
-enum RootTab: Hashable { case home, workspaces, settings }
+enum RootTab: Hashable { case home, workspaces, pullRequests, settings }
 
 /// Home B: attention first, with Workspaces and its search, and Settings,
 /// as tabs, or
@@ -171,6 +171,10 @@ struct RootView: View {
                     .slidesTabBar(hidden: !workspacesPath.isEmpty)
                     .connectionToast(pairing: $window.pairing)
             }
+            Tab("Pull Requests", systemImage: "arrow.triangle.pull", value: RootTab.pullRequests) {
+                NavigationStack { PullRequestsList() }
+                    .connectionToast(pairing: $window.pairing)
+            }
             Tab("Settings", systemImage: "gearshape", value: RootTab.settings) {
                 NavigationStack { SettingsView() }
                     .connectionToast(pairing: $window.pairing)
@@ -209,6 +213,7 @@ extension RootView {
         }
         switch defaults.string(forKey: "tab") {
         case "workspaces": tab = .workspaces
+        case "pullRequests": tab = .pullRequests
         case "settings": tab = .settings
         default: break
         }

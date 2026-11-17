@@ -243,6 +243,7 @@ pub(crate) fn router(state: Shared) -> Router {
             "/api/v2/chat/{pane}/summarize",
             post(crate::native::summarize),
         )
+        .route("/api/v2/chat/{pane}/title", post(crate::native::title))
         .route("/api/v2/github/token", get(crate::native::github::token))
         .route("/api/v2/home", get(crate::native::get_home))
         .route("/api/v2/hosts", get(hosts::list))
@@ -454,6 +455,8 @@ pub(crate) fn bearer(headers: &HeaderMap) -> Option<&str> {
 pub(crate) enum ApiError {
     // keep-sorted start
     #[error(transparent)]
+    Agent(#[from] crate::hub::row_summary::Error),
+    #[error(transparent)]
     App(#[from] crate::app::Error),
     #[error(transparent)]
     Auth(#[from] auth::Error),
@@ -488,6 +491,7 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = match &self {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
+            Self::Agent(error) => error.status(),
             Self::Changes(error) => error.status(),
             Self::GitHub(error) => error.status(),
             Self::TooManyStreams => StatusCode::TOO_MANY_REQUESTS,

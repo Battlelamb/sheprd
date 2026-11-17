@@ -170,7 +170,20 @@ struct ChatRowLabel: View {
         let prompt = item.chat.summary?.firstPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !prompt.isEmpty { return prompt }
         let agent = item.chat.agent?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if awaitsFirstPrompt {
+            return agent.isEmpty ? String(localized: "New chat") : String(localized: "New \(agent.capitalized) chat")
+        }
         return agent.isEmpty ? String(localized: "Chat") : agent.capitalized
+    }
+
+    /// A linked chat nobody has written to yet: no title, no prompt, no
+    /// turn, nothing said, and nothing asked. An older computer sends no
+    /// first prompt, but a chat with a turn behind it fails this anyway.
+    private var awaitsFirstPrompt: Bool {
+        guard let summary = item.chat.summary, item.question == nil, !item.working else { return false }
+        let blank = { (text: String?) in text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true }
+        return blank(item.chat.title) && blank(summary.firstPrompt) && blank(summary.lastText)
+            && summary.turnStartedMs == nil && summary.lastTurnEndedMs == nil
     }
 
     /// The line under the title: a waiting question first, then the
@@ -186,6 +199,7 @@ struct ChatRowLabel: View {
         case let .failed(reason, _)?:
             return Text("\(Image(systemName: "exclamationmark.triangle")) \(line(said: String(localized: "No summary: \(reason)")))")
         case .other?, nil:
+            if awaitsFirstPrompt { return Text(line(said: String(localized: "Waiting for your first prompt"))) }
             let said = (item.question?.title ?? item.chat.summary?.lastText)
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .flatMap { $0.isEmpty ? nil : $0 }

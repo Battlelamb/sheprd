@@ -111,6 +111,7 @@ impl SheprdWindow {
                 this.publish_server_keymap(cx);
             } else {
                 this.shift_taps.cancel();
+                this.recent_panes.finish();
                 this.disarm_prefix();
                 this.cancel_terminal_mouse(cx);
                 // A drag cut short is dropped; a selection kept for an
@@ -267,9 +268,11 @@ impl SheprdWindow {
             prefix_armed: false,
             presentation: Default::default(),
             pressed_terminal_link: None,
+            recent_panes: Default::default(),
             regions: Vec::new(),
             remote_browser: Vec::new(),
             remote_updates: Default::default(),
+            remote_work: Default::default(),
             removal: None,
             resize_mode: false,
             review_files_width: crate::panel_resize::REVIEW_FILES,
@@ -344,9 +347,12 @@ impl SheprdWindow {
         cx.on_app_quit(|this, _| {
             this.port_forwards.stop_all();
             this.tunnels.close_all();
+            this.flush_undo_close();
             async {}
         })
         .detach();
+        // Closing the window, the tabs it hid for undo still close.
+        cx.on_release(|this, _| this.flush_undo_close()).detach();
         #[cfg(feature = "integration-test")]
         if sidebar_test {
             this._poll = Task::ready(());

@@ -1,6 +1,8 @@
-//! `notes`, `worktree`, `checkpoint`, `scripts`, `teleport`, and `fan-out`.
+//! `notes`, `memory`, `worktree`, `checkpoint`, `scripts`, `teleport`, and
+//! `fan-out`.
 mod checkpoint;
 mod here;
+mod memory;
 mod scripts;
 #[cfg(test)]
 mod tests;
@@ -17,6 +19,7 @@ use crate::{
     },
 };
 pub(super) use checkpoint::checkpoint;
+pub(super) use memory::memory;
 use std::fmt::Write as _;
 
 /// The display boundary for errors of the commands this process runs itself:
@@ -118,11 +121,35 @@ pub(super) fn describe_mute(mute: &MuteInfo) -> String {
 
 pub(super) fn worktree(command: WorktreeCommand, context: &Context) -> crate::Result<Output> {
     let op = match command {
+        WorktreeCommand::List => WorkOp::KeptList {},
+        WorktreeCommand::Create { branch } => {
+            return context.act(Request::Work, WorkOp::KeptCreate { branch });
+        }
+        WorktreeCommand::Open => return context.act(Request::Work, WorkOp::KeptOpen {}),
+        WorktreeCommand::Delete => return context.act(Request::Work, WorkOp::KeptDelete {}),
         WorktreeCommand::Status => WorkOp::MuteStatus,
         WorktreeCommand::Mute => WorkOp::Mute { muted: true },
         WorktreeCommand::Unmute => WorkOp::Mute { muted: false },
     };
     match context.call(Request::Work, op)? {
+        Response::Work {
+            reply: Reply::Worktrees { worktrees },
+        } => {
+            let text = worktrees
+                .iter()
+                .map(|tree| {
+                    format!(
+                        "{}\t{}\t{}\t{}",
+                        tree.host,
+                        tree.workspace,
+                        tree.branch.as_deref().unwrap_or("detached"),
+                        tree.path
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            Output::data(text, &serde_json::json!({"worktrees": worktrees}))
+        }
         Response::Work {
             reply: Reply::Mute { mute },
         } => Output::data(describe_mute(&mute), &mute),

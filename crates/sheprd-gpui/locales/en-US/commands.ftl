@@ -5,6 +5,7 @@
 commands-about = About Sheprd
 commands-annotate-selection = Annotate Selection for the Agent
 commands-back = Back
+commands-clear-all-notifications = Clear All Notifications
 commands-clear-pane = Clear Pane
 commands-close-pane = Close Pane
 commands-close-tab = Close Tab
@@ -67,6 +68,8 @@ commands-previous-tab = Previous Tab
 commands-previous-workspace = Previous Workspace
 commands-quit = Quit
 commands-reconnect = Reconnect
+commands-recent-pane = Recent Pane
+commands-recent-pane-reverse = Recent Pane Reverse
 commands-reload-config = Reload Config
 commands-remote-pair = Remote Control: Pair Device
 commands-remove-worktree = Delete Worktree Checkout

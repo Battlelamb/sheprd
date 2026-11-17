@@ -30,6 +30,7 @@ const MAX_SKIPPED: usize = 1024;
 
 pub(crate) mod activity;
 mod claude_code;
+pub(crate) mod opencode;
 mod subagents;
 pub(crate) mod todos;
 pub(crate) use activity::{Report, STOP_METHOD, Tag, kill_all};
@@ -58,6 +59,8 @@ pub(crate) struct Projector {
     direct: HashSet<String>,
     next: u64,
     open: Option<Open>,
+    /// The peer negotiated OpenCode's session-identity lifecycle stream.
+    pub(crate) opencode_children: bool,
     /// Whether the agent sends ACP's plan, which then stands over what its
     /// to-do tool's calls say.
     planned: bool,
@@ -79,6 +82,12 @@ impl Projector {
             next: last.0,
             ..Self::default()
         }
+    }
+
+    /// A projector for another agent's conversation, which knows nothing of
+    /// this one but keeps its entry ids growing.
+    pub(crate) fn restart(&self) -> Self {
+        Self::after(EntryId(self.next))
     }
 
     fn next_id(&mut self) -> EntryId {
@@ -362,6 +371,9 @@ impl Projector {
         input: Option<&serde_json::Value>,
         status: Option<wire::ToolCallStatus>,
     ) -> Tag {
+        if self.opencode_children {
+            return Tag::default();
+        }
         if subagents::from_child(meta) {
             if let Some(parent) = self.children.get(call_id) {
                 return Tag {

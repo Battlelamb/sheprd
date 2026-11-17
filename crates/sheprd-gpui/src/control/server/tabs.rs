@@ -61,7 +61,9 @@ pub(super) fn serve(
             display,
         } => machines::set(name, (cpus, memory_gib, display), incoming, cx),
         TabOp::MachineSuspend { name } => machines::suspend(name, incoming, cx),
-        TabOp::Orchestrator { repo } => arrive::orchestrator(&caller, repo, incoming, watches, cx),
+        TabOp::Orchestrator { repo, action } => {
+            arrive::orchestrator(&caller, repo, action, incoming, watches, cx)
+        }
         TabOp::Review => arrive::review(&caller, incoming, watches, cx),
         TabOp::Px0 => arrive::px0(&caller, incoming, watches, cx),
     }

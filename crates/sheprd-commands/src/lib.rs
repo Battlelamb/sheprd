@@ -61,6 +61,9 @@ pub enum Command {
     DevicesOverview,
     /// Shows the alerts kept on the Overview.
     NotificationHistory,
+    /// Dismisses every toast, empties every host's alerts, and withdraws the
+    /// OS notifications the app posted, in every window.
+    ClearAllNotifications,
     /// Starts a shell in herdr-core (Herdr 2) and shows it in a tab.
     NewCoreTerminal,
     /// Opens a watch-only view of the focused herdr-core pane in a new tab.
@@ -112,6 +115,10 @@ pub enum Command {
     MoveTabNext,
     RenameTab,
     LastPane,
+    /// Steps through the panes this window focused across connected endpoints,
+    /// most recent first, while the shortcut's modifier stays held.
+    RecentPane,
+    RecentPaneReverse,
     /// Back through the panes this endpoint has focused.
     Back,
     Forward,
@@ -137,6 +144,13 @@ pub enum Command {
     NextAgent,
     AgentNumber(u8),
     ReloadConfig,
+}
+
+impl Command {
+    /// Ctrl-Tab and its reverse, which an open menu keeps for itself.
+    pub fn is_recent_pane(self) -> bool {
+        matches!(self, Self::RecentPane | Self::RecentPaneReverse)
+    }
 }
 
 pub struct CommandInfo {
@@ -346,6 +360,16 @@ pub const COMMANDS: &[CommandInfo] = &[
         command: Command::LastPane,
         name: "last_pane",
         message: "commands-last-pane",
+    },
+    CommandInfo {
+        command: Command::RecentPane,
+        name: "recent_pane",
+        message: "commands-recent-pane",
+    },
+    CommandInfo {
+        command: Command::RecentPaneReverse,
+        name: "recent_pane_reverse",
+        message: "commands-recent-pane-reverse",
     },
     CommandInfo {
         command: Command::Back,
@@ -616,6 +640,11 @@ pub const COMMANDS: &[CommandInfo] = &[
         command: Command::NotificationHistory,
         name: "notification_history",
         message: "commands-notification-history",
+    },
+    CommandInfo {
+        command: Command::ClearAllNotifications,
+        name: "clear_all_notifications",
+        message: "commands-clear-all-notifications",
     },
     CommandInfo {
         command: Command::NewCoreTerminal,

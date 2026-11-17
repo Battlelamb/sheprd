@@ -42,7 +42,7 @@ impl SheprdWindow {
     /// Gives every pane of the focused workspace's herdr-core tabs a view,
     /// once the hub is connected, and drops the views of closed tabs and
     /// panes.
-    pub(super) fn sync_core_views(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn sync_core_views(&mut self, cx: &mut Context<Self>) {
         let Some(store) = cx.try_global::<Store>() else {
             self.core_terminals.views.clear();
             self.core_terminals.tabs.clear();
@@ -190,10 +190,16 @@ impl SheprdWindow {
             let painter = self.painter.clone();
             let look = look.clone();
             let observe = role == Role::Observer;
-            let to_window = super::asks::window_call(cx);
+            let target = self.core_terminals.link_target(&host).cloned();
+            let paste_target = target.clone();
+            let to_window = super::asks::window_call(cx, host.clone(), target);
             let view = cx.new(|cx| {
-                CoreTerminalView::new(terminal.clone(), link, look, painter, observe, cx)
-                    .with_window(to_window)
+                let mut view =
+                    CoreTerminalView::new(terminal.clone(), link, look, painter, observe, cx)
+                        .with_window(to_window);
+                view.set_remote(host != Host::Local, cx);
+                view.set_paste_target(paste_target);
+                view
             });
             self.core_terminals.views.insert((tab, terminal), view);
         }
@@ -251,6 +257,7 @@ impl SheprdWindow {
     /// to, closes panes whose program ended in a split, and titles each tab
     /// after its pane in use, as a Herdr tab is titled after its program.
     pub(super) fn poll_core_panes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.observe_recent_focus(window, cx);
         if let Some((tab, terminal)) = self.core_terminals.focused_pane(window, cx)
             && let Some(shown) = self.core_terminals.tabs.get_mut(&tab)
             && shown.activate(terminal)
@@ -276,13 +283,23 @@ impl SheprdWindow {
         // Links are read against each pane's folder, and a path is no link
         // in another host's pane: both are known before the screens change.
         for ((tab, terminal), view) in &views {
-            let remote = self.core_terminals.host_of(*tab) != Host::Local;
+            let host = self.core_terminals.host_of(*tab);
+            let remote = host != Host::Local;
+            let paste_target = match &host {
+                Host::Local => Some(sheprd_client::ConnectTarget::Local),
+                Host::Remote(scope) => self
+                    .core_terminals
+                    .remote
+                    .get(scope)
+                    .map(|remote| remote.target.clone()),
+            };
             let cwd = self
                 .core_terminals
                 .info(*tab, terminal)
                 .and_then(|info| info.cwd.as_deref());
             view.update(cx, |view, cx| {
                 view.set_remote(remote, cx);
+                view.set_paste_target(paste_target.filter(|_| in_sight.contains(tab)));
                 view.set_cwd(cwd, cx);
             });
         }

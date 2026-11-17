@@ -25,6 +25,16 @@ impl<R: FnMut(Update)> Session<R> {
             Inbound::Notification { method, params } => {
                 if method == "session/update" {
                     self.session_update(params);
+                } else if method == project::opencode::METHOD
+                    && let Some(session) = &self.acp_session
+                {
+                    let changes = self.projector.opencode_child(
+                        &self.transcript,
+                        &session.0,
+                        params,
+                        now_ms(),
+                    );
+                    self.emit_all(changes);
                 }
             }
             Inbound::Request { id, method, params } => self.agent_request(id, &method, params),
@@ -82,6 +92,14 @@ impl<R: FnMut(Update)> Session<R> {
             }
         };
         let prompts = &response.agent_capabilities.prompt_capabilities;
+        self.projector.opencode_children =
+            response
+                .agent_capabilities
+                .meta
+                .as_ref()
+                .is_some_and(|meta| {
+                    meta.get(project::opencode::CAPABILITY) == Some(&Value::Bool(true))
+                });
         self.accepts = crate::files::Accepts {
             embedded: prompts.embedded_context,
             image: prompts.image,
@@ -198,9 +216,21 @@ impl<R: FnMut(Update)> Session<R> {
         if self.acp_session.as_ref() != Some(&notification.session_id) {
             return;
         }
-        let changes = self
-            .projector
-            .update(&self.transcript, notification.update, now_ms());
+        let mut update = notification.update;
+        // A conversation the agent replays holds Sheprd's notes ahead of
+        // the person's words: they are hidden, as when they were sent, and
+        // say what the agent was already told.
+        if let wire::SessionUpdate::UserMessageChunk(chunk) = &mut update
+            && let wire::ContentBlock::Text(content) = &mut chunk.content
+            && let Some((note, rest)) = crate::context::split(&content.text)
+        {
+            self.context.heard(note);
+            if rest.is_empty() {
+                return;
+            }
+            content.text = rest.to_owned();
+        }
+        let changes = self.projector.update(&self.transcript, update, now_ms());
         self.emit_all(changes);
     }
 

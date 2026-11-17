@@ -10,12 +10,18 @@ chat-layout-imessage = iMessage
 chat-layout-ia = iA
 chat-layout-opencode = OpenCode
 chat-status-commands = commands
+chat-launcher-agent = Agent button
 chat-launcher-plus = On + hover
 chat-launcher-beside = After +
 chat-launcher-leading = Before tabs
 chat-launcher-trailing = Right end
 chat-launcher-button = One button
 chat-launcher-off = Off
+
+# How an agent's HTML block starts out (Settings > Chat).
+chat-html-render-always = Always
+chat-html-render-never = Never
+chat-html-render-default = Default
 
 # A chat pane's header: the agent's state, the clients watching it, and the
 # button back to the chat from the agent's own terminal.
@@ -103,6 +109,12 @@ chat-copy-message-done = Copied the message
 chat-copy-answers-label = Copy answers
 chat-copy-answers-done = Copied the answers
 chat-copy-code-label = Copy code
+# A code block's button that wraps its long lines, or stops wrapping them.
+chat-code-wrap = Wrap
+chat-code-unwrap = Unwrap
+# An HTML block's buttons that switch between its source and its page.
+chat-page-show-code = Show code
+chat-page-render = Render webpage
 chat-copy-code-done = Copied the code
 chat-copy-diff-label = Copy diff
 chat-copy-diff-done = Copied the diff
@@ -237,6 +249,7 @@ chat-running-stopped = Stopped
 chat-settings-search = Search…
 chat-settings-hint = { $name }: { $value }
 chat-settings-mode = Mode
+chat-settings-agent = Agent
 chat-settings-auto-accept-on = Auto-accepting
 chat-settings-auto-accept-off = Asks first
 chat-settings-no-match = No match

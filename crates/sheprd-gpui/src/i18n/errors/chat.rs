@@ -65,6 +65,7 @@ impl Localize for ConvertError {
             Self::NotConnected => fl!("error-chat-start-not-connected"),
             Self::NotReachable => fl!("error-chat-convert-not-reachable"),
             Self::Program(error) => error.localize(),
+            Self::Remote(error) => fl!("error-chat-convert-core", error = error.to_string()),
             Self::Stale => fl!("error-chat-convert-stale"),
             Self::Type(error) => error.localize(),
             Self::Worker(_) => fl!("error-chat-convert-worker"),
@@ -206,6 +207,8 @@ impl Localize for sheprd_chat_protocol::Rejection {
             Self::UnknownActivity => fl!("error-chat-rejection-unknown-activity"),
             Self::UnknownQueued => fl!("error-chat-rejection-unknown-queued"),
             Self::AgentUnavailable => fl!("error-chat-rejection-agent-unavailable"),
+            Self::AgentFixed => fl!("error-chat-rejection-agent-fixed"),
+            Self::AgentMissing => fl!("error-chat-rejection-agent-missing"),
             Self::TooManyAttachments => fl!(
                 "error-chat-rejection-too-many-attachments",
                 count = sheprd_chat_protocol::MAX_ATTACHMENTS

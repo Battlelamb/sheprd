@@ -14,6 +14,7 @@ mod language;
 mod links;
 mod local_ports;
 mod machine;
+mod memory;
 mod menu_bar;
 mod mods;
 mod open_command;
@@ -24,6 +25,8 @@ mod remote_update;
 mod security;
 mod ui_agent_group;
 mod ui_panel;
+mod usage_pick;
+mod worktrees;
 
 #[test]
 fn build_info_is_an_informational_mode() {

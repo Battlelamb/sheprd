@@ -50,6 +50,18 @@ pub(crate) fn connect(
             target.pane_id.clone(),
         ];
         let command = match &target.route {
+            super::Route::Remote(host) => {
+                let args = args
+                    .iter()
+                    .map(|arg| sheprd_client::shell_quote(arg))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                return Link::start(
+                    Dial::Remote(host.clone(), super::remote_program_script(&args)),
+                    since,
+                    resend,
+                );
+            }
             super::Route::Local => {
                 // Unlike a missing socket directory, this is not permanent:
                 // the lookup started this tick may still be running.
@@ -70,6 +82,10 @@ pub(crate) fn connect(
         return Link::start(Dial::Process(command), since, resend);
     }
     let dial = match &target.route {
+        super::Route::Remote(host) => Dial::Remote(
+            host.clone(),
+            super::remote_program_script(&format!("connect {}", target.endpoint)),
+        ),
         super::Route::Local => Dial::Socket(
             sheprd_chat_protocol::endpoint_address(&target.endpoint).ok_or(Error::NoEndpointDir)?,
         ),
@@ -84,6 +100,8 @@ pub(crate) fn connect(
 /// The menu open over a chat's header.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Menu {
+    /// The agents the chat may still switch to.
+    Agent,
     /// The agent's older list of session modes.
     Modes,
     /// The choices of one setting, by id.
@@ -121,6 +139,8 @@ pub(crate) enum SendButton {
 pub(crate) struct ChatPane {
     /// Files the next prompt carries, in the order they were added.
     pub(crate) attachments: Vec<std::path::PathBuf>,
+    /// What this chat's buttons chose for its code blocks and HTML fences.
+    pub(crate) code: super::code_choices::CodeChoices,
     /// Which slash-command completion is selected.
     pub(crate) completion: usize,
     pub(crate) composer: Option<Entity<MultilineInput>>,
@@ -247,6 +267,7 @@ impl ChatPane {
         prepared.set_remote_links(!target.is_local());
         Self {
             attachments: Vec::new(),
+            code: Default::default(),
             completion: 0,
             composer: None,
             error: None,
@@ -549,6 +570,9 @@ pub(crate) struct Chats {
     pub(crate) launcher_deck: Option<LauncherDeck>,
     /// The layout the lists' rows were last measured in.
     measured: crate::config::ChatLayoutMode,
+    /// The `[chat]` code defaults that change a row's height, as the lists'
+    /// rows were last measured with: wrapping, line numbers, HTML fences.
+    measured_code: (bool, bool, crate::config::HtmlRender),
     /// The locale the panes' prepared text was last drawn in.
     measured_locale: Option<sheprd_i18n::Locale>,
     measured_width: u16,
@@ -565,6 +589,8 @@ pub(crate) struct Chats {
     panes: Vec<ChatPane>,
     /// The `herdr-acp` new chats run.
     pub(crate) program: super::Program,
+    /// Whether that program lets a new chat switch agents.
+    pub(crate) program_choice: super::start::AgentChoice,
     /// Exact pane/process/host targets the user turned back to their terminal.
     /// Two panes may legitimately observe the same session endpoint.
     raw: HashSet<Target>,
@@ -622,6 +648,20 @@ impl Chats {
             return false;
         }
         self.measured = layout;
+        for pane in &self.panes {
+            pane.list.remeasure();
+        }
+        true
+    }
+
+    /// Measures every list's rows again once a code default that changes
+    /// their height changed. Says whether it did.
+    pub(crate) fn recode(&mut self, chat: &crate::config::chat::ChatConfig) -> bool {
+        let code = (chat.wrap_code, chat.code_line_numbers, chat.render_html);
+        if self.measured_code == code {
+            return false;
+        }
+        self.measured_code = code;
         for pane in &self.panes {
             pane.list.remeasure();
         }

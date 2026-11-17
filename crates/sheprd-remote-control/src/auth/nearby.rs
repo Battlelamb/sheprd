@@ -106,16 +106,7 @@ pub(crate) fn shared_secret(daemon: &SecretKey, phone: &PublicKey) -> Result<Zer
 
 /// The 32 bytes of a fingerprint written as hex, with or without colons.
 pub(crate) fn fingerprint_bytes(fingerprint: &str) -> Option<[u8; 32]> {
-    let digits: Vec<u8> = fingerprint.bytes().filter(|byte| *byte != b':').collect();
-    if digits.len() != 64 {
-        return None;
-    }
-    let mut bytes = [0; 32];
-    for (index, pair) in digits.chunks(2).enumerate() {
-        let text = std::str::from_utf8(pair).ok()?;
-        bytes[index] = u8::from_str_radix(text, 16).ok()?;
-    }
-    Some(bytes)
+    crate::control::host_relay::fingerprint_bytes(fingerprint)
 }
 
 /// The fingerprint as 64 uppercase hex digits, no colons.
@@ -147,6 +138,7 @@ impl Exchange<'_> {
         &self,
         token: &[u8; SECRET_LEN],
         origins: &[String],
+        relay: Option<&crate::relay::Info>,
         aes_nonce: &[u8; AES_NONCE_LEN],
     ) -> Result<Revealed> {
         let daemon_point = self.daemon.public_key().to_sec1_bytes();
@@ -166,6 +158,7 @@ impl Exchange<'_> {
             serde_json::to_vec(&Offer {
                 token: encode(token),
                 origins,
+                relay,
             })
             .map_err(|_| Error::NearbyCrypto)?,
         );
@@ -262,6 +255,7 @@ impl StartedSession {
         fingerprint: &str,
         token: &[u8; SECRET_LEN],
         origins: &[String],
+        relay: Option<&crate::relay::Info>,
     ) -> Result<(NearbyRevealed, String)> {
         let phone_nonce: [u8; SECRET_LEN] =
             decode_fixed(phone_nonce).map_err(|_| Error::NearbyCrypto)?;
@@ -274,7 +268,7 @@ impl StartedSession {
             daemon_nonce: &self.nonce,
             fingerprint: &fingerprint,
         }
-        .reveal(token, origins, &aes_nonce)?;
+        .reveal(token, origins, relay, &aes_nonce)?;
         Ok((
             NearbyRevealed {
                 nonce: encode(&self.nonce),
@@ -295,9 +289,13 @@ fn random_secret() -> Result<SecretKey> {
     }
 }
 
-/// What the sealed offer holds: a claim token and where to claim it.
+/// What the sealed offer holds: a claim token and where to claim it, and,
+/// when this computer listens on relays, how to claim through them from
+/// another network (`relay`): the token is also the pairing secret.
 #[derive(serde::Serialize)]
 pub(crate) struct Offer<'a> {
     pub(crate) token: String,
     pub(crate) origins: &'a [String],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) relay: Option<&'a crate::relay::Info>,
 }

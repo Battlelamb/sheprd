@@ -12,6 +12,7 @@ pub(crate) mod chrome_focus;
 pub(crate) mod clipboard;
 #[cfg(target_os = "macos")]
 pub(crate) use clipboard::macos::run_helper as run_clipboard_helper;
+mod clear_notifications;
 mod commands;
 mod config_diagnostic;
 mod construct;
@@ -44,6 +45,7 @@ mod mouse;
 mod pending_input;
 mod plugin_selection;
 pub(crate) mod prefix;
+mod recent_panes;
 mod reconnecting;
 mod regions;
 mod render;
@@ -332,12 +334,15 @@ pub(crate) struct SheprdWindow {
     /// The frame on screen, kept across the gap between two projections.
     pub(crate) presentation: Presentation,
     pub(crate) pressed_terminal_link: Option<PressedLink>,
+    /// Ctrl-Tab's order: the panes focused on any endpoint, most recent first.
+    pub(crate) recent_panes: recent_panes::RecentPanes,
     /// The terminal grid's cached regions; see `host_regions`.
     pub(crate) regions: Vec<regions::RegionLayers>,
     /// Pages remote agents asked for, waiting for their port's forward.
     pub(crate) remote_browser: Vec<crate::remote_browser::Forwarding>,
     /// Sheprd on the other machines the window reaches, and updating it.
     pub(crate) remote_updates: crate::remote_update::RemoteUpdates,
+    pub(crate) remote_work: crate::remote_work::State,
     /// A `worktree.remove` queued after its dialog closed.
     pub(crate) removal: Option<menu::Removal>,
     /// Herdr's resize mode: direction keys resize the focused pane until
@@ -671,6 +676,7 @@ impl SheprdWindow {
         self.save_group_layouts(cx);
         self.poll_browser(window, cx);
         self.poll_remote_browser(window, cx);
+        self.poll_remote_work(window, cx);
         self.poll_chats(window, cx);
         self.offer_browser_skill(window, cx);
         self.poll_sessions(cx);
@@ -736,6 +742,7 @@ impl SheprdWindow {
             cx.notify();
         }
         self.publish_remote_pull_requests(cx);
+        self.publish_github_account(cx);
         self.sync_remote_hosts(window, cx);
         self.reach_device_tags(cx);
         self.update_merged_cleanup(window, cx);

@@ -380,6 +380,8 @@ impl SheprdWindow {
                 | Command::GoToFile
                 | Command::WorktreeNotes
                 | Command::LastPane
+                | Command::RecentPane
+                | Command::RecentPaneReverse
                 | Command::Back
                 | Command::Forward
                 | Command::PreviousWorkspace
@@ -401,6 +403,7 @@ impl SheprdWindow {
                 | Command::ToggleZenMode
                 | Command::DevicesOverview
                 | Command::NotificationHistory
+                | Command::ClearAllNotifications
                 | Command::NewCoreTerminal
                 | Command::MirrorCorePane
                 | Command::ConvertToChat

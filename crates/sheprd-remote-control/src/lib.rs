@@ -22,6 +22,9 @@ mod native;
 #[cfg(feature = "server")]
 mod push;
 #[cfg(feature = "server")]
+mod relay;
+pub mod relay_label;
+#[cfg(feature = "server")]
 pub mod server;
 #[cfg(feature = "server")]
 mod tls;
@@ -29,3 +32,6 @@ mod tls;
 mod web;
 
 pub use error::{Error, Result};
+/// `sheprd-remote-control relays --offer`: relays another computer shares.
+#[cfg(feature = "server")]
+pub use relay::shared as shared_relays;

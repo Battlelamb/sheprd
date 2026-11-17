@@ -172,6 +172,7 @@ pub(crate) fn install_services(personal: bool, cx: &mut App) {
         // Nor do they install or ask the remote control service.
         crate::remote::Supervisor::install(cx);
         crate::device_tags::DeviceTags::install(cx);
+        crate::relay_sharing::RelaySharing::install(cx);
         crate::text_shortcuts::Store::install(cx);
         #[cfg(feature = "cloud")]
         crate::cloud::install_idle_checks(cx);
@@ -459,7 +460,15 @@ pub(crate) fn run() -> std::process::ExitCode {
         }
     };
     let failed = startup_failed.clone();
-    let stores = Stores::load(mode == LaunchMode::Normal);
+    let stores = match Stores::load(mode == LaunchMode::Normal) {
+        Ok(stores) => stores,
+        Err(error) => {
+            tracing::error!(%error, "Cannot acquire saved-tab ownership");
+            // i18n: data
+            eprintln!("Cannot open saved tabs: {error}");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
     crate::composition::application(appearance.dark.config.backdrop.translucent())
         .with_assets(icons::Icons)
         .run(move |cx| {

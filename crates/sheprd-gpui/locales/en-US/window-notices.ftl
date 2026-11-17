@@ -7,10 +7,14 @@
 window-notices-request-failed = { $operation }: { $error }
 # Moving focus to a workspace, tab, or pane.
 window-notices-navigate = Navigate
+window-notices-recent-panes-needs-surface = Recent Pane needs a newer Herdr daemon.
 window-notices-annotate-pages-unsupported = Annotating pages needs macOS or Windows
 window-notices-scrollback-needs-newer = Opening scrollback needs a newer Herdr daemon
 window-notices-clear-needs-newer = Clear Pane needs a newer Herdr daemon.
 window-notices-move-tabs-needs-newer = Moving tabs needs a newer Herdr daemon.
+# A scroll-to-bottom request for the pane an agents-list row names, whose
+# click found the pane already shown; $error says why it could not be sent.
+window-notices-scroll-bottom-failed = Scroll to bottom not sent: { $error }
 
 # The agent skill: installed where one agent looks ($path), or where
 # several do ($count places).

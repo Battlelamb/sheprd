@@ -213,3 +213,81 @@ fn an_agent_that_cannot_resume_starts_anew_with_the_whole_conversation() {
         assert!(blocks[0].contains("User: next"));
     }
 }
+
+#[test]
+fn an_agent_left_before_its_handoff_reached_it_is_handed_everything_again() {
+    let mut harness = choosing();
+    let _codex = handed_to_codex(&mut harness);
+    // Back to Claude before Codex was ever prompted.
+    let (flow, _) = set_agent(&mut harness, Agent::Claude);
+    assert_eq!(
+        flow,
+        Flow::Launch {
+            agent: Agent::Claude,
+            harness: HarnessId(2),
+            load: Some("s1".to_owned()),
+        }
+    );
+    let (claude, open) = start(&mut harness, 2, json!({"loadSession": true}));
+    respond_as(&mut harness, 2, open["id"].as_i64().unwrap(), json!({}));
+    let (turn, _) = sent_prompt(&mut harness, &claude, "more");
+    say_as(&mut harness, 2, "s1", reply("More from Claude"));
+    respond_as(&mut harness, 2, turn, json!({"stopReason": "end_turn"}));
+
+    // Codex's session never heard the conversation, so it is not resumed
+    // as if it had: it starts anew and gets all of it.
+    let (flow, _) = set_agent(&mut harness, Agent::Codex);
+    assert_eq!(
+        flow,
+        Flow::Launch {
+            agent: Agent::Codex,
+            harness: HarnessId(3),
+            load: None,
+        }
+    );
+    let (codex, open) = start(&mut harness, 3, json!({"loadSession": true}));
+    assert_eq!(open["method"], "session/new");
+    respond_as(
+        &mut harness,
+        3,
+        open["id"].as_i64().unwrap(),
+        json!({"sessionId": "c2"}),
+    );
+    let (_, blocks) = sent_prompt(&mut harness, &codex, "your turn");
+    assert!(blocks[0].contains("taking over a conversation"));
+    assert!(blocks[0].contains("User: hello"));
+    assert!(blocks[0].contains("User: more"));
+}
+
+#[test]
+fn an_agent_that_failed_to_start_still_resumes_its_session_later() {
+    let mut harness = choosing();
+    let codex = handed_to_codex(&mut harness);
+    let (turn, _) = sent_prompt(&mut harness, &codex, "next");
+    respond_as(&mut harness, 1, turn, json!({"stopReason": "end_turn"}));
+    set_agent(&mut harness, Agent::Claude);
+    let error = crate::Error::AgentSpawn {
+        program: "claude-agent-acp".to_owned(),
+        source: std::io::Error::from(std::io::ErrorKind::NotFound),
+    };
+    harness.session.launch_failed(&error);
+
+    let (flow, _) = set_agent(&mut harness, Agent::Codex);
+    assert_eq!(
+        flow,
+        Flow::Launch {
+            agent: Agent::Codex,
+            harness: HarnessId(3),
+            load: Some("c1".to_owned()),
+        }
+    );
+    let (flow, _) = set_agent(&mut harness, Agent::Claude);
+    assert_eq!(
+        flow,
+        Flow::Launch {
+            agent: Agent::Claude,
+            harness: HarnessId(4),
+            load: Some("s1".to_owned()),
+        }
+    );
+}

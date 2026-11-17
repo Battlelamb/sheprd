@@ -46,6 +46,10 @@ pub(super) struct Thread {
     /// A resumed session replays its own history, which the transcript
     /// already shows: its updates are ignored until it opens.
     replaying: bool,
+    /// What the current agent knows of the conversation while its handoff
+    /// has not reached it yet; `None` once a prompt carried it (or for the
+    /// chat's first agent), when it has seen the whole transcript.
+    undelivered: Option<Joining>,
 }
 
 impl Thread {
@@ -71,14 +75,16 @@ impl Thread {
 
     /// A prompt reached the agent.
     pub(super) fn prompted(&mut self, shown: &str) {
+        // The prompt carried the handoff, if any: the agent is caught up.
+        self.undelivered = None;
         if self.first_prompt.is_none() {
             self.first_prompt = Some(shown.to_owned());
         }
     }
 
-    /// `from`, whose session is `session`, leaves for `to` after seeing up
-    /// to `seen`. Returns the session `to` should continue, if it took part
-    /// before.
+    /// `from`, whose session is `session`, leaves for `to` with the
+    /// transcript ending at `seen`. Returns the session `to` should
+    /// continue, if it took part before.
     pub(super) fn switch(
         &mut self,
         from: Option<(Agent, String)>,
@@ -92,6 +98,14 @@ impl Thread {
             self.replaying = false;
             return None;
         }
+        // An agent whose handoff never reached it saw only what it knew on
+        // joining; one that joined fresh saw nothing, so it is handed the
+        // whole conversation again rather than resumed.
+        let seen = match self.undelivered.take() {
+            None => seen,
+            Some(Joining::Resume { seen }) => Some(seen),
+            Some(Joining::Fresh) => None,
+        };
         if let (Some((agent, session)), Some(seen)) = (from, seen)
             && sheprd_chat_protocol::restore::session_id_is_plain(&session)
         {
@@ -100,11 +114,18 @@ impl Thread {
         if !self.held.contains(&to) {
             self.held.push(to);
         }
-        match self.left.remove(&to) {
+        // The record stays until the session opens, so a launch that fails
+        // can still resume it later.
+        let joining = match self.left.get(&to) {
+            Some(left) => Joining::Resume { seen: left.seen },
+            None => Joining::Fresh,
+        };
+        self.undelivered = Some(joining);
+        match self.left.get(&to) {
             Some(left) => {
-                self.joining = Some(Joining::Resume { seen: left.seen });
+                self.joining = Some(joining);
                 self.replaying = true;
-                Some(left.session)
+                Some(left.session.clone())
             }
             None => {
                 self.joining = Some(Joining::Fresh);
@@ -123,6 +144,7 @@ impl Thread {
     pub(super) fn resume_failed(&mut self) {
         if self.joining.is_some() {
             self.joining = Some(Joining::Fresh);
+            self.undelivered = Some(Joining::Fresh);
         }
         self.replaying = false;
     }
@@ -141,6 +163,9 @@ impl Thread {
             Joining::Resume { seen } if loaded => Joining::Resume { seen },
             _ => Joining::Fresh,
         };
+        // Its earlier session is continued or replaced now.
+        self.left.remove(&agent);
+        self.undelivered = Some(joining);
         let others: Vec<Agent> = self
             .held
             .iter()
@@ -160,7 +185,12 @@ impl Thread {
                 let since = entries.partition_point(|entry| entry.id <= seen);
                 handoff::build(&entries[since..], Scope::Since, &others, handoff::BUDGET)
             }
-        }?;
+        };
+        let Some(built) = built else {
+            // Nothing to hand over: it already knows the conversation.
+            self.undelivered = None;
+            return None;
+        };
         self.handoff = Some(built.text.clone());
         Some((joining, built))
     }

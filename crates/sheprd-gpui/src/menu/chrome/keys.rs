@@ -189,6 +189,10 @@ impl SheprdWindow {
             self.add_wsl_key(event, window, cx);
             return;
         }
+        if self.menu.page == Some(Page::AddNearby) {
+            self.add_nearby_key(event, window, cx);
+            return;
+        }
         if self.menu.page == Some(Page::RemoveWsl) {
             self.remove_wsl_key(event, window, cx);
             return;

@@ -504,6 +504,7 @@ impl SheprdWindow {
                         | Page::GitLab
                         | Page::AzureDevOps
                         | Page::AddDevice
+                        | Page::AddNearby
                         | Page::AddWsl
                         | Page::Usage(_)
                         | Page::RenameDevice
@@ -592,6 +593,7 @@ impl SheprdWindow {
                     page,
                     Page::AppUpdate
                         | Page::AddDevice
+                        | Page::AddNearby
                         | Page::AddWsl
                         | Page::RenameDevice
                         | Page::ForwardPort
@@ -677,6 +679,8 @@ impl SheprdWindow {
             panel = panel.child(dialog);
         } else if page == Page::AddWsl {
             panel = panel.child(self.render_add_wsl(compact_rail, cx));
+        } else if page == Page::AddNearby {
+            panel = panel.child(self.render_add_nearby(compact_rail, cx));
         } else if page == Page::RemoveWsl {
             panel = panel.child(self.render_remove_wsl(cx));
         } else if page == Page::GitHub {

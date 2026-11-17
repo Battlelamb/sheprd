@@ -491,8 +491,9 @@ only from another Sheprd whose user approved it in that app's dialog;
 `cloud create` installs Herdr only on the machines the user confirmed, as
 creating them in Settings does.
 
-Adding an SSH or local network device has no command: the Add Device dialog
-runs it. Its setup workspace runs `sheprd __device-setup-attach SOCKET`,
+Adding an SSH or local network device, or a nearby Sheprd over Bluetooth,
+has no command: the Add Device dialog runs it, and the other computer opens
+`remote pair`. Its setup workspace runs `sheprd __device-setup-attach SOCKET`,
 an internal helper that shows the setup the app runs (see the Native Shell
 README's "Local Network access"); it is not a command to call yourself, and
 the socket it names is single use.

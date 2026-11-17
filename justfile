@@ -210,7 +210,7 @@ bundle profile="release" features="":
     # Bluetooth pairing and presence run the Swift helper beside it; without
     # it the app pairs over the network only.
     xcrun swiftc -O -swift-version 6 macos/sheprd-nearby/main.swift macos/sheprd-nearby/Framing.swift \
-        macos/sheprd-nearby/Bonjour.swift -o "$app/Contents/MacOS/sheprd-nearby"
+        macos/sheprd-nearby/Bonjour.swift macos/sheprd-nearby/Central.swift -o "$app/Contents/MacOS/sheprd-nearby"
     # Herdr 2 terminals run in the pinned herdr-core beside it, as releases
     # bundle it. Fetched once per profile; an offline build goes on without.
     core=target/{{profile}}/herdr-core

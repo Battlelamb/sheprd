@@ -146,3 +146,94 @@ fn a_linked_relay_is_added_with_its_token_only_on_add(cx: &mut TestAppContext) {
     );
     assert!(cx.debug_bounds("remote-relay-linked").is_none());
 }
+
+/// Every config write fails, as a full disk or a read-only file would.
+fn failing_writes(view: &Entity<SettingsWindow>, cx: &mut VisualTestContext) {
+    view.update(cx, |view, _| {
+        view.controls.preference_io = Some(controls::preferences::PreferenceIo {
+            write: Arc::new(|_| Err(std::io::Error::other("read-only").into())),
+            load: Arc::new(skill_load),
+        });
+    });
+}
+
+#[gpui::test]
+fn a_relay_whose_removal_failed_keeps_its_token(cx: &mut TestAppContext) {
+    let (view, cx, _) = private_page(cx);
+    view.update(cx, |view, cx| {
+        view.config.remote.relays = vec!["https://relay.example.org".into()];
+        cx.notify();
+    });
+    draw(cx);
+    failing_writes(&view, cx);
+    click(cx, "remote-relay-0-remove");
+    assert!(kept().is_empty());
+}
+
+#[gpui::test]
+fn a_late_answer_never_takes_over_the_prompt_being_typed_in(cx: &mut TestAppContext) {
+    let (view, cx, _) = private_page(cx);
+    view.update(cx, |view, cx| {
+        view.check_relay_token("https://first.example.org".into(), cx);
+        // Before the first relay answers, the user opens another's token.
+        view.ask_relay_token("https://second.example.org".into(), cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        view.read_with(cx, |view, _| view.remote.token.relay.clone()),
+        Some("https://second.example.org".to_owned())
+    );
+
+    // Nor does an answer about a relay removed meanwhile.
+    view.update(cx, |view, cx| {
+        view.config.remote.relays = vec!["https://gone.example.org".into()];
+        view.remote.token.relay = None;
+        view.check_relay_token("https://gone.example.org".into(), cx);
+        view.remove_remote_relay(0, cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        view.read_with(cx, |view, _| view.remote.token.relay.clone()),
+        None
+    );
+}
+
+#[gpui::test]
+fn a_linked_relay_stays_offered_until_its_list_is_saved(cx: &mut TestAppContext) {
+    let (view, cx, edits) = private_page(cx);
+    view.update(cx, |view, cx| {
+        let token = ListenToken::parse(TOKEN).unwrap();
+        view.offer_linked_relay("https://linked.example.org".into(), token, cx);
+        // Another save is running: Add waits for it.
+        view.saving = true;
+        cx.notify();
+    });
+    draw(cx);
+    click(cx, "remote-relay-linked-add");
+    assert!(kept().is_empty());
+    assert!(cx.debug_bounds("remote-relay-linked").is_some());
+
+    // A save that fails keeps the offer, to add again.
+    view.update(cx, |view, cx| {
+        view.saving = false;
+        cx.notify();
+    });
+    draw(cx);
+    failing_writes(&view, cx);
+    click(cx, "remote-relay-linked-add");
+    assert_eq!(kept().len(), 1);
+    assert!(edits.lock().unwrap().is_empty());
+    assert!(cx.debug_bounds("remote-relay-linked").is_some());
+}
+
+#[gpui::test]
+fn a_token_can_be_forgotten_while_the_daemon_is_off(cx: &mut TestAppContext) {
+    let (view, cx, _) = private_page(cx);
+    cx.update(|_, cx| crate::remote::Supervisor::set_health(cx, crate::remote::Health::Off, None));
+    view.update(cx, |view, cx| {
+        view.ask_relay_token("https://relay.example.org".into(), cx);
+    });
+    draw(cx);
+    click(cx, "remote-relay-token-forget");
+    assert_eq!(kept(), [("https://relay.example.org".to_owned(), None)]);
+}

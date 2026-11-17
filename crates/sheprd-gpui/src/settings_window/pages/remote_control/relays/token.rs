@@ -6,13 +6,13 @@
 
 use super::{SettingsWindow, ui};
 use crate::{
-    config::remote::relay_address,
+    config::{
+        preferences::Preference,
+        remote::{Edit, Relay},
+    },
     i18n::{Localize, fl},
     relay_sharing::RelaySharing,
-    remote::{
-        Health,
-        relay_token::{self, ListenToken},
-    },
+    remote::relay_token::{self, ListenToken},
     search_input::SearchInput,
 };
 use gpui::{prelude::*, *};
@@ -30,8 +30,11 @@ pub(in crate::settings_window) struct TokenPrompt {
     input: Option<Entity<SearchInput>>,
     /// Why the last token was not kept, in the user's language.
     pub(in crate::settings_window) error: Option<String>,
-    /// A token is being kept or checked.
+    /// A token is being kept.
     saving: bool,
+    /// Bumped by each relay checked, each prompt opened, and each relay
+    /// removed, so a relay's late answer never takes over a newer prompt.
+    checks: u64,
     /// A relay and its token from a link, until the user adds or dismisses it.
     pub(in crate::settings_window) linked: Option<(String, ListenToken)>,
     pub(in crate::settings_window) check: Check,
@@ -51,27 +54,12 @@ impl Default for TokenPrompt {
             input: None,
             error: None,
             saving: false,
+            checks: 0,
             linked: None,
             check,
             keep,
         }
     }
-}
-
-/// Whether the daemon says it listens on `relay` with a token.
-fn has_token(relay: &str, health: &Health) -> bool {
-    let Health::Running(status) = health else {
-        return false;
-    };
-    status
-        .relays
-        .get(relay)
-        .or_else(|| {
-            relay_address(relay)
-                .ok()
-                .and_then(|address| status.relays.get(&address))
-        })
-        .is_some_and(|status| status.token)
 }
 
 impl SettingsWindow {
@@ -82,6 +70,7 @@ impl SettingsWindow {
         cx: &mut Context<Self>,
     ) {
         let prompt = &mut self.remote.token;
+        prompt.checks += 1;
         prompt.relay = Some(relay);
         prompt.error = None;
         let input = prompt
@@ -111,14 +100,20 @@ impl SettingsWindow {
         address: String,
         cx: &mut Context<Self>,
     ) {
-        let check = self.remote.token.check;
+        let prompt = &mut self.remote.token;
+        prompt.checks += 1;
+        let (check, current) = (prompt.check, prompt.checks);
         let asked = address.clone();
         let work = cx.background_executor().spawn(async move { check(&asked) });
         cx.spawn(async move |this, cx| {
             let wants = work.await;
             let _ = this.update(cx, |this, cx| match wants {
-                Ok(true) => this.ask_relay_token(address, cx),
-                Ok(false) => {}
+                // Only while nothing newer was checked, opened, or removed:
+                // a prompt the user is typing in is never replaced.
+                Ok(true) if this.remote.token.checks == current => {
+                    this.ask_relay_token(address, cx);
+                }
+                Ok(_) => {}
                 Err(error) => tracing::info!(%error, "Could not ask a relay whether it is private"),
             });
         })
@@ -136,7 +131,7 @@ impl SettingsWindow {
     }
 
     /// Keeps `token` for `relay`, or forgets it, off the UI thread; then
-    /// `done` runs with the outcome, and every other computer hears of it.
+    /// `done` runs once it is kept, and every other computer hears of it.
     fn keep_relay_token(
         &mut self,
         relay: String,
@@ -194,24 +189,31 @@ impl SettingsWindow {
         self.keep_relay_token(relay, None, Self::close_relay_token, cx);
     }
 
-    /// A removed relay's token goes with it. Quietly: the relay is gone
-    /// from the list either way.
-    pub(in crate::settings_window) fn forget_removed_relay_token(
+    /// Saves `relays`, the list without `removed`, then forgets `removed`'s
+    /// token, only once the list is saved: a failed save keeps the relay
+    /// listed, and its token with it. Quietly: the relay is gone either way.
+    pub(in crate::settings_window) fn remove_relay_and_token(
         &mut self,
-        relay: String,
+        relays: Vec<Relay>,
+        removed: String,
         cx: &mut Context<Self>,
     ) {
-        if self.remote.token.relay.as_deref() == Some(relay.as_str()) {
+        // An answer about the removed relay, still on its way, is dropped.
+        self.remote.token.checks += 1;
+        if self.remote.token.relay.as_deref() == Some(removed.as_str()) {
             self.close_relay_token(cx);
         }
         let keep = self.remote.token.keep;
-        cx.background_executor()
-            .spawn(async move {
-                if let Err(error) = keep(&relay, None) {
-                    tracing::debug!(%error, "Could not forget a removed relay's token");
-                }
-            })
-            .detach();
+        let forget = move |cx: &mut Context<Self>| {
+            cx.background_executor()
+                .spawn(async move {
+                    if let Err(error) = keep(&removed, None) {
+                        tracing::debug!(%error, "Could not forget a removed relay's token");
+                    }
+                })
+                .detach();
+        };
+        self.save_preference_then(Preference::Remote(Edit::Relays(relays)), forget, cx);
     }
 
     /// Shows a relay and token a link brought, for the user to add.
@@ -227,8 +229,13 @@ impl SettingsWindow {
     }
 
     /// Add's click on a linked relay: its token first, so the daemon the
-    /// new list restarts already has it, then the relay.
+    /// new list restarts already has it, then the relay. The offer stays
+    /// until the list naming the relay is saved, so a save that could not
+    /// run, or failed, leaves Add to click again.
     pub(in crate::settings_window) fn add_linked_relay(&mut self, cx: &mut Context<Self>) {
+        if self.busy() {
+            return;
+        }
         let Some((relay, token)) = self.remote.token.linked.clone() else {
             return;
         };
@@ -237,8 +244,24 @@ impl SettingsWindow {
             relay,
             Some(token),
             move |this, cx| {
-                this.remote.token.linked = None;
-                this.save_with_relay(address, cx);
+                if this.lists_relay(&address) {
+                    this.remote.token.linked = None;
+                    return;
+                }
+                let mut relays = this.config.remote.relays.clone();
+                relays.push(address.into());
+                // Runs inside the save's own update, so the offer is
+                // dropped just after it.
+                let added = |cx: &mut Context<Self>| {
+                    cx.spawn(async move |this, cx| {
+                        let _ = this.update(cx, |this, cx| {
+                            this.remote.token.linked = None;
+                            cx.notify();
+                        });
+                    })
+                    .detach();
+                };
+                this.save_preference_then(Preference::Remote(Edit::Relays(relays)), added, cx);
             },
             cx,
         );
@@ -247,7 +270,6 @@ impl SettingsWindow {
     /// The row asking for a token, if one is asked for.
     pub(in crate::settings_window) fn relay_token_row(
         &self,
-        health: &Health,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let prompt = &self.remote.token;
@@ -269,6 +291,17 @@ impl SettingsWindow {
         .when(idle, |button| {
             button.on_click(cx.listener(|this, _, _, cx| this.save_relay_token(cx)))
         });
+        // Offered whether or not the daemon runs: the token is in a file,
+        // and forgetting one never kept does nothing.
+        let forget = ui::button(
+            theme,
+            "remote-relay-token-forget",
+            fl!("settings-remote-relay-token-forget"),
+            idle,
+        )
+        .when(idle, |button| {
+            button.on_click(cx.listener(|this, _, _, cx| this.forget_relay_token(cx)))
+        });
         let cancel = ui::button(
             theme,
             "remote-relay-token-cancel",
@@ -277,17 +310,6 @@ impl SettingsWindow {
         )
         .when(idle, |button| {
             button.on_click(cx.listener(|this, _, _, cx| this.close_relay_token(cx)))
-        });
-        let forget = has_token(relay, health).then(|| {
-            ui::button(
-                theme,
-                "remote-relay-token-forget",
-                fl!("settings-remote-relay-token-forget"),
-                idle,
-            )
-            .when(idle, |button| {
-                button.on_click(cx.listener(|this, _, _, cx| this.forget_relay_token(cx)))
-            })
         });
         let row = ui::row(
             theme,
@@ -301,12 +323,10 @@ impl SettingsWindow {
                 .unwrap_or_else(|| fl!("settings-remote-relay-token-note")),
         )
         .control(field)
-        .control(save);
-        let row = match forget {
-            Some(forget) => row.control(forget),
-            None => row,
-        };
-        Some(row.control(cancel).into_any_element())
+        .control(save)
+        .control(forget)
+        .control(cancel);
+        Some(row.into_any_element())
     }
 
     /// The row offering a relay a link brought, if any.
@@ -317,7 +337,9 @@ impl SettingsWindow {
         let prompt = &self.remote.token;
         let (relay, _) = prompt.linked.as_ref()?;
         let theme = &self.theme;
-        let idle = !prompt.saving;
+        // Not while another save runs: the list naming the relay would not
+        // be saved.
+        let idle = !prompt.saving && !self.busy();
         let add = ui::button(
             theme,
             "remote-relay-linked-add",

@@ -242,8 +242,7 @@ impl SettingsWindow {
         let mut relays = self.config.remote.relays.clone();
         if index < relays.len() {
             let removed = relays.remove(index);
-            self.save_remote(Edit::Relays(relays), cx);
-            self.forget_removed_relay_token(removed.endpoint, cx);
+            self.remove_relay_and_token(relays, removed.endpoint, cx);
         }
     }
 
@@ -280,7 +279,7 @@ impl SettingsWindow {
         let theme = &self.theme;
         let relays = &self.config.remote.relays;
         let idle = !self.busy();
-        let (linked, token_row) = (self.linked_relay_row(cx), self.relay_token_row(health, cx));
+        let (linked, token_row) = (self.linked_relay_row(cx), self.relay_token_row(cx));
         let rows = relays.iter().enumerate().map(|(index, relay)| {
             let address = crate::notifications::safe_text(&relay.endpoint, 200);
             let name = relay.label.name.as_deref().map_or_else(

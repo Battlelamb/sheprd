@@ -4,6 +4,7 @@ use anyhow::{Context as _, Result, ensure};
 use chrono::{Days, Utc};
 use service::Snapshot;
 use sheprd_client::herdr::AgentKind;
+use sheprd_control_protocol::protocol::app::TraceFilter;
 use sheprd_traces::{Activity, EventKind, Session, Visibility};
 use std::{sync::Arc, time::Duration};
 
@@ -32,6 +33,16 @@ async fn run(handle: WindowHandle<SheprdWindow>, cx: &mut AsyncApp) -> Result<()
                 view.config.sidebar_style.activity_bar = true;
                 view.activity.panel = ActivityPanel::Traces;
                 view.traces.status = Status::Ready(snapshot.clone());
+                view.traces.peers = vec![
+                    replication::Report {
+                        host: "Buildbox".into(), // i18n: data
+                        state: replication::Phase::Ready,
+                    }, // i18n: data
+                    replication::Report {
+                        host: "Studio".into(), // i18n: data
+                        state: replication::Phase::Syncing,
+                    }, // i18n: data
+                ];
                 view.ensure_traces_page(cx);
                 window.resize(size(px(width), px(900.)));
                 cx.notify();
@@ -40,10 +51,32 @@ async fn run(handle: WindowHandle<SheprdWindow>, cx: &mut AsyncApp) -> Result<()
             capture(handle, &format!("{label}-{width}"), cx).await?;
         }
     }
+    for (scope, label) in [
+        (TraceFilter::Tag { tag: "work".into() }, "tag-work"),
+        (
+            TraceFilter::Host {
+                id: "demo-host-0".into(),
+            },
+            "host-workstation",
+        ),
+    ] {
+        handle.update(cx, |view, window, cx| -> Result<()> {
+            view.config.theme = "Catppuccin Mocha".into(); // i18n: data
+            view.theme = view.config.theme(false)?;
+            view.set_trace_filter(scope.clone(), cx);
+            if let Some(page) = &mut view.traces.page {
+                page.activity = Some(Ok(activity(&snapshot, &scope)));
+            }
+            window.resize(size(px(1400.), px(1000.)));
+            cx.notify();
+            Ok(())
+        })??;
+        capture(handle, label, cx).await?;
+    }
     handle.update(cx, |view, window, cx| -> Result<()> {
         view.config.theme = "Catppuccin Mocha".into(); // i18n: data
         view.theme = view.config.theme(false)?;
-        view.ensure_traces_page(cx);
+        view.set_trace_filter(TraceFilter::All, cx);
         let page = view.traces.page.as_mut().context("missing traces page")?;
         page.selected = Some(snapshot.sessions[0].id.clone());
         page.detail = Some(Detail::Loaded(events()));
@@ -65,8 +98,16 @@ async fn capture(handle: WindowHandle<SheprdWindow>, label: &str, cx: &mut Async
             .map_err(|_| anyhow::anyhow!("unexpected root"))?;
         ensure!(view.read(cx).activity_section() == Some(ActivityPanel::Traces));
         window.draw(cx).clear(cx);
+        // The explicit draw above consumes the dirty scene without presenting
+        // it through X11's frame callback. Schedule that presentation too.
+        window.refresh();
         Ok(())
     })??;
+    // X11 captures read the presented window, not GPUI's scene. Let the
+    // refreshed frame reach the compositor before reading that window.
+    cx.background_executor()
+        .timer(Duration::from_millis(250))
+        .await;
     #[cfg(any(feature = "mockup", target_os = "linux"))]
     if let Some(path) = std::env::var_os("HERDR_TEST_TRACES_CAPTURE") {
         let path = std::path::PathBuf::from(path).with_extension(format!("{label}.png"));
@@ -122,8 +163,8 @@ fn snapshot() -> Snapshot {
         .enumerate()
         .map(|(i, title)| Session {
             id: format!("demo-{i}"),
-            host_id: "demo-host".into(),
-            host: "Workstation".into(), // i18n: data
+            host_id: format!("demo-host-{}", i % 3),
+            host: ["Workstation", "Buildbox", "Studio"][i % 3].into(), // i18n: data
             agent: agents[i % agents.len()],
             native_id: format!("demo-{i}"),
             user: "demo@workstation".into(),
@@ -150,20 +191,57 @@ fn snapshot() -> Snapshot {
             visibility: Visibility::Private,
         })
         .collect();
+    let hosts = [
+        ("Workstation", "personal"), // i18n: data
+        ("Buildbox", "work"),        // i18n: data
+        ("Studio", "work"),          // i18n: data
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, (label, tag))| sheprd_client::device_tags::TaggedHost {
+        id: format!("demo-host-{i}"),
+        label: label.into(),
+        tags: sheprd_client::device_tags::ComputerTags::new([tag], 1),
+    })
+    .collect();
+    let mut snapshot = Snapshot {
+        sessions,
+        hosts,
+        ..Snapshot::default()
+    };
+    snapshot.activity = activity(&snapshot, &TraceFilter::All);
+    snapshot
+}
+
+fn activity(snapshot: &Snapshot, scope: &TraceFilter) -> Vec<Activity> {
+    let today = Utc::now().date_naive();
+    let agents = model::agents(&snapshot.sessions);
     let mut activity = Vec::new();
     for day in 0..30 {
-        for (i, agent) in agents.iter().enumerate() {
-            if let Some(date) = now.date_naive().checked_sub_days(Days::new(day)) {
-                activity.push(Activity {
-                    day: date.to_string(),
-                    agent: *agent,
-                    sessions: 1,
-                    messages: ((day as i64 * 7 + i as i64 * 11) % 43) + 3,
-                });
+        for (h, host) in snapshot
+            .hosts
+            .iter()
+            .enumerate()
+            .filter(|(_, host)| scope.includes(&host.id, &snapshot.hosts))
+        {
+            for (i, agent) in agents.iter().enumerate().filter(|(_, agent)| {
+                snapshot
+                    .sessions
+                    .iter()
+                    .any(|s| s.host_id == host.id && s.agent == **agent)
+            }) {
+                if let Some(date) = today.checked_sub_days(Days::new(day)) {
+                    activity.push(Activity {
+                        day: date.to_string(),
+                        agent: *agent,
+                        sessions: 1,
+                        messages: ((day as i64 * 7 + i as i64 * 11 + h as i64 * 5) % 43) + 3,
+                    });
+                }
             }
         }
     }
-    Snapshot { sessions, activity }
+    activity
 }
 
 fn events() -> Vec<Event> {

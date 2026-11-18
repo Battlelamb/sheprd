@@ -1,8 +1,8 @@
 //! `sheprd-acp traces`: this host's index of agent sessions. `index` scans
 //! the agents' session files into it; `watch` keeps it current as agents
 //! write and prints each changed session; `list` and `activity` read it.
-//! Sheprd runs these on each host it reaches, so the parsing and redaction
-//! happen where the files are.
+//! Sheprd runs `exchange` on connected hosts, so parsing and redaction happen
+//! where the files are and every host retains local and forwarded records.
 //!
 //! `watch --json` is a stream of JSON lines: one `host` line first, then a
 //! `session` line for each session that changed, and a `heartbeat` line
@@ -27,6 +27,11 @@ const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Command {
+    /// One bounded, bidirectional replication exchange over stdin/stdout.
+    Exchange,
+    Peers {
+        json: bool,
+    },
     Index {
         json: bool,
     },
@@ -56,6 +61,28 @@ pub(crate) fn run(command: Command) -> Result<()> {
         Ok((host, roots, Redactor::new(Some(&home))))
     };
     match command {
+        Command::Exchange => {
+            let (host, roots, redactor) = local()?;
+            sheprd_traces::index(&mut store, &host, &roots, &redactor, now)?;
+            sheprd_traces::sync::serve(&mut store, io::stdin().lock(), io::stdout().lock())?;
+        }
+        Command::Peers { json } => {
+            let peers = store.sync_peers()?;
+            if json {
+                println!("{}", serde_json::to_string(&peers)?);
+            } else {
+                for peer in peers {
+                    println!(
+                        "{}  received={} sent={}  {}",
+                        peer.route,
+                        peer.received,
+                        peer.sent,
+                        peer.synced_at
+                            .map_or_else(|| "not synchronized yet".into(), time)
+                    );
+                }
+            }
+        }
         Command::Watch { json } => {
             let (host, roots, redactor) = local()?;
             let stop = AtomicBool::new(false);

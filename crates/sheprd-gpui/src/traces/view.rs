@@ -65,6 +65,7 @@ impl SheprdWindow {
                             .flex_col()
                             .gap_5()
                             .child(header(&look, page))
+                            .child(replication(&look, &self.traces.peers))
                             .child(body),
                     ),
             )
@@ -80,22 +81,47 @@ impl SheprdWindow {
     ) -> Div {
         let now = chrono::Utc::now();
         let agents = model::agents(&snapshot.sessions);
-        let shown = model::shown(&snapshot.sessions, &page.filter, now.timestamp_millis());
+        let shown = model::shown(
+            &snapshot.sessions,
+            &page.filter,
+            now.timestamp_millis(),
+            &snapshot.hosts,
+        );
         let totals = model::totals(&shown);
-        let chart = model::chart(&snapshot.activity, &agents, &page.filter, now.date_naive());
-        let selected = page.selected.as_deref().and_then(|selected| {
-            snapshot
-                .sessions
-                .iter()
-                .find(|session| session.id == selected)
-        });
+        let activity = if matches!(
+            page.filter.scope,
+            sheprd_control_protocol::protocol::app::TraceFilter::All
+        ) {
+            Some(Ok(snapshot.activity.as_slice()))
+        } else {
+            page.activity.as_ref().map(|result| result.as_deref())
+        };
+        let chart = match activity {
+            Some(Ok(activity)) => chart::messages(
+                look,
+                &model::chart(activity, &agents, &page.filter, now.date_naive()),
+                page.filter.range,
+            )
+            .into_any_element(),
+            Some(Err(error)) => note(
+                look,
+                fl!("traces-activity-failed", error = error.to_string()),
+            )
+            .into_any_element(),
+            None => note(look, fl!("traces-activity-loading")).into_any_element(),
+        };
+        let selected = page
+            .selected
+            .as_deref()
+            .and_then(|selected| shown.iter().copied().find(|session| session.id == selected));
         div()
             .flex()
             .flex_col()
             .gap_5()
             .child(self.trace_filters(look, page, &agents, cx))
+            .child(self.trace_host_filters(look, &snapshot.hosts, &page.filter.scope, cx))
             .child(tiles(look, &totals))
-            .child(chart::messages(look, &chart, page.filter.range))
+            .child(chart)
             .child(
                 div()
                     .flex()
@@ -293,6 +319,34 @@ fn header(look: &Look, page: &Page) -> Div {
                 .max_w(px(320.))
                 .child(page.search.clone()),
         )
+}
+
+fn replication(look: &Look, peers: &[super::replication::Report]) -> Div {
+    use super::replication::Phase;
+    div()
+        .debug_selector(|| "traces-replication".into())
+        .flex()
+        .flex_col()
+        .gap_1()
+        .text_size(look.small())
+        .text_color(rgb(look.theme.subtext()))
+        .child(fl!("traces-replication-summary", count = peers.len()))
+        .children(peers.iter().map(|peer| {
+            let status = match &peer.state {
+                Phase::Waiting => fl!("traces-replication-waiting"),
+                Phase::Syncing => fl!("traces-replication-syncing"),
+                Phase::Ready => fl!("traces-replication-ready"),
+                Phase::Failed { error } => fl!(
+                    "traces-replication-failed",
+                    error = crate::notifications::safe_text(&error.to_string(), 512)
+                ),
+            };
+            div().child(fl!(
+                "traces-replication-peer",
+                host = peer.host.as_str(),
+                status = status
+            ))
+        }))
 }
 
 fn tiles(look: &Look, totals: &Totals) -> Div {

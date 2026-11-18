@@ -21,6 +21,8 @@ pub enum Error {
     Private(#[from] sheprd_client::private_file::Error),
     #[error("Saved parser state is not valid: {0}")]
     State(#[source] serde_json::Error),
+    #[error(transparent)]
+    Sync(#[from] crate::sync::Error),
     #[error("Could not watch session files: {0}")]
     Watch(#[from] notify::Error),
 }

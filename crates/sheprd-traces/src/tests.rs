@@ -18,7 +18,7 @@ fn host() -> Host {
     Host {
         id: Host::id_of("test-machine"),
         label: "box".into(),
-        os: "linux",
+        os: "linux".into(),
         user: "me@box".into(),
     }
 }

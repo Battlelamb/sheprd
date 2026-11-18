@@ -10,7 +10,7 @@ use sheprd_client::herdr::AgentKind;
 use std::{path::Path, time::Duration};
 
 /// The newest schema this build reads and writes.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 3;
 /// The most sessions or events one read returns.
 pub const MAX_LIMIT: usize = 1000;
 
@@ -99,7 +99,7 @@ pub(crate) struct Cursor {
 /// The index, open.
 #[derive(Debug)]
 pub struct Store {
-    connection: Connection,
+    pub(crate) connection: Connection,
 }
 
 impl Store {
@@ -129,8 +129,14 @@ impl Store {
         }
         if found < 1 {
             transaction.execute_batch(SCHEMA_V1)?;
-            transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
+        if found < 2 {
+            crate::sync::storage::migrate(&transaction)?;
+        }
+        if found < 3 {
+            crate::sync::tags::migrate(&transaction)?;
+        }
+        transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         transaction.commit()?;
         Ok(Self { connection })
     }
@@ -206,6 +212,13 @@ impl Store {
             }
         }
         recount(&transaction, &update.cursor.session_id)?;
+        crate::sync::storage::record_local(
+            &transaction,
+            update.host,
+            &update.cursor.session_id,
+            update.events,
+            update.restart,
+        )?;
         transaction.execute(
             "INSERT INTO file_cursors (host_id, path, session_id, ident, offset, parser)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -245,56 +258,38 @@ impl Store {
 
     /// The session `session_id`, if indexed.
     pub fn session(&self, session_id: &str) -> Result<Option<Session>> {
-        let mut statement = self.connection.prepare_cached(&format!(
-            "SELECT {COLUMNS} FROM sessions s JOIN hosts h USING (host_id)
-             WHERE s.session_id = ?1"
-        ))?;
-        Ok(statement
-            .query_row([session_id], session)
-            .optional()?
-            .flatten())
+        session_on(&self.connection, session_id)
     }
 
     /// The events of `session_id` from `seq` on, oldest first.
     pub fn events(&self, session_id: &str, from: i64, limit: usize) -> Result<Vec<Event>> {
-        let mut statement = self.connection.prepare_cached(
-            "SELECT seq, at, kind, tool, text FROM events
-             WHERE session_id = ?1 AND seq >= ?2 ORDER BY seq LIMIT ?3",
-        )?;
-        let rows = statement.query_map(
-            params![session_id, from, limit.min(MAX_LIMIT) as i64],
-            |row| {
-                let kind: String = row.get(2)?;
-                let Some(kind) = EventKind::parse(&kind) else {
-                    return Ok(None);
-                };
-                Ok(Some(Event {
-                    seq: row.get(0)?,
-                    at: row.get(1)?,
-                    kind,
-                    tool: row.get(3)?,
-                    text: row.get(4)?,
-                }))
-            },
-        )?;
-        let mut events = Vec::new();
-        for row in rows {
-            events.extend(row?);
-        }
-        Ok(events)
+        events_on(&self.connection, session_id, from, limit)
     }
 
     /// Sessions and messages per UTC day and agent since `since` (Unix
     /// milliseconds), oldest day first.
     pub fn activity(&self, since: i64) -> Result<Vec<Activity>> {
+        self.activity_for(since, i64::MAX, None)
+    }
+
+    /// Daily totals over a bounded interval and optional source-host set.
+    /// `None` includes every host; an empty set deliberately includes none.
+    pub fn activity_for(
+        &self,
+        since: i64,
+        until: i64,
+        hosts: Option<&[&str]>,
+    ) -> Result<Vec<Activity>> {
+        let hosts = hosts.map(|hosts| serde_json::json!(hosts).to_string());
         let mut statement = self.connection.prepare_cached(
             "SELECT date(e.at / 1000, 'unixepoch') AS day, s.agent,
                     count(DISTINCT e.session_id), count(*)
              FROM events e JOIN sessions s USING (session_id)
-             WHERE e.at >= ?1 AND e.kind IN ('user', 'agent')
+             WHERE e.at >= ?1 AND e.at <= ?2 AND e.kind IN ('user', 'agent')
+               AND (?3 IS NULL OR s.host_id IN (SELECT value FROM json_each(?3)))
              GROUP BY day, s.agent ORDER BY day, s.agent",
         )?;
-        let rows = statement.query_map([since], |row| {
+        let rows = statement.query_map(params![since, until, hosts], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -316,6 +311,50 @@ impl Store {
         }
         Ok(activity)
     }
+}
+
+pub(crate) fn session_on(connection: &Connection, session_id: &str) -> Result<Option<Session>> {
+    let mut statement = connection.prepare_cached(&format!(
+        "SELECT {COLUMNS} FROM sessions s JOIN hosts h USING (host_id)
+             WHERE s.session_id = ?1"
+    ))?;
+    Ok(statement
+        .query_row([session_id], session)
+        .optional()?
+        .flatten())
+}
+
+pub(crate) fn events_on(
+    connection: &Connection,
+    session_id: &str,
+    from: i64,
+    limit: usize,
+) -> Result<Vec<Event>> {
+    let mut statement = connection.prepare_cached(
+        "SELECT seq, at, kind, tool, text FROM events
+             WHERE session_id = ?1 AND seq >= ?2 ORDER BY seq LIMIT ?3",
+    )?;
+    let rows = statement.query_map(
+        params![session_id, from, limit.min(MAX_LIMIT) as i64],
+        |row| {
+            let kind: String = row.get(2)?;
+            let Some(kind) = EventKind::parse(&kind) else {
+                return Ok(None);
+            };
+            Ok(Some(Event {
+                seq: row.get(0)?,
+                at: row.get(1)?,
+                kind,
+                tool: row.get(3)?,
+                text: row.get(4)?,
+            }))
+        },
+    )?;
+    let mut events = Vec::new();
+    for row in rows {
+        events.extend(row?);
+    }
+    Ok(events)
 }
 
 /// What one scan of one file found.
@@ -369,7 +408,7 @@ fn upsert_session(transaction: &Transaction<'_>, update: &Update<'_>) -> Result<
     Ok(())
 }
 
-fn recount(transaction: &Transaction<'_>, session_id: &str) -> Result<()> {
+pub(crate) fn recount(transaction: &Transaction<'_>, session_id: &str) -> Result<()> {
     transaction.execute(
         "UPDATE sessions SET
             messages = (SELECT count(*) FROM events

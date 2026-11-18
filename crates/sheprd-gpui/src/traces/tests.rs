@@ -5,6 +5,7 @@ use chrono::NaiveDate;
 use sheprd_client::herdr::AgentKind;
 use sheprd_traces::{Activity, Session, Visibility};
 
+mod host_filter;
 mod layout;
 
 const DAY: i64 = 24 * 60 * 60 * 1000;
@@ -48,7 +49,7 @@ fn the_filter_keeps_the_range_agent_and_query() {
         session("old", AgentKind::Claude, 40, 2),
     ];
     let ids = |filter: &Filter| -> Vec<String> {
-        model::shown(&sessions, filter, NOW)
+        model::shown(&sessions, filter, NOW, &[])
             .iter()
             .map(|session| session.id.clone())
             .collect()

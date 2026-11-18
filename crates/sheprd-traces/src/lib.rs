@@ -21,6 +21,7 @@ mod parse;
 pub mod redact;
 mod scan;
 mod store;
+pub mod sync;
 #[cfg(test)]
 mod tests;
 mod watch;

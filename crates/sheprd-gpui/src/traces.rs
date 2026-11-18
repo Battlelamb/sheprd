@@ -1,5 +1,5 @@
-//! Traces: every agent session this computer's agents ran (Claude Code,
-//! Codex, Pi, omp), as a section of the activity bar drawn across the
+//! Traces: local and replicated agent sessions (Claude Code, Codex, Pi,
+//! omp), as a section of the activity bar drawn across the
 //! window's body. It shows totals, messages per day by agent, the sessions
 //! with a filter and search, and one session's events.
 //!
@@ -12,7 +12,9 @@
 
 mod chart;
 mod detail;
+mod host_filter;
 pub(crate) mod model;
+mod replication;
 pub(crate) mod service;
 mod view;
 
@@ -45,6 +47,9 @@ pub(crate) enum Detail {
 
 /// The section's own state, made the first time it shows.
 pub(crate) struct Page {
+    activity: Option<Result<Vec<sheprd_traces::Activity>, std::sync::Arc<sheprd_traces::Error>>>,
+    activity_task: Option<Task<()>>,
+    activity_dirty: bool,
     pub(crate) search: Entity<SearchInput>,
     pub(crate) scroll: ScrollHandle,
     pub(crate) detail_scroll: ScrollHandle,
@@ -62,6 +67,7 @@ pub(crate) struct State {
     pub(crate) status: Status,
     seen: u64,
     pub(crate) page: Option<Page>,
+    peers: Vec<replication::Report>,
 }
 
 impl Default for State {
@@ -70,11 +76,62 @@ impl Default for State {
             status: Status::Starting,
             seen: 0,
             page: None,
+            peers: Vec::new(),
         }
     }
 }
 
 impl SheprdWindow {
+    pub(crate) fn trace_hosts(&self) -> &[sheprd_control_protocol::protocol::app::TaggedHost] {
+        match &self.traces.status {
+            Status::Ready(snapshot) => &snapshot.hosts,
+            _ => &[],
+        }
+    }
+
+    pub(crate) fn trace_filter(&self) -> sheprd_control_protocol::protocol::app::TraceFilter {
+        self.traces
+            .page
+            .as_ref()
+            .map(|page| page.filter.scope.clone())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn set_trace_filter(
+        &mut self,
+        filter: sheprd_control_protocol::protocol::app::TraceFilter,
+        cx: &mut Context<Self>,
+    ) {
+        self.ensure_traces_page(cx);
+        if let Some(page) = &mut self.traces.page {
+            page.filter.scope = filter;
+            page.selected = None;
+            page.detail = None;
+            page.load = None;
+            page.scroll.set_offset(Point::default());
+            page.activity = None;
+            page.activity_dirty = true;
+            cx.notify();
+        }
+        self.refresh_trace_activity(cx);
+    }
+    pub(crate) fn traces_sync_status(
+        &self,
+    ) -> Vec<sheprd_control_protocol::protocol::app::TracePeer> {
+        self.traces
+            .peers
+            .iter()
+            .take(256)
+            .map(|peer| sheprd_control_protocol::protocol::app::TracePeer {
+                host: crate::notifications::safe_text(&peer.host, 512),
+                state: peer.state.clone().map_error(|error| {
+                    let redacted =
+                        sheprd_traces::redact::Redactor::new(None).redact(&error.to_string());
+                    crate::notifications::safe_text(&redacted, 512)
+                }),
+            })
+            .collect()
+    }
     /// Gives the section its page while it shows, in the window's face.
     fn ensure_traces_page(&mut self, cx: &mut Context<Self>) {
         let (font, theme) = (self.config.ui.clone(), self.theme.clone());
@@ -97,6 +154,9 @@ impl SheprdWindow {
             cx.notify();
         });
         self.traces.page = Some(Page {
+            activity: None,
+            activity_task: None,
+            activity_dirty: false,
             search,
             scroll: ScrollHandle::new(),
             detail_scroll: ScrollHandle::new(),
@@ -114,6 +174,14 @@ impl SheprdWindow {
     pub(crate) fn poll_traces(&mut self, cx: &mut Context<Self>) {
         if self.activity_section() == Some(ActivityPanel::Traces) {
             self.ensure_traces_page(cx);
+            if self
+                .traces
+                .page
+                .as_ref()
+                .is_some_and(|page| page.activity.is_none() && page.activity_task.is_none())
+            {
+                self.refresh_trace_activity(cx);
+            }
         }
         let Some(service) = cx.try_global::<Service>() else {
             return;
@@ -124,6 +192,8 @@ impl SheprdWindow {
         }
         self.traces.seen = generation;
         self.traces.status = service.status();
+        self.traces.peers = service.peers();
+        self.refresh_trace_activity(cx);
         // An open session's new events.
         if let Some(session) = self
             .traces

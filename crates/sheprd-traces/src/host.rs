@@ -3,7 +3,7 @@
 //! (itself, or another over SSH) names it the same way and the same session
 //! is never kept twice. Hostnames change and collide, so they are labels only.
 use crate::{Error, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{fs, io, path::Path};
 use uuid::Uuid;
 
@@ -12,11 +12,12 @@ const MACHINE_ID: [&str; 2] = ["/etc/machine-id", "/var/lib/dbus/machine-id"];
 /// The id file kept when the machine offers none.
 const FALLBACK: &str = "host-id";
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Host {
     pub id: String,
     pub label: String,
-    pub os: &'static str,
+    pub os: String,
     /// `user@label`: whose agents these are.
     pub user: String,
 }
@@ -33,7 +34,7 @@ impl Host {
             id: id(machine_id(), state)?,
             user: format!("{user}@{label}"),
             label,
-            os: std::env::consts::OS,
+            os: std::env::consts::OS.into(),
         })
     }
 

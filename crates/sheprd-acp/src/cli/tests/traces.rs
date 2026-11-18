@@ -5,6 +5,14 @@ use sheprd_client::herdr::AgentKind;
 #[test]
 fn traces_commands_and_their_options() {
     assert_eq!(
+        parse(args(&["traces", "exchange"])),
+        Ok(Parsed::Traces(Command::Exchange))
+    );
+    assert_eq!(
+        parse(args(&["traces", "peers", "--json"])),
+        Ok(Parsed::Traces(Command::Peers { json: true }))
+    );
+    assert_eq!(
         parse(args(&["traces", "index"])),
         Ok(Parsed::Traces(Command::Index { json: false }))
     );
@@ -45,6 +53,10 @@ fn traces_commands_and_their_options() {
 
 #[test]
 fn traces_mistakes_are_named() {
+    assert_eq!(
+        parse(args(&["traces", "exchange", "--json"])),
+        Err(Error::UnknownOption("--json".into()))
+    );
     assert_eq!(
         parse(args(&["traces"])),
         Err(Error::MissingValue("traces command"))

@@ -4,6 +4,9 @@ Captured from this branch's native Linux/X11 window using the isolated
 `native_traces` fixture. All session content is synthetic. These are native
 app captures, not browser mockups; no personal transcripts appear here.
 The disconnected status bar belongs to the daemon-free fixture.
+The current captures include synthetic replication status for two connected
+hosts and cached sessions from three computers. They demonstrate presentation,
+not a real network exchange; the replication tests exercise the exchange.
 
 | View | Capture |
 | --- | --- |
@@ -11,7 +14,9 @@ The disconnected status bar belongs to the daemon-free fixture.
 | Light, 1400 px | ![Light Traces dashboard](light.png) |
 | Dark, 640 px | ![Narrow dark Traces dashboard](narrow-dark.png) |
 | Light, 640 px | ![Narrow light Traces dashboard](narrow-light.png) |
-| Selected session | ![Session details](detail.png) |
+| Selected session (captured before the host-filter controls were added) | ![Session details](detail.png) |
+| Work label: two computers | ![Traces filtered to work-labelled hosts](tag-work.png) |
+| One computer | ![Traces filtered to Workstation](host-workstation.png) |
 
 ## Narrow layout correction
 

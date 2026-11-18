@@ -1,10 +1,10 @@
 //! What the index keeps: sessions with their totals, the bounded events of
 //! each, and per-day activity for charts.
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sheprd_client::herdr::AgentKind;
 
 /// What one event of a session is.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {
     /// A person's prompt.
@@ -46,9 +46,10 @@ impl EventKind {
     }
 }
 
-/// Who may see a session. Only the person, in the app, changes it; the
-/// index records `Private` for everything it adds.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+/// Publication visibility, independent of replication between authenticated
+/// connected hosts. The index records `Private` for everything it adds;
+/// public/link publishing and visibility controls are not implemented yet.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Visibility {
     #[default]
@@ -79,7 +80,8 @@ impl Visibility {
 /// One bounded, redacted event. `seq` orders events within their session
 /// and stays the same when the file is read again, so adding it twice is a
 /// no-op.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Event {
     pub seq: i64,
     /// Unix milliseconds, when the record carried a time.
@@ -90,12 +92,13 @@ pub struct Event {
 }
 
 /// One indexed session with its totals.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Session {
     pub id: String,
     pub host_id: String,
     pub host: String,
-    #[serde(serialize_with = "agent_name")]
+    #[serde(serialize_with = "agent_name", deserialize_with = "parse_agent")]
     pub agent: AgentKind,
     pub native_id: String,
     pub user: String,
@@ -128,4 +131,9 @@ pub struct Activity {
 
 fn agent_name<S: Serializer>(agent: &AgentKind, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_str(agent.name())
+}
+
+fn parse_agent<'de, D: Deserializer<'de>>(deserializer: D) -> Result<AgentKind, D::Error> {
+    let name = String::deserialize(deserializer)?;
+    AgentKind::parse(&name).ok_or_else(|| serde::de::Error::custom("unknown trace agent"))
 }

@@ -161,6 +161,11 @@ Usage:
                         The most recently updated indexed sessions.
   sheprd-acp traces activity [--days N] [--json]
                         Sessions and messages per day and agent.
+  sheprd-acp traces peers [--json]
+                        Last acknowledged replication progress for each host route.
+  sheprd-acp traces exchange
+                        One bounded replication request on stdin and reply on stdout;
+                        used by connected Sheprd hosts over authenticated transport.
   sheprd-acp mirror codex|claude FILE [--pane ID] [--endpoint ID]
                         Watch an existing JSONL transcript, read-only; starts
                         no agent and changes no Herdr pane metadata. Prints

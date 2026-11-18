@@ -24,6 +24,7 @@ fn narrow_tables_scroll_inside_the_page_with_and_without_details(cx: &mut gpui::
             view.traces.status = Status::Ready(Arc::new(Snapshot {
                 sessions: vec![session],
                 activity: Vec::new(),
+                ..Snapshot::default()
             }));
             view.poll_traces(cx);
             view

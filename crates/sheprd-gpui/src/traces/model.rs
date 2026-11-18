@@ -4,6 +4,7 @@
 
 use chrono::{Days, NaiveDate};
 use sheprd_client::herdr::AgentKind;
+use sheprd_control_protocol::protocol::app::{TaggedHost, TraceFilter};
 use sheprd_traces::{Activity, Session};
 
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
@@ -37,12 +38,16 @@ pub(crate) struct Filter {
     pub agent: Option<AgentKind>,
     pub range: Range,
     pub query: String,
+    pub scope: TraceFilter,
 }
 
 impl Filter {
     /// Whether `session` was active in the range, is of the agent, and
     /// names the query in its title, folder, branch, model, or host.
-    pub(crate) fn keeps(&self, session: &Session, now: i64) -> bool {
+    pub(crate) fn keeps(&self, session: &Session, now: i64, hosts: &[TaggedHost]) -> bool {
+        if !self.scope.includes(&session.host_id, hosts) {
+            return false;
+        }
         let since = now - i64::from(self.range.days()) * DAY_MS;
         if session.updated_at.is_none_or(|updated| updated < since) {
             return false;
@@ -67,10 +72,15 @@ impl Filter {
 }
 
 /// The sessions a filter keeps, as the table lists them.
-pub(crate) fn shown<'a>(sessions: &'a [Session], filter: &Filter, now: i64) -> Vec<&'a Session> {
+pub(crate) fn shown<'a>(
+    sessions: &'a [Session],
+    filter: &Filter,
+    now: i64,
+    hosts: &[TaggedHost],
+) -> Vec<&'a Session> {
     sessions
         .iter()
-        .filter(|session| filter.keeps(session, now))
+        .filter(|session| filter.keeps(session, now, hosts))
         .collect()
 }
 

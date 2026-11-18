@@ -3,7 +3,7 @@
 # and folder names are shown as they are.
 
 traces-title = Traces
-traces-subtitle = Every agent session on this computer, indexed as it happens
+traces-subtitle = Agent sessions across your connected computers, kept here for offline access
 traces-search = Search sessions, folders, branches, models
 traces-starting = Reading agent sessions…
 traces-failed = Traces could not read agent sessions: { $error }
@@ -25,6 +25,10 @@ traces-agent-claude = Claude Code
 traces-agent-codex = Codex
 traces-agent-pi = Pi
 traces-agent-omp = omp
+traces-all-hosts = All hosts
+traces-labels = Labels
+traces-hosts = Hosts
+traces-host-disambiguated = { $host } · { $id }
 
 # The totals over the sessions shown.
 traces-tile-sessions = Sessions
@@ -42,6 +46,8 @@ traces-tile-tokens = Tokens
 
 # The chart.
 traces-chart-title = Messages per day
+traces-activity-loading = Reading this selection’s activity…
+traces-activity-failed = Could not read this selection’s activity: { $error }
 traces-chart-summary = { $messages } messages in { $days } days
 
 # The table's columns.
@@ -71,3 +77,14 @@ traces-event-thinking = Thinking
 traces-event-tool = Tool
 traces-event-result = Result
 traces-event-error = Error
+
+traces-replication-summary = { $count ->
+        [0] No connected hosts to synchronize. Previously replicated sessions remain available.
+        [one] Sharing traces both ways with { $count } connected host, including traces learned from other hosts.
+       *[other] Sharing traces both ways with { $count } connected hosts, including traces learned from other hosts.
+    }
+traces-replication-waiting = Waiting to synchronize
+traces-replication-syncing = Synchronizing…
+traces-replication-ready = Up to date at the last exchange
+traces-replication-failed = Could not synchronize: { $error }. Check the connection and the host’s sheprd-acp version.
+traces-replication-peer = { $host }: { $status }

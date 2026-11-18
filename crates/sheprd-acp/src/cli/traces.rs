@@ -2,7 +2,7 @@ use super::*;
 use crate::traces::{Command, DEFAULT_DAYS, DEFAULT_LIMIT};
 use sheprd_client::herdr::AgentKind;
 
-/// `traces index|watch|list|activity` and their options.
+/// Host indexing, queries, and the bounded replication exchange.
 pub(super) fn parse(args: impl Iterator<Item = OsString>) -> Result<Parsed, Error> {
     let Some(mut args) = unless_help(args) else {
         return Ok(Parsed::Help);
@@ -11,7 +11,7 @@ pub(super) fn parse(args: impl Iterator<Item = OsString>) -> Result<Parsed, Erro
     let (mut json, mut agent, mut limit, mut days) = (false, None, DEFAULT_LIMIT, DEFAULT_DAYS);
     while let Some(arg) = args.next() {
         match (action.as_str(), arg.to_str()) {
-            (_, Some("--json")) => json = true,
+            ("index" | "watch" | "list" | "activity" | "peers", Some("--json")) => json = true,
             ("list", Some("--agent")) => {
                 let name = utf8(args.next(), "--agent")?;
                 agent = Some(AgentKind::parse(&name).ok_or(Error::UnknownAgent(name))?);
@@ -22,6 +22,8 @@ pub(super) fn parse(args: impl Iterator<Item = OsString>) -> Result<Parsed, Erro
         }
     }
     let command = match action.as_str() {
+        "exchange" => Command::Exchange,
+        "peers" => Command::Peers { json },
         "index" => Command::Index { json },
         "watch" => Command::Watch { json },
         "list" => Command::List { agent, limit, json },

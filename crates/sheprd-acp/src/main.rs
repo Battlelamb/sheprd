@@ -24,6 +24,7 @@ mod restore;
 mod rpc;
 mod session;
 mod session_helpers;
+mod traces;
 mod tui;
 
 use std::process::ExitCode;
@@ -74,6 +75,13 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Ok(cli::Parsed::Traces(command)) => match traces::run(command) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("sheprd-acp: {error:#}");
+                ExitCode::FAILURE
+            }
+        },
         Ok(cli::Parsed::Mirror(options)) => match mirror::run(options) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {

@@ -7,6 +7,7 @@ mod connect;
 mod mirror;
 mod restore;
 mod session_helpers;
+mod traces;
 mod transcripts;
 
 fn args(list: &[&str]) -> Vec<OsString> {

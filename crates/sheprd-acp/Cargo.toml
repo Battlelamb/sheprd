@@ -21,6 +21,7 @@ sheprd-chat-protocol.workspace = true
 sheprd-client.workspace        = true
 sheprd-memory.workspace        = true
 sheprd-core-client.workspace   = true
+sheprd-traces.workspace        = true
 ratatui.workspace             = true
 serde.workspace               = true
 serde_json.workspace          = true

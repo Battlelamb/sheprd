@@ -16,6 +16,7 @@ pub enum ActivityPanel {
     Automations,
     Ports,
     Usage,
+    Traces,
 }
 
 impl ActivityPanel {
@@ -29,6 +30,7 @@ impl ActivityPanel {
         Self::Automations,
         Self::Ports,
         Self::Usage,
+        Self::Traces,
     ];
 
     /// The name the CLI and the preferences file use.
@@ -43,6 +45,7 @@ impl ActivityPanel {
             Self::Automations => "automations",
             Self::Ports => "ports",
             Self::Usage => "usage",
+            Self::Traces => "traces",
         }
     }
 

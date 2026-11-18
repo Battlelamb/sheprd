@@ -1,5 +1,5 @@
 [workspace]
-members  = ["crates/embed-resource", "crates/sheprd-acp", "crates/sheprd-apns", "crates/sheprd-automate", "crates/sheprd-automation", "crates/sheprd-backend", "crates/sheprd-chat-protocol", "crates/sheprd-client", "crates/sheprd-commands", "crates/sheprd-control-protocol", "crates/sheprd-core-client", "crates/sheprd-credentials", "crates/sheprd-diagnostics", "crates/sheprd-github", "crates/sheprd-gpui", "crates/sheprd-launcher", "crates/sheprd-i18n", "crates/sheprd-luau", "crates/sheprd-memory", "crates/sheprd-mods", "crates/sheprd-nearby", "crates/sheprd-orchestrator", "crates/sheprd-protocol", "crates/sheprd-push-relay", "crates/sheprd-relay", "crates/sheprd-relay-agent", "crates/sheprd-remote", "crates/sheprd-remote-control", "crates/sheprd-session", "crates/sheprd-terminal", "crates/sheprd-tunnel", "crates/sheprd-updater", "crates/sheprd-usage", "crates/sheprd-vcs"]
+members  = ["crates/embed-resource", "crates/sheprd-acp", "crates/sheprd-apns", "crates/sheprd-automate", "crates/sheprd-automation", "crates/sheprd-backend", "crates/sheprd-chat-protocol", "crates/sheprd-client", "crates/sheprd-commands", "crates/sheprd-control-protocol", "crates/sheprd-core-client", "crates/sheprd-credentials", "crates/sheprd-diagnostics", "crates/sheprd-github", "crates/sheprd-gpui", "crates/sheprd-launcher", "crates/sheprd-i18n", "crates/sheprd-luau", "crates/sheprd-memory", "crates/sheprd-mods", "crates/sheprd-nearby", "crates/sheprd-orchestrator", "crates/sheprd-protocol", "crates/sheprd-push-relay", "crates/sheprd-relay", "crates/sheprd-relay-agent", "crates/sheprd-remote", "crates/sheprd-remote-control", "crates/sheprd-session", "crates/sheprd-terminal", "crates/sheprd-traces", "crates/sheprd-tunnel", "crates/sheprd-updater", "crates/sheprd-usage", "crates/sheprd-vcs"]
 resolver = "2"
 
 [workspace.package]
@@ -113,6 +113,7 @@ sheprd-relay          = { default-features = false, path = "crates/sheprd-relay"
 sheprd-remote-control         = { default-features = false, path = "crates/sheprd-remote-control" }
 sheprd-session        = { path = "crates/sheprd-session" }
 sheprd-terminal       = { path = "crates/sheprd-terminal" }
+sheprd-traces         = { path = "crates/sheprd-traces" }
 sheprd-tunnel         = { path = "crates/sheprd-tunnel" }
 sheprd-updater        = { path = "crates/sheprd-updater" }
 sheprd-usage          = { path = "crates/sheprd-usage" }
@@ -138,6 +139,7 @@ nucleo-matcher       = "0.3.1"
 # thread and needs no async runtime.
 mdns-sd              = { default-features = false, version = "0.21.5" }
 nix                  = { default-features = false, features = ["socket", "term", "user"], version = "=0.31.3" }
+notify               = "8.2"
 objc                 = "0.2"
 # The Secret Service client GPUI's Linux platform links, with its async-io backend.
 oo7                  = { default-features = false, features = ["async-std", "native_crypto"], version = "0.6" }

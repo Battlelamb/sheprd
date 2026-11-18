@@ -440,6 +440,8 @@ pub(crate) struct SheprdWindow {
     /// Toasts sliding in and out of their corners.
     pub(crate) toast_motion: toasts::motion::ToastMotion,
     pub(crate) toasts_hidden: bool,
+    /// Agent sessions on this computer, for the Traces section.
+    pub(crate) traces: crate::traces::State,
     /// SSH tunnels to remote ports that listen on their host's loopback only.
     pub(crate) tunnels: crate::listening_ports::Tunnels,
     pub(crate) update_preview: Option<updater::State>,
@@ -755,6 +757,7 @@ impl SheprdWindow {
         self.poll_core_terminals(window, cx);
         self.poll_overview(cx);
         self.poll_security(cx);
+        self.poll_traces(cx);
         self.poll_automations(cx);
         self.poll_remote_updates(window, cx);
         if self.update_system_load() {

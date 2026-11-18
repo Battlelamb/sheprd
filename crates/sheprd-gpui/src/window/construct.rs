@@ -327,6 +327,7 @@ impl SheprdWindow {
             title: WINDOW_TITLE.to_owned(),
             toast_motion: Default::default(),
             toasts_hidden: false,
+            traces: Default::default(),
             tunnels: Default::default(),
             update_preview: None,
             updater: updater::Updater::default(),

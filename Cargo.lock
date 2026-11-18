@@ -10853,6 +10853,7 @@ dependencies = [
  "sheprd-client",
  "sheprd-core-client",
  "sheprd-memory",
+ "sheprd-traces",
  "tempfile",
  "thiserror 2.0.21",
  "unicode-width",
@@ -11136,6 +11137,7 @@ dependencies = [
  "sheprd-remote",
  "sheprd-remote-control",
  "sheprd-session",
+ "sheprd-traces",
  "sheprd-updater",
  "sheprd-usage",
  "sheprd-vcs",
@@ -11467,6 +11469,21 @@ dependencies = [
  "sheprd-backend",
  "sheprd-protocol",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "sheprd-traces"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "notify",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sheprd-client",
+ "tempfile",
+ "thiserror 2.0.21",
+ "uuid",
 ]
 
 [[package]]

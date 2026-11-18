@@ -24,6 +24,7 @@ mod opencode;
 mod origin;
 mod permissions;
 mod prompt_titles;
+mod questions;
 mod resume;
 mod settings;
 mod streaming;

@@ -144,6 +144,8 @@ pub(crate) struct ChatPane {
     /// Which slash-command completion is selected.
     pub(crate) completion: usize,
     pub(crate) composer: Option<Entity<MultilineInput>>,
+    /// The message effects met and playing.
+    pub(crate) effects: super::effects::Effects,
     /// The last command this window could not send.
     pub(crate) error: Option<String>,
     /// Thoughts shown in full.
@@ -163,6 +165,8 @@ pub(crate) struct ChatPane {
     /// The search field over a long menu while one is open, with the
     /// subscription that redraws the menu as it changes.
     pub(crate) menu_search: Option<(Entity<SearchInput>, gpui::Subscription)>,
+    /// The agent whose remembered mode this chat was last settled for.
+    pub(crate) mode_settled: Option<String>,
     /// The web pages live in the chat's messages, oldest first.
     pub(crate) pages: Vec<super::page::ChatPage>,
     /// Trying again cannot help: the program speaks another version.
@@ -272,6 +276,7 @@ impl ChatPane {
             code: Default::default(),
             completion: 0,
             composer: None,
+            effects: Default::default(),
             error: None,
             expanded: HashSet::new(),
             failures: 0,
@@ -284,6 +289,7 @@ impl ChatPane {
             list_snapshots: 0,
             menu: None,
             menu_search: None,
+            mode_settled: None,
             pages: Vec::new(),
             permanent: false,
             prepared,
@@ -440,7 +446,8 @@ impl ChatPane {
     /// Brings the list and the prepared bodies up to the transcript.
     fn sync_view(&mut self) {
         let keys = self.session.keys();
-        if self.list_snapshots != self.session.snapshots() {
+        let history = self.list_snapshots != self.session.snapshots();
+        if history {
             self.list_snapshots = self.session.snapshots();
             self.prepared.clear();
             self.selection.clear();
@@ -464,6 +471,13 @@ impl ChatPane {
         self.list_keys = keys;
         self.refresh_text();
         self.widgets.retain(&self.prepared);
+        let prepared = &self.prepared;
+        self.effects.sync(
+            |entry| prepared.body(entry),
+            &self.list_keys,
+            history,
+            crate::motion::now(),
+        );
     }
 
     /// Starts the list over for `keys`: at its end, unless the user left it

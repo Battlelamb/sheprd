@@ -149,6 +149,28 @@ fn only_a_plain_local_socket_is_opened() {
 }
 
 #[test]
+fn a_quiet_server_is_idle_not_gone_and_answers_a_ping() {
+    let (mut client, server) = pair(|socket| {
+        let _ = read(socket);
+        // Nothing for longer than the client's read timeout, then the ping.
+        assert_eq!(read(socket), json!({"_tag": "Ping"}));
+        send(socket, &json!({"_tag": "Pong"}));
+    });
+    client
+        .socket
+        .get_ref()
+        .set_read_timeout(Some(Duration::from_millis(50)))
+        .unwrap();
+    client
+        .request("orchestration.subscribeShell", json!({}))
+        .unwrap();
+    assert!(matches!(client.next_frame(), Err(Error::Idle)));
+    client.ping().unwrap();
+    assert_eq!(client.next_frame().unwrap(), ServerFrame::Pong);
+    server.join().unwrap();
+}
+
+#[test]
 fn open_tries_every_resolved_address() {
     let mut tried = Vec::new();
     let stream = connect_any(["::1", "127.0.0.1"], |address| {

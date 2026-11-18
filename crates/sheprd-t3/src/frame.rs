@@ -25,6 +25,8 @@ pub enum ClientFrame {
         #[serde(rename = "requestId")]
         request_id: String,
     },
+    /// Asks the server to show it is still there; it answers `Pong`.
+    Ping,
     /// Ends a stream this client no longer wants.
     Interrupt {
         #[serde(rename = "requestId")]

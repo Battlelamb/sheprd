@@ -131,6 +131,8 @@ pub(crate) struct MenuState {
     /// was opened for: a branch that moved since must be reviewed again.
     pub(super) merge_method: Option<crate::pull_request::MergeMethod>,
     pub(super) merge_target: Option<crate::pr_actions::Target>,
+    /// What the merge queue confirmation adds or takes out.
+    pub(super) queue_change: Option<sheprd_control_protocol::protocol::hosts::QueueOp>,
     pub(super) target: Option<WorkspaceTarget>,
     pub input: Option<DialogInput>,
     pub(crate) error: Option<String>,
@@ -405,6 +407,7 @@ impl MenuState {
             git_selected: None,
             merge_method: None,
             merge_target: None,
+            queue_change: None,
             target: None,
             input: None,
             error: None,
@@ -522,6 +525,7 @@ impl MenuState {
         self.git_selected = None;
         self.merge_method = None;
         self.merge_target = None;
+        self.queue_change = None;
         self.target = None;
         self.input = None;
         self.error = None;

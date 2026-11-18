@@ -210,7 +210,7 @@ impl SheprdWindow {
     }
 
     /// A dialog's titled header: the row's icon, a title, and the PR.
-    fn pr_dialog_header(&self, row: Row, title: String) -> Div {
+    pub(super) fn pr_dialog_header(&self, row: Row, title: String) -> Div {
         let theme = &self.theme;
         let font = &self.config.ui;
         let subtitle = self
@@ -254,7 +254,7 @@ impl SheprdWindow {
             )
     }
 
-    fn pr_dialog_error(&self) -> Option<Div> {
+    pub(super) fn pr_dialog_error(&self) -> Option<Div> {
         let theme = &self.theme;
         self.menu.error.as_ref().map(|error| {
             div()
@@ -305,7 +305,7 @@ impl SheprdWindow {
             .border_color(rgb(self.theme.active))
     }
 
-    fn pr_back_button(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn pr_back_button(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         self.pr_button("pr-dialog-back", fl!("pr-actions-back"), false)
             .on_click(cx.listener(|this, _, _, cx| {
                 cx.stop_propagation();
@@ -502,6 +502,20 @@ impl SheprdWindow {
                         base = pr.base_ref_name.as_str(),
                     ))),
             );
+            // A stacked pull request merges with the open layers below it.
+            if pr.stack().is_some() {
+                let numbers = super::pr_queue::lands(&pr)
+                    .iter()
+                    .map(|number| format!("#{number}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                body = body.child(div().debug_selector(|| "pr-merge-stack".into()).child(
+                    crate::sidebar::label_text(&fl!(
+                        "pr-actions-merge-stack",
+                        numbers = numbers.as_str()
+                    )),
+                ));
+            }
             // GitHub has the final word; this is what it last reported.
             for (heading, label) in [
                 (fl!("pr-actions-review-heading"), pr.review().to_owned()),

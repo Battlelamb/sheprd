@@ -48,6 +48,7 @@ menu-page-processes = Processes
 menu-page-ports = Ports
 menu-page-comment-on-pull-request = Comment on pull request
 menu-page-merge-pull-request = Merge pull request
+menu-page-merge-queue = Merge queue
 menu-page-pull-request = Pull request
 menu-page-remote-control = Remote control
 menu-page-remote-control-phones = Remote control phones

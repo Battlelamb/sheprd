@@ -4,6 +4,7 @@ use crate::{pr_actions::Action, pull_request::MergeMethod, sidebar::layout_tests
 use gpui::{Entity, TestAppContext, VisualTestContext, point, px, size};
 
 mod en_xa;
+mod queue;
 
 fn input() -> crate::pull_request::Input {
     crate::pull_request::Input {
@@ -15,7 +16,7 @@ fn input() -> crate::pull_request::Input {
 
 /// A focused checkout with an open PR in the cache, tracked for actions,
 /// and no worker: nothing here reaches GitHub.
-fn open(
+pub(super) fn open(
     cx: &mut TestAppContext,
     pr: crate::pull_request::PullRequest,
 ) -> (Entity<crate::SheprdWindow>, &mut VisualTestContext) {
@@ -36,7 +37,7 @@ fn open(
     (view, cx)
 }
 
-fn draw(cx: &mut VisualTestContext) {
+pub(super) fn draw(cx: &mut VisualTestContext) {
     cx.update(|window, cx| {
         window.refresh();
         let _ = window.draw(cx);

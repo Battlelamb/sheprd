@@ -1,6 +1,29 @@
 use super::*;
 
 #[test]
+fn merge_and_queue_requests_have_a_stable_wire_form() {
+    for (op, wire) in [
+        (HostOp::PrMerge, r#"{"op":"pr_merge"}"#),
+        (
+            HostOp::PrQueue {
+                change: QueueOp::Add,
+            },
+            r#"{"op":"pr_queue","change":"add"}"#,
+        ),
+        (
+            HostOp::PrQueue {
+                change: QueueOp::Remove,
+            },
+            r#"{"op":"pr_queue","change":"remove"}"#,
+        ),
+    ] {
+        assert_eq!(serde_json::to_string(&op).unwrap(), wire);
+        assert_eq!(serde_json::from_str::<HostOp>(wire).unwrap(), op);
+    }
+    assert!(serde_json::from_str::<HostOp>(r#"{"op":"pr_queue","change":"jump"}"#).is_err());
+}
+
+#[test]
 fn an_older_apps_pull_request_without_stack_or_queue_still_reads() {
     let pr: PrInfo = serde_json::from_value(serde_json::json!({
         "number": 8, "url": "https://github.com/example/project/pull/8", "title": "Title",

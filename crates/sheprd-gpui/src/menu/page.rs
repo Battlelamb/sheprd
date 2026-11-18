@@ -96,6 +96,8 @@ pub(crate) enum Page {
     PrComment,
     /// Choosing a merge method, and confirming it.
     PrMerge,
+    /// Confirming the open pull request joins or leaves the merge queue.
+    PrQueue,
     /// The open pull request's checks and review conversation.
     PrReview,
     /// Pairing a phone for remote control: the QR, then the approval.
@@ -216,6 +218,7 @@ impl Page {
                 | Self::PrReview
                 | Self::PrComment
                 | Self::PrMerge
+                | Self::PrQueue
                 | Self::CoreMenu
                 | Self::CoreMove
                 | Self::RenameCore
@@ -256,6 +259,7 @@ impl Page {
                 | Self::PrReview
                 | Self::PrComment
                 | Self::PrMerge
+                | Self::PrQueue
                 | Self::OverviewReply
         )
     }

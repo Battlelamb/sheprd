@@ -17,6 +17,7 @@ mod memory;
 mod menu_bar;
 mod mods;
 mod open_command;
+mod pr_merge;
 mod px0;
 mod quota;
 mod remote;

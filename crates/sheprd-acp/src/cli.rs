@@ -9,6 +9,7 @@ use std::{
 use crate::{agents::Agent, mirror::transcript::TranscriptAgent};
 
 mod session_helpers;
+mod traces;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum Error {
@@ -58,6 +59,8 @@ pub(crate) enum Parsed {
     /// List the agents installed here, one name per line.
     Agents,
     Session(crate::session_helpers::Command),
+    /// This host's index of agent sessions.
+    Traces(crate::traces::Command),
     Help,
     Version,
 }
@@ -148,6 +151,21 @@ Usage:
   sheprd-acp observe codex|claude SESSION_ID PID START_TICKS [--pane ID]
                         Render the existing Linux agent over stdin/stdout.
                         Starts no agent; input stays in its original terminal.
+  sheprd-acp traces index [--json]
+                        Index this host's Claude Code, Codex, Pi and omp sessions,
+                        reading only what changed; secrets are redacted.
+  sheprd-acp traces watch [--json]
+                        Index, then keep indexing as agents write; print each
+                        changed session (JSON lines with --json) until stopped.
+  sheprd-acp traces list [--agent AGENT] [--limit N] [--json]
+                        The most recently updated indexed sessions.
+  sheprd-acp traces activity [--days N] [--json]
+                        Sessions and messages per day and agent.
+  sheprd-acp traces peers [--json]
+                        Last acknowledged replication progress for each host route.
+  sheprd-acp traces exchange
+                        One bounded replication request on stdin and reply on stdout;
+                        used by connected Sheprd hosts over authenticated transport.
   sheprd-acp mirror codex|claude FILE [--pane ID] [--endpoint ID]
                         Watch an existing JSONL transcript, read-only; starts
                         no agent and changes no Herdr pane metadata. Prints
@@ -236,6 +254,10 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Parsed, 
         Some("mirror") => {
             args.next();
             return mirror(args);
+        }
+        Some("traces") => {
+            args.next();
+            return traces::parse(args);
         }
         Some("observe") => {
             args.next();

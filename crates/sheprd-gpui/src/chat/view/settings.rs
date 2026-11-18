@@ -322,6 +322,11 @@ impl SheprdWindow {
         let on = chat.session.transcript().auto_accept;
         let pane = chat.target.pane_id.clone();
         let color = if on { yellow } else { theme.subtext() };
+        let label = if on {
+            fl!("chat-settings-auto-accept-on")
+        } else {
+            fl!("chat-settings-auto-accept-off")
+        };
         div()
             .id("chat-auto-accept")
             .debug_selector(|| "chat-auto-accept".into())
@@ -355,11 +360,9 @@ impl SheprdWindow {
                     .size(px(12.))
                     .text_color(rgb(color)),
             )
-            .child(div().min_w_0().truncate().child(if on {
-                fl!("chat-settings-auto-accept-on")
-            } else {
-                fl!("chat-settings-auto-accept-off")
-            }))
+            .child(div().min_w_0().truncate().child(label.clone()))
+            // The label may be truncated; the tooltip names it in full.
+            .tooltip(self.chat_setting_hint(&fl!("chat-settings-auto-accept"), &label))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                 cx.stop_propagation();

@@ -469,6 +469,7 @@ mod poller;
 mod renames;
 mod saved_beside_spaces;
 mod screen_history;
+mod unlisted_name;
 mod workspace_changes;
 
 #[test]

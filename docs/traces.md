@@ -66,6 +66,9 @@ on the receiving app's next local watcher refresh (at most 30 seconds while idle
 The replication journal currently has no compaction or retention policy.
 
 Event text and titles pass through the diagnostics redactor before storage.
+Structured tool data and JSON-encoded arguments are scrubbed recursively before
+being shortened; source-file opens reject symlinks and linked directories within
+the session roots. Periodic catch-up scans still run while notifications are busy.
 Events are limited to 4 KB in the index and shortened to 600 bytes in the view;
 the original files remain with the agent. The page reads up to 1,000 recent
 sessions, draws up to 200 matching rows, and shows the first 400 events of a

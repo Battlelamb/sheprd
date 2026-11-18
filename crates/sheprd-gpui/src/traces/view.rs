@@ -80,7 +80,7 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) -> Div {
         let now = chrono::Utc::now();
-        let agents = model::agents(&snapshot.sessions);
+        let agents = model::agents(&snapshot.sessions, &snapshot.activity);
         let shown = model::shown(
             &snapshot.sessions,
             &page.filter,

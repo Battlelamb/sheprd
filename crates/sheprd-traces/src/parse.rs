@@ -123,7 +123,7 @@ impl Out<'_> {
             at: self.at,
             kind,
             tool: tool.map(|tool| bounded(tool, MAX_FIELD)),
-            text: bounded(&self.redactor.redact(&bounded(text, MAX_TEXT)), MAX_TEXT),
+            text: bounded(&self.redactor.redact(text), MAX_TEXT),
         });
         self.count += 1;
     }
@@ -150,13 +150,14 @@ fn millis(text: &str) -> Option<i64> {
 
 /// The text of a tool's input or output: strings as they are, text blocks
 /// joined, anything else as compact JSON.
-fn text_of(value: &Value) -> String {
+fn text_of(value: &Value, redactor: &Redactor) -> String {
     match value {
-        Value::String(text) => bounded(text, MAX_TEXT),
+        Value::String(text) => bounded(&redactor.redact(text), MAX_TEXT),
         Value::Array(blocks) => {
             let mut text = String::new();
             for block in blocks.iter().take(BLOCKS as usize) {
-                let part = string(block, "text").map_or_else(|| text_of(block), str::to_owned);
+                let part = string(block, "text")
+                    .map_or_else(|| text_of(block, redactor), |text| redactor.redact(text));
                 if !text.is_empty() {
                     text.push('\n');
                 }
@@ -168,7 +169,11 @@ fn text_of(value: &Value) -> String {
             bounded(&text, MAX_TEXT)
         }
         Value::Null => String::new(),
-        other => bounded(&other.to_string(), MAX_TEXT),
+        other => {
+            let mut clean = other.clone();
+            redactor.json(&mut clean, 0);
+            bounded(&clean.to_string(), MAX_TEXT)
+        }
     }
 }
 

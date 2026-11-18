@@ -36,7 +36,7 @@ impl Parser {
     fn pi_message(&mut self, message: &Value, out: &mut Out<'_>) {
         match string(message, "role") {
             Some("user") => {
-                let text = text_of(&message["content"]);
+                let text = text_of(&message["content"], out.redactor);
                 self.title_from(&text, out.redactor);
                 out.push(EventKind::User, None, &text);
             }
@@ -60,7 +60,7 @@ impl Parser {
                         Some("toolCall") => out.push(
                             EventKind::ToolCall,
                             string(block, "name"),
-                            &text_of(&block["arguments"]),
+                            &text_of(&block["arguments"], out.redactor),
                         ),
                         _ => {}
                     }
@@ -80,7 +80,7 @@ impl Parser {
                 out.push(
                     kind,
                     string(message, "toolName"),
-                    &text_of(&message["content"]),
+                    &text_of(&message["content"], out.redactor),
                 );
             }
             _ => {}

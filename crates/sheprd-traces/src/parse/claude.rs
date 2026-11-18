@@ -57,7 +57,7 @@ impl Parser {
                             } else {
                                 EventKind::ToolResult
                             };
-                            out.push(kind, None, &text_of(&block["content"]));
+                            out.push(kind, None, &text_of(&block["content"], out.redactor));
                         }
                         _ => {}
                     }
@@ -98,7 +98,7 @@ impl Parser {
                 Some("tool_use") => out.push(
                     EventKind::ToolCall,
                     string(block, "name"),
-                    &text_of(&block["input"]),
+                    &text_of(&block["input"], out.redactor),
                 ),
                 _ => {}
             }

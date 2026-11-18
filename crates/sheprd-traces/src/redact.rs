@@ -4,6 +4,8 @@
 //! replaced. It would rather hide a harmless value than leak a secret.
 
 const REDACTED: &str = "[redacted]";
+/// Includes JSON embedded in strings, whose decoding can expose more JSON.
+const JSON_DEPTH: usize = 32;
 
 /// Names whose values are secrets, matched within a key, case-insensitively.
 const SECRET_NAMES: [&str; 11] = [
@@ -93,11 +95,52 @@ impl Redactor {
     }
 
     pub fn redact(&self, text: &str) -> String {
+        self.text(text, 0)
+    }
+
+    fn text(&self, text: &str, depth: usize) -> String {
+        if depth >= JSON_DEPTH {
+            return REDACTED.to_owned();
+        }
+        if text.trim_start().starts_with(['{', '[', '"'])
+            && let Ok(mut value) = serde_json::from_str::<serde_json::Value>(text)
+        {
+            self.json(&mut value, depth + 1);
+            return value.to_string();
+        }
         text.lines()
             .map(|line| self.line(line))
             .collect::<Vec<_>>()
             .join("\n")
             + if text.ends_with('\n') { "\n" } else { "" }
+    }
+
+    /// Scrub values while keys and nesting are still intact, before flattening
+    /// tool inputs/results or shortening them for the index.
+    pub(crate) fn json(&self, value: &mut serde_json::Value, depth: usize) {
+        use serde_json::Value;
+        if depth >= JSON_DEPTH {
+            *value = Value::String(REDACTED.to_owned());
+            return;
+        }
+        match value {
+            Value::Object(fields) => {
+                for (name, value) in fields {
+                    if secret_name(name) {
+                        *value = Value::String(REDACTED.to_owned());
+                    } else {
+                        self.json(value, depth + 1);
+                    }
+                }
+            }
+            Value::Array(values) => {
+                for value in values {
+                    self.json(value, depth + 1);
+                }
+            }
+            Value::String(text) => *text = self.text(text, depth + 1),
+            _ => {}
+        }
     }
 
     fn line(&self, line: &str) -> String {

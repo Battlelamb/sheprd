@@ -11499,12 +11499,14 @@ dependencies = [
  "chrono",
  "notify",
  "rusqlite",
+ "rustix",
  "serde",
  "serde_json",
  "sheprd-client",
  "tempfile",
  "thiserror 2.0.21",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

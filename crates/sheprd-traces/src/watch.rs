@@ -44,48 +44,100 @@ pub fn watch(
     redactor: &Redactor,
     stop: &AtomicBool,
     now: impl Fn() -> i64,
-    mut changed: impl FnMut(&Store, Tick<'_>) -> ControlFlow<()>,
+    changed: impl FnMut(&Store, Tick<'_>) -> ControlFlow<()>,
 ) -> Result<()> {
     let (sender, events) = mpsc::channel();
-    let mut follower = Follower {
+    let follower = Follower {
         watcher: notify::recommended_watcher(sender)?,
         watched: vec![false; roots.len()],
         parents: BTreeSet::new(),
     };
+    watch_loop(
+        Scan {
+            store,
+            host,
+            roots,
+            redactor,
+            stop,
+        },
+        follower,
+        events,
+        now,
+        changed,
+        Instant::now,
+    )
+}
+
+struct Scan<'a> {
+    store: &'a mut Store,
+    host: &'a Host,
+    roots: &'a [Root],
+    redactor: &'a Redactor,
+    stop: &'a AtomicBool,
+}
+
+fn watch_loop(
+    scan: Scan<'_>,
+    mut follower: Follower,
+    events: mpsc::Receiver<notify::Result<notify::Event>>,
+    now: impl Fn() -> i64,
+    mut changed: impl FnMut(&Store, Tick<'_>) -> ControlFlow<()>,
+    clock: impl Fn() -> Instant,
+) -> Result<()> {
+    let Scan {
+        store,
+        host,
+        roots,
+        redactor,
+        stop,
+    } = scan;
     follower.follow(roots);
     let report = index(store, host, roots, redactor, now())?;
     if tick(store, &report, &mut changed).is_break() {
         return Ok(());
     }
-    let mut rescan_at = Instant::now() + RESCAN;
+    let mut rescan_at = clock() + RESCAN;
     while !stop.load(Ordering::Relaxed) {
-        let wait = rescan_at.saturating_duration_since(Instant::now());
+        let wait = rescan_at.saturating_duration_since(clock());
         match events.recv_timeout(wait.min(Duration::from_secs(1))) {
             Ok(event) => {
                 let mut paths = BTreeSet::new();
                 let mut seen = collect(event, roots, &mut paths);
-                let burst = Instant::now() + BURST;
-                while Instant::now() < burst {
+                let burst = (clock() + BURST).min(rescan_at);
+                while clock() < burst && !stop.load(Ordering::Relaxed) {
                     match events.recv_timeout(SETTLE) {
                         Ok(event) => seen = seen.max(collect(event, roots, &mut paths)),
                         Err(_) => break,
                     }
                 }
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
                 // A root that just appeared may already hold files written
                 // before its watch began: read everything once.
-                let rescan =
-                    seen == Seen::Rescan || (seen == Seen::Parent && follower.follow(roots));
+                // A perpetually ready queue must not starve catch-up scans.
+                let rescan = clock() >= rescan_at
+                    || seen == Seen::Rescan
+                    || (seen == Seen::Parent && follower.follow(roots));
                 let report = if rescan {
-                    index(store, host, roots, redactor, now())?
+                    follower.follow(roots);
+                    let report = index(store, host, roots, redactor, now())?;
+                    rescan_at = clock() + RESCAN;
+                    report
                 } else {
                     let paths: Vec<PathBuf> = paths.into_iter().collect();
                     index_paths(store, host, roots, &paths, redactor)?
                 };
-                if tick(store, &report, &mut changed).is_break() {
+                let flow = if rescan && report.sessions.is_empty() {
+                    changed(store, Tick::Idle)
+                } else {
+                    tick(store, &report, &mut changed)
+                };
+                if flow.is_break() {
                     break;
                 }
             }
-            Err(mpsc::RecvTimeoutError::Timeout) if Instant::now() >= rescan_at => {
+            Err(mpsc::RecvTimeoutError::Timeout) if clock() >= rescan_at => {
                 follower.follow(roots);
                 let report = index(store, host, roots, redactor, now())?;
                 let flow = if report.sessions.is_empty() {
@@ -96,7 +148,7 @@ pub fn watch(
                 if flow.is_break() {
                     break;
                 }
-                rescan_at = Instant::now() + RESCAN;
+                rescan_at = clock() + RESCAN;
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -191,3 +243,6 @@ fn collect(
     }
     seen
 }
+
+#[cfg(test)]
+mod tests;

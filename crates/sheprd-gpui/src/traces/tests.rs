@@ -5,6 +5,7 @@ use chrono::NaiveDate;
 use sheprd_client::herdr::AgentKind;
 use sheprd_traces::{Activity, Session, Visibility};
 
+mod historical_agents;
 mod host_filter;
 mod layout;
 
@@ -105,7 +106,10 @@ fn agents_are_ordered_by_volume() {
         session("b", AgentKind::Pi, 1, 50),
         session("c", AgentKind::Claude, 1, 10),
     ];
-    assert_eq!(model::agents(&sessions), [AgentKind::Pi, AgentKind::Claude]);
+    assert_eq!(
+        model::agents(&sessions, &[]),
+        [AgentKind::Pi, AgentKind::Claude]
+    );
 }
 
 #[test]

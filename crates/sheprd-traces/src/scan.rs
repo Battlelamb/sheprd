@@ -11,11 +11,13 @@ use crate::{
 use serde::Serialize;
 use sheprd_client::herdr::AgentKind;
 use std::{
-    fs::{self, File, Metadata},
+    fs::{self, Metadata},
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
 use uuid::Uuid;
+
+mod open;
 
 /// The most bytes read from one file in one scan; the rest waits.
 const CHUNK: u64 = 32 * 1024 * 1024;
@@ -108,7 +110,7 @@ pub fn index(
         files.sort();
         for path in files {
             report.files += 1;
-            report.add(file(store, host, root.agent, &path, redactor))?;
+            report.add(file(store, host, root, &path, redactor))?;
         }
     }
     Ok(report)
@@ -129,16 +131,14 @@ pub fn index_paths(
         let Some(root) = roots.iter().find(|root| session_file(&root.dir, path)) else {
             continue;
         };
-        if !path.is_file() {
-            continue;
-        }
         report.files += 1;
-        report.add(file(store, host, root.agent, path, redactor))?;
+        report.add(file(store, host, root, path, redactor))?;
     }
     Ok(report)
 }
 
-/// Whether `path` is a session file `walk` would find under `root`.
+/// Whether `path` has a permitted session-file spelling beneath `root`.
+/// File types and links are checked while opening its components.
 pub(crate) fn session_file(root: &Path, path: &Path) -> bool {
     let Ok(relative) = path.strip_prefix(root) else {
         return false;
@@ -147,9 +147,9 @@ pub(crate) fn session_file(root: &Path, path: &Path) -> bool {
     parts > 0
         && parts <= DEPTH + 1
         && path.extension().is_some_and(|ext| ext == "jsonl")
-        && !relative
+        && relative
             .components()
-            .any(|part| part.as_os_str() == "subagents")
+            .all(|part| matches!(part, std::path::Component::Normal(name) if name != "subagents"))
 }
 
 /// Indexes what `path` gained: its session and how many events were
@@ -157,7 +157,7 @@ pub(crate) fn session_file(root: &Path, path: &Path) -> bool {
 fn file(
     store: &mut Store,
     host: &Host,
-    agent: AgentKind,
+    root: &Root,
     path: &Path,
     redactor: &Redactor,
 ) -> Result<Option<(String, usize)>> {
@@ -165,7 +165,10 @@ fn file(
         path: path.to_owned(),
         source,
     };
-    let mut handle = File::open(path).map_err(io)?;
+    let Some(mut handle) = open::file(&root.dir, path).map_err(io)? else {
+        return Ok(None);
+    };
+    let agent = root.agent;
     let metadata = handle.metadata().map_err(io)?;
     let ident = ident(&metadata);
     let key = path.to_string_lossy();
@@ -270,6 +273,9 @@ fn ident(metadata: &Metadata) -> String {
 /// Collects `*.jsonl` files under `dir`, `depth` levels down, never
 /// following links.
 fn walk(dir: &Path, depth: usize, files: &mut Vec<PathBuf>) {
+    if !open::directory(dir) {
+        return;
+    }
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };

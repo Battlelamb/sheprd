@@ -215,7 +215,7 @@ fn snapshot() -> Snapshot {
 
 fn activity(snapshot: &Snapshot, scope: &TraceFilter) -> Vec<Activity> {
     let today = Utc::now().date_naive();
-    let agents = model::agents(&snapshot.sessions);
+    let agents = model::agents(&snapshot.sessions, &snapshot.activity);
     let mut activity = Vec::new();
     for day in 0..30 {
         for (h, host) in snapshot

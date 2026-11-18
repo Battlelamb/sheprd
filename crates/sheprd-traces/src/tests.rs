@@ -10,6 +10,8 @@ use std::{fs, io::Write, path::Path};
 
 mod fixtures;
 mod pi;
+mod scan_links;
+mod structured_redaction;
 mod watch;
 
 const NOW: i64 = 1_800_000_000_000;

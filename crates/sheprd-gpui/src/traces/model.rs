@@ -109,14 +109,24 @@ pub(crate) fn totals(sessions: &[&Session]) -> Totals {
     }
 }
 
-/// The agents with any session, busiest first: the filter's choices and the
-/// chart's stacking order, so colours stay put while the filter changes.
-pub(crate) fn agents(sessions: &[Session]) -> Vec<AgentKind> {
+/// The table's agents plus those in the full activity history. A bounded
+/// session listing must not remove older agents from the filters or chart.
+pub(crate) fn agents(sessions: &[Session], activity: &[Activity]) -> Vec<AgentKind> {
     let mut counts: Vec<(AgentKind, i64)> = Vec::new();
     for session in sessions {
         match counts.iter_mut().find(|(agent, _)| *agent == session.agent) {
             Some((_, count)) => *count += session.messages.max(1),
             None => counts.push((session.agent, session.messages.max(1))),
+        }
+    }
+    let recent: Vec<_> = counts.iter().map(|(agent, _)| *agent).collect();
+    for entry in activity
+        .iter()
+        .filter(|entry| !recent.contains(&entry.agent))
+    {
+        match counts.iter_mut().find(|(agent, _)| *agent == entry.agent) {
+            Some((_, count)) => *count = count.saturating_add(entry.messages.max(0)),
+            None => counts.push((entry.agent, entry.messages.max(0))),
         }
     }
     counts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.name().cmp(b.0.name())));

@@ -53,7 +53,7 @@ impl Parser {
                     (Some("assistant"), _) => EventKind::Agent,
                     _ => return,
                 };
-                let text = text_of(&payload["content"]);
+                let text = text_of(&payload["content"], out.redactor);
                 if kind == EventKind::User {
                     if INJECTED
                         .iter()
@@ -66,24 +66,28 @@ impl Parser {
                 out.push(kind, None, &text);
             }
             Some("reasoning") => {
-                out.push(EventKind::Thinking, None, &text_of(&payload["summary"]));
+                out.push(
+                    EventKind::Thinking,
+                    None,
+                    &text_of(&payload["summary"], out.redactor),
+                );
             }
             Some("function_call") => out.push(
                 EventKind::ToolCall,
                 string(payload, "name"),
-                &text_of(&payload["arguments"]),
+                &text_of(&payload["arguments"], out.redactor),
             ),
             Some("custom_tool_call") => out.push(
                 EventKind::ToolCall,
                 string(payload, "name"),
-                &text_of(&payload["input"]),
+                &text_of(&payload["input"], out.redactor),
             ),
             Some("function_call_output" | "custom_tool_call_output") => {
                 let output = &payload["output"];
                 // Older rollouts nest `{content, success}`.
                 let (text, failed) = match output.get("content") {
-                    Some(content) => (text_of(content), output["success"] == false),
-                    None => (text_of(output), false),
+                    Some(content) => (text_of(content, out.redactor), output["success"] == false),
+                    None => (text_of(output, out.redactor), false),
                 };
                 let kind = if failed {
                     EventKind::Error

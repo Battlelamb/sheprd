@@ -2,7 +2,7 @@
 use super::*;
 use crate::orchestrator::Look;
 use sheprd_control_protocol::protocol::app::{TaggedHost, TraceFilter};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::PathBuf};
 
 mod publish;
 pub(super) use publish::{Publisher, wanted};
@@ -21,9 +21,10 @@ impl SheprdWindow {
     /// agent totals. Only one read runs per window; rapid edits retain the
     /// latest selection rather than queueing a query for every click.
     pub(super) fn refresh_trace_activity(&mut self, cx: &mut Context<Self>) {
-        if !cx.has_global::<Service>() {
+        let Some(service) = cx.try_global::<Service>() else {
             return;
-        }
+        };
+        let path = service.index_path().map(PathBuf::from);
         if self.activity_section() != Some(ActivityPanel::Traces) {
             if let Some(page) = &mut self.traces.page {
                 page.activity_dirty = true;
@@ -50,7 +51,7 @@ impl SheprdWindow {
             .collect();
         page.activity_dirty = false;
         let read = cx.background_executor().spawn(async move {
-            let path = sheprd_traces::path().ok_or(sheprd_traces::Error::NoStateDirectory)?;
+            let path = path.ok_or(sheprd_traces::Error::NoStateDirectory)?;
             let store = sheprd_traces::Store::open(&path)?;
             let until = chrono::Utc::now().timestamp_millis();
             let ids: Vec<&str> = ids.iter().map(String::as_str).collect();

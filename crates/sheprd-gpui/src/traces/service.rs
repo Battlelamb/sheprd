@@ -11,6 +11,7 @@ use sheprd_client::herdr::AgentKind;
 use sheprd_traces::{Activity, Host, Session, Store, redact::Redactor};
 use std::{
     ops::ControlFlow,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -63,9 +64,10 @@ impl Mailbox {
 
 /// The global that owns the watcher thread; dropping it stops the thread.
 pub(crate) struct Service {
+    index_path: Option<PathBuf>,
     mailbox: Arc<Mailbox>,
-    stop: Arc<AtomicBool>,
     replication: replication::Replication,
+    stop: Arc<AtomicBool>,
     tags: host_filter::Publisher,
 }
 
@@ -80,6 +82,9 @@ impl Drop for Service {
 impl Service {
     /// Starts watching this computer's agent sessions.
     pub(crate) fn install(cx: &mut gpui::App) {
+        // Pure environment/path resolution; opening the file stays on workers.
+        let index_path = sheprd_traces::path();
+        let worker_path = index_path.clone();
         let mailbox = Arc::new(Mailbox {
             status: Mutex::new(Status::Starting),
             generation: AtomicU64::new(1),
@@ -89,7 +94,7 @@ impl Service {
         let started = thread::Builder::new()
             .name("sheprd-traces".into())
             .spawn(move || {
-                if let Err(error) = run(&shared, &flag) {
+                if let Err(error) = run(&shared, &flag, worker_path.as_deref()) {
                     tracing::warn!(%error, "traces watcher stopped");
                     shared.put(Status::Failed(error.to_string()));
                 }
@@ -98,9 +103,10 @@ impl Service {
             mailbox.put(Status::Failed(error.to_string()));
         }
         cx.set_global(Self {
+            index_path,
             mailbox,
-            stop,
             replication: Default::default(),
+            stop,
             tags: Default::default(),
         });
         cx.spawn(async move |cx| {
@@ -139,17 +145,44 @@ impl Service {
     pub(super) fn peers(&self) -> Vec<replication::Report> {
         self.replication.reports()
     }
+
+    pub(super) fn index_path(&self) -> Option<&Path> {
+        self.index_path.as_deref()
+    }
+
+    #[cfg(test)]
+    pub(super) fn fixture(path: PathBuf, snapshot: Snapshot) -> (Self, impl Fn(Snapshot)) {
+        let mailbox = Arc::new(Mailbox {
+            status: Mutex::new(Status::Ready(Arc::new(snapshot))),
+            generation: AtomicU64::new(1),
+        });
+        let shared = mailbox.clone();
+        (
+            Self {
+                index_path: Some(path),
+                mailbox,
+                replication: Default::default(),
+                stop: Arc::new(AtomicBool::new(false)),
+                tags: Default::default(),
+            },
+            move |snapshot| shared.put(Status::Ready(Arc::new(snapshot))),
+        )
+    }
 }
 
-fn run(mailbox: &Mailbox, stop: &AtomicBool) -> sheprd_traces::Result<()> {
-    let path = sheprd_traces::path().ok_or(sheprd_traces::Error::NoStateDirectory)?;
+fn run(mailbox: &Mailbox, stop: &AtomicBool, path: Option<&Path>) -> sheprd_traces::Result<()> {
+    let path = path.ok_or(sheprd_traces::Error::NoStateDirectory)?;
     let state = path
         .parent()
         .ok_or(sheprd_traces::Error::NoStateDirectory)?;
     let home = std::env::home_dir().ok_or(sheprd_traces::Error::NoStateDirectory)?;
-    let mut store = Store::open(&path)?;
+    let mut store = Store::open(path)?;
     let host = Host::local(state)?;
-    let roots = sheprd_traces::default_roots(&home);
+    let cwd = std::env::current_dir().map_err(|source| sheprd_traces::Error::Io {
+        path: ".".into(),
+        source,
+    })?;
+    let roots = sheprd_traces::configured_roots(&home, &cwd, sheprd_client::login_env::var);
     let redactor = Redactor::new(Some(&home));
     // What was indexed before, shown while the first scan runs.
     mailbox.put(Status::Ready(Arc::new(snapshot(&store)?)));

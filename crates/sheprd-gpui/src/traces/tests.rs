@@ -5,6 +5,7 @@ use chrono::NaiveDate;
 use sheprd_client::herdr::AgentKind;
 use sheprd_traces::{Activity, Session, Visibility};
 
+mod activity_refresh;
 mod historical_agents;
 mod host_filter;
 mod layout;

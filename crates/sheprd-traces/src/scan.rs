@@ -67,32 +67,6 @@ impl Report {
     }
 }
 
-/// The session directories of the agents this index reads, under `home`.
-pub fn default_roots(home: &Path) -> Vec<Root> {
-    vec![
-        Root {
-            agent: AgentKind::Claude,
-            dir: home.join(".claude").join("projects"),
-        },
-        Root {
-            agent: AgentKind::Codex,
-            dir: home.join(".codex").join("sessions"),
-        },
-        Root {
-            agent: AgentKind::Codex,
-            dir: home.join(".codex").join("archived_sessions"),
-        },
-        Root {
-            agent: AgentKind::Pi,
-            dir: home.join(".pi").join("agent").join("sessions"),
-        },
-        Root {
-            agent: AgentKind::Omp,
-            dir: home.join(".omp").join("agent").join("sessions"),
-        },
-    ]
-}
-
 /// Indexes every session file under `roots` into `store` as `host`'s, at
 /// `now` (Unix milliseconds).
 pub fn index(

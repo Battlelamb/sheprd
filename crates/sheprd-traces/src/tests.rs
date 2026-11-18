@@ -10,6 +10,7 @@ use std::{fs, io::Write, path::Path};
 
 mod fixtures;
 mod pi;
+mod profile_roots;
 mod scan_links;
 mod structured_redaction;
 mod watch;

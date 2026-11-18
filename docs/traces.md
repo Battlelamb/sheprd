@@ -24,6 +24,14 @@ The app indexes native JSONL session files on a background thread and follows
 changes as agents write. It reads Claude's `~/.claude/projects`, Codex's
 `~/.codex/sessions` and `~/.codex/archived_sessions`, Pi's
 `~/.pi/agent/sessions`, and omp's `~/.omp/agent/sessions`.
+`CLAUDE_CONFIG_DIR` and `CODEX_HOME` replace their default base directories;
+Codex's active and archived sessions are both included. `PI_CODING_AGENT_DIR`
+overrides Pi/omp's agent directory, and omp also honors `PI_CONFIG_DIR` beneath
+the home directory when no direct agent-directory override is set. Relative
+direct overrides resolve from the app/helper's working directory; empty values
+use defaults. The desktop reads its resolved login environment on the worker.
+When Pi and omp share an override directory, it is indexed once using their
+shared Pi-compatible format, rather than duplicating its sessions.
 The index is private to the host's user account. Connected, authenticated hosts
 exchange its redacted session records automatically; previously replicated
 sessions remain readable when their source is offline. Nothing is published

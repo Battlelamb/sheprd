@@ -57,7 +57,8 @@ pub(crate) fn run(command: Command) -> Result<()> {
         let home = std::env::home_dir().context("no home directory")?;
         let state = path.parent().context("traces index has no directory")?;
         let host = Host::local(state)?;
-        let roots = sheprd_traces::default_roots(&home);
+        let cwd = std::env::current_dir().context("no working directory for traces")?;
+        let roots = sheprd_traces::configured_roots(&home, &cwd, |name| std::env::var_os(name));
         Ok((host, roots, Redactor::new(Some(&home))))
     };
     match command {

@@ -174,12 +174,9 @@ impl SheprdWindow {
     pub(crate) fn poll_traces(&mut self, cx: &mut Context<Self>) {
         if self.activity_section() == Some(ActivityPanel::Traces) {
             self.ensure_traces_page(cx);
-            if self
-                .traces
-                .page
-                .as_ref()
-                .is_some_and(|page| page.activity.is_none() && page.activity_task.is_none())
-            {
+            if self.traces.page.as_ref().is_some_and(|page| {
+                (page.activity.is_none() || page.activity_dirty) && page.activity_task.is_none()
+            }) {
                 self.refresh_trace_activity(cx);
             }
         }

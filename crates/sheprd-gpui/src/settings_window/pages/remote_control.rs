@@ -50,6 +50,8 @@ pub(in crate::settings_window) struct RemoteSettings {
     relay_invalid: bool,
     /// Sheprd's own relays, read once the page shows.
     pub(in crate::settings_window) offered: Offered,
+    /// A private relay's listen token being asked for or linked.
+    pub(in crate::settings_window) token: relays::TokenPrompt,
 }
 
 /// Opens Settings at Remote control, as the status bar's phone does.
@@ -66,6 +68,27 @@ pub(crate) fn open(source: WeakEntity<crate::SheprdWindow>, cx: &mut App) {
         let _ = handle.update(cx, |view, window, cx| {
             view.select_section(Section::RemoteControl, window, cx);
         });
+    });
+}
+
+/// Opens Settings at Remote control offering `relay` and its listen token
+/// from a link, for the user to add or dismiss.
+pub(crate) fn offer_linked_relay(
+    source: WeakEntity<crate::SheprdWindow>,
+    relay: String,
+    token: crate::remote::relay_token::ListenToken,
+    cx: &mut App,
+) {
+    open(source, cx);
+    // Queued after `open`'s own, so the page shows by now.
+    cx.defer(move |cx| {
+        let Some(handle) = cx
+            .default_global::<crate::settings_window::SettingsWindowHandle>()
+            .window
+        else {
+            return;
+        };
+        let _ = handle.update(cx, |view, _, cx| view.offer_linked_relay(relay, token, cx));
     });
 }
 

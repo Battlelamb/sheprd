@@ -53,7 +53,14 @@ fn with_pane(mut snapshot: ClientShellSnapshot, id: &str) -> ClientShellSnapshot
     snapshot
 }
 
-fn tick(now: Instant) -> Tick {
+fn typed_into(pane: &str, at: Instant) -> Typed {
+    Typed {
+        at,
+        pane: Some(pane.into()),
+    }
+}
+
+fn tick(now: Instant) -> Tick<'static> {
     Tick {
         now,
         busy: false,
@@ -191,7 +198,7 @@ fn typing_into_the_focused_pane_keeps_its_terminal() {
     focused.focused_pane_id = Some("p1".into());
     tracker.poll(scope("b1"), &focused, tick(start));
     let typed = Tick {
-        last_typed: Some(start + Duration::from_secs(2)),
+        last_typed: Some(&typed_into("p1", start + Duration::from_secs(2))),
         ..tick(start + SETTLE)
     };
     assert_eq!(tracker.poll(scope("b1"), &focused, typed), None);
@@ -210,7 +217,7 @@ fn input_before_the_agent_was_ready_does_not_count() {
     focused.focused_pane_id = Some("p1".into());
     tracker.poll(scope("b1"), &focused, tick(start));
     let typed = Tick {
-        last_typed: Some(start - Duration::from_secs(1)),
+        last_typed: Some(&typed_into("p1", start - Duration::from_secs(1))),
         ..tick(start + SETTLE)
     };
     assert_eq!(
@@ -364,8 +371,43 @@ fn typing_into_the_focused_pane_while_it_settles_keeps_its_terminal() {
     tracker.poll(scope("b1"), &focused, tick(start));
     // A key typed right at the deadline still wins over the move.
     let typed = Tick {
-        last_typed: Some(start + SETTLE),
+        last_typed: Some(&typed_into("p1", start + SETTLE)),
         ..tick(start + SETTLE)
     };
     assert_eq!(tracker.poll(scope("b1"), &focused, typed), None);
+}
+
+#[test]
+fn typing_into_another_pane_then_focusing_the_agent_lets_it_move() {
+    let start = Instant::now();
+    let mut tracker = tracker(&snapshot(&[]), start);
+    let mut focused = snapshot(&[("p1", "claude", IDLE, 1)]);
+    focused.focused_pane_id = Some("p1".into());
+    tracker.poll(scope("b1"), &focused, tick(start));
+    // Typed into p2 while p1 settled, then p1 was clicked.
+    let elsewhere = typed_into("p2", start + Duration::from_secs(2));
+    let typed = Tick {
+        last_typed: Some(&elsewhere),
+        ..tick(start + SETTLE)
+    };
+    assert_eq!(
+        tracker.poll(scope("b1"), &focused, typed),
+        Some("p1".into())
+    );
+}
+
+#[test]
+fn typing_into_an_agent_that_lost_focus_still_keeps_its_terminal() {
+    let start = Instant::now();
+    let mut tracker = tracker(&snapshot(&[]), start);
+    let mut other = snapshot(&[("p1", "claude", IDLE, 1)]);
+    other.focused_pane_id = Some("p2".into());
+    tracker.poll(scope("b1"), &other, tick(start));
+    // Typed into p1, then focus moved on before the next poll.
+    let draft = typed_into("p1", start + Duration::from_secs(2));
+    let typed = Tick {
+        last_typed: Some(&draft),
+        ..tick(start + SETTLE)
+    };
+    assert_eq!(tracker.poll(scope("b1"), &other, typed), None);
 }

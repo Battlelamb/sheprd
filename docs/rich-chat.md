@@ -203,9 +203,11 @@ change. It is off by default.
   logged and leaves the terminal; a chat moved back to its terminal stays
   there.
 - Typing, composing, or pasting into the agent's pane from this window keeps
-  its terminal, since a move would clear what is typed. Moving the pointer,
-  scrolling, or clicking does not. Text typed from another client, such as the
-  Herdr TUI, is not seen: that is what the wait is for.
+  its terminal, since a move would clear what is typed. That holds while the
+  move is still checking the agent too: it stops before pressing Ctrl+C.
+  Typing into another pane, then clicking the agent's, does not count, nor
+  does moving the pointer, scrolling, or clicking. Text typed from another
+  client, such as the Herdr TUI, is not seen: that is what the wait is for.
 - Several Sheprd windows on one daemon move each agent once: a window claims
   the pane before it stops the agent, and the others leave it alone. The same
   claim keeps **Move Agent into Chat** in one window from racing a move

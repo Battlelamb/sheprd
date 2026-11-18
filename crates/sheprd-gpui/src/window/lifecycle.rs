@@ -41,11 +41,20 @@ impl SheprdWindow {
     }
 
     /// Records that the window just typed, composed, or pasted into the
-    /// focused pane: use of the window, and a draft the pane may now hold.
+    /// focused pane: use of the window, and a draft the pane may now hold,
+    /// which an automatic move into a chat must not clear.
     pub(crate) fn note_typing(&mut self) {
         let now = Instant::now();
         self.last_input = Some(now);
-        self.last_typed = Some(now);
+        let pane = self
+            .live
+            .snapshot
+            .as_deref()
+            .and_then(|snapshot| snapshot.focused_pane_id.clone());
+        if let Some(pane) = &pane {
+            self.typed_into(pane);
+        }
+        self.last_typed = Some(crate::chat::Typed { at: now, pane });
     }
 
     /// Records the pointer at `position` over the panes as use only when it

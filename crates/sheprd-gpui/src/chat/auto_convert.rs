@@ -53,14 +53,30 @@ struct Watch {
 
 /// What one tick knows beyond the snapshot.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Tick {
+pub(crate) struct Tick<'a> {
     pub(crate) now: Instant,
     /// Whether a move is already under way, which the next one waits for.
     pub(crate) busy: bool,
-    /// When this window last typed, composed, or pasted into Herdr's
-    /// focused pane. Pointer motion, wheels, and clicks do not count: they
-    /// leave no draft, and the window notes them for any pane it shows.
-    pub(crate) last_typed: Option<Instant>,
+    /// When this window last typed, composed, or pasted, and into which
+    /// pane. Pointer motion, wheels, and clicks do not count: they leave no
+    /// draft, and the window notes them for any pane it shows.
+    pub(crate) last_typed: Option<&'a Typed>,
+}
+
+/// Typing, composing, or pasting into a pane: what can leave a draft there.
+/// It names the pane that had Herdr's focus then, so typing into one pane
+/// and clicking another later does not count against the second.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Typed {
+    pub(crate) at: Instant,
+    pub(crate) pane: Option<String>,
+}
+
+impl Typed {
+    /// Whether this typing went into `pane` at or after `since`.
+    pub(crate) fn went_into(&self, pane: &str, since: Instant) -> bool {
+        self.pane.as_deref() == Some(pane) && self.at >= since
+    }
 }
 
 /// The new agents of one daemon, and the panes that are done with.
@@ -97,7 +113,7 @@ impl Tracker {
         &mut self,
         scope: Scope,
         snapshot: &ClientShellSnapshot,
-        tick: Tick,
+        tick: Tick<'_>,
     ) -> Option<String> {
         if self.scope.as_ref() != Some(&scope) {
             // What runs when the window first sees a daemon is not new.
@@ -155,8 +171,10 @@ impl Tracker {
                 continue;
             }
             let since = *watch.idle_since.get_or_insert(tick.now);
-            let focused = snapshot.focused_pane_id.as_deref() == Some(pane.as_str());
-            if focused && tick.last_typed.is_some_and(|input| input >= since) {
+            if tick
+                .last_typed
+                .is_some_and(|typed| typed.went_into(pane, since))
+            {
                 // Someone is typing in this terminal: it is theirs.
                 self.settled.insert(pane.clone());
                 self.watching.remove(pane);
@@ -198,7 +216,7 @@ impl SheprdWindow {
         let tick = Tick {
             now,
             busy: self.chats.converting.is_some() || self.chats.converting_core.is_some(),
-            last_typed: self.last_typed,
+            last_typed: self.last_typed.as_ref(),
         };
         let Some(pane) = self.chats.auto_convert.poll(scope, snapshot, tick) else {
             return;
@@ -211,6 +229,21 @@ impl SheprdWindow {
                 tracing::info!(pane, agent = agent.name(), "Moving a new agent into a chat");
             }
             Err(error) => tracing::info!(pane, %error, "A new agent stays in its terminal"),
+        }
+    }
+
+    /// Stops the automatic move of `pane` before its worker presses Ctrl+C,
+    /// since what was just typed there is a draft Ctrl+C would clear. The
+    /// worker checks before each key it sends, then hands back its refusal,
+    /// and the pane stays in its terminal. A move already past its keys
+    /// finishes: the agent has stopped, and its chat is what remains.
+    pub(crate) fn typed_into(&mut self, pane: &str) {
+        if let Some(job) = &self.chats.converting
+            && job.automatic
+            && job.pane == pane
+        {
+            job.cancel();
+            tracing::info!(pane, "Typing into a new agent keeps it in its terminal");
         }
     }
 

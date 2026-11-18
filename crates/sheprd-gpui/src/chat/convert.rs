@@ -149,7 +149,7 @@ pub(crate) struct Job {
     /// Keeps every other window of this app off the pane until the move
     /// has typed its line or given up.
     _claim: Option<claim::Claim<'static>>,
-    pane: String,
+    pub(super) pane: String,
     result: mpsc::Receiver<Result<String, Error>>,
     scope: existing::Scope,
 }
@@ -176,6 +176,14 @@ impl Job {
             scope,
         };
         (job, sender, cancelled)
+    }
+}
+
+impl Job {
+    /// Stops the worker before its next query or key, as dropping the job
+    /// would, while keeping the claim until it answers.
+    pub(super) fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
     }
 }
 

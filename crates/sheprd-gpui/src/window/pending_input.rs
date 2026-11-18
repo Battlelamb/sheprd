@@ -170,15 +170,13 @@ impl SheprdWindow {
         if self.waits_behind_preparation() {
             return self.hold_after_gap(Held::Event(event), cx) || !self.in_projection_gap();
         }
+        if self.pending_input.target.is_none() {
+            return true;
+        }
+        self.note_event(&event);
         let Some(target) = &self.pending_input.target else {
             return true;
         };
-        // `target` borrows the window, so the fields are set directly.
-        let now = std::time::Instant::now();
-        self.last_input = Some(now);
-        if typing(&event) {
-            self.last_typed = Some(now);
-        }
         let handle = &self.endpoints[self.selected_endpoint].connection.handle;
         if let Some(handle) = handle
             && let Err(error) =

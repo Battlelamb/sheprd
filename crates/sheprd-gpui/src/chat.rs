@@ -53,6 +53,7 @@ pub(crate) mod visual;
 pub(crate) mod widgets;
 mod window;
 
+pub(crate) use auto_convert::Typed;
 pub(crate) use chats::{ChatInput, Chats, LauncherDeck, Toward};
 
 /// The wall clock in milliseconds since the Unix epoch, which the program

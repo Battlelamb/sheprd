@@ -49,6 +49,10 @@ code=$(changed \
   ':(exclude)assets/social-preview-*' \
   ':(exclude)assets/icons/sheprd-icon-badge.*' \
   ':(exclude).github/workflows/site.yml')
+# Crates embed the skills they install and test the published relay list,
+# so those reach the native jobs too, Markdown and all.
+embedded=$(changed skills website/site/relays.json website/site/relays.json.asc)
+[[ "$embedded" == true ]] && code=true
 windows_package=$(changed \
   scripts/release/package-windows.py scripts/release/windows-installer.py \
   scripts/release/sheprd.iss scripts/release/installer site/install.ps1 \

@@ -14,6 +14,7 @@ your instructions for every chat.
 | `terminal.md` | In the chat view of the agent's terminal pane |
 | `remote.md` | Anywhere else that cannot open the agent's files, such as the desktop app over SSH |
 | `phone.md` | In the iPhone and iPad app or the phone web app |
+| `phone-app.md` | In the iPhone and iPad app, after `phone.md`: the text sizes and message effects it draws, which the phone web app does not |
 
 `{{ name }}` is replaced by its value; an unknown name stays as written
 and the chat warns about it. See `docs/rich-chat.md` for the variables.

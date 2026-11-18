@@ -555,8 +555,9 @@ prompt or answer a permission request. Existing CLI sessions and read-only mirro
 ### Text size and effects
 
 An agent can set words larger or smaller within a line, and play an effect as
-a phone's messages do. Markdown directives keep the source readable where it is
-not drawn, such as terminal views and the phone:
+a phone's messages do, in the desktop chat and in the iPhone and iPad app.
+Markdown directives keep the source readable where they are not drawn, such
+as terminal views and the phone web app:
 
 ```markdown
 Tests pass and :huge[the PR is merged]. :small[CI took 4 min.]
@@ -585,13 +586,32 @@ All 214 tests pass.
   the terminals, tabs, or sidebar, and never take the pointer. A message plays its first; another
   arriving while one plays is dropped, not queued.
 
-Only an agent's replies play effects; a user's message shows its directives as
-text. Each effect plays once, as its message arrives: a transcript loaded,
-reopened, or received again after reconnecting shows each message at rest,
-with a **Replay** link under it. With the system's reduce motion setting on,
-nothing moves, and invisible ink still hides until hovered. The agent learns
-the syntax from the note Sheprd sends with the first prompt on a desktop
-(`desktop.md` and `remote.md` in `crates/sheprd-acp/prompts`).
+Only an agent's replies play effects; a user's message shows its effect
+directives as text, though its size spans still apply. Each effect plays once,
+as its message arrives: a transcript loaded, reopened, or received again after
+reconnecting shows each message at rest, with a **Replay** link under it. With
+the system's reduce motion setting on, nothing moves, and invisible ink still
+hides until hovered. The agent learns the syntax from the note Sheprd sends
+with the first prompt on a desktop (`desktop.md` and `remote.md` in
+`crates/sheprd-acp/prompts`) and in the iPhone and iPad app (`phone-app.md`).
+
+The iPhone and iPad app draws the same sizes and effects
+(`ios/SheprdRemoteCore/Sources/SheprdRemoteCore/Chat/TextSize.swift` and
+`Chat/Effects`, ported from the desktop's with the same tests), with these
+differences:
+
+- Invisible ink hides its text until tapped, and a second tap hides it again.
+- Screen effects play over the chat screen above the composer, never over
+  the composer, the navigation bar, or other screens, and take no touches.
+- A transcript from the phone's cache or a snapshot is history; only the
+  entries a live change pushes, appends to, or replaces play, wherever they
+  are in the transcript. The system's Reduce Motion setting draws everything
+  at rest.
+- A list row strips the directives from the computer's one-line excerpt of
+  the latest reply.
+
+The phone web app draws neither, so `phone.md` does not mention them and only
+`phone-app.md`, which follows it for the iPhone and iPad app, does.
 
 The catalog is application-specific, not an A2UI implementation or MCP Apps
 host. Embedded HTML pages use the platform webview; see the
@@ -630,7 +650,8 @@ words. An older program ignores the field, and an older client sends none.
 The note's texts are templates (`context/prompts.rs`): the built-in ones in
 `crates/sheprd-acp/prompts`, compiled in, each replaced by a non-empty file
 of the same name in `herdr/chat-prompts/`. One template per place
-(`desktop`, `terminal`, `remote`, `phone`, chosen by `Kind::of`) avoids
+(`desktop`, `terminal`, `remote`, `phone`, chosen by `Kind::of`), followed for
+the iPhone and iPad app alone by `phone-app.md` (`Kind::after`), avoids
 conditionals: `{{ name }}` substitution (`context/template.rs`) is one pass
 over known names, a value is never read as a template, and an unknown name
 stays as written, as Moltis fills its webhook templates. Files are read once

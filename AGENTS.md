@@ -263,10 +263,18 @@ what was deferred to CI.
   and requires CI to have passed on the commit. Keep the `cfg(unix)`/`cfg(windows)`
   split honest and say plainly what a platform cannot do instead of stubbing
   behavior that appears to work.
+- Pull requests run CI on `ubuntu-24.04` alone and lint and test only the
+  crates their changes reach (`scripts/ci-scope.py`). The merge queue, `main`,
+  and a pull request that changes a platform `cfg` line or file, a
+  dependency (any `Cargo.toml`, `Cargo.lock`) or the toolchain, or the CI
+  selection itself, or carries the `windows`, `macos`, or `full-ci` label,
+  run every platform over the whole workspace.
 - A `cfg` gate is only proven on the platform it names. For changes that touch
   one, rely on the corresponding platform CI jobs: a macOS run cannot see a
-  Linux-only gate, and neither can the Windows cross-check. `just lint-linux`
-  and `just lint-windows` are available for local investigation when needed.
+  Linux-only gate, and neither can the Windows cross-check. Code inside an
+  existing gate changes no `cfg` line, so label such a pull request
+  `windows` or `macos`. `just lint-linux` and `just lint-windows` are
+  available for local investigation when needed.
 - Documentation-only changes need command/path/link review and `git diff --check`; do not claim a code test run that did not happen.
 - Add deterministic tests for invariants: ordering, cancellation, fragmentation, revision fencing, error paths, geometry, and cleanup. Prefer explicit coordination and bounded waits over timing guesses.
 - Test pure session/CLI/geometry logic without a socket or window where possible. Exercise public behavior with mock peers and headless GPUI tests where integration matters.

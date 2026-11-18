@@ -20,6 +20,29 @@ local TONES = { working = "warning", blocked = "danger", done = "success" }
 
 -- Which design draws the rows. Devices lists agents by machine, which this
 -- pane does not yet, so it draws Herdr's rows.
+-- A tool at the end of a head (fold, search, the sidebar toggle): a small button, as
+-- `icon_button`'s, with its icon a step larger, as large as Sheprd's own
+-- sidebar draws them, where a small button's icon would be smaller.
+local function head_tool(props: any)
+	return ui.row {
+		gap = "none",
+		ui.row {
+			class = "icon-button sheprd-head-tool",
+			width = 26,
+			height = 26,
+			align = "center",
+			justify = "center",
+			tooltip = props.tooltip,
+			msg = props.msg,
+			to = props.to,
+			ui.icon { name = props.icon, size = "large" },
+		},
+	}
+end
+
+-- Folds the sidebar to its rail, or opens it again from there.
+local TOGGLE = { icon = "panel-left", tooltip = "Toggle the sidebar", msg = { command = "toggle_sidebar" }, to = LINK }
+
 local function design(layout: any): string
 	local name = layout.name
 	if name == "superset" or name == "orca" or name == "minimal" then
@@ -663,12 +686,19 @@ return mod {
 			return ui.column {
 				class = "sheprd-worktrees",
 				grow = true,
-				scroll = true,
-				-- Sheprd's own sidebar scrolls with no scrollbar.
-				scrollbar = false,
-				padding = "small",
-				style = { background = theme.sidebar, gap = 4 },
-				table.unpack(tiles),
+				gap = "none",
+				style = { background = theme.sidebar },
+				-- The toggle that opens the sidebar again, where its head has it.
+				ui.row { class = "sheprd-head", align = "center", justify = "center", height = 32, shrink = false, head_tool(TOGGLE) },
+				ui.column {
+					grow = true,
+					scroll = true,
+					-- Sheprd's own sidebar scrolls with no scrollbar.
+					scrollbar = false,
+					padding = "small",
+					style = { gap = 4 },
+					table.unpack(tiles),
+				},
 			}
 		end
 		local searching = state.searching and state.query ~= ""
@@ -718,14 +748,13 @@ return mod {
 				side = ui.row {
 					align = "center",
 					style = { gap = 2 },
-					icon_button {
+					head_tool {
 						icon = if folded then "chevrons-up-down" else "list-tree",
-						size = "small",
 						tooltip = if folded then "Expand every group" else "Collapse every group",
 						msg = { fold_all = not folded },
 						to = LINK,
 					},
-					icon_button { icon = "search", size = "small", tooltip = "Search devices, worktrees, branches and notes", msg = "search" },
+					head_tool { icon = "search", tooltip = "Search devices, worktrees, branches and notes", msg = "search" },
 				},
 			}
 		return ui.column {
@@ -743,7 +772,7 @@ return mod {
 				style = { padding = { left = 12, right = 8 } },
 				ui.text { "WORKSPACES", class = "sheprd-title", weight = "bold", size = "small", style = { color = theme.subtext } },
 				ui.spacer(),
-				icon_button { icon = "panel-left", size = "small", tooltip = "Toggle the sidebar", msg = { command = "toggle_sidebar" }, to = LINK },
+				head_tool(TOGGLE),
 			},
 			head,
 			ui.column {

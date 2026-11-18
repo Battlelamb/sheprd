@@ -379,7 +379,7 @@ impl SheprdWindow {
 
     /// What ends the bar: git actions, the account, and the window controls
     /// a client-decorated window draws.
-    fn titlebar_end(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+    pub(crate) fn titlebar_end(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let image = self
             .pr_profile()
             .and_then(|profile| self.menu.github_avatars.get(&profile.avatar_url));

@@ -148,6 +148,9 @@ impl SheprdWindow {
                 if let Some(endpoint) = self.hosted_endpoint(endpoint) {
                     self.navigate_endpoint(&endpoint, NavigationTarget::Workspace(&workspace), cx);
                 }
+                // As a click on the window's own row does: typing goes to the
+                // terminals shown, not to the layout's row that was clicked.
+                window.focus(&self.focus, cx);
             }
             Action::Menu(menu) => self.hosted_menu(menu, pointer, window, cx),
             Action::MoveWorkspace {
@@ -217,6 +220,7 @@ impl SheprdWindow {
             Some(target) => self.open_listed_agent(endpoint, &target, window, cx),
             None => {
                 self.navigate_endpoint(endpoint, NavigationTarget::Pane(id), cx);
+                window.focus(&self.focus, cx);
             }
         }
     }
@@ -262,7 +266,9 @@ impl SheprdWindow {
     }
 
     /// Resizes the sidebar from a host's drag of its edge, as dragging the
-    /// window's own edge does, and keeps the width when the drag ends.
+    /// window's own edge does, and keeps the width when the drag ends. From
+    /// the rail, or with the sidebar hidden, dragging it out past the least
+    /// width opens the sidebar there.
     fn drag_sidebar_edge(&mut self, phase: Drag, dx: f32, window: &Window, cx: &mut Context<Self>) {
         let viewport = f32::from(window.viewport_size().width);
         match phase {
@@ -274,18 +280,22 @@ impl SheprdWindow {
             }
             Drag::Down { reset: false } => {
                 let width = self.sidebar_mode().width(self.sidebar_width, viewport);
-                WIDTH_AT_PRESS.set(width);
+                WIDTH_AT_PRESS.set(Some(width.unwrap_or(0.)));
                 self.sidebar_modified = true;
             }
             Drag::Move => {
                 let Some(start) = WIDTH_AT_PRESS.get() else {
                     return;
                 };
-                let toward_end = crate::direction::toward_end(dx);
-                self.sidebar_width = Some(super::super::metrics::sidebar_width(
-                    Some(start + toward_end),
-                    viewport,
-                ));
+                let wanted = start + crate::direction::toward_end(dx);
+                if !self.sidebar_visible {
+                    if wanted < super::super::metrics::SIDEBAR_LEAST {
+                        return;
+                    }
+                    self.toggle_sidebar();
+                }
+                self.sidebar_width =
+                    Some(super::super::metrics::sidebar_width(Some(wanted), viewport));
             }
             Drag::Up => {
                 if WIDTH_AT_PRESS.take().is_some() {

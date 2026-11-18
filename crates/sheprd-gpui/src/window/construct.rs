@@ -327,6 +327,7 @@ impl SheprdWindow {
             theme,
             theme_light: crate::app::light_appearance(cx),
             title: WINDOW_TITLE.to_owned(),
+            titlebar_width: 0.,
             toast_motion: Default::default(),
             toasts_hidden: false,
             tunnels: Default::default(),

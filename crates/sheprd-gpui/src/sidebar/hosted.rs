@@ -74,6 +74,8 @@ pub struct Stamp {
     /// Every device's snapshot and folds; see `hosted_devices_stamp`.
     devices: u64,
     metrics: SidebarMetrics,
+    /// Whether Back and Forward fit the left column's header.
+    navigation: bool,
     panel: ActivityPanel,
     section: bool,
     sidebar_visible: bool,
@@ -96,6 +98,7 @@ impl PartialEq for Stamp {
             && self.details_visible == other.details_visible
             && self.devices == other.devices
             && self.metrics == other.metrics
+            && self.navigation == other.navigation
             && self.panel == other.panel
             && self.section == other.section
             && self.sidebar_visible == other.sidebar_visible
@@ -257,6 +260,7 @@ impl SheprdWindow {
             panel: self.activity_panel(),
             section: self.activity_section().is_some(),
             metrics: self.hosted_metrics(),
+            navigation: self.navigation_fits_sidebar(self.viewport_width),
             sidebar_visible: self.sidebar_visible,
             snapshot: self.live.snapshot.clone(),
             status_bar_visible: self.status_bar_visible,
@@ -353,6 +357,7 @@ impl SheprdWindow {
                 "panel": panel_id(self.activity_panel()),
                 "panels": panels,
                 "section": self.activity_section().is_some(),
+                "navigation_in_header": self.navigation_fits_sidebar(self.viewport_width),
                 "sidebar_visible": self.sidebar_visible,
                 "status": self.live.status_text(self.local_error.as_deref()),
                 "status_bar_visible": self.status_bar_visible,

@@ -443,6 +443,9 @@ pub(crate) struct SheprdWindow {
     pub(crate) theme_light: bool,
     /// Last title pushed to the OS, so the window is renamed only when it changes.
     pub(crate) title: String,
+    /// The width of the title bar's end (`titlebar_end`) as a host's
+    /// `titlebar` region last drew it, which the rightmost strip leaves free.
+    pub(crate) titlebar_width: f32,
     /// Toasts sliding in and out of their corners.
     pub(crate) toast_motion: toasts::motion::ToastMotion,
     pub(crate) toasts_hidden: bool,

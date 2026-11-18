@@ -1,6 +1,8 @@
 use super::*;
 use gpui::TestAppContext;
 
+mod edge;
+mod focus;
 mod nest;
 mod sidebar_size;
 

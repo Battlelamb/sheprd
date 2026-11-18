@@ -45,10 +45,10 @@ Everything around the terminals is Luau in `crates/sheprd-gpui/moonframe/app`:
 
 | File | Draws |
 | --- | --- |
-| `main.luau` | The layout: where each part goes |
-| `mods/header/main.luau` | Back, Forward, and the sidebar toggle |
-| `mods/activity/main.luau` | The activity bar |
-| `mods/worktrees/main.luau` | The left pane's head and worktree rows, linked worktrees under their checkout, drawn in the sidebar layout Sheprd's config names (`layout = "orca"`, `compact`, `minimal`, ...) |
+| `main.luau` | The layout: where each part goes, the line over the agents that shares the left pane's height with the worktrees (kept across launches; a double click shares it evenly again), and the device picker under them |
+| `mods/header/main.luau` | Back and Forward, while they fit the column (`navigation_in_header`); else Sheprd's title bar beside it shows them |
+| `mods/activity/main.luau` | The activity bar, with the sparkles above Settings |
+| `mods/worktrees/main.luau` | The left pane's head and worktree rows, linked worktrees under their checkout, drawn in the sidebar layout Sheprd's config names (`layout = "orca"`, `compact`, `minimal`, ...), and the sidebar toggle in its head, or over the rail of numbered tiles while the sidebar is folded. Dragging the column's edge out of the rail opens the sidebar too |
 | `mods/agents/main.luau` | The agents under the worktrees, in Sheprd's sort and the same layout |
 | `mods/details/main.luau` | The right pane; the toggle at the end of the title bar opens it |
 | `mods/status/main.luau` | The status bar |
@@ -57,13 +57,22 @@ Everything around the terminals is Luau in `crates/sheprd-gpui/moonframe/app`:
 
 The terminals, tabs, and pages stay one Rust view, placed with
 `ui.view { name = "sheprd", id = "main", props = { region = "main" } }`.
+The device picker is Sheprd's own too, the one its sidebar ends with
+(`region = "devices"`), shown as `[sidebar] device_footer` says.
+So is the title bar's end (`region = "titlebar"`): the checkout's changes and
+branch, the account, and the details toggle. The shell lays it over the end of
+the tab strip, which leaves it that room, at the width Sheprd reports
+(`titlebar` among the sizes); each group's tabs, split and ⋯ stay with its
+terminals. The terminals keep the keyboard: they take it when the window opens
+or comes back to the front, and after a click anywhere in the layout, so only
+a field (the search, a note) holds it instead.
 
 ## Changing it
 
 In `just run-moonframe`, saving a file reloads the window. To keep a change of
 your own in any build, copy the file to the same path under `~/.config/sheprd`
-and edit the copy; deleting it brings the original back. The sparkles at the
-bottom right ask an agent to make a change, and it asks before each edit:
+and edit the copy; deleting it brings the original back. The sparkles in the
+activity bar, above Settings, open a window where you ask an agent to make a change, and it asks before each edit:
 in a release it writes those copies, in `just run-moonframe` the checkout's
 files. View > Inspect Element (⌥⌘I, or ⇧⌘X
 to go straight to picking) shows what built any part, and its file and line.
@@ -86,7 +95,7 @@ shows in the log when one appears: `unknown key` names it.
 | `layout` | The configured sidebar layout's `name` and spacing: `padding`, `gap`, `row_padding`, `style_padding`, `child_indent`, `nest` (how far a device's rows step in under its header), `inset`, `spacing`, `radius`, `outline` (rounded highlights), `tree_lines`, `title_case`, `workspace_details`, `child_details`, `pr_counts` |
 | `panels`, `panel` | The activity panels (`id`, `label`, `count`, `unseen`) and the current one's `id` |
 | `connected`, `status` | Whether the daemon answers, and what to say about it |
-| `section`, `sidebar_visible`, `status_bar_visible`, `details_visible` | What the window shows; `details_visible` follows the toggle at the end of the title bar, and the shell shows the details pane by it |
+| `section`, `sidebar_visible`, `status_bar_visible`, `details_visible`, `navigation_in_header` | What the window shows (`navigation_in_header`: whether Back and Forward fit the left column's header, as Sheprd's own window decides); `details_visible` follows the toggle at the end of the title bar, and the shell shows the details pane by it |
 | `usage` | The status bar's usage as Sheprd's own bar shows it, or `nil` while hidden or empty: `segments` (each provider's `id`, `name`, `locked`, `stale`, `meter` with `used` as a fraction and its `color`, `labels` with `text` and `color`, and `balance`), `busy`, `error`, and the words `unavailable` and `refresh_label` |
 
 Two parts change on their own, so they have their own providers and a change
@@ -129,7 +138,7 @@ Send a message with `to = "provider:sheprd"`:
 | `{ toggle_device = id }`, `{ select_device = id }` | Folds a device's header, or selects the device |
 | `{ toggle_agent_sort = true }` | Switches the agents between grouped and by priority |
 | `{ move_workspace = id, target = id, after = bool }` | Moves a workspace of the selected device before (or after) another, as dropping its row there does; the worktrees mod sends it when a row with `carry` is dropped on one with `accept` |
-| `{ sidebar_width = true }` as a `pointer` | Resizes the sidebar from a drag of its edge (`phase`, `dx`); a double click puts back the default width. The shell draws the edge as a hairline beside the left column, its grip lit on hover and overhanging the main area so it never covers the lists' scrollbars (`.sheprd-left-edge` in `style.luau`) |
+| `{ sidebar_width = true }` as a `pointer` | Resizes the sidebar from a drag of its edge (`phase`, `dx`); a double click puts back the default width. The shell draws the edge as a hairline beside the left column, its grip overhanging the main area so it never covers the lists' scrollbars. The shell takes the drag (`hover`), draws the handle as a Moonframe split does (a short pill on hover, a longer one while dragging, as on the line over the agents), and sends the drag on |
 | `{ open_build_pr = true }` | Opens the pull request a worktree build came from |
 | `{ usage = id }`, `{ usage_refresh = true }` | Opens a usage provider's panel above the status bar, or reads usage again |
 

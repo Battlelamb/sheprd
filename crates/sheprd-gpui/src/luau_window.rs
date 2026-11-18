@@ -372,6 +372,8 @@ pub(crate) fn run() -> ExitCode {
 struct SheprdRegion {
     /// Over the whole window, for the main region; see `render`.
     overlay: Option<AnyView>,
+    /// The main region's watch on the keyboard; see `keep_terminal_focus`.
+    _focus: Vec<Subscription>,
     _sizes: Option<Subscription>,
     view: AnyView,
 }
@@ -387,9 +389,11 @@ impl SheprdRegion {
         let name = init.props().get("region").and_then(Data::as_str);
         let region = match name {
             Some("activity") => Some(Region::ActivityBar),
+            Some("devices") => Some(Region::Devices),
             Some("header") => Some(Region::Header),
             Some("sidebar") => Some(Region::Sidebar),
             Some("status") => Some(Region::StatusBar),
+            Some("titlebar") => Some(Region::TitleBar),
             _ => None,
         };
         let view = match region {
@@ -408,9 +412,12 @@ impl SheprdRegion {
                 if last.replace(sizes) != Some(sizes) {
                     messenger.send(Data::map([
                         ("activity_bar", f64::from(sizes.activity_bar).into()),
+                        ("devices", f64::from(sizes.devices).into()),
                         ("header", f64::from(sizes.header).into()),
+                        ("height", f64::from(sizes.height).into()),
                         ("left", f64::from(sizes.left).into()),
                         ("status_bar", f64::from(sizes.status_bar).into()),
+                        ("titlebar", f64::from(sizes.titlebar).into()),
                     ]));
                 }
             };
@@ -422,6 +429,10 @@ impl SheprdRegion {
             })
         });
         let overlay = region.is_none().then(|| host.region(Region::Overlay, cx));
+        let focus = match region {
+            None => keep_terminal_focus(host.focus_handle(cx), window, cx),
+            Some(_) => Vec::new(),
+        };
         if region.is_none() {
             let shared = shared.borrow();
             take_actions(host.clone(), shared.actions.clone(), window, cx);
@@ -436,10 +447,53 @@ impl SheprdRegion {
         }
         Self {
             overlay,
+            _focus: focus,
             _sizes: sizes,
             view,
         }
     }
+}
+
+/// Keeps the keyboard on the terminals, as Sheprd's own window does: they
+/// take it when the window opens, and whenever it would rest on nothing or
+/// on what merely holds them. Moonframe focuses its window, which contains
+/// the terminals, at start and on a click anywhere in the layout, which
+/// would leave typing going nowhere until the terminal is clicked. A field
+/// in the layout, or one of Sheprd's own, has a focus of its own that does
+/// not contain the terminals, and keeps the keyboard.
+fn keep_terminal_focus(
+    terminal: FocusHandle,
+    window: &mut Window,
+    cx: &mut Context<SheprdRegion>,
+) -> Vec<Subscription> {
+    reclaim_focus(terminal.clone(), window, cx);
+    let (out, lost, active) = (terminal.clone(), terminal.clone(), terminal);
+    vec![
+        cx.on_focus_out(&out.clone(), window, move |_, _, window, cx| {
+            reclaim_focus(out.clone(), window, cx);
+        }),
+        cx.on_focus_lost(window, move |_, window, cx| {
+            reclaim_focus(lost.clone(), window, cx);
+        }),
+        cx.observe_window_activation(window, move |_, window, cx| {
+            if window.is_window_active() {
+                reclaim_focus(active.clone(), window, cx);
+            }
+        }),
+    ]
+}
+
+/// Once the focus settles, gives it to `terminal` if it rests on nothing or
+/// on something containing it.
+fn reclaim_focus(terminal: FocusHandle, window: &mut Window, cx: &mut Context<SheprdRegion>) {
+    window.defer(cx, move |window, cx| {
+        let idle = window
+            .focused(cx)
+            .is_none_or(|focused| focused != terminal && focused.contains(&terminal, window));
+        if idle {
+            window.focus(&terminal, cx);
+        }
+    });
 }
 
 /// Does what mods ask as it arrives: a click must not wait for a tick.

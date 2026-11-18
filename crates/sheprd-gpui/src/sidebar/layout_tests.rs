@@ -749,6 +749,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         sent_focus: None,
         bounds: Bounds::default(),
         title: crate::WINDOW_TITLE.to_owned(),
+        titlebar_width: 0.,
         cell_width: 9.,
         hovered_terminal_link: false,
         pressed_terminal_link: None,

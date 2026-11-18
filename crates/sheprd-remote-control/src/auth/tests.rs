@@ -54,6 +54,7 @@ fn new_device(seed: u8, name: &str) -> NewDevice {
         name: name.to_owned(),
         public_key: PublicKey::parse(&public_key(&signing_key(seed))).unwrap(),
         relay: None,
+        ssh: None,
     }
 }
 

@@ -11,6 +11,7 @@ mod azure_browse;
 mod browse_pages;
 mod cli_project;
 mod clicks;
+mod column_fit;
 mod conversation;
 mod conversation_list;
 mod core_runs;

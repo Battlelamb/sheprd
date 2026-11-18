@@ -237,6 +237,9 @@ pub(crate) struct OrchestratorView {
     holders: HashMap<String, Vec<usize>>,
     /// Whether the shown list mixes backends, so rows mark their source.
     mixed_sources: bool,
+    /// The most characters of a shown row's number, which the pull request
+    /// number column grows to fit.
+    number_chars: usize,
     /// The open item's description, parsed once per change of its text.
     description: markdown::Markdown,
     dialog: Option<dispatch::Dialog>,
@@ -324,6 +327,7 @@ impl OrchestratorView {
             scroll: UniformListScrollHandle::new(),
             lines: Vec::new(),
             mixed_sources: false,
+            number_chars: 0,
             holders: HashMap::new(),
             description: markdown::Markdown::default(),
             dialog: None,

@@ -116,7 +116,31 @@ pub(super) fn project(
             add(&mut layout, &workspace, terminal);
         }
     }
+    distinguish_unlisted(&mut layout);
     layout
+}
+
+/// What the terminals no tab holds are called beside a workspace already
+/// named as they would be, such as the "Herdr 2" a host with no Herdr 1
+/// keeps its tabs in.
+const UNLISTED_BESIDE_NAMESAKE: &str = "Other terminals";
+
+fn distinguish_unlisted(layout: &mut Layout) {
+    let Some(index) = layout
+        .workspaces
+        .iter()
+        .position(|row| row.id == super::UNLISTED)
+    else {
+        return;
+    };
+    let label = &layout.workspaces[index].label;
+    let namesake = layout
+        .workspaces
+        .iter()
+        .any(|row| row.id != super::UNLISTED && row.label == *label);
+    if namesake {
+        UNLISTED_BESIDE_NAMESAKE.clone_into(&mut layout.workspaces[index].label);
+    }
 }
 
 /// Puts the workspaces the app keeps first, in the user's order, ahead of

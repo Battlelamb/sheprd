@@ -31,7 +31,8 @@ class Drafts(unittest.TestCase):
                 continue
             with self.subTest(workflow=path.name):
                 trigger = re.search(r"^  pull_request:\n((?:    .*\n)+)", text, re.M)[1]
-                self.assertIn("types: [opened, synchronize, reopened, ready_for_review]", trigger)
+                self.assertRegex(trigger, r"types: \[opened, synchronize, reopened, "
+                                          r"(?:labeled, )?ready_for_review\]")
                 for name, job in jobs(text).items():
                     # A job that waits on another is skipped with it.
                     if not needs(job):
@@ -69,10 +70,14 @@ class Queue(unittest.TestCase):
         self.assertTrue(set(PR_JOBS) <= set(JOBS))
 
     def test_pull_requests_run_one_macos_leg_and_main_both(self):
+        # A pull request with every platform runs one macOS leg; one without
+        # runs Linux alone (scripts/ci-scope.py); the merge queue and main run
+        # both macOS legs.
         exclude = re.search(r"^        exclude: (.+)$", JOBS["checks"], re.M)[1]
-        self.assertEqual(exclude, "${{ github.event_name == 'pull_request' && "
-                         "fromJSON('[{\"runner\":\"macos-15\",\"features\":\"all\"}]') || "
-                         "fromJSON('[]') }}")
+        self.assertEqual(exclude, "${{ fromJSON(needs.commits.outputs.full != 'true' && "
+                         "'[{\"runner\":\"macos-15\"},{\"runner\":\"ubuntu-24.04-arm\"}]' || "
+                         "github.event_name == 'pull_request' && "
+                         "'[{\"runner\":\"macos-15\",\"features\":\"all\"}]' || '[]') }}")
 
 
 class WindowsNativeChanges(GitFixture):

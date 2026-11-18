@@ -218,6 +218,10 @@ async fn request(
         builder = builder.header(hyper::header::CONTENT_TYPE, "application/json");
     }
     let request = builder.body(Full::new(Bytes::from(body.unwrap_or_default())))?;
+    // HTTP/1 takes one request at a time: the last answer may still be
+    // settling on the connection, and a request sent before it is ready
+    // is cancelled ("connection was not ready").
+    timeout(sender.ready()).await??;
     let response = timeout(sender.send_request(request)).await??;
     let status = response.status();
     let body = timeout(Limited::new(response.into_body(), MAX_ANSWER).collect())

@@ -12,7 +12,7 @@ use crate::{
     i18n::{Localize, fl},
     orchestrator::Item,
     pr_actions,
-    pull_request::{MergeMethod, Outcome, PullRequest, State},
+    pull_request::{Outcome, PullRequest, State},
 };
 use gpui::{prelude::*, *};
 
@@ -79,13 +79,13 @@ impl OrchestratorView {
         cx.notify();
     }
 
-    /// Merges the open pull request at the head the user saw.
-    /// Merges `expected`, the pull request and head commit the user confirmed.
-    /// A refresh that moved the head, or another pull request opened since,
-    /// refuses the merge instead of naming a commit the user never saw.
-    pub(super) fn merge(
+    /// Runs `action`, a merge, a stack merge, or a queue change, on
+    /// `expected`, the pull request and head commit the user confirmed. A
+    /// refresh that moved the head, or another pull request opened since,
+    /// refuses it instead of naming a commit the user never saw.
+    pub(super) fn run_pr_action(
         &mut self,
-        method: MergeMethod,
+        action: pr_actions::Action,
         expected: &pr_actions::Target,
         cx: &mut Context<Self>,
     ) {
@@ -102,9 +102,7 @@ impl OrchestratorView {
             return;
         };
         let methods = pr.merge_methods.clone();
-        let _ = self
-            .pr
-            .start(pr_actions::Action::Merge(method), &methods, token);
+        let _ = self.pr.start(action, &methods, token);
         cx.notify();
     }
 

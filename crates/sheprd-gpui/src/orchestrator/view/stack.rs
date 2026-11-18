@@ -2,7 +2,10 @@
 //! layer of its GitHub stack it is, and the popover it opens, which leads with
 //! what merging here would do (the verdict, or its merge queue entry), then
 //! the layers bottom to top. Each layer opens its own page when it is listed,
-//! else GitHub's. Read-only: merging and queueing stay with the status box.
+//! else GitHub's. Its footer merges the stack or changes its place in the
+//! merge queue (`actions`), each after the view's confirmation.
+
+mod actions;
 
 use super::{Event, OrchestratorView};
 use crate::{
@@ -14,6 +17,26 @@ use crate::{
     },
 };
 use gpui::{prelude::*, *};
+
+pub(super) use actions::{Change, confirm_text};
+
+/// The stack popover's state on the view.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct Popover {
+    /// The pull request whose popover is open.
+    pub(super) open: Option<u64>,
+    /// Whether "Merge stack" shows the merge methods to pick from.
+    pub(super) methods: bool,
+}
+
+impl Popover {
+    fn toggle(number: u64, current: Self) -> Self {
+        Self {
+            open: (current.open != Some(number)).then_some(number),
+            methods: false,
+        }
+    }
+}
 
 /// The popover's width.
 const WIDTH: f32 = 380.;
@@ -43,7 +66,7 @@ impl OrchestratorView {
             );
         };
         let number = pr.number;
-        let open = self.stack_open == Some(number);
+        let open = self.stack.open == Some(number);
         let label = fl!(
             "pr-stack-chip-label",
             position = position,
@@ -75,7 +98,7 @@ impl OrchestratorView {
             .child(fl!("pr-stack-chip", position = position, size = stack.size))
             .child(look.icon("icons/chevron-down.svg", 10., theme.muted))
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.stack_open = (this.stack_open != Some(number)).then_some(number);
+                this.stack = Popover::toggle(number, this.stack);
                 cx.notify();
             }));
         if !open {
@@ -97,7 +120,7 @@ impl OrchestratorView {
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(|this, _, _, cx| {
-                                this.stack_open = None;
+                                this.stack = Popover::default();
                                 cx.notify();
                             }),
                         ),
@@ -148,6 +171,7 @@ impl OrchestratorView {
             .overflow_hidden()
             .child(self.stack_verdict(pr, stack, position, cx))
             .child(self.stack_layers(stack, position, cx))
+            .children(self.stack_actions(pr, stack, position, cx))
     }
 
     /// The panel leading the popover: the merge queue entry while there is
@@ -294,7 +318,7 @@ impl OrchestratorView {
     /// Opens layer `number`'s page when the list has it, else its page on
     /// GitHub, beside the open one's.
     fn open_stack_layer(&mut self, number: u64, cx: &mut Context<Self>) {
-        self.stack_open = None;
+        self.stack = Popover::default();
         let Some(item) = self
             .detail
             .as_ref()

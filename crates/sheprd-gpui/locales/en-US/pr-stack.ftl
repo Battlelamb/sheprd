@@ -63,3 +63,25 @@ pr-stack-queue-mergeable = Its checks passed; it merges next.
 pr-stack-queue-unmergeable = It can't merge and will leave the queue.
 pr-stack-queue-locked = Locked while GitHub merges it.
 pr-stack-queue-unknown = Queued.
+
+# The popover's buttons. $count is how many pull requests merging lands.
+pr-stack-merge = Merge stack ({ $count })
+pr-stack-queue-add = Add stack to queue
+pr-stack-queue-remove = Remove from queue
+
+# Confirming a stack merge or a queue change. $numbers lists pull requests,
+# such as "#1361, #1362"; $head is the start of the head commit seen; $action
+# is a merge method's button label.
+pr-stack-confirm-merge-title = { $count ->
+    [one] Merge 1 pull request?
+   *[other] Merge { $count } pull requests?
+}
+pr-stack-confirm-merge-body = { $action } lands { $numbers }, bottom first, at head commit { $head } of #{ $number }. GitHub refuses if a branch moved since.
+pr-stack-confirm-merge = Merge stack
+pr-stack-confirm-queue-title = Add #{ $number } to the merge queue?
+pr-stack-confirm-queue-body = Queues { $numbers } at head commit { $head } of #{ $number }. They merge once the queue's checks pass.
+pr-stack-confirm-queue = Add to queue
+pr-stack-confirm-dequeue-title = Remove #{ $number } from the merge queue?
+pr-stack-confirm-dequeue-body = Pull requests of its stack above it leave the queue with it.
+pr-stack-confirm-dequeue = Remove
+pr-stack-queue-add-one = Add to merge queue

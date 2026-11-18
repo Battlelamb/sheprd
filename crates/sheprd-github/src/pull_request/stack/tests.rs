@@ -246,10 +246,12 @@ fn a_pull_request_reports_its_stack_and_queue_entry() {
             layer(1, "OPEN", "CLEAN", None, Some("SUCCESS")),
             layer(2, "OPEN", "BLOCKED", Some("REVIEW_REQUIRED"), None),
         ]}},
-        "mergeQueueEntry": {"state": "QUEUED", "position": 3, "estimatedTimeToMerge": 600}
+        "mergeQueueEntry": {"state": "QUEUED", "position": 3, "estimatedTimeToMerge": 600},
+        "isMergeQueueEnabled": true
     }));
     let (stack, position) = pr.stack().unwrap();
     assert_eq!((stack.number, position), (950, 2));
+    assert!(pr.merge_queue);
     assert_eq!(pr.queue.unwrap().position, 3);
 }
 

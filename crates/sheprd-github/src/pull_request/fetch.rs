@@ -29,7 +29,7 @@ fragment PullRequestFields on PullRequest {
     number title state isDraft mergeStateStatus reviewDecision
     commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
   } } } }
-  mergeQueueEntry { state position estimatedTimeToMerge }
+  mergeQueueEntry { state position estimatedTimeToMerge } isMergeQueueEnabled
   commits(last: 1) { nodes { commit { statusCheckRollup {
     contexts(first: 100) {
       pageInfo { hasNextPage }

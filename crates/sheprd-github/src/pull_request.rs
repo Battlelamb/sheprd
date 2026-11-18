@@ -32,7 +32,10 @@ pub use {
 pub use fetch::{by_number, local_repository, repository_key};
 pub use model::MergeState;
 #[cfg(any(test, feature = "test-support"))]
-pub use {model::fixture, stack::stacked_fixture};
+pub use {
+    model::fixture,
+    stack::{ready_stacked_fixture, stacked_fixture},
+};
 
 use fetch::Origins;
 use parse::{parse_graphql, parse_numbered};

@@ -39,6 +39,7 @@ mod sessions;
 mod sign_in;
 mod source_chip;
 mod stack;
+mod stack_actions;
 mod status;
 mod stores;
 mod tasks;

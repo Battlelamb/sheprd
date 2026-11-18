@@ -252,8 +252,8 @@ pub(crate) struct OrchestratorView {
     /// Conversation authors' avatars by URL.
     avatars: conversation::Avatars,
     merge_open: bool,
-    /// The pull request whose stack popover is open.
-    stack_open: Option<u64>,
+    /// The stack popover, while open.
+    stack: stack::Popover,
     /// Hosts a dispatch could go to, while the dialog is open.
     hosts: Arc<Vec<crate::dispatch::Candidate>>,
     /// Which Herdr starts a dispatch on this machine.
@@ -335,7 +335,7 @@ impl OrchestratorView {
             conversation: conversation::Rows::default(),
             avatars: conversation::Avatars::default(),
             merge_open: false,
-            stack_open: None,
+            stack: stack::Popover::default(),
             hosts: Arc::default(),
             terminals: Vec::new(),
             core_removals: Vec::new(),

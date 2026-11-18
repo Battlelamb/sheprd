@@ -218,6 +218,9 @@ async fn request(
         builder = builder.header(hyper::header::CONTENT_TYPE, "application/json");
     }
     let request = builder.body(Full::new(Bytes::from(body.unwrap_or_default())))?;
+    // The connection takes a moment to come back after the last answer's
+    // body is read; sending before then fails with "connection was not ready".
+    timeout(sender.ready()).await??;
     let response = timeout(sender.send_request(request)).await??;
     let status = response.status();
     let body = timeout(Limited::new(response.into_body(), MAX_ANSWER).collect())

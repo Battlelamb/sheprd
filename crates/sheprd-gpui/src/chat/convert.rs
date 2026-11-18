@@ -13,10 +13,12 @@ pub(in crate::chat) mod claim;
 mod core;
 mod error;
 mod remote;
+mod stage;
 
 pub(crate) use core::Job as CoreJob;
 
 pub use error::Error;
+pub(crate) use stage::Stage;
 
 use super::{Route, existing};
 use crate::{
@@ -88,8 +90,17 @@ struct Request {
     scope: existing::Scope,
 }
 
+/// Presses Ctrl+C through `send`, unless typing reached the pane before the
+/// first key, which would clear the draft.
+fn interrupt(stage: &Stage, send: impl FnOnce() -> Result<(), Error>) -> Result<(), Error> {
+    if !stage.interrupt() {
+        return Err(convert::Error::Stopped.into());
+    }
+    send()
+}
+
 /// The worker's whole job: the line to type once the agent has stopped.
-fn run(request: &Request, cancelled: &AtomicBool) -> Result<String, Error> {
+fn run(request: &Request, cancelled: &AtomicBool, stage: &Stage) -> Result<String, Error> {
     let Request {
         agent,
         pane,
@@ -131,7 +142,11 @@ fn run(request: &Request, cancelled: &AtomicBool) -> Result<String, Error> {
     convert::stop(
         *agent,
         || process_info(&host, pane, cancelled).map(|info| convert::shell_in_front(&info)),
-        || Ok(existing::query(&host, &keys, cancelled).map(drop)?),
+        || {
+            interrupt(stage, || {
+                Ok(existing::query(&host, &keys, cancelled).map(drop)?)
+            })
+        },
         || std::thread::sleep(convert::POLL),
         cancelled,
     )?;
@@ -152,6 +167,8 @@ pub(crate) struct Job {
     pub(super) pane: String,
     result: mpsc::Receiver<Result<String, Error>>,
     scope: existing::Scope,
+    /// Whether the worker has pressed a key, which typing may still stop.
+    pub(in crate::chat) stage: Arc<Stage>,
 }
 
 #[cfg(test)]
@@ -174,16 +191,9 @@ impl Job {
             pane: pane.to_owned(),
             result,
             scope,
+            stage: Arc::default(),
         };
         (job, sender, cancelled)
-    }
-}
-
-impl Job {
-    /// Stops the worker before its next query or key, as dropping the job
-    /// would, while keeping the claim until it answers.
-    pub(super) fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
     }
 }
 
@@ -199,10 +209,12 @@ fn spawn(request: Request, claim: claim::Claim<'static>) -> Result<Job, Error> {
     let (sender, result) = mpsc::sync_channel(1);
     let pane = request.pane.clone();
     let scope = request.scope.clone();
+    let stage = Arc::new(Stage::default());
+    let worker_stage = stage.clone();
     std::thread::Builder::new()
         .name("herdr-chat-convert".into())
         .spawn(move || {
-            let _ = sender.send(run(&request, &flag));
+            let _ = sender.send(run(&request, &flag, &worker_stage));
         })
         .map_err(Error::Worker)?;
     Ok(Job {
@@ -212,6 +224,7 @@ fn spawn(request: Request, claim: claim::Claim<'static>) -> Result<Job, Error> {
         pane,
         result,
         scope,
+        stage,
     })
 }
 

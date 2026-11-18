@@ -59,3 +59,32 @@ fn a_folder_no_remote_line_can_carry_is_refused() {
         ));
     }
 }
+
+#[test]
+fn typing_before_the_first_key_presses_none() {
+    let stage = Stage::default();
+    assert!(stage.typed());
+    let mut pressed = false;
+    let stopped = interrupt(&stage, || {
+        pressed = true;
+        Ok(())
+    });
+    assert!(matches!(
+        stopped,
+        Err(Error::Convert(convert::Error::Stopped))
+    ));
+    assert!(!pressed);
+}
+
+#[test]
+fn a_move_past_its_first_key_keeps_pressing_after_typing() {
+    let stage = Stage::default();
+    assert!(interrupt(&stage, || Ok(())).is_ok());
+    assert!(!stage.typed());
+    let mut pressed = false;
+    let again = interrupt(&stage, || {
+        pressed = true;
+        Ok(())
+    });
+    assert!(again.is_ok() && pressed);
+}

@@ -232,18 +232,25 @@ impl SheprdWindow {
         }
     }
 
-    /// Stops the automatic move of `pane` before its worker presses Ctrl+C,
-    /// since what was just typed there is a draft Ctrl+C would clear. The
-    /// worker checks before each key it sends, then hands back its refusal,
-    /// and the pane stays in its terminal. A move already past its keys
-    /// finishes: the agent has stopped, and its chat is what remains.
+    /// Stops the automatic move of `pane` if its worker has not pressed
+    /// Ctrl+C yet, since what was just typed there is a draft Ctrl+C would
+    /// clear. The worker then hands back its refusal, and the pane stays in
+    /// its terminal. A move past its first key finishes: the agent is on its
+    /// way out, and only its chat can continue the conversation.
     pub(crate) fn typed_into(&mut self, pane: &str) {
-        if let Some(job) = &self.chats.converting
-            && job.automatic
-            && job.pane == pane
-        {
-            job.cancel();
+        let Some(job) = &self.chats.converting else {
+            return;
+        };
+        if !job.automatic || job.pane != pane {
+            return;
+        }
+        if job.stage.typed() {
             tracing::info!(pane, "Typing into a new agent keeps it in its terminal");
+        } else {
+            tracing::debug!(
+                pane,
+                "Typed into an agent already stopping; its move finishes"
+            );
         }
     }
 

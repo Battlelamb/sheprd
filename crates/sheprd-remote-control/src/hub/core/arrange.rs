@@ -28,6 +28,10 @@ use std::{collections::BTreeMap, io::Read, path::Path, time::SystemTime};
 
 // Serialize phones before taking the cross-process ownership lock.
 static EDITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// How often a held saved-tabs lock is tried again before Sheprd is taken
+/// to hold it, and how long apart: 100ms in all, on the blocking pool.
+const OWNER_RETRIES: u32 = 5;
+const OWNER_RETRY: std::time::Duration = std::time::Duration::from_millis(20);
 
 impl From<Error> for HubError {
     fn from(error: Error) -> Self {
@@ -119,7 +123,11 @@ impl Source {
                 Op::RenamePane(name) => own.rename_pane(&at, name.as_deref())?,
                 // Ending its terminals is all closing it takes.
                 Op::Close => return Ok(None),
-                Op::SplitDown | Op::SplitRight | Op::RenameWorkspace { .. } => {
+                Op::SplitDown
+                | Op::SplitRight
+                | Op::RenameWorkspace { .. }
+                | Op::CloseWorkspace { .. }
+                | Op::RemoveWorktree { .. } => {
                     return Err(super::Error::Unsupported.into());
                 }
             }
@@ -148,11 +156,19 @@ impl Source {
         // Take ownership before starting a split's shell. A running desktop
         // must receive the intent without a speculative terminal being made.
         let _owner = file_owner(path)?;
-        if let Op::RenameWorkspace { workspace, name } = op {
-            edit_owned_file(path, |bytes| {
-                edit::rename_workspace(bytes, scope, workspace, name.trim())
-            })?;
-            return Ok(None);
+        match op {
+            Op::RenameWorkspace { workspace, name } => {
+                edit_owned_file(path, |bytes| {
+                    edit::rename_workspace(bytes, scope, workspace, name.trim())
+                })?;
+                return Ok(None);
+            }
+            // Its terminals end and its checkout goes with Sheprd's own
+            // checks, which a closed Sheprd cannot make.
+            Op::CloseWorkspace { .. } | Op::RemoveWorktree { .. } => {
+                return Err(Error::SheprdClosed.into());
+            }
+            _ => {}
         }
         let at = TerminalId::new(address).map_err(Error::from)?;
         // The phone names a recovered chat's replacement, which a file saved
@@ -199,7 +215,11 @@ impl Source {
                 name: name.as_deref(),
             },
             Op::Close => Change::Close,
-            Op::SplitDown | Op::SplitRight | Op::RenameWorkspace { .. } => {
+            Op::SplitDown
+            | Op::SplitRight
+            | Op::RenameWorkspace { .. }
+            | Op::CloseWorkspace { .. }
+            | Op::RemoveWorktree { .. } => {
                 return Err(super::Error::Unsupported.into());
             }
         };
@@ -311,12 +331,22 @@ fn file_owner(path: &Path) -> std::result::Result<std::fs::File, Error> {
         .truncate(false)
         .write(true)
         .open(sheprd_session::saved::lock_path(path))?;
-    match owner.try_lock() {
-        Ok(()) => {}
-        Err(std::fs::TryLockError::WouldBlock) => return Err(Error::SheprdOpen),
-        Err(std::fs::TryLockError::Error(error)) => return Err(error.into()),
+    // The lock is the open file's, which a child another thread forks
+    // shares until it runs its program, as the daemon's `git` does: a lock
+    // just let go can read as held for that moment. Sheprd holds its own
+    // for as long as it runs, so a few short retries tell the two apart.
+    let mut retries = 0;
+    loop {
+        match owner.try_lock() {
+            Ok(()) => return Ok(owner),
+            Err(std::fs::TryLockError::WouldBlock) if retries < OWNER_RETRIES => {
+                retries += 1;
+                std::thread::sleep(OWNER_RETRY);
+            }
+            Err(std::fs::TryLockError::WouldBlock) => return Err(Error::SheprdOpen),
+            Err(std::fs::TryLockError::Error(error)) => return Err(error.into()),
+        }
     }
-    Ok(owner)
 }
 
 fn edit_owned_file(

@@ -97,7 +97,14 @@ and nothing goes through your phone.
      opens a chat, as tapping a Live Activity does.
    - `-openTerm PANE` opens a terminal; `-type TEXT` then types into it
      (a newline presses Enter).
-   - `-tab workspaces|settings` opens that tab, and `-openWorkspace ID`
+   - `-homeSearch TEXT` types into Home's search, and `-pullRequestSearch TEXT`
+     into the Pull Requests tab's. With `-gitHubDemo signedIn`,
+     `-gitHubDemoLoading N` holds the Pull Requests tab loading N seconds.
+   - `-homeJump N` scrolls Home to the bottom, then jumps to section N as
+     its edge index does; `-homeJumpRow YES` jumps to that section's first
+     row, as its first dot does, and `-homeJumpSweep YES` first crosses every
+     entry from the bottom up, as a drag along the index does.
+   - `-tab workspaces|pullRequests|settings` opens that tab, and `-openWorkspace ID`
      opens that workspace's screen in it.
    - `-otherAgents YES` unfolds a workspace's other agents.
    - With `-openWorkspace`, `-openChanges YES` opens its changes; then
@@ -109,6 +116,12 @@ and nothing goes through your phone.
      `-askAgentName YES` asks the workspace's most recent agent chat for a
      short name and renames the workspace to it, as the alert's Ask button
      does; that prompts the chat's agent once.
+   - `-summarizeFirst YES` asks for the row summary of a workspace's first
+     chat with a reply, as its row's swipe does. It runs Claude Code once
+     on the computer, which costs a model call.
+   - A workspace's screen ends with Close Workspace and, for a linked
+     worktree, Delete Worktree. Both act on the paired computer's real
+     workspaces, so try them on one made for the purpose.
    - `-newWorkspace YES` opens the new workspace form.
    - `-computerTags work,lab` tags the first computer, `-computerTagFilter work`
      filters Workspaces by a tag, and `-openComputer YES` opens the first
@@ -119,6 +132,8 @@ and nothing goes through your phone.
      simulator has no microphone, and `-voiceConfirm YES` then presses Start
      which creates what the card shows. Run it
      against a sandboxed Herdr, not your own.
+   - `-sampleChat YES` opens a made-up chat that needs no daemon, for
+     screenshots of the chat screen without real prompts.
    - With `-openLink`, `-session YES` opens the chat's session sheet and
      `-draft TEXT` types into its composer (`-draft /` lists the slash
      commands).

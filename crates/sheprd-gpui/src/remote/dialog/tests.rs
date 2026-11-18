@@ -21,6 +21,7 @@ mod hosts;
 mod keyboard;
 mod networks;
 mod share_github;
+mod ssh;
 
 fn on() -> RemoteConfig {
     RemoteConfig {
@@ -130,6 +131,7 @@ fn pairing_daemon(_: &Path, request: &Request) -> Result<Response, control::Erro
                 device_name: "Pixel\u{202e}".into(),
                 code: "428913".into(),
                 app: Some("https://other.example:8443".into()),
+                ssh: false,
             })
         }
         Request::Pairing { .. } => Response::Pairing(PairingState::Waiting {

@@ -25,6 +25,8 @@ on:
       - 'scripts/test_push_relay_deploy.py'
       - '.github/workflows/push-relay-image.yml'
   pull_request:
+    # ready_for_review starts the run a draft skipped.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'crates/sheprd-apns/**'
       - 'crates/sheprd-push-relay/**'
@@ -48,6 +50,7 @@ jobs:
   # and the job cannot write packages.
   check:
     if: >-
+      github.event.pull_request.draft != true &&
       (github.repository == 'sheprd-labs/sheprd' || github.repository == 'penso/herdr-gpui') &&
       github.actor == 'penso' && github.triggering_actor == 'penso' &&
       github.event_name == 'pull_request' &&

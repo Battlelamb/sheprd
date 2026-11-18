@@ -501,4 +501,4 @@ impl std::fmt::Debug for Served {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

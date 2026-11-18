@@ -28,6 +28,7 @@ fn requests_and_responses_keep_their_wire_names() {
             device_name: "iPhone".into(),
             code: "428913".into(),
             app: None,
+            ssh: false,
         }))
         .unwrap(),
         json!({"response": "pairing", "state": "claimed", "device_name": "iPhone", "code": "428913"})

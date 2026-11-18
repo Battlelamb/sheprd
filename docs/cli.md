@@ -497,8 +497,9 @@ only from another Sheprd whose user approved it in that app's dialog;
 `cloud create` installs Herdr only on the machines the user confirmed, as
 creating them in Settings does.
 
-Adding an SSH or local network device has no command: the Add Device dialog
-runs it. Its setup workspace runs `sheprd __device-setup-attach SOCKET`,
+Adding an SSH or local network device, or a nearby Sheprd over Bluetooth,
+has no command: the Add Device dialog runs it, and the other computer opens
+`remote pair`. Its setup workspace runs `sheprd __device-setup-attach SOCKET`,
 an internal helper that shows the setup the app runs (see the Native Shell
 README's "Local Network access"); it is not a command to call yourself, and
 the socket it names is single use.
@@ -605,6 +606,11 @@ download first is left out.
 
 Files dropped on a remote chat are copied to the host first, into private
 temporary files under its `${TMPDIR:-/tmp}`, and the copies are attached.
+While they copy, each file's chip in the composer fills as its bytes go
+out, the footer shows the bytes sent of the total, and a chip's × cancels
+the whole drop, removing what already reached the host. Files dropped on a
+Herdr 2 terminal on another host show the same chips along the pane's foot
+until their paths are pasted; × or Escape cancels the copy there.
 
 Herdr 2 chats also use saved cloud connectors and, on Windows, the selected
 WSL distribution. ACP installed for phone pairing by this release is reused

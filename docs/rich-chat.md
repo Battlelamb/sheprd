@@ -439,6 +439,10 @@ Every rail section folds to one line. While anything runs, **Plan** and
 change totals; once nothing runs they open again. Clicking a section's header
 overrides that for as long as the chat is open.
 
+Drag the rail's left edge to resize it, up to half the chat's width; a
+double-click on the edge goes back to the default. Every chat in the window
+shares the width, and it is kept with the window's other panel widths.
+
 When the rail is hidden or the pane is too narrow for it, click the row above
 the composer for a table instead: what each one is, how long it has run or ran,
 and whether it is running, done, failed, or stopped.
@@ -547,6 +551,47 @@ only changes local state. An explicit action with `mode: "draft"` adds the
 selected values to the composer for review; `mode: "send"` uses the normal
 prompt flow. Rendering or editing a native card cannot run code, submit a
 prompt or answer a permission request. Existing CLI sessions and read-only mirrors cannot submit widget actions.
+
+### Text size and effects
+
+An agent can set words larger or smaller within a line, and play an effect as
+a phone's messages do. Markdown directives keep the source readable where it is
+not drawn, such as terminal views and the phone:
+
+```markdown
+Tests pass and :huge[the PR is merged]. :small[CI took 4 min.]
+
+:::slam
+Found it: the resize bug was a stale cell width.
+:::
+
+::confetti
+All 214 tests pass.
+```
+
+- `:small[…]`, `:big[…]`, `:huge[…]`, and `:giant[…]` are the only sizes:
+  0.85, 1.35, 2, and 3 times the prose. A span ends with its paragraph, nests
+  up to eight deep, and keeps bold, italics, and links inside it. Code and
+  unknown names stay as written.
+- `:::slam`, `:::loud`, `:::gentle`, and `:::ink`, closed by `:::`, play on the
+  Markdown between them. Invisible ink (`ink`) hides its text under moving
+  specks until the pointer is over it. A message holds at most eight; one
+  still streaming reaches the end of the message.
+- A line `::balloons`, `::celebration`, `::confetti`, `::echo`,
+  `::fireworks`, `::lasers`, `::love`, `::spotlight`, or `::zap` plays over
+  the chat's own pane for three to five seconds. In `zap`, the message's first
+  letters line up as a swaying formation and three pixel ships shoot them
+  down, each bursting into pixels. Effects stay in the chat's pane, never over
+  the terminals, tabs, or sidebar, and never take the pointer. A message plays its first; another
+  arriving while one plays is dropped, not queued.
+
+Only an agent's replies play effects; a user's message shows its directives as
+text. Each effect plays once, as its message arrives: a transcript loaded,
+reopened, or received again after reconnecting shows each message at rest,
+with a **Replay** link under it. With the system's reduce motion setting on,
+nothing moves, and invisible ink still hides until hovered. The agent learns
+the syntax from the note Sheprd sends with the first prompt on a desktop
+(`desktop.md` and `remote.md` in `crates/sheprd-acp/prompts`).
 
 The catalog is application-specific, not an A2UI implementation or MCP Apps
 host. Embedded HTML pages use the platform webview; see the

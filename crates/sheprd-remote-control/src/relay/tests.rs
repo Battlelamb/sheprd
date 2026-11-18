@@ -31,7 +31,7 @@ mod tokens;
 
 /// A relay serving QUIC and HTTP on loopback ports: its HTTP address, and
 /// its QUIC address and pin.
-async fn relay() -> (SocketAddr, SocketAddr, sheprd_relay::pin::Pin) {
+pub(crate) async fn relay() -> (SocketAddr, SocketAddr, sheprd_relay::pin::Pin) {
     relay_with(RelayOptions {
         metrics: None,
         ..RelayOptions::default()
@@ -67,7 +67,7 @@ async fn relay_with(options: RelayOptions) -> (SocketAddr, SocketAddr, sheprd_re
 /// What a relay session serves on `shared`, behind the certificate the
 /// daemon presents for `127.0.0.1`; and a client config that trusts only
 /// this computer's authority, as the phone does.
-fn served(dir: &Path, shared: &crate::web::Shared) -> (Served, rustls::ClientConfig) {
+pub(crate) fn served(dir: &Path, shared: &crate::web::Shared) -> (Served, rustls::ClientConfig) {
     let authority = Authority::load_or_create(dir).unwrap();
     let loopback = IpAddr::V4(Ipv4Addr::LOCALHOST);
     let resolver = Arc::new(
@@ -97,7 +97,7 @@ fn served(dir: &Path, shared: &crate::web::Shared) -> (Served, rustls::ClientCon
     (served, client)
 }
 
-async fn listening(relays: &Relays) {
+pub(crate) async fn listening(relays: &Relays) {
     for _ in 0..100 {
         if relays
             .status()

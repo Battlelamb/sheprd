@@ -214,6 +214,111 @@ fn kept_close_dialog_remote_checkout_is_unknown_without_a_local_probe(cx: &mut T
     });
 }
 
+fn real_repository() -> tempfile::TempDir {
+    let folder = tempfile::tempdir().unwrap();
+    let hooks = tempfile::tempdir().unwrap();
+    git(folder.path(), hooks.path(), &["init", "-b", "test"]);
+    git(
+        folder.path(),
+        hooks.path(),
+        &["commit", "--allow-empty", "-m", "initial"],
+    );
+    git(
+        folder.path(),
+        hooks.path(),
+        &["update-ref", "refs/remotes/origin/test", "HEAD"],
+    );
+    folder
+}
+
+#[gpui::test]
+fn kept_close_check_does_not_depend_on_the_identity_cache(cx: &mut TestAppContext) {
+    // The cache has no branch for this folder, as right after it opens.
+    let folder = real_repository();
+    let (view, cx, _) = window(cx, folder.path());
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            assert!(view.menu.target.as_ref().unwrap().branch.is_none());
+            view.update_workspace_dialog(window, cx);
+            let report = view
+                .menu
+                .close_check
+                .as_ref()
+                .unwrap()
+                .report
+                .as_ref()
+                .unwrap();
+            assert!(!report.unknown, "the worker reads the folder itself");
+            assert!(!report.dirty && !report.unpushed);
+        });
+    });
+}
+
+#[gpui::test]
+fn kept_close_refuses_a_branch_switched_after_the_check(cx: &mut TestAppContext) {
+    let folder = real_repository();
+    let hooks = tempfile::tempdir().unwrap();
+    let (view, cx, id) = window(cx, folder.path());
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.update_workspace_dialog(window, cx);
+            assert!(view.menu.close_check.as_ref().unwrap().report.is_some());
+        });
+    });
+    // The session cache is slow to notice; the folder is switched on disk.
+    git(
+        folder.path(),
+        hooks.path(),
+        &["checkout", "-q", "-b", "other"],
+    );
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.submit_workspace_dialog(window, cx);
+            assert!(view.is_kept_workspace(&id), "a stale report cannot close");
+            assert!(view.menu.error.is_some());
+            assert!(
+                view.menu.close_check.as_ref().unwrap().report.is_none(),
+                "the check starts again for the new branch"
+            );
+        });
+    });
+}
+
+#[gpui::test]
+fn kept_close_accepts_the_cache_learning_an_unchanged_checkout(cx: &mut TestAppContext) {
+    let folder = real_repository();
+    let hooks = tempfile::tempdir().unwrap();
+    let (view, cx, id) = window(cx, folder.path());
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.update_workspace_dialog(window, cx);
+            let key = git(
+                folder.path(),
+                hooks.path(),
+                &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+            );
+            view.core_terminals.seed_checkout_for_test(
+                folder.path().to_str().unwrap(),
+                Some(Identity {
+                    branch: Some("test".into()),
+                    key,
+                    label: "test".into(),
+                    linked: false,
+                }),
+            );
+            view.refresh_core_session(cx);
+            view.submit_workspace_dialog(window, cx);
+            assert!(
+                !view.is_kept_workspace(&id),
+                "an unchanged clean checkout closes"
+            );
+        });
+    });
+}
+
 #[gpui::test]
 fn kept_close_finishes_without_a_herdr_snapshot_and_requires_unknown_consent(
     cx: &mut TestAppContext,
@@ -468,18 +573,18 @@ fn kept_close_checks_local_git_and_never_probes_remote_paths(cx: &mut TestAppCon
             }
         }
     }
-    // The worker must not call a mismatched checkout clean, nor accept a
-    // relative folder/key, unavailable branch, or a folder outside Git.
+    // The worker must not accept a relative folder or one outside Git, and it
+    // reads the folder itself: stale cache metadata changes nothing.
     let checkout = folder.path().to_str().unwrap();
     let nonrepo = hooks.path().to_str().unwrap();
-    for (cwd, branch, key) in [
-        ("relative", Some("test"), None),
-        (checkout, None, None),
-        (checkout, Some("test\n"), None),
-        (checkout, Some("replacement"), None),
-        (nonrepo, Some("test"), None),
-        (checkout, Some("test"), Some(nonrepo)),
-        (checkout, Some("test"), Some("relative/.git")),
+    for (cwd, branch, key, known) in [
+        ("relative", Some("test"), None, false),
+        (nonrepo, Some("test"), None, false),
+        (checkout, None, None, true),
+        (checkout, Some("test\n"), None, true),
+        (checkout, Some("replacement"), None, true),
+        (checkout, Some("test"), Some(nonrepo), true),
+        (checkout, Some("test"), Some("relative/.git"), true),
     ] {
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
@@ -501,8 +606,9 @@ fn kept_close_checks_local_git_and_never_probes_remote_paths(cx: &mut TestAppCon
             view.update(cx, |view, _| {
                 let check = view.menu.close_check.as_mut().unwrap();
                 assert!(check.poll());
-                assert!(check.report.as_ref().unwrap().unknown);
-                assert!(!check.allows("", true));
+                let report = check.report.as_ref().unwrap();
+                assert_eq!(report.unknown, !known);
+                assert_eq!(check.allows("", true), known);
                 assert!(check.allows("close", true));
             });
         });

@@ -97,6 +97,7 @@ pub(crate) fn submit_focus_change(
                 dirty: true,
                 unpushed: true,
                 unknown: false,
+                ..Default::default()
             }),
         )
     });

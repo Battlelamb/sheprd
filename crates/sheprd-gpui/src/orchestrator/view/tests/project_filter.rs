@@ -131,6 +131,10 @@ fn the_menu_lists_projects_and_narrows_to_their_rows(cx: &mut TestAppContext) {
     assert_eq!(listed(&view, cx), ["pr/1", "pr/2", "pr/3"]);
     assert_eq!(label(cx), "All projects");
     click(cx, "orchestrator-project-filter");
+    // Rows stand apart, so picked ones read as separate.
+    let first = cx.debug_bounds("orchestrator-project-filter-0").unwrap();
+    let second = cx.debug_bounds("orchestrator-project-filter-1").unwrap();
+    assert!(second.top() - first.bottom() >= gpui::px(4.));
     // contoso › Fabrikam, then Tools.
     click(cx, "orchestrator-project-filter-0");
     assert_eq!(listed(&view, cx), ["pr/1", "pr/2"]);

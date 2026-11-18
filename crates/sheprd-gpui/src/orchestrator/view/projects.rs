@@ -372,6 +372,7 @@ impl OrchestratorView {
                     .overflow_y_scroll()
                     .flex()
                     .flex_col()
+                    .gap(px(super::browse::PICK_GAP))
                     .children(rows),
             ),
             "orchestrator-project-filter-menu",

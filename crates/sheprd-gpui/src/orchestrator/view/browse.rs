@@ -24,6 +24,9 @@ pub(super) const MAX_ROWS: usize = 400;
 const MENU_DROP: f32 = 4.;
 const MENU_GAP: f32 = 16.;
 const MENU_MAX_HEIGHT: f32 = 420.;
+/// The space between the rows of a menu where several may be picked, so
+/// picked rows read as separate rather than as one block.
+pub(super) const PICK_GAP: f32 = 4.;
 
 /// The room under each dropdown's control, to the window's bottom edge,
 /// written as the control is drawn.
@@ -439,6 +442,7 @@ impl OrchestratorView {
                     .overflow_y_scroll()
                     .flex()
                     .flex_col()
+                    .gap(px(PICK_GAP))
                     .children(rows),
             ),
             "orchestrator-projects-menu",

@@ -54,6 +54,8 @@ pub(crate) enum Parsed {
     Mirror(MirrorOptions),
     /// Project one verified running CLI process over standard streams.
     Observe(ObserveOptions),
+    /// Follow a T3 Code thread, read-only, without starting any agent.
+    T3(T3Options),
     /// List the agents installed here, one name per line.
     Agents,
     Session(crate::session_helpers::Command),
@@ -107,6 +109,17 @@ pub(crate) struct MirrorOptions {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub(crate) struct T3Options {
+    pub endpoint: Option<sheprd_chat_protocol::EndpointId>,
+    pub pane: Option<String>,
+    /// The server's address; by default the one running on this computer.
+    pub server: Option<String>,
+    pub thread: String,
+    /// The access token `sheprd-t3 pair` kept.
+    pub token_file: PathBuf,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct ObserveOptions {
     pub agent: TranscriptAgent,
     pub pane: Option<String>,
@@ -151,6 +164,11 @@ Usage:
   sheprd-acp mirror codex|claude FILE [--pane ID] [--endpoint ID]
                         Watch an existing JSONL transcript, read-only; starts
                         no agent and changes no Herdr pane metadata. Prints
+                        its endpoint ID once ready. Stop with Ctrl+C.
+  sheprd-acp t3 THREAD --token-file FILE [--server URL] [--pane ID]
+                [--endpoint ID]
+                        Follow a T3 Code thread live, read-only, with the token
+                        `sheprd-t3 pair` kept in FILE; starts no agent. Prints
                         its endpoint ID once ready. Stop with Ctrl+C.
 
 Agents:
@@ -222,6 +240,10 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Parsed, 
                     }
                 })
                 .map_err(|_| Error::InvalidEndpoint(id));
+        }
+        Some("t3") => {
+            args.next();
+            return t3(args);
         }
         Some("mirror") => {
             args.next();
@@ -359,6 +381,40 @@ fn mirror(args: impl Iterator<Item = OsString>) -> Result<Parsed, Error> {
         }
     }
     Ok(Parsed::Mirror(options))
+}
+
+fn t3(args: impl Iterator<Item = OsString>) -> Result<Parsed, Error> {
+    let Some(mut args) = unless_help(args) else {
+        return Ok(Parsed::Help);
+    };
+    let thread = utf8(args.next(), "t3 THREAD")?;
+    let mut endpoint = None;
+    let mut pane = None;
+    let mut server = None;
+    let mut token_file = None;
+    while let Some(arg) = args.next() {
+        match arg.to_str() {
+            Some("--pane") => pane = Some(utf8(args.next(), "--pane")?),
+            Some("--server") => server = Some(utf8(args.next(), "--server")?),
+            Some("--token-file") => {
+                token_file = Some(PathBuf::from(
+                    args.next().ok_or(Error::MissingValue("--token-file"))?,
+                ));
+            }
+            Some("--endpoint") => {
+                let id = utf8(args.next(), "--endpoint")?;
+                endpoint = Some(id.parse().map_err(|_| Error::InvalidEndpoint(id))?);
+            }
+            _ => return Err(Error::UnknownOption(arg)),
+        }
+    }
+    Ok(Parsed::T3(T3Options {
+        endpoint,
+        pane,
+        server,
+        thread,
+        token_file: token_file.ok_or(Error::MissingValue("--token-file"))?,
+    }))
 }
 
 fn observe(args: impl Iterator<Item = OsString>) -> Result<Parsed, Error> {

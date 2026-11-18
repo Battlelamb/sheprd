@@ -410,6 +410,7 @@ impl Bridge {
         options: Vec<wire::PermissionOption>,
         ask: permission::Ask,
     ) -> Out {
+        let meta = ask.meta();
         let fields = wire::ToolCallUpdateFields::new()
             .title(Some(ask.title().to_owned()))
             .raw_input(input);
@@ -417,7 +418,8 @@ impl Bridge {
             self.session.clone(),
             wire::ToolCallUpdate::new(tool_use.clone(), fields),
             options,
-        );
+        )
+        .meta(meta);
         self.next_request += 1;
         self.asks.insert(self.next_request, (tool_use, ask));
         Out::Session(Inbound::Request {

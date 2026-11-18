@@ -21,6 +21,7 @@ sheprd-chat-protocol.workspace = true
 sheprd-client.workspace        = true
 sheprd-memory.workspace        = true
 sheprd-core-client.workspace   = true
+sheprd-t3.workspace            = true
 sheprd-traces.workspace        = true
 ratatui.workspace             = true
 serde.workspace               = true
@@ -31,7 +32,8 @@ url.workspace                 = true
 uuid.workspace                = true
 
 [dev-dependencies]
-tempfile.workspace = true
+tempfile.workspace    = true
+tungstenite.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true

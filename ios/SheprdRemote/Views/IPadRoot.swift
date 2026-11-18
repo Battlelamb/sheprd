@@ -18,7 +18,7 @@ struct IPadRoot: View {
     @State private var workspacesPath: [WorkspaceKey] = []
     @AppStorage(HomeRow.sortKey) private var sort = AgentSort.priority
 
-    enum SidebarTab: Hashable { case chats, workspaces, settings }
+    enum SidebarTab: Hashable { case chats, workspaces, pullRequests, settings }
 
     /// The workspace a chat or terminal's header opened, over the window.
     @State private var workspaceSheet: WorkspaceKey?
@@ -104,6 +104,7 @@ struct IPadRoot: View {
         .task {
             switch UserDefaults.standard.string(forKey: "tab") {
             case "workspaces": tab = .workspaces
+            case "pullRequests": tab = .pullRequests
             case "settings": tab = .settings
             default: break
             }
@@ -156,6 +157,10 @@ struct IPadRoot: View {
             .badge(model.fleet.waiting)
             Tab("Workspaces", systemImage: "square.stack.3d.up", value: SidebarTab.workspaces) {
                 NavigationStack(path: $workspacesPath) { WorkspacesTab(query: $query).toolbar { hideSidebar } }
+                    .connectionToast(pairing: $pairing)
+            }
+            Tab("Pull Requests", systemImage: "arrow.triangle.pull", value: SidebarTab.pullRequests) {
+                NavigationStack { PullRequestsList().toolbar { hideSidebar } }
                     .connectionToast(pairing: $pairing)
             }
             Tab("Settings", systemImage: "gearshape", value: SidebarTab.settings) {

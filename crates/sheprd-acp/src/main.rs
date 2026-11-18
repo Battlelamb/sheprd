@@ -24,6 +24,7 @@ mod restore;
 mod rpc;
 mod session;
 mod session_helpers;
+mod t3;
 mod traces;
 mod tui;
 
@@ -83,6 +84,13 @@ fn main() -> ExitCode {
             }
         },
         Ok(cli::Parsed::Mirror(options)) => match mirror::run(options) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("sheprd-acp: {error:#}");
+                ExitCode::FAILURE
+            }
+        },
+        Ok(cli::Parsed::T3(options)) => match t3::run(options) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("sheprd-acp: {error:#}");

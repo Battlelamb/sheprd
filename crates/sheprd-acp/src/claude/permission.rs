@@ -4,6 +4,8 @@
 use acp::v1 as wire;
 use serde_json::{Map, Value, json};
 
+use sheprd_chat_protocol::{Question, QuestionOption};
+
 use super::tools;
 use crate::harness::out;
 
@@ -36,6 +38,9 @@ pub(super) struct Ask {
     /// Where an `AskUserQuestion` call is: the question on screen and the
     /// answers so far, keyed by question text as Claude Code expects.
     questions: Option<(usize, Map<String, Value>)>,
+    /// The question on screen as clients show it, which they may answer in
+    /// their own words or with several choices.
+    shown: Option<Box<Question>>,
     /// What the permission card says.
     title: String,
 }
@@ -103,6 +108,10 @@ fn offer(
     questions: Option<(usize, Map<String, Value>)>,
     title: String,
 ) -> (Vec<wire::PermissionOption>, Ask) {
+    let shown = questions
+        .as_ref()
+        .and_then(|(index, _)| shown_question(&input, *index))
+        .map(Box::new);
     let (offered, choices) = options
         .into_iter()
         .map(|(option, choice)| {
@@ -117,6 +126,7 @@ fn offer(
             control,
             input,
             questions,
+            shown,
             title,
         },
     )
@@ -127,6 +137,24 @@ impl Ask {
     /// question being asked.
     pub(super) fn title(&self) -> &str {
         &self.title
+    }
+
+    /// The permission request's `_meta`: the question on screen in full,
+    /// when it is one a client may answer itself.
+    pub(super) fn meta(&self) -> Option<wire::Meta> {
+        let question = serde_json::to_value(self.shown.as_ref()?).ok()?;
+        let mut meta = wire::Meta::new();
+        meta.insert(out::QUESTION.to_owned(), question);
+        Some(meta)
+    }
+
+    /// The answer a client gave to the question on screen in its own words,
+    /// several choices joined as Claude Code joins them.
+    fn answered(&self, answers: &[&str]) -> Option<Choice> {
+        self.shown.as_ref()?;
+        (!answers.is_empty()).then(|| Choice::Answer {
+            label: answers.join(", "),
+        })
     }
 
     /// The control response for the session's answer: the chosen option,
@@ -140,15 +168,19 @@ impl Ask {
                 serde_json::from_value::<wire::RequestPermissionResponse>(value.clone()).ok()
             })
             .and_then(|response| match response.outcome {
-                wire::RequestPermissionOutcome::Selected(selected) => {
-                    Some(selected.option_id.0.to_string())
-                }
+                wire::RequestPermissionOutcome::Selected(selected) => Some(selected),
                 _ => None,
             })
-            .and_then(|id| {
+            .and_then(|selected| {
+                let id = selected.option_id.0.as_ref();
+                if id == out::ANSWERS {
+                    let answers = selected.meta.as_ref()?.get(out::ANSWERS)?.as_array()?;
+                    let answers: Vec<&str> = answers.iter().filter_map(Value::as_str).collect();
+                    return self.answered(&answers);
+                }
                 self.choices
                     .iter()
-                    .find(|(known, _)| *known == id)
+                    .find(|(known, _)| known == id)
                     .map(|(_, choice)| choice.clone())
             });
         let decision = match chosen {
@@ -298,6 +330,31 @@ fn question(
         Some((index, answers)),
         title,
     ))
+}
+
+/// Question `index` of an `AskUserQuestion` call as clients show it.
+fn shown_question(input: &Value, index: usize) -> Option<Question> {
+    let text = tools::question_at(input, index)?;
+    let asked = input.get("questions")?.get(index)?;
+    let field =
+        |value: &Value, key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned);
+    Some(Question {
+        header: field(asked, "header"),
+        multiple: asked.get("multiSelect") == Some(&Value::Bool(true)),
+        options: asked
+            .get("options")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|option| {
+                Some(QuestionOption {
+                    description: field(option, "description"),
+                    label: field(option, "label")?,
+                })
+            })
+            .collect(),
+        text: text.to_owned(),
+    })
 }
 
 /// What "always" means for the updates Claude suggests.

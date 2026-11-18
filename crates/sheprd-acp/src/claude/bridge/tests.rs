@@ -6,6 +6,7 @@ use super::*;
 use crate::harness::tests::{file_name, file_uri};
 
 mod background;
+mod client_answers;
 mod names;
 mod progress;
 mod questions;

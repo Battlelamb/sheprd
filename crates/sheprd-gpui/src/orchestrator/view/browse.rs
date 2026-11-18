@@ -28,9 +28,16 @@ const MENU_MAX_HEIGHT: f32 = 420.;
 /// picked rows read as separate rather than as one block.
 pub(super) const PICK_GAP: f32 = 4.;
 
-/// The room under each dropdown's control, to the window's bottom edge,
-/// written as the control is drawn.
-pub(crate) type MenuRoom = Rc<RefCell<HashMap<Menu, Pixels>>>;
+/// Each dropdown's control and the room under it, to the window's bottom
+/// edge, written as the control is drawn.
+pub(crate) type MenuRoom = Rc<RefCell<HashMap<Menu, Placed>>>;
+
+/// Where a dropdown's control was last drawn.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Placed {
+    control: Bounds<Pixels>,
+    below: Pixels,
+}
 
 /// A choice of the State menu, from the filters it sets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -170,10 +177,13 @@ impl OrchestratorView {
         let rooms = self.menu_room.clone();
         canvas(
             move |control, window, _| {
-                let room = window.viewport_size().height - control.bottom();
+                let placed = Placed {
+                    control,
+                    below: window.viewport_size().height - control.bottom(),
+                };
                 // Too late to draw this frame again, as when the search row
                 // wraps: the menu takes the room it has from the next.
-                if rooms.borrow_mut().insert(menu, room) != Some(room) {
+                if rooms.borrow_mut().insert(menu, placed) != Some(placed) {
                     window.request_animation_frame();
                 }
             },
@@ -185,15 +195,33 @@ impl OrchestratorView {
 
     /// Hangs `frame` from the control holding it, right edges aligned, as
     /// the right edge stays put while the control's label changes width;
-    /// moved as far as it must to stay inside the window.
-    pub(super) fn drop_down(&self, frame: impl IntoElement) -> Div {
+    /// moved as far as it must to stay inside the window. A press outside
+    /// both shuts it; one on the control is left to the control's toggle.
+    pub(super) fn drop_down(
+        &self,
+        menu: Menu,
+        frame: impl IntoElement,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let shut = cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+            let on_control = this
+                .menu_room
+                .borrow()
+                .get(&menu)
+                .is_some_and(|placed| placed.control.contains(&event.position));
+            if this.menu != Some(menu) || on_control {
+                return;
+            }
+            this.menu = None;
+            cx.notify();
+        });
         div().absolute().top_full().right_0().child(
             deferred(
                 anchored()
                     .anchor(Anchor::TopRight)
                     .offset(point(px(0.), px(MENU_DROP)))
                     .snap_to_window_with_margin(px(MENU_GAP))
-                    .child(frame),
+                    .child(div().on_mouse_down_out(shut).child(frame)),
             )
             .with_priority(1),
         )
@@ -228,7 +256,11 @@ impl OrchestratorView {
         selector: &'static str,
         list: impl IntoElement,
     ) -> Div {
-        let below = self.menu_room.borrow().get(&menu).copied();
+        let below = self
+            .menu_room
+            .borrow()
+            .get(&menu)
+            .map(|placed| placed.below);
         let room = below.unwrap_or(px(MENU_MAX_HEIGHT)) - px(MENU_DROP + MENU_GAP);
         self.menu_frame(width)
             .debug_selector(move || selector.to_owned())
@@ -258,23 +290,27 @@ impl OrchestratorView {
 
     pub(super) fn render_state_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let picked = StateChoice::of(self.filters);
-        self.drop_down(crate::motion::pop_in(
-            self.menu_frame(200.)
-                .children(StateChoice::ALL.into_iter().map(|choice| {
-                    self.menu_row(
-                        format!("orchestrator-state-{}", choice.id()).into(),
-                        choice == picked,
-                    )
-                    .child(choice.label())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        choice.apply(&mut this.filters);
-                        this.menu = None;
-                        this.refresh_rows();
-                        cx.notify();
-                    }))
-                })),
-            "orchestrator-state-menu",
-        ))
+        self.drop_down(
+            Menu::State,
+            crate::motion::pop_in(
+                self.menu_frame(200.)
+                    .children(StateChoice::ALL.into_iter().map(|choice| {
+                        self.menu_row(
+                            format!("orchestrator-state-{}", choice.id()).into(),
+                            choice == picked,
+                        )
+                        .child(choice.label())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            choice.apply(&mut this.filters);
+                            this.menu = None;
+                            this.refresh_rows();
+                            cx.notify();
+                        }))
+                    })),
+                "orchestrator-state-menu",
+            ),
+            cx,
+        )
     }
 
     /// What the Projects menu says of organization `repo` before its
@@ -431,21 +467,25 @@ impl OrchestratorView {
                 count = MAX_BROWSED
             )));
         }
-        self.drop_down(crate::motion::pop_in(
-            self.bounded_menu(
-                Menu::Projects,
-                320.,
-                "orchestrator-projects-frame",
-                div()
-                    .id("orchestrator-projects-list")
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_col()
-                    .gap(px(PICK_GAP))
-                    .children(rows),
+        self.drop_down(
+            Menu::Projects,
+            crate::motion::pop_in(
+                self.bounded_menu(
+                    Menu::Projects,
+                    320.,
+                    "orchestrator-projects-frame",
+                    div()
+                        .id("orchestrator-projects-list")
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .flex()
+                        .flex_col()
+                        .gap(px(PICK_GAP))
+                        .children(rows),
+                ),
+                "orchestrator-projects-menu",
             ),
-            "orchestrator-projects-menu",
-        ))
+            cx,
+        )
     }
 }

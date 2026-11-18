@@ -23,6 +23,7 @@ mod gitlab_merge_request;
 mod groups;
 mod list_switch;
 mod markdown;
+mod menu_dismiss;
 mod menu_placement;
 mod non_projects;
 mod outside_git;

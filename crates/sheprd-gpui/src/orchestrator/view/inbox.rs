@@ -584,6 +584,7 @@ impl OrchestratorView {
         let row = row.children(project_filter).child(
             div()
                 .id("orchestrator-sort")
+                .debug_selector(|| "orchestrator-sort".into())
                 .flex_none()
                 .flex()
                 .items_center()
@@ -645,34 +646,38 @@ impl OrchestratorView {
 
     fn render_sort_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.look.theme;
-        self.drop_down(crate::motion::pop_in(
-            self.menu_frame(200.)
-                .children(Sort::ALL.into_iter().map(|sort| {
-                    let on = sort == self.sort;
-                    let hover = theme.active;
-                    div()
-                        .id(SharedString::from(format!(
-                            "orchestrator-sort-{}",
-                            sort.label()
-                        )))
-                        .px_2()
-                        .h(px(28.))
-                        .flex()
-                        .items_center()
-                        .rounded(px(corners::SMALL))
-                        .cursor_pointer()
-                        .hover(move |style| style.bg(rgb(hover)))
-                        .when(on, |el| el.bg(rgb(theme.primary_wash())))
-                        .child(sort.label())
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.sort = sort;
-                            this.menu = None;
-                            this.refresh_rows();
-                            cx.notify();
-                        }))
-                })),
-            "orchestrator-sort-menu",
-        ))
+        self.drop_down(
+            Menu::Sort,
+            crate::motion::pop_in(
+                self.menu_frame(200.)
+                    .children(Sort::ALL.into_iter().map(|sort| {
+                        let on = sort == self.sort;
+                        let hover = theme.active;
+                        div()
+                            .id(SharedString::from(format!(
+                                "orchestrator-sort-{}",
+                                sort.label()
+                            )))
+                            .px_2()
+                            .h(px(28.))
+                            .flex()
+                            .items_center()
+                            .rounded(px(corners::SMALL))
+                            .cursor_pointer()
+                            .hover(move |style| style.bg(rgb(hover)))
+                            .when(on, |el| el.bg(rgb(theme.primary_wash())))
+                            .child(sort.label())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.sort = sort;
+                                this.menu = None;
+                                this.refresh_rows();
+                                cx.notify();
+                            }))
+                    })),
+                "orchestrator-sort-menu",
+            ),
+            cx,
+        )
     }
 
     fn render_banners(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {

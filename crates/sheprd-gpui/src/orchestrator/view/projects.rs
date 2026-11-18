@@ -361,21 +361,25 @@ impl OrchestratorView {
                     .into_any_element(),
             );
         }
-        self.drop_down(crate::motion::pop_in(
-            self.bounded_menu(
-                Menu::Repos,
-                260.,
-                "orchestrator-project-filter-frame",
-                div()
-                    .id("orchestrator-project-filter-list")
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_col()
-                    .gap(px(super::browse::PICK_GAP))
-                    .children(rows),
+        self.drop_down(
+            Menu::Repos,
+            crate::motion::pop_in(
+                self.bounded_menu(
+                    Menu::Repos,
+                    260.,
+                    "orchestrator-project-filter-frame",
+                    div()
+                        .id("orchestrator-project-filter-list")
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .flex()
+                        .flex_col()
+                        .gap(px(super::browse::PICK_GAP))
+                        .children(rows),
+                ),
+                "orchestrator-project-filter-menu",
             ),
-            "orchestrator-project-filter-menu",
-        ))
+            cx,
+        )
     }
 }

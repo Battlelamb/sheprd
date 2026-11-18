@@ -7,6 +7,9 @@ import SwiftUI
 /// app does.
 struct ChatTurn: View {
     let entries: ArraySlice<Entry>
+    /// Set on the latest turn: whether its prompt has scrolled up past the
+    /// top of the chat, so the chat pins it there.
+    var promptAbove: Binding<Bool>?
 
     /// A transcript's entries split where each prompt starts; whatever came
     /// before the first prompt is a turn of its own, without a heading.
@@ -32,7 +35,15 @@ struct ChatTurn: View {
         }
         VStack(alignment: .leading, spacing: 16) {
             if let prompt {
-                PromptHeading(text: prompt.text)
+                if let promptAbove {
+                    PromptHeading(text: prompt.text)
+                        .id(PinnedPrompt.anchor)
+                        // Below the viewport (reading earlier turns) is not
+                        // "above": only a prompt scrolled past pins.
+                        .onGeometryChange(for: Bool.self) { $0.frame(in: .scrollView).maxY < 0 } action: { promptAbove.wrappedValue = $0 }
+                } else {
+                    PromptHeading(text: prompt.text)
+                }
             }
             if !tools.isEmpty {
                 DisclosureGroup {

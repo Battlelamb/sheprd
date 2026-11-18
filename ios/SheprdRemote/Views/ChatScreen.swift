@@ -5,7 +5,8 @@ import UIKit
 /// Chat B: the latest turn as a document (the prompt as a heading, steps
 /// folded to one line, the answer, then its diffs folded to a line each),
 /// the running step pinned under the header, earlier turns summed up, and
-/// questions in a bottom sheet.
+/// questions in a bottom sheet. Once the prompt scrolls off the top, its
+/// first three lines stay pinned there.
 struct ChatScreen: View {
     @Environment(AppModel.self) private var model
     let key: PaneKey
@@ -115,6 +116,12 @@ struct ChatScreen: View {
             }
         }
         .onAppear {
+            #if DEBUG
+            if key == .sample {
+                store = ChatStore(key: key, sample: .sample)
+                return
+            }
+            #endif
             store = model.fleet.openChat(key)
             model.recentDevice = key.device
             #if DEBUG
@@ -176,6 +183,8 @@ private struct ChatDocument: View {
     @State private var shownTurns = 5
     /// A link the agent wrote, shown in full before it opens.
     @State private var pendingLink: URL?
+    /// The latest prompt has scrolled up past the top of the chat.
+    @State private var promptAbove = false
 
     /// Lines stay this wide at most on an iPad or an unfolded iPhone, so
     /// the answer reads like a page rather than a banner.
@@ -186,6 +195,7 @@ private struct ChatDocument: View {
         let tools: [Tool] = (turns.last ?? []).compactMap { entry in
             if case let .tool(tool) = entry.kind { tool } else { nil }
         }
+        let prompt: String? = if case let .user(text, _) = turns.last?.first?.kind { text } else { nil }
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 let hidden = max(turns.count - shownTurns, 0)
@@ -204,7 +214,8 @@ private struct ChatDocument: View {
                 }
                 ForEach(Array(turns.enumerated().dropFirst(hidden)), id: \.element.first?.id) { index, turn in
                     if index > hidden { Divider().padding(.vertical, 8) }
-                    ChatTurn(entries: turn)
+                    // Only the latest turn's prompt pins once scrolled past.
+                    ChatTurn(entries: turn, promptAbove: index == turns.count - 1 ? $promptAbove : nil)
                 }
                 if !transcript.queued.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
@@ -247,7 +258,18 @@ private struct ChatDocument: View {
         }
         // Dragging the conversation puts the keyboard away, as Messages does.
         .scrollDismissesKeyboard(.interactively)
+        // A picture opened full screen swipes through the chat's others.
+        .environment(\.chatPictures, transcript.pictures.map(GalleryPicture.init))
         .opacity(store.stale ? 0.6 : 1)
+        .overlay(alignment: .top) {
+            if let prompt, promptAbove {
+                PinnedPrompt(text: prompt) {
+                    withAnimation(.snappy) { position.scrollTo(id: PinnedPrompt.anchor, anchor: .top) }
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy, value: promptAbove && prompt != nil)
         // A bar, not an inset: what scrolls under it fades as under the
         // system's own toolbars.
         .safeAreaBar(edge: .bottom) {
@@ -303,7 +325,6 @@ private struct ChatDocument: View {
         }
         .sheet(item: question) { permission in
             QuestionSheet(key: key, permission: permission)
-                .presentationDetents([.medium, .large])
         }
     }
 
@@ -323,6 +344,33 @@ private struct ChatDocument: View {
 
     private func unqueue(_ queued: Queued) {
         Task { problem = await model.fleet.send(.unqueue(queued.id), to: key) }
+    }
+}
+
+/// The latest prompt, three lines at most, over the top of the chat while
+/// its heading is scrolled away; a tap scrolls back to it.
+struct PinnedPrompt: View {
+    static let anchor = "latest-prompt"
+    let text: String
+    let reveal: () -> Void
+
+    var body: some View {
+        Button(action: reveal) {
+            HStack(alignment: .top, spacing: 10) {
+                Rectangle().fill(.tint).frame(width: 3)
+                Text(text).font(.subheadline.weight(.semibold)).lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .glassEffect(.regular, in: .rect(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: ChatDocument.readableWidth + 40)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .accessibilityLabel("Your prompt: \(text)")
+        .accessibilityHint("Scrolls to it")
     }
 }
 
@@ -383,48 +431,5 @@ private struct RunningCapsule: View {
         .glassEffect(.regular, in: .capsule)
         .frame(maxWidth: ChatDocument.readableWidth)
         .padding(.horizontal, 16)
-    }
-}
-
-/// Questions A: a bottom sheet in thumb reach, full-width options, the
-/// "always" ones set apart.
-private struct QuestionSheet: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    let key: PaneKey
-    let permission: Permission
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(permission.title).font(.title3.weight(.semibold))
-            let always = permission.options.filter { $0.kind == .allowAlways || $0.kind == .rejectAlways }
-            ForEach(permission.options.filter { !always.contains($0) }) { option in
-                if option.kind == .allowOnce {
-                    Button { answer(option) } label: { Text(option.name).frame(maxWidth: .infinity) }
-                        .buttonStyle(.glassProminent).controlSize(.large).tint(Home.AgentStatus.blocked.color)
-                } else {
-                    Button { answer(option) } label: { Text(option.name).frame(maxWidth: .infinity) }
-                        .buttonStyle(.glass).controlSize(.large)
-                }
-            }
-            if !always.isEmpty {
-                Divider()
-                ForEach(always) { option in
-                    Button(option.name) { answer(option) }.font(.subheadline)
-                }
-            }
-        }
-        .padding(24)
-    }
-
-    /// The sheet leaves once the answer is allowed; a refused answer
-    /// brings the question back, and the sync bar says why.
-    private func answer(_ option: PermissionOption) {
-        Task {
-            guard await OwnerCheck.allows(option) else { return }
-            let fleet = model.fleet
-            Task { _ = await fleet.send(.answer(permission: permission.id, option: option.id), to: key) }
-            dismiss()
-        }
     }
 }

@@ -204,9 +204,10 @@ change. It is off by default.
   there.
 - Typing, composing, or pasting into the agent's pane from this window keeps
   its terminal, since a move would clear what is typed. That holds while the
-  move is still checking the agent too: it stops before pressing Ctrl+C.
-  Once Ctrl+C is pressed, the move finishes, since the agent is on its way
-  out and only its chat can continue the conversation.
+  move is still checking the agent too: it stops before pressing Ctrl+C, or,
+  for an agent you quit meanwhile, before typing its line. Once Ctrl+C is
+  pressed, the move finishes, since the agent is on its way out and only its
+  chat can continue the conversation.
   Typing into another pane, then clicking the agent's, does not count, nor
   does moving the pointer, scrolling, or clicking. Text typed from another
   client, such as the Herdr TUI, is not seen: that is what the wait is for.

@@ -61,30 +61,19 @@ fn a_folder_no_remote_line_can_carry_is_refused() {
 }
 
 #[test]
-fn typing_before_the_first_key_presses_none() {
+fn typing_before_the_move_acts_stops_it() {
     let stage = Stage::default();
     assert!(stage.typed());
-    let mut pressed = false;
-    let stopped = interrupt(&stage, || {
-        pressed = true;
-        Ok(())
-    });
     assert!(matches!(
-        stopped,
+        committed(&stage),
         Err(Error::Convert(convert::Error::Stopped))
     ));
-    assert!(!pressed);
 }
 
 #[test]
-fn a_move_past_its_first_key_keeps_pressing_after_typing() {
+fn a_move_that_acted_finishes_after_typing() {
     let stage = Stage::default();
-    assert!(interrupt(&stage, || Ok(())).is_ok());
+    assert!(committed(&stage).is_ok());
     assert!(!stage.typed());
-    let mut pressed = false;
-    let again = interrupt(&stage, || {
-        pressed = true;
-        Ok(())
-    });
-    assert!(again.is_ok() && pressed);
+    assert!(committed(&stage).is_ok(), "later keys, then the line");
 }

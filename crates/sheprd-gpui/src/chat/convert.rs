@@ -90,13 +90,15 @@ struct Request {
     scope: existing::Scope,
 }
 
-/// Presses Ctrl+C through `send`, unless typing reached the pane before the
-/// first key, which would clear the draft.
-fn interrupt(stage: &Stage, send: impl FnOnce() -> Result<(), Error>) -> Result<(), Error> {
-    if !stage.interrupt() {
-        return Err(convert::Error::Stopped.into());
+/// Commits the worker to acting on the pane, unless typing reached it
+/// first: a Ctrl+C would clear the draft, and a resume line would mix with
+/// it or restart an agent the user quit.
+fn committed(stage: &Stage) -> Result<(), Error> {
+    if stage.commit() {
+        Ok(())
+    } else {
+        Err(convert::Error::Stopped.into())
     }
-    send()
 }
 
 /// The worker's whole job: the line to type once the agent has stopped.
@@ -143,13 +145,15 @@ fn run(request: &Request, cancelled: &AtomicBool, stage: &Stage) -> Result<Strin
         *agent,
         || process_info(&host, pane, cancelled).map(|info| convert::shell_in_front(&info)),
         || {
-            interrupt(stage, || {
-                Ok(existing::query(&host, &keys, cancelled).map(drop)?)
-            })
+            committed(stage)?;
+            Ok(existing::query(&host, &keys, cancelled).map(drop)?)
         },
         || std::thread::sleep(convert::POLL),
         cancelled,
     )?;
+    // An agent the user quit leaves the shell in front, and no key was
+    // pressed: the line still waits on the same check.
+    committed(stage)?;
     Ok(line)
 }
 

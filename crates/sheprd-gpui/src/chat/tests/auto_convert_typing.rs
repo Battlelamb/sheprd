@@ -93,7 +93,7 @@ fn typing_after_the_first_ctrl_c_lets_the_move_finish(cx: &mut gpui::TestAppCont
             let stage = job.stage.clone();
             view.chats.converting = Some(job);
             // The worker pressed Ctrl+C, and the agent is on its way out.
-            assert!(stage.interrupt());
+            assert!(stage.commit());
             view.note_typing();
             assert!(
                 !stage.stopped_by_typing(),

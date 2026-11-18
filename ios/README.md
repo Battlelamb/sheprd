@@ -15,6 +15,12 @@ The native app for Sheprd's remote control (`docs/ios-app-plan.md`).
   paired computer, merged into one list, with what needs you first.
 - **What you can do:** answer questions in place, open a chat or a terminal,
   and send prompts.
+- **Chat text:** an agent's replies are Markdown with the desktop's text sizes
+  (`:big[…]` and the other steps) and message effects (`:::slam` bubbles,
+  invisible ink revealed by a tap, and `::confetti` and the other screen
+  effects), which play once as a reply arrives and show at rest with a Replay
+  link afterwards (`docs/rich-chat.md`, Text size and effects). Reduce Motion
+  draws them at rest.
 - **Live Activities:** they put running chats on the lock screen and in the
   Dynamic Island.
 - **Launch:** it draws the last state from its cache at once, then catches up
@@ -33,7 +39,7 @@ The native app for Sheprd's remote control (`docs/ios-app-plan.md`).
 | `SheprdRemote/` | The app: `Fleet` (one link per computer), `Cache`, the pinned HTTPS and WebSocket client, pairing, Keychain, and `Views/` |
 | `SheprdRemoteWidgets/` | The lock screen and Dynamic Island layouts |
 | `Shared/` | The Live Activity's attributes, compiled into both targets |
-| `Mockups/` | The SwiftUI mockups the screens were picked from (`just ios-mockups`) |
+| `Mockups/` | The SwiftUI mockups the screens were picked from (`just ios-mockups`); the `effects` round draws text sizes and message effects with the app's own `Views/Effects` |
 | `Spikes/` | Phase 0 spikes (`docs/ios-spikes.md`) |
 | `tools/` | The simulator loop's control client and the TestFlight upload scripts |
 
@@ -133,7 +139,10 @@ and nothing goes through your phone.
      which creates what the card shows. Run it
      against a sandboxed Herdr, not your own.
    - `-sampleChat YES` opens a made-up chat that needs no daemon, for
-     screenshots of the chat screen without real prompts.
+     screenshots of the chat screen without real prompts. `-sampleChat effects`
+     opens one with text sizes and message effects at rest; `-samplePlay NAME`
+     then asks for the screen effect NAME (`confetti`, `zap`, …) in its last
+     reply and plays it and every bubble a second after it opens.
    - With `-openLink`, `-session YES` opens the chat's session sheet and
      `-draft TEXT` types into its composer (`-draft /` lists the slash
      commands).

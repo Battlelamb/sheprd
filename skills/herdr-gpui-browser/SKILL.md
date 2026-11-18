@@ -54,8 +54,9 @@ Tests :big[pass]: :huge[214 of 214]. :small[CI took 4 min.]
   `balloons`, `celebration`, `fireworks`, `love`, `lasers`, `echo`,
   `spotlight`, or `zap`, where pixel ships shoot down the message's letters)
   fills the chat pane for a moment, when long work finally succeeds. Never use them in routine replies.
-- Terminal views and the phone show the directives as plain text, so the reply
-  still reads well there.
+- The iPhone and iPad app draws them too (ink shows on a tap). Terminal views
+  and the phone web app show the directives as plain text, so the reply still
+  reads well there.
 
 For a small interactive selection, put a JSON document in a closed `herdr-ui`
 fence. The catalog supports native controls on Linux as well as macOS/Windows:

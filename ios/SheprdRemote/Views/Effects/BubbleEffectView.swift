@@ -15,6 +15,10 @@ struct BubbleEffectView<Content: View>: View {
     var held: Double?
     @ViewBuilder var content: Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Whether invisible ink shows its words. Kept here, above the moving
+    /// and resting branches, so ink revealed while it shimmers stays
+    /// revealed when the shimmer ends.
+    @State private var revealed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -37,7 +41,7 @@ struct BubbleEffectView<Content: View>: View {
     private func posed(at t: Double?) -> some View {
         let pose = effect.pose(at: t)
         if effect == .ink {
-            InkCover(frame: pose.shimmer ? UInt32((t ?? 0) * Ink.shimmerRate) + 1 : 0) { content }
+            InkCover(frame: pose.shimmer ? UInt32((t ?? 0) * Ink.shimmerRate) + 1 : 0, revealed: $revealed) { content }
         } else {
             content
                 .scaleEffect(pose.scale, anchor: .leading)
@@ -62,8 +66,8 @@ enum Ink {
 /// costs no frames.
 struct InkCover<Content: View>: View {
     let frame: UInt32
+    @Binding var revealed: Bool
     @ViewBuilder var content: Content
-    @State private var revealed = false
 
     var body: some View {
         content

@@ -155,8 +155,16 @@ impl Stream {
             && credit > 0
             && chunk.end.is_none()
         {
-            self.link
-                .send(self.channel, Kind::Credit, &credit.to_le_bytes())?;
+            // The bytes are already taken: a connection lost since they
+            // arrived must not drop them. Losing it ends this route, so the
+            // next read reports the loss.
+            match self
+                .link
+                .send(self.channel, Kind::Credit, &credit.to_le_bytes())
+            {
+                Ok(()) | Err(Error::Lost) => {}
+                Err(error) => return Err(error),
+            }
         }
         Ok(chunk)
     }

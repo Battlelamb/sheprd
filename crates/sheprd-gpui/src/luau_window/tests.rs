@@ -170,3 +170,5 @@ fn option_at_launch_opens_the_other_window() {
     assert!(!super::choose(false, false));
     assert!(super::choose(false, true));
 }
+
+mod keys;

@@ -368,6 +368,10 @@ pub(crate) fn run() -> ExitCode {
         .run()
 }
 
+/// The key context of every Sheprd region, which Moonframe knows: its Escape
+/// binding leaves a terminal's alone.
+const TERMINAL_CONTEXT: &str = "Terminal";
+
 /// One region of the main window, where Luau placed it.
 struct SheprdRegion {
     /// Over the whole window, for the main region; see `render`.
@@ -574,9 +578,18 @@ fn host(shared: &RefCell<Shared>, window: &mut Window, cx: &mut App) -> Host {
             // Before the host installs: from then on Sheprd's own changes to
             // its menus (a layout picked, the language) rebuild Moonframe's bar.
             crate::embed::keep_menus(moonframe::refresh_menus, cx);
+            cx.bind_keys(terminal_keys());
             Host::new(startup.take(), window, cx)
         })
         .clone()
+}
+
+/// Moonframe draws its windows inside the toolkit's `Root`, which binds Tab
+/// and Shift-Tab to move between controls. Over Sheprd's regions they reach
+/// the terminal instead, as in Sheprd's own window: its shell completes on
+/// them. Sheprd's own fields still see them as keys.
+fn terminal_keys() -> [KeyBinding; 2] {
+    ["tab", "shift-tab"].map(|key| KeyBinding::new(key, NoAction, Some(TERMINAL_CONTEXT)))
 }
 
 impl HostView for SheprdRegion {}
@@ -597,7 +610,7 @@ impl Render for SheprdRegion {
         });
         // `Terminal` keeps Moonframe's Escape off: it belongs to the terminal.
         div()
-            .key_context("Terminal")
+            .key_context(TERMINAL_CONTEXT)
             .size_full()
             .child(self.view.clone())
             .children(overlay)

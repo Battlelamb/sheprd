@@ -411,8 +411,8 @@ pub(super) fn pr_number(key: &str, pr: &PrBadge, size: f32, glyph: f32) -> (f32,
         .gap(px(3.))
         .text_color(rgb(pr.color))
         .child(icon("icons/git-branch.svg", size, pr.color))
-        .child(label_text(&pr.number));
-    let width = size + 3. + (pr.number.chars().count() as f32 * glyph).ceil();
+        .child(label_text(&pr.label));
+    let width = size + 3. + (pr.label.chars().count() as f32 * glyph).ceil();
     (width, element)
 }
 

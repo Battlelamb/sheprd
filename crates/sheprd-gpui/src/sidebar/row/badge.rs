@@ -89,7 +89,7 @@ impl RowBadge {
         layout: &SidebarMetrics,
     ) -> f32 {
         let glyph = glyph_width(font);
-        let number = self.pr.as_ref().map_or(0, |pr| pr.number.chars().count());
+        let number = self.pr.as_ref().map_or(0, |pr| pr.label.chars().count());
         let pr = (glyph * number as f32).ceil();
         // Reserve the icon and the gap before the PR number, even at small fonts.
         let mark = line_height(font) + glyph;
@@ -181,7 +181,7 @@ impl RowBadge {
                                 .flex_none()
                                 .truncate()
                                 .text_color(rgb(badge.color))
-                                .child(label_text(&badge.number)),
+                                .child(label_text(&badge.label)),
                         )
                     }),
             )
@@ -222,14 +222,28 @@ impl RowBadge {
 /// Cached pull request state for a worktree row: the number carries the
 /// lifecycle/readiness color.
 pub(in crate::sidebar) struct PrBadge {
+    /// `#1364`, as mods read it.
     pub(in crate::sidebar) number: String,
+    /// What the row shows: the number, and its layer of a GitHub stack.
+    pub(in crate::sidebar) label: String,
     pub(in crate::sidebar) color: u32,
 }
 
 impl PrBadge {
     pub(in crate::sidebar) fn new(pr: &crate::pull_request::PullRequest, theme: &Theme) -> Self {
+        let number = format!("#{}", pr.number);
+        let label = match pr.stack() {
+            Some((stack, position)) => fl!(
+                "sidebar-pull-request-stacked",
+                number = number.as_str(),
+                position = position,
+                size = stack.size
+            ),
+            None => number.clone(),
+        };
         Self {
-            number: format!("#{}", pr.number),
+            number,
+            label,
             color: crate::pull_request::color(pr, theme),
         }
     }
@@ -237,8 +251,10 @@ impl PrBadge {
     /// Commits on the branch that no pull request carries yet, in the slot a
     /// number would take, so every layout shows it where it shows a number.
     pub(in crate::sidebar) fn unopened(theme: &Theme) -> Self {
+        let number = fl!("sidebar-pull-request-unopened");
         Self {
-            number: fl!("sidebar-pull-request-unopened"),
+            label: number.clone(),
+            number,
             color: crate::pull_request::unopened_color(theme),
         }
     }

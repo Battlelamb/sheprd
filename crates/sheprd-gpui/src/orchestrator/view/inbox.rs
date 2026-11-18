@@ -57,18 +57,6 @@ impl OrchestratorView {
                     .child(self.render_list(cx))
                     .children(pane),
             )
-            .when(self.menu == Some(Menu::Sort), |el| {
-                el.child(self.render_sort_menu(cx))
-            })
-            .when(self.menu == Some(Menu::State), |el| {
-                el.child(self.render_state_menu(cx))
-            })
-            .when(self.menu == Some(Menu::Projects), |el| {
-                el.child(self.render_projects_menu(cx))
-            })
-            .when(self.menu == Some(Menu::Repos), |el| {
-                el.child(self.render_project_filter_menu(cx))
-            })
             .into_any_element()
     }
 
@@ -603,12 +591,17 @@ impl OrchestratorView {
                 .cursor_pointer()
                 .text_size(look.small())
                 .text_color(rgb(theme.subtext()))
+                .relative()
+                .child(self.measure_room(Menu::Sort))
                 .child(self.sort.label())
                 .child(look.icon("icons/chevron-down.svg", 10., theme.muted))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_menu(Menu::Sort);
                     cx.notify();
-                })),
+                }))
+                .when(self.menu == Some(Menu::Sort), |el| {
+                    el.child(self.render_sort_menu(cx))
+                }),
         );
         match beside {
             // Too narrow for both: the field keeps a line, the controls wrap.
@@ -651,22 +644,9 @@ impl OrchestratorView {
     }
 
     fn render_sort_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let look = &self.look;
-        let theme = &look.theme;
-        deferred(crate::motion::pop_in(
-            div()
-                .absolute()
-                .top(px(120. + self.search_line()))
-                .right(px(16.))
-                .w(px(200.))
-                .p_1()
-                .flex()
-                .flex_col()
-                .rounded(px(corners::CONTROL))
-                .bg(rgb(theme.surface))
-                .border_1()
-                .border_color(rgb(theme.active))
-                .shadow_lg()
+        let theme = &self.look.theme;
+        self.drop_down(crate::motion::pop_in(
+            self.menu_frame(200.)
                 .children(Sort::ALL.into_iter().map(|sort| {
                     let on = sort == self.sort;
                     let hover = theme.active;

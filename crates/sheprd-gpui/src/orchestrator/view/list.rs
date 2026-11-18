@@ -36,13 +36,13 @@ const PULL_REQUEST_AUTHOR_WIDTH: f32 = 100.;
 /// What a title keeps before an author joins it beside an open item.
 pub(super) const AUTHOR_TITLE_MIN: f32 = 280.;
 /// The gap between a row's cells, and its padding on either side.
-const CELL_GAP: f32 = 8.;
+const CELL_GAP: f32 = 16.;
 const ROW_PADDING: f32 = 16.;
+/// The pull request number column: its icon and a four-digit number.
+const NUMBER_WIDTH: f32 = 60.;
 /// The list width below which the search field takes its own line, at the
 /// usual text size: the Pull requests list's controls fill the row.
 const SEARCH_BESIDE_WIDTH: f32 = 960.;
-/// What that line adds above a dropdown.
-const SEARCH_LINE: f32 = 40.;
 /// The columns saying where a pull request stands, at the usual text size:
 /// see [`Look::column`].
 const STATUS_WIDTH: f32 = 80.;
@@ -76,15 +76,6 @@ impl OrchestratorView {
         self.look.column(SEARCH_BESIDE_WIDTH)
     }
 
-    /// How far a dropdown moves down for the search field's own line.
-    pub(super) fn search_line(&self) -> f32 {
-        if self.search_stacked() {
-            SEARCH_LINE
-        } else {
-            0.
-        }
-    }
-
     /// Whether rows name their author: always, unless an open item leaves
     /// the title too little room for it.
     fn shows_author(&self) -> bool {
@@ -97,7 +88,10 @@ impl OrchestratorView {
             // Age, run, title, author, and action.
             Tab::Issues | Tab::Tasks => (5., 32. + 30. + ISSUE_AUTHOR_WIDTH + ACTION_WIDTH),
             // Number, title, author, two dots, and age.
-            Tab::PullRequests => (6., 48. + PULL_REQUEST_AUTHOR_WIDTH + 12. + 12. + 32.),
+            Tab::PullRequests => (
+                6.,
+                NUMBER_WIDTH + PULL_REQUEST_AUTHOR_WIDTH + 12. + 12. + 32.,
+            ),
         };
         let (source_cells, source) = if self.mixed_sources {
             (1., SOURCE_WIDTH)
@@ -220,7 +214,7 @@ impl OrchestratorView {
                 head.push((String::new(), Some(ACTION_WIDTH)));
             }
             Tab::PullRequests => {
-                head.push((fl!("orchestrator-column-pull-request"), Some(48.)));
+                head.push((fl!("orchestrator-column-pull-request"), Some(NUMBER_WIDTH)));
                 if sources {
                     head.push((fl!("orchestrator-column-source"), Some(SOURCE_WIDTH)));
                 }
@@ -491,7 +485,7 @@ impl OrchestratorView {
             .h(px(self.row_height()))
             .flex()
             .items_center()
-            .gap_2()
+            .gap(px(CELL_GAP))
             .px_4()
             .border_b_1()
             .border_color(rgb(theme.active))
@@ -674,7 +668,8 @@ impl OrchestratorView {
             .child(
                 div()
                     .flex_none()
-                    .w(px(48.))
+                    .w(px(NUMBER_WIDTH))
+                    .overflow_hidden()
                     .flex()
                     .items_center()
                     .gap_1()
@@ -846,7 +841,7 @@ fn column_head(look: &Look, cells: &[(String, Option<f32>)]) -> Div {
         .flex_none()
         .flex()
         .items_center()
-        .gap_2()
+        .gap(px(CELL_GAP))
         .h(px(24.))
         .px_4()
         .border_b_1()

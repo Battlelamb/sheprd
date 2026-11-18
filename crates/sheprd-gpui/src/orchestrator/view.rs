@@ -113,7 +113,7 @@ impl EventEmitter<Event> for OrchestratorView {}
 const REFRESH_GRACE: Duration = Duration::from_millis(1500);
 
 /// A dropdown under the search row; one is open at a time.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Menu {
     Sort,
     State,
@@ -205,6 +205,8 @@ pub(crate) struct OrchestratorView {
     sort: Sort,
     /// The dropdown open under the search row, if any.
     menu: Option<Menu>,
+    /// The room under each dropdown's control, which its menu fits in.
+    menu_room: browse::MenuRoom,
     /// How many repositories the Browse menu draws: its pages so far.
     browse_rows: usize,
     filters: Filters,
@@ -304,6 +306,7 @@ impl OrchestratorView {
             tab: Tab::default(),
             sort: Sort::default(),
             menu: None,
+            menu_room: browse::MenuRoom::default(),
             browse_rows: browse::MAX_ROWS,
             filters: Filters::default(),
             yours: rows::Yours::default(),

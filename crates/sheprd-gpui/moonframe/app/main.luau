@@ -134,23 +134,32 @@ return mod {
 						if state.activity_bar > 0
 							then ui.column { width = state.activity_bar, shrink = false, gap = "none", style = { background = theme.sidebar }, ui.mount "activity" }
 							else false,
-						-- The left pane: the worktrees, then the agents, each a mod,
-						-- and the device picker under them, as Sheprd's sidebar has
-						-- it. A page in the sidebar's place shows neither list.
+						-- The left pane: the worktrees, new and menu, then the agents,
+						-- each a mod, and the device picker under them, as Sheprd's
+						-- sidebar has it. A page in the sidebar's place shows neither list.
 						ui.column {
 							class = "sheprd-left",
 							grow = true,
 							gap = "none",
 							style = { background = theme.sidebar },
 							ui.column { grow = true, gap = "none", ui.mount "worktrees" },
-							if lists and sheprd.agents_list ~= false then ui.column {
-								class = "sheprd-agents-pane",
-								height = agents_height(state),
+							-- Under a rule, new and menu, then the agents. The rule is the edge
+							-- that shares the height between the worktrees and the agents, as
+							-- Sheprd's does.
+							if lists then ui.column {
+								class = "sheprd-lower",
 								shrink = false,
 								gap = "none",
-								ui.mount "agents",
-								-- Its top edge resizes it, over the agents' rule.
-								ui.row {
+								ui.row { class = "sheprd-rule", height = 1, shrink = false, style = { background = theme.active } },
+								ui.mount "actions",
+								if sheprd.agents_list ~= false then ui.column {
+									class = "sheprd-agents-pane",
+									height = agents_height(state),
+									shrink = false,
+									gap = "none",
+									ui.mount "agents",
+								} else false,
+								if sheprd.agents_list ~= false then ui.row {
 									class = "sheprd-agents-edge",
 									float = { top = -3, left = 0, right = 0 },
 									height = 7,
@@ -161,7 +170,7 @@ return mod {
 									pointer = { agents_edge = true },
 									hover = true,
 									handle(state.agents_edge, "x"),
-								},
+								} else false,
 							} else false,
 							if lists and state.devices > 0
 								then ui.row { height = state.devices, shrink = false, gap = "none", region "devices" }

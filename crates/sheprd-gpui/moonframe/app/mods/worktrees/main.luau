@@ -596,15 +596,6 @@ local function results(devices: any, query: string, selected: number, layout: an
 	return children
 end
 
-local function link(text: string, command: string, theme: any)
-	return ui.row {
-		class = "sheprd-link",
-		msg = { command = command },
-		to = LINK,
-		ui.text { text, style = { color = theme.muted } },
-	}
-end
-
 return mod {
 	init = function(previous)
 		return previous or { query = "", searching = false, selected = 1 }
@@ -783,15 +774,7 @@ return mod {
 				gap = "none",
 				ui.column { shrink = false, gap = "none", table.unpack(rows) },
 			},
-			ui.row {
-				class = "sheprd-left-actions",
-				align = "center",
-				shrink = false,
-				style = { padding = { x = (layout.padding or 8) + (layout.inset or 0), y = 4 } },
-				link("new", "new_workspace", theme),
-				ui.spacer(),
-				link("menu", "command_palette", theme),
-			},
+			-- New and menu are the `actions` mod's, under the rule below.
 		}
 	end,
 }

@@ -45,10 +45,11 @@ Everything around the terminals is Luau in `crates/sheprd-gpui/moonframe/app`:
 
 | File | Draws |
 | --- | --- |
-| `main.luau` | The layout: where each part goes, the line over the agents that shares the left pane's height with the worktrees (kept across launches; a double click shares it evenly again), and the device picker under them |
+| `main.luau` | The layout: where each part goes, the rule under the worktrees, over New and Menu and the agents, that shares the left pane's height between them (kept across launches; a double click shares it evenly again), and the device picker under them |
 | `mods/header/main.luau` | Back and Forward, while they fit the column (`navigation_in_header`); else Sheprd's title bar beside it shows them |
 | `mods/activity/main.luau` | The activity bar, with the sparkles above Settings |
 | `mods/worktrees/main.luau` | The left pane's head and worktree rows, linked worktrees under their checkout, drawn in the sidebar layout Sheprd's config names (`layout = "orca"`, `compact`, `minimal`, ...), and the sidebar toggle in its head, or over the rail of numbered tiles while the sidebar is folded. Dragging the column's edge out of the rail opens the sidebar too |
+| `mods/actions/main.luau` | New and Menu under the worktrees: a new worktree, and the command palette |
 | `mods/agents/main.luau` | The agents under the worktrees, in Sheprd's sort and the same layout |
 | `mods/details/main.luau` | The right pane; the toggle at the end of the title bar opens it |
 | `mods/status/main.luau` | The status bar |
@@ -138,7 +139,7 @@ Send a message with `to = "provider:sheprd"`:
 | `{ toggle_device = id }`, `{ select_device = id }` | Folds a device's header, or selects the device |
 | `{ toggle_agent_sort = true }` | Switches the agents between grouped and by priority |
 | `{ move_workspace = id, target = id, after = bool }` | Moves a workspace of the selected device before (or after) another, as dropping its row there does; the worktrees mod sends it when a row with `carry` is dropped on one with `accept` |
-| `{ sidebar_width = true }` as a `pointer` | Resizes the sidebar from a drag of its edge (`phase`, `dx`); a double click puts back the default width. The shell draws the edge as a hairline beside the left column, its grip overhanging the main area so it never covers the lists' scrollbars. The shell takes the drag (`hover`), draws the handle as a Moonframe split does (a short pill on hover, a longer one while dragging, as on the line over the agents), and sends the drag on |
+| `{ sidebar_width = true }` as a `pointer` | Resizes the sidebar from a drag of its edge (`phase`, `dx`); a double click puts back the default width. The shell draws the edge as a hairline beside the left column, its grip overhanging the main area so it never covers the lists' scrollbars. The shell takes the drag (`hover`), draws the handle as a Moonframe split does (a short pill on hover, a longer one while dragging, as on the rule over New and Menu), and sends the drag on |
 | `{ open_build_pr = true }` | Opens the pull request a worktree build came from |
 | `{ usage = id }`, `{ usage_refresh = true }` | Opens a usage provider's panel above the status bar, or reads usage again |
 

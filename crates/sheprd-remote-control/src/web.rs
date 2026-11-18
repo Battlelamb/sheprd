@@ -235,6 +235,10 @@ pub(crate) fn router(state: Shared) -> Router {
             "/api/term/{pane}/upload",
             post(terminal::upload).layer(DefaultBodyLimit::max(uploads::MAX_UPLOAD + 1024)),
         )
+        .route(
+            "/api/term/{pane}/file",
+            post(terminal::file).layer(DefaultBodyLimit::max(uploads::MAX_FILE + 1024)),
+        )
         .route("/api/term/{pane}/action", post(terminal::action))
         .route("/api/term/{pane}/rename", post(terminal::rename))
         .route("/api/stream", get(stream::stream))

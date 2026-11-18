@@ -296,6 +296,22 @@ final class RemoteClient: Sendable {
         let _: EmptyAnswer = try await perform(request)
     }
 
+    /// Any file the computer stores under its name and types the path of,
+    /// as `termUpload` does a picture.
+    func termFile(_ data: Data, name: String, pane: String, bearer: String) async throws {
+        var components = URLComponents(string: origin + "/api/term/\(Self.segment(pane))/file")
+        components?.queryItems = [URLQueryItem(name: "name", value: name)]
+        guard let url = components?.url else { throw RemoteError.unreachable }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        // Up to 16 MB, possibly through a relay.
+        request.timeoutInterval = 300
+        request.httpBody = data
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        let _: EmptyAnswer = try await perform(request)
+    }
+
     /// Runs an action from the sheet; answers the pane to show next, or
     /// `nil` when the pane or tab is gone.
     /// A terminal tab in `workspace`, which needs no pane there, so a

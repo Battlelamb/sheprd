@@ -41,9 +41,15 @@ final class TermTyping {
         modifiers = modifiers.afterKey
     }
 
+    /// Pastes `text` whole, over as many requests as it takes; text past
+    /// what one paste may send is refused rather than cut off.
     func paste(_ text: String) {
         guard !text.isEmpty else { return }
-        enqueue([.paste(String(text.prefix(64 * 1024)))])
+        guard text.utf8.count <= TermInput.maxPasted else {
+            problem = "That text is too long to paste; the limit is 1 MB."
+            return
+        }
+        enqueue(TermInput.pastes(for: text))
     }
 
     private func enqueue(_ sends: [TermInput.Send]) {

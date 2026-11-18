@@ -133,6 +133,9 @@ pub(crate) struct MenuState {
     pub(super) merge_target: Option<crate::pr_actions::Target>,
     /// What the merge queue confirmation adds or takes out.
     pub(super) queue_change: Option<sheprd_control_protocol::protocol::hosts::QueueOp>,
+    /// A command opened the merge or queue dialog, which then confirms only
+    /// by a click: an Enter typed for a terminal must not land on it.
+    pub(super) asked_by_command: bool,
     pub(super) target: Option<WorkspaceTarget>,
     pub input: Option<DialogInput>,
     pub(crate) error: Option<String>,
@@ -408,6 +411,7 @@ impl MenuState {
             merge_method: None,
             merge_target: None,
             queue_change: None,
+            asked_by_command: false,
             target: None,
             input: None,
             error: None,
@@ -526,6 +530,7 @@ impl MenuState {
         self.merge_method = None;
         self.merge_target = None;
         self.queue_change = None;
+        self.asked_by_command = false;
         self.target = None;
         self.input = None;
         self.error = None;

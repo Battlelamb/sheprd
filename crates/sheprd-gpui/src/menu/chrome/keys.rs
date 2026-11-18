@@ -303,6 +303,10 @@ impl SheprdWindow {
             }
             "enter" if self.menu.page == Some(Page::GitCommit) => self.submit_git_commit(cx),
             "enter" if self.menu.page == Some(Page::PrComment) => self.submit_pr_comment(cx),
+            // A dialog a command opened confirms only by a click.
+            "enter"
+                if matches!(self.menu.page, Some(Page::PrMerge | Page::PrQueue))
+                    && self.menu.asked_by_command => {}
             "enter" if self.menu.page == Some(Page::PrMerge) => self.submit_pr_merge(cx),
             "enter" if self.menu.page == Some(Page::PrQueue) => self.submit_pr_queue(cx),
             "enter" if self.menu.page == Some(Page::OverviewReply) => {

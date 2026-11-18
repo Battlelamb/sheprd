@@ -57,12 +57,14 @@ impl SheprdWindow {
             PrChange::Merge => self.open_pr_merge(),
             PrChange::Queue(change) => self.open_pr_queue(change),
         }
+        self.menu.asked_by_command = true;
         cx.notify();
         true
     }
 
     pub(super) fn open_pr_queue(&mut self, change: QueueOp) {
         self.menu.page = Some(Page::PrQueue);
+        self.menu.asked_by_command = false;
         self.menu.error = None;
         self.menu.queue_change = Some(change);
         self.menu.merge_target = self.pr_actions.target().cloned();

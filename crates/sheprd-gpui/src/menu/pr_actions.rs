@@ -67,6 +67,7 @@ impl SheprdWindow {
             .map(|pr| pr.merge_methods.clone())
             .unwrap_or_default();
         self.menu.page = Some(Page::PrMerge);
+        self.menu.asked_by_command = false;
         self.menu.error = None;
         self.menu.merge_method = methods.first().copied();
         self.menu.merge_target = self.pr_actions.target().cloned();

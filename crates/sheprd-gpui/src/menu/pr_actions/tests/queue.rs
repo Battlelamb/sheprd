@@ -63,3 +63,25 @@ fn a_command_never_replaces_an_open_menu(cx: &mut TestAppContext) {
     assert!(!opened, "the Git popup the test opened stays");
     cx.update(|_, cx| assert_eq!(view.read(cx).menu.page, Some(Page::Git)));
 }
+
+#[gpui::test]
+fn enter_never_confirms_a_dialog_a_command_opened(cx: &mut TestAppContext) {
+    let mut pr = ready_stacked_fixture().unwrap();
+    pr.merge_methods = vec![crate::pull_request::MergeMethod::Squash];
+    let (view, cx) = open(cx, pr);
+    for (change, page) in [
+        (PrChange::Queue(QueueOp::Add), Page::PrQueue),
+        (PrChange::Merge, Page::PrMerge),
+    ] {
+        assert!(ask(&view, cx, change));
+        draw(cx);
+        // An Enter typed for a terminal, landing on the dialog.
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            let view = view.read(cx);
+            assert_eq!(view.menu.page, Some(page));
+            assert!(view.pr_actions.running().is_none(), "nothing was sent");
+        });
+    }
+}

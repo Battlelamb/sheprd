@@ -20,6 +20,7 @@ pub(super) enum Row {
     Review,
     Comment,
     Merge,
+    Restack,
 }
 
 impl Row {
@@ -31,6 +32,7 @@ impl Row {
             Self::Review => "icons/pulse.svg",
             Self::Comment => "icons/plus.svg",
             Self::Merge => "icons/arrow-right.svg",
+            Self::Restack => "icons/git-branch.svg",
         }
     }
 }
@@ -273,6 +275,12 @@ impl SheprdWindow {
                 rows.push((Row::Merge, fl!("git-menu-merge")));
             }
         }
+        if let Some(restack) = self.git_restack() {
+            rows.push((
+                Row::Restack,
+                fl!("git-menu-restack", base = restack.base.as_str()),
+            ));
+        }
         rows
     }
 
@@ -303,11 +311,12 @@ impl SheprdWindow {
             Row::Review => self.open_pr_review(),
             Row::Comment => self.open_pr_comment(),
             Row::Merge => self.open_pr_merge(),
+            Row::Restack => self.open_git_restack(),
         }
         cx.notify();
     }
 
-    fn start_git(&mut self, action: Action) {
+    pub(super) fn start_git(&mut self, action: Action) {
         if let Err(error) = self.git.start(action, self.main_tokens()) {
             self.menu.error = Some(error.to_string());
         } else {

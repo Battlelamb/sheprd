@@ -302,6 +302,7 @@ impl SheprdWindow {
                 self.submit_workspace_dialog(window, cx)
             }
             "enter" if self.menu.page == Some(Page::GitCommit) => self.submit_git_commit(cx),
+            "enter" if self.menu.page == Some(Page::GitRestack) => self.submit_git_restack(cx),
             "enter" if self.menu.page == Some(Page::PrComment) => self.submit_pr_comment(cx),
             // A dialog a command opened confirms only by a click.
             "enter"

@@ -50,6 +50,7 @@ fn reads_github_stack_bottom_first_with_each_layers_rollup() {
     assert_eq!(stack.layers[1].checks, Some(Outcome::Pending));
     assert_eq!(stack.layers[2].checks, None);
     assert!(!stack.truncated());
+    assert_eq!(stack.layers[0].head_oid, "");
 }
 
 #[test]
@@ -58,6 +59,7 @@ fn hidden_layers_and_remote_text_are_dropped_or_cleaned() {
     hidden["pullRequest"] = Value::Null;
     let mut spoofed = layer(1, "OPEN", "CLEAN", None, None);
     spoofed["pullRequest"]["title"] = json!("Fix\n\u{202e}it");
+    spoofed["pullRequest"]["headRefOid"] = json!("--upload-pack=evil");
     let stack: Stack = serde_json::from_value(json!({
         "number": 7, "baseRefName": "ma\u{202e}in", "size": 3,
         "entries": {"nodes": [spoofed, hidden, null]}
@@ -65,6 +67,10 @@ fn hidden_layers_and_remote_text_are_dropped_or_cleaned() {
     .unwrap();
     assert_eq!(stack.layers.len(), 1);
     assert_eq!(stack.layers[0].title, "Fix  it");
+    assert_eq!(
+        stack.layers[0].head_oid, "",
+        "an ID that is not a commit is dropped"
+    );
     assert_eq!(stack.base, "ma in");
     assert!(stack.truncated());
 }
@@ -270,4 +276,26 @@ fn a_position_outside_the_stack_is_not_trusted() {
         "stack": {"number": 950, "baseRefName": "main", "size": 2, "entries": {"nodes": []}}
     }));
     assert!(pr.stack().is_none());
+}
+
+#[test]
+fn only_the_lowest_open_layer_restacks_onto_a_merged_one() {
+    let mut merged = layer(1, "MERGED", "UNKNOWN", None, None);
+    merged["pullRequest"]["headRefOid"] = json!("0123456789abcdef0123456789abcdef01234567");
+    let layers = stack(vec![
+        merged,
+        layer(2, "OPEN", "CLEAN", None, None),
+        layer(3, "OPEN", "CLEAN", None, None),
+    ]);
+    assert_eq!(layers.merged_below(2).map(|layer| layer.number), Some(1361));
+    assert!(
+        layers.merged_below(3).is_none(),
+        "layer 2 is still open between"
+    );
+    assert!(layers.merged_below(1).is_none());
+    let unknown = stack(vec![layer(1, "MERGED", "UNKNOWN", None, None)]);
+    assert!(
+        unknown.merged_below(2).is_none(),
+        "no head commit, nothing to name"
+    );
 }

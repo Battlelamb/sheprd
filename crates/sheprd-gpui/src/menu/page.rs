@@ -66,6 +66,8 @@ pub(crate) enum Page {
     GitHub,
     /// The account menu's GitLab tokens, beside GitHub's sign-in.
     GitLab,
+    /// Confirming a restack of the focused branch onto its stack's base.
+    GitRestack,
     /// A group's "…" menu: opening tabs other than a terminal, closing
     /// tabs, and splitting.
     Group,
@@ -214,6 +216,7 @@ impl Page {
                 | Self::RemoveWsl
                 | Self::Git
                 | Self::GitCommit
+                | Self::GitRestack
                 | Self::RemoteDevices
                 | Self::PrReview
                 | Self::PrComment
@@ -256,6 +259,7 @@ impl Page {
             self,
             Self::Git
                 | Self::GitCommit
+                | Self::GitRestack
                 | Self::PrReview
                 | Self::PrComment
                 | Self::PrMerge

@@ -68,6 +68,7 @@ impl Page {
             Self::ForwardPort => fl!("menu-page-forward-port"),
             Self::Git => fl!("menu-page-git"),
             Self::GitCommit => fl!("menu-page-commit"),
+            Self::GitRestack => fl!("menu-page-restack"),
             Self::GitHub => fl!("menu-page-github-account"),
             Self::GitLab => fl!("menu-page-gitlab-tokens"),
             Self::Group => fl!("menu-page-tab-actions"),

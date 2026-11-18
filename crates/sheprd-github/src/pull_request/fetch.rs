@@ -26,7 +26,7 @@ fragment PullRequestFields on PullRequest {
   headRepositoryOwner { login } headRepository { name }
   stackEntry { position }
   stack { number baseRefName size entries(first: 16) { nodes { position pullRequest {
-    number title state isDraft mergeStateStatus reviewDecision
+    number title state isDraft mergeStateStatus reviewDecision headRefOid
     commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
   } } } }
   mergeQueueEntry { state position estimatedTimeToMerge } isMergeQueueEnabled

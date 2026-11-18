@@ -717,6 +717,8 @@ impl SheprdWindow {
             panel = panel.child(self.render_git_menu(cx));
         } else if page == Page::GitCommit {
             panel = panel.child(self.render_git_commit(cx));
+        } else if page == Page::GitRestack {
+            panel = panel.child(self.render_git_restack(cx));
         } else if page == Page::PrReview {
             panel = panel.child(self.render_pr_review(cx));
         } else if page == Page::PrComment {

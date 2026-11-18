@@ -15,6 +15,7 @@ pub(in crate::menu) fn leaves(page: Page) -> bool {
         page,
         Page::Devices
             | Page::Git
+            | Page::GitRestack
             | Page::PrReview
             | Page::PrComment
             | Page::PrMerge

@@ -27,3 +27,10 @@ git-menu-merge-heading = Merge
 git-menu-checks-heading = Checks
 git-menu-loading-pull-request = Loading pull request...
 git-menu-open-in-browser = Open in browser
+# Restacking the branch once the pull request below it in its GitHub stack
+# merged. $base is the stack's base branch; $number the merged pull request;
+# $branch the focused branch.
+git-menu-restack = Restack onto { $base }...
+git-menu-restack-title = Restack onto { $base }
+git-menu-restack-body = #{ $number } merged below this branch, which still carries its old commits. Restacking replays only { $branch }'s own commits onto { $base } as the remote has it now. It changes this checkout only and pushes nothing; if commits conflict, the rebase stops for you to resolve.
+git-menu-restack-confirm = Restack

@@ -11,6 +11,7 @@
 mod ahead;
 mod error;
 mod identity;
+pub mod restack;
 
 pub use ahead::Ahead;
 pub use error::Error;
@@ -80,6 +81,12 @@ pub enum Action {
     Commit(String),
     Push,
     CreatePullRequest,
+    /// Replay the branch's own commits, after `below` (a merged layer's head
+    /// commit), onto `base` as its remote has it now. Never pushes.
+    Restack {
+        below: String,
+        base: String,
+    },
 }
 
 impl Action {
@@ -88,6 +95,7 @@ impl Action {
             Self::Commit(_) => "Committing...",
             Self::Push => "Pushing...",
             Self::CreatePullRequest => "Creating pull request...",
+            Self::Restack { .. } => "Restacking...",
         }
     }
 }
@@ -734,6 +742,9 @@ fn perform(
         Action::CreatePullRequest => {
             let token = token.ok_or(sheprd_github::Error::Authentication)?;
             create_pull_request(&checkout, &input.branch, &token, deadline, cancelled)
+        }
+        Action::Restack { below, base } => {
+            restack::restack(&checkout, &input.branch, &below, &base, deadline, cancelled)
         }
     }
 }

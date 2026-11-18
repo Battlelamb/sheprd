@@ -10,7 +10,7 @@ use notify::{RecursiveMode, Watcher};
 use std::{
     collections::BTreeSet,
     ops::ControlFlow,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc,
@@ -51,6 +51,7 @@ pub fn watch(
         watcher: notify::recommended_watcher(sender)?,
         watched: vec![false; roots.len()],
         parents: BTreeSet::new(),
+        aliases: Vec::new(),
     };
     watch_loop(
         Scan {
@@ -102,11 +103,13 @@ fn watch_loop(
         match events.recv_timeout(wait.min(Duration::from_secs(1))) {
             Ok(event) => {
                 let mut paths = BTreeSet::new();
-                let mut seen = collect(event, roots, &mut paths);
+                let mut seen = collect(event, roots, &follower.aliases, &mut paths);
                 let burst = (clock() + BURST).min(rescan_at);
                 while clock() < burst && !stop.load(Ordering::Relaxed) {
                     match events.recv_timeout(SETTLE) {
-                        Ok(event) => seen = seen.max(collect(event, roots, &mut paths)),
+                        Ok(event) => {
+                            seen = seen.max(collect(event, roots, &follower.aliases, &mut paths))
+                        }
                         Err(_) => break,
                     }
                 }
@@ -164,6 +167,41 @@ struct Follower {
     watcher: notify::RecommendedWatcher,
     watched: Vec<bool>,
     parents: BTreeSet<PathBuf>,
+    /// FSEvents reports canonical paths, even when a configured root uses
+    /// an OS alias such as /var -> /private/var. Keep cursor paths unchanged.
+    aliases: Vec<Alias>,
+}
+
+struct Alias {
+    watched: PathBuf,
+    configured: PathBuf,
+}
+
+fn remember_alias(aliases: &mut Vec<Alias>, path: &Path) {
+    if let Ok(watched) = path.canonicalize()
+        && watched != path
+        && !aliases.iter().any(|alias| alias.configured == path)
+    {
+        aliases.push(Alias {
+            watched,
+            configured: path.to_owned(),
+        });
+    }
+}
+
+fn configured_path(path: PathBuf, aliases: &[Alias]) -> PathBuf {
+    let Some((alias, suffix)) = aliases
+        .iter()
+        .filter_map(|alias| {
+            path.strip_prefix(&alias.watched)
+                .ok()
+                .map(|suffix| (alias, suffix))
+        })
+        .max_by_key(|(alias, _)| alias.watched.components().count())
+    else {
+        return path;
+    };
+    alias.configured.join(suffix)
 }
 
 impl Follower {
@@ -180,6 +218,9 @@ impl Follower {
                     .watch(&root.dir, RecursiveMode::Recursive)
                     .is_ok();
                 grew |= *watched;
+                if *watched {
+                    remember_alias(&mut self.aliases, &root.dir);
+                }
                 continue;
             }
             let Some(parent) = root.dir.ancestors().skip(1).find(|dir| dir.is_dir()) else {
@@ -192,6 +233,7 @@ impl Follower {
                     .is_ok()
             {
                 self.parents.insert(parent.to_owned());
+                remember_alias(&mut self.aliases, parent);
             }
         }
         grew
@@ -225,6 +267,7 @@ fn tick(
 fn collect(
     event: notify::Result<notify::Event>,
     roots: &[Root],
+    aliases: &[Alias],
     paths: &mut BTreeSet<PathBuf>,
 ) -> Seen {
     let Ok(event) = event else {
@@ -235,6 +278,9 @@ fn collect(
     }
     let mut seen = Seen::Files;
     for path in event.paths {
+        // Translate only the registered prefix. Canonicalizing each event
+        // would follow links inside the root and bypass the no-follow opener.
+        let path = configured_path(path, aliases);
         if roots.iter().any(|root| session_file(&root.dir, &path)) {
             paths.insert(path);
         } else if roots.iter().any(|root| root.dir.starts_with(&path)) {

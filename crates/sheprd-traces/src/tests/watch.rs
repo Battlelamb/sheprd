@@ -75,9 +75,12 @@ fn appended_messages_are_indexed_as_they_land() {
 #[test]
 fn an_agent_used_for_the_first_time_is_noticed() {
     let home = tempfile::tempdir().unwrap();
+    // The existing agent's initial report confirms that all watches, including
+    // the missing Pi directory's ancestor, are installed before Pi is created.
+    write(&claude_file(home.path()), fixtures::CLAUDE);
     let (stop, counts, handle) = start(home.path());
+    next(&counts, 3);
     // Neither ~/.pi nor anything under it exists when watching starts.
-    thread::sleep(Duration::from_millis(200));
     write(
         &home
             .path()

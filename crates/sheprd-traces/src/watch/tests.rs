@@ -38,6 +38,7 @@ fn a_ready_event_queue_cannot_starve_a_scheduled_full_scan() {
         watcher: notify::recommended_watcher(|_: notify::Result<notify::Event>| {}).unwrap(),
         watched: vec![false],
         parents: BTreeSet::new(),
+        aliases: Vec::new(),
     };
     let clock = Cell::new(0u64);
     let start = Instant::now();
@@ -89,3 +90,5 @@ fn a_ready_event_queue_cannot_starve_a_scheduled_full_scan() {
         "the busy queue prevented discovery of a file with no event"
     );
 }
+
+mod aliases;

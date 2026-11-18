@@ -85,3 +85,10 @@ pr-stack-confirm-dequeue-title = Remove #{ $number } from the merge queue?
 pr-stack-confirm-dequeue-body = Pull requests of its stack above it leave the queue with it.
 pr-stack-confirm-dequeue = Remove
 pr-stack-queue-add-one = Add to merge queue
+
+# A stack read from branch bases rather than kept by GitHub.
+pr-stack-inferred = Inferred from branch bases: each pull request merges on its own.
+pr-stack-inferred-ready-detail = { $count ->
+    [one] Nothing below it is still open.
+   *[other] Merge them one at a time, bottom first.
+}

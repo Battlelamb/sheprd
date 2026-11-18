@@ -39,7 +39,7 @@ The native app for Sheprd's remote control (`docs/ios-app-plan.md`).
 
 ## Build and test
 
-Requires Xcode 26 or later and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+Requires Xcode 27 or later (App Store uploads need the iOS 27 SDK) and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 ```sh
 just ios-test      # Swift package tests on the Mac, no simulator

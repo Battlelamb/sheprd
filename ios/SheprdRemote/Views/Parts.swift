@@ -168,7 +168,7 @@ struct ChatRowLabel: View {
         let title = item.chat.title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !title.isEmpty { return title }
         let prompt = item.chat.summary?.firstPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !prompt.isEmpty { return prompt }
+        if !prompt.isEmpty { return String(InlineMarkdown.plainSized(prompt).characters) }
         let agent = item.chat.agent?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if awaitsFirstPrompt {
             return agent.isEmpty ? String(localized: "New chat") : String(localized: "New \(agent.capitalized) chat")
@@ -200,7 +200,7 @@ struct ChatRowLabel: View {
             return Text("\(Image(systemName: "exclamationmark.triangle")) \(line(said: String(localized: "No summary: \(reason)")))")
         case .other?, nil:
             if awaitsFirstPrompt { return Text(line(said: String(localized: "Waiting for your first prompt"))) }
-            let said = (item.question?.title ?? item.chat.summary?.lastText)
+            let said = (item.question?.title ?? item.chat.summary?.lastText.map(AgentMessage.rowLine))
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .flatMap { $0.isEmpty ? nil : $0 }
             return Text(line(said: said))

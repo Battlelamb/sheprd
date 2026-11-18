@@ -125,6 +125,12 @@ impl MockCore {
             .unwrap();
     }
 
+    /// Hangs up once everything sent is in the socket. On Windows a pipe
+    /// write may still be in flight, and dropping it then cancels it.
+    pub(crate) fn close(mut self) {
+        self.socket.flush().unwrap();
+    }
+
     pub(crate) fn answer(&mut self, request: &Value, result: Value) {
         let message = json!({"jsonrpc": "2.0", "id": request["id"], "result": result});
         self.send(0, Kind::Data, &serde_json::to_vec(&message).unwrap());

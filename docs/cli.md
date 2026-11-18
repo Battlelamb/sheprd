@@ -368,9 +368,10 @@ run `sheprd config set tab_labels.agent_title true`.
 
 | Command | What it does |
 | --- | --- |
-| `remote [status]` | Whether remote control is on and its daemon runs: its port, version, the addresses it serves with network labels and daemon-host interface names, its certificate authority fingerprint, paired and connected devices, and each relay it listens on with its name, description, and tags, whether it is listening, and its round trip (`[remote] relays`, and relays Sheprd on another computer shared with it). JSON includes optional `status.address_details` keyed by origin, and `status.relays` keyed by relay with a `state` of `connecting`, `listening` (with its round trip `rtt_ms` once measured), or `failed` (with its `error`), and the `name`, `description`, and `tags` its `[remote] relays` entry gives it, if any; older daemons omit them |
+| `remote [status]` | Whether remote control is on and its daemon runs: its port, version, the addresses it serves with network labels and daemon-host interface names, its certificate authority fingerprint, paired and connected devices, and each relay it listens on with its name, description, and tags, whether it is listening, and its round trip (`[remote] relays`, and relays Sheprd on another computer shared with it). JSON includes optional `status.address_details` keyed by origin, and `status.relays` keyed by relay with a `state` of `connecting`, `listening` (with its round trip `rtt_ms` once measured), or `failed` (with its `error`), and the `name`, `description`, and `tags` its `[remote] relays` entry gives it, if any; older daemons omit them. Each relay's `token` is whether the daemon listens there with a private relay's listen token (text says `with a listen token`); it is `false` from older daemons |
 | `remote devices` | The paired devices with their IDs, when each was last seen, whether it gets notifications, and the other machines it was paired with from here or is being paired with. JSON includes each device's optional `via` (the computer that vouched for it) and `hosts`, each with a `state` of `offered`, `allowed`, `asking`, `pending`, `paired`, or `failed`. Exits 4 when there are none |
 | `remote pair [--address HTTPS_ORIGIN]` | Open the pairing dialog, preferring Tailscale by default. Choose an address in the dialog, or pass an exact origin from `remote status` (for example `https://100.101.102.103:7443`). The QR and its token show only there, and the user approves the phone there. An unavailable address is reported in the dialog |
+| `remote relays token ENDPOINT [--clear]` | Keep this computer's listen token for a private relay, read from standard input (at most 1 KiB, trimmed; 16 to 255 printable characters without spaces), or with `--clear` forget it. The token is never an argument, a terminal on standard input is refused so it is not shown, and it is never printed or logged. ENDPOINT is a relay address such as `relay.example.org`. Works whether or not the relay is in `[remote] relays` and whether remote control is on; a running daemon reconnects with it, and Sheprd offers it again to your other machines. Exits 2 for a bad address or token, or empty standard input |
 | `remote restart` | Restart the daemon from the binary beside the app, as after a rebuild or update; phones reconnect on their own. Exits 6 while the service is already changing |
 | `remote revoke DEVICE` | Ask in the window to revoke a paired device, named by its ID from `remote devices` or its name (a name two devices share is refused); the user confirms there |
 
@@ -381,7 +382,10 @@ While it is off, `remote status` says so and exits 0; `pair`, `devices`,
 `revoke`, and `restart` exit 1. A dialog already open in the window refuses `pair` and
 `revoke` (exit 6). `--json` gives `{"enabled", "running", "status", "error"}`
 for `status`, where `status` is the daemon's own report, and
-`{"devices": [...]}` for `devices`.
+`{"devices": [...]}` for `devices`, and `{"relay", "token"}` for
+`relays token`: the relay as normalized and whether a token is now kept.
+Phones never need a listen token; only computers that listen on a private
+relay do.
 
 Standalone phone PR/check/log reads are opt-in per computer. After signing in
 with `gh auth login` on that host, set `[remote] github_cli = true` and restart
@@ -397,6 +401,8 @@ and in Settings, never from this command. See the
 ```sh
 sheprd remote status --json
 sheprd remote revoke d_6f1c
+sheprd remote relays token relay.example.org < ~/relay-token.txt
+sheprd remote relays token relay.example.org --clear
 ```
 
 ### Mods
@@ -514,11 +520,13 @@ this for jump list entries, notification clicks, and links in other apps.
 | `herdr-gpui://open?path=PATH` | Focus the workspace showing the Git checkout or worktree at `PATH`, or ask in the window before opening one there |
 | `herdr-gpui://device?id=ID` | Show the device `host list` names `ID` |
 | `herdr-gpui://notification?tag=TAG` | Open the pane of a notification this app posted |
+| `herdr-gpui://relay?endpoint=ENDPOINT&token=TOKEN` | Open Settings > Remote control offering the private relay `ENDPOINT` and its listen token, as sheprd.org/relay links a relay it deployed; nothing is saved until the user clicks Add |
 
 A link is untrusted input, checked by the command and again by the app: only
 those shapes, each parameter once, bounded lengths, no control characters, and
 an absolute local path without `..` (on Windows a drive path, never a UNC or
-`\\?\` one). A link only ever shows something; it never runs a command. A
+`\\?\` one), and for a relay an address `[remote] relays` takes and a token
+a relay would. A link only ever shows something; it never runs a command. A
 refused link exits 2, an unknown device or notification 5, as for commands.
 The request is `{"method": "link", "caller", "op": {"url"}}`.
 

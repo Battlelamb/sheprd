@@ -64,6 +64,7 @@ class CiPolicy(unittest.TestCase):
             "github.event.pull_request.head.repo.full_name": "larry0x/herdr-gpui",
             "github.event.pull_request.draft": False,
             "needs.commits.outputs.code": "true",
+            "needs.commits.outputs.full": "true",
             "needs.commits.outputs.macos_release": "true",
             "needs.commits.outputs.website": "true",
             "needs.commits.outputs.windows_native": "true",
@@ -107,8 +108,28 @@ class CiPolicy(unittest.TestCase):
                     self.assertEqual(condition_matches(job, context),
                                      allowed and job not in PR_ONLY_JOBS)
 
+    def test_fast_pull_request_skips_only_other_platforms(self):
+        # Without every platform, a pull request still runs the Linux checks.
+        for full in ("false", ""):
+            context = self.context(**{"needs.commits.outputs.full": full})
+            for job in PR_JOBS:
+                self.assertEqual(condition_matches(job, context),
+                                 job not in ("windows", "windows-native", "build-macos"), (job, full))
+
+    def test_merge_queue_runs_every_platform_but_no_main_release_build(self):
+        # The queue's ref and actor are GitHub's; it checks what reaches main.
+        for actor in ("larry0x", "penso", "github-merge-queue[bot]"):
+            context = self.context(**{
+                "github.event_name": "merge_group",
+                "github.ref": "refs/heads/gh-readonly-queue/main/pr-456-0123456789abcdef",
+                "github.actor": actor, "github.triggering_actor": actor,
+            })
+            for job in JOBS:
+                with self.subTest(actor=actor, job=job):
+                    self.assertEqual(condition_matches(job, context), job != "build")
+
     def test_other_repositories_cannot_run_jobs(self):
-        for event in ("pull_request", "push", "workflow_dispatch"):
+        for event in ("pull_request", "merge_group", "push", "workflow_dispatch"):
             context = self.context(**{
                 "github.repository": "larry0x/herdr-gpui", "github.event_name": event,
                 "github.ref": "refs/heads/main", "github.actor": "penso",
@@ -166,19 +187,21 @@ class CiPolicy(unittest.TestCase):
         script = "\n".join(line[10:] for line in script.splitlines() if line.startswith("          "))
 
         def gate(code, checks, windows, native, commits, package_inputs="false", package="skipped",
-                 event="push", macos=None, site_inputs="false", site="skipped",
+                 event="push", macos=None, site_inputs="false", site="skipped", full="true",
                  native_inputs=None, macos_inputs=None, zizmor="success"):
             if native_inputs is None:
                 native_inputs = code if code in ("true", "false") else "false"
             if macos_inputs is None:
                 macos_inputs = native_inputs
             if macos is None:
-                macos = ("success" if code == macos_inputs == "true" and event == "pull_request"
-                         else "skipped")
+                before_merge = event in ("pull_request", "merge_group")
+                selected = code == macos_inputs == full == "true" and before_merge
+                macos = "success" if selected else "skipped"
             return subprocess.run(
                 ["bash", "-e", "-c", script], capture_output=True,
                 env={**os.environ, "CODE": code, "RESULT": checks, "WINDOWS": windows,
                      "NATIVE": native, "NATIVE_INPUTS": native_inputs, "COMMITS": commits,
+                     "FULL": full,
                      "PACKAGE_INPUTS": package_inputs, "PACKAGE": package,
                      "EVENT": event, "MACOS_RELEASE": macos, "MACOS_INPUTS": macos_inputs,
                      "SITE_INPUTS": site_inputs, "SITE": site, "ZIZMOR": zizmor},
@@ -218,15 +241,31 @@ class CiPolicy(unittest.TestCase):
                         or (inputs == "false" and package == "skipped"))
             self.assertEqual(gate("true", "success", "success", "success", "success", inputs, package),
                              expected, (inputs, package))
-        # The macOS release builds run, and must pass, on pull requests that
-        # change their inputs only; anywhere else they must have been skipped.
+        # A pull request may run Linux alone: the other platforms must then
+        # have been skipped. Main and the merge queue must run every one, and
+        # selection that failed to say fails the gate.
+        for event, full, windows in itertools.product(
+                ("pull_request", "merge_group", "push", "workflow_dispatch"), ("true", "false", ""),
+                ("success", "failure", "skipped")):
+            expected = (full == "true" and windows == "success") or (
+                event == "pull_request" and full == "false" and windows == "skipped")
+            self.assertEqual(gate("true", "success", windows, windows, "success", event=event, full=full),
+                             expected, (event, full, windows))
+        for event, full in itertools.product(("merge_group", "push"), ("false", "")):
+            self.assertFalse(gate("false", "skipped", "skipped", "skipped", "success",
+                                  event=event, full=full), (event, full))
+        # The macOS release builds run, and must pass, before merge with every
+        # platform when their inputs change only; anywhere else they must
+        # have been skipped.
         for code, inputs, event, macos in itertools.product(
-                ("true", "false"), ("true", "false"), ("pull_request", "push", "workflow_dispatch"),
+                ("true", "false"), ("true", "false"),
+                ("pull_request", "merge_group", "push", "workflow_dispatch"),
                 ("success", "failure", "cancelled", "skipped")):
             if code == "false" and inputs == "true":
                 continue  # Its inputs are code, so detection never reports this.
             platform = "success" if code == "true" else "skipped"
-            selected = code == inputs == "true" and event == "pull_request"
+            before_merge = event in ("pull_request", "merge_group")
+            selected = code == inputs == "true" and before_merge
             expected = macos == ("success" if selected else "skipped")
             self.assertEqual(gate(code, platform, platform, platform, "success", event=event,
                                   macos=macos, native_inputs=code, macos_inputs=inputs),
@@ -244,7 +283,7 @@ class CiPolicy(unittest.TestCase):
     def test_ci_has_no_privileged_trigger_or_credentials(self):
         triggers = WORKFLOW.split("\npermissions:", 1)[0]
         self.assertEqual(re.findall(r"^  (\w+):", triggers, re.M),
-                         ["push", "pull_request", "workflow_dispatch"])
+                         ["push", "pull_request", "merge_group", "workflow_dispatch"])
         self.assertIn("\npermissions: {}\n", WORKFLOW)
         for name, job in JOBS.items():
             with self.subTest(job=name):

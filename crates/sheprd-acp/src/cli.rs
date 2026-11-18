@@ -165,6 +165,7 @@ Agents:
              (or npx @agentclientprotocol/codex-acp)
   copilot    copilot --acp
   gemini     gemini --acp
+  kimi       kimi acp
   opencode   opencode acp
   pi         pi --mode rpc, or with --acp pi-acp (or npx pi-acp)
 

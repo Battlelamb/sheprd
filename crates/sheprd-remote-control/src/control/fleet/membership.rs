@@ -363,18 +363,44 @@ impl<'g, 'a> Folder<'g, 'a> {
             .copied()
             .filter(|&position| matches!(self.graph.order[position].body(), Body::Admit(_)))
             .collect();
-        let reach: Vec<BTreeSet<MemberId>> = removals
+        let mut reach: Vec<BTreeSet<MemberId>> = removals
             .iter()
             .map(|&removal| self.reach(removal, targets(self.graph.order[removal]), &admissions))
             .collect();
+        // Settle the removals, then let the ones in effect reach together:
+        // a member every admission of which some removal in effect voids
+        // has no trust left, though no one removal voids them all. Reaches
+        // only grow, so this ends; a removal it leaves out of effect keeps
+        // what it reached, which can only remove more (fail closed).
+        loop {
+            let decided = self.decide(&removals, &reach, &admissions);
+            if !self.join_reach(&removals, &decided, &mut reach, &admissions) {
+                return removals
+                    .into_iter()
+                    .zip(reach)
+                    .zip(decided)
+                    .filter(|(_, effective)| *effective)
+                    .map(|(entry, _)| entry)
+                    .collect();
+            }
+        }
+    }
+
+    /// Which `removals` take effect, given what each reaches.
+    fn decide(
+        &self,
+        removals: &[usize],
+        reach: &[BTreeSet<MemberId>],
+        admissions: &[usize],
+    ) -> Vec<bool> {
         let could_counter: Vec<bool> = (0..removals.len())
-            .map(|slot| self.could_counter(slot, &removals, &reach, &admissions))
+            .map(|slot| self.could_counter(slot, removals, reach, admissions))
             .collect();
         // Who could void each removal.
         let voiders: Vec<Vec<usize>> = (0..removals.len())
             .map(|of| {
                 (0..removals.len())
-                    .filter(|&by| self.voids(&removals, &reach, by, of, could_counter[of]))
+                    .filter(|&by| self.voids(removals, reach, by, of, could_counter[of]))
                     .collect()
             })
             .collect();
@@ -399,13 +425,73 @@ impl<'g, 'a> Folder<'g, 'a> {
             }
         }
         // What is left voids itself in a cycle: fail closed.
-        removals
+        decided
             .into_iter()
-            .zip(reach)
-            .zip(decided)
-            .filter(|(_, state)| *state != Some(false))
-            .map(|(entry, _)| entry)
+            .map(|state| state != Some(false))
             .collect()
+    }
+
+    /// Adds to the reach of the removals in effect every member each of
+    /// whose admissions one of them voids: one that reaches its signer and
+    /// had not seen it. The member joins the reach of each removal that
+    /// voided one, so whatever it signed on that admission is void too.
+    /// Says whether any reach grew.
+    fn join_reach(
+        &self,
+        removals: &[usize],
+        effective: &[bool],
+        reach: &mut [BTreeSet<MemberId>],
+        admissions: &[usize],
+    ) -> bool {
+        let mut grew = false;
+        loop {
+            let voiding = |admission: usize, reach: &[BTreeSet<MemberId>]| -> Vec<usize> {
+                let signer = self.graph.order[admission].signer();
+                (0..removals.len())
+                    .filter(|&slot| {
+                        effective[slot]
+                            && reach[slot].contains(&signer)
+                            && !self.graph.sees(removals[slot], admission)
+                    })
+                    .collect()
+            };
+            let mut joined: Vec<(usize, MemberId)> = Vec::new();
+            let mut by_member: BTreeMap<MemberId, Vec<usize>> = BTreeMap::new();
+            for &admission in admissions {
+                if let Body::Admit(admit) = self.graph.order[admission].body() {
+                    by_member
+                        .entry(admit.bundle.id())
+                        .or_default()
+                        .push(admission);
+                }
+            }
+            for (member, admitted_by) in by_member {
+                if self.base.members.contains_key(&member) || self.base.tombstones.contains(&member)
+                {
+                    continue;
+                }
+                let voided: Vec<Vec<usize>> = admitted_by
+                    .iter()
+                    .map(|&admission| voiding(admission, reach))
+                    .collect();
+                if voided.iter().all(|slots| !slots.is_empty()) {
+                    joined.extend(
+                        voided
+                            .into_iter()
+                            .flatten()
+                            .filter(|&slot| !reach[slot].contains(&member))
+                            .map(|slot| (slot, member)),
+                    );
+                }
+            }
+            if joined.is_empty() {
+                return grew;
+            }
+            grew = true;
+            for (slot, member) in joined {
+                reach[slot].insert(member);
+            }
+        }
     }
 
     /// Every member removal `removal` removes when it starts from `seeds`:

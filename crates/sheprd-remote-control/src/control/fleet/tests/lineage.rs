@@ -110,3 +110,59 @@ fn a_replayed_admission_does_not_take_the_member_it_copies() {
         assert!(state.members.contains_key(&kept.id()));
     }
 }
+
+/// c and d both admit x without a having seen either admission; a then
+/// removes c and d, one after the other or concurrently, or together.
+fn admitted_twice(how: &str) -> (Log, Device, Device) {
+    let (mut log, a, b, c, d) = four();
+    let before = log.heads().to_vec();
+    let x = computer(9);
+    let body = admit_body(&log, &x);
+    let next = |member: &Device| log.state().members[&member.id()].seq + 1;
+    let by_c = sign_on(&log, &c, &before, next(&c), body.clone());
+    let by_d = sign_on(&log, &d, &before, next(&d), body);
+    let seq = next(&a);
+    match how {
+        "in turn" => {
+            act(&mut log, &a, remove_body(&c));
+            act(&mut log, &a, remove_body(&d));
+        }
+        "reversed" => {
+            act(&mut log, &a, remove_body(&d));
+            act(&mut log, &a, remove_body(&c));
+        }
+        "concurrently" => {
+            let remove_c = sign_on(&log, &a, &before, seq, remove_body(&c));
+            let remove_d = sign_on(&log, &b, &before, next(&b), remove_body(&d));
+            apply(&mut log, remove_c);
+            apply(&mut log, remove_d);
+        }
+        _ => unreachable!(),
+    }
+    apply(&mut log, by_c);
+    apply(&mut log, by_d);
+    (log, b, x)
+}
+
+#[test]
+fn a_member_every_admitter_of_which_is_removed_goes_with_them() {
+    for how in ["in turn", "reversed", "concurrently"] {
+        let (mut log, b, x) = admitted_twice(how);
+        // What x signed on either admission is void too.
+        let heads: Vec<OpId> = log
+            .ops()
+            .filter(|op| matches!(op.body(), Body::Admit(admit) if admit.bundle.id() == x.id()))
+            .map(Op::id)
+            .collect();
+        let added = sign_on(&log, &x, &heads, 1, Body::HostAdd(plain_host(40)));
+        apply(&mut log, added);
+        let state = log.state();
+        assert!(!state.members.contains_key(&x.id()), "{how}");
+        assert!(state.tombstones.contains(&x.id()), "{how}");
+        assert!(
+            !state.hosts.contains_key(&plain_host(40).id().unwrap()),
+            "{how}"
+        );
+        assert!(state.members.contains_key(&b.id()), "{how}");
+    }
+}

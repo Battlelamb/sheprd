@@ -169,7 +169,6 @@ pub(super) fn proven_keys(state_dir: &Path) -> Result<Vec<[u8; 32]>> {
         .collect())
 }
 
-/// Writes the log and the peers' state. Blocking.
 /// The fleet id this computer joined as a shared host, if it did. Blocking.
 pub(super) fn load_hosted(state_dir: &Path) -> Result<Option<String>> {
     Ok(read_bounded(&path(state_dir, HOSTED), 64)?
@@ -182,6 +181,28 @@ pub(super) fn save_hosted(state_dir: &Path, fleet: &str) -> Result<()> {
     Ok(())
 }
 
+/// Removes the log and how this computer joined it, once it left the
+/// fleet for good; `save` then writes the peers' state empty. Blocking.
+pub(super) fn forget(state_dir: &Path) -> Result<()> {
+    for name in [LOG, HOSTED] {
+        let file = path(state_dir, name);
+        match std::fs::remove_file(&file) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(crate::desktop::Error::File {
+                    operation: "remove",
+                    path: file,
+                    source,
+                }
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Writes the log and the peers' state. Blocking.
 pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
     if let Some(log) = &inner.log {
         write_private(&path(state_dir, LOG), &saved::encode(log)?)?;

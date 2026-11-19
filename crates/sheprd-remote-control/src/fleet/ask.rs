@@ -1,10 +1,12 @@
 //! What Sheprd asks the daemon about the fleet (`control::fleet::sync::Ask`).
 //! Every operation this computer signs is one a person here asked for in
 //! Sheprd's own dialog; the daemon only signs, keeps, and passes them on.
+//! The one exception is `Seen`: a shared host's newer record, which its own
+//! certificate authority signed, carried as a member carries its own.
 
 use super::{Error, Fleet, Result, me};
 use crate::control::fleet::{
-    Access, Admit, Body, Bundle, HostIntro, Remove, View,
+    Access, Admit, Body, Bundle, HostIntro, HostSeen, Remove, View,
     sync::{self, Answer, Ask},
 };
 use crate::web::State;
@@ -21,7 +23,7 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             Ok(Answer::Done)
         }
         Ask::Bundle { fleet: id } => {
-            if fleet.inner().log.is_some() {
+            if fleet.in_fleet()? {
                 return Err(Error::InFleet);
             }
             let id = sync::fleet(&id)?;
@@ -133,6 +135,44 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             super::scrub::live(state, fleet)?;
             Ok(Answer::Done)
         }
+        Ask::Seen { intro } => {
+            let intro = HostIntro::from_bytes(&sync::bytes(&intro)?)?;
+            let id = intro.id()?;
+            let carry = {
+                let inner = fleet.inner();
+                let log = inner.log.as_ref().ok_or(Error::NoFleet)?;
+                let state = log.state();
+                // Only a host the fleet holds, that is no member (a member
+                // signs its own), and only a newer record its own
+                // certificate authority signed.
+                state.hosts.get(&id).is_some_and(|held| {
+                    intro.record.host == id
+                        && held.intro.ca.is_some()
+                        && !state.members.values().any(|member| {
+                            member
+                                .bundle
+                                .host
+                                .as_ref()
+                                .is_some_and(|own| own.id().ok() == Some(id))
+                        })
+                        && intro.record.rev > held.record.rev
+                        && me::moved(&held.record, &intro.record)
+                        && held
+                            .intro
+                            .vouches(&intro.record, intro.record_signature.as_ref())
+                })
+            };
+            if carry {
+                fleet.sign(
+                    Body::HostSeen(HostSeen {
+                        record: intro.record,
+                        signature: intro.record_signature,
+                    }),
+                    now_ms,
+                )?;
+            }
+            Ok(Answer::Done)
+        }
         Ask::Apply(apply) => {
             // A caller naming another fleet learns nothing of this one.
             if let Some(named) = &apply.fleet
@@ -143,12 +183,17 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             }
             let heads = apply.heads()?;
             let ops = apply.ops()?;
-            if apply.more && fleet.inner().log.is_none() {
-                // A part of a log handed over: nothing to answer yet.
-                fleet.stage(ops, now_ms)?;
+            // A log handed over in parts, by the fleet its caller names.
+            let handover = apply.fleet.as_deref().unwrap_or_default();
+            let refused = if fleet.inner().log.is_some() {
+                fleet.receive(ops, now_ms)?
+            } else if apply.more {
+                // Nothing to answer until the last part.
+                fleet.stage(handover, &ops, now_ms)?;
                 return Ok(Answer::Applied(sync::Applied::default()));
-            }
-            let refused = fleet.receive(ops, now_ms)?;
+            } else {
+                fleet.receive_last(handover, ops, now_ms)?
+            };
             let mut applied = {
                 let inner = fleet.inner();
                 let log = inner.log.as_ref().ok_or(Error::NoFleet)?;
@@ -210,7 +255,11 @@ fn access(
 /// The fleet as this computer sees it, when it is in one.
 pub(crate) fn view(fleet: &Fleet) -> Option<View> {
     let suspended = fleet.suspended();
-    let inner = fleet.inner();
+    let mut inner = fleet.inner();
+    // A fleet this computer left, once the removal was passed on, is gone.
+    if let Err(error) = fleet.release_if_left(&mut inner) {
+        tracing::warn!(%error, "could not forget a fleet this computer left");
+    }
     inner
         .log
         .as_ref()

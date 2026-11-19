@@ -600,3 +600,29 @@ fn an_update_whose_ssh_lines_could_not_be_written_stays_to_be_applied_again() {
         .unwrap();
     assert_eq!(report.digest, denied.digest().unwrap());
 }
+
+#[test]
+fn a_removal_whose_save_stops_part_way_still_revokes_the_desktop_on_retry() {
+    let host = Host::new();
+    host.enroll(2);
+    host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[]))
+        .unwrap();
+    // The revoked pairs cannot be written: nothing after them is either.
+    std::fs::remove_file(host.state().join(REVOKED)).unwrap();
+    std::fs::create_dir(host.state().join(REVOKED)).unwrap();
+    let removed = file(&[(1, true, 0)], &[2], &[]);
+    assert!(host.apply(removed.clone()).is_err());
+    std::fs::remove_dir(host.state().join(REVOKED)).unwrap();
+    // The access file still names member 2, so the retry records its pair.
+    assert!(
+        Held::load(host.state())
+            .unwrap()
+            .access
+            .unwrap()
+            .members
+            .contains_key(&id(2))
+    );
+    host.apply(removed).unwrap();
+    assert_eq!(Held::load(host.state()).unwrap().revoked.len(), 1);
+    assert_eq!(host.admitted().peer(&dial(2), &[2; 32]), None);
+}

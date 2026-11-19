@@ -106,6 +106,8 @@ impl Action {
 pub struct Outcome {
     pub message: String,
     pub url: Option<String>,
+    /// What a restack did, for the chrome to say in the user's language.
+    pub restacked: Option<restack::Restacked>,
 }
 
 enum Job {
@@ -189,7 +191,7 @@ pub struct Git {
     uncommitted: Option<bool>,
     due: Option<Instant>,
     running: Option<Action>,
-    error: Option<String>,
+    error: Option<Arc<crate::Error>>,
     outcome: Option<Outcome>,
     probes: Vec<Probe>,
     /// Listed checkouts are counted rather than only probed for dirt.
@@ -263,7 +265,7 @@ impl Git {
         self.running.as_ref()
     }
 
-    pub fn error(&self) -> Option<&str> {
+    pub fn error(&self) -> Option<&crate::Error> {
         self.error.as_deref()
     }
 
@@ -483,7 +485,7 @@ impl Git {
                             self.status = None;
                             self.uncommitted = None;
                             if self.running.is_none() {
-                                self.error = Some(error.to_string());
+                                self.error = Some(Arc::new(error));
                             }
                             self.due = Some(now + ERROR_BACKOFF);
                         }
@@ -507,7 +509,7 @@ impl Git {
                             self.running = None;
                             match result {
                                 Ok(outcome) => self.outcome = Some(outcome),
-                                Err(error) => self.error = Some(error.to_string()),
+                                Err(error) => self.error = Some(Arc::new(error)),
                             }
                             // A commit or push changed the tree it reported on.
                             if self.input.as_ref() == Some(&input) {
@@ -522,7 +524,7 @@ impl Git {
                     self.waiting = None;
                     self.worker = None;
                     self.running = None;
-                    self.error = Some(Error::Worker.to_string());
+                    self.error = Some(Arc::new(Error::Worker.into()));
                     self.due = Some(now + ERROR_BACKOFF);
                     return true;
                 }
@@ -567,13 +569,13 @@ impl Git {
                     Ok(_) => self.worker = Some(Worker { requests, results }),
                     Err(source) => {
                         self.running = None;
-                        self.error = Some(
+                        self.error = Some(Arc::new(
                             Error::Process {
                                 operation: "start the Git worker",
                                 source,
                             }
-                            .to_string(),
-                        );
+                            .into(),
+                        ));
                         self.due = Some(now + ERROR_BACKOFF);
                         return true;
                     }
@@ -589,7 +591,7 @@ impl Git {
                     Err(mpsc::TrySendError::Disconnected(_)) => {
                         self.worker = None;
                         self.running = None;
-                        self.error = Some(Error::Worker.to_string());
+                        self.error = Some(Arc::new(Error::Worker.into()));
                         self.due = Some(now + ERROR_BACKOFF);
                         changed = true;
                     }
@@ -782,6 +784,7 @@ fn commit(
     Ok(Outcome {
         message: format!("Committed {}", clean(&head)),
         url: None,
+        restacked: None,
     })
 }
 
@@ -801,6 +804,7 @@ fn push(
     Ok(Outcome {
         message: format!("Pushed {branch} to origin"),
         url: None,
+        restacked: None,
     })
 }
 
@@ -890,6 +894,7 @@ fn parse_created(response: &serde_json::Value, owner: &str, repo: &str) -> crate
     Ok(Outcome {
         message: format!("Opened pull request #{}", number.unwrap_or_default()),
         url: expected,
+        restacked: None,
     })
 }
 

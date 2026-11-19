@@ -130,6 +130,12 @@ fn restacking_keeps_only_the_branchs_own_commits_on_the_new_base() {
     // Run again, there is nothing left to do.
     let again = run_restack(&stack, &stack.below, "main").unwrap();
     assert!(again.message.starts_with("Nothing to restack"));
+    assert_eq!(
+        again.restacked,
+        Some(Restacked::Unchanged {
+            branch: "layer-2".into()
+        })
+    );
 }
 
 #[test]
@@ -189,4 +195,32 @@ fn only_commit_ids_and_plain_branch_names_reach_git() {
     }
     assert!(branch_name("feat/t3-client"));
     assert!(!branch_name("refs/heads/x.lock"));
+}
+
+#[test]
+fn a_checkout_on_another_branch_is_refused_before_anything_moves() {
+    let stack = squashed_stack();
+    let dir = stack.checkout.path();
+    git_in(dir, &["checkout", "layer-1"]);
+    let head = git_in(dir, &["rev-parse", "HEAD"]);
+    assert!(matches!(
+        run_restack(&stack, &stack.below, "main"),
+        Err(crate::Error::Git(super::super::Error::Restack(
+            Error::Moved
+        )))
+    ));
+    assert_eq!(git_in(dir, &["rev-parse", "HEAD"]), head);
+}
+
+#[test]
+fn other_local_branches_stay_where_they_were_even_with_update_refs_on() {
+    let stack = squashed_stack();
+    let dir = stack.checkout.path();
+    git_in(dir, &["config", "rebase.updateRefs", "true"]);
+    // A saved branch on a commit the restack replays.
+    git_in(dir, &["branch", "saved", "HEAD"]);
+    let saved = git_in(dir, &["rev-parse", "saved"]);
+    let outcome = run_restack(&stack, &stack.below, "main").unwrap();
+    assert!(matches!(outcome.restacked, Some(Restacked::Onto { .. })));
+    assert_eq!(git_in(dir, &["rev-parse", "saved"]), saved);
 }

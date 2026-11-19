@@ -301,6 +301,14 @@ impl SheprdWindow {
             "enter" if matches!(self.menu.page, Some(Page::Dialog(_))) => {
                 self.submit_workspace_dialog(window, cx)
             }
+            // Rewriting history, merging, and queueing also take a fresh
+            // press: the one that opened the dialog may still be held.
+            "enter"
+                if event.is_held
+                    && matches!(
+                        self.menu.page,
+                        Some(Page::GitRestack | Page::PrMerge | Page::PrQueue)
+                    ) => {}
             "enter" if self.menu.page == Some(Page::GitCommit) => self.submit_git_commit(cx),
             "enter" if self.menu.page == Some(Page::GitRestack) => self.submit_git_restack(cx),
             "enter" if self.menu.page == Some(Page::PrComment) => self.submit_pr_comment(cx),

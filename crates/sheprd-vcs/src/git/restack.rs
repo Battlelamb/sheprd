@@ -15,6 +15,47 @@ use super::{Outcome, command, git};
 use sheprd_github::pull_request::{base_repository, clean, run};
 use std::time::Instant;
 
+/// What a restack did, for the chrome to say.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Restacked {
+    /// `branch` now sits on `remote`/`base` with only its own commits.
+    Onto {
+        branch: String,
+        remote: String,
+        base: String,
+    },
+    /// `branch` no longer carried the merged commits; nothing changed.
+    Unchanged { branch: String },
+}
+
+impl Restacked {
+    /// The English the worker reports, for logs and tests.
+    fn message(&self) -> String {
+        match self {
+            Self::Onto {
+                branch,
+                remote,
+                base,
+            } => format!(
+                "Restacked {branch} onto {remote}/{base}; push it with --force-with-lease when ready"
+            ),
+            Self::Unchanged { branch } => {
+                format!("Nothing to restack: {branch} no longer carries the merged commits")
+            }
+        }
+    }
+}
+
+impl From<Restacked> for Outcome {
+    fn from(restacked: Restacked) -> Self {
+        Outcome {
+            message: restacked.message(),
+            url: None,
+            restacked: Some(restacked),
+        }
+    }
+}
+
 pub(super) fn restack(
     checkout: &str,
     branch: &str,
@@ -29,11 +70,14 @@ pub(super) fn restack(
     if super::checkout_dirty(checkout, deadline, cancelled)? {
         return Err(super::Error::from(Error::Dirty).into());
     }
+    // The branch and commit confirmed; a terminal or agent may move them
+    // while the fetch runs, so they are read again before rewriting.
+    let head = checked_out(checkout, branch, deadline, cancelled)?;
     if !carries(checkout, below, deadline, cancelled)? {
-        return Ok(Outcome {
-            message: format!("Nothing to restack: {branch} no longer carries the merged commits"),
-            url: None,
-        });
+        return Ok(Restacked::Unchanged {
+            branch: branch.to_owned(),
+        }
+        .into());
     }
     let remote = base_repository(checkout, deadline, cancelled)?
         .remote
@@ -46,9 +90,25 @@ pub(super) fn restack(
         deadline,
         cancelled,
     )?;
+    if checked_out(checkout, branch, deadline, cancelled)? != head {
+        return Err(super::Error::from(Error::Moved).into());
+    }
     // A rebase that is not interactive asks for no message, but a hook or a
-    // setting could still start an editor nobody would see.
-    let mut rebase = command(checkout, &["rebase", "--onto", "FETCH_HEAD", below]);
+    // setting could still start an editor nobody would see. `updateRefs`
+    // would also move other local branches on the replayed commits; this
+    // changes the checkout's own branch only. (A setting, not
+    // `--no-update-refs`, so a Git before 2.38 ignores it.)
+    let mut rebase = command(
+        checkout,
+        &[
+            "-c",
+            "rebase.updateRefs=false",
+            "rebase",
+            "--onto",
+            "FETCH_HEAD",
+            below,
+        ],
+    );
     rebase.env("GIT_EDITOR", "true");
     let (ok, output) = run(&mut rebase, deadline, cancelled)?;
     if !ok {
@@ -57,12 +117,36 @@ pub(super) fn restack(
         };
         return Err(super::Error::from(stopped).into());
     }
-    Ok(Outcome {
-        message: format!(
-            "Restacked {branch} onto {remote}/{base}; push it with --force-with-lease when ready"
-        ),
-        url: None,
-    })
+    Ok(Restacked::Onto {
+        branch: branch.to_owned(),
+        remote: remote.to_owned(),
+        base: base.to_owned(),
+    }
+    .into())
+}
+
+/// HEAD's commit, once `branch` is checked out; else the checkout moved.
+fn checked_out(
+    checkout: &str,
+    branch: &str,
+    deadline: Instant,
+    cancelled: &impl Fn() -> bool,
+) -> crate::Result<String> {
+    let (on_branch, current) = run(
+        &mut command(checkout, &["symbolic-ref", "--quiet", "--short", "HEAD"]),
+        deadline,
+        cancelled,
+    )?;
+    if !on_branch || current.trim() != branch {
+        return Err(super::Error::from(Error::Moved).into());
+    }
+    git(
+        checkout,
+        &["rev-parse", "HEAD"],
+        "read HEAD",
+        deadline,
+        cancelled,
+    )
 }
 
 /// Whether HEAD still has `below` in its history. Git exits 1 with nothing

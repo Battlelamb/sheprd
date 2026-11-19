@@ -4,7 +4,12 @@
 //! the Git worker then replays the branch's own commits onto the base as the
 //! remote has it now, locally, and never pushes.
 use super::{Page, git::Row};
-use crate::{SheprdWindow, git::Action, i18n::fl, pull_request::State};
+use crate::{
+    SheprdWindow,
+    git::{Action, restack::Restacked},
+    i18n::fl,
+    pull_request::State,
+};
 use gpui::{prelude::*, *};
 
 /// What a restack moves the focused branch onto, and past.
@@ -34,22 +39,32 @@ impl SheprdWindow {
         })
     }
 
+    /// Opens the confirmation for the focused checkout's restack, which it
+    /// keeps: confirming acts on that one or on nothing.
     pub(super) fn open_git_restack(&mut self) {
         self.menu.page = Some(Page::GitRestack);
         self.menu.error = None;
+        self.menu.restack = self.git.tracked().cloned().zip(self.git_restack());
     }
 
-    /// The confirmation itself: the restack named by the pull request the
-    /// popup shows now, so a lookup that moved since cannot name another.
+    /// The confirmation itself, only for the checkout and restack the dialog
+    /// was opened with: a focus or lookup that moved since is refused.
     pub(super) fn submit_git_restack(&mut self, cx: &mut Context<Self>) {
         if self.git.running().is_some() || self.pr_actions.running().is_some() {
             return;
         }
-        let Some(restack) = self.git_restack() else {
-            self.menu.page = Some(Page::Git);
+        let current = self.git.tracked().cloned().zip(self.git_restack());
+        let Some((_, restack)) = self
+            .menu
+            .restack
+            .clone()
+            .filter(|kept| Some(kept) == current.as_ref())
+        else {
+            self.menu.error = Some(fl!("git-menu-restack-changed"));
             cx.notify();
             return;
         };
+        self.menu.restack = None;
         self.start_git(Action::Restack {
             below: restack.oid,
             base: restack.base,
@@ -62,15 +77,16 @@ impl SheprdWindow {
 
     pub(super) fn render_git_restack(&self, cx: &mut Context<Self>) -> Div {
         let theme = &self.theme;
-        let restack = self.git_restack();
+        let restack = self.menu.restack.as_ref().map(|(_, restack)| restack);
         let base = restack
             .as_ref()
             .map_or(String::new(), |restack| restack.base.clone());
         let body = restack.as_ref().map(|restack| {
             let branch = self
-                .git
-                .tracked()
-                .map(|input| input.branch.clone())
+                .menu
+                .restack
+                .as_ref()
+                .map(|(input, _)| input.branch.clone())
                 .unwrap_or_default();
             fl!(
                 "git-menu-restack-body",
@@ -115,5 +131,24 @@ impl SheprdWindow {
                     })),
                 ),
             )
+    }
+}
+
+/// What a restack did, as the popup says it.
+pub(super) fn restacked_text(restacked: &Restacked) -> String {
+    match restacked {
+        Restacked::Onto {
+            branch,
+            remote,
+            base,
+        } => fl!(
+            "git-menu-restacked",
+            branch = branch.as_str(),
+            remote = remote.as_str(),
+            base = base.as_str()
+        ),
+        Restacked::Unchanged { branch } => {
+            fl!("git-menu-restack-unchanged", branch = branch.as_str())
+        }
     }
 }

@@ -66,6 +66,7 @@ error-vcs-git-pull-request-base = This branch is the repository default branch; 
 error-vcs-git-pull-request-title = The branch has no commit to describe. Commit before opening a pull request.
 error-vcs-git-worker = Git worker stopped. Retry the operation.
 error-vcs-git-restack-dirty = Commit or stash the checkout's changes before restacking.
+error-vcs-git-restack-moved = The checkout moved to another branch or commit; restack it again from its branch.
 # $details is Git's own output.
 error-vcs-git-restack-stopped = The rebase stopped: { $details }. Resolve the conflicts and run `git rebase --continue`, or `git rebase --abort` to undo it.
 error-vcs-git-restack-target = The stack's base or the merged layer's commit cannot be restacked onto.

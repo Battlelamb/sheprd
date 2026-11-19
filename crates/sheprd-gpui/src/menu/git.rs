@@ -3,7 +3,7 @@
 //! open pull request.
 // i18n: migrated
 use super::{Page, accent, danger};
-use crate::i18n::fl;
+use crate::i18n::{Localize, fl};
 use crate::{
     SheprdWindow,
     dialog_input::DialogInput,
@@ -34,6 +34,16 @@ impl Row {
             Self::Merge => "icons/arrow-right.svg",
             Self::Restack => "icons/git-branch.svg",
         }
+    }
+}
+
+/// What a running Git action says while it runs.
+fn running_text(action: &Action) -> String {
+    match action {
+        Action::Commit(_) => fl!("git-menu-running-commit"),
+        Action::Push => fl!("git-menu-running-push"),
+        Action::CreatePullRequest => fl!("git-menu-running-pull-request"),
+        Action::Restack { .. } => fl!("git-menu-running-restack"),
     }
 }
 
@@ -648,7 +658,7 @@ impl SheprdWindow {
                     .debug_selector(|| "git-menu-running".into())
                     .p(px(8.))
                     .text_color(rgb(theme.ink(theme.palette[3])))
-                    .child(action.running_label()),
+                    .child(running_text(action)),
             );
         }
         if let Some(outcome) = self.git.outcome() {
@@ -656,7 +666,10 @@ impl SheprdWindow {
                 div()
                     .debug_selector(|| "git-menu-outcome".into())
                     .p(px(8.))
-                    .child(outcome.message.clone()),
+                    .child(match &outcome.restacked {
+                        Some(restacked) => super::git_restack::restacked_text(restacked),
+                        None => outcome.message.clone(),
+                    }),
             );
             if let Some(url) = outcome.url.clone() {
                 panel = panel.child(
@@ -677,18 +690,19 @@ impl SheprdWindow {
             }
         }
         panel = self.render_pr_action_status(panel, cx);
-        for error in self
+        let errors = self
             .git
             .error()
+            .map(Localize::localize)
             .into_iter()
-            .chain(self.menu.error.as_deref())
-        {
+            .chain(self.menu.error.clone());
+        for error in errors {
             panel = panel.child(
                 div()
                     .debug_selector(|| "git-menu-error".into())
                     .p(px(8.))
                     .text_color(rgb(theme.ink(theme.palette[1])))
-                    .child(error.to_owned()),
+                    .child(error),
             );
         }
         panel

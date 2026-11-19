@@ -74,3 +74,20 @@ fn a_branch_with_an_open_layer_below_is_not_offered_a_restack(cx: &mut TestAppCo
         assert!(rows.iter().all(|(row, _)| *row != Row::Restack));
     });
 }
+
+#[gpui::test]
+fn a_restack_whose_target_changed_since_opening_is_refused(cx: &mut TestAppContext) {
+    let (view, cx) = open_with(cx, restack_fixture().unwrap());
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.activate_git_row(Row::Restack, window, cx);
+            assert_eq!(view.menu.page, Some(Page::GitRestack));
+            // The lookup moves on: the layer below is open again.
+            view.seed_pr(input(), stacked_fixture().unwrap(), Instant::now());
+            view.submit_git_restack(cx);
+            assert!(view.git.running().is_none(), "nothing runs");
+            assert!(view.menu.error.is_some());
+            assert_eq!(view.menu.page, Some(Page::GitRestack));
+        })
+    });
+}

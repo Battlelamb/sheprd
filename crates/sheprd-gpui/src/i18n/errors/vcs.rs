@@ -84,6 +84,7 @@ impl Localize for git::restack::Error {
         match self {
             // keep-sorted start
             Self::Dirty => fl!("error-vcs-git-restack-dirty"),
+            Self::Moved => fl!("error-vcs-git-restack-moved"),
             Self::Stopped { details } => {
                 fl!("error-vcs-git-restack-stopped", details = details.as_str())
             }

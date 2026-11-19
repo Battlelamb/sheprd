@@ -5,6 +5,8 @@ pub enum Error {
     // keep-sorted start
     #[error("Commit or stash the checkout's changes before restacking.")]
     Dirty,
+    #[error("The checkout moved to another branch or commit; restack it again from its branch.")]
+    Moved,
     #[error(
         "The rebase stopped: {details}. Resolve the conflicts and run `git rebase --continue`, or `git rebase --abort` to undo it."
     )]

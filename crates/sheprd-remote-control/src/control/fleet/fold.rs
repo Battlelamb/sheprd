@@ -39,7 +39,8 @@ pub(super) fn fold(folder: &Folder<'_, '_>, set: &Bits, base: &State) -> State {
             member.seq = member.seq.max(op.unsigned().seq);
         }
     }
-    let anchors = hosts::hosts(graph, &members, &effective, base, &mut state);
+    let held = held(folder, &positions, &state.equivocating);
+    let anchors = hosts::hosts(graph, &members, &effective, &held, base, &mut state);
     // The bundles that count: a voided `Admit` or `Rotate` names no host.
     let bundles: BTreeSet<usize> = effective
         .iter()
@@ -49,10 +50,40 @@ pub(super) fn fold(folder: &Folder<'_, '_>, set: &Bits, base: &State) -> State {
         })
         .map(|(position, _)| *position)
         .collect();
-    routes::records(graph, &members, &bundles, &effective, base, &mut state);
-    access(folder, &positions, &anchors, &effective, base, &mut state);
+    routes::records(
+        graph, &members, &bundles, &effective, &held, base, &mut state,
+    );
+    access(
+        folder, &positions, &anchors, &effective, &held, base, &mut state,
+    );
     links(folder, &anchors, &effective, base, &mut state);
     state
+}
+
+/// The operations of members found `equivocating` whose `HostAdd` and
+/// `Access` are held: those no checkpoint had seen. A checkpoint settles
+/// what it saw, as the state it names keeps it, so a log pruned to it
+/// and the whole log hold the same ones when an equivocation turns up
+/// later.
+fn held(
+    folder: &Folder<'_, '_>,
+    positions: &[usize],
+    equivocating: &BTreeSet<MemberId>,
+) -> BTreeSet<usize> {
+    let graph = folder.graph();
+    let mut settled = Bits::new(graph.len());
+    for &position in positions {
+        if matches!(graph.order[position].body(), Body::Checkpoint(_)) {
+            settled.union(&graph.ancestors[position]);
+        }
+    }
+    positions
+        .iter()
+        .copied()
+        .filter(|&position| {
+            equivocating.contains(&graph.order[position].signer()) && !settled.contains(position)
+        })
+        .collect()
 }
 
 /// Members with two operations neither had seen.
@@ -82,7 +113,7 @@ fn equivocating(folder: &Folder<'_, '_>, positions: &[usize], base: &State) -> B
 type Grant = (usize, bool, u64);
 
 /// Sets the access registers. An `Access` counts when it is not void, its
-/// signer is not equivocating, and it came after the host was added
+/// signer is not equivocating (unless a checkpoint saw it, [`held`]), and it came after the host was added
 /// (any addition in its [`Lifetime`]): a host added again starts without the exclusions
 /// it had, as a pruned log, which dropped them with the host, does.
 /// Concurrent allow and deny: deny. `state.access_rev` is the highest
@@ -92,6 +123,7 @@ fn access(
     positions: &[usize],
     anchors: &BTreeMap<HostId, Lifetime>,
     effective: &[(usize, &Op)],
+    held: &BTreeSet<usize>,
     base: &State,
     state: &mut State,
 ) {
@@ -118,7 +150,7 @@ fn access(
         let after = anchors
             .get(&access.host)
             .is_some_and(|lifetime| lifetime.covers(graph, position));
-        if after && !state.equivocating.contains(&op.signer()) {
+        if after && !held.contains(&position) {
             by_pair
                 .entry((access.host, access.member))
                 .or_default()

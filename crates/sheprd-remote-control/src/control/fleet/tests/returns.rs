@@ -158,3 +158,25 @@ fn a_rotation_keeps_the_route_decisions_before_it() {
     assert!(!state.hosts[&own_id].held);
     assert_eq!(state.routes[&own.record.route], own_id);
 }
+
+#[test]
+fn an_equivocation_after_a_checkpoint_holds_the_same_in_pruned_and_whole_logs() {
+    let (mut log, a, _, c) = three();
+    act(&mut log, &c, Body::HostAdd(plain_host(40)));
+    let (mut pruned, mut whole) = split(&mut log, &a);
+    both(&mut pruned, &mut whole, &c, Body::HostAdd(plain_host(41)));
+    // c's key signs in two places.
+    let heads = pruned.heads().to_vec();
+    let seq = pruned.state().members[&c.id()].seq + 1;
+    for n in [1, 2] {
+        let op = sign_on(&pruned, &c, &heads, seq, Body::HostRemove(HostId([n; 32])));
+        assert_eq!(pruned.insert(op.clone(), NOW), Ok(Inserted::Applied));
+        assert_eq!(whole.insert(op, NOW), Ok(Inserted::Applied));
+    }
+    assert_eq!(pruned.state(), whole.state());
+    let state = pruned.state();
+    assert!(state.equivocating.contains(&c.id()));
+    // What the checkpoint saw stands; what it had not is held.
+    assert!(state.hosts.contains_key(&plain_host(40).id().unwrap()));
+    assert!(!state.hosts.contains_key(&plain_host(41).id().unwrap()));
+}

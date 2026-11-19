@@ -188,15 +188,14 @@ pub(super) fn records(
     members: &Members,
     bundles: &BTreeSet<usize>,
     effective: &[(usize, &Op)],
+    held: &BTreeSet<usize>,
     base: &State,
     state: &mut State,
 ) {
     let mut pass = Pass::new(base);
     for &(position, op) in effective {
         match op.body() {
-            Body::HostAdd(intro)
-                if intro.kind != HostKind::Member && !state.equivocating.contains(&op.signer()) =>
-            {
+            Body::HostAdd(intro) if intro.kind != HostKind::Member && !held.contains(&position) => {
                 if let Ok(id) = intro.id() {
                     pass.add(graph, position, id, intro, None);
                 }

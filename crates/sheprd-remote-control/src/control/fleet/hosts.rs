@@ -18,7 +18,7 @@ use super::{
     membership::Members,
     state::{Host, State},
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The additions of a live host that survive: `None` for the base.
 #[derive(Clone, Debug, Default)]
@@ -52,11 +52,13 @@ struct Add<'a> {
 }
 
 /// Sets `state.hosts` from the additions and removals in `effective`, on
-/// top of `base`, and says where each live host's history starts.
+/// top of `base`, and says where each live host's history starts. The
+/// `HostAdd`s in `held` are an equivocating member's, and do not count.
 pub(super) fn hosts(
     graph: &Graph<'_>,
     members: &Members,
     effective: &[(usize, &Op)],
+    held: &BTreeSet<usize>,
     base: &State,
     state: &mut State,
 ) -> BTreeMap<HostId, Lifetime> {
@@ -75,7 +77,7 @@ pub(super) fn hosts(
     let mut removals: BTreeMap<HostId, Vec<usize>> = BTreeMap::new();
     for &(position, op) in effective {
         match op.body() {
-            Body::HostAdd(intro) if !state.equivocating.contains(&op.signer()) => {
+            Body::HostAdd(intro) if !held.contains(&position) => {
                 if let Ok(id) = intro.id()
                     && intro.kind != HostKind::Member
                 {

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// The fleet calls a phone makes on a member computer's daemon
@@ -49,15 +50,19 @@ extension API {
             routes = try c.decodeIfPresent([FleetRoute].self, forKey: .routes) ?? []
         }
 
+        /// Where `host` is, from its own record once checked
+        /// (`FleetRoute.verified`): nil unless the host is linked and its
+        /// certificate authority, whose hash is the host id this phone
+        /// pins, signed the record.
+        public func relay(for host: String) -> RelayInfo? {
+            routes.first { $0.host.lowercased() == host.lowercased() }?.verified()
+        }
+
         /// How this phone reaches `host` through its relays with `keys`, its
-        /// fleet bundle's: nil unless the host is linked, its route is
-        /// pinned to the host's own certificate authority, and it names
+        /// fleet bundle's: nil unless `relay(for:)` checks out and names
         /// relays.
         public func relayRecord(for host: String, keys: RelayKeyPair) -> RelayRecord? {
-            guard let route = routes.first(where: { $0.host.lowercased() == host.lowercased() }),
-                  route.fingerprint.lowercased() == host.lowercased()
-            else { return nil }
-            return RelayRecord.make(from: route.relay, keys: keys)
+            relay(for: host).flatMap { RelayRecord.make(from: $0, keys: keys) }
         }
 
         /// The direct addresses `host` publishes, as `https://` origins.
@@ -142,13 +147,51 @@ extension API {
 
     public enum FleetStanding: String, Decodable, Sendable { case pending, member }
 
-    /// A linked host's relays, as `GET /api/relay` answers on it.
+    /// A linked host's latest record as its certificate authority signed
+    /// it, base64url. The computer that sends it is only a carrier: the
+    /// phone checks it against the host id before using it.
     public struct FleetRoute: Decodable, Equatable, Sendable {
         public let host: String
-        /// The SHA-256 of the host's certificate authority: its id, and
-        /// what its record is signed by.
-        public let fingerprint: String
-        public let relay: RelayInfo
+        /// The CA's certificate, DER: its SHA-256 is the host's id.
+        public let certificate: String
+        /// The CA's key, SEC1 uncompressed, found inside the certificate.
+        public let key: String
+        /// What the CA signed: the fleet's domain, `/self`, and the record.
+        public let record: String
+        public let signature: String
+
+        public init(host: String, certificate: String, key: String, record: String, signature: String) {
+            self.host = host
+            self.certificate = certificate
+            self.key = key
+            self.record = record
+            self.signature = signature
+        }
+
+        /// The relays the record names, when the certificate hashes to
+        /// `host`, holds the key, and that key signed a record for `host`;
+        /// nil otherwise. The same checks a member makes on a host's
+        /// `HostSeen` (`HostIntro.vouches`, `Ca::check`).
+        public func verified() -> RelayInfo? {
+            guard let id = Fleet.data(hex: host),
+                  let certificate = Base64URL.decode(certificate),
+                  let key = Base64URL.decode(key), key.count == 65, key.first == 0x04,
+                  let message = Base64URL.decode(record),
+                  let signature = Base64URL.decode(signature),
+                  Data(SHA256.hash(data: certificate)) == id,
+                  certificate.range(of: key) != nil,
+                  let point = try? P256.Signing.PublicKey(x963Representation: key),
+                  let parsed = try? P256.Signing.ECDSASignature(rawRepresentation: signature),
+                  point.isValidSignature(parsed, for: message)
+            else { return nil }
+            let prefix = Fleet.domain + Data("/self".utf8)
+            guard message.starts(with: prefix) else { return nil }
+            var reader = FleetReader(message.dropFirst(prefix.count))
+            guard let record = try? Fleet.SelfRecord.read(&reader), (try? reader.finish()) != nil,
+                  record.host == id
+            else { return nil }
+            return RelayInfo(identity: record.identity, relays: record.relays, route: record.route)
+        }
     }
 
     public struct FleetReach: Decodable, Equatable, Sendable {

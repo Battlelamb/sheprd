@@ -216,15 +216,18 @@ final class FleetMembership {
         record.map { RelayKeyPair(dialKey: $0.relayDial, tunnelKey: $0.relayTunnel) }
     }
 
-    /// Gives a linked computer held without relays the route `status`
-    /// names for it, as a host that moved relays or a link made before
-    /// routes were sent needs.
+    /// Gives each computer this phone linked the relays its host's own
+    /// signed record names (`FleetRoute.verified`), when it has none or
+    /// they moved: a later record replaces a saved one, so a host that
+    /// changed relays is followed.
     private func route(_ status: API.FleetStatus) {
         guard let keys = relayKeys else { return }
-        for computer in computers() where computer.via != nil && computer.relay == nil && computer.device.hasPrefix("fleet-") {
+        for computer in computers() where computer.via != nil && computer.device.hasPrefix("fleet-") {
             let host = computer.fingerprint.hex.lowercased()
             guard status.links.contains(host),
-                  let relay = status.relayRecord(for: host, keys: keys)
+                  let info = status.relay(for: host),
+                  computer.relay.map({ !$0.matches(info) }) ?? true,
+                  let relay = RelayRecord.make(from: info, keys: keys)
             else { continue }
             var routed = computer
             routed.relay = relay

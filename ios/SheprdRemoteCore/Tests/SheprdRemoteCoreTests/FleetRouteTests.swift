@@ -3,55 +3,106 @@ import Foundation
 import Testing
 @testable import SheprdRemoteCore
 
-/// The relays a linked host is reached through: what `GET /api/v2/fleet`
-/// says from the host's signed record, made into the relay record the
-/// phone keeps with that computer, with its fleet bundle's keys.
+/// The relays a linked host is reached through: its own record, signed by
+/// its certificate authority, which the computer that answers
+/// `GET /api/v2/fleet` only carries. The phone checks it against the host
+/// id it pins, as the daemon's vector (`signed.json`) and a record signed
+/// here show, before making the relay record it keeps.
 struct FleetRouteTests {
-    static let host = String(repeating: "04", count: 32)
+    /// A host's CA, and records it signs.
+    struct Host {
+        let key = P256.Signing.PrivateKey()
+        var certificate: Data { Data("certificate:".utf8) + key.publicKey.x963Representation + Data(":end".utf8) }
+        var id: Data { Data(SHA256.hash(data: certificate)) }
 
-    static func identity() -> String {
-        let x25519 = Curve25519.KeyAgreement.PrivateKey().publicKey.rawRepresentation
-        let mlkem = (try? MLKEM768.PrivateKey())?.publicKey.rawRepresentation ?? Data()
-        return Base64URL.encode(x25519 + mlkem)
+        func record(rev: UInt64 = 1, host: Data? = nil) -> Fleet.SelfRecord {
+            let x25519 = Curve25519.KeyAgreement.PrivateKey().publicKey.rawRepresentation
+            let mlkem = (try? MLKEM768.PrivateKey())?.publicKey.rawRepresentation ?? Data()
+            return Fleet.SelfRecord(
+                host: host ?? id, rev: rev, route: Base64URL.encode(Data(repeating: 0x52, count: 32)),
+                relays: ["https://relay.example.org"], identity: Base64URL.encode(x25519 + mlkem),
+                direct: [], sshHostKeys: ["ssh-ed25519 AAAA"], signedMs: 1
+            )
+        }
+
+        func route(_ record: Fleet.SelfRecord, signedBy signer: P256.Signing.PrivateKey? = nil) throws -> API.FleetRoute {
+            let message = try record.message()
+            let signature = try (signer ?? key).signature(for: message).rawRepresentation
+            return API.FleetRoute(
+                host: id.hexString, certificate: Base64URL.encode(certificate),
+                key: Base64URL.encode(key.publicKey.x963Representation),
+                record: Base64URL.encode(message), signature: Base64URL.encode(signature)
+            )
+        }
     }
 
-    static func status(fingerprint: String = host, linked: Bool = true) throws -> API.FleetStatus {
-        let object: [String: Any] = [
-            "heads": [],
-            "links": linked ? [host] : [],
-            "routes": linked ? [[
-                "host": host,
-                "fingerprint": fingerprint,
-                "relay": [
-                    "identity": identity(),
-                    "relays": ["https://relay.example.org"],
-                    "route": Base64URL.encode(Data(repeating: 0x52, count: 32)),
-                ],
-            ]] : [],
-        ]
-        return try JSONDecoder().decode(API.FleetStatus.self, from: JSONSerialization.data(withJSONObject: object))
+    static func status(_ routes: [API.FleetRoute]) -> API.FleetStatus {
+        API.FleetStatus(view: nil, links: routes.map(\.host), routes: routes)
+    }
+
+    @Test func theDaemonsSignedRecordChecksOut() throws {
+        let fixture = try #require(try FleetTests.fixture("signed")["self_record"] as? [String: Any])
+        let route = API.FleetRoute(
+            host: try #require(fixture["host"] as? String),
+            certificate: Base64URL.encode(try FleetTests.hex(fixture["certificate"])),
+            key: Base64URL.encode(try FleetTests.hex(fixture["key"])),
+            record: Base64URL.encode(try FleetTests.hex(fixture["message"])),
+            signature: Base64URL.encode(try FleetTests.hex(fixture["signature"]))
+        )
+        let relay = try #require(route.verified())
+        #expect(!relay.relays.isEmpty && !relay.route.isEmpty && !relay.identity.isEmpty)
+        // Another host's id: its certificate does not hash to it.
+        let elsewhere = API.FleetRoute(
+            host: String(repeating: "05", count: 32), certificate: route.certificate,
+            key: route.key, record: route.record, signature: route.signature
+        )
+        #expect(elsewhere.verified() == nil)
+    }
+
+    @Test func aRecordTheCASignedBecomesTheRelayRecord() throws {
+        let host = Host()
+        let record = host.record()
+        let keys = RelayKeyPair()
+        let made = try #require(Self.status([try host.route(record)]).relayRecord(for: host.id.hexString.uppercased(), keys: keys))
+        #expect(made.dialKey == keys.dialKey && made.tunnelKey == keys.tunnelKey)
+        #expect(made.route == Data(repeating: 0x52, count: 32))
+        #expect(made.identity == Base64URL.decode(record.identity))
+        #expect(made.relays.map(\.description) == ["https://relay.example.org"])
+    }
+
+    @Test func aRouteTheCADidNotSignIsRefused() throws {
+        let host = Host()
+        let record = host.record()
+        let good = try host.route(record)
+        // Signed by another key: the carrying computer's, say.
+        #expect(try host.route(record, signedBy: P256.Signing.PrivateKey()).verified() == nil)
+        // A record for another host, signed by this CA.
+        #expect(try host.route(host.record(host: Data(repeating: 5, count: 32))).verified() == nil)
+        // The record changed after signing.
+        var moved = record
+        moved.relays = ["https://evil.example.org"]
+        let swapped = API.FleetRoute(
+            host: good.host, certificate: good.certificate, key: good.key,
+            record: Base64URL.encode(try moved.message()), signature: good.signature
+        )
+        #expect(swapped.verified() == nil)
+        // A key the certificate does not hold.
+        let other = P256.Signing.PrivateKey()
+        let foreign = API.FleetRoute(
+            host: good.host, certificate: good.certificate,
+            key: Base64URL.encode(other.publicKey.x963Representation),
+            record: good.record, signature: Base64URL.encode(try other.signature(for: try record.message()).rawRepresentation)
+        )
+        #expect(foreign.verified() == nil)
+        // Not linked: no route at all.
+        #expect(Self.status([]).relayRecord(for: host.id.hexString, keys: RelayKeyPair()) == nil)
     }
 
     @Test func routesDecode() throws {
-        let status = try Self.status()
-        let route = try #require(status.routes.first)
-        #expect(route.host == Self.host && route.fingerprint == Self.host)
-        #expect(route.relay.relays == ["https://relay.example.org"])
+        let json = #"{"heads":[],"routes":[{"host":"h","certificate":"c","key":"k","record":"r","signature":"s"}]}"#
+        let status = try JSONDecoder().decode(API.FleetStatus.self, from: Data(json.utf8))
+        #expect(status.routes == [API.FleetRoute(host: "h", certificate: "c", key: "k", record: "r", signature: "s")])
+        #expect(status.relay(for: "h") == nil)
         #expect(try JSONDecoder().decode(API.FleetStatus.self, from: Data(#"{"heads":[]}"#.utf8)).routes.isEmpty)
-    }
-
-    @Test func aLinkedHostsRecordCarriesTheBundlesKeys() throws {
-        let keys = RelayKeyPair()
-        let record = try #require(try Self.status().relayRecord(for: Self.host.uppercased(), keys: keys))
-        #expect(record.dialKey == keys.dialKey && record.tunnelKey == keys.tunnelKey)
-        #expect(record.route == Data(repeating: 0x52, count: 32))
-        #expect(record.relays.map(\.description) == ["https://relay.example.org"])
-    }
-
-    @Test func aRouteNotPinnedToTheHostOrNotLinkedMakesNoRecord() throws {
-        let other = String(repeating: "05", count: 32)
-        #expect(try Self.status(fingerprint: other).relayRecord(for: Self.host, keys: RelayKeyPair()) == nil)
-        #expect(try Self.status(linked: false).relayRecord(for: Self.host, keys: RelayKeyPair()) == nil)
-        #expect(try Self.status().relayRecord(for: other, keys: RelayKeyPair()) == nil)
     }
 }

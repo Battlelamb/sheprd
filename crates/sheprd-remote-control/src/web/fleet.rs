@@ -4,8 +4,8 @@
 //! - `GET /api/v2/fleet?member=ID`: the fleet as this computer sees it,
 //!   and what the phone needs to sign its next operation when `ID` is a
 //!   live member: the fleet, its sequence number, and the parents, and for
-//!   each Sheprd host it linked, the route, relays, and tunnel identity
-//!   from that host's CA-signed record, with the CA's fingerprint. The
+//!   each Sheprd host it linked, that host's latest record with its CA's
+//!   signature and certificate, for the phone to check itself. The
 //!   phone keeps no log in this version; a removal it signs counts once
 //!   any member holds it, whatever parents it names.
 //! - `POST /api/v2/fleet/sync`: operations the phone signed or carries,
@@ -70,9 +70,9 @@ pub(super) struct Status {
     /// connections, by host: what a phone tries before its relays.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     reach: Vec<Reach>,
-    /// How to reach each Sheprd host the member linked through its relays,
-    /// from the host's latest record, which its certificate authority
-    /// signed: what the phone pins and dials with its bundle's keys.
+    /// Each Sheprd host the member linked: its latest record as its
+    /// certificate authority signed it, which the phone checks against the
+    /// fingerprint it pins before dialing its relays with its bundle's keys.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     routes: Vec<Route>,
 }
@@ -85,14 +85,19 @@ pub(super) struct Next {
     parents: Vec<String>,
 }
 
-/// A linked host's relays, as `GET /api/relay` would answer on it.
+/// A linked host's latest record, as its certificate authority signed it,
+/// so the phone checks it against the fingerprint it pins rather than
+/// taking this computer's word for where the host is. Bytes in base64url.
 #[derive(Debug, Serialize)]
 pub(super) struct Route {
     host: String,
-    /// The SHA-256 of the host's certificate authority, which its record
-    /// is signed by: the host's id.
-    fingerprint: String,
-    relay: crate::control::host_relay::Info,
+    /// The CA's certificate, DER: its SHA-256 is the host's id.
+    certificate: String,
+    /// The CA's key, SEC1 uncompressed, which appears in the certificate.
+    key: String,
+    /// What the CA signed (`SelfRecord::message`).
+    record: String,
+    signature: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -161,14 +166,10 @@ fn read(fleet: &Fleet, member: Option<&MemberId>, now_ms: u64) -> Status {
             let ca = host.intro.ca.as_ref()?;
             Some(Route {
                 host: id.to_string(),
-                fingerprint: HostId(ca.fingerprint()).to_string(),
-                relay: crate::control::host_relay::Info {
-                    identity: host.record.identity.clone(),
-                    labels: Default::default(),
-                    relays: host.record.relays.clone(),
-                    route: host.record.route.clone(),
-                    rtt_ms: Default::default(),
-                },
+                certificate: sync::text(&ca.certificate),
+                key: sync::text(&ca.key),
+                record: sync::text(&host.record.message()?),
+                signature: sync::text(host.record_signature.as_ref()?),
             })
         })
         .collect();

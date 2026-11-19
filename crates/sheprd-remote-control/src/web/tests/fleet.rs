@@ -253,18 +253,23 @@ async fn a_phones_link_and_removal_go_through_sync() {
     assert_eq!(answer["ops"], json!(sync::encode_ops([&link])));
     let (_, body) = call(&state, &token, get(&path)).await;
     assert_eq!(body["links"], json!([own.to_string()]));
-    // The linked host's relays, from its signed record, pinned by its CA.
+    // The linked host's record as its CA signed it, which the phone checks
+    // against the fingerprint it pins: the certificate hashes to the host
+    // id, and its key signed the record.
     let record = fleet.inner().log.as_ref().unwrap().state().hosts[&own]
         .record
         .clone();
-    assert_eq!(
-        body["routes"],
-        json!([{
-            "host": own.to_string(),
-            "fingerprint": own.to_string(),
-            "relay": {"identity": record.identity, "relays": record.relays, "route": record.route},
-        }])
-    );
+    let routes = body["routes"].as_array().unwrap();
+    assert_eq!(routes.len(), 1);
+    let route = &routes[0];
+    assert_eq!(route["host"], own.to_string());
+    let bytes = |field: &str| sync::bytes(route[field].as_str().unwrap()).unwrap();
+    use sha2::Digest as _;
+    assert_eq!(sha2::Sha256::digest(bytes("certificate")).as_slice(), own.0);
+    assert_eq!(bytes("record"), record.message().unwrap());
+    let key = p256::ecdsa::VerifyingKey::from_sec1_bytes(&bytes("key")).unwrap();
+    let signature = Signature::from_slice(&bytes("signature")).unwrap();
+    p256::ecdsa::signature::Verifier::verify(&key, &bytes("record"), &signature).unwrap();
     // A phone may not grant access, and its removal of the computer that
     // founded the fleet is a removal like any member's.
     let log = fleet.inner().log.as_ref().map(|log| {

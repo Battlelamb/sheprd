@@ -26,7 +26,13 @@ mod error;
 pub use error::{Error, Result};
 
 use super::{Fleet, grants::own_host};
-use crate::auth::{DeviceRecord, NewDevice, PublicKey, devices::RelayKeys};
+use crate::auth::{
+    NewDevice, PublicKey,
+    devices::{
+        RelayKeys,
+        relay_keys::{FLEET_ID, FLEET_VIA},
+    },
+};
 use crate::control::{
     DeviceId,
     fleet::{Bundle, Kind, MemberId, State as Log},
@@ -38,8 +44,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 /// The ids of the devices links admitted.
 const FILE: &str = "fleet/links.json";
-/// What every such device id starts with.
-const PREFIX: &str = "fleet-";
 
 /// The device id a phone's link key `key` (P-256, SEC1, either form) gets
 /// on the host it names, with the key as devices keep it: `fleet-` and the
@@ -53,7 +57,7 @@ pub(crate) fn device_id(key: &[u8]) -> Option<(DeviceId, PublicKey)> {
         .map(|byte| format!("{byte:02x}"))
         .collect();
     let public_key = PublicKey::parse(&crate::auth::encode(uncompressed.as_bytes())).ok()?;
-    Some((DeviceId(format!("{PREFIX}{id}")), public_key))
+    Some((DeviceId(format!("{FLEET_ID}{id}")), public_key))
 }
 
 struct Wanted {
@@ -81,7 +85,7 @@ pub(crate) fn apply(state: &State, fleet: &Fleet, now_ms: u64) -> Result<bool> {
         let relay = device
             .relay
             .clone()
-            .filter(|keys| !held_by_another(auth.devices().records(), &id, keys));
+            .filter(|keys| !auth.devices().relay_taken(&id, keys));
         if let Some(record) = auth.devices().get(&id) {
             let Some(set) = before.get(&id.0) else {
                 // A device this module did not admit is not its own.
@@ -161,7 +165,7 @@ fn wanted(fleet: &Fleet) -> (BTreeMap<String, Wanted>, String) {
         return (BTreeMap::new(), String::new());
     };
     let state = log.state();
-    let via = format!("fleet {}", log.fleet().short());
+    let via = format!("{FLEET_VIA}{}", log.fleet().short());
     let Some(host) = own_host(state, &fleet.me()) else {
         return (BTreeMap::new(), via);
     };
@@ -215,16 +219,4 @@ fn members_hold(
     }) || proven
         .iter()
         .any(|(id, keys)| id != phone && keys.contains(&bundle.tunnel))
-}
-
-/// Whether a device other than `id` holds either of `keys`.
-fn held_by_another(records: &[DeviceRecord], id: &DeviceId, keys: &RelayKeys) -> bool {
-    let (dial, tunnel) = (keys.dial_key(), keys.tunnel_key());
-    records.iter().any(|record| {
-        record.id != *id
-            && record.relay.as_ref().is_some_and(|other| {
-                (dial.is_some() && other.dial_key() == dial)
-                    || (tunnel.is_some() && other.tunnel_key() == tunnel)
-            })
-    })
 }

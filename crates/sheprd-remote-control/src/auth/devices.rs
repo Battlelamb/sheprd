@@ -2,6 +2,8 @@
 //! directory. Every change replaces the file atomically, private to this
 //! user; seeing a device is written at most once a minute.
 
+pub(crate) mod relay_keys;
+
 use super::{Error, NewDevice, PublicKey, Result, StoreOperation, links::Link};
 use crate::control::{self, DeviceId};
 use serde::{Deserialize, Serialize};
@@ -165,6 +167,10 @@ impl Devices {
         links: Vec<Link>,
         share_github: bool,
     ) -> Result<()> {
+        let cleared = match &device.relay {
+            Some(keys) => self.make_room(&device.id, via.as_deref(), keys)?,
+            None => Vec::new(),
+        };
         self.records.push(DeviceRecord {
             app: device.app,
             id: device.id,
@@ -183,6 +189,7 @@ impl Devices {
         });
         self.save_or_undo(|devices| {
             devices.records.pop();
+            devices.restore(cleared);
         })
     }
 
@@ -288,21 +295,13 @@ impl Devices {
         keys: RelayKeys,
         now_ms: u64,
     ) -> Result<bool> {
-        let Some(record) = self.records.iter_mut().find(|record| &record.id == id) else {
-            return Ok(false);
-        };
-        let before = (record.relay.replace(keys), record.relay_ms.replace(now_ms));
-        let index = self.records.iter().position(|record| &record.id == id);
-        self.save_or_undo(|devices| {
-            if let Some(record) = index.and_then(|index| devices.records.get_mut(index)) {
-                (record.relay, record.relay_ms) = before;
-            }
-        })?;
-        Ok(true)
+        self.replace_relay(id, Some(keys), now_ms)
     }
 
     /// Replaces the device's relay keys with `keys`, or drops them with
-    /// `None`, set at `now_ms`; whether it is paired. Blocking.
+    /// `None`, set at `now_ms`; whether it is paired. Keys another device
+    /// holds are refused, unless a device the fleet admitted holds them
+    /// and this one was paired here ([`relay_keys`]). Blocking.
     pub(crate) fn replace_relay(
         &mut self,
         id: &DeviceId,
@@ -311,6 +310,11 @@ impl Devices {
     ) -> Result<bool> {
         let Some(index) = self.records.iter().position(|record| &record.id == id) else {
             return Ok(false);
+        };
+        let via = self.records[index].via.clone();
+        let cleared = match &keys {
+            Some(keys) => self.make_room(id, via.as_deref(), keys)?,
+            None => Vec::new(),
         };
         let record = &mut self.records[index];
         let set_ms = keys.is_some().then_some(now_ms);
@@ -322,6 +326,7 @@ impl Devices {
             if let Some(record) = devices.records.get_mut(index) {
                 (record.relay, record.relay_ms) = before;
             }
+            devices.restore(cleared);
         })?;
         Ok(true)
     }

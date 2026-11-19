@@ -98,6 +98,42 @@ async fn keys_the_phone_sent_itself_stay() {
 }
 
 #[tokio::test]
+async fn a_device_paired_later_takes_its_keys_back() {
+    let a = founded().await;
+    let phone = Phone::new(7);
+    admit(&a, &phone);
+    link(&a, &phone, 20);
+    apply(&a);
+    // A phone paired here directly sends these keys over its own session:
+    // the bundle named them, but they are its own.
+    let (_, public_key) = links::device_id(&device_key(30)).unwrap();
+    let direct = crate::control::DeviceId("direct".into());
+    let mut auth = a.state.auth();
+    auth.devices_mut()
+        .add(
+            NewDevice {
+                app: None,
+                id: direct.clone(),
+                name: "iPhone".into(),
+                public_key,
+                relay: None,
+                ssh: None,
+            },
+            now_ms(),
+        )
+        .unwrap();
+    auth.devices_mut()
+        .set_relay(&direct, bundle_keys(&phone), now_ms())
+        .unwrap();
+    drop(auth);
+    assert_eq!(device(&a, 20).unwrap().relay, None);
+    // The fleet does not put them back.
+    a.fleet.bump();
+    apply(&a);
+    assert_eq!(device(&a, 20).unwrap().relay, None);
+}
+
+#[tokio::test]
 async fn another_devices_keys_are_never_set() {
     let a = founded().await;
     let phone = Phone::new(7);

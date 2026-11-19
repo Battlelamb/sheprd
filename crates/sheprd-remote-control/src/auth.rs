@@ -86,6 +86,8 @@ pub enum Error {
     Random(#[source] getrandom::Error),
     #[error("too many requests; try again shortly")]
     RateLimited,
+    #[error("another device already uses these relay keys; make new ones")]
+    RelayKeysTaken,
     #[error(transparent)]
     SshAccess(#[from] crate::ssh_access::Error),
     #[error("could not {operation} {}", path.display())]

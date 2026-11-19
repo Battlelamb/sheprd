@@ -121,6 +121,18 @@ struct ChatScreen: View {
                 store = ChatStore(key: key, sample: .sample)
                 return
             }
+            if key == .effectsSample {
+                let play = UserDefaults.standard.string(forKey: "samplePlay")
+                let sample = ChatStore(key: key, sample: .effectsSample(screen: play.flatMap(ScreenEffect.init(rawValue:)) ?? .confetti))
+                store = sample
+                if let play {
+                    Task {
+                        try? await Task.sleep(for: .seconds(1))
+                        sample.playSample(play)
+                    }
+                }
+                return
+            }
             #endif
             store = model.fleet.openChat(key)
             model.recentDevice = key.device
@@ -258,12 +270,22 @@ private struct ChatDocument: View {
         }
         // Dragging the conversation puts the keyboard away, as Messages does.
         .scrollDismissesKeyboard(.interactively)
+        .coordinateSpace(.named(ChatEffectsModel.space))
+        .environment(\.chatEffects, store.effects)
+        // A screen effect plays over the chat alone, never the composer,
+        // and takes no touches.
+        .overlay {
+            let effects = store.effects
+            ScreenEffectOverlay(playing: effects.ledger.playing(at: .now)) { [effects] playing in
+                effects.target(of: playing)
+            }
+        }
         // A picture opened full screen swipes through the chat's others.
         .environment(\.chatPictures, transcript.pictures.map(GalleryPicture.init))
         .opacity(store.stale ? 0.6 : 1)
         .overlay(alignment: .top) {
             if let prompt, promptAbove {
-                PinnedPrompt(text: prompt) {
+                PinnedPrompt(text: String(InlineMarkdown.plainSized(prompt).characters)) {
                     withAnimation(.snappy) { position.scrollTo(id: PinnedPrompt.anchor, anchor: .top) }
                 }
                 .transition(.move(edge: .top).combined(with: .opacity))

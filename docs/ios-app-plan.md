@@ -1069,7 +1069,7 @@ A `ios-testflight` job in `.github/workflows/ios.yml` builds and uploads on
 every push to `main` that touches `ios/**` or the v2 fixtures, and on each
 release tag; pull requests run only `ios-test` and the unsigned build.
 
-- `macos-26` runner with Xcode 26 (or later) selected explicitly.
+- `xcode-27` runner (macOS 27, Xcode 27): App Store Connect requires the iOS 27 SDK from April 2027, and the workflow fails on an older one.
 - `xcodegen`, then `xcodebuild archive` with automatic signing through an
   App Store Connect API key (`-allowProvisioningUpdates
   -authenticationKeyPath ... -authenticationKeyID ... -authenticationKeyIssuerID ...`),

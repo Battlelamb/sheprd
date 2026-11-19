@@ -50,6 +50,7 @@ sheprd-relay = { features = ["signed-directory"], workspace = true }
 # Remote control without its server: the control protocol and `app`.
 sheprd-remote-control.workspace         = true
 sheprd-updater.workspace        = true
+sheprd-traces.workspace         = true
 sheprd-usage.workspace          = true
 sheprd-vcs.workspace            = true
 if-addrs.workspace             = true

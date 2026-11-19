@@ -3715,7 +3715,7 @@ conversation natively over that pane. The program is the agent's only client,
 so the Herdr TUI, a plain terminal, and every app window see one conversation.
 
 **Starting one.** A group's **…** menu lists **New Chat** with one row per
-agent `sheprd-acp` knows (Claude, Codex, Copilot, Gemini, OpenCode, Pi). A row
+agent `sheprd-acp` knows (Claude, Codex, Copilot, Gemini, Kimi Code, OpenCode, Pi). A row
 opens a tab named after the agent in the focused workspace, in the focused
 pane's folder, and runs the program there; `sheprd chat new AGENT` does
 the same from a pane. The rows show once the app has found `sheprd-acp`,
@@ -3726,7 +3726,7 @@ saved SSH, cloud, and WSL hosts; an empty app-kept workspace starts a new
 Herdr 2 chat tab. Remote launches find the remote host's own program rather
 than using the desktop executable's path. Each agent has to be
 installed: `claude`, `codex` and `pi` (which `sheprd-acp` drives without an
-ACP adapter), `copilot --acp`, `gemini --acp`, or `opencode acp`. The program can
+ACP adapter), `copilot --acp`, `gemini --acp`, `kimi acp`, or `opencode acp`. The program can
 also be started by hand in any pane: `sheprd-acp claude`.
 
 **One click.** Each tab strip also offers an **Agent** button right after

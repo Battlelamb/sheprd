@@ -93,7 +93,7 @@ private struct PromptHeading: View {
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
                 if !words.isEmpty {
-                    Text(words).font(.title3.weight(.semibold)).textSelection(.enabled)
+                    SizedPlain(text: words, style: .title3).font(.title3.weight(.semibold)).textSelection(.enabled)
                 }
             }
         }

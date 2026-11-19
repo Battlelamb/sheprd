@@ -108,7 +108,58 @@ pub(crate) fn apply(state: &State, fleet: &Fleet) -> Result<()> {
     if let Ok(access) = state.auth().ssh_access() {
         access.keys.set_fleet(&lines)?;
     }
+    supersede(state, fleet)?;
     write_records(fleet.state_dir(), &records)
+}
+
+/// Revokes every desktop paired here one by one, over Bluetooth, that is a
+/// live computer member's device (the same tunnel or SSH key): the fleet
+/// lets it in now, and a pairing left beside it would outlive its
+/// removal from the fleet. Once revoked here, removing the member removes
+/// every way in it had. Blocking.
+fn supersede(state: &State, fleet: &Fleet) -> Result<()> {
+    let members: Vec<([u8; 32], Option<SshKey>)> = {
+        let inner = fleet.inner();
+        let Some(log) = &inner.log else {
+            return Ok(());
+        };
+        log.state()
+            .members
+            .iter()
+            .filter(|(id, member)| **id != fleet.me() && member.bundle.kind == Kind::Computer)
+            .map(|(_, member)| {
+                let ssh = member
+                    .bundle
+                    .ssh
+                    .as_deref()
+                    .and_then(|key| SshKey::parse(key).ok());
+                (member.bundle.tunnel, ssh)
+            })
+            .collect()
+    };
+    if members.is_empty() {
+        return Ok(());
+    }
+    let mut auth = state.auth();
+    let paired: Vec<crate::control::DeviceId> = auth
+        .devices()
+        .records()
+        .iter()
+        .filter(|record| {
+            let tunnel = record.relay.as_ref().and_then(|relay| relay.tunnel_key());
+            record.ssh.is_some()
+                && members.iter().any(|(member_tunnel, member_ssh)| {
+                    tunnel == Some(*member_tunnel)
+                        || (member_ssh.is_some() && record.ssh == *member_ssh)
+                })
+        })
+        .map(|record| record.id.clone())
+        .collect();
+    for device in paired {
+        tracing::info!("the fleet now lets in a desktop paired here; its own pairing goes");
+        auth.revoke(&device)?;
+    }
+    Ok(())
 }
 
 /// One line per computer member allowed on this computer, tagged with the

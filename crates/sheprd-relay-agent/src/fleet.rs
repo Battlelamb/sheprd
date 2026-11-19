@@ -236,6 +236,11 @@ impl Held {
         }
         if changed {
             held.save(state_dir)?;
+        }
+        // Even when nothing changed: a suspension saved by an earlier try
+        // whose `authorized_keys` write failed is finished before the
+        // removal is acknowledged. Rewriting is a no-op when it is current.
+        if !taken.is_empty() {
             held.write_keys(keys)?;
         }
         Ok(taken)

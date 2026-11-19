@@ -20,7 +20,7 @@
 
 use super::{Fleet, Holder};
 use crate::control::fleet::{
-    Body, HostKind, Op, OpId, State,
+    Body, HostKind, Op, OpId, State, access,
     removal::{MAX_FRAME, MAX_OPS, MAX_ROUNDS, Message, PURPOSE_REMOVAL},
 };
 use crate::desktop::record::Record;
@@ -185,7 +185,7 @@ fn owed(fleet: &Fleet) -> Vec<(Holder, Record, Vec<Op>)> {
             // it in the access file.
             let mut effective = removals
                 .iter()
-                .filter(|op| op.signer() == fleet.me() && took_effect(state, op));
+                .filter(|op| op.signer() == fleet.me() && access::for_agents(state, op));
             let ops = unheld(&holder, &mut effective);
             Some((holder, record, ops))
         });
@@ -205,16 +205,6 @@ fn record(state: &State, host: &crate::control::fleet::HostId, name: &str) -> Op
         route: record.route.clone(),
         fleet: true,
     })
-}
-
-/// Whether `op` removed someone: one of its targets is a tombstone.
-fn took_effect(state: &State, op: &Op) -> bool {
-    let Body::Remove(remove) = op.body() else {
-        return false;
-    };
-    remove
-        .targets()
-        .any(|target| state.tombstones.contains(target))
 }
 
 /// Passes removals to every live computer member and plain host that has

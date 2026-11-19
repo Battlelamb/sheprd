@@ -69,6 +69,7 @@ async fn exchange(from: &Node, to: &Node) -> sheprd_tunnel::stream::Tunnel {
         relays: info.relays,
         route: info.route,
         fleet: true,
+        host: None,
     };
     let keys = crate::desktop::keys::Keys::load_or_create(from.dir.path()).unwrap();
     // `to` names `from`'s dial key on the relay just after it applies the

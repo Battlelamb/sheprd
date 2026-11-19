@@ -17,6 +17,7 @@
 pub(crate) mod ask;
 mod error;
 pub(crate) mod grants;
+mod lock;
 mod me;
 mod plain;
 pub(crate) mod removals;
@@ -48,7 +49,15 @@ pub(crate) struct Unconfirmed {
     pub(crate) signer: MemberId,
     pub(crate) targets: Vec<MemberId>,
     pub(crate) since_ms: u64,
+    /// The removal itself, put to the log again once its history is
+    /// held: the log refusing it ends the suspension. Kept for at most
+    /// [`MAX_KEPT_REMOVALS`] suspensions, newest first; one without it
+    /// lasts until a settled history, its signer, or the TTL ends it.
+    pub(crate) op: Option<Op>,
 }
+
+/// Suspensions that keep their removal to check again.
+pub(crate) const MAX_KEPT_REMOVALS: usize = crate::control::fleet::MAX_PENDING;
 
 /// The daemon's fleet: its key, and its log once it founded or joined one.
 #[derive(Debug)]
@@ -61,6 +70,8 @@ pub(crate) struct Fleet {
     /// Removal exchanges other members dialed in for, at most
     /// `removals::CONCURRENT` at once.
     pub(crate) inbound: tokio::sync::Semaphore,
+    /// The fleet folder's lock, which the daemon holds for its life.
+    _lock: Option<lock::Lock>,
 }
 
 /// What removals are passed to: a member's daemon, or a plain host's
@@ -96,9 +107,25 @@ impl Fleet {
     /// The fleet kept in `state_dir`, making this computer's fleet key the
     /// first time. Blocking.
     pub(crate) fn load(state_dir: &Path, now_ms: u64) -> Result<Self> {
+        Self::load_with(state_dir, now_ms, None)
+    }
+
+    /// The fleet kept in `state_dir`, as the daemon loads it: holding the
+    /// fleet folder's lock for as long as it lives, so `fleet apply` with
+    /// no daemon cannot write the log under it. Waits for one already
+    /// writing. Blocking.
+    pub(crate) fn load_exclusive(state_dir: &Path, now_ms: u64) -> Result<Self> {
+        let lock = lock::Lock::acquire(state_dir)?;
+        Self::load_with(state_dir, now_ms, Some(lock))
+    }
+
+    fn load_with(state_dir: &Path, now_ms: u64, lock: Option<lock::Lock>) -> Result<Self> {
         let key = store::load_or_create_key(state_dir)?;
         let me = member_id(&key);
-        let inner = store::load(state_dir, now_ms)?;
+        let mut inner = store::load(state_dir, now_ms)?;
+        // A history `fleet apply` brought while the daemon was stopped may
+        // settle a suspension.
+        settle_unconfirmed(&mut inner, now_ms);
         Ok(Self {
             state_dir: state_dir.to_owned(),
             key,
@@ -106,6 +133,7 @@ impl Fleet {
             inner: Mutex::new(inner),
             changed: watch::Sender::new(0),
             inbound: tokio::sync::Semaphore::new(removals::CONCURRENT),
+            _lock: lock,
         })
     }
 
@@ -150,7 +178,7 @@ impl Fleet {
             })
             .flat_map(|kept| kept.targets.iter().copied())
             .collect();
-        for (_, _, targets) in log.pending_removals() {
+        for (_, targets) in log.pending_removals() {
             members.extend(targets);
         }
         members.retain(|member| *member != self.me && log.is_member(member));
@@ -171,6 +199,41 @@ impl Fleet {
         drop(inner);
         self.bump();
         Ok(op)
+    }
+
+    /// Signs what `bodies` makes of the log as this computer, in order,
+    /// each on the one before, and keeps them all or none: one the log
+    /// refuses leaves the log, and the file, as they were. Blocking: it
+    /// writes the log.
+    pub(crate) fn sign_all(
+        &self,
+        now_ms: u64,
+        bodies: impl FnOnce(&Log) -> Vec<Body>,
+    ) -> Result<Vec<Op>> {
+        let mut inner = self.inner();
+        let log = inner.log.as_mut().ok_or(Error::NoFleet)?;
+        let bodies = bodies(log);
+        let mut draft = log.clone();
+        let mut signed = Vec::with_capacity(bodies.len());
+        for body in bodies {
+            let op = draft.draft(self.me, now_ms, body).sign(&self.key)?;
+            match draft.insert(op.clone(), now_ms)? {
+                Inserted::Applied | Inserted::Known => {}
+                Inserted::Pending => return Err(Error::NotApplied),
+            }
+            signed.push(op);
+        }
+        let kept = std::mem::replace(log, draft);
+        if let Err(error) = self.save(&inner) {
+            // Unsaved, so not kept: what is held matches the file.
+            if let Some(log) = inner.log.as_mut() {
+                *log = kept;
+            }
+            return Err(error);
+        }
+        drop(inner);
+        self.bump();
+        Ok(signed)
     }
 
     /// Founds a fleet with `bundle`, this computer's, as its only member.
@@ -205,6 +268,7 @@ impl Fleet {
     pub(crate) fn receive(&self, ops: Vec<Op>, now_ms: u64) -> Result<usize> {
         let mut inner = self.inner();
         let before = inner.log.as_ref().map(|log| log.heads().to_vec());
+        let suspensions: Vec<OpId> = inner.unconfirmed.keys().copied().collect();
         let refused = match &mut inner.log {
             Some(log) => log
                 .insert_all(ops, now_ms)
@@ -219,7 +283,11 @@ impl Fleet {
         };
         settle_unconfirmed(&mut inner, now_ms);
         let after = inner.log.as_ref().map(|log| log.heads().to_vec());
-        if after != before || !inner.unconfirmed.is_empty() {
+        // A suspension lifted is a change too: its target's grants return.
+        if after != before
+            || !inner.unconfirmed.is_empty()
+            || !suspensions.iter().eq(inner.unconfirmed.keys())
+        {
             self.save(&inner)?;
             drop(inner);
             self.bump();
@@ -279,23 +347,35 @@ impl Fleet {
 pub fn run_apply(state_dir: &Path, apply: sync::Apply) -> Result<sync::Applied> {
     use crate::control::{Request, Response};
     let request = Request::Fleet(Box::new(sync::Ask::Apply(apply.clone())));
-    match crate::control::request(&crate::control::address(state_dir), &request) {
-        Ok(Response::Fleet(answer)) => match *answer {
-            sync::Answer::Applied(applied) => Ok(applied),
-            _ => Err(Error::Daemon("an unexpected answer".to_owned())), // i18n: data
-        },
-        Ok(Response::Error { message, .. }) => Err(Error::Daemon(message)),
-        Ok(_) => Err(Error::Daemon("an unexpected answer".to_owned())), // i18n: data
-        Err(crate::control::Error::Connect(_)) => {
+    let deadline = std::time::Instant::now() + lock::WAIT;
+    loop {
+        match crate::control::request(&crate::control::address(state_dir), &request) {
+            Ok(Response::Fleet(answer)) => match *answer {
+                sync::Answer::Applied(applied) => return Ok(applied),
+                _ => return Err(Error::Daemon("an unexpected answer".to_owned())), // i18n: data
+            },
+            Ok(Response::Error { message, .. }) => return Err(Error::Daemon(message)),
+            Ok(_) => return Err(Error::Daemon("an unexpected answer".to_owned())), // i18n: data
+            Err(crate::control::Error::Connect(_)) => {}
+            Err(error) => return Err(error.into()),
+        }
+        // No daemon answers. Held, the lock keeps a daemon from starting
+        // and another update from writing until this one has; busy, a
+        // daemon is starting, or another update is writing, and the
+        // socket is tried again.
+        if let Some(_lock) = lock::Lock::try_acquire(state_dir)? {
             let now = crate::web::now_ms();
             let fleet = Fleet::load(state_dir, now)?;
             let heads = apply.heads()?;
             let refused = fleet.receive(apply.ops()?, now)?;
             let inner = fleet.inner();
             let log = inner.log.as_ref().ok_or(Error::NoFleet)?;
-            Ok(sync::answer(log, &heads, refused))
+            return Ok(sync::answer(log, &heads, refused));
         }
-        Err(error) => Err(error.into()),
+        if std::time::Instant::now() >= deadline {
+            return Err(Error::Busy);
+        }
+        lock::pause();
     }
 }
 
@@ -331,23 +411,66 @@ fn join(mut ops: Vec<Op>, me: MemberId, now_ms: u64) -> Result<(Log, usize)> {
 }
 
 /// Moves the log's pending removals into `unconfirmed`, and drops those
-/// whose history arrived: once in the log, the log settles them.
+/// the log settled: taken in, or refused once their history arrived.
 fn settle_unconfirmed(inner: &mut Inner, now_ms: u64) {
-    let Some(log) = &inner.log else {
+    let Some(log) = &mut inner.log else {
         return;
     };
-    for (id, signer, targets) in log.pending_removals() {
-        inner.unconfirmed.entry(id).or_insert(Unconfirmed {
-            signer,
+    for (op, targets) in log.pending_removals() {
+        inner.unconfirmed.entry(op.id()).or_insert(Unconfirmed {
+            signer: op.signer(),
             targets,
             since_ms: now_ms,
+            op: Some(op.clone()),
         });
+    }
+    // A removal whose history is now held, and that the log does not
+    // hold, either expired from the pending pool before its history came
+    // or was refused with it: put it to the log again. Only a refusal the
+    // history proves ends the suspension; a full log keeps it.
+    let ready: Vec<Op> = inner
+        .unconfirmed
+        .iter()
+        .filter_map(|(id, kept)| kept.op.as_ref().filter(|_| log.get(id).is_none()))
+        .filter(|op| op.parents().iter().all(|parent| log.get(parent).is_some()))
+        .cloned()
+        .collect();
+    let mut refused = BTreeSet::new();
+    for op in ready {
+        let id = op.id();
+        match log.insert(op, now_ms) {
+            Err(
+                crate::control::fleet::Error::Full
+                | crate::control::fleet::Error::Bounds
+                | crate::control::fleet::Error::ParentMissing,
+            )
+            | Ok(_) => {}
+            Err(_) => {
+                refused.insert(id);
+            }
+        }
     }
     inner.unconfirmed.retain(|id, kept| {
         log.get(id).is_none()
+            && !refused.contains(id)
             && standing(log, kept)
             && now_ms.saturating_sub(kept.since_ms) <= UNCONFIRMED_TTL_MS
     });
+    // Bounded: the oldest give up their removal, never their suspension.
+    let mut kept: Vec<(u64, OpId)> = inner
+        .unconfirmed
+        .iter()
+        .filter(|(_, kept)| kept.op.is_some())
+        .map(|(id, kept)| (kept.since_ms, *id))
+        .collect();
+    if kept.len() > MAX_KEPT_REMOVALS {
+        kept.sort_unstable();
+        for (_, id) in &kept[..kept.len() - MAX_KEPT_REMOVALS] {
+            if let Some(entry) = inner.unconfirmed.get_mut(id) {
+                entry.op = None;
+            }
+        }
+    }
 }
 
 /// Whether a suspension still stands: its signer is a member, or was

@@ -12,6 +12,22 @@ use gpui::{Context, Window};
 pub enum Action {
     /// Runs a command by its name in the catalog, as a shortcut does.
     Command(String),
+    /// Acts on a line of the device picker: its place among the lines the
+    /// keys reach, and the key that says it is still the same line.
+    DeviceLine {
+        ordinal: usize,
+        key: String,
+        action: crate::menu::LineAction,
+    },
+    /// Opens the device picker from the footer, or closes it.
+    DevicePicker,
+    /// Closes the device picker, as a click outside it or Escape does.
+    DevicePickerDismiss,
+    /// A key the open device picker took: `up`, `down`, `left`, `right`,
+    /// `enter`, `space`, `backspace`, or `escape`.
+    DevicePickerKey(String),
+    /// Opens the Devices overview, as the picker's activity card does.
+    DevicesOverview,
     /// Opens or closes the note on a workspace's checkout, at the pointer.
     EditNote {
         endpoint: Option<String>,
@@ -127,6 +143,15 @@ impl SheprdWindow {
                     self.command(command, window, cx);
                 }
             }
+            Action::DeviceLine {
+                ordinal,
+                key,
+                action,
+            } => self.hosted_picker_line(ordinal, &key, action, window, cx),
+            Action::DevicePicker => self.hosted_picker_toggle(window, cx),
+            Action::DevicePickerDismiss => self.hosted_picker_dismiss(window, cx),
+            Action::DevicePickerKey(key) => self.hosted_picker_key(&key, window, cx),
+            Action::DevicesOverview => self.open_devices_overview(window, cx),
             Action::EditNote {
                 endpoint,
                 workspace,

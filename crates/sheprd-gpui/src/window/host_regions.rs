@@ -187,7 +187,8 @@ impl SheprdWindow {
         root.extend(self.render_toasts(window, cx));
         root.extend(self.render_file_transfer(window, cx));
         root.extend(self.render_menu_leaving(window, cx));
-        if self.menu.page.is_some() {
+        // The layout draws the device picker itself.
+        if self.menu.page.is_some() && !self.hosted_picker_open() {
             root.extend([self.render_menu(window, cx).into_any_element()]);
         }
     }

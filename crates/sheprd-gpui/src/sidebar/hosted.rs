@@ -71,6 +71,9 @@ pub struct Stamp {
     agents_list: bool,
     connected: bool,
     details_visible: bool,
+    /// The device footer, and the picker while it is open, as a host's
+    /// layout reads them: small, and built only while the window changes.
+    device_picker: Value,
     /// Every device's snapshot and folds; see `hosted_devices_stamp`.
     devices: u64,
     metrics: SidebarMetrics,
@@ -96,6 +99,7 @@ impl PartialEq for Stamp {
             && self.agents_list == other.agents_list
             && self.connected == other.connected
             && self.details_visible == other.details_visible
+            && self.device_picker == other.device_picker
             && self.devices == other.devices
             && self.metrics == other.metrics
             && self.navigation == other.navigation
@@ -256,6 +260,7 @@ impl SheprdWindow {
             agents_list: self.hosted_agents_list(),
             connected: self.live.status.is_connected(),
             details_visible: self.details_visible,
+            device_picker: self.hosted_device_picker(),
             devices: self.hosted_devices_stamp(),
             panel: self.activity_panel(),
             section: self.activity_section().is_some(),
@@ -364,6 +369,7 @@ impl SheprdWindow {
                 "usage": self.hosted_usage(),
             "workspaces": self.hosted_workspaces(cx),
                 "devices": self.hosted_devices(cx),
+                "device_picker": self.hosted_device_picker(),
                 "multi": self.endpoints.len() > 1,
                 "build": build_state(),
             }),

@@ -15,6 +15,13 @@ return style {
 		[".feedback-button"] = { width = 32, height = 32, padding = 0, radius = 8, size = "title" },
 		[".status-item:hover"] = { opacity = 0.75 },
 		[".sheprd-link:hover"] = { opacity = 0.75 },
+		-- The device footer and its sheet, as Sheprd's own answer the pointer.
+		[".sheprd-device-picker:hover"] = { background = "secondary" },
+		[".sheprd-device-settings:hover"] = { background = "secondary" },
+		[".sheprd-device-line:hover"] = { background = "secondary" },
+		[".sheprd-device-chip:hover"] = { background = "secondary" },
+		[".sheprd-device-trash:hover"] = { background = "secondary" },
+		[".sheprd-device-activity:hover"] = { border_color = "muted-foreground" },
 		-- The left pane's edge: a hairline; the shell draws its handle.
 		[".sheprd-left-edge-line"] = { background = "border" },
 		-- An edge's handle, as Sheprd's own (src/panel_resize/grip.rs): its

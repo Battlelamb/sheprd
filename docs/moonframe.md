@@ -51,6 +51,7 @@ Everything around the terminals is Luau in `crates/sheprd-gpui/moonframe/app`:
 | `mods/worktrees/main.luau` | The left pane's head and worktree rows, linked worktrees under their checkout, drawn in the sidebar layout Sheprd's config names (`layout = "orca"`, `compact`, `minimal`, ...), and the sidebar toggle in its head, or over the rail of numbered tiles while the sidebar is folded. Dragging the column's edge out of the rail opens the sidebar too |
 | `mods/actions/main.luau` | New and Menu under the worktrees: a new worktree, and the command palette |
 | `mods/agents/main.luau` | The agents under the worktrees, in Sheprd's sort and the same layout |
+| `mods/devices/main.luau` | The device picker at the left pane's foot, and the sheet it opens: the agents' activity, every device and the unfolded one's sessions, and Add Device |
 | `mods/details/main.luau` | The right pane; the toggle at the end of the title bar opens it |
 | `mods/status/main.luau` | The status bar |
 | `components/sheprd-*.luau` | What the worktrees and agents share: a row highlighted as the layout marks the selected one, the status dot, and the section names |
@@ -58,9 +59,11 @@ Everything around the terminals is Luau in `crates/sheprd-gpui/moonframe/app`:
 
 The terminals, tabs, and pages stay one Rust view, placed with
 `ui.view { name = "sheprd", id = "main", props = { region = "main" } }`.
-The device picker is Sheprd's own too, the one its sidebar ends with
-(`region = "devices"`), shown as `[sidebar] device_footer` says.
-So is the title bar's end (`region = "titlebar"`): the checkout's changes and
+The device picker at the left pane's foot is the `devices` mod, shown as
+`[sidebar] device_footer` says; Sheprd keeps what it is doing and the dialogs
+it opens (Add Device, a session's editor). Sheprd's own picker is still a
+region, `region = "devices"`, for a layout that would rather place it.
+The title bar's end is Sheprd's own (`region = "titlebar"`): the checkout's changes and
 branch, the account, and the details toggle. The shell lays it over the end of
 the tab strip, which leaves it that room, at the width Sheprd reports
 (`titlebar` among the sizes); each group's tabs, split and ⋯ stay with its
@@ -89,6 +92,7 @@ shows in the log when one appears: `unknown key` names it.
 | --- | --- |
 | `devices` | Each device the sidebar lists, in its order: `id`, `label`, `selected`, `connected`, `enabled`, `removing`, `collapsed`, `load` (`cpu`, `memory`), `search` (every workspace, folded or not, with `label`, `branch` and `note`, for the sidebar's search), and `workspaces`, its visible rows (fields as below, plus `endpoint`, `group` and `collapsed` on a checkout that folds its worktrees, `note`, `muted`, `teleported`) |
 | `multi` | Whether several devices are listed, so each shows a header |
+| `device_picker` | The device picker: `footer` (`label`, `initials` beside the activity bar, `hosts`, `connected`, `adding`, `settings` (its tooltip, without the bar), `aria`, `shown`, `width`), `online` and `wash` (the connected dot's and the current line's colors), `open`, and while open `sheet`: `activity` (`heading`, `overview`, `working`, `blocked`, `bars` of `working` and `blocked`, or `false` before a step was seen, and their `peak`), `heading`, `hint`, `selected` (the line the keys are on), `lines` (each `kind`: `all`, `device`, `session`, `add`, `note` or `error`; the lines the keys reach have `ordinal`, `key`, `label`, `detail`, `checked`, `enabled`, and `online`, a device its session `chip` (`word`, `session`, `open`, `hint`), a session `delete` (whether it can be deleted now); a note or error its `text`), and `adding` (cloud machines still being added) |
 | `build` | The worktree a build came from: `worktree`, `branch`, `pr` |
 | `workspaces` | The selected device's, folded or not, in the sidebar's order: `id`, `number`, `label`, `branch`, `repo`, `repo_key`, `linked`, `child` (shown under its checkout), `focused`, `agent_status`, `ahead`, `behind`, `added`, `removed`, `dirty`, `pr`, `pr_color` (the number's color for its state) |
 | `agents` | In Sheprd's sort: `name`, `kind` (`claude`, `codex`, ...), `status`, `state` (the status's word, when the agent's integration shows one), `title`, `pane`, `pane_name`, `workspace`, `workspace_label`, `tab`, `focused` |
@@ -141,6 +145,10 @@ Send a message with `to = "provider:sheprd"`:
 | `{ move_workspace = id, target = id, after = bool }` | Moves a workspace of the selected device before (or after) another, as dropping its row there does; the worktrees mod sends it when a row with `carry` is dropped on one with `accept` |
 | `{ sidebar_width = true }` as a `pointer` | Resizes the sidebar from a drag of its edge (`phase`, `dx`); a double click puts back the default width. The shell draws the edge as a hairline beside the left column, its grip overhanging the main area so it never covers the lists' scrollbars. The shell takes the drag (`hover`), draws the handle as a Moonframe split does (a short pill on hover, a longer one while dragging, as on the rule over New and Menu), and sends the drag on |
 | `{ open_build_pr = true }` | Opens the pull request a worktree build came from |
+| `{ device_picker = true }`, `{ device_picker_dismiss = true }` | Opens the device picker or closes it, or only closes it (a click outside, Escape) |
+| `{ device_line = ordinal, key = key, how = "choose" }` | Picks a picker line: a device (with Cmd, Ctrl elsewhere, listed too or no longer, the sheet left open), a session, or Add Device. `how = "sessions"` unfolds a device's sessions or folds them, `how = "delete"` asks to delete a session. A line whose `key` no longer matches its `ordinal` is left alone |
+| `{ device_key = key }` | A key the open picker took (`up`, `down`, `left`, `right`, `enter`, `backspace`, `delete`, `escape`), as Sheprd's own picker reads it |
+| `{ devices_overview = true }` | Opens the Devices overview, as the picker's activity card does |
 | `{ usage = id }`, `{ usage_refresh = true }` | Opens a usage provider's panel above the status bar, or reads usage again |
 
 A row on another device adds `endpoint = id` to its message; without it the

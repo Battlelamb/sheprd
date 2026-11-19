@@ -135,7 +135,7 @@ return mod {
 							then ui.column { width = state.activity_bar, shrink = false, gap = "none", style = { background = theme.sidebar }, ui.mount "activity" }
 							else false,
 						-- The left pane: the worktrees, new and menu, then the agents,
-						-- each a mod, and the device picker under them, as Sheprd's
+						-- each a mod, and the device picker under them (`mods/devices`), as Sheprd's
 						-- sidebar has it. A page in the sidebar's place shows neither list.
 						ui.column {
 							class = "sheprd-left",
@@ -173,7 +173,7 @@ return mod {
 								} else false,
 							} else false,
 							if lists and state.devices > 0
-								then ui.row { height = state.devices, shrink = false, gap = "none", region "devices" }
+								then ui.row { height = state.devices, shrink = false, gap = "none", ui.mount "devices" }
 								else false,
 						},
 					},

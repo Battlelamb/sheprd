@@ -171,4 +171,5 @@ fn option_at_launch_opens_the_other_window() {
     assert!(super::choose(false, true));
 }
 
+mod devices;
 mod keys;

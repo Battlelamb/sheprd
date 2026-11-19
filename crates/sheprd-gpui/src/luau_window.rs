@@ -212,6 +212,11 @@ fn action(message: &Data) -> Option<Action> {
             })
         })
         .or_else(|| sidebar_width(message))
+        .or_else(|| device_line(message))
+        .or_else(|| flag("device_picker").map(|_| Action::DevicePicker))
+        .or_else(|| flag("device_picker_dismiss").map(|_| Action::DevicePickerDismiss))
+        .or_else(|| text("device_key").map(Action::DevicePickerKey))
+        .or_else(|| flag("devices_overview").map(|_| Action::DevicesOverview))
         .or_else(|| text("toggle_device").map(Action::ToggleDevice))
         .or_else(|| text("select_device").map(Action::SelectDevice))
         .or_else(|| flag("fold_all").map(Action::FoldAll))
@@ -235,6 +240,25 @@ fn sidebar_width(message: &Data) -> Option<Action> {
         _ => return None,
     };
     Some(Action::SidebarWidth { phase, dx })
+}
+
+/// A device picker line's click or hover: `device_line` is its ordinal,
+/// `key` its identity, and `how` what was done to it.
+fn device_line(message: &Data) -> Option<Action> {
+    let ordinal = message.get("device_line").and_then(Data::as_f64)?;
+    if ordinal < 0.0 || ordinal.fract() != 0.0 {
+        return None;
+    }
+    let key = message.get("key").and_then(Data::as_str)?.to_owned();
+    let action = message
+        .get("how")
+        .and_then(Data::as_str)
+        .and_then(crate::menu::LineAction::named)?;
+    Some(Action::DeviceLine {
+        ordinal: ordinal as usize,
+        key,
+        action,
+    })
 }
 
 /// What is read before the event loop, and the host the first region makes.

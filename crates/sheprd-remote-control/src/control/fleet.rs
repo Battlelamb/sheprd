@@ -33,6 +33,7 @@ mod graph;
 mod log;
 mod membership;
 mod op;
+mod routes;
 mod state;
 mod wire;
 

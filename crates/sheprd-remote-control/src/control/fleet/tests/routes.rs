@@ -106,3 +106,60 @@ fn a_later_host_with_a_lower_id_cannot_take_a_route() {
     assert!(log.state().hosts[&later.id().unwrap()].held);
     assert!(!log.state().hosts[&first.id().unwrap()].held);
 }
+
+#[test]
+fn a_route_first_named_in_a_record_cannot_be_taken_by_a_later_addition() {
+    let a = computer(1);
+    let mut log = found(&a);
+    let (first, first_ca) = ca_host(40, HostKind::Sheprd);
+    act(&mut log, &a, Body::HostAdd(first.clone()));
+    act(&mut log, &a, seen(&first, &first_ca, 2, "fresh", 40));
+    let later = on_route(41, "fresh");
+    act(&mut log, &a, Body::HostAdd(later.clone()));
+    let state = log.state();
+    assert!(state.hosts[&later.id().unwrap()].held);
+    assert!(!state.hosts[&first.id().unwrap()].held);
+    assert_eq!(state.routes["fresh"], first.id().unwrap());
+}
+
+#[test]
+fn pruned_and_whole_logs_agree_on_route_owners() {
+    let (a, b) = (computer(1), computer(2));
+    let mut log = found(&a);
+    admit(&mut log, &a, &b);
+    let (first, first_ca) = ca_host(40, HostKind::Sheprd);
+    let route = first.record.route.clone();
+    // A host added after the first, sorting before it.
+    let (later, later_ca) = (41..=255)
+        .map(|seed| ca_host(seed, HostKind::Sheprd))
+        .find(|(intro, _)| intro.id().unwrap() < first.id().unwrap())
+        .unwrap();
+    act(&mut log, &a, Body::HostAdd(first.clone()));
+    act(&mut log, &a, Body::HostAdd(later.clone()));
+    // The first moves to a new route; the later one tries its first one.
+    act(&mut log, &a, seen(&first, &first_ca, 2, "moved", 40));
+    act(&mut log, &b, seen(&later, &later_ca, 2, &route, 41));
+    let hash = log.state().hash().unwrap();
+    let checkpoint = act(&mut log, &a, Body::Checkpoint(hash));
+    let mut whole = copy(&log);
+    log.prune(&checkpoint.id()).unwrap();
+    assert_eq!(log.state(), whole.state());
+    let after: [(&Device, Body); 3] = [
+        (&b, seen(&later, &later_ca, 3, "moved", 41)),
+        (&a, seen(&first, &first_ca, 3, &route, 40)),
+        (&a, Body::HostAdd(on_route(60, "moved"))),
+    ];
+    for (by, body) in after {
+        let op = act(&mut log, by, body);
+        apply(&mut whole, op);
+        assert_eq!(log.state(), whole.state());
+    }
+    // The first went back to its own route, which freed the one it had
+    // moved to; the later host never owned either.
+    let state = log.state();
+    let newest = on_route(60, "moved").id().unwrap();
+    assert_eq!(state.routes[&route], first.id().unwrap());
+    assert_eq!(state.routes["moved"], newest);
+    assert!(!state.hosts[&newest].held);
+    assert!(state.hosts[&later.id().unwrap()].flagged);
+}

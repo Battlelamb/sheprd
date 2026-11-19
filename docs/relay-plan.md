@@ -1773,8 +1773,12 @@ without an approval.
     step for it.
   - **Computers paired over Bluetooth** (#1389 `sheprd-desktop:`
     devices): each gets a join invite, and still needs its own approval,
-    because the old pairing granted one direction only. Once it joins,
-    its `sheprd-desktop:` line is replaced by a `sheprd-fleet:` line.
+    because the old pairing granted one direction only. Once it joins
+    and first opens SSH here through the fleet, which proves it holds
+    the member's tunnel key, its `sheprd-desktop:` pairing is revoked and
+    the `sheprd-fleet:` line stands alone, so removing it from the fleet
+    removes every way in it had. Until then the pairing stays, as the
+    person here made it, and Remote control's device list revokes it.
   - **Paired phones:** each is offered to join on the phone. The
     computer's Allow happened at pairing, so the phone's confirmation is
     what remains.

@@ -108,7 +108,64 @@ pub(crate) fn apply(state: &State, fleet: &Fleet) -> Result<()> {
     if let Ok(access) = state.auth().ssh_access() {
         access.keys.set_fleet(&lines)?;
     }
+    revoke_removed(state, fleet)?;
     write_records(fleet.state_dir(), &records)
+}
+
+/// Revokes every desktop paired here one by one with a tunnel key a member
+/// proved here and that is no longer a member: removing it from the fleet
+/// removes every way in it had. Blocking.
+fn revoke_removed(state: &State, fleet: &Fleet) -> Result<()> {
+    let gone: Vec<(MemberId, Vec<[u8; 32]>)> = {
+        let inner = fleet.inner();
+        let Some(log) = &inner.log else {
+            return Ok(());
+        };
+        inner
+            .proven
+            .iter()
+            .filter(|(member, _)| !log.is_member(member))
+            .map(|(member, keys)| (*member, keys.iter().copied().collect()))
+            .collect()
+    };
+    for (member, keys) in &gone {
+        for tunnel in keys {
+            supersede(state, tunnel)?;
+        }
+        // Saved, so the file and what is held agree.
+        fleet.forget_proven(member)?;
+    }
+    Ok(())
+}
+
+/// Revokes the desktop paired here one by one, over Bluetooth, whose
+/// tunnel key is `tunnel`, once that device has proved it is a fleet member
+/// allowed here: it just finished the tunnel's handshake with that key and
+/// asked for SSH. The fleet lets it in now, and a pairing left beside it
+/// would outlive its removal from the fleet. Matching on a key the device
+/// proved, not on what a bundle claims, keeps a member from revoking a
+/// desktop by naming its public keys. Blocking.
+pub(crate) fn supersede(state: &State, tunnel: &[u8; 32]) -> Result<()> {
+    let mut auth = state.auth();
+    let paired: Vec<crate::control::DeviceId> = auth
+        .devices()
+        .records()
+        .iter()
+        .filter(|record| {
+            record.ssh.is_some()
+                && record
+                    .relay
+                    .as_ref()
+                    .and_then(|relay| relay.tunnel_key())
+                    .is_some_and(|key| key == *tunnel)
+        })
+        .map(|record| record.id.clone())
+        .collect();
+    for device in paired {
+        tracing::info!("the fleet now lets in a desktop paired here; its own pairing goes");
+        auth.revoke(&device)?;
+    }
+    Ok(())
 }
 
 /// One line per computer member allowed on this computer, tagged with the

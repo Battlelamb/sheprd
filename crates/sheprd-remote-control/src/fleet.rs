@@ -38,6 +38,10 @@ use std::{
 };
 use tokio::sync::watch;
 
+/// Tunnel keys remembered per member. A member that proves more has the
+/// pairing with each further key revoked at once rather than remembered.
+pub(crate) const MAX_PROVEN: usize = 8;
+
 /// How long a removal whose history never arrives keeps its targets cut
 /// off: any member that syncs brings the history long before, so only a
 /// removal whose history does not exist outlives it.
@@ -76,6 +80,11 @@ pub(crate) struct Inner {
     /// until its history arrives and settles it, its signer is no longer a
     /// member, or [`UNCONFIRMED_TTL_MS`] passes.
     pub(crate) unconfirmed: BTreeMap<OpId, Unconfirmed>,
+    /// Every tunnel key each computer member proved by finishing the
+    /// tunnel's handshake here, at most [`MAX_PROVEN`] each: once it is
+    /// removed, a desktop paired here one by one with any of them goes
+    /// with it, keys it rotated away from included.
+    pub(crate) proven: BTreeMap<MemberId, BTreeSet<[u8; 32]>>,
 }
 
 impl Fleet {
@@ -218,6 +227,35 @@ impl Fleet {
             self.bump();
         }
         Ok(refused)
+    }
+
+    /// Records that `member` proved `tunnel` by finishing the tunnel's
+    /// handshake here. Blocking.
+    /// Whether the key is kept: past [`MAX_PROVEN`] it is not, and the
+    /// caller revokes its pairing at once instead, so no key a member
+    /// proved is ever forgotten while a pairing with it stands.
+    pub(crate) fn proved(&self, member: MemberId, tunnel: [u8; 32]) -> Result<bool> {
+        let mut inner = self.inner();
+        let keys = inner.proven.entry(member).or_default();
+        if keys.contains(&tunnel) {
+            return Ok(true);
+        }
+        if keys.len() >= MAX_PROVEN {
+            return Ok(false);
+        }
+        keys.insert(tunnel);
+        self.save(&inner)?;
+        Ok(true)
+    }
+
+    /// Forgets what `member` proved, once its desktops are revoked.
+    /// Blocking.
+    pub(crate) fn forget_proven(&self, member: &MemberId) -> Result<()> {
+        let mut inner = self.inner();
+        if inner.proven.remove(member).is_none() {
+            return Ok(());
+        }
+        self.save(&inner)
     }
 
     /// Records that `peer` holds the removals `ids`. Blocking.

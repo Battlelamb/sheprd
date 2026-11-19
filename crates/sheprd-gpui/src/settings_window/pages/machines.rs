@@ -12,6 +12,7 @@ use crate::{
 use gpui::{prelude::*, *};
 use std::collections::HashMap;
 
+mod create;
 mod images;
 
 /// What waits for a second press before it is deleted.
@@ -40,6 +41,24 @@ pub(crate) fn open(source: WeakEntity<SheprdWindow>, delete: Option<Deletion>, c
     });
 }
 
+/// Opens Settings on this page, offering to make a machine from Apple's
+/// macOS, as `name` if one is given.
+pub(crate) fn offer_new(source: WeakEntity<SheprdWindow>, name: Option<Name>, cx: &mut App) {
+    open(source, None, cx);
+    cx.defer(move |cx| {
+        let Some(handle) = cx
+            .default_global::<crate::settings_window::SettingsWindowHandle>()
+            .window
+        else {
+            return;
+        };
+        let _ = handle.update(cx, |view, _, cx| {
+            view.machines.create_name = name;
+            cx.notify();
+        });
+    });
+}
+
 #[derive(Default)]
 pub(in crate::settings_window) struct MachinesPage {
     /// `None` until the folders are read.
@@ -58,6 +77,12 @@ pub(in crate::settings_window) struct MachinesPage {
     /// What each machine was doing when last drawn: a change moves its disk
     /// use, so the folders are read again.
     seen: HashMap<Name, Status>,
+    /// Whether an install was under way when last drawn: once it ends, its
+    /// machine is read.
+    installing: bool,
+    /// What the next machine made from Apple's macOS is called, when the
+    /// command line named it.
+    create_name: Option<Name>,
 }
 
 /// `bytes` as the Finder counts them.
@@ -86,6 +111,11 @@ impl SettingsWindow {
                             let queued = machine::queued_settings(&listing.name);
                             listing.settings = queued.apply(listing.settings);
                         }
+                        let names = listings
+                            .iter()
+                            .map(|listing| listing.name.clone())
+                            .collect();
+                        machine::known::remember(names, cx);
                         this.machines.listings = Some(listings);
                     }
                     Err(error) => this.machines.failure = Some(error.localize()),
@@ -469,12 +499,13 @@ impl SettingsWindow {
 
     pub(in crate::settings_window) fn render_machines(&mut self, cx: &mut Context<Self>) -> Div {
         self.follow_machines(cx);
+        self.follow_install(cx);
         let limits = Limits::host();
         let listings = self.machines.listings.clone();
-        let page = div().flex().flex_col();
+        let page = div().flex().flex_col().child(self.render_create(cx));
         let page = match listings.as_deref() {
             None => page,
-            Some([]) => page.child(self.control_note(fl!("settings-machines-none"))),
+            Some([]) => page,
             Some(listings) => page.children(
                 listings
                     .iter()

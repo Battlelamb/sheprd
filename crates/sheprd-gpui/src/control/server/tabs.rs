@@ -61,7 +61,7 @@ pub(super) fn serve(
             machines::image_save(machine, image, incoming, cx);
         }
         TabOp::MachineList => machines::list(incoming, cx),
-        TabOp::MachineNew { name, image } => machines::new(name, image, incoming, cx),
+        TabOp::MachineNew { name, image } => machines::new(&caller, name, image, incoming, cx),
         TabOp::MachineSet {
             name,
             cpus,

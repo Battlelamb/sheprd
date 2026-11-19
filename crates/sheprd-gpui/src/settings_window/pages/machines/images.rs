@@ -35,6 +35,7 @@ impl SettingsWindow {
         let taken = self.machines.listings.clone().unwrap_or_default();
         let Some(name) = image::unused(from, |text| {
             taken.iter().any(|listing| listing.name.as_str() == text)
+                || Name::try_from(text.to_owned()).is_ok_and(|name| machine::install::making(&name))
         }) else {
             return;
         };

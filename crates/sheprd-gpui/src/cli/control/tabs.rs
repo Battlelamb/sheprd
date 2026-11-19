@@ -60,9 +60,11 @@ pub enum MachineCommand {
     Delete {
         name: String,
     },
+    /// From an image, or without one from Apple's macOS, which the user
+    /// confirms in Settings.
     New {
-        name: String,
-        image: String,
+        name: Option<String>,
+        image: Option<String>,
     },
     ImageList,
     ImageSave {
@@ -209,10 +211,11 @@ pub(super) fn machine(args: &mut Args) -> Result<MachineCommand, CliError> {
         },
         Some("new") => {
             let image = args.text_option("--from")?;
-            MachineCommand::New {
-                name: args.required_text("NAME")?,
-                image: image.ok_or(CliError::MissingValue("--from"))?,
-            }
+            let name = match image {
+                Some(_) => Some(args.required_text("NAME")?),
+                None => args.optional_text()?,
+            };
+            MachineCommand::New { name, image }
         }
         Some("image") => machine_image(args)?,
         Some(verb @ ("agent" | "exec" | "screenshot" | "click" | "type" | "key")) => {

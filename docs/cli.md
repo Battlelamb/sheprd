@@ -153,6 +153,7 @@ Sheprd** entry, which both Windows installers add, runs this command through
 | `machine suspend NAME` | Save it and stop it; it resumes where it was when next shown |
 | `machine delete NAME` | Ask in Settings to delete it and free its disk; the user confirms there |
 | `machine new NAME --from IMAGE` | Make a machine from an image: an APFS clone that takes no real space until it changes, with its own identity, so several can run at once (macOS allows 2) |
+| `machine new [NAME]` | Open Settings > Virtual Macs, where the user confirms downloading Apple's newest macOS for this Mac (over 20 GB) and installing it on a new machine, `NAME` or `default`; it then opens with its setup guide. Exits 2 when `NAME` exists |
 | `machine image [list]` | The images machines can start from. Exits 4 when there are none |
 | `machine image save MACHINE IMAGE` | Keep a shut down machine as an image. Exits 6 while it runs or is suspended |
 | `machine image delete IMAGE` | Ask in Settings to delete it; the user confirms there. Machines made from it stay |

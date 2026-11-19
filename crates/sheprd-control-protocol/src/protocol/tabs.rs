@@ -127,10 +127,14 @@ pub enum TabOp {
         modifiers: Vec<MachineModifier>,
     },
     MachineList,
-    /// Make the virtual Mac called `name` from image `image`.
+    /// Make the virtual Mac called `name` from image `image`. Without an
+    /// image, open Settings > Virtual Macs, where the user confirms making
+    /// one from Apple's macOS (named `name`, if given).
     MachineNew {
-        name: String,
-        image: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        image: Option<String>,
     },
     /// Show the virtual Mac called `name` with its setup guide beside it:
     /// the steps that make it ready for agents, which Sheprd checks.

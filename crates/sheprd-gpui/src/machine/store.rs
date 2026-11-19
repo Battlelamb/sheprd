@@ -220,6 +220,11 @@ pub(super) fn boot_settings(folder: &Path) -> Result<Settings> {
     Ok(settings)
 }
 
+/// Records what a machine in `folder` boots with, as when it is made.
+pub(super) fn write_settings(folder: &Path, settings: &Settings) -> Result<()> {
+    write_json(&folder.join(SETTINGS), settings)
+}
+
 /// Forgets machine `name`'s saved state, so it next boots afresh.
 pub(crate) fn discard_state(name: &Name) -> Result<()> {
     let state = state_file(name)?;

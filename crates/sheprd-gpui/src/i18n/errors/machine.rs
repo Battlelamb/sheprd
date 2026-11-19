@@ -16,6 +16,8 @@ impl Localize for Error {
                 error = source.to_string()
             ),
             Self::Exists(name) => fl!("error-machine-exists", name = name.as_str()),
+            #[cfg(target_os = "macos")]
+            Self::Install(error) => error.localize(),
             Self::Framework(message) => {
                 fl!("error-machine-framework", message = message.as_str())
             }
@@ -76,6 +78,42 @@ impl Localize for crate::machine::agent::Error {
                 path = path.display().to_string(),
                 error = source.to_string()
             ),
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Localize for crate::machine::install::Error {
+    fn localize(&self) -> String {
+        use crate::machine::install::Error;
+        match self {
+            Error::Cancelled => fl!("error-machine-install-cancelled"),
+            Error::Download(source) => {
+                fl!("error-machine-install-download", error = source.to_string())
+            }
+            Error::Fetch(message) => {
+                fl!("error-machine-install-fetch", message = message.as_str())
+            }
+            Error::File { path, source } => fl!(
+                "error-machine-write",
+                path = path.display().to_string(),
+                error = source.to_string()
+            ),
+            Error::Incomplete { got, expected } => fl!(
+                "error-machine-install-incomplete",
+                got = format!("{:.1}", *got as f64 / 1e9), // i18n: data
+                expected = format!("{:.1}", *expected as f64 / 1e9)  // i18n: data
+            ),
+            Error::Install(message) => {
+                fl!("error-machine-install-failed", message = message.as_str())
+            }
+            Error::NoRoom { needed, free } => fl!(
+                "error-machine-install-no-room",
+                needed = format!("{:.0}", *needed as f64 / 1e9), // i18n: data
+                free = format!("{:.0}", *free as f64 / 1e9)      // i18n: data
+            ),
+            Error::NotSupported => fl!("error-machine-install-not-supported"),
+            Error::Status(status) => fl!("error-machine-install-status", status = *status),
         }
     }
 }

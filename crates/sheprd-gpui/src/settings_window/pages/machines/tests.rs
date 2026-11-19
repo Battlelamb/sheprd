@@ -134,6 +134,8 @@ fn deleting_an_image_asks_a_second_time(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("machine-one-delete").is_some());
 }
 
+/// Making a machine from Apple's macOS, and how far that has got.
+mod create;
 mod delete_layout;
 
 /// Stepper buttons that bring a value outside the allowed range back in.

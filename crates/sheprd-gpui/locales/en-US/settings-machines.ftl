@@ -2,6 +2,18 @@
 
 settings-machines-applies-later = Changes apply the next time this machine boots, after it shuts down.
 settings-machines-cpus = CPUs
+settings-machines-create = New virtual Mac
+settings-machines-create-cancel = Stop
+settings-machines-create-description = Downloads the newest macOS this Mac runs from Apple, over 20 GB, and installs it on a new machine. It takes a while; Settings can close meanwhile. The machine then opens with a guide to set it up for agents.
+settings-machines-create-dismiss = Dismiss
+settings-machines-create-downloading = Downloading macOS { $version }: { $done } of { $total } GB
+settings-machines-create-fetching = Asking Apple which macOS this Mac runs…
+settings-machines-create-installing = Installing macOS { $version }: { $percent }%
+settings-machines-create-making = Making { $name }
+settings-machines-create-named = New virtual Mac: { $name }
+settings-machines-create-preparing = Preparing a machine for macOS { $version }…
+settings-machines-create-retry = Try again
+settings-machines-create-start = Download and install
 settings-machines-delete = Delete this machine
 settings-machines-delete-ask = Delete { $name } and free up to { $size } GB? Everything on it is lost. This cannot be undone.
 settings-machines-delete-ask-running = Stop { $name }, delete it, and free up to { $size } GB? Everything on it is lost, unsaved work too. This cannot be undone.
@@ -18,7 +30,6 @@ settings-machines-forget = Forget saved state
 settings-machines-gb = { $size } GB
 settings-machines-guide = Set up for agents
 settings-machines-memory = Memory
-settings-machines-none = No virtual Macs are installed.
 settings-machines-open = Open
 settings-machines-running = Running
 settings-machines-saving = Saving…

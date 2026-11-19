@@ -19,6 +19,10 @@ pub(crate) mod guide;
 #[cfg(target_os = "macos")]
 pub(crate) mod image;
 #[cfg(target_os = "macos")]
+pub(crate) mod install;
+#[cfg(target_os = "macos")]
+pub(crate) mod known;
+#[cfg(target_os = "macos")]
 mod quit;
 #[cfg(target_os = "macos")]
 mod settings;

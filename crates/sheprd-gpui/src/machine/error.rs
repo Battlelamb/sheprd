@@ -18,6 +18,9 @@ pub enum Error {
     },
     #[error("{0} already exists")]
     Exists(Name),
+    #[cfg(target_os = "macos")]
+    #[error(transparent)]
+    Install(#[from] super::install::Error),
     /// What Virtualization said, as its message: an `NSError` cannot leave
     /// the main thread.
     #[error("Virtualization refused the machine: {0}")]

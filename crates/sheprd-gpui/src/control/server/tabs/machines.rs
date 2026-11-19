@@ -48,7 +48,13 @@ pub(super) fn delete(_: &Caller, _: String, incoming: socket::Incoming, _: &mut 
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(super) fn new(_: String, _: String, incoming: socket::Incoming, _: &mut App) {
+pub(super) fn new(
+    _: &Caller,
+    _: Option<String>,
+    _: Option<String>,
+    incoming: socket::Incoming,
+    _: &mut App,
+) {
     unsupported(incoming);
 }
 
@@ -212,6 +218,48 @@ pub(super) fn delete(caller: &Caller, name: String, incoming: socket::Incoming, 
     .detach();
 }
 
+/// Opens Settings > Virtual Macs on the caller's window, where the user
+/// confirms downloading Apple's macOS onto a new machine: it takes tens of
+/// gigabytes, so the command only asks.
+#[cfg(target_os = "macos")]
+fn offer(caller: &Caller, name: Option<String>, incoming: socket::Incoming, cx: &mut App) {
+    let (name, incoming) = match name {
+        Some(name) => match named(name, incoming) {
+            Some((name, incoming)) => (Some(name), incoming),
+            None => return,
+        },
+        None => (None, incoming),
+    };
+    let handle = match window_for(caller, cx) {
+        Ok(handle) => handle,
+        Err(response) => return incoming.respond(response),
+    };
+    let read = cx.background_executor().spawn(async { machine::list() });
+    cx.spawn(async move |cx: &mut gpui::AsyncApp| {
+        let listings = read.await;
+        let taken = name.as_ref().is_some_and(|name| {
+            listings
+                .as_ref()
+                .is_ok_and(|listings| listings.iter().any(|listing| listing.name == *name))
+        });
+        if let Some(name) = name.as_ref().filter(|_| taken) {
+            return incoming.respond(refused(&machine::Error::Exists(name.clone())));
+        }
+        cx.update(|cx| {
+            let source = handle
+                .entity(cx)
+                .map(|view: gpui::Entity<SheprdWindow>| view.downgrade());
+            if let Ok(source) = source {
+                crate::settings_window::offer_new_machine(source, name, cx);
+            }
+        });
+        incoming.respond(Response::done(
+            "Opened Settings > Virtual Macs: press Download and install there to make it", // i18n: data
+        ));
+    })
+    .detach();
+}
+
 /// What a failure to make or save a machine says to the caller.
 #[cfg(target_os = "macos")]
 fn refused(error: &machine::Error) -> Response {
@@ -225,7 +273,22 @@ fn refused(error: &machine::Error) -> Response {
 }
 
 #[cfg(target_os = "macos")]
-pub(super) fn new(name: String, from: String, incoming: socket::Incoming, cx: &mut App) {
+pub(super) fn new(
+    caller: &Caller,
+    name: Option<String>,
+    from: Option<String>,
+    incoming: socket::Incoming,
+    cx: &mut App,
+) {
+    let Some(from) = from else {
+        return offer(caller, name, incoming, cx);
+    };
+    let Some(name) = name else {
+        return incoming.respond(Response::error(
+            ErrorCode::InvalidRequest,
+            "A machine made from an image needs a name",
+        ));
+    };
     let Some((name, incoming)) = named(name, incoming) else {
         return;
     };

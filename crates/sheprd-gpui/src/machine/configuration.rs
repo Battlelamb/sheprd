@@ -109,14 +109,22 @@ impl Bundle {
     /// Reads machine `name`'s folder. It reaches the disk, so it runs off the
     /// main thread.
     pub(super) fn read(name: &Name) -> Result<Self> {
-        let folder = store::folder(name)?;
+        Self::read_in(&store::folder(name)?, true)
+    }
+
+    /// Reads the machine in `folder`, with the agent's installer disk or,
+    /// while macOS is being installed, without it.
+    pub(super) fn read_in(folder: &Path, with_installer: bool) -> Result<Self> {
+        let folder = folder.to_owned();
         let auxiliary = folder.join(AUXILIARY);
         let disk = folder.join(DISK);
         if !auxiliary.is_file() || !disk.is_file() {
             return Err(Error::NotInstalled(folder));
         }
-        let saved = Some(store::state_file(name)?).filter(|state| state.is_file());
-        let installer = installer(&folder, bundled_installer().as_deref(), saved.is_some());
+        let saved = Some(folder.join(store::STATE)).filter(|state| state.is_file());
+        let installer = with_installer
+            .then(|| installer(&folder, bundled_installer().as_deref(), saved.is_some()))
+            .flatten();
         Ok(Self {
             hardware: read(&folder.join(HARDWARE))?,
             identity: read(&folder.join(IDENTITY))?,

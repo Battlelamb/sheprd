@@ -77,15 +77,31 @@ fn machine_has_its_own_help() {
 }
 
 #[test]
-fn machine_new_needs_an_image() {
+fn machine_new_takes_an_image_or_asks_for_macos() {
     assert_eq!(
         command(&["machine", "new", "work", "--from", "base"]),
         control::ControlCommand::Machine(control::MachineCommand::New {
-            name: "work".to_owned(),
-            image: "base".to_owned(),
+            name: Some("work".to_owned()),
+            image: Some("base".to_owned()),
         })
     );
-    assert!(LaunchOptions::parse(["machine", "new", "work"]).is_err());
+    // From an image, the new machine needs a name.
+    assert!(LaunchOptions::parse(["machine", "new", "--from", "base"]).is_err());
+    // Without one, Settings offers Apple's macOS, under a name or its own.
+    assert_eq!(
+        command(&["machine", "new", "work"]),
+        control::ControlCommand::Machine(control::MachineCommand::New {
+            name: Some("work".to_owned()),
+            image: None,
+        })
+    );
+    assert_eq!(
+        command(&["machine", "new"]),
+        control::ControlCommand::Machine(control::MachineCommand::New {
+            name: None,
+            image: None,
+        })
+    );
 }
 
 #[test]

@@ -116,15 +116,18 @@ final class FleetMembership {
         Task { await check(computer) }
     }
 
-    /// Reads the fleet from `computer`.
-    func check(_ computer: Computer) async {
+    /// Reads the fleet from `computer`; whether a fresh answer about this
+    /// phone's fleet came back. A failed read keeps the last status, which
+    /// must not settle anything a post just changed.
+    @discardableResult
+    func check(_ computer: Computer) async -> Bool {
         do {
             let member = record.flatMap { FleetLog.data(hex: $0.member) }
             let status = try await client(computer).status(member: member)
             fleets[computer.device] = status.view?.fleet
             guard let record, status.view?.fleet == record.fleet else {
                 if self.record == nil { self.status = status }
-                return
+                return false
             }
             self.status = status
             route(status)
@@ -136,9 +139,11 @@ final class FleetMembership {
                 admitted.through = computer.device
                 save(admitted)
             }
+            return true
         } catch {
             // A daemon from before the fleet answers 404 here.
             log.info("\(computer.name, privacy: .public) gave no fleet: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 
@@ -212,7 +217,7 @@ final class FleetMembership {
             .remove(member: id, alsoMembers: [], alsoHosts: [], reason: leaving ? .left : reason),
         ])
         // Left once a computer took it, whatever failed before it.
-        if leaving, outcome == .answered, problem == nil { forget() }
+        if leaving, outcome != nil, problem == nil { forget() }
     }
 
     /// Removes a host from the whole fleet.
@@ -317,8 +322,19 @@ final class FleetMembership {
             problem = Self.describe(error)
             return .answered
         }
+        // Signed once, by the first computer that answers its fleet: a post
+        // whose answer is lost goes to the next computer as the same bytes.
+        var signed: FleetClient.Signed?
         let attempt = await FleetAttempt.first(candidates) { computer in
-            try await client(computer).sign(bodies, as: key.signer, at: .now)
+            let client = client(computer)
+            let ops: FleetClient.Signed
+            if let signed {
+                ops = signed
+            } else {
+                ops = try await client.prepare(bodies, as: key.signer, at: .now)
+                signed = ops
+            }
+            try await client.post(ops)
         } failed: { computer, error in
             log.error("fleet: \(computer.name, privacy: .public) did not take it: \(error.localizedDescription, privacy: .public)")
         }
@@ -330,12 +346,12 @@ final class FleetMembership {
                 moved.through = computer.device
                 save(moved)
             }
-            await check(computer)
-            return .answered
+            // Only a fresh read says which links landed; with none, the
+            // keys of what was posted are kept.
+            return FleetPendingLink.outcome(freshRead: await check(computer))
         case let .refused(computer, count):
             problem = Self.describe(FleetClientError.refused(count))
-            await check(computer)
-            return .answered
+            return FleetPendingLink.outcome(freshRead: await check(computer))
         case let .failed(error):
             problem = error.map(Self.describe)
             // No computer answered: what was posted may have landed.

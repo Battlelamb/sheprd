@@ -43,6 +43,9 @@ pub(crate) struct PairingDialog {
     /// fleet when it asks to join (`fleet_line`). Ticked by default, as
     /// the design has it; shown only while this computer is a member.
     pub(crate) join_fleet: bool,
+    /// The fleet the phone joins once approved: set at Allow, only when
+    /// the switch was shown ticked, and spent once.
+    fleet_choice: Option<String>,
     addresses_scroll: ScrollHandle,
     other_addresses: crate::motion::Toggle,
     client: Option<Client>,
@@ -110,6 +113,7 @@ impl SheprdWindow {
             pairing: pairing.with_address(address),
             hosts: hosts::choices(Supervisor::hosts(cx)),
             join_fleet: true,
+            fleet_choice: None,
             addresses_scroll: ScrollHandle::new(),
             other_addresses: crate::motion::Toggle::default(),
             client,
@@ -171,9 +175,9 @@ impl SheprdWindow {
                         Phase::Showing { .. } | Phase::Claimed { .. } => {}
                         _ => dialog._nearby = None,
                     }
-                    if let Phase::Approved { device, ssh, .. } = dialog.pairing.phase() {
-                        if dialog.join_fleet && !ssh {
-                            crate::fleet::Fleet::expect(cx, device.clone());
+                    if let Phase::Approved { device, .. } = dialog.pairing.phase() {
+                        if let Some(fleet) = dialog.fleet_choice.take() {
+                            crate::fleet::Fleet::expect(cx, device.clone(), fleet);
                         }
                         Supervisor::refresh(cx);
                     }
@@ -202,6 +206,11 @@ impl SheprdWindow {
     fn answer_pairing(&mut self, allow: bool, cx: &mut Context<Self>) {
         if let Some(dialog) = &mut self.menu.remote_pairing {
             let ticked = hosts::ticked(&dialog.hosts);
+            // A phone, with the switch shown: this computer is a member.
+            let phone = matches!(dialog.pairing.phase(), Phase::Claimed { ssh: false, .. });
+            dialog.fleet_choice = (allow && phone && dialog.join_fleet)
+                .then(|| crate::fleet::Fleet::member_of(cx))
+                .flatten();
             dialog.pairing.answer_with_hosts(allow, ticked);
             cx.notify();
         }

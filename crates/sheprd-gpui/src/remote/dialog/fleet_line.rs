@@ -22,10 +22,8 @@ impl SheprdWindow {
     pub(super) fn pairing_fleet(&self, enabled: bool, cx: &mut Context<Self>) -> Option<Div> {
         let dialog = self.menu.remote_pairing.as_ref()?;
         // Only a member admits anyone.
+        Fleet::member_of(cx)?;
         let view = Fleet::view(cx)?;
-        if !view.members.iter().any(|member| member.id == view.me) {
-            return None;
-        }
         let theme = &self.theme;
         let on = dialog.join_fleet;
         let count = |kind| {

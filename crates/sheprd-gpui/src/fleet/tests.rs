@@ -84,15 +84,21 @@ fn an_approval_at_pairing_is_used_once_and_expires() {
     };
     let now = Instant::now() + Duration::from_secs(7200);
     let mut expected = HashMap::from([
-        (DeviceId("fresh".into()), now - Duration::from_secs(5)),
-        (DeviceId("old".into()), now - joins::EXPECT),
+        (
+            DeviceId("fresh".into()),
+            ("f1".into(), now - Duration::from_secs(5)),
+        ),
+        (DeviceId("old".into()), ("f1".into(), now - joins::EXPECT)),
+        // Given while this computer was in another fleet.
+        (DeviceId("elsewhere".into()), ("f0".into(), now)),
     ]);
     let (admit, rest) = joins::settle(
         &mut expected,
-        vec![join("fresh"), join("old"), join("other")],
+        "f1",
+        vec![join("fresh"), join("old"), join("elsewhere"), join("other")],
         now,
     );
     assert_eq!(admit, vec![join("fresh")]);
-    assert_eq!(rest, vec![join("old"), join("other")]);
+    assert_eq!(rest, vec![join("old"), join("elsewhere"), join("other")]);
     assert!(expected.is_empty());
 }

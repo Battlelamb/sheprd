@@ -25,15 +25,20 @@ pub(super) const EXPECT: Duration = Duration::from_secs(600);
 /// How often the daemon is asked while a join is expected.
 pub(super) const WATCH: Duration = Duration::from_secs(5);
 
-/// Splits `joins` into those an approval in `expected` covers, and the
-/// rest, which wait for a person. An approval is used once, and dropped
-/// once it is older than [`EXPECT`].
+/// An approval given at pairing: the fleet it was given for, and when.
+pub(super) type Expected = HashMap<DeviceId, (String, Instant)>;
+
+/// Splits `joins` into those an approval in `expected` covers for `fleet`,
+/// this computer's fleet now, and the rest, which wait for a person. An
+/// approval is used once, and dropped once it is older than [`EXPECT`] or
+/// was given for another fleet.
 pub(super) fn settle(
-    expected: &mut HashMap<DeviceId, Instant>,
+    expected: &mut Expected,
+    fleet: &str,
     joins: Vec<Join>,
     now: Instant,
 ) -> (Vec<Join>, Vec<Join>) {
-    expected.retain(|_, at| now.duration_since(*at) < EXPECT);
+    expected.retain(|_, (given, at)| given == fleet && now.duration_since(*at) < EXPECT);
     joins
         .into_iter()
         .partition(|join| expected.remove(&join.device_id).is_some())
@@ -51,16 +56,43 @@ pub(crate) fn admit(join: &Join) -> Ask {
 }
 
 impl Fleet {
-    /// Admits the phone `device` when it asks to join within [`EXPECT`]:
-    /// the person ticked Also add to your fleet when approving it.
-    pub(crate) fn expect(cx: &mut App, device: DeviceId) {
+    /// Admits the phone `device` to `fleet` when it asks to join within
+    /// [`EXPECT`]: the person ticked Also add to your fleet, shown for
+    /// that fleet, when approving it.
+    pub(crate) fn expect(cx: &mut App, device: DeviceId, fleet: String) {
         if !cx.has_global::<Self>() {
             return;
         }
         cx.update_global::<Self, _>(|this, _| {
-            this.expected.insert(device, Instant::now());
+            this.expected.insert(device, (fleet, Instant::now()));
         });
         Self::refresh(cx);
+    }
+
+    /// The approvals given at pairing and not yet spent.
+    #[cfg(test)]
+    pub(crate) fn expected(cx: &App) -> Vec<(DeviceId, String)> {
+        cx.try_global::<Self>()
+            .map(|fleet| {
+                fleet
+                    .expected
+                    .iter()
+                    .map(|(device, (given, _))| (device.clone(), given.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Sets the view as the daemon would have answered it.
+    #[cfg(test)]
+    pub(crate) fn set_view(
+        cx: &mut App,
+        view: Option<sheprd_remote_control::control::fleet::View>,
+    ) {
+        cx.update_global::<Self, _>(|this, _| {
+            this.view = view;
+            this.read = true;
+        });
     }
 
     /// The joins waiting for a person, oldest first.
@@ -97,7 +129,8 @@ impl Fleet {
                     _ => return,
                 };
                 let admit = cx.update_global::<Self, _>(|this, _| {
-                    let (admit, rest) = settle(&mut this.expected, joins, Instant::now());
+                    let fleet = this.member_fleet().map(str::to_owned).unwrap_or_default();
+                    let (admit, rest) = settle(&mut this.expected, &fleet, joins, Instant::now());
                     this.joins = rest;
                     admit
                 });

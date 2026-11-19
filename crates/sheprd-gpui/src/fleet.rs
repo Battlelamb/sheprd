@@ -120,7 +120,7 @@ pub(crate) struct Fleet {
     /// Machines an invitation or share runs for.
     acting: BTreeSet<String>,
     /// Phones approved at pairing with Also add to your fleet, by when.
-    expected: HashMap<sheprd_remote_control::control::DeviceId, Instant>,
+    expected: joins::Expected,
     /// Joins waiting for a person.
     joins: Vec<sheprd_remote_control::control::fleet::sync::Join>,
 }
@@ -135,6 +135,19 @@ impl Fleet {
     /// The fleet as this computer's daemon last said.
     pub(crate) fn view(cx: &App) -> Option<&View> {
         cx.try_global::<Self>()?.view.as_ref()
+    }
+
+    /// This computer's fleet, while it is a member.
+    pub(crate) fn member_of(cx: &App) -> Option<String> {
+        cx.try_global::<Self>()?.member_fleet().map(str::to_owned)
+    }
+
+    fn member_fleet(&self) -> Option<&str> {
+        let view = self.view.as_ref()?;
+        view.members
+            .iter()
+            .any(|member| member.id == view.me)
+            .then_some(view.fleet.as_str())
     }
 
     /// Whether the daemon has answered at least once.

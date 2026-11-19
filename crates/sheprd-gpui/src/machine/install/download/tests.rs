@@ -158,10 +158,13 @@ fn apple_is_reached_over_https_only() {
     assert!(matches!(failed, Err(Error::Download(_))));
 }
 
-/// A download that would leave no room for the install does not start.
+/// A download that would leave no room for the install does not start, even
+/// into a folder no try has made yet.
 #[test]
 fn a_download_without_room_does_not_start() {
-    let folder = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let folder = tempfile::TempDir::with_prefix_in("unused-", root.path()).unwrap();
+    fs::remove_dir(folder.path()).unwrap();
     let (url, server) = serve(|_| response("200 OK", BODY, BODY.len()));
     let failed = fetch(
         &agent(),
@@ -173,4 +176,5 @@ fn a_download_without_room_does_not_start() {
     server.join().unwrap();
     assert!(matches!(failed, Err(Error::NoRoom { .. })));
     assert!(!target(&folder).exists());
+    assert!(!partial(&target(&folder)).exists());
 }

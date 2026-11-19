@@ -75,6 +75,19 @@ pub(super) fn fetch(
         .map_err(|source| Error::Download(Box::new(source)))?;
     let status = response.status().as_u16();
     let length = response.body().content_length();
+    // Before any file is made, so a refusal leaves none behind; the folder
+    // must exist for its volume to be measured.
+    if let Some(folder) = target.parent() {
+        fs::create_dir_all(folder).map_err(|source| file_error(folder, source))?;
+    }
+    if matches!(status, 200 | 206)
+        && let (Some(length), Some(free)) = (length, target.parent().and_then(free_bytes))
+    {
+        let needed = length.saturating_add(room);
+        if free < needed {
+            return Err(Error::NoRoom { needed, free });
+        }
+    }
     let mut file = match status {
         // The rest of what an earlier try began.
         206 => open(&part, true)?,
@@ -91,12 +104,6 @@ pub(super) fn fetch(
         }
         _ => return Err(Error::Status(status)),
     };
-    if let (Some(length), Some(free)) = (length, target.parent().and_then(free_bytes)) {
-        let needed = length.saturating_add(room);
-        if free < needed {
-            return Err(Error::NoRoom { needed, free });
-        }
-    }
     let expected = length.map(|length| offset + length);
     counter
         .total

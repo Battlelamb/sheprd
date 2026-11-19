@@ -11,6 +11,7 @@ fn link(standing: Standing, ago: Duration, synced: &[&str]) -> (Link, Instant) {
         synced: synced.iter().map(|head| (*head).to_owned()).collect(),
         last: Some(now - ago),
         running: false,
+        host: None,
         standing,
     };
     (link, now)
@@ -204,4 +205,11 @@ fn the_first_answer_of_no_fleet_counts_as_a_change() {
     assert!(fleet.answered(2, Ok(None)));
     fleet.reads = 3;
     assert!(!fleet.answered(3, Ok(None)));
+}
+
+#[test]
+fn a_removed_host_that_holds_its_removal_is_never_synced_again() {
+    let mine = vec!["h1".to_owned()];
+    let (removed, now) = link(Standing::Removed, OUTSIDE * 100, &[]);
+    assert!(!removed.due(&mine, now));
 }

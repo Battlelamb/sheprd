@@ -84,39 +84,113 @@ async fn a_members_record_is_never_carried_for_it() {
     assert_eq!(a.view().heads, heads);
 }
 
+/// What `node` asks its daemon for `host`'s removal, from `heads`.
+fn removal_for(node: &Node, host: &str, heads: Vec<String>) -> sync::Applied {
+    let Answer::Applied(applied) = node.ask(Ask::RemovalFor {
+        host: host.to_owned(),
+        heads,
+    }) else {
+        panic!("not applied");
+    };
+    applied
+}
+
+fn ids(applied: &sync::Applied) -> Vec<OpId> {
+    sync::decode_ops(&applied.ops)
+        .unwrap()
+        .iter()
+        .map(Op::id)
+        .collect()
+}
+
 #[tokio::test(flavor = "multi_thread")]
-async fn a_removed_shared_host_is_still_reached_and_stops_letting_the_fleet_in() {
+async fn a_removed_host_is_handed_its_removal_and_nothing_after_it() {
     let (http, _, _) = relay().await;
     let (a, host) = (Node::new(http, 1).await, Node::new(http, 5).await);
     assert_eq!(a.ask(Ask::Found), Answer::Done);
     share(&a, &host);
-    let id = host.fleet.host().unwrap();
-    assert!(grants::still_allowed(&host.fleet, &a.fleet.me()));
+    let id = host.fleet.host().unwrap().to_string();
+    let own = a
+        .view()
+        .hosts
+        .iter()
+        .find(|shared| shared.id != id)
+        .unwrap()
+        .id
+        .clone();
+    let toggle = |allow| {
+        a.ask(Ask::Access {
+            host: own.clone(),
+            member: a.me(),
+            allow,
+        })
+    };
+    // One change the host has not seen, its removal, then one after it.
+    let held_before: Vec<OpId> = host.ops().iter().map(Op::id).collect();
+    toggle(false);
     assert_eq!(
         a.ask(Ask::RemovedHosts),
         Answer::Hosts { hosts: Vec::new() }
     );
-    a.ask(Ask::RemoveHost {
-        host: id.to_string(),
-    });
-    // Gone from the view, but still one a sync may reach and prove.
-    assert!(
-        !a.view()
-            .hosts
-            .iter()
-            .any(|shared| shared.id == id.to_string())
-    );
+    a.ask(Ask::RemoveHost { host: id.clone() });
+    toggle(true);
     assert_eq!(
         a.ask(Ask::RemovedHosts),
         Answer::Hosts {
-            hosts: vec![id.to_string()]
+            hosts: vec![id.clone()]
         }
     );
-    // Sync hands it the removal: it lets nobody in, then forgets the
-    // fleet.
-    host.fleet.receive(a.ops(), now_ms()).unwrap();
+    let heads: Vec<String> = host.view().heads;
+    let part = removal_for(&a, &id, heads);
+    let sent = ids(&part);
+    // The change before it (an ancestor) and the removal: nothing after.
+    assert_eq!(sent.len(), 2, "{sent:?}");
+    // The change after the removal is the log's only head.
+    let after = a.fleet.inner().log.as_ref().unwrap().heads()[0];
+    assert!(!sent.contains(&after));
+    assert!(sent.iter().all(|op| !held_before.contains(op)));
+    // Handed over, the host lets nobody in; asked again, there is nothing
+    // left to send, which is when Sheprd stops syncing it.
+    let Answer::Applied(answer) = host.ask(Ask::Apply(Apply {
+        fleet: Some(a.view().fleet),
+        heads: part.heads.clone(),
+        ops: part.ops.clone(),
+        ..Apply::default()
+    })) else {
+        panic!("not applied");
+    };
     assert!(!grants::still_allowed(&host.fleet, &a.fleet.me()));
     grants::apply(&host.state, &host.fleet).unwrap();
     assert!(host.lines().is_empty(), "{:?}", host.lines());
+    assert!(removal_for(&a, &id, answer.heads).ops.is_empty());
+    assert!(
+        !host
+            .fleet
+            .inner()
+            .log
+            .as_ref()
+            .unwrap()
+            .ops()
+            .any(|op| op.id() == after)
+    );
+    // It forgets the fleet.
     assert!(!host.fleet.in_fleet().unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_members_own_host_is_no_removed_host() {
+    let (http, _, _) = relay().await;
+    let (a, b) = (Node::new(http, 1).await, Node::new(http, 2).await);
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    join(&a, &b);
+    a.ask(Ask::Remove {
+        member: b.me(),
+        also_members: Vec::new(),
+        also_hosts: Vec::new(),
+        reason: crate::control::fleet::Reason::Lost,
+    });
+    assert_eq!(
+        a.ask(Ask::RemovedHosts),
+        Answer::Hosts { hosts: Vec::new() }
+    );
 }

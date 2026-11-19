@@ -173,6 +173,17 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
                 .unwrap_or_default();
             Ok(Answer::Hosts { hosts })
         }
+        Ask::RemovalFor { host, heads } => {
+            let host = sync::host(&host)?;
+            let heads = heads
+                .iter()
+                .map(|head| crate::control::fleet::OpId::from_hex(head))
+                .collect::<Option<Vec<_>>>()
+                .ok_or(crate::control::fleet::Error::Encoding)?;
+            let inner = fleet.inner();
+            let log = inner.log.as_ref().ok_or(Error::NoFleet)?;
+            Ok(Answer::Applied(sync::removal_for(log, &host, &heads)))
+        }
         Ask::Apply(apply) => {
             // A caller naming another fleet learns nothing of this one.
             if let Some(named) = &apply.fleet

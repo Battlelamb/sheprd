@@ -66,6 +66,8 @@ pub(crate) struct Link {
     synced: Vec<String>,
     last: Option<Instant>,
     running: bool,
+    /// The host it last proved to be.
+    host: Option<String>,
     pub(crate) standing: Standing,
 }
 
@@ -80,6 +82,9 @@ pub(crate) enum Standing {
     Outside,
     /// Could not be asked.
     Failed,
+    /// A host the fleet removed that holds its removal, or forgot the
+    /// fleet: not synced again.
+    Removed,
 }
 
 impl Link {
@@ -96,6 +101,7 @@ impl Link {
             Standing::Member => self.synced != mine || since(REFRESH),
             Standing::Outside => since(OUTSIDE),
             Standing::Failed => since(RETRY),
+            Standing::Removed => false,
         }
     }
 }

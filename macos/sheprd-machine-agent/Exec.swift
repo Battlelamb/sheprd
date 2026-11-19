@@ -38,12 +38,16 @@ func run(_ request: [String: Any]) throws -> [String: Any] {
     if exited.wait(timeout: deadline) == .timedOut {
         timedOut = true
         kill(-pid, SIGTERM)
-        _ = exited.wait(timeout: .now() + grace)
+        let ended = exited.wait(timeout: .now() + grace) == .success
         // What ignored that goes now, whether or not the command itself
         // ended: a group outlives its leader while any member runs, and its
         // ID is not reused meanwhile.
         kill(-pid, SIGKILL)
-        exited.wait()
+        // The waiting thread signals once, so wait again only if that wait
+        // did not take its signal.
+        if !ended {
+            exited.wait()
+        }
     }
     // What the command left running may hold its output open: it goes
     // once the time is up.

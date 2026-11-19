@@ -7,7 +7,10 @@
 //! without its runtime, so the agent never depends on this crate and this
 //! crate brings no Tokio to the app.
 
-use super::{Error, HostId, HostKind, Kind, Log, MAX_TOMBSTONES, MemberId, OpId, Result};
+use super::{
+    Body, Bundle, Error, HostId, HostKind, Kind, Log, MAX_TOMBSTONES, MemberId, Op, OpId, Result,
+    State,
+};
 use sheprd_relay_agent::fleet::Suspension;
 use std::collections::BTreeMap;
 
@@ -21,6 +24,22 @@ pub struct Asked {
     pub signer: MemberId,
     pub seq: u64,
     pub target: MemberId,
+}
+
+/// Whether removal `op` may be passed to a plain host's agent, which acts
+/// on it without checking it: every member it names has been removed.
+/// A removal the log voided may name a member another removal took, but
+/// it also names one that is still a member, and the agent would suspend
+/// that one. One that names only removed members suspends no one the log
+/// still lets in.
+#[must_use]
+pub fn for_agents(state: &State, op: &Op) -> bool {
+    let Body::Remove(remove) = op.body() else {
+        return false;
+    };
+    remove
+        .targets()
+        .all(|target| state.tombstones.contains(target))
 }
 
 /// Every removal the agent's `status --json` reports suspending for.
@@ -67,6 +86,30 @@ fn settles(log: &Log, asked: &Asked, graced: &impl Fn(&OpId) -> bool) -> bool {
 // The agent remembers as many removed members as the log does.
 const _: () = assert!(sheprd_relay_agent::access::MAX_REMOVED == MAX_TOMBSTONES);
 
+/// How new `member`'s keys (`bundle`) are, as the agent orders key
+/// updates: the sequence number of its own latest `Rotate` that put them
+/// in place. A member's operations form one chain, so a later rotation
+/// always has a higher number, whatever else it signed in between; the
+/// number of operations it signed says nothing about its keys. Keys from
+/// its admission are 0; keys rotated before the checkpoint the log was
+/// pruned to take the member's sequence number there, which no rotation
+/// pruned away exceeds and every later one does.
+fn key_version(log: &Log, member: &MemberId, bundle: &Bundle) -> u64 {
+    let rotated = log
+        .ops()
+        .filter(|op| op.signer() == *member)
+        .filter(|op| matches!(op.body(), Body::Rotate(rotated) if rotated == bundle))
+        .map(|op| op.unsigned().seq)
+        .max();
+    rotated
+        .or_else(|| {
+            let (_, base) = log.base()?;
+            let kept = base.members.get(member)?;
+            (kept.bundle == *bundle).then_some(kept.seq)
+        })
+        .unwrap_or(0)
+}
+
 /// The access file for plain host `host` as `log` has it: every live
 /// computer member, allowed or not, with the `rev` of its `Access`
 /// register, and every removed member. `suspended` are the removals the
@@ -106,7 +149,7 @@ pub fn compute(
                 rev,
                 ssh,
                 tunnel: member.bundle.tunnel,
-                keys: member.seq,
+                keys: key_version(log, id, &member.bundle),
                 former: Vec::new(),
             };
             Some((Id(id.0), member))

@@ -86,8 +86,9 @@ impl Held {
     /// What `state_dir` holds; nothing for an agent no fleet reached.
     /// Blocking.
     pub fn load(state_dir: &Path) -> Result<Self> {
-        let access = files::read_bounded(&state_dir.join(access::FILE), access::MAX_BYTES as u64)?
-            .map(|bytes| Access::parse(&bytes))
+        let path = state_dir.join(access::FILE);
+        let access = files::read_bounded(&path, access::MAX_STORED_BYTES as u64)?
+            .map(|bytes| Access::parse_stored(&bytes))
             .transpose()?;
         Ok(Self {
             access,
@@ -98,7 +99,7 @@ impl Held {
 
     fn save(&self, state_dir: &Path) -> Result<()> {
         if let Some(access) = &self.access {
-            files::write_private(&state_dir.join(access::FILE), &access.to_bytes()?)?;
+            files::write_private(&state_dir.join(access::FILE), &access.to_stored_bytes()?)?;
         }
         write_json(state_dir, SUSPENDED, &self.suspended)?;
         write_json(state_dir, REVOKED, &self.revoked)
@@ -142,8 +143,11 @@ impl Held {
             !removed && !voided
         });
         held.access = Some(merged);
-        held.save(state_dir)?;
+        // The SSH lines first: a write that fails leaves the file it was
+        // computed from unsaved, so the digest still shows the host behind
+        // and Sheprd applies it again.
         held.write_keys(keys)?;
+        held.save(state_dir)?;
         Ok(held)
     }
 
@@ -236,6 +240,11 @@ impl Held {
         }
         if changed {
             held.save(state_dir)?;
+        }
+        // Even when nothing changed: a suspension saved by an earlier try
+        // whose `authorized_keys` write failed is finished before the
+        // removal is acknowledged. Rewriting is a no-op when it is current.
+        if !taken.is_empty() {
             held.write_keys(keys)?;
         }
         Ok(taken)

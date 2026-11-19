@@ -494,3 +494,109 @@ fn a_member_naming_an_enrolled_desktops_keys_cannot_make_it_forgotten() {
     assert_eq!(desktops.entries().len(), 1);
     assert_eq!(desktops.entries()[0].label, "laptop");
 }
+
+#[cfg(unix)]
+#[test]
+fn a_retried_removal_finishes_the_ssh_lines_an_earlier_try_could_not_write() {
+    let host = Host::new();
+    host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[]))
+        .unwrap();
+    assert_eq!(host.lines().len(), 2);
+    // The first try saves the suspension, then cannot rewrite the file.
+    let lines = std::fs::read(host.keys()).unwrap();
+    std::fs::remove_file(host.keys()).unwrap();
+    let elsewhere = host.state().join("elsewhere");
+    std::fs::write(&elsewhere, &lines).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, host.keys()).unwrap();
+    let signed = Removed {
+        signer: [1; 32],
+        ..removal(0x51, &[2])
+    };
+    assert!(
+        Held::suspend(
+            host.state(),
+            Some(&host.keys()),
+            id(1),
+            std::slice::from_ref(&signed)
+        )
+        .is_err()
+    );
+    assert!(
+        Held::load(host.state())
+            .unwrap()
+            .suspended
+            .contains_key(&id(2))
+    );
+    // The retry, with the file writable again, removes the line before
+    // the removal is acknowledged.
+    std::fs::remove_file(host.keys()).unwrap();
+    std::fs::rename(&elsewhere, host.keys()).unwrap();
+    assert_eq!(host.lines().len(), 2);
+    assert_eq!(host.pass(1, &[signed]), [[0x51; 32]]);
+    assert_eq!(host.lines(), [id(1).short()]);
+}
+
+#[test]
+fn a_desktop_with_keys_a_member_rotated_away_from_is_cut_off_with_it() {
+    let host = Host::new();
+    host.enroll(2);
+    host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[]))
+        .unwrap();
+    // Member 2 rotates: the agent remembers the pair it replaced.
+    let mut rotated = file(&[(1, true, 0), (2, true, 0)], &[], &[]);
+    let two = rotated.members.get_mut(&id(2)).unwrap();
+    two.dial = dial(12);
+    two.tunnel = [12; 32];
+    two.keys = 1;
+    host.apply(rotated.clone()).unwrap();
+    // While member 2 is not suspended, the desktop is its own.
+    assert_eq!(
+        host.admitted().peer(&dial(2), &[2; 32]),
+        Some(Peer::Desktop)
+    );
+    host.suspend(1, &[removal(0x51, &[2])]);
+    assert_eq!(host.admitted().peer(&dial(2), &[2; 32]), None);
+    // Removed for good, its old pair stays cut off and listed.
+    let mut removed = rotated;
+    removed.members.remove(&id(2));
+    removed.removed.insert(id(2));
+    host.apply(removed).unwrap();
+    assert_eq!(host.admitted().peer(&dial(2), &[2; 32]), None);
+    let desktops = Authorized::load(host.state()).unwrap();
+    let report = Held::load(host.state())
+        .unwrap()
+        .report(&desktops)
+        .unwrap()
+        .unwrap();
+    assert_eq!(report.revoked.len(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn an_update_whose_ssh_lines_could_not_be_written_stays_to_be_applied_again() {
+    let host = Host::new();
+    let first = file(&[(1, true, 0), (2, true, 0)], &[], &[]);
+    host.apply(first.clone()).unwrap();
+    let lines = std::fs::read(host.keys()).unwrap();
+    std::fs::remove_file(host.keys()).unwrap();
+    let elsewhere = host.state().join("elsewhere");
+    std::fs::write(&elsewhere, &lines).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, host.keys()).unwrap();
+    // Member 2 is denied: the lines cannot be written, so nothing is kept.
+    let denied = file(&[(1, true, 0), (2, false, 1)], &[], &[]);
+    assert!(host.apply(denied.clone()).is_err());
+    let held = Held::load(host.state()).unwrap();
+    let report = held.report(&Authorized::default()).unwrap().unwrap();
+    assert_eq!(report.digest, first.digest().unwrap(), "shown as behind");
+    // Once the file is writable again, applying it again finishes it.
+    std::fs::remove_file(host.keys()).unwrap();
+    std::fs::rename(&elsewhere, host.keys()).unwrap();
+    host.apply(denied.clone()).unwrap();
+    assert_eq!(host.lines(), [id(1).short()]);
+    let report = Held::load(host.state())
+        .unwrap()
+        .report(&Authorized::default())
+        .unwrap()
+        .unwrap();
+    assert_eq!(report.digest, denied.digest().unwrap());
+}

@@ -219,6 +219,23 @@ fn a_full_file_fits_its_byte_bound() {
     }
     let bytes = file.to_bytes().unwrap();
     assert!(bytes.len() <= MAX_BYTES, "{} bytes", bytes.len());
+    // The agent's own key history has its own room beside it: every
+    // member with all the pairs it may remember still saves and reads.
+    for (index, member) in file.members.values_mut().enumerate() {
+        member.former = (0..MAX_FORMER)
+            .map(|slot| Pair {
+                dial: dial(u8::try_from(index * MAX_FORMER + slot).unwrap() % 250 + 1),
+                tunnel: [0xee; 32],
+            })
+            .collect();
+    }
+    let stored = file.to_stored_bytes().unwrap();
+    assert!(stored.len() > MAX_BYTES, "{} bytes", stored.len());
+    assert!(stored.len() <= MAX_STORED_BYTES, "{} bytes", stored.len());
+    assert_eq!(Access::parse_stored(&stored).unwrap(), file);
+    // A file Sheprd hands over carries no history.
+    assert_eq!(file.to_bytes(), Err(Error::Bounds));
+    assert!(Access::parse(&stored).is_err());
 }
 
 #[test]

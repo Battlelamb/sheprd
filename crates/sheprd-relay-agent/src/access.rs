@@ -38,8 +38,10 @@ use std::{
 
 /// The file the merged access lives in, in the state directory.
 pub const FILE: &str = "fleet";
-/// The largest access file read or written.
+/// The largest access file Sheprd hands an agent.
 pub const MAX_BYTES: usize = 64 * 1024;
+/// What one remembered key pair takes in the stored file, at most.
+const MAX_PAIR_BYTES: usize = 128;
 /// Members one file names, allowed or not: a host names at most 32 fleet
 /// dial keys, keeping room in a relay's 64 for desktops enrolled one by one.
 pub const MAX_MEMBERS: usize = 32;
@@ -184,6 +186,9 @@ pub struct Pair {
 
 /// Former key pairs kept per member.
 pub const MAX_FORMER: usize = 8;
+/// The largest file the agent keeps: an access file and, beside it, every
+/// member's key history, so remembering keys never crowds out the fleet.
+pub const MAX_STORED_BYTES: usize = MAX_BYTES + MAX_MEMBERS * MAX_FORMER * MAX_PAIR_BYTES;
 
 impl Member {
     fn valid(&self) -> bool {
@@ -269,9 +274,28 @@ impl Access {
         }
     }
 
-    /// Reads a file, checking its bounds and every member's keys.
+    /// Reads a file Sheprd handed over, checking its bounds and every
+    /// member's keys. It carries no key history: that is the agent's own.
     pub fn parse(bytes: &[u8]) -> crate::Result<Self> {
         if bytes.len() > MAX_BYTES {
+            return Err(Error::Bounds.into());
+        }
+        let access: Self = serde_json::from_slice(bytes).map_err(crate::Error::AccessFormat)?;
+        access.check()?;
+        if access
+            .members
+            .values()
+            .any(|member| !member.former.is_empty())
+        {
+            return Err(Error::Bounds.into());
+        }
+        Ok(access)
+    }
+
+    /// Reads the file the agent keeps, whose key history has its own
+    /// budget beside [`MAX_BYTES`] ([`MAX_STORED_BYTES`]).
+    pub fn parse_stored(bytes: &[u8]) -> crate::Result<Self> {
+        if bytes.len() > MAX_STORED_BYTES {
             return Err(Error::Bounds.into());
         }
         let access: Self = serde_json::from_slice(bytes).map_err(crate::Error::AccessFormat)?;
@@ -284,6 +308,10 @@ impl Access {
         if self.members.len() > MAX_MEMBERS
             || self.removed.len() > MAX_REMOVED
             || self.settled.len() > MAX_SETTLED
+            || self
+                .members
+                .values()
+                .any(|member| member.former.len() > MAX_FORMER)
         {
             return Err(Error::Bounds);
         }
@@ -293,12 +321,28 @@ impl Access {
         Ok(())
     }
 
-    /// The file's bytes: compact JSON, maps in id order, so one access
-    /// has one encoding.
+    /// The file's bytes as Sheprd hands it over: compact JSON, maps in id
+    /// order, so one access has one encoding; no key history.
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        if self
+            .members
+            .values()
+            .any(|member| !member.former.is_empty())
+        {
+            return Err(Error::Bounds);
+        }
+        self.encode(MAX_BYTES)
+    }
+
+    /// The bytes of the file the agent keeps, key history included.
+    pub fn to_stored_bytes(&self) -> Result<Vec<u8>> {
+        self.encode(MAX_STORED_BYTES)
+    }
+
+    fn encode(&self, limit: usize) -> Result<Vec<u8>> {
         self.check()?;
         let bytes = serde_json::to_vec(self).map_err(|_| Error::Bounds)?;
-        if bytes.len() > MAX_BYTES {
+        if bytes.len() > limit {
             return Err(Error::Bounds);
         }
         Ok(bytes)

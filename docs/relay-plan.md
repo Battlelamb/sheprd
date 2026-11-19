@@ -1595,8 +1595,11 @@ accepted on this purpose.
   removal floods the fleet in about two hops. It sends each `Remove` to
   each peer until that peer answers `Held`, then never again.
 - Plain hosts get it too. Every daemon dials each plain host in its
-  state from the host's record, and sends it the removals that took
-  effect in its log and that it signed itself. An agent takes `removal`
+  state from the host's record, and sends it the removals it signed
+  itself that removed every member they name (a voided removal may name
+  a member another removal took, beside one still live). Each member's
+  keys carry the sequence number of its own latest rotation, so an
+  agent never prefers keys a rotation replaced. An agent takes `removal`
   from the member tunnel keys in its access file. It checks no
   signatures and wants no parents, so it only **suspends** the target:
   it stops admitting that member's keys (and any enrolled desktop with
@@ -1730,7 +1733,7 @@ all of them. It needs no fleet key, because it only removes access.
 | One `fleet apply` or sync message | 256 KiB and 64 operations. More takes several rounds. |
 | Operations waiting for parents | 256 per peer, dropped after 1 hour |
 | Pending joins | 8 at once, each valid for 10 minutes |
-| Agent access file | 64 KiB: 32 members, 1,024 removed ids, and 64 settled removals; 8 removals remembered per suspended member, past which only its removal settles it |
+| Agent access file | 64 KiB: 32 members, 1,024 removed ids, and 64 settled removals; the copy the agent keeps adds 32 KiB for 8 former key pairs per member; 8 removals remembered per suspended member, past which only its removal settles it |
 | `removal` sessions | 8 out and 8 in at once, 30 seconds each; 64 operations and 256 KiB per message; 4 `Want` rounds; retries from 5 seconds to 10 minutes |
 
 ### Storage and logs

@@ -7,6 +7,7 @@ use p256::ecdsa::{SigningKey, VerifyingKey, signature::Signer};
 
 mod access;
 mod admission;
+mod agents;
 mod checkpoint;
 mod convergence;
 mod encoding;

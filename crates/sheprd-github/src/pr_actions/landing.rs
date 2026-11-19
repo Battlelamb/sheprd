@@ -6,7 +6,8 @@
 //! The request is sent once and names the head commit the user saw. GitHub
 //! may answer at once or accept it to run in the background; then its result
 //! is read again, a bounded number of times, and a merge still running when
-//! that ends is reported as such rather than retried.
+//! that ends, or whose result cannot be read once accepted, is reported as
+//! such rather than retried or called a failure.
 
 use super::{Outcome, Target};
 use crate::pull_request::{self, MergeMethod, clean};
@@ -73,8 +74,26 @@ pub(super) fn land(
             break;
         };
         let read = format!("{path}/{uuid}");
-        send(Step::Pause(POLL_EVERY))?;
-        answer = send(Step::Get { path: read })?;
+        // GitHub accepted the request, so a read that fails says nothing of
+        // the merge, which may still land: report it accepted, never failed.
+        let read = send(Step::Pause(POLL_EVERY)).and_then(|_| send(Step::Get { path: read }));
+        match read {
+            Ok(next) => answer = next,
+            Err(error) => {
+                tracing::warn!(
+                    category = "github_pr_land",
+                    kind = crate::log::kind(&error),
+                    "an accepted landing's result could not be read"
+                );
+                return Ok(Outcome {
+                    message: format!(
+                        "GitHub accepted landing #{}, but its result could not be read; check it on GitHub",
+                        target.number
+                    ),
+                    url: Some(target.url.clone()),
+                });
+            }
+        }
     }
     outcome(&answer, target, landing)
 }

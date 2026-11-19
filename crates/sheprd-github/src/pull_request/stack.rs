@@ -188,6 +188,33 @@ impl Stack {
     }
 }
 
+impl super::PullRequest {
+    /// The pull requests merging or queueing this one lands, bottom first:
+    /// on a stack, every open layer up to it as read; else itself.
+    pub fn lands(&self) -> Vec<u64> {
+        match self.stack() {
+            Some((stack, position)) => stack.landing(position).map(|layer| layer.number).collect(),
+            None => vec![self.number],
+        }
+    }
+
+    /// Whether a merge may be offered as far as its stack goes: in no
+    /// stack, or every layer up to it read and ready, so a confirmation can
+    /// name all that lands.
+    pub fn stack_mergeable(&self) -> bool {
+        self.stack().is_none_or(|(stack, position)| {
+            matches!(stack.verdict(position), Verdict::Ready { .. })
+        })
+    }
+
+    /// Whether queueing may be offered as far as its stack goes: in no
+    /// stack, or every layer up to it read.
+    pub fn stack_known(&self) -> bool {
+        self.stack()
+            .is_none_or(|(stack, position)| stack.read_through(position))
+    }
+}
+
 /// A pull request's entry in its base branch's merge queue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 pub struct QueueEntry {

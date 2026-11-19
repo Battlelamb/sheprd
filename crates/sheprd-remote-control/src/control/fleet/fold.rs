@@ -171,22 +171,25 @@ fn hosts(
     live.truncate(MAX_HOSTS);
     state.hosts = live.into_iter().map(|(_, id, host)| (id, host)).collect();
     // A computer is its own host. Two members naming one host is a copied
-    // intro: held until a person picks. So is a member naming a host added
-    // before its bundle (an added host joining as itself) with another
-    // account or other SSH host keys. An addition the member's bundle did
-    // not see changes nothing: no member can hold another's host by adding
-    // a copy of it.
+    // intro: held until a person picks. So is a member naming an added
+    // host with another account or other SSH host keys, unless the
+    // addition came after the member's bundle and saw it: only then is the
+    // addition the copy, and it changes nothing, so no member can hold
+    // another's host by adding a copy of it. An addition before the bundle
+    // or concurrent with it is weighed, so a bundle cannot silently take
+    // over a host another member added.
     for (id, claims) in member_hosts {
         let (intro, member) = claims[0];
         let origin = members.origins.get(&member).copied();
-        let seen_by_member = preceding.get(&id).is_some_and(|positions| {
+        let weighed = preceding.get(&id).is_some_and(|positions| {
             positions.iter().any(|at| match (at, origin) {
                 (None, _) => true,
-                (Some(at), Some(origin)) => graph.sees(origin, *at),
+                (Some(at), Some(origin)) => !graph.sees(*at, origin),
+                // A member from the base came before every addition here.
                 (Some(_), None) => false,
             })
         });
-        let added = state.hosts.get(&id).filter(|_| seen_by_member);
+        let added = state.hosts.get(&id).filter(|_| weighed);
         let held = claims.len() > 1
             || added.is_some_and(|added| {
                 added.intro.user != intro.user

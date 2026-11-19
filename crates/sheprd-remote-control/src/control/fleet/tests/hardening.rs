@@ -259,3 +259,30 @@ fn removed_members_cannot_use_up_a_live_members_removals() {
     assert!(!log.state().members.contains_key(&d.id()));
     assert!(log.state().members.contains_key(&b.id()));
 }
+
+#[test]
+fn a_bundle_concurrent_with_an_added_host_cannot_take_it_over() {
+    let (mut log, a, b, c, _) = four();
+    let (intro, _) = ca_host(60, HostKind::Sheprd);
+    let host = intro.id().unwrap();
+    let mut copy = intro.clone();
+    copy.kind = HostKind::Member;
+    copy.user = "root".into();
+    let before = log.heads().to_vec();
+    let next = |member: &Device| log.state().members[&member.id()].seq + 1;
+    let ops = [
+        sign_on(&log, &a, &before, next(&a), Body::HostAdd(intro)),
+        sign_on(
+            &log,
+            &b,
+            &before,
+            next(&b),
+            admit_body(&log, &joiner_with(9, copy)),
+        ),
+    ];
+    for op in ops {
+        apply(&mut log, op);
+    }
+    assert!(log.state().hosts[&host].held);
+    assert!(!log.state().allowed(&host, &c.id()));
+}

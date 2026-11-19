@@ -43,6 +43,52 @@ impl SheprdWindow {
         cx.notify();
     }
 
+    /// Opens a virtual Mac from the palette or a menu: the only one, or the
+    /// only one running. With none, or a choice to make, Settings lists them
+    /// and offers to make one.
+    pub(crate) fn open_some_machine(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        #[cfg(target_os = "macos")]
+        {
+            let read = cx
+                .background_executor()
+                .spawn(async { crate::machine::list() });
+            cx.spawn_in(window, async move |this, cx| {
+                let names: Vec<Name> = read
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|listing| listing.name)
+                    .collect();
+                let _ = this.update_in(cx, |this, window, cx| {
+                    crate::machine::known::remember(names.clone(), cx);
+                    let running = crate::machine::running();
+                    let pick = match (names.as_slice(), running.as_slice()) {
+                        ([only], _) | (_, [only]) => Some(only.clone()),
+                        _ => None,
+                    };
+                    match pick {
+                        Some(name) => this.open_machine(name, window, cx),
+                        None => this.offer_new_machine(cx),
+                    }
+                });
+            })
+            .detach();
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = window;
+            self.show_flash(Flash::warning(fl!("error-machine-unsupported")), cx);
+        }
+    }
+
+    /// Settings > Virtual Macs, whose first row makes a machine.
+    pub(crate) fn offer_new_machine(&mut self, cx: &mut Context<Self>) {
+        #[cfg(target_os = "macos")]
+        crate::settings_window::open_machines(cx.entity().downgrade(), None, cx);
+        #[cfg(not(target_os = "macos"))]
+        self.show_flash(Flash::warning(fl!("error-machine-unsupported")), cx);
+    }
+
     /// The machine's display, or what it is doing instead.
     pub(crate) fn render_machine_tab(&self, tab: &Tab, cx: &mut Context<Self>) -> AnyElement {
         let display = match self.machine_display(tab, cx) {

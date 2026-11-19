@@ -485,6 +485,14 @@ impl SheprdWindow {
                 self.open_px0(None, window, cx);
                 return;
             }
+            Command::OpenMachine => {
+                self.open_some_machine(window, cx);
+                return;
+            }
+            Command::NewMachine => {
+                self.offer_new_machine(cx);
+                return;
+            }
             Command::RemotePair => {
                 self.open_remote_pairing(window, cx);
                 return;

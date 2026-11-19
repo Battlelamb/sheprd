@@ -570,3 +570,33 @@ fn a_desktop_with_keys_a_member_rotated_away_from_is_cut_off_with_it() {
         .unwrap();
     assert_eq!(report.revoked.len(), 1);
 }
+
+#[cfg(unix)]
+#[test]
+fn an_update_whose_ssh_lines_could_not_be_written_stays_to_be_applied_again() {
+    let host = Host::new();
+    let first = file(&[(1, true, 0), (2, true, 0)], &[], &[]);
+    host.apply(first.clone()).unwrap();
+    let lines = std::fs::read(host.keys()).unwrap();
+    std::fs::remove_file(host.keys()).unwrap();
+    let elsewhere = host.state().join("elsewhere");
+    std::fs::write(&elsewhere, &lines).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, host.keys()).unwrap();
+    // Member 2 is denied: the lines cannot be written, so nothing is kept.
+    let denied = file(&[(1, true, 0), (2, false, 1)], &[], &[]);
+    assert!(host.apply(denied.clone()).is_err());
+    let held = Held::load(host.state()).unwrap();
+    let report = held.report(&Authorized::default()).unwrap().unwrap();
+    assert_eq!(report.digest, first.digest().unwrap(), "shown as behind");
+    // Once the file is writable again, applying it again finishes it.
+    std::fs::remove_file(host.keys()).unwrap();
+    std::fs::rename(&elsewhere, host.keys()).unwrap();
+    host.apply(denied.clone()).unwrap();
+    assert_eq!(host.lines(), [id(1).short()]);
+    let report = Held::load(host.state())
+        .unwrap()
+        .report(&Authorized::default())
+        .unwrap()
+        .unwrap();
+    assert_eq!(report.digest, denied.digest().unwrap());
+}

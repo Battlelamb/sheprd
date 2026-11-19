@@ -1733,7 +1733,7 @@ all of them. It needs no fleet key, because it only removes access.
 | One `fleet apply` or sync message | 256 KiB and 64 operations. More takes several rounds. |
 | Operations waiting for parents | 256 per peer, dropped after 1 hour |
 | Pending joins | 8 at once, each valid for 10 minutes |
-| Agent access file | 64 KiB: 32 members, 1,024 removed ids, and 64 settled removals; 8 removals remembered per suspended member, past which only its removal settles it |
+| Agent access file | 64 KiB: 32 members, 1,024 removed ids, and 64 settled removals; the copy the agent keeps adds 32 KiB for 8 former key pairs per member; 8 removals remembered per suspended member, past which only its removal settles it |
 | `removal` sessions | 8 out and 8 in at once, 30 seconds each; 64 operations and 256 KiB per message; 4 `Want` rounds; retries from 5 seconds to 10 minutes |
 
 ### Storage and logs

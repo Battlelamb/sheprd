@@ -184,6 +184,9 @@ impl Context {
             self.told.place = place;
             body.push('\n');
             body.push_str(&self.part(Kind::of(origin), Some(origin)));
+            if let Some(kind) = Kind::after(origin) {
+                body.push_str(&self.part(kind, Some(origin)));
+            }
         }
         Some(note::wrap(place, &body))
     }

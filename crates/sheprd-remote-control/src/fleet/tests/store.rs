@@ -40,6 +40,7 @@ async fn fleet_apply_with_no_daemon_running_keeps_the_log() {
         fleet: Some(fleet.clone()),
         heads: Vec::new(),
         ops: sync::encode_ops(&a.ops()),
+        nonce: None,
     };
     let applied = run_apply(b.dir.path(), apply).unwrap();
     assert_eq!(applied.fleet, fleet);
@@ -75,6 +76,7 @@ async fn an_answer_carries_what_the_caller_lacks() {
         fleet: Some(a.view().fleet),
         heads: caller.iter().map(ToString::to_string).collect(),
         ops: Vec::new(),
+        nonce: None,
     })) else {
         panic!("no answer");
     };
@@ -119,9 +121,40 @@ async fn apply_naming_another_fleet_learns_nothing() {
         fleet: Some(b.view().fleet),
         heads: Vec::new(),
         ops: Vec::new(),
+        nonce: None,
     };
     assert!(matches!(
         ask::answer(&a.state, &a.fleet, Ask::Apply(apply), now_ms()),
         Err(Error::OtherFleet)
     ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_answer_proves_which_host_gave_it() {
+    let (http, _, _) = relay().await;
+    let a = Node::new(http, 1).await;
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    let nonce = "n0nce";
+    let Answer::Applied(applied) = a.ask(Ask::Apply(Apply {
+        fleet: None,
+        heads: Vec::new(),
+        ops: Vec::new(),
+        nonce: Some(nonce.into()),
+    })) else {
+        panic!("no answer");
+    };
+    let hosts: Vec<String> = a.view().hosts.into_iter().map(|host| host.id).collect();
+    assert!(sync::proven(&applied, nonce, &hosts));
+    // Another nonce, other heads, or a host the fleet does not hold: no.
+    assert!(!sync::proven(&applied, "other", &hosts));
+    let mut moved = applied.clone();
+    moved.heads.push("00".repeat(32));
+    assert!(!sync::proven(&moved, nonce, &hosts));
+    assert!(!sync::proven(&applied, nonce, &["11".repeat(32)]));
+    // A machine that only echoes the fleet id, with no proof.
+    let echoed = sync::Applied {
+        proof: None,
+        ..applied
+    };
+    assert!(!sync::proven(&echoed, nonce, &hosts));
 }

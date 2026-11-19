@@ -29,6 +29,7 @@ fn fleet_requests_keep_their_wire_names() {
             fleet: None,
             heads: vec!["h".into()],
             ops: Vec::new(),
+            nonce: None,
         })))
     );
     assert_eq!(

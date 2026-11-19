@@ -23,6 +23,21 @@ pub struct Apply {
     pub heads: Vec<String>,
     #[serde(default)]
     pub ops: Vec<String>,
+    /// A fresh random value the answering computer signs with its
+    /// certificate authority ([`Proof`]), so the caller knows it is a host
+    /// the fleet holds before sending it anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<String>,
+}
+
+/// An answering computer's proof that it is the host its certificate
+/// names: its certificate authority's certificate and key, and that key's
+/// signature over [`proof_message`], all base64url.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Proof {
+    pub certificate: String,
+    pub key: String,
+    pub signature: String,
 }
 
 /// What a `fleet apply` came to.
@@ -38,6 +53,64 @@ pub struct Applied {
     /// The answer stopped at [`MAX_ANSWER_BYTES`]: ask again.
     #[serde(default)]
     pub more: bool,
+    /// The answering computer's proof, when the caller sent a nonce and it
+    /// has a certificate authority to sign with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proof: Option<Proof>,
+}
+
+/// What a computer answering a `fleet apply` signs: the domain, the
+/// caller's nonce, then its fleet and its heads, each after its length.
+#[must_use]
+pub fn proof_message(nonce: &str, fleet: &str, heads: &[String]) -> Vec<u8> {
+    let mut message = [super::DOMAIN, b"/sync"].concat();
+    for text in std::iter::once(nonce)
+        .chain(std::iter::once(fleet))
+        .chain(heads.iter().map(String::as_str))
+    {
+        message.extend_from_slice(&u32::try_from(text.len()).unwrap_or(u32::MAX).to_be_bytes());
+        message.extend_from_slice(text.as_bytes());
+    }
+    message
+}
+
+/// Whether `applied` comes from one of `hosts` (host ids, hex): its proof's
+/// certificate hashes to one of them, holds the proof's key, and that key
+/// signed [`proof_message`] for `nonce`, this answer's fleet, and its
+/// heads. A machine that only echoes a fleet id proves nothing.
+#[must_use]
+pub fn proven(applied: &Applied, nonce: &str, hosts: &[String]) -> bool {
+    use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
+    let Some(proof) = &applied.proof else {
+        return false;
+    };
+    let (Ok(certificate), Ok(key), Ok(signature)) = (
+        bytes(&proof.certificate),
+        bytes(&proof.key),
+        bytes(&proof.signature),
+    ) else {
+        return false;
+    };
+    let host = HostId(super::sha256(&[&certificate])).to_string();
+    // As `host_relay` checks a carried answer: the key must be the
+    // certificate's own.
+    if !hosts.contains(&host)
+        || key.len() != 65
+        || key[0] != 0x04
+        || !certificate
+            .windows(key.len())
+            .any(|window| window == key.as_slice())
+    {
+        return false;
+    }
+    let (Ok(key), Ok(signature)) = (
+        VerifyingKey::from_sec1_bytes(&key),
+        Signature::from_slice(&signature),
+    ) else {
+        return false;
+    };
+    let message = proof_message(nonce, &applied.fleet, &applied.heads);
+    key.verify(&message, &signature).is_ok()
 }
 
 impl Apply {
@@ -76,6 +149,7 @@ pub fn answer(log: &Log, caller_heads: &[OpId], refused: usize) -> Applied {
         ops,
         refused,
         more,
+        proof: None,
     }
 }
 

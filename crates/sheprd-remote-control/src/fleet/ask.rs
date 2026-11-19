@@ -124,9 +124,24 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             let heads = apply.heads()?;
             let ops = apply.ops()?;
             let refused = fleet.receive(ops, now_ms)?;
-            let inner = fleet.inner();
-            let log = inner.log.as_ref().ok_or(Error::NoFleet)?;
-            Ok(Answer::Applied(sync::answer(log, &heads, refused)))
+            let mut applied = {
+                let inner = fleet.inner();
+                let log = inner.log.as_ref().ok_or(Error::NoFleet)?;
+                sync::answer(log, &heads, refused)
+            };
+            if let (Some(nonce), Some(authority)) = (&apply.nonce, &state.authority) {
+                let message = sync::proof_message(nonce, &applied.fleet, &applied.heads);
+                if let (Some(key), Some(signature)) =
+                    (authority.public_key(), authority.sign(&message))
+                {
+                    applied.proof = Some(sync::Proof {
+                        certificate: sync::text(authority.ca_der()),
+                        key: sync::text(&key),
+                        signature: sync::text(&signature),
+                    });
+                }
+            }
+            Ok(Answer::Applied(applied))
         }
     }
 }

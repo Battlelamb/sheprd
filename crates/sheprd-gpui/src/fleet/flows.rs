@@ -9,8 +9,8 @@ use gpui::App;
 use sheprd_remote_control::control::{
     Request, Response,
     fleet::{
-        Method,
-        sync::{Answer, Applied, Apply, Ask},
+        HostKind, Method,
+        sync::{self, Answer, Applied, Apply, Ask},
     },
 };
 use std::{sync::atomic::AtomicBool, time::Instant};
@@ -54,21 +54,36 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
     let executor = cx.background_executor().clone();
     cx.spawn(async move |cx| {
         let outcome = async {
-            let mine = match daemon(&client, Ask::Status).await? {
-                Answer::Status { view: Some(view) } if view.fleet == fleet => view.heads.clone(),
+            let view = match daemon(&client, Ask::Status).await? {
+                Answer::Status { view: Some(view) } if view.fleet == fleet => view,
                 _ => return Ok((Standing::Outside, Vec::new(), Vec::new())),
             };
+            // Hosts that sign with a certificate authority: computers in
+            // the fleet and Sheprd hosts. Only one of them may prove it is
+            // the machine answering.
+            let hosts: Vec<String> = view
+                .hosts
+                .iter()
+                .filter(|host| host.kind != HostKind::Agent)
+                .map(|host| host.id.clone())
+                .collect();
+            let nonce = uuid::Uuid::new_v4().simple().to_string();
             let target = machine.target.clone();
+            // The fleet is not named: a machine outside it learns nothing,
+            // and one that names it back must still prove it.
             let ask = Apply {
-                fleet: Some(fleet.clone()),
-                heads: mine,
+                fleet: None,
+                heads: view.heads.clone(),
                 ops: Vec::new(),
+                nonce: Some(nonce.clone()),
             };
             let theirs = executor
                 .spawn(async move { remote::apply(&target, &ask, &AtomicBool::new(false)) })
                 .await;
             let theirs = match theirs {
-                Ok(theirs) if theirs.fleet == fleet => theirs,
+                Ok(theirs) if theirs.fleet == fleet && sync::proven(&theirs, &nonce, &hosts) => {
+                    theirs
+                }
                 Ok(_) | Err(Error::NoProgram) => {
                     return Ok((Standing::Outside, Vec::new(), Vec::new()));
                 }
@@ -80,6 +95,7 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
                     fleet: Some(fleet.clone()),
                     heads: theirs.heads.clone(),
                     ops: theirs.ops,
+                    nonce: None,
                 },
             )
             .await?;
@@ -90,6 +106,7 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
                     fleet: Some(fleet.clone()),
                     heads: ours.heads.clone(),
                     ops: ours.ops,
+                    nonce: None,
                 };
                 let answer = executor
                     .spawn(async move { remote::apply(&target, &send, &AtomicBool::new(false)) })
@@ -162,6 +179,7 @@ pub(crate) fn invite(
                     fleet: Some(fleet.clone()),
                     heads: Vec::new(),
                     ops: Vec::new(),
+                    nonce: None,
                 },
             )
             .await?;
@@ -170,6 +188,7 @@ pub(crate) fn invite(
                 fleet: None,
                 heads: Vec::new(),
                 ops: everything.ops,
+                nonce: None,
             };
             executor
                 .spawn(async move { remote::apply(&target, &send, &AtomicBool::new(false)) })

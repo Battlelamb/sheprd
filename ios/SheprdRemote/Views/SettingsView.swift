@@ -27,7 +27,7 @@ struct SettingsView: View {
             Section {
                 ForEach(model.computers) { computer in
                     NavigationLink {
-                        ComputerScreen(device: computer.device)
+                        ComputerScreen(device: computer.device).makesRoomForConnectionToast()
                     } label: {
                         ComputerRow(computer: computer)
                     }
@@ -66,7 +66,7 @@ struct SettingsView: View {
             }
             Section {
                 NavigationLink {
-                    FleetSettingsView()
+                    FleetSettingsView().makesRoomForConnectionToast()
                 } label: {
                     LabeledContent("Fleet", value: fleetSummary)
                 }
@@ -75,7 +75,7 @@ struct SettingsView: View {
             }
             Section {
                 NavigationLink {
-                    RelaysView()
+                    RelaysView().makesRoomForConnectionToast()
                 } label: {
                     LabeledContent("Relays", value: "\(model.savedRelays.relays.count)")
                 }
@@ -94,7 +94,7 @@ struct SettingsView: View {
                     ForEach(RowLines.choices, id: \.self) { Text($0, format: .number).tag($0) }
                 }
                 NavigationLink {
-                    TextShortcutsView()
+                    TextShortcutsView().makesRoomForConnectionToast()
                 } label: {
                     LabeledContent("Text Shortcuts", value: "\(model.shortcuts.shortcuts.count)")
                 }
@@ -114,7 +114,7 @@ struct SettingsView: View {
             }
             Section("Terminal") {
                 NavigationLink {
-                    TerminalKeysView()
+                    TerminalKeysView().makesRoomForConnectionToast()
                 } label: {
                     let layout = model.termKeys.layout
                     LabeledContent("Terminal Keys", value: "\(layout.top.count + layout.bottom.count)")
@@ -190,9 +190,9 @@ struct SettingsView: View {
         .environment(\.editMode, $editMode)
         #if DEBUG
         .task { if UserDefaults.standard.bool(forKey: "editComputers") { editMode = .active } }
-        .navigationDestination(isPresented: $showingRelays) { RelaysView() }
+        .navigationDestination(isPresented: $showingRelays) { RelaysView().makesRoomForConnectionToast() }
         .task { if UserDefaults.standard.bool(forKey: "openRelays") { showingRelays = true } }
-        .navigationDestination(isPresented: $showingGitHub) { GitHubSettingsView() }
+        .navigationDestination(isPresented: $showingGitHub) { GitHubSettingsView().makesRoomForConnectionToast() }
         .task { if UserDefaults.standard.bool(forKey: "openGitHub") { showingGitHub = true } }
         #endif
     }

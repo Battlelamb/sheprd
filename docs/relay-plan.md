@@ -581,8 +581,9 @@ addresses, timing, sizes, and which pseudonymous keys reach which route.
 **Nothing to authorize on the relay.** The relay has no users, accounts,
 or lists to keep. Who may reach a computer is the computer's own choice,
 made when a device pairs, and the relay holds that choice only while the
-computer is connected. Optional listen tokens (off by default) keep a
-relay to its owner's computers; dialers never need one. A token file
+computer is connected. Optional listen tokens (off by default in the
+relay, on by default in the droplets `deploy/relay` makes) keep a relay to
+its owner's computers; dialers never need one. A token file
 (`--listen-token-file`) holds one per person or machine, `NAME: TOKEN` per
 line, re-read every 30 seconds: taking a token out closes the listeners it
 admitted and no one else's, and emptying or deleting the file closes them
@@ -1957,8 +1958,16 @@ distroless `nonroot` image. `deploy/relay` holds the rest:
   on `127.0.0.1` only.
 - `cloud-init.yml`: DigitalOcean user data for Ubuntu 24.04. Installs
   Docker, allows only 22, 80, and 443 through `ufw`, makes a dashboard
-  token, and starts the relay at `IP.sslip.io` unless a domain is given.
-- `create-droplet.sh REGION...`: one droplet per region with `doctl`.
+  token, sets the listen token filled into `__RELAY_LISTEN_TOKEN__`, and
+  starts the relay at `IP.sslip.io` unless a domain is given. The relay
+  stays open when the placeholder is left unfilled or says `open`.
+- `create-droplet.sh REGION...`: one droplet per region with `doctl`. Each
+  gets its own listen token (32 random bytes, base64url), unless
+  `RELAY_OPEN=1`, and the script prints it with the relay's address and a
+  `sheprd://relay?endpoint=…&token=…` link that opens Settings with both
+  filled in. sheprd.org/relay does the same in the browser, with an "Open
+  relay" checkbox. The token is also in `/root/sheprd-relay-login.txt` on
+  the droplet; nothing logs it.
 - `app.yaml`: DigitalOcean App Platform, with no server: WebSockets only,
   since App Platform has no UDP. The relay listens on `PORT` and reads
   callers' addresses from `do-connecting-ip` (`RELAY_CLIENT_IP_HEADER`).

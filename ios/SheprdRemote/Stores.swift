@@ -24,11 +24,15 @@ final class ChatStore {
     private(set) var diverged = false
     /// Prompts this phone sent that the transcript does not show yet.
     private(set) var outgoing: [Outgoing] = []
+    /// The message effects of this chat: a transcript from the cache or a
+    /// snapshot only notes them, and live changes play the new ones.
+    let effects = ChatEffectsModel()
 
     init(key: PaneKey, cached: Cache.CachedChat?) {
         self.key = key
         transcript = cached?.transcript
         cursor = cached?.cursor
+        if let transcript { effects.history(transcript) }
     }
 
     #if DEBUG
@@ -38,6 +42,7 @@ final class ChatStore {
         transcript = sample
         connected = true
         stale = false
+        effects.history(sample)
     }
     #endif
 
@@ -45,6 +50,7 @@ final class ChatStore {
         switch event {
         case let .chatSnapshot(snapshot):
             transcript = snapshot.transcript
+            effects.history(snapshot.transcript)
             cursor = snapshot.cursor
             connected = snapshot.connected
             stale = false
@@ -66,6 +72,7 @@ final class ChatStore {
                 cursor = item.cursor
             }
             transcript = current
+            effects.live(current, changed: changes.compactMap(\.change.entry))
         case let .chatConnection(_, connected):
             self.connected = connected
         default:

@@ -21,6 +21,9 @@ pub struct View {
     pub suspended: Vec<String>,
     /// Operations waiting for their parents.
     pub pending: usize,
+    /// The log's heads, hex: Sheprd syncs a machine again when they move.
+    #[serde(default)]
+    pub heads: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -42,6 +45,10 @@ pub struct HostView {
     /// The computer members allowed on it.
     pub grants: Vec<String>,
     pub relays: Vec<String>,
+    /// What this device's `ssh` reaches it as, `USER@r-ID.sheprd.invalid`,
+    /// when the fleet lets it in there; through `relay-connect`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
     pub rev: u64,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub held: bool,
@@ -83,6 +90,10 @@ impl View {
                         .map(ToString::to_string)
                         .collect(),
                     relays: host.record.relays.clone(),
+                    target: state
+                        .allowed(id, me)
+                        .then(|| target(&host.intro.user, &host.record.route))
+                        .flatten(),
                     rev: host.record.rev,
                     held: host.held,
                     flagged: host.flagged,
@@ -92,6 +103,21 @@ impl View {
             equivocating: state.equivocating.iter().map(ToString::to_string).collect(),
             suspended: suspended.iter().map(ToString::to_string).collect(),
             pending: log.pending(),
+            heads: log.heads().iter().map(ToString::to_string).collect(),
         }
     }
+}
+
+/// `USER@r-ID.sheprd.invalid` for the host whose relay route is `route`:
+/// the name `relay-connect` dials it by (`sheprd_client::relay_host`).
+fn target(user: &str, route: &str) -> Option<String> {
+    let route = sheprd_relay::RouteId::parse(route)?;
+    let id: String = route.as_bytes()[..sheprd_client::relay_host::ID_LEN / 2]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Some(format!(
+        "{user}@{}",
+        sheprd_client::relay_host::host_name(&id)
+    ))
 }

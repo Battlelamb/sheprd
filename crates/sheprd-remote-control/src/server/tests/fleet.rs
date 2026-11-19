@@ -23,6 +23,17 @@ fn fleet_apply_and_bundle_parse() {
 }
 
 #[test]
+fn fleet_intro_parses() {
+    assert_eq!(
+        parse(args(&["fleet", "intro"])).unwrap(),
+        Invocation::Fleet {
+            state_dir: None,
+            action: FleetAction::Intro,
+        }
+    );
+}
+
+#[test]
 fn fleet_refuses_what_it_does_not_take() {
     assert_eq!(
         parse(args(&["fleet", "bundle"])).unwrap_err(),
@@ -42,6 +53,6 @@ fn fleet_refuses_what_it_does_not_take() {
     ));
     assert_eq!(
         parse(args(&["fleet"])).unwrap_err(),
-        ParseError::Missing("apply or bundle")
+        ParseError::Missing("apply, bundle, or intro")
     );
 }

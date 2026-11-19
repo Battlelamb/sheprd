@@ -25,6 +25,8 @@ pub enum Error {
     NotApplied,
     #[error("that bundle is not this computer's")]
     NotMine,
+    #[error("this computer is in another fleet")]
+    OtherFleet,
     #[error("the fleet's peers file does not read")]
     Peers,
     #[error(transparent)]

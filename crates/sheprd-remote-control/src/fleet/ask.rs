@@ -106,7 +106,21 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             fleet.sign(Body::HostRemove(sync::host(&host)?), now_ms)?;
             Ok(Answer::Done)
         }
+        Ask::Intro => {
+            let mut intro = me::intro(state, now_ms)?;
+            intro.kind = crate::control::fleet::HostKind::Sheprd;
+            Ok(Answer::Intro {
+                intro: sync::text(&intro.to_bytes()?),
+            })
+        }
         Ask::Apply(apply) => {
+            // A caller naming another fleet learns nothing of this one.
+            if let Some(named) = &apply.fleet
+                && let Some(log) = &fleet.inner().log
+                && *named != log.fleet().to_string()
+            {
+                return Err(Error::OtherFleet);
+            }
             let heads = apply.heads()?;
             let ops = apply.ops()?;
             let refused = fleet.receive(ops, now_ms)?;

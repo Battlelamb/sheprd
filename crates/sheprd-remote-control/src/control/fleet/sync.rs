@@ -139,6 +139,9 @@ pub enum Ask {
     RemoveHost { host: String },
     /// Takes operations another member carried, and says what it lacks.
     Apply(Apply),
+    /// This computer as a Sheprd host, its record signed by its own
+    /// certificate authority, for a member about to share it.
+    Intro,
 }
 
 /// What the daemon answers.
@@ -155,6 +158,11 @@ pub enum Answer {
     },
     Applied(Applied),
     Done,
+    /// [`Ask::Intro`]'s answer: a `HostIntro`'s canonical bytes,
+    /// base64url.
+    Intro {
+        intro: String,
+    },
 }
 
 /// Reads a member id from hex.

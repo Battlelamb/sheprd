@@ -82,7 +82,15 @@ async fn an_answer_carries_what_the_caller_lacks() {
     b.fleet
         .receive(sync::decode_ops(&applied.ops).unwrap(), now_ms())
         .unwrap();
-    assert_eq!(b.view().hosts, a.view().hosts);
+    // The same hosts and grants; each computer's own `target` differs.
+    let shared = |node: &Node| {
+        node.view()
+            .hosts
+            .into_iter()
+            .map(|host| (host.id, host.grants))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(shared(&b), shared(&a));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -98,5 +106,22 @@ async fn a_peers_file_that_does_not_read_is_an_error() {
     assert!(matches!(
         Fleet::load(a.dir.path(), now_ms()),
         Err(Error::Peers)
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn apply_naming_another_fleet_learns_nothing() {
+    let (http, _, _) = relay().await;
+    let (a, b) = (Node::new(http, 1).await, Node::new(http, 2).await);
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    assert_eq!(b.ask(Ask::Found), Answer::Done);
+    let apply = Apply {
+        fleet: Some(b.view().fleet),
+        heads: Vec::new(),
+        ops: Vec::new(),
+    };
+    assert!(matches!(
+        ask::answer(&a.state, &a.fleet, Ask::Apply(apply), now_ms()),
+        Err(Error::OtherFleet)
     ));
 }

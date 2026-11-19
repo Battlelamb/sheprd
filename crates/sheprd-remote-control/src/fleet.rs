@@ -248,11 +248,12 @@ pub fn run_apply(state_dir: &Path, apply: sync::Apply) -> Result<sync::Applied> 
     }
 }
 
-/// `fleet bundle`, run over SSH: this computer's bundle, signed for
-/// `fleet`, from the running daemon. Blocking.
-pub fn run_bundle(state_dir: &Path, fleet: String) -> Result<sync::Answer> {
+/// `fleet bundle` or `fleet intro`, run over SSH: this computer's bundle
+/// signed for a fleet, or its host intro, from the running daemon, which
+/// holds the certificate authority's key. Blocking.
+pub fn run_ask(state_dir: &Path, ask: sync::Ask) -> Result<sync::Answer> {
     use crate::control::{Request, Response};
-    let request = Request::Fleet(Box::new(sync::Ask::Bundle { fleet }));
+    let request = Request::Fleet(Box::new(ask));
     match crate::control::request(&crate::control::address(state_dir), &request)? {
         Response::Fleet(answer) => Ok(*answer),
         Response::Error { message, .. } => Err(Error::Daemon(message)),

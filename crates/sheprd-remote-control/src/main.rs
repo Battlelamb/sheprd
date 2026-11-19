@@ -62,7 +62,14 @@ fn main() -> ExitCode {
                     let apply = serde_json::from_str(&text).map_err(std::io::Error::from)?;
                     print_json(&fleet::run_apply(state_dir, apply)?)
                 }
-                FleetAction::Bundle { fleet: id } => print_json(&fleet::run_bundle(state_dir, id)?),
+                FleetAction::Bundle { fleet: id } => {
+                    let ask = control::fleet::sync::Ask::Bundle { fleet: id };
+                    print_json(&fleet::run_ask(state_dir, ask)?)
+                }
+                FleetAction::Intro => print_json(&fleet::run_ask(
+                    state_dir,
+                    control::fleet::sync::Ask::Intro,
+                )?),
             });
         }
         Ok(Invocation::DesktopPair { state_dir, name }) => {

@@ -164,6 +164,9 @@ pub enum FleetAction {
     /// Prints this computer's bundle signed for the fleet with this id, for
     /// the member about to admit it.
     Bundle { fleet: String },
+    /// Prints this computer as a Sheprd host, its record signed by its
+    /// certificate authority, for the member about to share it.
+    Intro,
 }
 
 pub const USAGE: &str = "\
@@ -176,6 +179,7 @@ Usage: sheprd-remote-control serve --state-dir DIR [options]
        sheprd-remote-control relays [--offer] [--state-dir DIR] [< RELAYS.json]
        sheprd-remote-control fleet apply [--state-dir DIR] < APPLY.json
        sheprd-remote-control fleet bundle --fleet ID [--state-dir DIR]
+       sheprd-remote-control fleet intro [--state-dir DIR]
        sheprd-remote-control desktop-pair --name NAME [--state-dir DIR]
        sheprd-remote-control relay-connect [--state-dir DIR] HOST
 
@@ -233,7 +237,9 @@ the ProxyCommand ssh runs for it.
 fleet apply and fleet bundle are the fleet's halves Sheprd on another
 computer runs here over SSH: apply takes signed fleet operations and
 prints what this computer holds that the caller lacks; bundle prints this
-computer's keys, signed, for the member about to admit it.
+computer's keys, signed, for the member about to admit it; intro prints
+this computer as a host, signed by its certificate authority, for a
+member about to share it.
 Their state directory defaults to the one Sheprd on this computer uses.
 ";
 
@@ -527,7 +533,7 @@ fn parse_fleet(mut args: impl Iterator<Item = OsString>) -> Result<Invocation, P
     let verb = args
         .next()
         .and_then(|verb| verb.to_str().map(str::to_owned))
-        .ok_or(ParseError::Missing("apply or bundle"))?;
+        .ok_or(ParseError::Missing("apply, bundle, or intro"))?;
     let (mut state_dir, mut fleet) = (None, None);
     while let Some(arg) = args.next() {
         let name = arg.to_str().unwrap_or_default().to_owned();
@@ -554,6 +560,7 @@ fn parse_fleet(mut args: impl Iterator<Item = OsString>) -> Result<Invocation, P
     }
     let action = match verb.as_str() {
         "apply" if fleet.is_none() => FleetAction::Apply,
+        "intro" if fleet.is_none() => FleetAction::Intro,
         "bundle" => FleetAction::Bundle {
             fleet: fleet.ok_or(ParseError::Missing("--fleet"))?,
         },

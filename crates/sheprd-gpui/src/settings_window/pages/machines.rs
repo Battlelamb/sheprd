@@ -178,7 +178,7 @@ impl SettingsWindow {
         cx.notify();
     }
 
-    /// A value between two buttons that step it within `range`.
+    /// A value between two buttons that step it within `range`, or toward it.
     fn machine_stepper(
         &self,
         id: String,
@@ -197,8 +197,7 @@ impl SettingsWindow {
                 },
             )
         };
-        let lower = current.checked_sub(1).filter(|next| range.contains(next));
-        let higher = current.checked_add(1).filter(|next| range.contains(next));
+        let (lower, higher) = steps(current, &range);
         div()
             .flex()
             .flex_row()
@@ -490,6 +489,23 @@ impl SettingsWindow {
             page.child(self.control_note(failure))
         })
     }
+}
+
+/// What a stepper's buttons set `current` to, each `None` when disabled. A
+/// value outside `range`, such as an 8 GiB default on a Mac that allows 4,
+/// or an image made on a bigger Mac, steps to the nearest end of it.
+fn steps(current: u16, range: &std::ops::RangeInclusive<u16>) -> (Option<u16>, Option<u16>) {
+    let lower = if current > *range.end() {
+        Some(*range.end())
+    } else {
+        current.checked_sub(1).filter(|next| range.contains(next))
+    };
+    let higher = if current < *range.start() {
+        Some(*range.start())
+    } else {
+        current.checked_add(1).filter(|next| range.contains(next))
+    };
+    (lower, higher)
 }
 
 #[cfg(test)]

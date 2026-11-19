@@ -135,3 +135,6 @@ fn deleting_an_image_asks_a_second_time(cx: &mut TestAppContext) {
 }
 
 mod delete_layout;
+
+/// Stepper buttons that bring a value outside the allowed range back in.
+mod steps;

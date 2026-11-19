@@ -123,7 +123,7 @@ pub async fn run(options: Options) -> Result<()> {
         }
         Err(error) => return Err(error.into()),
     };
-    let fleet = match crate::fleet::Fleet::load(&options.state_dir, web::now_ms()) {
+    let fleet = match crate::fleet::Fleet::load_exclusive(&options.state_dir, web::now_ms()) {
         Ok(fleet) => Some(Arc::new(fleet)),
         Err(error) => {
             tracing::warn!(%error, "Could not load the fleet; it stays off until the daemon restarts");

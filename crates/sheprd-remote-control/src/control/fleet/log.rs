@@ -23,7 +23,7 @@ pub enum Inserted {
 }
 
 /// The fleet log.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Log {
     fleet: FleetId,
     /// The checkpoint the log was pruned to, which every kept operation
@@ -171,9 +171,9 @@ impl Log {
     /// Removals waiting for their parents whose signature already checks
     /// out against a live member's key: what a daemon suspends at once,
     /// before their history arrives (`docs/relay-plan.md`, Removals
-    /// between daemons). Their ids, signers, and targets.
+    /// between daemons). Each, with its targets.
     #[must_use]
-    pub fn pending_removals(&self) -> Vec<(OpId, MemberId, Vec<MemberId>)> {
+    pub fn pending_removals(&self) -> Vec<(&Op, Vec<MemberId>)> {
         self.pending
             .values()
             .filter_map(|(op, _)| {
@@ -187,7 +187,7 @@ impl Log {
                     .filter(|target| self.state.members.contains_key(target))
                     .copied()
                     .collect::<Vec<_>>();
-                (!targets.is_empty()).then(|| (op.id(), op.signer(), targets))
+                (!targets.is_empty()).then_some((op, targets))
             })
             .collect()
     }

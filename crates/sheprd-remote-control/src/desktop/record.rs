@@ -58,8 +58,14 @@ impl Record {
         // The id is only the route's first eight bytes: another machine
         // whose route shares them must not take over this one's record
         // and host keys. The same machine paired again may update both.
+        // A fleet record may also take a new tunnel identity for the same
+        // route from the fleet's signed log, which only that host can
+        // sign; pairing never replaces one that way.
         match Self::load(state_dir, &id) {
-            Ok(kept) if kept.route != self.route || kept.identity != self.identity => {
+            Ok(kept)
+                if kept.route != self.route
+                    || (kept.identity != self.identity && !(kept.fleet && self.fleet)) =>
+            {
                 return Err(Error::RecordConflict(id));
             }
             Ok(_) | Err(Error::Record(_)) => {}

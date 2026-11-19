@@ -214,7 +214,7 @@ fn records(state: &Log, me: &MemberId, suspended: &[MemberId]) -> Vec<(Record, V
 
 /// Writes `records`, and removes those the fleet wrote before and no
 /// longer grants. A record pairing wrote under the same id is left alone.
-fn write_records(state_dir: &Path, records: &[(Record, Vec<String>)]) -> Result<()> {
+pub(super) fn write_records(state_dir: &Path, records: &[(Record, Vec<String>)]) -> Result<()> {
     let file = state_dir.join(RECORDS);
     let before: BTreeSet<String> = files::read_bounded(&file, 64 * 1024)?
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
@@ -236,6 +236,10 @@ fn write_records(state_dir: &Path, records: &[(Record, Vec<String>)]) -> Result<
         }
     }
     for gone in before.difference(&written) {
+        // Paired here since the fleet wrote it: pairing owns it now.
+        if Record::load(state_dir, gone).is_ok_and(|kept| !kept.fleet) {
+            continue;
+        }
         Record::remove(state_dir, gone)?;
     }
     let json = serde_json::to_vec(&written).map_err(|_| crate::desktop::Error::RecordFormat)?;

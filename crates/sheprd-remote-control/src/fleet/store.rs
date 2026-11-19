@@ -49,7 +49,7 @@ struct Peers {
     #[serde(default)]
     unconfirmed: BTreeMap<String, Kept>,
     #[serde(default)]
-    proven: BTreeMap<String, String>,
+    proven: BTreeMap<String, BTreeSet<String>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -88,9 +88,12 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
         proven: peers
             .proven
             .iter()
-            .filter_map(|(member, tunnel)| {
-                let tunnel = crate::control::fleet::HostId::from_hex(tunnel)?.0;
-                Some((MemberId::from_hex(member)?, tunnel))
+            .filter_map(|(member, keys)| {
+                let keys = keys
+                    .iter()
+                    .filter_map(|key| crate::control::fleet::HostId::from_hex(key).map(|key| key.0))
+                    .collect();
+                Some((MemberId::from_hex(member)?, keys))
             })
             .collect(),
         unconfirmed: peers
@@ -133,10 +136,12 @@ pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
         proven: inner
             .proven
             .iter()
-            .map(|(member, tunnel)| {
+            .map(|(member, keys)| {
                 (
                     member.to_string(),
-                    crate::control::fleet::HostId(*tunnel).to_string(),
+                    keys.iter()
+                        .map(|key| crate::control::fleet::HostId(*key).to_string())
+                        .collect(),
                 )
             })
             .collect(),

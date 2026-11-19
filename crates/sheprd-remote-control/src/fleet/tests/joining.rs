@@ -217,3 +217,69 @@ async fn removing_a_member_revokes_a_pairing_whose_key_it_proved() {
     });
     until(10, || a.state.auth().devices().get(&legacy).is_none()).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_member_takes_pairings_with_every_key_it_proved() {
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    let (http, _, _) = relay().await;
+    let (a, b) = (Node::new(http, 1).await, Node::new(http, 2).await);
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    join(&a, &b);
+    // A desktop paired here with a tunnel key b proved before it rotated.
+    let old = [0x5a; 32];
+    let point = SigningKey::from_slice(&[9; 32])
+        .unwrap()
+        .verifying_key()
+        .to_sec1_point(false);
+    let legacy = crate::control::DeviceId("legacy".into());
+    a.state
+        .auth()
+        .devices_mut()
+        .add(
+            crate::auth::NewDevice {
+                app: None,
+                id: legacy.clone(),
+                name: "b before it rotated".into(),
+                public_key: crate::auth::PublicKey::parse(
+                    &URL_SAFE_NO_PAD.encode(point.as_bytes()),
+                )
+                .unwrap(),
+                relay: Some(crate::control::host_relay::Keys {
+                    dial: URL_SAFE_NO_PAD.encode(
+                        SigningKey::from_slice(&[8; 32])
+                            .unwrap()
+                            .verifying_key()
+                            .to_sec1_point(true)
+                            .as_bytes(),
+                    ),
+                    tunnel: URL_SAFE_NO_PAD.encode(old),
+                }),
+                ssh: Some(
+                    crate::ssh_access::SshKey::parse(
+                        &crate::desktop::keys::ssh_public_key(b.dir.path()).unwrap(),
+                    )
+                    .unwrap(),
+                ),
+            },
+            now_ms(),
+        )
+        .unwrap();
+    a.fleet.proved(b.fleet.me(), old).unwrap();
+    a.fleet.proved(b.fleet.me(), [0x6b; 32]).unwrap();
+    a.ask(Ask::Remove {
+        member: b.me(),
+        also_members: Vec::new(),
+        also_hosts: Vec::new(),
+        reason: crate::control::fleet::Reason::Lost,
+    });
+    grants::apply(&a.state, &a.fleet).unwrap();
+    assert!(a.state.auth().devices().get(&legacy).is_none());
+    // Forgotten on disk too.
+    assert!(
+        Fleet::load(a.dir.path(), now_ms())
+            .unwrap()
+            .inner()
+            .proven
+            .is_empty()
+    );
+}

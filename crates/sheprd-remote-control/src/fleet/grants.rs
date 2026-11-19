@@ -116,7 +116,7 @@ pub(crate) fn apply(state: &State, fleet: &Fleet) -> Result<()> {
 /// proved here and that is no longer a member: removing it from the fleet
 /// removes every way in it had. Blocking.
 fn revoke_removed(state: &State, fleet: &Fleet) -> Result<()> {
-    let gone: Vec<(MemberId, [u8; 32])> = {
+    let gone: Vec<(MemberId, Vec<[u8; 32]>)> = {
         let inner = fleet.inner();
         let Some(log) = &inner.log else {
             return Ok(());
@@ -125,12 +125,15 @@ fn revoke_removed(state: &State, fleet: &Fleet) -> Result<()> {
             .proven
             .iter()
             .filter(|(member, _)| !log.is_member(member))
-            .map(|(member, tunnel)| (*member, *tunnel))
+            .map(|(member, keys)| (*member, keys.iter().copied().collect()))
             .collect()
     };
-    for (member, tunnel) in &gone {
-        supersede(state, tunnel)?;
-        fleet.inner().proven.remove(member);
+    for (member, keys) in &gone {
+        for tunnel in keys {
+            supersede(state, tunnel)?;
+        }
+        // Saved, so the file and what is held agree.
+        fleet.forget_proven(member)?;
     }
     Ok(())
 }

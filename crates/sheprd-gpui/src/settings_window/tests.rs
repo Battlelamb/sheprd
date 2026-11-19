@@ -30,6 +30,7 @@ mod remote_github;
 mod remote_history_reload;
 mod remote_relay_deploy;
 mod remote_relay_labels;
+mod remote_relay_tokens;
 mod remote_relays;
 mod rtl;
 mod save_now;

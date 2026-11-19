@@ -53,6 +53,7 @@ sheprd-remote-control.workspace         = true
 # the access file the app hands it (Settings > Fleet).
 sheprd-relay-agent.workspace            = true
 sheprd-updater.workspace        = true
+sheprd-traces.workspace         = true
 sheprd-usage.workspace          = true
 sheprd-vcs.workspace            = true
 if-addrs.workspace             = true

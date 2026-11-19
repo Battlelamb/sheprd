@@ -96,6 +96,18 @@ struct ChatScreen: View {
                 store = ChatStore(key: key, sample: .sample)
                 return
             }
+            if key == .effectsSample {
+                let play = UserDefaults.standard.string(forKey: "samplePlay")
+                let sample = ChatStore(key: key, sample: .effectsSample(screen: play.flatMap(ScreenEffect.init(rawValue:)) ?? .confetti))
+                store = sample
+                if let play {
+                    Task {
+                        try? await Task.sleep(for: .seconds(1))
+                        sample.playSample(play)
+                    }
+                }
+                return
+            }
             #endif
             store = model.fleet.openChat(key)
             model.recentDevice = key.device
@@ -182,7 +194,7 @@ private struct ChatDocument: View {
                     if let prompt {
                         HStack(alignment: .top, spacing: 10) {
                             Rectangle().fill(.tint).frame(width: 3)
-                            Text(prompt).font(.title3.weight(.semibold)).textSelection(.enabled)
+                            SizedPlain(text: prompt, style: .title3).font(.title3.weight(.semibold)).textSelection(.enabled)
                         }
                         .fixedSize(horizontal: false, vertical: true)
                         .id(PinnedPrompt.anchor)
@@ -241,12 +253,22 @@ private struct ChatDocument: View {
                 .padding(.bottom, 24)
             }
             .defaultScrollAnchor(.bottom)
+            .coordinateSpace(.named(ChatEffectsModel.space))
+            .environment(\.chatEffects, store.effects)
+            // A screen effect plays over the chat alone, never the composer,
+            // and takes no touches.
+            .overlay {
+                let effects = store.effects
+                ScreenEffectOverlay(playing: effects.ledger.playing(at: .now)) { [effects] playing in
+                    effects.target(of: playing)
+                }
+            }
             // A picture opened full screen swipes through the chat's others.
             .environment(\.chatPictures, transcript.pictures.map(GalleryPicture.init))
             .opacity(store.stale ? 0.6 : 1)
             .overlay(alignment: .top) {
                 if let prompt, promptAbove {
-                    PinnedPrompt(text: prompt) {
+                    PinnedPrompt(text: String(InlineMarkdown.plainSized(prompt).characters)) {
                         withAnimation(.snappy) { proxy.scrollTo(PinnedPrompt.anchor, anchor: .top) }
                     }
                     .transition(.move(edge: .top).combined(with: .opacity))

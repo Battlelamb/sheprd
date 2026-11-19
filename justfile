@@ -321,6 +321,63 @@ test-mockup-wait:
 test-pr-closure:
     PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_close_low_confidence_prs.py
 
+# Mirrors the `deploy` job of .github/workflows/site.yml from this checkout:
+# generate /docs in a throwaway venv,
+# then upload website/site with no Netlify build. It refuses a dirty tree or
+# a commit not on origin/main unless given `--allow-unpublished`;
+# `--dry-run` does everything but the upload. Needs the `netlify` CLI, logged
+# in (`netlify login`) or given NETLIFY_AUTH_TOKEN; NETLIFY_SITE_ID overrides
+# the site. relays.json.sig is signed only by CI's `sign-relays` job, so this
+# deploy publishes none (any local one is deleted, never uploaded stale):
+# clients keep their last good relay list until the next CI deploy signs it.
+#
+# Deploy sheprd.org to Netlify production, docs included, without a Netlify build.
+site-deploy *flags:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    allow_unpublished=0 dry_run=0
+    for flag in {{flags}}; do
+        case "$flag" in
+            --allow-unpublished) allow_unpublished=1 ;;
+            --dry-run) dry_run=1 ;;
+            *) echo "error: unknown flag $flag (expected --allow-unpublished or --dry-run)" >&2; exit 2 ;;
+        esac
+    done
+    site_id="${NETLIFY_SITE_ID:-3847f83c-d98c-47f1-8306-ad63e64ece75}"
+    command -v netlify >/dev/null || { echo "error: the netlify CLI is missing: npm install --global netlify-cli" >&2; exit 1; }
+    netlify api getCurrentUser >/dev/null 2>&1 || { echo "error: netlify is not logged in: run netlify login or set NETLIFY_AUTH_TOKEN" >&2; exit 1; }
+    dirty="$(git status --porcelain --untracked-files=all)"
+    git fetch --quiet origin main
+    published=1
+    git merge-base --is-ancestor HEAD origin/main || published=0
+    if [ -n "$dirty" ] || [ "$published" = 0 ]; then
+        [ -n "$dirty" ] && { echo "The working tree is not clean:"; echo "$dirty"; } >&2
+        [ "$published" = 0 ] && echo "HEAD $(git rev-parse --short HEAD) is not on origin/main." >&2
+        if [ "$allow_unpublished" = 0 ]; then
+            echo "error: refusing to deploy; pass --allow-unpublished to deploy it anyway" >&2
+            exit 1
+        fi
+        echo "Deploying anyway (--allow-unpublished)." >&2
+    fi
+    venv="$(mktemp -d "${TMPDIR:-/tmp}/sheprd-docs-venv.XXXXXX")"
+    trap 'rm -rf "$venv"' EXIT
+    python3 -m venv "$venv"
+    PIP_DISABLE_PIP_VERSION_CHECK=1 "$venv/bin/pip" install --quiet --require-hashes -r website/requirements.txt
+    "$venv/bin/python" website/tools/docs.py
+    test -f website/site/docs/index.html || { echo "error: website/site/docs/index.html was not generated" >&2; exit 1; }
+    if [ -e website/site/relays.json.sig ]; then
+        echo "Removing website/site/relays.json.sig: only CI signs the relay list." >&2
+        rm -f website/site/relays.json.sig
+    fi
+    deploy=(netlify deploy --prod --dir=website/site --no-build --site "$site_id"
+        --message "just site-deploy $(git rev-parse --short HEAD)")
+    if [ "$dry_run" = 1 ]; then
+        echo "Dry run; would run: ${deploy[*]}"
+        exit 0
+    fi
+    echo "Publishing without relays.json.sig; the next CI deploy signs the relay list again." >&2
+    "${deploy[@]}"
+
 # Sheprd's public relay list, website/site/relays.json, which clients take
 # only when signed (docs/relay-plan.md). Each recipe stamps a new serial and
 # expiry, signs with your OpenPGP key (a hardware key tap), and checks the

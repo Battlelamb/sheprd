@@ -66,6 +66,15 @@ struct SettingsView: View {
             }
             Section {
                 NavigationLink {
+                    FleetSettingsView()
+                } label: {
+                    LabeledContent("Fleet", value: fleetSummary)
+                }
+            } footer: {
+                Text("Your computers and phones, and the hosts they share. Joining lets this \(UIDevice.current.model) control all of them.")
+            }
+            Section {
+                NavigationLink {
                     RelaysView()
                 } label: {
                     LabeledContent("Relays", value: "\(model.savedRelays.relays.count)")
@@ -186,6 +195,16 @@ struct SettingsView: View {
         .navigationDestination(isPresented: $showingGitHub) { GitHubSettingsView() }
         .task { if UserDefaults.standard.bool(forKey: "openGitHub") { showingGitHub = true } }
         #endif
+    }
+
+    /// Where this phone stands with the fleet, beside its row.
+    private var fleetSummary: String {
+        let membership = model.fleetMembership
+        if membership.admitted {
+            let count = membership.status?.view?.members.count ?? 0
+            return count == 1 ? "1 member" : "\(count) members"
+        }
+        return membership.record == nil ? "Not joined" : "Waiting"
     }
 }
 

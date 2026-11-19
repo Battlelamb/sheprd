@@ -248,6 +248,24 @@ final class RemoteClient: Sendable {
         try await send("POST", "/api/v2/hosts/relay", body: request, bearer: bearer)
     }
 
+    // MARK: Fleet
+
+    /// A fleet call (`FleetClient`): JSON in, the answer's bytes out.
+    func fleetCall(_ method: String, _ path: String, body: Data?, bearer: String) async throws -> Data {
+        guard let url = URL(string: origin + path) else { throw RemoteError.unreachable }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.httpBody = body
+        if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw RemoteError.notHTTP }
+        guard (200..<300).contains(http.statusCode) else {
+            throw RemoteError.status(http.statusCode, Refusal.text(status: http.statusCode, body: data))
+        }
+        return data
+    }
+
     // MARK: Tags
 
     /// Offers this phone's copy of the computer's tags; answers those that

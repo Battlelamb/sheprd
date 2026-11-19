@@ -18,6 +18,9 @@ pub(super) const DIRECTORY: &str = "fleet";
 const KEY: &str = "key";
 const LOG: &str = "log.bin";
 const PEERS: &str = "peers.json";
+/// The fleet id this computer joined as a host the fleet shares, not as a
+/// member.
+const HOSTED: &str = "hosted";
 /// The removals suspensions keep to check again take most of it.
 const MAX_PEERS: u64 = 16 * 1024 * 1024;
 
@@ -149,6 +152,18 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
 }
 
 /// Writes the log and the peers' state. Blocking.
+/// The fleet id this computer joined as a shared host, if it did. Blocking.
+pub(super) fn load_hosted(state_dir: &Path) -> Result<Option<String>> {
+    Ok(read_bounded(&path(state_dir, HOSTED), 64)?
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned()))
+}
+
+/// Records that this computer joined `fleet` as a shared host. Blocking.
+pub(super) fn save_hosted(state_dir: &Path, fleet: &str) -> Result<()> {
+    write_private(&path(state_dir, HOSTED), fleet.as_bytes())?;
+    Ok(())
+}
+
 pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
     if let Some(log) = &inner.log {
         write_private(&path(state_dir, LOG), &saved::encode(log)?)?;

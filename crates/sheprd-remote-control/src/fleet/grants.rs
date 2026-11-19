@@ -93,11 +93,14 @@ pub(crate) fn dial_keys(fleet: &Fleet) -> Vec<Key> {
 }
 
 /// This computer's own host in `state`: as a member, the host its bundle
-/// names; otherwise `host`, its certificate authority's, when the fleet
-/// shares it.
+/// names; otherwise `host`, its certificate authority's, which
+/// [`Fleet::host`] gives only for a computer that joined as a shared host,
+/// when the fleet still shares it and never once this computer was removed
+/// as a member.
 pub(crate) fn own_host(state: &Log, me: &MemberId, host: Option<HostId>) -> Option<HostId> {
     match state.members.get(me) {
         Some(member) => member.bundle.host.as_ref()?.id().ok(),
+        None if state.tombstones.contains(me) => None,
         None => host.filter(|host| state.hosts.contains_key(host)),
     }
 }

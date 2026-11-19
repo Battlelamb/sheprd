@@ -92,4 +92,42 @@ async fn a_shared_sheprd_host_takes_the_log_and_lets_allowed_members_in() {
     assert!(grants::still_allowed(&host.fleet, &a.fleet.me()));
     grants::apply(&host.state, &host.fleet).unwrap();
     assert_eq!(host.lines().len(), 1, "{:?}", host.lines());
+    // It stays a host after a restart: how it joined is kept.
+    let again = Fleet::load(host.dir.path(), now_ms()).unwrap();
+    assert_eq!(again.host(), host.fleet.host());
+    assert!(grants::still_allowed(&again, &a.fleet.me()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_member_never_acts_as_a_shared_host() {
+    let (http, _, _) = relay().await;
+    let (a, b) = (Node::new(http, 1).await, Node::new(http, 2).await);
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    join(&a, &b);
+    // b joined as a member: it has a certificate authority, but is no
+    // shared host.
+    assert!(b.fleet.host.is_some());
+    assert_eq!(b.fleet.host(), None);
+    a.ask(Ask::Remove {
+        member: b.me(),
+        also_members: Vec::new(),
+        also_hosts: Vec::new(),
+        reason: crate::control::fleet::Reason::Lost,
+    });
+    b.fleet.receive(a.ops(), now_ms()).unwrap();
+    let a_host = {
+        let inner = a.fleet.inner();
+        grants::own_host(inner.log.as_ref().unwrap().state(), &a.fleet.me(), None).unwrap()
+    };
+    let inner = b.fleet.inner();
+    let state = inner.log.as_ref().unwrap().state();
+    assert!(state.tombstones.contains(&b.fleet.me()));
+    // Even handed a host the fleet holds, a removed member gets none.
+    assert_eq!(grants::own_host(state, &b.fleet.me(), Some(a_host)), None);
+    drop(inner);
+    assert!(!grants::still_allowed(&b.fleet, &a.fleet.me()));
+    grants::apply(&b.state, &b.fleet).unwrap();
+    assert!(b.lines().is_empty(), "{:?}", b.lines());
+    let again = Fleet::load(b.dir.path(), now_ms()).unwrap();
+    assert_eq!(again.host(), None);
 }

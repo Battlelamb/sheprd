@@ -30,7 +30,10 @@ use sha2::{Digest as _, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
-    sync::{Mutex, MutexGuard, PoisonError},
+    sync::{
+        Mutex, MutexGuard, PoisonError,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 use tokio::sync::watch;
 
@@ -85,6 +88,10 @@ pub(crate) struct Fleet {
     /// certificate: a computer that is not a member holds the log as a host
     /// the fleet shares, and lets in the members allowed there.
     host: Option<HostId>,
+    /// This computer joined its fleet as a shared host, not as a member
+    /// (`fleet/hosted` names that fleet): only then does it act as `host`
+    /// without being a member. A member that was removed never does.
+    hosted: AtomicBool,
     inner: Mutex<Inner>,
     joining: Mutex<Option<Joining>>,
     changed: watch::Sender<u64>,
@@ -143,11 +150,16 @@ impl Fleet {
                 None
             }
         };
+        let hosted = match (store::load_hosted(state_dir)?, &inner.log) {
+            (Some(fleet), Some(log)) => fleet == log.fleet().to_string(),
+            _ => false,
+        };
         Ok(Self {
             state_dir: state_dir.to_owned(),
             key,
             me,
             host,
+            hosted: AtomicBool::new(hosted),
             inner: Mutex::new(inner),
             joining: Mutex::new(None),
             changed: watch::Sender::new(0),
@@ -160,9 +172,12 @@ impl Fleet {
         self.me
     }
 
-    /// This computer's host id, from its certificate authority.
+    /// This computer's host id, from its certificate authority, when it
+    /// joined its fleet as a shared host: what it acts as without being a
+    /// member. `None` for a computer that joined as a member, removed or
+    /// not.
     pub(crate) fn host(&self) -> Option<HostId> {
-        self.host
+        self.host.filter(|_| self.hosted.load(Ordering::SeqCst))
     }
 
     pub(crate) fn state_dir(&self) -> &Path {
@@ -305,6 +320,13 @@ impl Fleet {
                     .map_or_else(Vec::new, |kept| kept.ops);
                 all.extend(ops);
                 let (log, refused) = join(all, self.me, self.host, now_ms)?;
+                // Taken because it shares this computer, not because it
+                // admits it: remembered, so only such a computer ever acts
+                // as a host without being a member.
+                if !sync::admits(&log, &self.me) {
+                    store::save_hosted(&self.state_dir, &log.fleet().to_string())?;
+                    self.hosted.store(true, Ordering::SeqCst);
+                }
                 inner.log = Some(log);
                 refused
             }

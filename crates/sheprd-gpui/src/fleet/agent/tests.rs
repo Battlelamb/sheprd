@@ -71,7 +71,7 @@ fn the_service_runs_the_agent_on_each_relay_on_both_systems() {
         "https://nyc1.relay.sheprd.org".to_owned(),
     ]);
     assert!(script.contains(
-        "run --relay https://fra1.relay.sheprd.org --relay https://nyc1.relay.sheprd.org"
+        "\\\" --relay https://fra1.relay.sheprd.org --relay https://nyc1.relay.sheprd.org"
     ));
     assert!(
         script.contains("<string>--relay</string><string>https://nyc1.relay.sheprd.org</string>")
@@ -83,7 +83,15 @@ fn the_service_runs_the_agent_on_each_relay_on_both_systems() {
     assert!(script.contains("launchctl kickstart -k \"$job\""));
     assert!(script.contains("until launchctl bootstrap"));
     assert!(script.contains("sleep 1"));
-    assert!(script.trim_end().ends_with("\"$agent\" status --json"));
+    assert!(
+        script
+            .trim_end()
+            .ends_with("\"$agent\" status --json --state-dir \"$state\"")
+    );
+    // The service runs on the state directory the SSH commands use.
+    assert!(script.contains("run --state-dir \\\"$state\\\" --relay"));
+    assert!(script.contains("<string>--state-dir</string><string>$state</string>"));
+    assert!(script.contains("state=\"$XDG_STATE_HOME/sheprd-relay-agent\""));
 }
 
 #[test]
@@ -127,4 +135,12 @@ fn a_host_whose_first_key_this_computer_does_not_trust_is_not_shared() {
         Err(Error::HostKey)
     ));
     assert_eq!(host_id(&reported.ssh_host_keys, &known), None);
+}
+
+#[test]
+fn a_share_waits_for_a_running_agent() {
+    let mut stopped = report(&[ED25519]);
+    stopped.running = false;
+    assert!(matches!(running(stopped), Err(Error::NotRunning)));
+    assert!(running(report(&[ED25519])).is_ok());
 }

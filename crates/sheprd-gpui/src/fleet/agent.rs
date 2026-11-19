@@ -77,8 +77,18 @@ pub(crate) fn service_script(relays: &[String]) -> String {
     format!(
         // i18n: data
         r#"agent="$HOME/.local/bin/{PROGRAM}"
-case "$HOME" in *'&'*|*'<'*|*'>'*|*'"'*|*'%'*) echo "the home directory's name cannot go in a service" >&2; exit 5;; esac
-case "$(uname -s)" in
+# The state directory every SSH command of this account uses, as the agent
+# picks it by default, given to the service explicitly: its manager may not
+# share this login's environment (`XDG_STATE_HOME`).
+if [ "$(uname -s)" = Darwin ]; then
+  state="$HOME/Library/Application Support/{PROGRAM}"
+else
+  case "${{XDG_STATE_HOME:-}}" in
+  /*) state="$XDG_STATE_HOME/{PROGRAM}" ;;
+  *) state="$HOME/.local/state/{PROGRAM}" ;;
+  esac
+fi
+case "$state" in *'&'*|*'<'*|*'>'*|*'"'*|*'%'*|*'\'*) echo "the state directory's name cannot go in a service" >&2; exit 5;; esac
 Darwin)
   plist="$HOME/Library/LaunchAgents/{LABEL}.plist"
   mkdir -p "$HOME/Library/LaunchAgents"
@@ -86,7 +96,7 @@ Darwin)
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
     '<plist version="1.0"><dict>' \
     '<key>Label</key><string>{LABEL}</string>' \
-    "<key>ProgramArguments</key><array><string>$agent</string><string>run</string>{plist_args}</array>" \
+    "<key>ProgramArguments</key><array><string>$agent</string><string>run</string><string>--state-dir</string><string>$state</string>{plist_args}</array>" \
     '<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>' \
     '</dict></plist>' > "$plist.part"
   job="gui/$(id -u)/{LABEL}"
@@ -113,7 +123,7 @@ Darwin)
   dir="${{XDG_CONFIG_HOME:-$HOME/.config}}/systemd/user"
   mkdir -p "$dir"
   printf '%s\n' '[Unit]' 'Description=sheprd-relay-agent: Sheprd reaches this SSH server through relays' \
-    '' '[Service]' "ExecStart=\"$agent\" run{args}" 'Restart=on-failure' 'RestartSec=10' \
+    '' '[Service]' "ExecStart=\"$agent\" run --state-dir \"$state\"{args}" 'Restart=on-failure' 'RestartSec=10' \
     '' '[Install]' 'WantedBy=default.target' > "$dir/{UNIT}.part"
   mv -f "$dir/{UNIT}.part" "$dir/{UNIT}"
   # Without lingering a user unit stops at logout; allowed for oneself on
@@ -126,11 +136,11 @@ Darwin)
 esac
 i=0
 while [ $i -lt 10 ]; do
-  case "$("$agent" status --json 2>/dev/null)" in *'"running": true'*) break;; esac
+  case "$("$agent" status --json --state-dir "$state" 2>/dev/null)" in *'"running": true'*) break;; esac
   sleep 1
   i=$((i + 1))
 done
-"$agent" status --json
+"$agent" status --json --state-dir "$state"
 "#
     )
 }
@@ -239,7 +249,17 @@ pub(super) fn install(
         cancelled,
     )
     .map_err(Error::Run)?;
-    parse_status(&output)?.ok_or(Error::NoProgram)
+    running(parse_status(&output)?.ok_or(Error::NoProgram)?)
+}
+
+/// `report`, once the service it came from runs: a host whose agent never
+/// started would be shared under a route nothing listens on.
+pub(crate) fn running(report: Report) -> Result<Report, Error> {
+    if report.running {
+        Ok(report)
+    } else {
+        Err(Error::NotRunning)
+    }
 }
 
 /// Prints the SHA-256 of the agent of `version` the host holds, or nothing.

@@ -7,7 +7,9 @@
 //! a relay's state changes and every [`HEARTBEAT`], and removes it when it
 //! stops. A file older than [`STALE`] is from an agent that died.
 
-use crate::{Error, Result, authorized::Authorized, files, fleet, keys::Keys};
+use crate::{Error, Result, files, fleet};
+#[cfg(feature = "runtime")]
+use crate::{authorized::Authorized, keys::Keys};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -21,6 +23,16 @@ pub const HEARTBEAT: Duration = Duration::from_secs(30);
 /// A status older than this is from an agent that is no longer running.
 pub const STALE: Duration = Duration::from_secs(90);
 const MAX_BYTES: u64 = 64 * 1024;
+/// Where OpenSSH keeps the host keys.
+pub const HOST_KEY_DIR: &str = "/etc/ssh";
+/// Host key files, the ones OpenSSH makes by default, strongest first.
+const HOST_KEYS: [&str; 3] = [
+    "ssh_host_ed25519_key.pub",
+    "ssh_host_ecdsa_key.pub",
+    "ssh_host_rsa_key.pub",
+];
+/// The longest host key file read.
+const MAX_HOST_KEY: u64 = 16 * 1024;
 
 /// One relay's state.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -88,6 +100,11 @@ pub struct Report {
     pub route: String,
     /// Whether an agent is running for this state directory.
     pub running: bool,
+    /// The SSH server's host keys, `TYPE BASE64`, strongest first: what
+    /// Sheprd checks against its own strictly checked session before it
+    /// shares this machine, and the first of which names it in the fleet.
+    #[serde(default)]
+    pub ssh_host_keys: Vec<String>,
     /// The agent's version.
     pub version: String,
 }
@@ -96,6 +113,7 @@ impl Report {
     /// The report for `state_dir` at `now`, making the keys the first time
     /// so a machine being enrolled has its route before the agent starts.
     /// Blocking.
+    #[cfg(feature = "runtime")]
     pub fn read(state_dir: &Path, now: SystemTime) -> Result<Self> {
         let keys = Keys::load_or_create(state_dir)?;
         let authorized = Authorized::load(state_dir)?;
@@ -111,7 +129,22 @@ impl Report {
                 .unwrap_or_default(),
             route: keys.route().to_string(),
             running: live.is_some(),
+            ssh_host_keys: host_keys(Path::new(HOST_KEY_DIR)),
             version: env!("CARGO_PKG_VERSION").to_owned(),
+        })
+    }
+
+    /// Reads `status --json` as the agent printed it.
+    pub fn parse(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() as u64 > MAX_BYTES {
+            return Err(Error::TooLarge {
+                limit: MAX_BYTES,
+                path: FILE.into(),
+            });
+        }
+        serde_json::from_slice(bytes).map_err(|source| Error::StatusFormat {
+            path: FILE.into(),
+            source,
         })
     }
 
@@ -145,3 +178,35 @@ impl Report {
         text
     }
 }
+
+/// The SSH host keys in `dir`, `TYPE BASE64`, strongest first; files that
+/// are missing or hold no key are passed over. Blocking.
+pub fn host_keys(dir: &Path) -> Vec<String> {
+    HOST_KEYS
+        .iter()
+        .filter_map(|name| {
+            files::read_bounded(&dir.join(name), MAX_HOST_KEY)
+                .ok()
+                .flatten()
+        })
+        .filter_map(|bytes| host_key(&String::from_utf8_lossy(&bytes)))
+        .collect()
+}
+
+/// `TYPE BASE64` from a host key file's first line.
+fn host_key(text: &str) -> Option<String> {
+    let mut fields = text.lines().next()?.split_ascii_whitespace();
+    let (kind, blob) = (fields.next()?, fields.next()?);
+    let kind_valid = (kind.starts_with("ssh-") || kind.starts_with("ecdsa-"))
+        && kind
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-@.".contains(&byte));
+    let blob_valid = !blob.is_empty()
+        && blob
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"+/=".contains(&byte));
+    (kind_valid && blob_valid).then(|| format!("{kind} {blob}"))
+}
+
+#[cfg(test)]
+mod tests;

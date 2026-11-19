@@ -63,8 +63,9 @@ async fn plain_host(
     (dir, agent, stop, intro)
 }
 
-/// What Sheprd would run over SSH: `fleet apply` with the file `node`'s
-/// log computes, settling what the agent reported suspending.
+/// What Sheprd runs over SSH: `fleet apply` with the file `node`'s daemon
+/// computes (`Ask::AgentAccess`), settling what the agent reported
+/// suspending.
 fn fleet_apply(node: &Node, host: &HostId, dir: &Path, agent: &Agent) -> Held {
     let suspended: Vec<OpId> = Held::load(dir)
         .unwrap()
@@ -72,10 +73,18 @@ fn fleet_apply(node: &Node, host: &HostId, dir: &Path, agent: &Agent) -> Held {
         .values()
         .flat_map(|suspension| suspension.removals.iter().map(|id| OpId(id.0)))
         .collect();
-    let file = {
+    let Answer::AgentAccess { access } = node.ask(Ask::AgentAccess {
+        host: host.to_string(),
+        suspended: suspended.iter().map(ToString::to_string).collect(),
+    }) else {
+        panic!("no access file");
+    };
+    let file = sheprd_relay_agent::access::Access::parse(access.as_bytes()).unwrap();
+    let computed = {
         let inner = node.fleet.inner();
         host_access::compute(inner.log.as_ref().unwrap(), host, suspended).unwrap()
     };
+    assert_eq!(file, computed);
     let held = Held::apply(dir, Some(&dir.join("authorized_keys")), file).unwrap();
     agent.reload().unwrap();
     held
@@ -128,4 +137,43 @@ async fn a_removal_reaches_a_plain_hosts_agent_with_no_sheprd_running() {
     assert!(held.suspended.is_empty());
     assert!(held.access.unwrap().removed.contains(&c_id));
     drop(b);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_daemon_computes_an_access_file_only_for_a_plain_host() {
+    let (http, _, _) = relay().await;
+    let a = Node::new(http, 1).await;
+    let refused = |host: String, suspended: Vec<String>| {
+        ask::answer(
+            &a.state,
+            &a.fleet,
+            Ask::AgentAccess { host, suspended },
+            now_ms(),
+        )
+        .is_err()
+    };
+    // No fleet yet.
+    assert!(refused(HostId([1; 32]).to_string(), Vec::new()));
+    a.ask(Ask::Found);
+    // This computer's own host is a member's, not a plain host.
+    let own = a.view().hosts[0].id.clone();
+    assert!(refused(own, Vec::new()));
+    assert!(refused("not hex".to_owned(), Vec::new()));
+    let (_dir, _agent, _stop, intro) = plain_host(http).await;
+    let host = intro.id().unwrap();
+    a.ask(Ask::AddHost {
+        intro: sync::text(&intro.to_bytes().unwrap()),
+        deny: Vec::new(),
+    });
+    assert!(refused(host.to_string(), vec!["not hex".to_owned()]));
+    let Answer::AgentAccess { access } = a.ask(Ask::AgentAccess {
+        host: host.to_string(),
+        suspended: vec![OpId([9; 32]).to_string()],
+    }) else {
+        panic!("no access file");
+    };
+    let file = sheprd_relay_agent::access::Access::parse(access.as_bytes()).unwrap();
+    assert_eq!(file.members.len(), 1);
+    // A removal the log does not hold settles nothing.
+    assert!(file.settled.is_empty());
 }

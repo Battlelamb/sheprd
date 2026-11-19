@@ -220,6 +220,15 @@ pub enum Ask {
     /// `authorized_keys` lines and relay records it wrote. For a computer
     /// the fleet removed, or a fleet that is gone (`sheprd fleet scrub`).
     Scrub,
+    /// The access file for plain host `host`, for Sheprd to hand its
+    /// agent (`fleet apply`): computed here, so the log never leaves the
+    /// daemon. `suspended` are the removals, hex, the agent reported
+    /// suspending for; those the log holds are settled.
+    AgentAccess {
+        host: String,
+        #[serde(default)]
+        suspended: Vec<String>,
+    },
 }
 
 /// What the daemon answers.
@@ -240,6 +249,11 @@ pub enum Answer {
     /// base64url.
     Intro {
         intro: String,
+    },
+    /// [`Ask::AgentAccess`]'s answer: the access file, as the agent reads
+    /// it on stdin.
+    AgentAccess {
+        access: String,
     },
 }
 

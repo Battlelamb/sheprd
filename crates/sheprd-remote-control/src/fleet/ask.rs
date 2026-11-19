@@ -4,7 +4,7 @@
 
 use super::{Error, Fleet, Result, me};
 use crate::control::fleet::{
-    Access, Admit, Body, Bundle, HostIntro, Remove, View,
+    Access, Admit, Body, Bundle, HostIntro, OpId, Remove, View,
     sync::{self, Answer, Ask},
 };
 use crate::web::State;
@@ -121,6 +121,24 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             }
             fleet.scrub()?;
             Ok(Answer::Done)
+        }
+        Ask::AgentAccess { host, suspended } => {
+            let host = sync::host(&host)?;
+            let suspended = suspended
+                .iter()
+                .map(|id| OpId::from_hex(id).ok_or(crate::control::fleet::Error::Encoding))
+                .collect::<crate::control::fleet::Result<Vec<_>>>()?;
+            let file = {
+                let inner = fleet.inner();
+                let log = inner.log.as_ref().ok_or(Error::NoFleet)?;
+                crate::control::fleet::access::compute(log, &host, suspended)?
+            };
+            let bytes = file
+                .to_bytes()
+                .map_err(crate::control::fleet::Error::from)?;
+            Ok(Answer::AgentAccess {
+                access: String::from_utf8_lossy(&bytes).into_owned(),
+            })
         }
         Ask::Apply(apply) => {
             // A caller naming another fleet learns nothing of this one.

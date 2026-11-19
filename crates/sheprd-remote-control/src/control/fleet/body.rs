@@ -257,7 +257,7 @@ impl HostIntro {
             Some(ca) => Ok(HostId(ca.fingerprint())),
             None => {
                 let first = self.record.ssh_host_keys.first().ok_or(Error::Invalid)?;
-                Ok(HostId(sha256(&[DOMAIN, HOST, first.as_bytes()])))
+                Ok(HostId::plain(first))
             }
         }
     }
@@ -675,4 +675,14 @@ fn ssh_key(text: &str, max: usize) -> Result<()> {
         return Err(Error::Invalid);
     }
     Ok(())
+}
+
+impl HostId {
+    /// A plain host's id: the hash of its first SSH host key, `TYPE
+    /// BASE64`, as its intro computes it. Sheprd finds an agent host among
+    /// the machines it reaches by it.
+    #[must_use]
+    pub fn plain(ssh_host_key: &str) -> Self {
+        Self(sha256(&[DOMAIN, HOST, ssh_host_key.as_bytes()]))
+    }
 }

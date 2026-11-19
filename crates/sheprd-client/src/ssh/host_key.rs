@@ -226,6 +226,43 @@ fn lists_host<'a>(name: &str, files: impl IntoIterator<Item = &'a PathBuf>) -> R
     Ok(false)
 }
 
+/// The host keys the known hosts files `ssh` checks for `target` list
+/// under its name, `TYPE BASE64`: the keys a strictly checked session to it
+/// accepts, so a key a host reports about itself can be held to them. A
+/// `@cert-authority` or `@revoked` line is no host key and is passed over.
+/// Blocks on `ssh -G` and `ssh-keygen`: call it from a background thread.
+pub fn known_host_keys(target: &str) -> Result<Vec<String>> {
+    validate_target(target)?;
+    let known = known_hosts(target)?;
+    let mut keys = Vec::new();
+    for file in known.files().filter(|file| file.is_file()) {
+        let mut command = crate::environment::command("ssh-keygen");
+        command.args(["-F", &known.name, "-f"]).arg(file);
+        let (status, output) = super::run(&mut command, Duration::from_secs(5), || false)?;
+        match status.code() {
+            Some(0) => keys.extend(found_keys(&output)),
+            Some(1) => {}
+            _ => return Err(crate::Error::RemoteCommand(status)),
+        }
+    }
+    keys.dedup();
+    Ok(keys)
+}
+
+/// `TYPE BASE64` of each entry `ssh-keygen -F` printed.
+fn found_keys(output: &[u8]) -> Vec<String> {
+    String::from_utf8_lossy(output)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with('@'))
+        .filter_map(|line| {
+            let mut fields = line.split_ascii_whitespace();
+            let (_, kind, blob) = (fields.next()?, fields.next()?, fields.next()?);
+            Some(format!("{kind} {blob}"))
+        })
+        .collect()
+}
+
 fn known_hosts(target: &str) -> Result<KnownHosts> {
     let mut command = crate::environment::command("ssh");
     command

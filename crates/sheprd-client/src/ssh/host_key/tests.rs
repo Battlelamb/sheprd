@@ -337,3 +337,13 @@ fn invalid_targets_are_refused_before_ssh_runs() {
         Err(crate::Error::Ssh(Error::InvalidTarget))
     ));
 }
+
+#[test]
+fn known_keys_are_read_from_ssh_keygen_find_output() {
+    let output = b"# Host studio found: line 3\nstudio ssh-ed25519 AAAAC3Nz comment\n|1|c2FsdA==|aGFzaA== ecdsa-sha2-nistp256 AAAAE2Vj\n@cert-authority studio ssh-ed25519 AAAAca\n\n";
+    assert_eq!(
+        found_keys(output),
+        ["ssh-ed25519 AAAAC3Nz", "ecdsa-sha2-nistp256 AAAAE2Vj"]
+    );
+    assert!(found_keys(b"").is_empty());
+}

@@ -26,7 +26,8 @@
 //!
 //! - [`cli`]: the command line, parsed from OS strings.
 //! - [`keys`]: the route key and tunnel keys, made once.
-//! - [`status`]: what `status --json` reports.
+//! - [`status`]: what `status --json` reports; Sheprd parses it without
+//!   the runtime.
 //! - [`agent`]: listening on every relay and forwarding sessions.
 
 pub mod access;
@@ -46,7 +47,6 @@ mod listen;
 pub mod removal;
 #[cfg(feature = "runtime")]
 mod serve;
-#[cfg(feature = "runtime")]
 pub mod status;
 
 pub use error::{Error, Result};

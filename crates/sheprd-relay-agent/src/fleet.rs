@@ -97,17 +97,26 @@ impl Held {
         })
     }
 
-    /// Writes each file whole, in the order that fails closed when it
+    /// Writes each file whole, in the order [`Held::files`] gives.
+    fn save(&self, state_dir: &Path) -> Result<()> {
+        for (name, bytes) in self.files()? {
+            files::write_private(&state_dir.join(name), &bytes)?;
+        }
+        Ok(())
+    }
+
+    /// The files kept, by name, in the order that fails closed when saving
     /// stops part way: the revoked pairs before the access file that drops
     /// the members they come from (a retry finds them there again), and
     /// the suspensions after it, so one is lifted only once the file that
     /// lifts it, or removes its member, is kept.
-    fn save(&self, state_dir: &Path) -> Result<()> {
-        write_json(state_dir, REVOKED, &self.revoked)?;
+    fn files(&self) -> Result<Vec<(&'static str, Vec<u8>)>> {
+        let mut files = vec![(REVOKED, json(REVOKED, &self.revoked)?)];
         if let Some(access) = &self.access {
-            files::write_private(&state_dir.join(access::FILE), &access.to_stored_bytes()?)?;
+            files.push((access::FILE, access.to_stored_bytes()?));
         }
-        write_json(state_dir, SUSPENDED, &self.suspended)
+        files.push((SUSPENDED, json(SUSPENDED, &self.suspended)?));
+        Ok(files)
     }
 
     /// `fleet apply`: merges `incoming` into what `state_dir` holds,
@@ -141,11 +150,15 @@ impl Held {
                 }
             }
         }
+        // Each settled removal is forgotten as it is settled, so files
+        // that each settle some of a suspension's removals, as the bound
+        // on `settled` may make them, lift it between them.
         held.suspended.retain(|member, suspension| {
-            let removed = merged.removed.contains(member);
-            let voided =
-                !suspension.overflow && suspension.removals.keys().all(|id| settled.contains(id));
-            !removed && !voided
+            if merged.removed.contains(member) {
+                return false;
+            }
+            suspension.removals.retain(|id, _| !settled.contains(id));
+            suspension.overflow || !suspension.removals.is_empty()
         });
         held.access = Some(merged);
         // The SSH lines first: a write that fails leaves the file it was
@@ -369,13 +382,11 @@ fn read_json<T: serde::de::DeserializeOwned + Default>(state_dir: &Path, name: &
     }
 }
 
-fn write_json(state_dir: &Path, name: &str, value: &impl Serialize) -> Result<()> {
-    let path = state_dir.join(name);
-    let json = serde_json::to_vec(value).map_err(|source| Error::FleetFormat {
-        path: path.clone(),
+fn json(name: &str, value: &impl Serialize) -> Result<Vec<u8>> {
+    serde_json::to_vec(value).map_err(|source| Error::FleetFormat {
+        path: name.into(),
         source,
-    })?;
-    files::write_private(&path, &json)
+    })
 }
 
 #[cfg(test)]

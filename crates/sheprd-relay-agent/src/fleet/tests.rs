@@ -607,22 +607,37 @@ fn a_removal_whose_save_stops_part_way_still_revokes_the_desktop_on_retry() {
     host.enroll(2);
     host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[]))
         .unwrap();
-    // The revoked pairs cannot be written: nothing after them is either.
-    std::fs::remove_file(host.state().join(REVOKED)).unwrap();
-    std::fs::create_dir(host.state().join(REVOKED)).unwrap();
     let removed = file(&[(1, true, 0)], &[2], &[]);
-    assert!(host.apply(removed.clone()).is_err());
-    std::fs::remove_dir(host.state().join(REVOKED)).unwrap();
-    // The access file still names member 2, so the retry records its pair.
-    assert!(
-        Held::load(host.state())
-            .unwrap()
-            .access
-            .unwrap()
-            .members
-            .contains_key(&id(2))
-    );
+    // What applying it would write, worked out on a copy.
+    let copy = Host::new();
+    for name in [crate::authorized::FILE, access::FILE, SUSPENDED, REVOKED] {
+        std::fs::copy(host.state().join(name), copy.state().join(name)).unwrap();
+    }
+    let next = copy.apply(removed.clone()).unwrap();
+    let files = next.files().unwrap();
+    // The revoked pairs go first, before the file that drops member 2.
+    let names: Vec<&str> = files.iter().map(|(name, _)| *name).collect();
+    assert_eq!(names, [REVOKED, access::FILE, SUSPENDED]);
+    // Stopped after the first write: the retry still revokes the desktop.
+    let (name, bytes) = &files[0];
+    files::write_private(&host.state().join(name), bytes).unwrap();
     host.apply(removed).unwrap();
     assert_eq!(Held::load(host.state()).unwrap().revoked.len(), 1);
     assert_eq!(host.admitted().peer(&dial(2), &[2; 32]), None);
+}
+
+#[test]
+fn files_that_each_settle_part_of_a_suspension_lift_it_between_them() {
+    let host = Host::new();
+    let members = [(1, true, 0), (2, true, 0), (3, true, 0)];
+    host.apply(file(&members, &[], &[])).unwrap();
+    host.suspend(1, &[removal(0x51, &[2])]);
+    host.suspend(3, &[removal(0x52, &[2])]);
+    let held = host.apply(file(&members, &[], &[0x51])).unwrap();
+    assert_eq!(
+        held.suspended[&id(2)].removals.keys().collect::<Vec<_>>(),
+        [&id(0x52)]
+    );
+    let held = host.apply(file(&members, &[], &[0x52])).unwrap();
+    assert!(held.suspended.is_empty());
 }

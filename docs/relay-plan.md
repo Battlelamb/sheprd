@@ -1613,8 +1613,9 @@ accepted on this purpose.
 - The next access file, computed over SSH from the signed log, settles
   it. A confirmed removal becomes a permanent tombstone. A removal the
   log voids, such as one from a member that was itself removed first, is
-  lifted: the file's `settled` names every removal the member was
-  suspended for that no longer stands, and the log still lists it as a
+  lifted: each file's `settled` names removals the member was suspended
+  for that no longer stand, the agent forgets each as it is settled, and
+  the suspension lifts once none is left and the log still lists the
   member. A removal stands no longer when the log holds it, or, when the
   log does not hold it and is not waiting for it: once its signer or
   target is no member, once the log holds a later operation of its

@@ -376,6 +376,11 @@ pub(super) fn ask(
         Ok((_, Lookup::Missing(note))) => return missing(note),
         Err(response) => return response,
     };
+    // What the pull request itself rules out comes first: focusing a
+    // workspace cannot open a closed one.
+    if let Some(reason) = refusal(&pr, change) {
+        return Response::error(ErrorCode::InvalidRequest, reason);
+    }
     let followed = Target::try_from(&*pr).ok().is_some_and(|wanted| {
         view.pr_actions
             .target()
@@ -390,9 +395,6 @@ pub(super) fn ask(
                 place.workspace
             ),
         );
-    }
-    if let Some(reason) = refusal(&pr, change) {
-        return Response::error(ErrorCode::InvalidRequest, reason);
     }
     if !view.ask_pr_change(change, window, cx) {
         return Response::error(

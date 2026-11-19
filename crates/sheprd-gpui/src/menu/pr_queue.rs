@@ -108,10 +108,21 @@ impl SheprdWindow {
                     .join(", ")
             })
             .unwrap_or_default();
+        // The commit the dialog was opened for, which the queue names.
+        let head = self
+            .menu
+            .merge_target
+            .as_ref()
+            .map(|target| target.head().chars().take(12).collect::<String>())
+            .unwrap_or_default();
         let (title, body, verb) = match change {
             QueueOp::Add => (
                 fl!("pr-stack-dialog-add-title"),
-                fl!("pr-stack-dialog-add-body", numbers = numbers.as_str()),
+                fl!(
+                    "pr-stack-dialog-add-body",
+                    numbers = numbers.as_str(),
+                    head = head.as_str()
+                ),
                 fl!("pr-stack-dialog-add"),
             ),
             QueueOp::Remove => (

@@ -10,8 +10,10 @@
 //!   device, `USER@r-ID.sheprd.invalid`.
 //!
 //! Syncing never hands this fleet's log to a machine outside it: a machine
-//! is first asked for what it holds of this fleet, and one that answers
-//! for another fleet, or for none, is left alone.
+//! is first asked, with a nonce and without naming the fleet, for what it
+//! holds, and only one that answers for this fleet and signs the nonce
+//! with the certificate authority of one of the fleet's computers or
+//! Sheprd hosts goes on; any other is left alone.
 
 mod error;
 pub(crate) mod flows;
@@ -113,6 +115,11 @@ pub(crate) struct Fleet {
     read: bool,
     asked: Option<Instant>,
     asking: bool,
+    /// How many reads were asked for: only the newest one's answer is
+    /// taken, so an older answer arriving late never replaces a newer view.
+    reads: u64,
+    /// Orders the saved devices' updates ([`saved::keep`]).
+    saving: saved::Saving,
     error: Option<String>,
     windows: HashMap<EntityId, Reached>,
     links: HashMap<String, Link>,
@@ -241,9 +248,11 @@ impl Fleet {
         let Some(client) = Supervisor::client(cx) else {
             return;
         };
-        cx.update_global::<Self, _>(|this, _| {
+        let read = cx.update_global::<Self, _>(|this, _| {
             this.asking = true;
             this.asked = Some(Instant::now());
+            this.reads = this.reads.wrapping_add(1);
+            this.reads
         });
         let task = client.request(Request::Fleet(Box::new(Ask::Status)));
         cx.spawn(async move |cx| {
@@ -258,23 +267,7 @@ impl Fleet {
                     Ok(_) => Err(None),
                     Err(error) => Err(Some(error.to_string())),
                 };
-                let changed = cx.update_global::<Self, _>(|this, _| {
-                    this.asking = false;
-                    match view {
-                        Ok(view) => {
-                            let changed = this.view != view;
-                            this.view = view;
-                            this.read = true;
-                            changed
-                        }
-                        // An older daemon, or none: the page says so.
-                        Err(message) => {
-                            this.read = true;
-                            this.error = message;
-                            false
-                        }
-                    }
-                });
+                let changed = cx.update_global::<Self, _>(|this, _| this.answered(read, view));
                 if changed {
                     saved::keep(cx);
                     Self::tick(cx);
@@ -285,6 +278,28 @@ impl Fleet {
         .detach();
     }
 
+    /// Takes the answer to the `read`th read: whether the view changed. An
+    /// answer to an older read is dropped, as a newer one is on its way.
+    fn answered(&mut self, read: u64, view: Result<Option<View>, Option<String>>) -> bool {
+        if read != self.reads {
+            return false;
+        }
+        self.asking = false;
+        self.read = true;
+        match view {
+            Ok(view) => {
+                let changed = self.view != view;
+                self.view = view;
+                changed
+            }
+            // An older daemon, or none: the page says so.
+            Err(message) => {
+                self.error = message;
+                false
+            }
+        }
+    }
+
     /// Asks the daemon `ask`, which a person here approved, then reads the
     /// view again. `done` gets a failure to show.
     pub(crate) fn act(
@@ -292,18 +307,34 @@ impl Fleet {
         ask: Ask,
         done: impl FnOnce(Option<String>, &mut App) + 'static,
     ) {
+        Self::act_all(cx, vec![ask], done);
+    }
+
+    /// Asks the daemon each of `asks` in order, which a person here
+    /// approved as one change, stopping at the first failure, then reads
+    /// the view again. `done` gets a failure to show.
+    pub(crate) fn act_all(
+        cx: &mut App,
+        asks: Vec<Ask>,
+        done: impl FnOnce(Option<String>, &mut App) + 'static,
+    ) {
         let Some(client) = Supervisor::client(cx) else {
             done(Some(Error::NoDaemon.to_string()), cx);
             return;
         };
-        let task = client.request(Request::Fleet(Box::new(ask)));
         cx.spawn(async move |cx| {
-            let failure = match task.await {
-                Ok(Response::Fleet(_)) => None,
-                Ok(Response::Error { message, .. }) => Some(message),
-                Ok(_) => Some(Error::Daemon(String::new()).to_string()),
-                Err(error) => Some(error.to_string()),
-            };
+            let mut failure = None;
+            for ask in asks {
+                failure = match client.request(Request::Fleet(Box::new(ask))).await {
+                    Ok(Response::Fleet(_)) => None,
+                    Ok(Response::Error { message, .. }) => Some(message),
+                    Ok(_) => Some(Error::Daemon(String::new()).to_string()),
+                    Err(error) => Some(error.to_string()),
+                };
+                if failure.is_some() {
+                    break;
+                }
+            }
             cx.update(|cx| {
                 Self::refresh(cx);
                 done(failure, cx);

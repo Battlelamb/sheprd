@@ -1,10 +1,11 @@
 //! The fleet's files, in the state directory's `fleet` folder, private to
 //! this user: `key` (the fleet key's 32-byte secret), `log.bin` (the log,
 //! `control::fleet::saved`), and `peers.json` (which removals each peer
-//! holds, and which suspensions wait for their history).
+//! holds, and which suspensions wait for their history); `lock` is
+//! `super::lock`'s.
 
 use super::{Error, Inner, Result};
-use crate::control::fleet::{MemberId, OpId, saved};
+use crate::control::fleet::{MemberId, Op, OpId, saved, sync};
 use crate::desktop::files::{read_bounded, write_private};
 use p256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
@@ -13,11 +14,15 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const DIRECTORY: &str = "fleet";
+pub(super) const DIRECTORY: &str = "fleet";
 const KEY: &str = "key";
 const LOG: &str = "log.bin";
 const PEERS: &str = "peers.json";
-const MAX_PEERS: u64 = 1024 * 1024;
+/// The fleet id this computer joined as a host the fleet shares, not as a
+/// member.
+const HOSTED: &str = "hosted";
+/// The removals suspensions keep to check again take most of it.
+const MAX_PEERS: u64 = 16 * 1024 * 1024;
 
 fn path(state_dir: &Path, name: &str) -> PathBuf {
     state_dir.join(DIRECTORY).join(name)
@@ -75,6 +80,9 @@ struct Kept {
     signer: String,
     targets: Vec<String>,
     since_ms: u64,
+    /// The removal, base64url; absent from files an earlier build wrote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    op: Option<String>,
 }
 
 /// What the fleet folder keeps, read at `now_ms`. A log that no longer
@@ -104,8 +112,9 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
             .unconfirmed
             .iter()
             .filter_map(|(id, kept)| {
+                let id = OpId::from_hex(id)?;
                 Some((
-                    OpId::from_hex(id)?,
+                    id,
                     super::Unconfirmed {
                         signer: MemberId::from_hex(&kept.signer)?,
                         targets: kept
@@ -114,6 +123,13 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
                             .filter_map(|member| MemberId::from_hex(member))
                             .collect(),
                         since_ms: kept.since_ms,
+                        // One that no longer reads keeps its suspension.
+                        op: kept
+                            .op
+                            .as_deref()
+                            .and_then(|op| sync::bytes(op).ok())
+                            .and_then(|op| Op::decode(&op).ok())
+                            .filter(|op| op.id() == id),
                     },
                 ))
             })
@@ -154,6 +170,18 @@ pub(super) fn proven_keys(state_dir: &Path) -> Result<Vec<[u8; 32]>> {
 }
 
 /// Writes the log and the peers' state. Blocking.
+/// The fleet id this computer joined as a shared host, if it did. Blocking.
+pub(super) fn load_hosted(state_dir: &Path) -> Result<Option<String>> {
+    Ok(read_bounded(&path(state_dir, HOSTED), 64)?
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned()))
+}
+
+/// Records that this computer joined `fleet` as a shared host. Blocking.
+pub(super) fn save_hosted(state_dir: &Path, fleet: &str) -> Result<()> {
+    write_private(&path(state_dir, HOSTED), fleet.as_bytes())?;
+    Ok(())
+}
+
 pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
     if let Some(log) = &inner.log {
         write_private(&path(state_dir, LOG), &saved::encode(log)?)?;
@@ -193,6 +221,7 @@ pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
                         signer: kept.signer.to_string(),
                         targets: kept.targets.iter().map(ToString::to_string).collect(),
                         since_ms: kept.since_ms,
+                        op: kept.op.as_ref().map(|op| sync::text(&op.encode())),
                     },
                 )
             })

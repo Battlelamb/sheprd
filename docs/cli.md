@@ -415,7 +415,7 @@ command line.
 
 | Command | What it does |
 | --- | --- |
-| `fleet [status]` | The fleet as this computer's daemon keeps it: its id, the members (computers and phones, who admitted each, which is this computer), the hosts (who added each, how many computers may reach each, and the `ssh` target this computer reaches it by when it may), members cut off by a removal whose history has not arrived, and members that signed in two places. Exits 4 when this computer is in no fleet |
+| `fleet [status]` | The fleet as this computer's daemon keeps it: its id, the members (computers and phones, who admitted each, which is this computer), the hosts (who added each, how many computers may reach each, and the `ssh` target this computer reaches it by when it may), members cut off by a removal whose history has not arrived, and members that signed in two places. Exits 4 when this computer is in no fleet, and 1, with the reason, when its daemon cannot be read |
 | `fleet members`, `fleet hosts` | One of those lists. JSON is `{"members": [...]}` or `{"hosts": [...]}` |
 | `fleet open` | Show Settings > Fleet, where a fleet is created, computers this Sheprd reaches are invited, and hosts are shared with the computers ticked |
 | `fleet remove MEMBER` | Ask in Settings > Fleet to remove a member, named by its ID from `fleet status` or its name (a name two members share is refused). The user picks why there: a compromised member takes the members and hosts it added with it |

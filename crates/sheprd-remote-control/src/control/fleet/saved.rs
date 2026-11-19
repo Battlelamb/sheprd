@@ -3,7 +3,8 @@
 //! checks every operation again, as if it had just arrived, so a file
 //! changed on disk computes nothing a signature does not back.
 
-use super::{Body, Error, Log, MAX_OPS, MAX_REMOVALS, MAX_STATE, Op, Result};
+use super::{Body, Error, Log, MAX_OPS, MAX_PENDING, MAX_REMOVALS, MAX_STATE, Op, OpId, Result};
+use std::collections::HashMap;
 
 const MAGIC: &[u8] = b"sheprd-fleet-log-v1";
 /// The largest file read: a full log, a full state, and their lengths.
@@ -72,10 +73,49 @@ pub fn decode(bytes: &[u8], now_ms: u64) -> Result<Log> {
             Log::found(ops.swap_remove(found))?
         }
     };
-    // What no longer checks out is dropped with its reason; the rest
-    // stands.
-    let _ = log.insert_all(ops, now_ms);
+    // Parents first, a pool's worth at a time: each batch applies whole,
+    // so the bounded pool of operations waiting for their parents never
+    // has to drop history the file holds. What no longer checks out is
+    // dropped with its reason; the rest stands.
+    let mut ops = parents_first(ops).into_iter().peekable();
+    while ops.peek().is_some() {
+        let batch: Vec<Op> = ops.by_ref().take(MAX_PENDING).collect();
+        let _ = log.insert_all(batch, now_ms);
+    }
     Ok(log)
+}
+
+/// `ops` ordered so each comes after every parent among them; those whose
+/// parents the file lacks come last, in no meaningful order.
+fn parents_first(ops: Vec<Op>) -> Vec<Op> {
+    let index: HashMap<OpId, usize> = ops.iter().enumerate().map(|(i, op)| (op.id(), i)).collect();
+    let mut waiting = vec![0_usize; ops.len()];
+    let mut children = vec![Vec::new(); ops.len()];
+    for (position, op) in ops.iter().enumerate() {
+        for parent in op.parents() {
+            if let Some(&parent) = index.get(parent) {
+                waiting[position] += 1;
+                children[parent].push(position);
+            }
+        }
+    }
+    let mut ready: Vec<usize> = (0..ops.len()).filter(|&i| waiting[i] == 0).collect();
+    let mut order = Vec::with_capacity(ops.len());
+    while let Some(position) = ready.pop() {
+        order.push(position);
+        for &child in &children[position] {
+            waiting[child] -= 1;
+            if waiting[child] == 0 {
+                ready.push(child);
+            }
+        }
+    }
+    let mut slots: Vec<Option<Op>> = ops.into_iter().map(Some).collect();
+    let mut sorted: Vec<Op> = order.iter().filter_map(|&i| slots[i].take()).collect();
+    // Ids are hashes, so no cycle can hold an operation back; whatever
+    // could is kept rather than lost.
+    sorted.extend(slots.into_iter().flatten());
+    sorted
 }
 
 fn push(bytes: &mut Vec<u8>, item: &[u8]) -> Result<()> {

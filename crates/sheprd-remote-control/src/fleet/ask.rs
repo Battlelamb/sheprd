@@ -8,6 +8,7 @@ use crate::control::fleet::{
     sync::{self, Answer, Ask},
 };
 use crate::web::State;
+use std::collections::BTreeSet;
 
 /// Answers `ask` at `now_ms`. Blocking.
 pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Result<Answer> {
@@ -81,11 +82,21 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             let deny = deny
                 .iter()
                 .map(|member| sync::member(member))
-                .collect::<crate::control::fleet::Result<Vec<_>>>()?;
-            fleet.sign(Body::HostAdd(intro), now_ms)?;
-            for member in deny {
-                access(fleet, host, member, false, now_ms)?;
-            }
+                .collect::<crate::control::fleet::Result<BTreeSet<_>>>()?;
+            // The host and its exclusions land together or not at all: a
+            // host kept without them would be shared wider than asked.
+            fleet.sign_all(now_ms, |log| {
+                std::iter::once(Body::HostAdd(intro))
+                    .chain(deny.into_iter().map(|member| {
+                        Body::Access(Access {
+                            host,
+                            member,
+                            allow: false,
+                            rev: sync::next_rev(log.state(), host, member),
+                        })
+                    }))
+                    .collect()
+            })?;
             Ok(Answer::Done)
         }
         Ask::Access {
@@ -127,6 +138,11 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             }
             let heads = apply.heads()?;
             let ops = apply.ops()?;
+            if apply.more && fleet.inner().log.is_none() {
+                // A part of a log handed over: nothing to answer yet.
+                fleet.stage(ops, now_ms)?;
+                return Ok(Answer::Applied(sync::Applied::default()));
+            }
             let refused = fleet.receive(ops, now_ms)?;
             let mut applied = {
                 let inner = fleet.inner();

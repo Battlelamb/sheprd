@@ -5,13 +5,21 @@ use super::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use p256::ecdsa::{SigningKey, VerifyingKey, signature::Signer};
 
+mod access_floor;
 mod admission;
 mod checkpoint;
 mod convergence;
+mod drafting;
 mod encoding;
+mod forgery;
 mod hardening;
 mod hosts;
+mod lineage;
+mod pending;
+mod pruning;
 mod removal;
+mod rotation;
+mod routes;
 mod vectors;
 
 /// A fixed "now": 2027-01-15.
@@ -150,6 +158,14 @@ fn phone(seed: u8) -> Device {
 /// Signs `body` as `by` on top of everything `log` holds.
 fn sign(log: &Log, by: &Device, body: Body) -> Op {
     log.draft(by.id(), NOW, body).sign(&by.key).unwrap()
+}
+
+/// Signs `body` as `by` on top of everything `log` holds, as it is: an
+/// `Access` keeps the `rev` given rather than the one the draft computes.
+fn as_drafted(log: &Log, by: &Device, body: Body) -> Op {
+    let mut unsigned = log.draft(by.id(), NOW, body.clone());
+    unsigned.body = body;
+    unsigned.sign(&by.key).unwrap()
 }
 
 /// Signs `body` as `by` on exactly `parents`, as a device that had seen

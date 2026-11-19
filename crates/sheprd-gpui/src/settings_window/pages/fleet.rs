@@ -412,6 +412,7 @@ impl SettingsWindow {
                 Standing::Agent => fl!("settings-fleet-machine-agent"),
                 Standing::Outside => fl!("settings-fleet-machine-outside"),
                 Standing::NoDaemon => fl!("settings-fleet-machine-no-daemon"),
+                Standing::Unchecked => fl!("settings-fleet-machine-unchecked"),
                 Standing::Failed => fl!("settings-fleet-machine-failed"),
                 Standing::Unknown => fl!("settings-fleet-machine-unknown"),
             };
@@ -476,7 +477,11 @@ impl SettingsWindow {
                 this.fleet.sharing = None;
                 cx.notify();
             }));
-            if matches!(standing, Standing::Member | Standing::Agent) || acting {
+            if matches!(
+                standing,
+                Standing::Member | Standing::Agent | Standing::Unchecked
+            ) || acting
+            {
                 rows.push(row.description(line).control(scrub));
                 continue;
             }

@@ -70,3 +70,30 @@ fn a_plain_host_in_the_fleet_shows_as_one(cx: &mut TestAppContext) {
         Standing::Agent
     );
 }
+
+#[gpui::test]
+fn a_machine_whose_key_is_not_checked_cannot_be_shared(cx: &mut TestAppContext) {
+    let _serial = serial();
+    let cx = page(cx, true);
+    reach(cx, Standing::Unchecked);
+    assert!(cx.debug_bounds("fleet-machine-0-share-plain").is_none());
+    assert!(cx.debug_bounds("fleet-machine-0-share").is_none());
+    assert!(cx.debug_bounds("fleet-machine-0-invite").is_none());
+    assert!(cx.debug_bounds("fleet-machine-0-scrub").is_some());
+}
+
+#[gpui::test]
+fn sharing_a_machine_whose_key_is_not_checked_stops_before_reaching_it(cx: &mut TestAppContext) {
+    let _serial = serial();
+    let cx = page(cx, true);
+    reach(cx, Standing::NoDaemon);
+    sheprd_client::set_host_keys("deploy@build-01", sheprd_client::HostKeys::Skip);
+    click(cx, "fleet-machine-0-share-plain");
+    click(cx, "fleet-machine-0-share-confirm");
+    cx.run_until_parked();
+    draw(cx);
+    sheprd_client::set_host_keys("deploy@build-01", sheprd_client::HostKeys::Verify);
+    assert!(cx.debug_bounds("fleet-error").is_some());
+    assert!(!cx.update(|_, cx| Fleet::acting(cx, "build-01")));
+    assert!(ASKED.lock().unwrap().is_empty());
+}

@@ -85,6 +85,9 @@ pub(crate) enum Standing {
     NoDaemon,
     /// A plain host of this fleet, whose relay agent is kept current.
     Agent,
+    /// Its SSH host key is not checked: the fleet neither shares it as a
+    /// plain host nor asks its agent anything.
+    Unchecked,
     /// Could not be asked.
     Failed,
 }
@@ -101,7 +104,7 @@ impl Link {
         match self.standing {
             Standing::Unknown => true,
             Standing::Member | Standing::Agent => self.synced != mine || since(REFRESH),
-            Standing::Outside | Standing::NoDaemon => since(OUTSIDE),
+            Standing::Outside | Standing::NoDaemon | Standing::Unchecked => since(OUTSIDE),
             Standing::Failed => since(RETRY),
         }
     }

@@ -33,6 +33,10 @@ pub enum Error {
     Run(#[source] sheprd_client::Error),
     #[error("Could not check the host's SSH key against this computer's known hosts")]
     Trust(#[source] sheprd_client::Error),
+    #[error(
+        "This host's SSH key is not checked; the fleet shares only hosts whose key is checked strictly"
+    )]
+    Unchecked,
     #[error("The fleet cannot reach this kind of device")]
     Unsupported,
     // keep-sorted end

@@ -31,12 +31,18 @@ pub(crate) fn relays(view: &View) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The SSH target a plain host is reached by; the host keys a strictly
-/// checked session to it accepts come from the known hosts of that name.
-fn ssh_target(target: &ConnectTarget) -> Result<String, Error> {
-    match target {
-        ConnectTarget::Ssh { target, .. } => Ok(target.clone()),
-        _ => Err(Error::Unsupported),
+/// The SSH target a plain host is reached by, when its sessions check the
+/// host key strictly: the host keys they accept come from the known hosts
+/// of that name. A target the user chose not to check
+/// (`sheprd_client::HostKeys::Skip`) is refused, since nothing it reports
+/// about itself was said over a session that proved who it is.
+pub(crate) fn strict_target(target: &ConnectTarget) -> Result<String, Error> {
+    let ConnectTarget::Ssh { target, .. } = target else {
+        return Err(Error::Unsupported);
+    };
+    match sheprd_client::HostKeys::of(target) {
+        sheprd_client::HostKeys::Verify => Ok(target.clone()),
+        sheprd_client::HostKeys::Skip => Err(Error::Unchecked),
     }
 }
 
@@ -68,11 +74,12 @@ pub(crate) fn share(
     let executor = cx.background_executor().clone();
     cx.spawn(async move |cx| {
         let outcome = async {
+            // Before anything runs on the machine.
+            let target = strict_target(&machine.target)?;
             let relays = relays(&view);
             if relays.is_empty() {
                 return Err(Error::NoRelays);
             }
-            let target = ssh_target(&machine.target)?;
             let (connect, label) = (machine.target.clone(), machine.label.clone());
             let installing = relays.clone();
             let (report, user, known) = executor
@@ -82,6 +89,12 @@ pub(crate) fn share(
                     let user = agent::user(&host, &cancelled)?;
                     let report = agent::install(&host, &installing, &cancelled)?;
                     let known = known_keys(&target)?;
+                    // The key that names the host must be the one it
+                    // negotiates, not only one it says it has.
+                    let first = report.ssh_host_keys.first().ok_or(Error::HostKey)?;
+                    if !sheprd_client::confirm_host_key(&target, first).map_err(Error::Trust)? {
+                        return Err(Error::HostKey);
+                    }
                     Ok::<_, Error>((report, user, known))
                 })
                 .await?;
@@ -120,6 +133,12 @@ pub(super) async fn sync(
     machine: &Machine,
     view: &View,
 ) -> Result<Standing, Error> {
+    // Nothing is asked of a machine whose key is not checked.
+    let target = match strict_target(&machine.target) {
+        Ok(target) => target,
+        Err(Error::Unchecked) => return Ok(Standing::Unchecked),
+        Err(_) => return Ok(Standing::NoDaemon),
+    };
     let connect = machine.target.clone();
     let report = executor
         .spawn(async move {
@@ -137,9 +156,6 @@ pub(super) async fn sync(
     {
         return Ok(Standing::Outside);
     }
-    let Ok(target) = ssh_target(&machine.target) else {
-        return Ok(Standing::NoDaemon);
-    };
     let reported = report.ssh_host_keys.clone();
     let known = executor.spawn(async move { known_keys(&target) }).await?;
     let host = agent::host_id(&reported, &known);

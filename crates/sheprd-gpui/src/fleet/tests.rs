@@ -1,6 +1,8 @@
 use super::*;
 use std::time::{Duration, Instant};
 
+mod plain;
+
 fn link(standing: Standing, ago: Duration, synced: &[&str]) -> (Link, Instant) {
     let now = Instant::now() + Duration::from_secs(7200);
     let link = Link {

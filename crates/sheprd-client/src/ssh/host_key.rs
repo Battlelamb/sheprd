@@ -229,38 +229,154 @@ fn lists_host<'a>(name: &str, files: impl IntoIterator<Item = &'a PathBuf>) -> R
 /// The host keys the known hosts files `ssh` checks for `target` list
 /// under its name, `TYPE BASE64`: the keys a strictly checked session to it
 /// accepts, so a key a host reports about itself can be held to them. A
-/// `@cert-authority` or `@revoked` line is no host key and is passed over.
-/// Blocks on `ssh -G` and `ssh-keygen`: call it from a background thread.
+/// `@cert-authority` line is no host key, and a key any file marks
+/// `@revoked` is left out wherever else it is listed. Refuses a target the
+/// user chose not to check ([`super::HostKeys::Skip`]): its sessions accept
+/// any key. Blocks on `ssh -G` and `ssh-keygen`: call it from a background
+/// thread.
 pub fn known_host_keys(target: &str) -> Result<Vec<String>> {
     validate_target(target)?;
+    strictly_checked(target)?;
     let known = known_hosts(target)?;
-    let mut keys = Vec::new();
+    let (mut keys, mut revoked) = (Vec::new(), Vec::new());
     for file in known.files().filter(|file| file.is_file()) {
         let mut command = crate::environment::command("ssh-keygen");
         command.args(["-F", &known.name, "-f"]).arg(file);
         let (status, output) = super::run(&mut command, Duration::from_secs(5), || false)?;
         match status.code() {
-            Some(0) => keys.extend(found_keys(&output)),
+            Some(0) => {
+                let found = found_keys(&output);
+                keys.extend(found.keys);
+                revoked.extend(found.revoked);
+            }
             Some(1) => {}
             _ => return Err(crate::Error::RemoteCommand(status)),
         }
     }
+    keys.retain(|key| !revoked.contains(key));
     keys.dedup();
     Ok(keys)
 }
 
-/// `TYPE BASE64` of each entry `ssh-keygen -F` printed.
-fn found_keys(output: &[u8]) -> Vec<String> {
-    String::from_utf8_lossy(output)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with('@'))
-        .filter_map(|line| {
-            let mut fields = line.split_ascii_whitespace();
-            let (_, kind, blob) = (fields.next()?, fields.next()?, fields.next()?);
-            Some(format!("{kind} {blob}"))
-        })
-        .collect()
+/// Refuses a target whose sessions do not check its host key.
+fn strictly_checked(target: &str) -> Result<()> {
+    match super::HostKeys::of(target) {
+        super::HostKeys::Verify => Ok(()),
+        super::HostKeys::Skip => Err(Error::Unchecked.into()),
+    }
+}
+
+/// Whether `target` proves it holds `key` (`TYPE BASE64`) in an SSH key
+/// exchange: `ssh` connects with that key alone known under the target's
+/// name, checking strictly and offering only its algorithms, and
+/// authenticates with nothing, so no credential is offered and no command
+/// runs. What a host reports about its own keys can then be held to the key
+/// it actually negotiated. `false` for a key of a type it cannot offer.
+/// Blocks on SSH: call it from a background thread.
+pub fn confirm_host_key(target: &str, key: &str) -> Result<bool> {
+    validate_target(target)?;
+    strictly_checked(target)?;
+    let Some(algorithms) = host_key_algorithms(key) else {
+        return Ok(false);
+    };
+    let known = known_hosts(target)?;
+    let scratch = tempfile::Builder::new()
+        .prefix("herdr-host-key-")
+        .tempdir()?;
+    let only = scratch.path().join("known_hosts");
+    std::fs::write(&only, format!("{} {key}\n", known.name))?;
+    let mut command = crate::environment::command("ssh");
+    command
+        .args(confirm_options(&only, algorithms))
+        .args(crate::relay_host::options(target))
+        .args(super::POLICY)
+        .args(["-o", "ClearAllForwardings=yes", "--", target, "true"])
+        .stderr(Stdio::piped());
+    let (status, _, stderr) =
+        super::run_with_stderr(&mut command, Duration::from_secs(20), || false)?;
+    Ok(match status.code() {
+        // Authentication is refused only after the host was verified.
+        Some(255) => SshFailure::classify(status.code(), &stderr) == SshFailure::Auth,
+        Some(_) => true,
+        None => false,
+    })
+}
+
+/// The host key algorithms that prove a key of `key`'s type.
+fn host_key_algorithms(key: &str) -> Option<&'static str> {
+    match key.split_ascii_whitespace().next()? {
+        "ssh-ed25519" => Some("ssh-ed25519"),
+        "ecdsa-sha2-nistp256" => Some("ecdsa-sha2-nistp256"),
+        "ecdsa-sha2-nistp384" => Some("ecdsa-sha2-nistp384"),
+        "ecdsa-sha2-nistp521" => Some("ecdsa-sha2-nistp521"),
+        "ssh-rsa" => Some("rsa-sha2-512,rsa-sha2-256"),
+        _ => None,
+    }
+}
+
+/// Options for [`confirm_host_key`], ahead of everything else so they win:
+/// `only` is the sole known hosts file, nothing else may vouch for a key,
+/// and every authentication method is off.
+fn confirm_options(only: &Path, algorithms: &str) -> Vec<String> {
+    [
+        format!("UserKnownHostsFile=\"{}\"", option_path(only)),
+        "GlobalKnownHostsFile=/dev/null".into(),
+        "KnownHostsCommand=none".into(),
+        "StrictHostKeyChecking=yes".into(),
+        "CheckHostIP=no".into(),
+        "VerifyHostKeyDNS=no".into(),
+        "UpdateHostKeys=no".into(),
+        format!("HostKeyAlgorithms={algorithms}"),
+        "PubkeyAuthentication=no".into(),
+        "PasswordAuthentication=no".into(),
+        "KbdInteractiveAuthentication=no".into(),
+        "GSSAPIAuthentication=no".into(),
+        "HostbasedAuthentication=no".into(),
+        "ControlPath=none".into(),
+        "ForwardAgent=no".into(),
+        "PermitLocalCommand=no".into(),
+        "RemoteCommand=none".into(),
+        "Tunnel=no".into(),
+    ]
+    .into_iter()
+    .flat_map(|option| ["-o".into(), option])
+    .collect()
+}
+
+/// What `ssh-keygen -F` printed: host keys, and keys marked revoked.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Found {
+    keys: Vec<String>,
+    revoked: Vec<String>,
+}
+
+/// `TYPE BASE64` of each entry `ssh-keygen -F` printed, sorted by marker:
+/// none is a host key, `@revoked` a revoked key, and any other marker
+/// (`@cert-authority`) no host key at all.
+fn found_keys(output: &[u8]) -> Found {
+    let mut found = Found::default();
+    for line in String::from_utf8_lossy(output).lines().map(str::trim) {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut fields = line.split_ascii_whitespace();
+        let marker = if line.starts_with('@') {
+            fields.next()
+        } else {
+            None
+        };
+        let (Some(_), Some(kind), Some(blob)) = (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        let key = format!("{kind} {blob}");
+        match marker {
+            None => found.keys.push(key),
+            Some("@revoked") => found.revoked.push(key),
+            Some(_) => {}
+        }
+    }
+    found
 }
 
 fn known_hosts(target: &str) -> Result<KnownHosts> {

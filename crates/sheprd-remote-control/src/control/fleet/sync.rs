@@ -231,6 +231,10 @@ pub enum Ask {
     /// `HostSeen` when it moved, as a host that is no member cannot sign
     /// one. Its certificate authority's signature is what counts.
     Seen { intro: String },
+    /// The hosts removed from the fleet that sign with a certificate
+    /// authority ([`removed_hosts`]): Sheprd still syncs them, so they
+    /// learn of their removal and stop letting the fleet in.
+    RemovedHosts,
 }
 
 /// What the daemon answers.
@@ -251,6 +255,10 @@ pub enum Answer {
     /// base64url.
     Intro {
         intro: String,
+    },
+    /// [`Ask::RemovedHosts`]'s answer: host ids, hex.
+    Hosts {
+        hosts: Vec<String>,
     },
 }
 
@@ -289,6 +297,31 @@ pub fn next_rev(state: &State, host: HostId, member: MemberId) -> u64 {
         .get(&(host, member))
         .map_or(0, |register| register.rev)
         .saturating_add(1)
+}
+
+/// Every host `log` ever held that signs with a certificate authority, as
+/// its `HostAdd` or its member's bundle named it, and holds no longer: what
+/// may still prove itself to a member syncing it, to be told it is gone.
+#[must_use]
+pub fn removed_hosts(log: &Log) -> Vec<String> {
+    let live = &log.state().hosts;
+    let mut removed = std::collections::BTreeSet::new();
+    for op in log.ops() {
+        let intro = match op.body() {
+            Body::HostAdd(intro) => Some(intro),
+            Body::Found(bundle) | Body::Rotate(bundle) => bundle.host.as_ref(),
+            Body::Admit(admit) => admit.bundle.host.as_ref(),
+            _ => None,
+        };
+        if let Some(id) = intro
+            .filter(|intro| intro.ca.is_some())
+            .and_then(|intro| intro.id().ok())
+            .filter(|id| !live.contains_key(id))
+        {
+            removed.insert(id);
+        }
+    }
+    removed.iter().map(ToString::to_string).collect()
 }
 
 /// Whether `log` shares `host`, this computer as a host the fleet holds:

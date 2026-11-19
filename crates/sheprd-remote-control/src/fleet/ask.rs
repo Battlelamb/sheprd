@@ -164,6 +164,15 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             }
             Ok(Answer::Done)
         }
+        Ask::RemovedHosts => {
+            let inner = fleet.inner();
+            let hosts = inner
+                .log
+                .as_ref()
+                .map(sync::removed_hosts)
+                .unwrap_or_default();
+            Ok(Answer::Hosts { hosts })
+        }
         Ask::Apply(apply) => {
             // A caller naming another fleet learns nothing of this one.
             if let Some(named) = &apply.fleet

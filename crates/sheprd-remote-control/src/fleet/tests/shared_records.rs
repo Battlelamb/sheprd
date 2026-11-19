@@ -83,3 +83,40 @@ async fn a_members_record_is_never_carried_for_it() {
     assert_eq!(a.ask(Ask::Seen { intro }), Answer::Done);
     assert_eq!(a.view().heads, heads);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_shared_host_is_still_reached_and_stops_letting_the_fleet_in() {
+    let (http, _, _) = relay().await;
+    let (a, host) = (Node::new(http, 1).await, Node::new(http, 5).await);
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    share(&a, &host);
+    let id = host.fleet.host().unwrap();
+    assert!(grants::still_allowed(&host.fleet, &a.fleet.me()));
+    assert_eq!(
+        a.ask(Ask::RemovedHosts),
+        Answer::Hosts { hosts: Vec::new() }
+    );
+    a.ask(Ask::RemoveHost {
+        host: id.to_string(),
+    });
+    // Gone from the view, but still one a sync may reach and prove.
+    assert!(
+        !a.view()
+            .hosts
+            .iter()
+            .any(|shared| shared.id == id.to_string())
+    );
+    assert_eq!(
+        a.ask(Ask::RemovedHosts),
+        Answer::Hosts {
+            hosts: vec![id.to_string()]
+        }
+    );
+    // Sync hands it the removal: it lets nobody in, then forgets the
+    // fleet.
+    host.fleet.receive(a.ops(), now_ms()).unwrap();
+    assert!(!grants::still_allowed(&host.fleet, &a.fleet.me()));
+    grants::apply(&host.state, &host.fleet).unwrap();
+    assert!(host.lines().is_empty(), "{:?}", host.lines());
+    assert!(!host.fleet.in_fleet().unwrap());
+}

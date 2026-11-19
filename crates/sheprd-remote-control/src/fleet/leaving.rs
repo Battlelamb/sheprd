@@ -2,7 +2,9 @@
 //! the log until its removal has been passed on: until a live computer
 //! member said it holds the removal (`Inner::held`, which the removal
 //! flood fills), or none is left to tell. Then the fleet is forgotten
-//! here, so this computer may found or join another.
+//! here, so this computer may found or join another. A computer that
+//! joined as a shared host forgets the fleet once the fleet removed that
+//! host: it has nothing to pass on, and lets nobody in any more.
 
 use super::{Fleet, Inner, Result, store};
 use crate::control::fleet::{Body, Kind, Log, MemberId, OpId};
@@ -46,7 +48,14 @@ impl Fleet {
     /// ([`released`]): its log, what peers hold, suspensions, and proven
     /// keys. Says whether it did. Blocking.
     pub(crate) fn release_if_left(&self, inner: &mut Inner) -> Result<bool> {
-        if !released(inner, &self.me) {
+        let host_removed = self.hosted.load(Ordering::SeqCst)
+            && inner.log.as_ref().is_some_and(|log| {
+                !log.is_member(&self.me)
+                    && self
+                        .host
+                        .is_none_or(|host| !log.state().hosts.contains_key(&host))
+            });
+        if !host_removed && !released(inner, &self.me) {
             return Ok(false);
         }
         *inner = Inner::default();

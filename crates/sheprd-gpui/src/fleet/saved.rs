@@ -7,6 +7,7 @@
 use super::Fleet;
 use gpui::{App, BorrowAppContext};
 use sheprd_client::SavedHost;
+use sheprd_remote_control::control::fleet::View;
 use std::{
     collections::BTreeSet,
     path::PathBuf,
@@ -101,14 +102,14 @@ pub(super) fn plan(before: &BTreeSet<String>, saved: &[SavedHost], wanted: &[Sav
     plan
 }
 
-/// Saves the fleet hosts this computer may reach and forgets those it no
-/// longer may, on the background executor.
-pub(super) fn keep(cx: &mut App) {
-    let Some(view) = Fleet::view(cx) else {
-        return;
+/// The devices the fleet wants saved: each host in `view` this computer
+/// may reach. None in no fleet, so a fleet this computer left has all its
+/// devices forgotten.
+pub(super) fn wanted(view: Option<&View>) -> Vec<SavedHost> {
+    let Some(view) = view else {
+        return Vec::new();
     };
-    let wanted: Vec<SavedHost> = view
-        .hosts
+    view.hosts
         .iter()
         .filter(|host| !host.held)
         .filter_map(|host| {
@@ -120,7 +121,15 @@ pub(super) fn keep(cx: &mut App) {
                 enabled: true,
             })
         })
-        .collect();
+        .collect()
+}
+
+/// Saves the fleet hosts this computer may reach and forgets those it no
+/// longer may, on the background executor. Called only after the daemon
+/// answered: a view of `None` then means this computer is in no fleet, not
+/// that the daemon could not be read.
+pub(super) fn keep(cx: &mut App) {
+    let wanted = wanted(Fleet::view(cx));
     let (saving, number) = cx.update_global::<Fleet, _>(|fleet, _| {
         fleet.saving.started += 1;
         (fleet.saving.clone(), fleet.saving.started)

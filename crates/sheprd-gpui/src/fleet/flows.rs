@@ -173,12 +173,17 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
             // Hosts that sign with a certificate authority: computers in
             // the fleet and Sheprd hosts. Only one of them may prove it is
             // the machine answering.
-            let hosts: Vec<String> = view
+            let mut hosts: Vec<String> = view
                 .hosts
                 .iter()
                 .filter(|host| host.kind != HostKind::Agent)
                 .map(|host| host.id.clone())
                 .collect();
+            // A host the fleet removed still proves itself, so it is sent
+            // its removal and stops letting the fleet's computers in.
+            if let Ok(Answer::Hosts { hosts: removed }) = daemon(&client, Ask::RemovedHosts).await {
+                hosts.extend(removed);
+            }
             let target = &machine.target;
             let Some((mut theirs, proven)) =
                 ask_proven(&executor, target, view.heads.clone(), &fleet, &hosts).await?

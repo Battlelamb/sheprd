@@ -175,3 +175,33 @@ fn an_older_update_of_the_saved_devices_never_runs_after_a_newer_one() {
     saving.run(3, || ran.borrow_mut().push(3));
     assert_eq!(*ran.borrow(), vec![2, 3]);
 }
+
+#[test]
+fn leaving_the_fleet_forgets_every_device_it_saved() {
+    let before = BTreeSet::from(["one".to_owned(), "two".to_owned()]);
+    let saved_now = [
+        host("one", "me@r-one.sheprd.invalid"),
+        host("two", "me@r-two.sheprd.invalid"),
+        host("mine", "me@build-01"),
+    ];
+    // In no fleet: nothing is wanted.
+    let wanted = saved::wanted(None);
+    assert!(wanted.is_empty());
+    let plan = saved::plan(&before, &saved_now, &wanted);
+    assert_eq!(plan.forget, vec!["one".to_owned(), "two".to_owned()]);
+    assert!(plan.save.is_empty() && plan.kept.is_empty());
+}
+
+#[test]
+fn the_first_answer_of_no_fleet_counts_as_a_change() {
+    let mut fleet = Fleet {
+        reads: 1,
+        ..Fleet::default()
+    };
+    // A failure is no answer.
+    assert!(!fleet.answered(1, Err(Some("refused".into()))));
+    fleet.reads = 2;
+    assert!(fleet.answered(2, Ok(None)));
+    fleet.reads = 3;
+    assert!(!fleet.answered(3, Ok(None)));
+}

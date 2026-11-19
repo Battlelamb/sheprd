@@ -36,6 +36,8 @@ final class FleetMembership {
         /// Keychain as other relay keys are.
         var relayDial: Data
         var relayTunnel: Data
+        /// Device keys made for hosts whose `Link` may not have landed yet.
+        var pendingLinks: [FleetPendingLink]?
     }
 
     private(set) var record: Record?
@@ -48,6 +50,10 @@ final class FleetMembership {
     var problem: String?
     /// The offer card was closed this launch.
     var offerDismissed = false
+    /// A computer of this phone's fleet says the phone is not a member:
+    /// another member removed it, or that computer has not heard of its
+    /// admission yet. The phone can then forget the fleet and join again.
+    private(set) var notMember = false
     /// The computers on this phone.
     @ObservationIgnored var computers: () -> [Computer] = { [] }
     /// Keeps a host the phone linked itself to.
@@ -77,17 +83,23 @@ final class FleetMembership {
     }
 
     /// The computer the phone reads the fleet from and posts to.
-    var through: Computer? {
-        guard let record else { return nil }
-        let computers = computers()
-        return computers.first { $0.device == record.through }
-            ?? computers.first { fleets[$0.device] == record.fleet }
+    var through: Computer? { candidates.first }
+
+    /// The computers of this phone's fleet it may post to: the one it last
+    /// reached first, then every other directly paired one in the fleet,
+    /// so one that is offline or lost never blocks the rest.
+    private var candidates: [Computer] {
+        guard let record else { return [] }
+        let computers = computers().filter { $0.via == nil }
+        let saved = computers.filter { $0.device == record.through }
+        let others = computers.filter { $0.device != record.through && fleets[$0.device] == record.fleet }
+        return saved + others
     }
 
     /// Sheprd hosts in the fleet the phone may add: not linked yet, not
     /// held, and not a computer it already holds.
     var offers: [API.FleetHost] {
-        guard admitted, let status, let view = status.view else { return [] }
+        guard admitted, !notMember, let status, let view = status.view else { return [] }
         let held = Set(computers().map(\.fingerprint.hex))
         return view.hosts.filter { host in
             host.runsSheprd && !host.held && !status.links.contains(host.id)
@@ -116,6 +128,8 @@ final class FleetMembership {
             }
             self.status = status
             route(status)
+            settleLinks(status, outcome: .unknown)
+            notMember = record.admitted && status.lacks(member: record.member, in: record.fleet)
             if !record.admitted, status.join == .member {
                 var admitted = record
                 admitted.admitted = true
@@ -154,6 +168,14 @@ final class FleetMembership {
         forget()
     }
 
+    /// Forgets the fleet on this phone alone, once a computer of the fleet
+    /// says the phone is no longer a member: nothing is signed, as a
+    /// removed key may sign nothing, and joining again makes a new key.
+    func forgetRemoved() {
+        guard notMember else { return }
+        forget()
+    }
+
     /// Removes a member, this phone included, which then leaves.
     func remove(member: String, reason: FleetLog.Reason) async {
         guard let id = FleetLog.data(hex: member) else { return }
@@ -172,42 +194,54 @@ final class FleetMembership {
 
     /// Signs one `Link` per host, with a new device key for each, so those
     /// hosts admit this phone to their API; keeps each as a computer
-    /// reached through the one the phone joined through.
+    /// reached through the one the phone joined through. The keys are kept
+    /// before posting, so a reply that never arrives loses none of a link
+    /// that landed: the next read of the fleet finishes them.
     func link(_ hosts: [API.FleetHost]) async {
-        guard let through, let status else { return }
+        guard var record, record.admitted else { return }
         let reason = hosts.count == 1 ? "Add \(hosts[0].name)" : "Add \(hosts.count) computers"
-        // A new device key per host, as host links make them: the host
-        // admits this key alone, and the phone signs in with it there.
-        var made: [(host: API.FleetHost, id: Data, key: HostKey, point: Data)] = []
+        var made: [FleetPendingLink] = []
         do {
-            for host in hosts {
-                guard let id = FleetLog.data(hex: host.id) else { continue }
+            for host in hosts where FleetLog.data(hex: host.id) != nil {
                 let key = try DeviceKey.create()
-                let kept = HostKey(publicKey: DeviceKeyEncoding.publicKey(key.publicKey), kind: key.kind, data: key.data)
-                made.append((host, id, kept, key.publicKey.x963Representation))
+                made.append(FleetPendingLink(
+                    host: host.id, name: host.name, keyKind: key.kind, keyData: key.data,
+                    publicKey: DeviceKeyEncoding.publicKey(key.publicKey), point: key.publicKey.x963Representation
+                ))
             }
         } catch {
             problem = error.localizedDescription
             return
         }
-        let bodies: [FleetLog.Body] = made.map { .link(host: $0.id, deviceKey: $0.point) }
-        // Signing reads the fleet again, so `self.status` now carries the
-        // linked hosts' relays.
-        await sign(reason, bodies)
-        guard problem == nil else { return }
-        let linked = self.status ?? status
-        for (host, _, key, point) in made {
-            guard let device = FleetLog.linkDevice(key: point),
-                  let fingerprint = Fingerprint(host.id)
-            else { continue }
+        record.pendingLinks = FleetPendingLink.merge(record.pendingLinks ?? [], made)
+        save(record)
+        guard self.record == record else { return }
+        let bodies: [FleetLog.Body] = made.compactMap { pending in
+            FleetLog.data(hex: pending.host).map { .link(host: $0, deviceKey: pending.point) }
+        }
+        let outcome = await sign(reason, bodies)
+        if let status, let outcome { settleLinks(status, outcome: outcome) }
+    }
+
+    /// Keeps as computers the pending links the fleet now holds, and drops
+    /// those that never landed once a computer answered.
+    private func settleLinks(_ status: API.FleetStatus, outcome: FleetPendingLink.Outcome) {
+        guard var record, let pending = record.pendingLinks, !pending.isEmpty,
+              let through = through
+        else { return }
+        let (done, waiting) = FleetPendingLink.settle(pending, linked: status.links, outcome: outcome)
+        for link in done {
+            guard let device = FleetLog.linkDevice(key: link.point), let fingerprint = Fingerprint(link.host) else { continue }
             let enrolled = HostState.Enrolled(
-                device: device, computer: host.name, fingerprint: fingerprint,
-                origins: linked.origins(of: host.id)
+                device: device, computer: link.name, fingerprint: fingerprint,
+                origins: status.origins(of: link.host)
             )
-            var computer = Computer(host: enrolled, key: key, via: through.fingerprint)
-            computer.relay = relayKeys.flatMap { linked.relayRecord(for: host.id, keys: $0) }
+            var computer = Computer(host: enrolled, key: link.key, via: through.fingerprint)
+            computer.relay = relayKeys.flatMap { status.relayRecord(for: link.host, keys: $0) }
             onLinked(computer)
         }
+        record.pendingLinks = waiting.isEmpty ? nil : waiting
+        if record != self.record { save(record) }
     }
 
     /// The relay keys of this phone's fleet bundle: the ones every host it
@@ -236,13 +270,47 @@ final class FleetMembership {
 
     // MARK: Private
 
-    private func sign(_ reason: String, _ bodies: [FleetLog.Body]) async {
-        guard let record, record.admitted, let through, !bodies.isEmpty else { return }
-        await run {
-            let key = try await Self.open(record, reason: reason)
-            try await client(through).sign(bodies, as: key.signer, at: .now)
-            await check(through)
+    /// Signs `bodies` and posts them through the first computer of the
+    /// fleet that answers. Answers how it ended for links that may have
+    /// landed: `nil` when nothing was posted (Face ID refused, say).
+    @discardableResult
+    private func sign(_ reason: String, _ bodies: [FleetLog.Body]) async -> FleetPendingLink.Outcome? {
+        guard let record, record.admitted, !bodies.isEmpty else { return nil }
+        let candidates = candidates
+        guard !candidates.isEmpty else { return nil }
+        busy = true
+        problem = nil
+        defer { busy = false }
+        let key: FleetKey
+        do {
+            key = try await Self.open(record, reason: reason)
+        } catch {
+            problem = Self.describe(error)
+            return .answered
         }
+        for computer in candidates {
+            do {
+                try await client(computer).sign(bodies, as: key.signer, at: .now)
+                if computer.device != record.through {
+                    var moved = record
+                    moved.through = computer.device
+                    save(moved)
+                }
+                await check(computer)
+                return .answered
+            } catch FleetClientError.refused(let count) {
+                // The fleet checked them and refused: another computer
+                // would refuse them too.
+                problem = Self.describe(FleetClientError.refused(count))
+                await check(computer)
+                return .answered
+            } catch {
+                log.error("fleet: \(computer.name, privacy: .public) did not take it: \(error.localizedDescription, privacy: .public)")
+                problem = Self.describe(error)
+            }
+        }
+        // No computer answered: what was posted may have landed.
+        return .unknown
     }
 
     /// Opens the fleet key with one Face ID for `reason`, so a batch of
@@ -300,6 +368,7 @@ final class FleetMembership {
         try? Keychain.delete(Self.account)
         record = nil
         status = nil
+        notMember = false
     }
 
     private static func describe(_ error: Error) -> String {

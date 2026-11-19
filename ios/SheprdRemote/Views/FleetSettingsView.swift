@@ -16,6 +16,14 @@ struct FleetSettingsView: View {
             if let problem = membership.problem {
                 Section { Label(problem, systemImage: "exclamationmark.triangle").font(.footnote) }
             }
+            if membership.notMember {
+                Section {
+                    Label("Not in the fleet", systemImage: "person.crop.circle.badge.xmark")
+                    Button("Forget This Fleet", role: .destructive) { membership.forgetRemoved() }
+                } footer: {
+                    Text("A member removed this \(UIDevice.current.model), or this computer has not heard it was admitted yet. Forgetting the fleet here signs nothing; you can then join again with a new key.")
+                }
+            }
             if membership.admitted, let view = membership.status?.view {
                 members(view, me: membership.record?.member)
                 hosts(view, status: membership.status)

@@ -135,24 +135,35 @@ public struct FleetClient: Sendable {
         return try JSONDecoder().decode(API.FleetApplied.self, from: data)
     }
 
+    /// Operations one sync may carry: the daemon refuses more.
+    public static let maxSyncOps = 64
+
     /// Signs one operation per body, each on the one before, and posts them
-    /// together. Throws when the computer refused any.
+    /// at most `maxSyncOps` at a time, each batch on what the last one
+    /// left. Throws when the computer refused any; batches before it stand.
     @discardableResult
     public func sign(_ bodies: [Fleet.Body], as signer: Fleet.Signer, at now: Date) async throws -> API.FleetApplied {
         let status = try await status(member: signer.member)
         guard status.view != nil else { throw FleetClientError.noFleet }
         guard let next = status.next else { throw FleetClientError.notMember }
         let issued = UInt64(max(0, now.timeIntervalSince1970 * 1000))
-        var ops: [Fleet.Op] = []
         var on = next
-        for body in bodies {
-            var op = try Fleet.draft(on: on, signer: signer.member, issuedMs: issued, body: body)
-            try op.sign(using: signer.sign)
-            ops.append(op)
-            on = API.FleetNext(fleet: next.fleet, seq: op.seq + 1, parents: [try op.id().hexString])
+        var heads = status.heads
+        var applied: API.FleetApplied?
+        for start in stride(from: 0, to: bodies.count, by: Self.maxSyncOps) {
+            var ops: [Fleet.Op] = []
+            for body in bodies[start..<min(start + Self.maxSyncOps, bodies.count)] {
+                var op = try Fleet.draft(on: on, signer: signer.member, issuedMs: issued, body: body)
+                try op.sign(using: signer.sign)
+                ops.append(op)
+                on = API.FleetNext(fleet: next.fleet, seq: op.seq + 1, parents: [try op.id().hexString])
+            }
+            let answer = try await sync(ops, heads: heads)
+            if answer.refused > 0 { throw FleetClientError.refused(answer.refused) }
+            heads = answer.heads
+            applied = answer
         }
-        let applied = try await sync(ops, heads: status.heads)
-        if applied.refused > 0 { throw FleetClientError.refused(applied.refused) }
+        guard let applied else { throw FleetError.invalid }
         return applied
     }
 

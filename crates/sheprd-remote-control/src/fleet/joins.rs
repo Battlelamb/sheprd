@@ -16,7 +16,7 @@ use crate::control::{
     fleet::{Bundle, Kind, Log, MemberId, sync},
 };
 use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 /// Joins waiting at once.
 pub(crate) const MAX: usize = 8;
@@ -103,12 +103,15 @@ impl Joins {
         self.waiting.contains_key(member)
     }
 
-    /// The joins waiting, oldest first, as Sheprd lists them.
-    pub(crate) fn list(&mut self, now_ms: u64) -> Vec<sync::Join> {
+    /// The joins waiting, oldest first, as Sheprd lists them: only those
+    /// from a device `paired` still holds. One revoked after asking is not
+    /// listed, so nothing admits it, by hand or by its device.
+    pub(crate) fn list(&mut self, now_ms: u64, paired: &HashSet<DeviceId>) -> Vec<sync::Join> {
         self.expire(now_ms);
         let mut joins: Vec<sync::Join> = self
             .waiting
             .iter()
+            .filter(|(_, waiting)| paired.contains(&waiting.device))
             .filter_map(|(member, waiting)| {
                 Some(sync::Join {
                     member: member.to_string(),
@@ -129,6 +132,21 @@ impl Joins {
     /// Drops `member`'s join: a person admitted it.
     pub(crate) fn admitted(&mut self, member: &MemberId) {
         self.waiting.remove(member);
+    }
+
+    /// Refuses admitting `member` when its join came from a device
+    /// `paired` no longer holds: revoking the device ends its request too.
+    /// A member that asked through no join here (over SSH, say) passes.
+    pub(crate) fn admissible(&self, member: &MemberId, paired: &HashSet<DeviceId>) -> Result<()> {
+        match self.waiting.get(member) {
+            Some(waiting) if !paired.contains(&waiting.device) => Err(Error::Unpaired),
+            _ => Ok(()),
+        }
+    }
+
+    /// Drops the join `device` asked for, as it is revoked.
+    pub(crate) fn forget_device(&mut self, device: &DeviceId) {
+        self.waiting.retain(|_, waiting| waiting.device != *device);
     }
 
     fn expire(&mut self, now_ms: u64) {

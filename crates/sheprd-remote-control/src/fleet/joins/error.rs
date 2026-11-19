@@ -12,6 +12,8 @@ pub enum Error {
     Removed,
     #[error("the join signature does not check out")]
     Signature,
+    #[error("the device that asked to join is no longer paired")]
+    Unpaired,
     // keep-sorted end
 }
 

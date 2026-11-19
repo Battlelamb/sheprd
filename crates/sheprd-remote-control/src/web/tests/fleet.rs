@@ -71,7 +71,7 @@ pub(crate) fn device_key(seed: u8) -> Vec<u8> {
 
 /// A daemon's state that founded a fleet, with a relay configured (not
 /// dialed) and SSH host keys, as its bundle needs.
-fn founded(dir: &std::path::Path) -> Shared {
+pub(crate) fn founded(dir: &std::path::Path) -> Shared {
     let mut state = state(dir);
     let endpoint = sheprd_relay::Endpoint::parse("http://127.0.0.1:9").unwrap();
     let relays = Arc::new(crate::relay::Relays::load(dir, vec![endpoint.into()]).unwrap());
@@ -100,11 +100,11 @@ fn founded(dir: &std::path::Path) -> Shared {
     state
 }
 
-fn ask(state: &Shared, ask: Ask) -> Answer {
+pub(crate) fn ask(state: &Shared, ask: Ask) -> Answer {
     crate::fleet::ask::answer(state, state.fleet.as_ref().unwrap(), ask, now_ms()).unwrap()
 }
 
-fn fleet_id(state: &Shared) -> FleetId {
+pub(crate) fn fleet_id(state: &Shared) -> FleetId {
     state
         .fleet
         .as_ref()
@@ -465,10 +465,14 @@ async fn joins_are_bounded() {
         }
     }
     // Ten minutes on, they are gone.
+    let paired: std::collections::HashSet<DeviceId> = (0..=max)
+        .map(|seed| DeviceId(format!("device{seed}")))
+        .collect();
+    assert_eq!(fleet.joins().list(now_ms(), &paired).len(), max);
     assert!(
         fleet
             .joins()
-            .list(now_ms() + crate::fleet::joins::TTL_MS)
+            .list(now_ms() + crate::fleet::joins::TTL_MS, &paired)
             .is_empty()
     );
     // One device keeps one join: a second replaces its first.
@@ -481,7 +485,10 @@ async fn joins_are_bounded() {
         );
         assert_eq!(call(&state, &token, request).await.0, StatusCode::OK);
     }
-    assert_eq!(fleet.joins().list(now_ms()).len(), 1);
+    let Answer::Joins { joins } = ask(&state, Ask::Joins) else {
+        panic!("no joins");
+    };
+    assert_eq!(joins.len(), 1);
 }
 
 /// The vector the iOS app's `FleetClient` is checked against: a `Link`

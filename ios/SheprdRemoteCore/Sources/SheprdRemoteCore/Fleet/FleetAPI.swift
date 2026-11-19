@@ -72,6 +72,15 @@ extension API {
             return record
         }
 
+        /// Whether `member` is no longer in `fleet` as this computer sees
+        /// it: neither a member nor waiting to join. Removed, or this
+        /// computer has not heard of its admission yet.
+        public func lacks(member: String, in fleet: String) -> Bool {
+            guard let view, view.fleet.lowercased() == fleet.lowercased() else { return false }
+            return join == nil && next == nil
+                && !view.members.contains { $0.id.lowercased() == member.lowercased() }
+        }
+
         /// The direct addresses `host` publishes, as `https://` origins.
         public func origins(of host: String) -> [String] {
             (reach.first { $0.host == host }?.direct ?? [])

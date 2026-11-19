@@ -39,9 +39,11 @@ enum Touch {
 final class Feedback {
     static let shared = Feedback()
 
-    /// Rendered sounds by cue, so an effect renders once. Few effects
-    /// exist, and zap's differ by at most `Zap.maxTargets` letter counts.
+    /// Rendered sounds by cue, so an effect renders once. Zap's letters
+    /// streaming in make sounds that rarely recur, so the cache is bounded:
+    /// past `maxSounds` it starts over.
     private var sounds: [Synth: Data] = [:]
+    private static let maxSounds = 32
     /// Kept until they finish: a player let go stops.
     private var players: [AVAudioPlayer] = []
     private var engine: CHHapticEngine?
@@ -90,6 +92,7 @@ final class Feedback {
         Task {
             // A few seconds of samples: rendered away from the main thread.
             let data = await Task.detached(priority: .userInitiated) { synth.wav() }.value
+            if sounds.count >= Self.maxSounds { sounds.removeAll() }
             sounds[synth] = data
             start(data)
         }

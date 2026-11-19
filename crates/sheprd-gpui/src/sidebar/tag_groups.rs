@@ -100,6 +100,8 @@ impl SheprdWindow {
         // And hear which relays this computer listens on.
         let window = cx.entity_id();
         crate::relay_sharing::RelaySharing::reach(cx, window, &reachable);
+        // And carry the fleet's log to those in it.
+        crate::fleet::Fleet::reach(cx, window, &reachable);
         DeviceTags::reach(cx, reachable);
     }
 

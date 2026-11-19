@@ -309,7 +309,7 @@ impl SettingsWindow {
             Section::Theme | Section::Integrations | Section::Plugins | Section::Code => div(),
             #[cfg(feature = "cloud")]
             Section::CloudDevices => div(),
-            Section::RemoteControl => div(),
+            Section::RemoteControl | Section::Fleet => div(),
         };
         div().flex().flex_col().min_w_0().child(content)
     }

@@ -646,6 +646,12 @@ pub(super) const CATALOG: &[Entry] = &[
         "settings-remote-devices-description",
     ),
     entry(
+        Section::Fleet,
+        "fleet-create-row",
+        "settings-fleet-none",
+        "settings-fleet-none-description",
+    ),
+    entry(
         Section::Configuration,
         "config-local",
         "settings-config-local",

@@ -23,6 +23,7 @@ pub(super) enum Section {
     #[cfg(feature = "cloud")]
     CloudDevices,
     RemoteControl,
+    Fleet,
     Configuration,
 }
 
@@ -88,6 +89,7 @@ impl Section {
         #[cfg(feature = "cloud")]
         Self::CloudDevices,
         Self::RemoteControl,
+        Self::Fleet,
         Self::Configuration,
     ];
 
@@ -114,6 +116,7 @@ impl Section {
             #[cfg(feature = "cloud")]
             Self::CloudDevices => "settings-section-cloud-devices",
             Self::RemoteControl => "settings-section-remote-control",
+            Self::Fleet => "settings-fleet-section",
             Self::Configuration => "settings-section-configuration",
         }
     }
@@ -133,6 +136,7 @@ impl Section {
             #[cfg(feature = "cloud")]
             Self::CloudDevices => "settings-lead-cloud-devices",
             Self::RemoteControl => "settings-lead-remote-control",
+            Self::Fleet => "settings-fleet-lead",
             Self::Configuration => "settings-lead-configuration",
             Self::General | Self::Tabs | Self::Notifications => return None,
         };
@@ -156,7 +160,7 @@ impl Section {
             Self::Integrations | Self::Plugins => Some(Group::Connect),
             #[cfg(feature = "cloud")]
             Self::CloudDevices => Some(Group::Connect),
-            Self::RemoteControl => Some(Group::Connect),
+            Self::RemoteControl | Self::Fleet => Some(Group::Connect),
             Self::Configuration => Some(Group::Advanced),
         }
     }
@@ -179,6 +183,7 @@ impl Section {
             #[cfg(feature = "cloud")]
             Self::CloudDevices => "icons/globe.svg",
             Self::RemoteControl => "icons/phone.svg",
+            Self::Fleet => "icons/globe.svg",
             Self::Configuration => "icons/file.svg",
         }
     }

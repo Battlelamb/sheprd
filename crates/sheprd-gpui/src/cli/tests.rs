@@ -10,6 +10,7 @@ mod cloud_exec;
 mod cloud_images;
 mod cloud_setup;
 mod control_commands;
+mod fleet;
 mod language;
 mod links;
 mod local_ports;

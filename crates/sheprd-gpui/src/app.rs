@@ -175,6 +175,7 @@ pub(crate) fn install_services(personal: bool, cx: &mut App) {
         crate::remote::nearby::desktop::install(cx);
         crate::device_tags::DeviceTags::install(cx);
         crate::relay_sharing::RelaySharing::install(cx);
+        crate::fleet::Fleet::install(cx);
         crate::text_shortcuts::Store::install(cx);
         #[cfg(feature = "cloud")]
         crate::cloud::install_idle_checks(cx);

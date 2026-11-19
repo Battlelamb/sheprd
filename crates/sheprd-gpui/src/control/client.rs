@@ -5,6 +5,7 @@ mod app;
 mod browser;
 mod chat;
 mod events;
+mod fleet;
 mod help;
 mod hosts;
 mod local;
@@ -485,6 +486,7 @@ pub(crate) fn run(invocation: Invocation) -> ExitCode {
         ControlCommand::Security(command) => hosts::security(command, &context),
         ControlCommand::Automation(command) => hosts::automation(command, &context),
         ControlCommand::Remote(command) => remote::remote(command, &context),
+        ControlCommand::Fleet(command) => fleet::fleet(command, &context),
         ControlCommand::Mod(command) => mods::run(command, &context),
         ControlCommand::Search {
             files,

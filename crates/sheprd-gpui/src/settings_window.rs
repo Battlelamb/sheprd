@@ -15,6 +15,7 @@ mod layouts;
 mod navigation;
 mod pages;
 pub(crate) use layouts::{apply_loaded_layout, layout_load_revision};
+pub(crate) use pages::fleet::{Pending as FleetPending, open as open_fleet};
 pub(crate) use pages::remote_control::open as open_remote;
 pub(crate) use pages::text_shortcuts::open as open_text_shortcuts;
 #[cfg(all(feature = "integration-test", target_os = "macos"))]
@@ -172,6 +173,7 @@ struct SettingsWindow {
     px0: controls::px0::Px0Settings,
     chat_env: controls::chat_env::ChatEnvSettings,
     remote: pages::remote_control::RemoteSettings,
+    fleet: pages::fleet::FleetPage,
     text_shortcuts: pages::text_shortcuts::TextShortcutsPage,
     /// The open override dropdown, if any; its list renders inside its button.
     dropdown: Option<ui::Dropdown>,
@@ -340,6 +342,7 @@ impl SettingsWindow {
             px0: Default::default(),
             chat_env: Default::default(),
             remote: Default::default(),
+            fleet: Default::default(),
             text_shortcuts: Default::default(),
             dropdown: None,
             number_edit: None,
@@ -716,6 +719,11 @@ impl SettingsWindow {
         } else {
             self.close_remote_control();
         }
+        if section == Section::Fleet {
+            self.open_fleet(cx);
+        } else {
+            self.close_fleet();
+        }
         self.body_scroll.set_offset(Point::default());
         window.focus(&self.focus, cx);
         if section == Section::Integrations {
@@ -751,6 +759,7 @@ impl Render for SettingsWindow {
                 Section::Plugins => self.render_plugin_controls(cx),
                 Section::Code => self.render_code_controls(window, cx),
                 Section::RemoteControl => self.render_remote_control(cx),
+                Section::Fleet => self.render_fleet(cx),
                 #[cfg(feature = "cloud")]
                 Section::CloudDevices => self.render_cloud_devices(cx),
                 _ => self.render_controls(window, cx),

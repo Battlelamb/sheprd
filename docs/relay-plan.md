@@ -1888,14 +1888,38 @@ manual multi-machine and phone steps left unticked in its QA list.
      Sheprd's side, phase 3; `POST /api/v2/fleet/sync` comes with the
      phones, phase 5; direct tunnels on the daemon's listener come with
      `relay-connect`'s race, phase 3.
-3. **Sheprd's side:**
-   - **Interface:** Settings > Fleet; the join, share, and remove
-     dialogs; Fleet hosts in the worktree listing and Devices.
-   - **Records:** relay records and `known_hosts.d` from signed records,
-     and `HostSeen` updates.
-   - **Paths:** `relay-connect`'s race and `desktop/paths`, shown in the
-     host indicator.
-   - **Command line:** `sheprd fleet`, `docs/cli.md`, and the skill.
+3. **Sheprd's side** (built, first cut):
+   - **Settings > Fleet:** creating a fleet; members with who admitted
+     each, and Remove (or Leave) asking why, a compromised member taking
+     the members and hosts it added with it; hosts with who added each,
+     a switch per computer allowed on it, and Remove everywhere; and the
+     machines this Sheprd reaches, each with Invite (it joins: its own
+     bundle over SSH, `Admit` here, the log handed over) or Share (its
+     CA-signed `fleet intro` over SSH, with the computers ticked).
+     Members cut off by an unconfirmed removal, and members that signed
+     in two places, show at the top. Every change asks first, on the
+     page, by a second click.
+   - **Sync** (`crate::fleet`): Sheprd syncs the log with every machine a
+     window reaches, as `relay_sharing` offers relays: it asks the
+     machine for what this computer lacks, naming the fleet and sending
+     nothing, so a machine in no fleet or another learns nothing; then
+     its daemon says what the machine lacks, and Sheprd sends that. A
+     machine in the fleet is synced at once when this computer's heads
+     move and every 10 minutes; one outside it every hour. A daemon
+     refuses an `apply` naming another fleet.
+   - **Devices:** each fleet host this computer may reach is kept as a
+     saved device, `USER@r-ID.sheprd.invalid`, and forgotten when the
+     fleet no longer lets it in; devices a person saved are never
+     touched.
+   - **Command line:** `sheprd fleet [status|members|hosts|open]`, and
+     `fleet remove MEMBER` and `fleet remove-host HOST`, which open the
+     page asking; `docs/cli.md` and the skill.
+   - **Left:** the join approval for phones (`Ask::Joins`, phase 5),
+     joining over Bluetooth in one step (today: pair, then Invite over
+     the SSH that pairing opened, which proves the same), the pairing
+     dialog's fleet line, `relay-connect`'s race with direct tunnels and
+     `desktop/paths` for the host indicator, history, and native
+     screenshots.
 4. **`sheprd-relay-agent` in Sheprd:** install and update over SSH,
    service units, the access file and `fleet apply`, writing
    `authorized_keys` from it, `--direct` behind its own dialog, and the

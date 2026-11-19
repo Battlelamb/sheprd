@@ -138,33 +138,59 @@ public struct FleetClient: Sendable {
     /// Operations one sync may carry: the daemon refuses more.
     public static let maxSyncOps = 64
 
-    /// Signs one operation per body, each on the one before, and posts them
-    /// at most `maxSyncOps` at a time, each batch on what the last one
-    /// left. Throws when the computer refused any; batches before it stand.
-    @discardableResult
-    public func sign(_ bodies: [Fleet.Body], as signer: Fleet.Signer, at now: Date) async throws -> API.FleetApplied {
+    /// Operations this phone signed, ready to post, and the heads of the
+    /// computer they were drafted on.
+    public struct Signed: Equatable, Sendable {
+        public let ops: [Fleet.Op]
+        public let heads: [String]
+    }
+
+    /// Signs one operation per body, each on the one before, on what this
+    /// computer answers. Nothing is posted: a post whose answer is lost is
+    /// sent again as these same bytes, to this computer or another, never
+    /// signed afresh, as two different operations with one sequence number
+    /// would look like this phone's key in use in two places.
+    public func prepare(_ bodies: [Fleet.Body], as signer: Fleet.Signer, at now: Date) async throws -> Signed {
         let status = try await status(member: signer.member)
         guard status.view != nil else { throw FleetClientError.noFleet }
         guard let next = status.next else { throw FleetClientError.notMember }
         let issued = UInt64(max(0, now.timeIntervalSince1970 * 1000))
         var on = next
-        var heads = status.heads
+        var ops: [Fleet.Op] = []
+        for body in bodies {
+            var op = try Fleet.draft(on: on, signer: signer.member, issuedMs: issued, body: body)
+            try op.sign(using: signer.sign)
+            ops.append(op)
+            on = API.FleetNext(fleet: next.fleet, seq: op.seq + 1, parents: [try op.id().hexString])
+        }
+        guard !ops.isEmpty else { throw FleetError.invalid }
+        return Signed(ops: ops, heads: status.heads)
+    }
+
+    /// Posts `signed` at most `maxSyncOps` at a time, each batch on the
+    /// heads the last one left. Throws when the computer refused any;
+    /// batches before it stand. Posting the same operations again is
+    /// harmless: a computer that holds one already takes it as known.
+    @discardableResult
+    public func post(_ signed: Signed) async throws -> API.FleetApplied {
+        var heads = signed.heads
         var applied: API.FleetApplied?
-        for start in stride(from: 0, to: bodies.count, by: Self.maxSyncOps) {
-            var ops: [Fleet.Op] = []
-            for body in bodies[start..<min(start + Self.maxSyncOps, bodies.count)] {
-                var op = try Fleet.draft(on: on, signer: signer.member, issuedMs: issued, body: body)
-                try op.sign(using: signer.sign)
-                ops.append(op)
-                on = API.FleetNext(fleet: next.fleet, seq: op.seq + 1, parents: [try op.id().hexString])
-            }
-            let answer = try await sync(ops, heads: heads)
+        for start in stride(from: 0, to: signed.ops.count, by: Self.maxSyncOps) {
+            let batch = Array(signed.ops[start..<min(start + Self.maxSyncOps, signed.ops.count)])
+            let answer = try await sync(batch, heads: heads)
             if answer.refused > 0 { throw FleetClientError.refused(answer.refused) }
             heads = answer.heads
             applied = answer
         }
         guard let applied else { throw FleetError.invalid }
         return applied
+    }
+
+    /// Signs one operation per body and posts them (`prepare`, then
+    /// `post`).
+    @discardableResult
+    public func sign(_ bodies: [Fleet.Body], as signer: Fleet.Signer, at now: Date) async throws -> API.FleetApplied {
+        try await post(prepare(bodies, as: signer, at: now))
     }
 
     /// Asks to join the computer's fleet with `bundle`, signed with

@@ -35,6 +35,13 @@ public struct FleetPendingLink: Codable, Equatable, Sendable {
         case unknown
     }
 
+    /// How a post that a computer took ended, by whether the fleet could be
+    /// read again after it: only a fresh read says which links landed, so
+    /// without one the keys of all of them stay.
+    public static func outcome(freshRead: Bool) -> Outcome {
+        freshRead ? .answered : .unknown
+    }
+
     /// Splits `pending` against the hosts the fleet says this phone linked:
     /// those linked are done, to keep as computers; the rest stay waiting,
     /// unless the computer answered, when they never landed and go.

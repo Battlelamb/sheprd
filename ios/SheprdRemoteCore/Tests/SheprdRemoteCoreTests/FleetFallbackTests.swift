@@ -52,6 +52,58 @@ struct FleetFallbackTests {
         }
     }
 
+    @Test func aLostPostGoesToTheNextComputerAsTheSameBytes() async throws {
+        typealias Computer = FleetClientTests.Computer
+        let next = API.FleetNext(fleet: String(repeating: "09", count: 32), seq: 3, parents: [String(repeating: "01", count: 32)])
+        // The first computer drafts and loses the answer to the post; the
+        // second has not synced and would draft on older parents.
+        let laptop = Computer { method, _, _ in
+            if method == "GET" { return FleetClientTests.status(next: next) }
+            throw Offline(name: "laptop")
+        }
+        let stale = API.FleetNext(fleet: next.fleet, seq: 1, parents: [String(repeating: "02", count: 32)])
+        let studio = Computer { method, _, _ in
+            method == "GET" ? FleetClientTests.status(next: stale) : FleetClientTests.applied
+        }
+        let signer = FleetClientTests.signer()
+        var signed: FleetClient.Signed?
+        let attempt = await FleetAttempt.first([laptop, studio]) { computer in
+            let client = computer.client
+            let ops: FleetClient.Signed
+            if let signed {
+                ops = signed
+            } else {
+                ops = try await client.prepare([.hostRemove(Data(repeating: 4, count: 32))], as: signer, at: .now)
+                signed = ops
+            }
+            try await client.post(ops)
+        }
+        guard case .done = attempt else {
+            Issue.record("not done: \(attempt)")
+            return
+        }
+        let first = try #require(laptop.requests.withLock { $0.last?.body })
+        let second = studio.requests.withLock { $0 }
+        // Never signed again: no read, and the very bytes the first got.
+        #expect(second.map(\.method) == ["POST"])
+        let sent = try JSONDecoder().decode(FleetClientTests.Posted.self, from: first)
+        let secondBody = try #require(second.first?.body)
+        let resent = try JSONDecoder().decode(FleetClientTests.Posted.self, from: secondBody)
+        #expect(resent.ops == sent.ops)
+        let text = try #require(resent.ops.first)
+        let op = try Fleet.Op.decode(try #require(Base64URL.decode(text)))
+        #expect(op.seq == 3)
+    }
+
+    @Test func withoutAFreshReadTheKeysOfWhatWasPostedStay() {
+        #expect(FleetPendingLink.outcome(freshRead: true) == .answered)
+        #expect(FleetPendingLink.outcome(freshRead: false) == .unknown)
+        // A read that failed after a post settles nothing it could drop.
+        let pending = [FleetRecoveryTests.pending("aa")]
+        let settled = FleetPendingLink.settle(pending, linked: [], outcome: FleetPendingLink.outcome(freshRead: false))
+        #expect(settled.waiting == pending)
+    }
+
     @Test func aLostOrFailedAnswerKeepsWhatTheRequestCarried() {
         // No answer, or the computer failed: the join may be waiting there.
         #expect(fleetRequestMayHaveLanded(status: nil))

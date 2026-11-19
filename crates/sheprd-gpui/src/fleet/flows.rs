@@ -45,15 +45,16 @@ const MAX_PARTS: usize = saved::MAX_SAVED.div_ceil(sync::MAX_ANSWER_BYTES) + 1;
 
 /// Asks `target` for what this computer lacks, from `heads`, naming no
 /// fleet and with a fresh nonce: its answer, when it proves it is one of
-/// `hosts` (the fleet's computers and Sheprd hosts) in `fleet`; `None` for
-/// a machine outside it, which learns nothing.
+/// `hosts` (the fleet's computers and Sheprd hosts) in `fleet`, with the
+/// host it proved to be; `None` for a machine outside it, which learns
+/// nothing.
 async fn ask_proven(
     executor: &BackgroundExecutor,
     target: &ConnectTarget,
     heads: Vec<String>,
     fleet: &str,
     hosts: &[String],
-) -> Result<Option<Applied>, Error> {
+) -> Result<Option<(Applied, String)>, Error> {
     let nonce = uuid::Uuid::new_v4().simple().to_string();
     let ask = Apply {
         fleet: None,
@@ -66,8 +67,8 @@ async fn ask_proven(
         .spawn(async move { remote::apply(&target, &ask, &AtomicBool::new(false)) })
         .await
     {
-        Ok(theirs) if theirs.fleet == fleet && sync::proven(&theirs, &nonce, hosts) => {
-            Ok(Some(theirs))
+        Ok(theirs) if theirs.fleet == fleet => {
+            Ok(sync::proven_host(&theirs, &nonce, hosts).map(|host| (theirs, host)))
         }
         Ok(_) => Ok(None),
         // A machine with no Sheprd daemon: the caller decides.
@@ -98,7 +99,10 @@ async fn hand_over(
         .await?;
         sent = tips(&sent, &part.ops)?;
         let more = part.more;
+        // The fleet is named so the machine keeps this handover's parts
+        // apart from any other's.
         let send = Apply {
+            fleet: Some(fleet.to_owned()),
             ops: part.ops,
             more,
             ..Apply::default()
@@ -183,18 +187,18 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
                 .map(|host| host.id.clone())
                 .collect();
             let target = &machine.target;
-            let mut theirs = match ask_proven(&executor, target, view.heads.clone(), &fleet, &hosts)
-                .await
-            {
-                Ok(Some(theirs)) => theirs,
-                Ok(None) => return Ok((Standing::Outside, Vec::new(), Vec::new())),
-                // No Sheprd daemon: perhaps a plain host of this fleet.
-                Err(Error::NoProgram) => {
-                    let standing = super::plain::sync(&client, &executor, &machine, &view).await?;
-                    return Ok((standing, Vec::new(), view.heads.clone()));
-                }
-                Err(error) => return Err(error),
-            };
+            let (mut theirs, proven) =
+                match ask_proven(&executor, target, view.heads.clone(), &fleet, &hosts).await {
+                    Ok(Some(answer)) => answer,
+                    Ok(None) => return Ok((Standing::Outside, Vec::new(), Vec::new())),
+                    // No Sheprd daemon: perhaps a plain host of this fleet.
+                    Err(Error::NoProgram) => {
+                        let standing =
+                            super::plain::sync(&client, &executor, &machine, &view).await?;
+                        return Ok((standing, Vec::new(), view.heads.clone()));
+                    }
+                    Err(error) => return Err(error),
+                };
             let mut ours;
             let mut parts = 1;
             loop {
@@ -212,14 +216,17 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
                     break;
                 }
                 parts += 1;
-                let next =
+                let (next, again) =
                     match ask_proven(&executor, target, ours.heads.clone(), &fleet, &hosts).await {
-                        Ok(Some(next)) => next,
+                        Ok(Some(answer)) => answer,
                         Ok(None) | Err(Error::NoProgram) => {
                             return Ok((Standing::Outside, Vec::new(), Vec::new()));
                         }
                         Err(error) => return Err(error),
                     };
+                if again != proven {
+                    return Ok((Standing::Outside, Vec::new(), Vec::new()));
+                }
                 theirs = next;
             }
             let mut heads = theirs.heads;
@@ -251,6 +258,27 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
                     },
                 )
                 .await?;
+            }
+            // A shared Sheprd host is no member and cannot publish its own
+            // record when its relays move: this computer carries it.
+            let shared = view
+                .hosts
+                .iter()
+                .any(|host| host.id == proven && host.kind == HostKind::Sheprd);
+            if shared {
+                let target = target.clone();
+                let seen = executor
+                    .spawn(async move { remote::intro(&target, &AtomicBool::new(false)) })
+                    .await;
+                let carried = match seen {
+                    Ok(intro) => daemon(&client, Ask::Seen { intro }).await.map(drop),
+                    Err(error) => Err(error),
+                };
+                // The log itself synced: a record not carried now is
+                // tried again on the next sync.
+                if let Err(error) = carried {
+                    tracing::debug!(%error, "Could not carry a shared host's record");
+                }
             }
             Ok::<_, Error>((Standing::Member, heads, ours.heads))
         }

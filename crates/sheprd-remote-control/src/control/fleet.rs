@@ -31,6 +31,7 @@ mod body;
 mod error;
 mod fold;
 mod graph;
+mod hosts;
 mod log;
 mod membership;
 mod op;
@@ -78,6 +79,9 @@ pub const MAX_MEMBERSHIP_OPS: usize = 256;
 pub const MAX_REMOVALS: usize = 1024;
 /// Removals one member may have signed between checkpoints.
 pub const MAX_REMOVALS_PER_SIGNER: usize = 32;
+/// Checkpoints one member may have signed between prunes. They count
+/// against no other bound, so a full log can always checkpoint and prune.
+pub const MAX_CHECKPOINTS_PER_SIGNER: usize = 8;
 /// The largest operation, encoded.
 pub const MAX_OP: usize = 16 * 1024;
 /// The largest checkpoint state, encoded.

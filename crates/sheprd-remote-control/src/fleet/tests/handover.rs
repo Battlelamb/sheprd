@@ -131,3 +131,79 @@ async fn a_removed_member_never_acts_as_a_shared_host() {
     let again = Fleet::load(b.dir.path(), now_ms()).unwrap();
     assert_eq!(again.host(), None);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_fleets_handing_over_at_once_keep_their_own_parts() {
+    let (http, _, _) = relay().await;
+    let (a, c, b) = (
+        Node::new(http, 1).await,
+        Node::new(http, 3).await,
+        Node::new(http, 2).await,
+    );
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    assert_eq!(c.ask(Ask::Found), Answer::Done);
+    let (first, second) = (a.view().fleet, c.view().fleet);
+    for (by, fleet) in [(&a, &first), (&c, &second)] {
+        let Answer::Bundle { bundle, signature } = b.ask(Ask::Bundle {
+            fleet: fleet.clone(),
+        }) else {
+            panic!("no bundle");
+        };
+        by.ask(Ask::Admit {
+            bundle,
+            signature,
+            method: crate::control::fleet::Method::Ssh,
+        });
+    }
+    let named = |fleet: &str, ops: &[Op], more| {
+        b.ask(Ask::Apply(Apply {
+            fleet: Some(fleet.to_owned()),
+            ops: sync::encode_ops(ops),
+            more,
+            ..Apply::default()
+        }))
+    };
+    let (a_ops, c_ops) = (a.ops(), c.ops());
+    // Both first parts arrive, then a's last: c's parts never mix in.
+    named(&first, &a_ops[..1], true);
+    named(&second, &c_ops[..1], true);
+    let Answer::Applied(applied) = named(&first, &a_ops[1..], false) else {
+        panic!("not applied");
+    };
+    assert_eq!(applied.fleet, first);
+    assert_eq!(applied.refused, 0);
+}
+
+#[test]
+fn parts_of_one_fleet_kept_at_once_are_all_kept() {
+    let key = SigningKey::from_slice(&[3; 32]).unwrap();
+    let ops: Vec<Op> = (1..=32)
+        .map(|seq| {
+            Unsigned {
+                fleet: crate::control::fleet::FleetId([1; 32]),
+                signer: MemberId([2; 32]),
+                seq,
+                issued_ms: 1,
+                parents: vec![OpId([5; 32])],
+                body: Body::HostRemove(HostId([4; 32])),
+            }
+            .sign(&key)
+            .unwrap()
+        })
+        .collect();
+    let handovers = super::super::joining::Handovers::default();
+    std::thread::scope(|scope| {
+        for chunk in ops.chunks(4) {
+            let handovers = &handovers;
+            scope.spawn(move || {
+                for op in chunk {
+                    handovers.keep("f", std::slice::from_ref(op), 1).unwrap();
+                    // The same part twice adds nothing.
+                    handovers.keep("f", std::slice::from_ref(op), 1).unwrap();
+                }
+            });
+        }
+    });
+    assert_eq!(handovers.take("f", 1).len(), ops.len());
+    assert!(handovers.take("f", 1).is_empty());
+}

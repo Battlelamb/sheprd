@@ -46,6 +46,10 @@ pub struct PullRequest {
     pub merge_state_status: MergeState,
     #[serde(default)]
     pub review_decision: ReviewDecision,
+    /// Waiting in the repository's merge queue, which GitHub merges on its
+    /// own once the queue's checks pass.
+    #[serde(default)]
+    pub is_in_merge_queue: bool,
     #[serde(skip)]
     pub checks_summary: String,
     #[serde(default)]
@@ -378,6 +382,8 @@ pub enum Tone {
     Held,
     /// Merged.
     Merged,
+    /// In the merge queue, so GitHub will merge it without anyone acting.
+    Queued,
     /// Ready to merge.
     Ready,
     /// Checks are running, a review is required, or GitHub has not decided.
@@ -433,6 +439,7 @@ impl PullRequest {
             State::Closed => return Tone::Attention,
             State::Unknown => return Tone::Muted,
             State::Open if self.is_draft => return Tone::Muted,
+            State::Open if self.is_in_merge_queue => return Tone::Queued,
             State::Open => {}
         }
         let has_check = |outcome| {

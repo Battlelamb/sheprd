@@ -22,7 +22,7 @@ macro_rules! fields {
         r#"
 fragment PullRequestFields on PullRequest {
   id number url title state isDraft headRefName headRefOid baseRefName additions deletions
-  changedFiles updatedAt mergeStateStatus reviewDecision isCrossRepository
+  changedFiles updatedAt mergeStateStatus reviewDecision isInMergeQueue isCrossRepository
   headRepositoryOwner { login } headRepository { name }
   commits(last: 1) { nodes { commit { statusCheckRollup {
     contexts(first: 100) {

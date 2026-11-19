@@ -451,6 +451,7 @@ extension Home.PullRequest.Tone {
         case .attention: .red
         case .held: .orange
         case .merged: .purple
+        case .queued: .brown
         case .ready: .green
         case .waiting: .yellow
         case .other: .secondary
@@ -463,6 +464,7 @@ extension Home.PullRequest.Tone {
         case .attention: "xmark.circle.fill"
         case .held: "exclamationmark.triangle.fill"
         case .merged: "arrow.triangle.merge"
+        case .queued: "hourglass.circle.fill"
         case .ready: "checkmark.circle.fill"
         case .waiting: "clock.fill"
         case .other: "pencil.circle.fill"
@@ -474,6 +476,7 @@ extension Home.PullRequest.Tone {
         case .attention: "needs attention"
         case .held: "blocked or behind"
         case .merged: "merged"
+        case .queued: "queued to merge"
         case .ready: "ready to merge"
         case .waiting: "checks or review pending"
         case .other: "draft"

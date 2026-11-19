@@ -27,6 +27,7 @@ mod fetch;
 mod fork_branch;
 mod fork_remote;
 mod lookup;
+mod merge_queue;
 mod moved_checkout;
 mod moved_repository;
 mod remote_paths;

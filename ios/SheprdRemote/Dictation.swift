@@ -66,6 +66,7 @@ final class Dictation {
             }
             guard mine == attempt else { return }
             let session = AVAudioSession.sharedInstance()
+            Feedback.shared.holdAudio(self)
             try session.setCategory(.record, mode: .measurement, options: .duckOthers)
             try session.setActive(true, options: .notifyOthersOnDeactivation)
             let (input, feeding) = AsyncStream.makeStream(of: AnalyzerInput.self)
@@ -131,6 +132,7 @@ final class Dictation {
         settled += guess
         guess = ""
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        Feedback.shared.releaseAudio(self)
     }
 }
 

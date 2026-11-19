@@ -350,7 +350,7 @@ struct AgentGrid: View {
             }
         }
         .padding(.vertical, 4)
-        .sensoryFeedback(.selection, trigger: selection)
+        .haptic(.selection, trigger: selection)
     }
 }
 

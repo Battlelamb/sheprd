@@ -42,6 +42,7 @@ final class VoiceListener {
         }
         guard mine == attempt else { return }
         let session = AVAudioSession.sharedInstance()
+        Feedback.shared.holdAudio(self)
         // AirPods and car kits are the point of talking without looking.
         try session.setCategory(.record, mode: .measurement, options: [.duckOthers, .allowBluetoothHFP])
         try session.setActive(true, options: .notifyOthersOnDeactivation)
@@ -101,6 +102,7 @@ final class VoiceListener {
         guess = ""
         levels = [Float](repeating: 0, count: Self.bars)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        Feedback.shared.releaseAudio(self)
     }
 }
 

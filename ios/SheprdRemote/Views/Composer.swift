@@ -69,7 +69,7 @@ struct Composer: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             clipboardHasImage = UIPasteboard.general.hasImages
         }
-        .sensoryFeedback(.start, trigger: dictation.phase == .listening) { _, now in now }
+        .haptic(.start, trigger: dictation.phase == .listening) { _, now in now }
         .onAppear {
             model.fleet.composerOpened(id, in: key)
             // Memory first, which keeps uploads already under way; the
@@ -162,6 +162,7 @@ struct Composer: View {
             .accessibilityLabel("Dictate")
         } else {
             Button {
+                Feedback.shared.touch(stopping ? .stop : .send)
                 if stopping { send(.cancel) } else { sendPrompt() }
             } label: {
                 Image(systemName: stopping ? "stop.fill" : "arrow.up").font(.body.bold()).frame(width: 36, height: 36)

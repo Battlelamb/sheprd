@@ -628,6 +628,11 @@ All 214 tests pass.
   down, each bursting into pixels. Effects stay in the chat's pane, never over
   the terminals, tabs, or sidebar, and never take the pointer. A message plays its first; another
   arriving while one plays is dropped, not queued.
+- A line `::wizz` asks for the person's attention, as MSN Messenger's nudge
+  did: the chat shakes for a second and, on a phone, buzzes. A turn whose
+  last reply holds it sends a time-sensitive push that plays the same buzz,
+  whatever the push privacy, so a locked phone buzzes too. The excerpt a
+  push shows leaves every directive line out.
 
 Only an agent's replies play effects; a user's message shows its effect
 directives as text, though its size spans still apply. Each effect plays once,
@@ -652,6 +657,12 @@ differences:
   at rest.
 - A list row strips the directives from the computer's one-line excerpt of
   the latest reply.
+- Each effect also has a sound and, on an iPhone, haptic taps timed to its
+  animation (`Chat/Effects/Cue.swift`): a slam's landing, each firework's
+  burst, each letter zap shoots down. The sounds are synthesized
+  (`Synth.swift`), not shipped as files. They play in the ambient category,
+  so the Ring/Silent switch mutes them, and never while dictation or voice
+  holds the audio session. Settings > Sounds & Haptics turns each off.
 
 The phone web app draws neither, so `phone.md` does not mention them and only
 `phone-app.md`, which follows it for the iPhone and iPad app, does.

@@ -109,3 +109,31 @@ struct ScreenEffectOverlay: View {
         }
     }
 }
+
+/// The chat shaking while a wizz plays (`EffectScene.wizzShake`). Keyframes
+/// rather than a timeline, so the chat keeps its identity, and its scroll
+/// position, whether or not one plays.
+struct WizzShake: ViewModifier {
+    /// When the wizz playing began, if one does.
+    let since: Date?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Keyframes per second: more than the shake's own 14 a second.
+    private static let rate = 60.0
+
+    func body(content: Content) -> some View {
+        content.keyframeAnimator(initialValue: CGSize.zero, trigger: since) { content, shift in
+            content.offset(shift)
+        } keyframes: { _ in
+            KeyframeTrack {
+                // Begun a moment ago, as when the chat opened mid-wizz: the
+                // shake picks up where it is.
+                let start = since.map { max(0, Date.now.timeIntervalSince($0)) } ?? ScreenEffect.wizz.length
+                let steps = reduceMotion ? 0 : Int((ScreenEffect.wizz.length - start) * Self.rate)
+                for step in 0...max(steps, 0) {
+                    LinearKeyframe(EffectScene.wizzShake(at: start + Double(step) / Self.rate), duration: 1 / Self.rate)
+                }
+            }
+        }
+    }
+}

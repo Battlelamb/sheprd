@@ -54,6 +54,9 @@ Tests :big[pass]: :huge[214 of 214]. :small[CI took 4 min.]
   `balloons`, `celebration`, `fireworks`, `love`, `lasers`, `echo`,
   `spotlight`, or `zap`, where pixel ships shoot down the message's letters)
   fills the chat pane for a moment, when long work finally succeeds. Never use them in routine replies.
+- When you are stuck and truly need the person, such as a decision only they
+  can make, end the reply with a line `::wizz`: the chat shakes, and a paired
+  phone buzzes even when locked. Once per wait at most.
 - The iPhone and iPad app draws them too (ink shows on a tap). Terminal views
   and the phone web app show the directives as plain text, so the reply still
   reads well there.

@@ -255,6 +255,7 @@ private struct ChatDocument: View {
             .defaultScrollAnchor(.bottom)
             .coordinateSpace(.named(ChatEffectsModel.space))
             .environment(\.chatEffects, store.effects)
+            .modifier(WizzShake(since: store.effects.ledger.playing(at: .now).flatMap { $0.effect == .wizz ? $0.since : nil }))
             // A screen effect plays over the chat alone, never the composer,
             // and takes no touches.
             .overlay {

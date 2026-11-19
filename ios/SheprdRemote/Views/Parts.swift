@@ -362,6 +362,7 @@ struct AnswerCard: View {
                 sending = false
                 return
             }
+            Feedback.shared.touch(.send)
             problem = await model.fleet.send(.answer(permission: question.id, option: option.id), to: item.key)
             sending = false
         }

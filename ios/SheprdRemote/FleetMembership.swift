@@ -147,17 +147,45 @@ final class FleetMembership {
     /// in Sheprd on that computer.
     func join(through computer: Computer, name: String) async {
         guard record == nil, let fleet = fleets[computer.device] else { return }
-        await run {
-            let key = try FleetKey.create()
+        busy = true
+        problem = nil
+        defer { busy = false }
+        let key: FleetKey
+        let bundle: FleetLog.Bundle
+        do {
+            key = try FleetKey.create()
             let relay = RelayKeyPair()
-            let bundle = try FleetLog.phoneBundle(key: key.publicKey, name: name, relay: relay)
-            let joined = try await client(computer).join(bundle, fleet: fleet, as: key.signer)
+            bundle = try FleetLog.phoneBundle(key: key.publicKey, name: name, relay: relay)
+            // Kept before the join is sent: if its answer is lost, the
+            // daemon may hold a join for this key, and only this key can
+            // become that member.
             save(Record(
-                keyKind: key.kind, keyData: key.data, member: joined.member, fleet: fleet,
-                through: computer.device, admitted: joined.state == .member,
+                keyKind: key.kind, keyData: key.data, member: bundle.id.hexString, fleet: fleet,
+                through: computer.device, admitted: false,
                 relayDial: relay.dialKey, relayTunnel: relay.tunnelKey
             ))
+        } catch {
+            problem = Self.describe(error)
+            return
+        }
+        guard record != nil else { return }
+        do {
+            let joined = try await client(computer).join(bundle, fleet: fleet, as: key.signer)
+            if joined.state == .member, var admitted = record {
+                admitted.admitted = true
+                save(admitted)
+            }
             follow(computer)
+        } catch {
+            log.error("fleet: join through \(computer.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            problem = Self.describe(error)
+            if fleetRequestMayHaveLanded(status: Self.status(of: error)) {
+                // No answer: the join may be waiting there. Keep the key and
+                // follow it; Cancel forgets it.
+                follow(computer)
+            } else {
+                forget()
+            }
         }
     }
 
@@ -180,10 +208,11 @@ final class FleetMembership {
     func remove(member: String, reason: FleetLog.Reason) async {
         guard let id = FleetLog.data(hex: member) else { return }
         let leaving = member == record?.member
-        await sign("Remove this member from your fleet", [
+        let outcome = await sign("Remove this member from your fleet", [
             .remove(member: id, alsoMembers: [], alsoHosts: [], reason: leaving ? .left : reason),
         ])
-        if leaving, problem == nil { forget() }
+        // Left once a computer took it, whatever failed before it.
+        if leaving, outcome == .answered, problem == nil { forget() }
     }
 
     /// Removes a host from the whole fleet.
@@ -288,29 +317,30 @@ final class FleetMembership {
             problem = Self.describe(error)
             return .answered
         }
-        for computer in candidates {
-            do {
-                try await client(computer).sign(bodies, as: key.signer, at: .now)
-                if computer.device != record.through {
-                    var moved = record
-                    moved.through = computer.device
-                    save(moved)
-                }
-                await check(computer)
-                return .answered
-            } catch FleetClientError.refused(let count) {
-                // The fleet checked them and refused: another computer
-                // would refuse them too.
-                problem = Self.describe(FleetClientError.refused(count))
-                await check(computer)
-                return .answered
-            } catch {
-                log.error("fleet: \(computer.name, privacy: .public) did not take it: \(error.localizedDescription, privacy: .public)")
-                problem = Self.describe(error)
-            }
+        let attempt = await FleetAttempt.first(candidates) { computer in
+            try await client(computer).sign(bodies, as: key.signer, at: .now)
+        } failed: { computer, error in
+            log.error("fleet: \(computer.name, privacy: .public) did not take it: \(error.localizedDescription, privacy: .public)")
         }
-        // No computer answered: what was posted may have landed.
-        return .unknown
+        switch attempt {
+        case let .done(computer):
+            // A computer before it may have failed: that no longer matters.
+            problem = nil
+            if computer.device != record.through, var moved = self.record {
+                moved.through = computer.device
+                save(moved)
+            }
+            await check(computer)
+            return .answered
+        case let .refused(computer, count):
+            problem = Self.describe(FleetClientError.refused(count))
+            await check(computer)
+            return .answered
+        case let .failed(error):
+            problem = error.map(Self.describe)
+            // No computer answered: what was posted may have landed.
+            return .unknown
+        }
     }
 
     /// Opens the fleet key with one Face ID for `reason`, so a batch of
@@ -321,18 +351,6 @@ final class FleetMembership {
         context.localizedReason = reason
         try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
         return try FleetKey(kind: record.keyKind, data: record.keyData, context: context)
-    }
-
-    private func run(_ action: () async throws -> Void) async {
-        busy = true
-        problem = nil
-        defer { busy = false }
-        do {
-            try await action()
-        } catch {
-            log.error("fleet: \(error.localizedDescription, privacy: .public)")
-            problem = Self.describe(error)
-        }
     }
 
     /// Follows a join until a person admits it, or the daemon forgets it.
@@ -369,6 +387,12 @@ final class FleetMembership {
         record = nil
         status = nil
         notMember = false
+    }
+
+    /// The HTTP status a computer answered with, when it answered.
+    private static func status(of error: Error) -> Int? {
+        if case let RemoteError.status(code, _) = error { return code }
+        return nil
     }
 
     private static func describe(_ error: Error) -> String {

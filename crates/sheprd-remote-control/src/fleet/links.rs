@@ -74,10 +74,27 @@ struct Wanted {
 pub(crate) fn apply(state: &State, fleet: &Fleet, now_ms: u64) -> Result<bool> {
     let (wanted, linked, via) = wanted(fleet);
     let file = fleet.state_dir().join(FILE);
-    let before = read(&file)?;
+    let stored = read(&file)?;
+    let mut before = stored.clone();
     let mut kept = Kept::default();
     let mut changed = false;
     let mut auth = state.auth();
+    // A device marked as the fleet's (its id and `via`) that the file does
+    // not name was added before a write of the file that never landed: it
+    // is this module's, so a removal still reaches it.
+    for record in auth.devices().records() {
+        let marked = record.id.0.starts_with(FLEET_ID)
+            && record
+                .via
+                .as_deref()
+                .is_some_and(|via| via.starts_with(FLEET_VIA));
+        if marked && !before.refused.contains(&record.id.0) {
+            before
+                .admitted
+                .entry(record.id.0.clone())
+                .or_insert_with(|| record.relay.clone());
+        }
+    }
     // A device this module admitted that is gone from `devices.json` was
     // revoked here by hand: a local refusal, kept while its link stands,
     // suspended or not, so a suspension lifted later never brings it back.
@@ -143,7 +160,7 @@ pub(crate) fn apply(state: &State, fleet: &Fleet, now_ms: u64) -> Result<bool> {
         changed = true;
     }
     drop(auth);
-    if kept != before {
+    if kept != stored {
         let json = serde_json::to_vec(&kept).map_err(|_| crate::desktop::Error::RecordFormat)?;
         files::write_private(&file, &json)?;
     }
@@ -157,7 +174,7 @@ pub(crate) fn apply(state: &State, fleet: &Fleet, now_ms: u64) -> Result<bool> {
 }
 
 /// What `fleet/links.json` keeps.
-#[derive(Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 struct Kept {
     /// The devices this module admitted, with the relay keys it last set
     /// on each.

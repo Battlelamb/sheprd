@@ -30,6 +30,8 @@ mod handover;
 #[cfg(unix)]
 mod joining;
 #[cfg(unix)]
+mod link_recovery;
+#[cfg(unix)]
 mod offline;
 #[cfg(unix)]
 mod phone_relays;

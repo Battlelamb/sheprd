@@ -59,13 +59,18 @@ extension API {
         }
 
         /// How this phone reaches `host` through its relays with `keys`, its
-        /// fleet bundle's: nil unless `relay(for:)` checks out and names
-        /// relays, or when `saved` came from a record at least as new. A
+        /// fleet bundle's, or `saved`'s when it has any: nil unless
+        /// `relay(for:)` checks out and names relays, or when `saved`
+        /// came from a record at least as new. A
         /// record's `rev` only goes up, so a computer serving an older one
         /// again cannot roll the phone back.
         public func relayRecord(for host: String, keys: RelayKeyPair, replacing saved: RelayRecord? = nil) -> RelayRecord? {
             guard let checked = relay(for: host) else { return nil }
             if let savedRev = saved?.signedRev, checked.rev <= savedRev { return nil }
+            // Keys the phone already reaches the host with stay: it may have
+            // sent its own since (`POST /api/relay`), and the host keeps
+            // those over the bundle's.
+            let keys = saved.map { RelayKeyPair(dialKey: $0.dialKey, tunnelKey: $0.tunnelKey) } ?? keys
             guard var record = RelayRecord.make(from: checked.relay, keys: keys) else { return nil }
             record.signedRev = checked.rev
             record.signedMs = checked.signedMs

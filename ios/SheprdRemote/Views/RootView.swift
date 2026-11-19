@@ -159,7 +159,7 @@ struct RootView: View {
         TabView(selection: $tab) {
             Tab("Home", systemImage: "house", value: RootTab.home) {
                 NavigationStack(path: $homePath) {
-                    HomeTab(pairing: $window.pairing).withRoutes()
+                    HomeTab(pairing: $window.pairing).makesRoomForConnectionToast().withRoutes()
                 }
                 .environment(\.offersWorkspace, true)
                 .slidesTabBar(hidden: !homePath.isEmpty)
@@ -167,16 +167,16 @@ struct RootView: View {
             }
             .badge(model.fleet.waiting)
             Tab("Workspaces", systemImage: "square.stack.3d.up", value: RootTab.workspaces) {
-                NavigationStack(path: $workspacesPath) { WorkspacesTab(query: $workspacesQuery).withRoutes() }
+                NavigationStack(path: $workspacesPath) { WorkspacesTab(query: $workspacesQuery).makesRoomForConnectionToast().withRoutes() }
                     .slidesTabBar(hidden: !workspacesPath.isEmpty)
                     .connectionToast(pairing: $window.pairing)
             }
             Tab("Pull Requests", systemImage: "arrow.triangle.pull", value: RootTab.pullRequests) {
-                NavigationStack { PullRequestsList() }
+                NavigationStack { PullRequestsList().makesRoomForConnectionToast() }
                     .connectionToast(pairing: $window.pairing)
             }
             Tab("Settings", systemImage: "gearshape", value: RootTab.settings) {
-                NavigationStack { SettingsView() }
+                NavigationStack { SettingsView().makesRoomForConnectionToast() }
                     .connectionToast(pairing: $window.pairing)
             }
         }
@@ -275,7 +275,7 @@ struct CreatingSheet: View {
 
 extension View {
     func withRoutes() -> some View {
-        navigationDestination(for: Route.self) { $0.screen }
+        navigationDestination(for: Route.self) { $0.screen.makesRoomForConnectionToast() }
     }
 
     /// Slides a tab's bar in and out with its stack. The screens pushed on

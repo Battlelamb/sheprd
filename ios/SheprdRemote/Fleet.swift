@@ -659,11 +659,12 @@ final class Fleet {
         }
     }
 
-    /// Deletes a workspace's linked worktree and closes the workspace.
-    func removeWorktree(_ key: WorkspaceKey) async throws {
+    /// Deletes a workspace's linked worktree and closes the workspace;
+    /// `discard` loses its uncommitted changes, as the person confirmed.
+    func removeWorktree(_ key: WorkspaceKey, discard: Bool) async throws {
         let workspace = key.workspace
         try await call(key.device) { client, token in
-            try await client.removeWorktree(workspace, bearer: token)
+            try await client.removeWorktree(workspace, discard: discard, bearer: token)
         }
     }
 

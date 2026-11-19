@@ -18,10 +18,14 @@ extension API {
         public let links: [String]
         /// Where hosts take direct connections, by host id.
         public let reach: [FleetReach]
+        /// How to reach each Sheprd host this phone linked through its
+        /// relays, from the host's own signed record.
+        public let routes: [FleetRoute]
 
         public init(
             view: FleetView?, heads: [String] = [], next: FleetNext? = nil,
-            join: FleetStanding? = nil, links: [String] = [], reach: [FleetReach] = []
+            join: FleetStanding? = nil, links: [String] = [], reach: [FleetReach] = [],
+            routes: [FleetRoute] = []
         ) {
             self.view = view
             self.heads = heads
@@ -29,9 +33,10 @@ extension API {
             self.join = join
             self.links = links
             self.reach = reach
+            self.routes = routes
         }
 
-        enum CodingKeys: String, CodingKey { case view, heads, next, join, links, reach }
+        enum CodingKeys: String, CodingKey { case view, heads, next, join, links, reach, routes }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -41,6 +46,18 @@ extension API {
             join = try c.decodeIfPresent(FleetStanding.self, forKey: .join)
             links = try c.decodeIfPresent([String].self, forKey: .links) ?? []
             reach = try c.decodeIfPresent([FleetReach].self, forKey: .reach) ?? []
+            routes = try c.decodeIfPresent([FleetRoute].self, forKey: .routes) ?? []
+        }
+
+        /// How this phone reaches `host` through its relays with `keys`, its
+        /// fleet bundle's: nil unless the host is linked, its route is
+        /// pinned to the host's own certificate authority, and it names
+        /// relays.
+        public func relayRecord(for host: String, keys: RelayKeyPair) -> RelayRecord? {
+            guard let route = routes.first(where: { $0.host.lowercased() == host.lowercased() }),
+                  route.fingerprint.lowercased() == host.lowercased()
+            else { return nil }
+            return RelayRecord.make(from: route.relay, keys: keys)
         }
 
         /// The direct addresses `host` publishes, as `https://` origins.
@@ -124,6 +141,15 @@ extension API {
     }
 
     public enum FleetStanding: String, Decodable, Sendable { case pending, member }
+
+    /// A linked host's relays, as `GET /api/relay` answers on it.
+    public struct FleetRoute: Decodable, Equatable, Sendable {
+        public let host: String
+        /// The SHA-256 of the host's certificate authority: its id, and
+        /// what its record is signed by.
+        public let fingerprint: String
+        public let relay: RelayInfo
+    }
 
     public struct FleetReach: Decodable, Equatable, Sendable {
         public let host: String

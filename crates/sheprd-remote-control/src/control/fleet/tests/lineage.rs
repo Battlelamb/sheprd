@@ -86,3 +86,27 @@ fn a_member_admitted_on_the_side_cannot_reach_further() {
         assert!(state.hosts.contains_key(&host));
     }
 }
+
+#[test]
+fn a_replayed_admission_does_not_take_the_member_it_copies() {
+    let (mut log, a, b, c, d) = four();
+    let before = log.heads().to_vec();
+    let x = computer(9);
+    // b admits x; c, about to be removed, replays x's join signature in an
+    // admission of its own, backdated so x is not yet live there.
+    let genuine = admit(&mut log, &b, &x);
+    let seq = log.state().members[&c.id()].seq + 1;
+    let Body::Admit(body) = genuine.body().clone() else {
+        unreachable!()
+    };
+    let replay = sign_on(&log, &c, &before, seq, Body::Admit(body));
+    act(&mut log, &a, remove_body(&c));
+    apply(&mut log, replay);
+    let state = log.state();
+    assert!(state.members.contains_key(&x.id()));
+    assert!(!state.tombstones.contains(&x.id()));
+    assert!(!state.members.contains_key(&c.id()));
+    for kept in [&a, &b, &d] {
+        assert!(state.members.contains_key(&kept.id()));
+    }
+}

@@ -307,32 +307,17 @@ fn access(
     }
     let mut registers = base.access.clone();
     for (pair, entries) in by_pair {
-        let floor = base.access.get(&pair).map_or(0, |register| register.rev);
-        // A `rev` is one above the highest it saw, so an agent merging by
-        // `rev` alone orders it rightly, and no single operation can put
-        // the register out of reach of a later deny. Whether a `rev`
-        // follows is a matter of the operation's own history: one that a
-        // removal voided later still raised the floor its descendants
-        // signed on, so a deny that saw it stays a deny.
-        // `entries` are in graph order, so each one's ancestors are known
-        // before it.
-        let mut valid: Vec<&Grant> = Vec::new();
-        for entry in &entries {
-            let (position, _, rev, _) = entry;
-            let seen = valid
-                .iter()
-                .filter(|(other, ..)| graph.sees(*position, *other))
-                .map(|(_, _, other_rev, _)| *other_rev)
-                .fold(floor, u64::max);
-            if seen.checked_add(1) == Some(*rev) {
-                valid.push(entry);
-            }
-        }
-        let Some(highest) = valid.iter().map(|(_, _, rev, _)| *rev).max() else {
+        // Every `Access` held is one above the highest in its own history
+        // (`Folder::check`), so an agent merging by `rev` alone orders it
+        // rightly. One a removal voided later still raised the floor its
+        // descendants signed on, so a deny that saw it stays a deny, and
+        // the register keeps the highest any history reached: the floor
+        // the next one signs on.
+        let Some(highest) = entries.iter().map(|(_, _, rev, _)| *rev).max() else {
             continue;
         };
-        let counted: Vec<&&Grant> = valid.iter().filter(|(.., counts)| *counts).collect();
-        let latest: Vec<&&&Grant> = counted
+        let counted: Vec<&Grant> = entries.iter().filter(|(.., counts)| *counts).collect();
+        let latest: Vec<&&Grant> = counted
             .iter()
             .filter(|(position, ..)| {
                 !counted

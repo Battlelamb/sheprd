@@ -185,9 +185,11 @@ fn no_access_rev_puts_the_register_out_of_reach() {
             rev,
         })
     };
-    // A huge rev, or a skipped one, counts for nothing and sets no floor.
-    act(&mut log, &b, access(true, u64::MAX));
-    act(&mut log, &b, access(true, 7));
+    // A huge rev, or a skipped one, is refused and sets no floor.
+    for rev in [u64::MAX, 7] {
+        let op = as_drafted(&log, &b, access(true, rev));
+        assert_eq!(log.insert(op, NOW), Err(Error::Rev));
+    }
     act(&mut log, &a, access(false, 1));
     assert!(!log.state().allowed(&host, &c.id()));
     assert_eq!(log.state().access[&(host, c.id())].rev, 1);

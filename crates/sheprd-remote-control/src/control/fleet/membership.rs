@@ -162,7 +162,39 @@ impl<'g, 'a> Folder<'g, 'a> {
         if op.unsigned().seq <= self.last_seq(position, op.signer()) {
             return Err(Error::Sequence);
         }
-        self.permitted(op, kind, &members)
+        self.permitted(op, kind, &members)?;
+        if let Body::Access(access) = op.body()
+            && Some(access.rev)
+                != self
+                    .access_floor(position, access.host, access.member)
+                    .checked_add(1)
+        {
+            return Err(Error::Rev);
+        }
+        Ok(())
+    }
+
+    /// The highest `rev` of an `Access` for `host` and `member` in the
+    /// history of `position`, or the base's: the one an `Access` there
+    /// must be one above. Every `Access` held passed this check, so none
+    /// can put the register out of reach of a later deny, and whether one
+    /// follows depends on its own history alone.
+    fn access_floor(&self, position: usize, host: super::HostId, member: MemberId) -> u64 {
+        let floor = self
+            .base
+            .access
+            .get(&(host, member))
+            .map_or(0, |register| register.rev);
+        self.graph.ancestors[position]
+            .iter()
+            .filter(|&ancestor| self.checks.get(ancestor).is_some_and(Result::is_ok))
+            .filter_map(|ancestor| match self.graph.order[ancestor].body() {
+                Body::Access(other) if other.host == host && other.member == member => {
+                    Some(other.rev)
+                }
+                _ => None,
+            })
+            .fold(floor, u64::max)
     }
 
     /// The highest sequence number the signer used before `position`.
@@ -380,6 +412,12 @@ impl<'g, 'a> Folder<'g, 'a> {
     /// those, and every member one of them admitted that `removal` had
     /// not seen, and so on. Such an admission is void with its signer, so
     /// whoever it admitted has no trust left of its own.
+    ///
+    /// Only a member every admission of which is void that way: a join
+    /// signature is not bound to one admission, so a removed member can
+    /// replay it in an admission of its own, and that must not take a
+    /// member another admission let in. A member of the base was let in
+    /// before any of these.
     fn reach<'m>(
         &self,
         removal: usize,
@@ -387,17 +425,31 @@ impl<'g, 'a> Folder<'g, 'a> {
         admissions: &[usize],
     ) -> BTreeSet<MemberId> {
         let mut reach: BTreeSet<MemberId> = seeds.copied().collect();
+        let admitted = |admission: usize| match self.graph.order[admission].body() {
+            Body::Admit(admit) => Some(admit.bundle.id()),
+            _ => None,
+        };
         loop {
             let before = reach.len();
-            for &admission in admissions {
-                let op = self.graph.order[admission];
-                if let Body::Admit(admit) = op.body()
-                    && reach.contains(&op.signer())
+            let void = |admission: usize, reach: &BTreeSet<MemberId>| {
+                reach.contains(&self.graph.order[admission].signer())
                     && !self.graph.sees(removal, admission)
-                {
-                    reach.insert(admit.bundle.id());
-                }
-            }
+            };
+            let joined: Vec<MemberId> = admissions
+                .iter()
+                .filter(|&&admission| void(admission, &reach))
+                .filter_map(|&admission| admitted(admission))
+                .filter(|id| {
+                    !reach.contains(id)
+                        && !self.base.members.contains_key(id)
+                        && !self.base.tombstones.contains(id)
+                        && admissions
+                            .iter()
+                            .filter(|&&other| admitted(other) == Some(*id))
+                            .all(|&other| void(other, &reach))
+                })
+                .collect();
+            reach.extend(joined);
             if reach.len() == before {
                 return reach;
             }

@@ -2,9 +2,9 @@
 //! waiting for their parents, and the state they compute.
 
 use super::{
-    Admit, Body, Bundle, Error, FleetId, MAX_MEMBERSHIP_OPS, MAX_OPS, MAX_PARENTS, MAX_PENDING,
-    MAX_REMOVALS, MAX_REMOVALS_PER_SIGNER, MAX_SKEW_MS, MemberId, Op, OpId, PENDING_TTL_MS, Result,
-    State, Unsigned,
+    Admit, Body, Bundle, Error, FleetId, HostId, MAX_MEMBERSHIP_OPS, MAX_OPS, MAX_PARENTS,
+    MAX_PENDING, MAX_REMOVALS, MAX_REMOVALS_PER_SIGNER, MAX_SKEW_MS, MemberId, Op, OpId,
+    PENDING_TTL_MS, Result, State, Unsigned,
     fold::fold,
     graph::{Bits, Graph},
     membership::Folder,
@@ -154,8 +154,12 @@ impl Log {
     /// crowd out the others, and what it signed that a removal did not
     /// name is void anyway. The heads left out are named by the next
     /// operations.
+    ///
+    /// An `Access` gets the `rev` its parents call for, one above the
+    /// highest for its host and member they hold, whatever it was drafted
+    /// with: the register can be ahead of what the parents name.
     #[must_use]
-    pub fn draft(&self, signer: MemberId, issued_ms: u64, body: Body) -> Unsigned {
+    pub fn draft(&self, signer: MemberId, issued_ms: u64, mut body: Body) -> Unsigned {
         let own = self.own_head(signer);
         let mut heads: Vec<(bool, OpId)> = self
             .heads
@@ -175,6 +179,11 @@ impl Log {
             .take(MAX_PARENTS)
             .collect();
         parents.sort_unstable();
+        if let Body::Access(access) = &mut body {
+            access.rev = self
+                .access_floor(&parents, access.host, access.member)
+                .saturating_add(1);
+        }
         let seq = self
             .ops
             .values()
@@ -193,6 +202,31 @@ impl Log {
             parents,
             body,
         }
+    }
+
+    /// The highest `rev` of an `Access` for `host` and `member` that
+    /// `parents` and their ancestors hold, or the base's.
+    fn access_floor(&self, parents: &[OpId], host: HostId, member: MemberId) -> u64 {
+        let mut floor = self
+            .base
+            .access
+            .get(&(host, member))
+            .map_or(0, |register| register.rev);
+        let mut seen: HashSet<OpId> = parents.iter().copied().collect();
+        let mut queue = parents.to_vec();
+        while let Some(id) = queue.pop() {
+            let Some(op) = self.ops.get(&id) else {
+                continue;
+            };
+            if let Body::Access(access) = op.body()
+                && access.host == host
+                && access.member == member
+            {
+                floor = floor.max(access.rev);
+            }
+            queue.extend(op.parents().iter().filter(|parent| seen.insert(**parent)));
+        }
+        floor
     }
 
     /// The first head, by id, that is or descends from `signer`'s latest

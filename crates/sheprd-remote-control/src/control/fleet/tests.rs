@@ -159,6 +159,14 @@ fn sign(log: &Log, by: &Device, body: Body) -> Op {
     log.draft(by.id(), NOW, body).sign(&by.key).unwrap()
 }
 
+/// Signs `body` as `by` on top of everything `log` holds, as it is: an
+/// `Access` keeps the `rev` given rather than the one the draft computes.
+fn as_drafted(log: &Log, by: &Device, body: Body) -> Op {
+    let mut unsigned = log.draft(by.id(), NOW, body.clone());
+    unsigned.body = body;
+    unsigned.sign(&by.key).unwrap()
+}
+
 /// Signs `body` as `by` on exactly `parents`, as a device that had seen
 /// only those would.
 fn sign_on(log: &Log, by: &Device, parents: &[OpId], seq: u64, body: Body) -> Op {

@@ -41,3 +41,33 @@ fn a_deny_survives_the_removal_of_the_allow_it_saw() {
     act(&mut log, &b, access(true, 3));
     assert!(log.state().allowed(&host, &d.id()));
 }
+
+#[test]
+fn a_draft_takes_the_rev_its_parents_call_for() {
+    let (a, b, c) = (computer(1), computer(2), computer(3));
+    let mut log = found(&a);
+    admit(&mut log, &a, &b);
+    admit(&mut log, &a, &c);
+    act(&mut log, &a, Body::HostAdd(plain_host(40)));
+    let host = plain_host(40).id().unwrap();
+    let access = |allow, rev| {
+        Body::Access(Access {
+            host,
+            member: c.id(),
+            allow,
+            rev,
+        })
+    };
+    act(&mut log, &a, access(false, 1));
+    // Drafted with a stale or wild rev, it still follows its parents.
+    for wild in [0, 1, u64::MAX] {
+        let op = sign(&log, &b, access(true, wild));
+        let Body::Access(signed) = op.body() else {
+            unreachable!()
+        };
+        let expected = log.state().access[&(host, c.id())].rev + 1;
+        assert_eq!(signed.rev, expected);
+        apply(&mut log, op);
+    }
+    assert!(log.state().allowed(&host, &c.id()));
+}

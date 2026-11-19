@@ -12,6 +12,10 @@ pub enum Error {
     #[error("this computer is in a fleet already; leave it first")]
     InFleet,
     #[error(transparent)]
+    Joins(#[from] super::joins::Error),
+    #[error(transparent)]
+    Links(#[from] super::links::Error),
+    #[error(transparent)]
     Log(#[from] crate::control::fleet::Error),
     #[error("this computer cannot sign with its certificate authority")]
     NoAuthority,

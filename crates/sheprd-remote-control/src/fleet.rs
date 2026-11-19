@@ -10,6 +10,10 @@
 //!   reach.
 //! - [`removals`]: removals passed between daemons inside the relay
 //!   tunnel, so they land while every Sheprd window is shut.
+//! - [`joins`]: phones asking to join through this computer, waiting for a
+//!   person to admit them in Sheprd.
+//! - [`links`]: phones on this computer's API through the `Link`s they
+//!   signed.
 //!
 //! Every change bumps [`Fleet::changed`]; `follow` then rewrites what the
 //! log grants, off the control thread.
@@ -17,6 +21,8 @@
 pub(crate) mod ask;
 mod error;
 pub(crate) mod grants;
+pub(crate) mod joins;
+pub(crate) mod links;
 mod me;
 pub(crate) mod removals;
 mod store;
@@ -56,6 +62,8 @@ pub(crate) struct Fleet {
     /// Removal exchanges other members dialed in for, at most
     /// `removals::CONCURRENT` at once.
     pub(crate) inbound: tokio::sync::Semaphore,
+    /// Phones waiting to join, memory only.
+    joins: Mutex<joins::Joins>,
 }
 
 #[derive(Debug, Default)]
@@ -84,6 +92,7 @@ impl Fleet {
             inner: Mutex::new(inner),
             changed: watch::Sender::new(0),
             inbound: tokio::sync::Semaphore::new(removals::CONCURRENT),
+            joins: Mutex::default(),
         })
     }
 
@@ -106,6 +115,12 @@ impl Fleet {
 
     pub(crate) fn inner(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The phones waiting to join. Lock it after [`Fleet::inner`], never
+    /// before.
+    pub(crate) fn joins(&self) -> MutexGuard<'_, joins::Joins> {
+        self.joins.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Members cut off now: those the log's live members removed in an

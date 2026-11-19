@@ -213,9 +213,19 @@ pub(crate) async fn follow(state: Shared) {
             }
         }
         let (blocking, fleet_ref) = (state.clone(), fleet.clone());
-        let applied = tokio::task::spawn_blocking(move || apply(&blocking, &fleet_ref)).await;
-        if let Ok(Err(error)) = applied {
-            tracing::warn!(error = %error, "could not apply the fleet's grants");
+        let applied = tokio::task::spawn_blocking(move || {
+            let grants = apply(&blocking, &fleet_ref);
+            let links = super::links::apply(&blocking, &fleet_ref, crate::web::now_ms());
+            (grants, links)
+        })
+        .await;
+        if let Ok((grants, links)) = applied {
+            if let Err(error) = grants {
+                tracing::warn!(error = %error, "could not apply the fleet's grants");
+            }
+            if let Err(error) = links {
+                tracing::warn!(error = %error, "could not apply the fleet's phone links");
+            }
         }
         if let Some(relay) = &state.relay {
             relay.devices_changed();

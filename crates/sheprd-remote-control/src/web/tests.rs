@@ -20,6 +20,8 @@ mod convert;
 #[cfg(unix)]
 mod echo;
 mod empty_core;
+#[cfg(unix)]
+pub(crate) mod fleet;
 mod github;
 mod handoff;
 mod hosts;

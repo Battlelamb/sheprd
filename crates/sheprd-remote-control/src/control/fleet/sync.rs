@@ -3,7 +3,9 @@
 //! member or host. Operations travel as their canonical bytes in
 //! base64url, so nothing here can change what was signed.
 
-use super::{Body, Error, FleetId, HostId, Log, MemberId, Method, Op, OpId, Reason, Result, State};
+use super::{
+    Body, Error, FleetId, HostId, Kind, Log, MemberId, Method, Op, OpId, Reason, Result, State,
+};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 
@@ -139,6 +141,9 @@ pub enum Ask {
     RemoveHost { host: String },
     /// Takes operations another member carried, and says what it lacks.
     Apply(Apply),
+    /// The phones waiting to join through this computer, for a person to
+    /// admit one with [`Ask::Admit`]; none is ever admitted otherwise.
+    Joins,
 }
 
 /// What the daemon answers.
@@ -155,6 +160,27 @@ pub enum Answer {
     },
     Applied(Applied),
     Done,
+    Joins {
+        joins: Vec<Join>,
+    },
+}
+
+/// A phone that asked to join through this computer
+/// (`POST /api/v2/fleet/join`), kept in memory for a while.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Join {
+    /// The joiner's member id, hex.
+    pub member: String,
+    /// The name in its bundle.
+    pub name: String,
+    pub kind: Kind,
+    /// Its bundle and its signature over [`super::Bundle::join_message`],
+    /// base64url, as [`Ask::Admit`] takes them.
+    pub bundle: String,
+    pub signature: String,
+    /// The paired device that asked, as this computer names it.
+    pub device: String,
+    pub received_ms: u64,
 }
 
 /// Reads a member id from hex.

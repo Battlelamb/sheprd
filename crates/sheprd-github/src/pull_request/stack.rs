@@ -83,8 +83,12 @@ pub enum Verdict {
     Merged,
     /// `count` open layers, up to and including that one, can merge.
     Ready { count: usize },
-    /// The lowest layer up to that one that cannot merge, and why.
+    /// The lowest layer read up to that one that cannot merge, and why.
     Blocked { number: u64, blocker: Blocker },
+    /// No layer read blocks, but some layer up to that one was not read
+    /// (past the read limit, or hidden from this reader), so whether it can
+    /// merge, and what it would land, is not known.
+    Unread,
 }
 
 impl Layer {
@@ -151,7 +155,8 @@ impl Stack {
             .filter(move |layer| layer.position <= position && layer.state != State::Merged)
     }
 
-    /// What merging at `position` would do.
+    /// What merging at `position` would do. Ready and merged need every
+    /// layer up to it read: an unread one may be open, and blocked.
     pub fn verdict(&self, position: u64) -> Verdict {
         let mut count = 0;
         for layer in self.landing(position) {
@@ -163,10 +168,18 @@ impl Stack {
             }
             count += 1;
         }
+        if !self.read_through(position) {
+            return Verdict::Unread;
+        }
         match count {
             0 => Verdict::Merged,
             count => Verdict::Ready { count },
         }
+    }
+
+    /// Whether every layer from the bottom up to `position` was read.
+    pub fn read_through(&self, position: u64) -> bool {
+        (1..=position).all(|wanted| self.layers.iter().any(|layer| layer.position == wanted))
     }
 
     /// Whether some layers were not read.

@@ -3,7 +3,7 @@
 //! claim the log orders first arrives after the keys were saved.
 
 use super::*;
-use crate::control::fleet::{HostKind, HostSeen};
+use crate::control::fleet::{HostId, HostKind, HostSeen};
 use crate::desktop::record::Record;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 

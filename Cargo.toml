@@ -1,6 +1,7 @@
 [workspace]
 members  = ["crates/embed-resource", "crates/sheprd-acp", "crates/sheprd-apns", "crates/sheprd-automate", "crates/sheprd-automation", "crates/sheprd-backend", "crates/sheprd-chat-protocol", "crates/sheprd-client", "crates/sheprd-commands", "crates/sheprd-control-protocol", "crates/sheprd-core-client", "crates/sheprd-credentials", "crates/sheprd-diagnostics", "crates/sheprd-github", "crates/sheprd-gpui", "crates/sheprd-launcher", "crates/sheprd-i18n", "crates/sheprd-luau", "crates/sheprd-memory", "crates/sheprd-mods", "crates/sheprd-nearby", "crates/sheprd-orchestrator", "crates/sheprd-protocol", "crates/sheprd-push-relay", "crates/sheprd-relay", "crates/sheprd-relay-agent", "crates/sheprd-remote", "crates/sheprd-remote-control", "crates/sheprd-session", "crates/sheprd-t3", "crates/sheprd-terminal", "crates/sheprd-traces", "crates/sheprd-tunnel", "crates/sheprd-updater", "crates/sheprd-usage", "crates/sheprd-vcs"]
 resolver = "2"
+exclude = ["crates/vendor/accesskit_macos"]
 
 [workspace.package]
 edition      = "2024"
@@ -270,8 +271,10 @@ zeroize              = "=1.9.1"
 [profile.dev]
 debug = "line-tables-only"
 
+[patch.crates-io]
+# GPUI 0.3.10 still uses the 0.26 adapter. Backport AccessKit #835 until GPUI carries it.
+accesskit_macos = { path = "crates/vendor/accesskit_macos" }
 # GPUI's build script embeds its own Windows manifest through embed-resource,
 # which would clash with Herdr's (crates/sheprd-gpui/windows.manifest); this
 # no-op stands in for it. See crates/embed-resource.
-[patch.crates-io]
 embed-resource = { path = "crates/embed-resource" }

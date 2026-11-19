@@ -224,3 +224,41 @@ fn other_local_branches_stay_where_they_were_even_with_update_refs_on() {
     assert!(matches!(outcome.restacked, Some(Restacked::Onto { .. })));
     assert_eq!(git_in(dir, &["rev-parse", "saved"]), saved);
 }
+
+#[test]
+fn a_branch_whose_own_commits_include_a_merge_is_left_for_a_person() {
+    let stack = squashed_stack();
+    let dir = stack.checkout.path();
+    git_in(dir, &["checkout", "-b", "side", "layer-2"]);
+    commit(dir, "side", "side\n", "side work");
+    git_in(dir, &["checkout", "layer-2"]);
+    commit(dir, "three", "three\n", "layer 2, more");
+    git_in(dir, &["merge", "--no-ff", "-m", "merge side", "side"]);
+    let head = git_in(dir, &["rev-parse", "HEAD"]);
+    assert!(matches!(
+        run_restack(&stack, &stack.below, "main"),
+        Err(crate::Error::Git(super::super::Error::Restack(
+            Error::Merges
+        )))
+    ));
+    assert_eq!(git_in(dir, &["rev-parse", "HEAD"]), head);
+}
+
+#[test]
+fn edits_are_refused_rather_than_stashed_and_the_fetched_base_is_forgotten() {
+    let stack = squashed_stack();
+    let dir = stack.checkout.path();
+    git_in(dir, &["config", "rebase.autoStash", "true"]);
+    std::fs::write(dir.join("two"), "edited\n").unwrap();
+    assert!(matches!(
+        run_restack(&stack, &stack.below, "main"),
+        Err(crate::Error::Git(super::super::Error::Restack(
+            Error::Dirty
+        )))
+    ));
+    assert_eq!(git_in(dir, &["stash", "list"]), "");
+    git_in(dir, &["checkout", "--", "two"]);
+    run_restack(&stack, &stack.below, "main").unwrap();
+    let refs = git_in(dir, &["for-each-ref", "refs/sheprd"]);
+    assert_eq!(refs, "", "the action's own ref is deleted");
+}

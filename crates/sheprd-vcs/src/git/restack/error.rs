@@ -5,6 +5,10 @@ pub enum Error {
     // keep-sorted start
     #[error("Commit or stash the checkout's changes before restacking.")]
     Dirty,
+    #[error(
+        "The branch's own commits include a merge, which a rebase would drop; restack it by hand."
+    )]
+    Merges,
     #[error("The checkout moved to another branch or commit; restack it again from its branch.")]
     Moved,
     #[error(

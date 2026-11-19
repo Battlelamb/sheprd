@@ -36,9 +36,11 @@ error-vcs-git-failed = { $kind ->
     [fetch-stack-base] git fetch of the stack's base failed: { $details }
     [find-branch-start] git find where the branch started failed: { $details }
     [find-checkout] git find the checkout failed: { $details }
+    [forget-fetched-base] git forgetting the fetched base failed: { $details }
     [list-attribute-files] git list attribute files failed: { $details }
     [list-branches] git list branches failed: { $details }
     [list-files] git list files failed: { $details }
+    [list-merges] git listing the branch's merges failed: { $details }
     [list-untracked] git list untracked files failed: { $details }
     [list-working-tree] git list working tree changes failed: { $details }
     [prepare-remote-checkout] git prepare the remote pull request or issue checkout failed: { $details }
@@ -47,6 +49,7 @@ error-vcs-git-failed = { $kind ->
     [read-branch-history] git read of the branch's history failed: { $details }
     [read-commit-subject] git read the commit subject failed: { $details }
     [read-default-branch] git read the remote's default branch failed: { $details }
+    [read-stack-base] git read of the stack's base failed: { $details }
     [read-head] git read HEAD failed: { $details }
     [read-new-commit] git read the new commit failed: { $details }
     [read-working-tree-changes] git read working tree changes failed: { $details }
@@ -66,6 +69,7 @@ error-vcs-git-pull-request-base = This branch is the repository default branch; 
 error-vcs-git-pull-request-title = The branch has no commit to describe. Commit before opening a pull request.
 error-vcs-git-worker = Git worker stopped. Retry the operation.
 error-vcs-git-restack-dirty = Commit or stash the checkout's changes before restacking.
+error-vcs-git-restack-merges = The branch's own commits include a merge, which a rebase would drop; restack it by hand.
 error-vcs-git-restack-moved = The checkout moved to another branch or commit; restack it again from its branch.
 # $details is Git's own output.
 error-vcs-git-restack-stopped = The rebase stopped: { $details }. Resolve the conflicts and run `git rebase --continue`, or `git rebase --abort` to undo it.

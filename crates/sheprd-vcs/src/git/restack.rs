@@ -56,6 +56,9 @@ impl From<Restacked> for Outcome {
     }
 }
 
+/// Where the stack's base is fetched for one restack, then deleted.
+const ONTO_REF: &str = "refs/sheprd/restack-onto";
+
 pub(super) fn restack(
     checkout: &str,
     branch: &str,
@@ -82,7 +85,10 @@ pub(super) fn restack(
     let remote = base_repository(checkout, deadline, cancelled)?
         .remote
         .name();
-    let refspec = format!("refs/heads/{base}");
+    // The base lands in a ref of this action's own, and the rebase names the
+    // commit it captured: a fetch run elsewhere in this checkout meanwhile
+    // rewrites `FETCH_HEAD`, never this.
+    let refspec = format!("+refs/heads/{base}:{ONTO_REF}");
     git(
         checkout,
         &["fetch", "--no-tags", remote, &refspec],
@@ -90,22 +96,66 @@ pub(super) fn restack(
         deadline,
         cancelled,
     )?;
+    let onto = git(
+        checkout,
+        &["rev-parse", "--verify", &format!("{ONTO_REF}^{{commit}}")],
+        "read the stack's base",
+        deadline,
+        cancelled,
+    );
+    let _ = git(
+        checkout,
+        &["update-ref", "-d", ONTO_REF],
+        "forget the fetched base",
+        deadline,
+        cancelled,
+    );
+    let onto = onto?;
+    if !commit_id(&onto) {
+        return Err(super::Error::from(Error::Target).into());
+    }
+    // The fetch may take a while: the branch, its commit, and the working
+    // tree are read again right before history is rewritten.
     if checked_out(checkout, branch, deadline, cancelled)? != head {
         return Err(super::Error::from(Error::Moved).into());
     }
+    if super::checkout_dirty(checkout, deadline, cancelled)? {
+        return Err(super::Error::from(Error::Dirty).into());
+    }
+    // A rebase replays a merge commit's parents' changes but drops the merge
+    // itself, and with it a resolution made there, so a branch whose own
+    // commits include one is left for a person to rebase.
+    let merges = git(
+        checkout,
+        &[
+            "rev-list",
+            "--merges",
+            "--count",
+            &format!("{below}..{head}"),
+        ],
+        "list the branch's merges",
+        deadline,
+        cancelled,
+    )?;
+    if merges.trim() != "0" {
+        return Err(super::Error::from(Error::Merges).into());
+    }
     // A rebase that is not interactive asks for no message, but a hook or a
-    // setting could still start an editor nobody would see. `updateRefs`
-    // would also move other local branches on the replayed commits; this
-    // changes the checkout's own branch only. (A setting, not
-    // `--no-update-refs`, so a Git before 2.38 ignores it.)
+    // setting could still start an editor nobody would see. `autoStash`
+    // would hide edits instead of refusing them, and `updateRefs` would
+    // move other local branches on the replayed commits; this changes the
+    // checkout's own branch only. (Settings, not options, so an older Git
+    // ignores the one it lacks.)
     let mut rebase = command(
         checkout,
         &[
             "-c",
+            "rebase.autoStash=false",
+            "-c",
             "rebase.updateRefs=false",
             "rebase",
             "--onto",
-            "FETCH_HEAD",
+            &onto,
             below,
         ],
     );

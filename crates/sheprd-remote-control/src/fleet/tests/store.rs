@@ -169,7 +169,51 @@ async fn scrubbing_forgets_the_fleet_and_what_it_wrote() {
     assert_eq!(b.lines().len(), 1);
     let records = b.dir.path().join("desktop/hosts");
     assert_eq!(records.read_dir().unwrap().count(), 1);
+    // A desktop paired with b one by one whose key a member proved.
+    let proved = [0x5a; 32];
+    {
+        use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+        let point = SigningKey::from_slice(&[9; 32])
+            .unwrap()
+            .verifying_key()
+            .to_sec1_point(false);
+        b.state
+            .auth()
+            .devices_mut()
+            .add(
+                crate::auth::NewDevice {
+                    app: None,
+                    id: crate::control::DeviceId("legacy".into()),
+                    name: "a over Bluetooth".into(),
+                    public_key: crate::auth::PublicKey::parse(
+                        &URL_SAFE_NO_PAD.encode(point.as_bytes()),
+                    )
+                    .unwrap(),
+                    relay: Some(crate::control::host_relay::Keys {
+                        dial: URL_SAFE_NO_PAD.encode(
+                            SigningKey::from_slice(&[8; 32])
+                                .unwrap()
+                                .verifying_key()
+                                .to_sec1_point(true)
+                                .as_bytes(),
+                        ),
+                        tunnel: URL_SAFE_NO_PAD.encode(proved),
+                    }),
+                    ssh: Some(
+                        crate::ssh_access::SshKey::parse(
+                            &crate::desktop::keys::ssh_public_key(a.dir.path()).unwrap(),
+                        )
+                        .unwrap(),
+                    ),
+                },
+                now_ms(),
+            )
+            .unwrap();
+    }
+    b.fleet.proved(a.fleet.me(), proved).unwrap();
     assert_eq!(b.ask(Ask::Scrub), Answer::Done);
+    let legacy = crate::control::DeviceId("legacy".into());
+    assert!(b.state.auth().devices().get(&legacy).is_none());
     grants::apply(&b.state, &b.fleet).unwrap();
     assert!(b.lines().is_empty());
     assert_eq!(records.read_dir().unwrap().count(), 0);

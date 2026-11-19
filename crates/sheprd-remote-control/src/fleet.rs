@@ -236,9 +236,17 @@ impl Fleet {
         self.save(&inner)
     }
 
-    /// Forgets the fleet: its log, which removals each peer holds, and the
-    /// suspensions waiting for history. The key stays: a fleet founded or
-    /// joined later is another one, where it was never removed. Blocking.
+    /// Every tunnel key a member proved here: what scrubbing the fleet
+    /// revokes pairings for first, as if every member were removed.
+    pub(crate) fn proven_keys(&self) -> Vec<[u8; 32]> {
+        self.inner().proven.values().flatten().copied().collect()
+    }
+
+    /// Forgets the fleet: its log, which removals each peer holds, the
+    /// suspensions waiting for history, and the keys members proved. The
+    /// key stays: a fleet founded or joined later is another one, where it
+    /// was never removed. Callers revoke the proven keys' pairings first
+    /// ([`Fleet::proven_keys`]). Blocking.
     pub(crate) fn scrub(&self) -> Result<()> {
         let mut inner = self.inner();
         *inner = Inner::default();
@@ -316,6 +324,12 @@ pub fn run_scrub(state_dir: &Path) -> Result<()> {
         Ok(_) => Err(Error::Daemon("an unexpected answer".to_owned())), // i18n: data
         Err(crate::control::Error::Connect(_)) => {
             let fleet = Fleet::load(state_dir, crate::web::now_ms())?;
+            // As if every member were removed: pairings with keys they
+            // proved here go first.
+            let mut auth = crate::auth::Auth::load(state_dir, crate::auth::Limits::default())?;
+            for tunnel in fleet.proven_keys() {
+                grants::revoke_paired(&mut auth, &tunnel)?;
+            }
             fleet.scrub()?;
             if let Ok(keys) = crate::ssh_access::AuthorizedKeys::of_user() {
                 keys.set_fleet(&[])?;

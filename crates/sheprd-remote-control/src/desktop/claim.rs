@@ -120,6 +120,7 @@ pub(crate) async fn claim(
             relays: info.relays.clone(),
             route: info.route.clone(),
             fleet: false,
+            host: None,
         },
         login,
     })

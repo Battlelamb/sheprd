@@ -16,7 +16,11 @@ use crate::desktop::{files, record::Record};
 use crate::ssh_access::SshKey;
 use crate::web::{Shared, State};
 use sheprd_relay::wire::Key;
-use std::{collections::BTreeSet, path::Path, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+    time::Duration,
+};
 
 /// How often this computer checks whether its own record moved.
 const RECORD_CHECK: Duration = Duration::from_secs(10 * 60);
@@ -209,11 +213,16 @@ fn records(state: &Log, me: &MemberId, suspended: &[MemberId]) -> Vec<(Record, V
         return Vec::new();
     }
     let own = own_host(state, me, None);
+    let owners = route_owners(state);
     state
         .hosts
         .iter()
-        .filter(|(id, _)| Some(**id) != own && state.allowed(id, me))
-        .map(|(_, host)| {
+        .filter(|(id, host)| {
+            Some(**id) != own
+                && state.allowed(id, me)
+                && owners.get(host.record.route.as_str()) == Some(&Some(**id))
+        })
+        .map(|(id, host)| {
             (
                 Record {
                     computer: host.intro.name.clone(),
@@ -221,6 +230,7 @@ fn records(state: &Log, me: &MemberId, suspended: &[MemberId]) -> Vec<(Record, V
                     relays: host.record.relays.clone(),
                     route: host.record.route.clone(),
                     fleet: true,
+                    host: Some(id.to_string()),
                 },
                 host.record.ssh_host_keys.clone(),
             )
@@ -228,9 +238,41 @@ fn records(state: &Log, me: &MemberId, suspended: &[MemberId]) -> Vec<(Record, V
         .collect()
 }
 
+/// Which live host each route belongs to, `None` when that is unclear. A
+/// host's record names its route, but another host may sign a record
+/// naming the same one: the route stays with the one host whose own
+/// introduction named it, and with none when that is not exactly one, so
+/// no host can take over another's record by claiming its route.
+fn route_owners(state: &Log) -> BTreeMap<&str, Option<HostId>> {
+    let mut claims: BTreeMap<&str, Vec<(HostId, bool)>> = BTreeMap::new();
+    for (id, host) in &state.hosts {
+        let route = host.record.route.as_str();
+        claims
+            .entry(route)
+            .or_default()
+            .push((*id, host.intro.record.route == route));
+    }
+    claims
+        .into_iter()
+        .map(|(route, hosts)| {
+            let owner = match hosts.as_slice() {
+                [(id, _)] => Some(*id),
+                _ => {
+                    let mut named = hosts.iter().filter(|(_, named)| *named);
+                    match (named.next(), named.next()) {
+                        (Some((id, _)), None) => Some(*id),
+                        _ => None,
+                    }
+                }
+            };
+            (route, owner)
+        })
+        .collect()
+}
+
 /// Writes `records`, and removes those the fleet wrote before and no
 /// longer grants. A record pairing wrote under the same id is left alone.
-fn write_records(state_dir: &Path, records: &[(Record, Vec<String>)]) -> Result<()> {
+pub(super) fn write_records(state_dir: &Path, records: &[(Record, Vec<String>)]) -> Result<()> {
     let file = state_dir.join(RECORDS);
     let before: BTreeSet<String> = files::read_bounded(&file, 64 * 1024)?
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
@@ -239,10 +281,18 @@ fn write_records(state_dir: &Path, records: &[(Record, Vec<String>)]) -> Result<
     for (record, host_keys) in records {
         // A machine paired here over Bluetooth keeps the record pairing
         // wrote; the fleet never takes it over.
-        if let Ok(id) = record.id()
-            && Record::load(state_dir, &id).is_ok_and(|kept| !kept.fleet)
-        {
+        let Ok(id) = record.id() else {
             continue;
+        };
+        match Record::load(state_dir, &id) {
+            Ok(kept) if !kept.fleet => continue,
+            // The route's owner, resolved from the log, replaces a fleet
+            // record kept for another host (or for none, as written before
+            // records named their host) on the same full route.
+            Ok(kept) if kept.route == record.route && kept.host != record.host => {
+                Record::remove(state_dir, &id)?;
+            }
+            _ => {}
         }
         match record.save(state_dir, host_keys) {
             Ok(id) => {
@@ -252,6 +302,10 @@ fn write_records(state_dir: &Path, records: &[(Record, Vec<String>)]) -> Result<
         }
     }
     for gone in before.difference(&written) {
+        // Paired here since the fleet wrote it: pairing owns it now.
+        if Record::load(state_dir, gone).is_ok_and(|kept| !kept.fleet) {
+            continue;
+        }
         Record::remove(state_dir, gone)?;
     }
     let json = serde_json::to_vec(&written).map_err(|_| crate::desktop::Error::RecordFormat)?;

@@ -1594,7 +1594,10 @@ history still acts on it at once, to fail closed:
   knows, and the target is a member, it suspends the target's grants
   before asking for any missing parents.
 - Once the parents arrive, the full rules (Validity and conflicts)
-  either make the suspension permanent or lift it.
+  either make the suspension permanent or lift it. The receiver keeps
+  the removal itself with the suspension, so it checks it again when its
+  history arrives after the removal left the pending pool, or after a
+  restart; only a refusal the history proves lifts it, never a full log.
 - A suspension whose history has not arrived is kept, and listed in
   Settings > Fleet as "suspended, unconfirmed", while the removal's
   signer is still a member and for at most 7 days: any member that
@@ -1867,7 +1870,9 @@ manual multi-machine and phone steps left unticked in its QA list.
      (`fleet/key`, `fleet/log.bin`, `fleet/peers.json`), the control
      socket's `Request::Fleet`, `sheprd-remote-control fleet apply` and
      `fleet bundle` over SSH (apply writes the log itself when no daemon
-     runs), and members as hosts of each other through `ssh_access`
+     runs, holding `fleet/lock`, which the daemon holds for its life, so
+     two updates or one and a starting daemon never drop each other's
+     operations), and members as hosts of each other through `ssh_access`
      with `sheprd-fleet:FLEET:MEMBER` lines, their dial keys on the
      relays, and their tunnel keys admitted. `relay-connect` sends a
      purpose byte to a fleet host; a desktop paired over Bluetooth that

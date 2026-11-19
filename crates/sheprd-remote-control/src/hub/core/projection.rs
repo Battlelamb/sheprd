@@ -109,7 +109,7 @@ pub(super) fn project(
             continue;
         }
         let workspace = sheprd_session::labelled_workspace(&record.labels).map_or_else(
-            || super::UNLISTED.to_owned(),
+            || unlabelled_workspace(&layout, record).to_owned(),
             |labelled| crate::hub::sessions::join_id(labelled.session, labelled.id),
         );
         if let Some(terminal) = terminal(boot, &tab, "", &[record], urgency) {
@@ -118,6 +118,21 @@ pub(super) fn project(
     }
     distinguish_unlisted(&mut layout);
     layout
+}
+
+/// Where a terminal with no workspace label is listed: the shell the app
+/// shows in place of Herdr 1 in the workspace it shows it in, as the
+/// desktop does, and any other with the terminals no tab holds.
+fn unlabelled_workspace(layout: &Layout, record: &Record) -> &'static str {
+    let stand_in = record.name.as_deref() == Some(sheprd_session::STAND_IN_SHELL)
+        && layout
+            .workspace(sheprd_session::DEFAULT_WORKSPACE)
+            .is_some();
+    if stand_in {
+        sheprd_session::DEFAULT_WORKSPACE
+    } else {
+        super::UNLISTED
+    }
 }
 
 /// What the terminals no tab holds are called beside a workspace already

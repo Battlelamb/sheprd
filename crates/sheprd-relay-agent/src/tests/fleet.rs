@@ -127,29 +127,6 @@ async fn an_allowed_member_reaches_ssh_and_a_denied_one_does_not() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_desktop_is_bound_to_the_member_naming_its_keys_once_a_session_proves_them() {
-    let dir = tempfile::tempdir().unwrap();
-    let laptop = Desktop::new(0x51);
-    authorize(dir.path(), &[&laptop]);
-    let running = start(dir.path()).await;
-    apply(
-        &running,
-        dir.path(),
-        vec![member(&laptop, 1, true, 0)],
-        &[],
-        &[],
-    );
-    assert!(Held::load(dir.path()).unwrap().bound.is_empty());
-    // As the enrolled desktop, with no purpose byte: the handshake alone
-    // proved the tunnel key under the dial key the relay checked.
-    let mut session = dial(&running, &laptop).await.unwrap();
-    session.io.write_all(b"SSH-2.0-client\r\n").await.unwrap();
-    assert_eq!(greeting(&mut session.io).await, b"SSH-2.0-test\r\n");
-    let bound = Held::load(dir.path()).unwrap().bound;
-    assert!(bound[&Id([1; 32])].contains(&Id(laptop.tunnel.identity().x25519())));
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn a_suspended_members_keys_never_reach_ssh_as_an_enrolled_desktop() {
     let dir = tempfile::tempdir().unwrap();
     let (a, laptop) = (Desktop::new(0x51), Desktop::new(0x52));

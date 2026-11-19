@@ -1,7 +1,9 @@
 //! Who the agent admits: the desktops in `authorized` and the fleet's
-//! members, less those suspended, and less every desktop with a suspended
-//! or removed member's keys. A key a suspended member names never falls
-//! through to a desktop: the agent fails closed.
+//! members, less those suspended, and less every desktop with both keys
+//! of a suspended or removed member. A session is matched by its dial and
+//! tunnel keys together, the same way everywhere: a suspended member's
+//! pair never falls through to a desktop, and a desktop that shares only
+//! one key with it is still that desktop.
 
 use super::Held;
 use crate::{
@@ -80,8 +82,8 @@ impl Admitted {
             .flat_map(Member::pairs)
     }
 
-    /// A desktop with both keys of a suspended member, or of one removed
-    /// for good (until enrolled again), is cut off, bound or not.
+    /// Both keys of a suspended member, or of one removed for good (until
+    /// a desktop with them is enrolled again): no one's.
     fn cut_off(&self, dial: &Key, tunnel: &[u8; 32]) -> bool {
         let pair = Pair {
             dial: *dial,
@@ -110,23 +112,26 @@ impl Admitted {
         keys
     }
 
-    fn desktop(&self, tunnel: &[u8; 32]) -> bool {
+    fn desktop(&self, dial: &Key, tunnel: &[u8; 32]) -> bool {
         self.desktops
             .entries()
             .iter()
-            .any(|entry| entry.tunnel == *tunnel && !self.cut_off(&entry.dial, &entry.tunnel))
+            .any(|entry| entry.dial == *dial && entry.tunnel == *tunnel)
     }
 
-    /// Who a handshake showing `tunnel` is, if admitted. A suspended
-    /// member's key is no one's; a key two members name is still an
-    /// enrolled desktop's that no removal cut off.
+    /// Who a session dialed with `dial` and showing `tunnel` in its
+    /// handshake is, if admitted. A suspended or removed member's pair is
+    /// no one's; a pair two members name is still an enrolled desktop's.
     #[must_use]
-    pub fn peer(&self, tunnel: &[u8; 32]) -> Option<Peer> {
-        if self.suspended_pairs().any(|pair| pair.tunnel == *tunnel) {
+    pub fn peer(&self, dial: &Key, tunnel: &[u8; 32]) -> Option<Peer> {
+        if self.cut_off(dial, tunnel) {
             return None;
         }
-        let desktop = self.desktop(tunnel);
-        match self.members().find(|(_, member)| member.tunnel == *tunnel) {
+        let desktop = self.desktop(dial, tunnel);
+        let member = self
+            .members()
+            .find(|(_, member)| member.dial == *dial && member.tunnel == *tunnel);
+        match member {
             Some((id, member)) => Some(Peer::Member {
                 id: *id,
                 ssh: member.allow,
@@ -136,40 +141,18 @@ impl Admitted {
         }
     }
 
-    /// Whether a session from `dial` and `tunnel` proves an unbound
-    /// enrolled desktop is a member's device: what `Held::bind` records.
-    #[must_use]
-    pub fn binds(&self, dial: &Key, tunnel: &[u8; 32]) -> bool {
-        let pair = Pair {
-            dial: *dial,
-            tunnel: *tunnel,
-        };
-        let named = self.held.access.iter().any(|access| {
-            access
-                .members
-                .values()
-                .any(|member| member.pairs().any(|named| named == pair))
-        });
-        let enrolled = self
-            .desktops
-            .entries()
-            .iter()
-            .any(|entry| entry.dial == *dial && entry.tunnel == *tunnel);
-        named && enrolled && !self.held.bound(&pair)
-    }
-
     /// Whether `peer`'s SSH session may go on: what a live session checks
     /// after every change.
     #[must_use]
-    pub fn keeps_ssh(&self, peer: &Peer, tunnel: &[u8; 32]) -> bool {
-        if self.suspended_pairs().any(|pair| pair.tunnel == *tunnel) {
+    pub fn keeps_ssh(&self, peer: &Peer, dial: &Key, tunnel: &[u8; 32]) -> bool {
+        if self.cut_off(dial, tunnel) {
             return false;
         }
         match peer {
-            Peer::Desktop => self.desktop(tunnel),
-            Peer::Member { id, .. } => self
-                .members()
-                .any(|(member, entry)| member == id && entry.allow && entry.tunnel == *tunnel),
+            Peer::Desktop => self.desktop(dial, tunnel),
+            Peer::Member { id, .. } => self.members().any(|(member, entry)| {
+                member == id && entry.allow && entry.dial == *dial && entry.tunnel == *tunnel
+            }),
         }
     }
 

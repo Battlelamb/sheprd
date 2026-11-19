@@ -1445,8 +1445,8 @@ sequenceDiagram
    writes the `authorized_keys` lines the way `ssh_access` does, with the
    same shared code: atomically, refusing a linked file, and touching
    only lines with its own fleet's tag. A member removed for good also
-   loses any `authorized` line bound to it, and cuts off (without
-   forgetting) any other with both its keys. It then names the dial keys
+   cuts off, without forgetting, any `authorized` line with both its
+   keys. It then names the dial keys
    to its relays. `status --json` and `fleet apply` report the fleet and
    the digest of the merged file, which Sheprd compares with the file it
    would write to see a host that is behind. A plain host trusts the SSH
@@ -1622,13 +1622,14 @@ accepted on this purpose.
   removal ids that do not exist.
 - An enrolled desktop (`authorized`) with both keys of a member fails
   closed with it: cut off while the member is suspended, and after its
-  removal; a suspended member's key is never let in as a desktop. Once a
-  session from such a desktop completes the tunnel handshake (proving
-  the tunnel key, under the dial key the relay checked), the agent binds
-  it to the member (`bound`). A member removed for good takes its bound
-  desktops with it; an unbound one stays enrolled, cut off, and listed in
+  removal. Sessions are matched by their dial and tunnel keys together,
+  the same way everywhere, so a suspended member's pair is never let in
+  as a desktop, and a desktop sharing only one key with it still is. A
+  desktop is never forgotten because of a member: a member may name any
+  desktop's public keys, and no session proves a desktop is that member.
+  One a removed member named stays enrolled, cut off, and listed in
   `status --json` (`revoked`), so a person can enroll it again with
-  `authorize` when a member named its keys falsely.
+  `authorize`.
 - A suspension the agent cannot settle stays in place. Settings > Fleet
   lists it, so a member can only ever take access away on an agent this
   way, never give it.

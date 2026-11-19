@@ -44,7 +44,7 @@ async fn serve(agent: &Arc<Agent>, pending: Pending, route: RouteId) -> Result<(
     let dial = incoming.key;
     let io = join(incoming.recv, incoming.send);
     let accepted = {
-        let admits = |remote: &[u8; 32]| admitted.borrow().peer(remote).is_some();
+        let admits = |remote: &[u8; 32]| admitted.borrow().peer(&dial, remote).is_some();
         tokio::time::timeout(
             HANDSHAKE,
             stream::accept(io, tunnel_keys, responder, admits),
@@ -53,19 +53,12 @@ async fn serve(agent: &Arc<Agent>, pending: Pending, route: RouteId) -> Result<(
         .map_err(|_| sheprd_tunnel::Error::Closed)??
     };
     let remote = accepted.remote;
-    // The handshake proved the tunnel key, and the relay the dial key: an
-    // enrolled desktop with both that a member's bundle names is that
-    // member's device.
-    let binds = admitted.borrow().binds(&dial, &remote);
-    if binds {
-        bind(agent, dial, remote).await;
-    }
-    let Some(peer) = admitted.borrow().peer(&remote) else {
+    let Some(peer) = admitted.borrow().peer(&dial, &remote) else {
         return Ok(());
     };
     let mut tunnel = accepted.io;
     let Peer::Member { id, ssh, desktop } = peer else {
-        return splice(agent, tunnel, Peer::Desktop, remote, None).await;
+        return splice(agent, tunnel, Peer::Desktop, dial, remote, None).await;
     };
     let mut first = [0];
     tokio::time::timeout(HANDSHAKE, tunnel.read_exact(&mut first))
@@ -74,29 +67,10 @@ async fn serve(agent: &Arc<Agent>, pending: Pending, route: RouteId) -> Result<(
         .map_err(Error::Splice)?;
     match first[0] {
         PURPOSE_REMOVAL => removals(agent, id, &mut tunnel).await,
-        PURPOSE_SSH if ssh => splice(agent, tunnel, peer, remote, None).await,
+        PURPOSE_SSH if ssh => splice(agent, tunnel, peer, dial, remote, None).await,
         PURPOSE_SSH => Ok(()),
-        byte if desktop => splice(agent, tunnel, Peer::Desktop, remote, Some(byte)).await,
+        byte if desktop => splice(agent, tunnel, Peer::Desktop, dial, remote, Some(byte)).await,
         _ => Ok(()),
-    }
-}
-
-/// Binds the enrolled desktop with `dial` and `tunnel` to the member that
-/// names them, off the runtime's threads. A failure binds nothing, which
-/// only leaves the desktop enrolled when its member is removed.
-async fn bind(agent: &Arc<Agent>, dial: sheprd_relay::wire::Key, tunnel: [u8; 32]) {
-    let blocking = Arc::clone(agent);
-    let bound = tokio::task::spawn_blocking(move || {
-        Held::bind(blocking.state_dir(), dial, tunnel).and_then(|bound| {
-            if bound {
-                blocking.reload()?;
-            }
-            Ok(bound)
-        })
-    })
-    .await;
-    if let Ok(Err(error)) = bound {
-        tracing::debug!(error = %error, "could not bind a desktop to its member");
     }
 }
 
@@ -107,6 +81,7 @@ async fn splice(
     agent: &Agent,
     mut tunnel: impl AsyncRead + AsyncWrite + Unpin,
     peer: Peer,
+    dial: sheprd_relay::wire::Key,
     remote: [u8; 32],
     first: Option<u8>,
 ) -> Result<()> {
@@ -123,7 +98,7 @@ async fn splice(
         }
         // The relay also ends the session when the dial key goes; this
         // covers a key removed under another, a deny, and a suspension.
-        _ = admitted.wait_for(|admitted| !admitted.keeps_ssh(&peer, &remote)) => {
+        _ = admitted.wait_for(|admitted| !admitted.keeps_ssh(&peer, &dial, &remote)) => {
             tracing::info!("ended a session no longer admitted");
         }
     }

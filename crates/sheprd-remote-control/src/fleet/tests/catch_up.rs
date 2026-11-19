@@ -14,8 +14,12 @@ async fn a_large_update_applies_whole() {
     );
     assert_eq!(a.ask(Ask::Found), Answer::Done);
     join(&a, &b);
-    let host =
-        grants::own_host(a.fleet.inner().log.as_ref().unwrap().state(), &a.fleet.me()).unwrap();
+    let host = grants::own_host(
+        a.fleet.inner().log.as_ref().unwrap().state(),
+        &a.fleet.me(),
+        None,
+    )
+    .unwrap();
     let member = b.fleet.me();
     {
         let mut inner = a.fleet.inner();

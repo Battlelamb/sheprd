@@ -308,6 +308,7 @@ pub(super) fn write_records(
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default();
     let mut written = BTreeSet::new();
+    let mut failed = None;
     for (record, host_keys) in records {
         // A machine paired here over Bluetooth keeps the record pairing
         // wrote; the fleet never takes it over.
@@ -337,7 +338,17 @@ pub(super) fn write_records(
             Ok(id) => {
                 written.insert(id);
             }
-            Err(error) => tracing::warn!(error = %error, "could not keep a fleet host's record"),
+            // Another machine's record under the id: this host gets none.
+            Err(error @ crate::desktop::Error::RecordConflict(_)) => {
+                tracing::warn!(error = %error, "could not keep a fleet host's record");
+            }
+            // A host still granted keeps what was written for it while the
+            // write fails; the error goes back so the write is tried again.
+            Err(error) => {
+                tracing::warn!(error = %error, "could not keep a fleet host's record");
+                written.insert(id);
+                failed.get_or_insert(error);
+            }
         }
     }
     let gone: Vec<String> = before.difference(&written).cloned().collect();
@@ -356,7 +367,10 @@ pub(super) fn write_records(
     }
     let json = serde_json::to_vec(&written).map_err(|_| crate::desktop::Error::RecordFormat)?;
     files::write_private(&file, &json)?;
-    Ok(())
+    match failed {
+        Some(error) => Err(error.into()),
+        None => Ok(()),
+    }
 }
 
 /// Follows the fleet for the life of the daemon: rewrites what it grants

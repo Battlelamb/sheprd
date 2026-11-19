@@ -390,14 +390,16 @@ impl Log {
 
     /// The operations just `added` that would take the log past a bound.
     /// A removal never counts against the others' bounds, so filling the
-    /// log cannot stop its signer's removal; removals have their own,
-    /// per signer, so no member can fill theirs for another.
+    /// log cannot stop its signer's removal. Removals have their own: per
+    /// signer, so no member can use up a live member's share, and one
+    /// shared by members no longer live.
     fn over_caps(&self, added: &[OpId]) -> BTreeMap<OpId, Error> {
         let removal = |op: &Op| matches!(op.body(), Body::Remove(_));
         let costly = |op: &Op| op.body().membership() && !removal(op);
+        let gone = |op: &Op| removal(op) && !self.state.members.contains_key(&op.signer());
         let mut ops = self.ops.values().filter(|op| !removal(op)).count();
         let mut membership = self.ops.values().filter(|op| costly(op)).count();
-        let mut removals = self.ops.values().filter(|op| removal(op)).count();
+        let mut removals = self.ops.values().filter(|op| gone(op)).count();
         let mut by_signer: BTreeMap<MemberId, usize> = BTreeMap::new();
         let fresh: HashSet<&OpId> = added.iter().collect();
         for op in self
@@ -415,10 +417,12 @@ impl Log {
             if removal(op) {
                 let mine = by_signer.entry(op.signer()).or_default();
                 *mine += 1;
-                if *mine > MAX_REMOVALS_PER_SIGNER || removals > MAX_REMOVALS {
+                if *mine > MAX_REMOVALS_PER_SIGNER || (gone(op) && removals > MAX_REMOVALS) {
                     refused.insert(op.id(), Error::Full);
                     *mine -= 1;
-                    removals -= 1;
+                    if gone(op) {
+                        removals -= 1;
+                    }
                 }
             } else if ops > MAX_OPS || (costly(op) && membership > MAX_MEMBERSHIP_OPS) {
                 refused.insert(op.id(), Error::Full);

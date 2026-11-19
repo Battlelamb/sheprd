@@ -230,3 +230,32 @@ fn one_member_cannot_use_up_the_removals() {
     act(&mut log, &a, remove_body(&c));
     assert!(!log.state().members.contains_key(&c.id()));
 }
+
+#[test]
+fn adding_a_copy_of_a_members_host_cannot_hold_it() {
+    let (mut log, a, b, c, _) = four();
+    let host = a.bundle.host.as_ref().unwrap().id().unwrap();
+    let mut copy = copied_host(&a);
+    copy.kind = HostKind::Sheprd;
+    act(&mut log, &b, Body::HostAdd(copy));
+    assert!(!log.state().hosts[&host].held);
+    assert_eq!(log.state().hosts[&host].intro.user, "me");
+    assert!(log.state().allowed(&host, &c.id()));
+}
+
+#[test]
+fn removed_members_cannot_use_up_a_live_members_removals() {
+    let (mut log, a, b, c, d) = four();
+    let before = log.heads().to_vec();
+    let seq = log.state().members[&c.id()].seq;
+    act(&mut log, &a, remove_body(&c));
+    // c, removed, signs its whole share of backdated removals.
+    for offset in 1..=u64::try_from(MAX_REMOVALS_PER_SIGNER).unwrap() {
+        let op = sign_on(&log, &c, &before, seq + offset, remove_body(&d));
+        assert!(log.insert(op, NOW).is_ok());
+    }
+    // b's share is untouched, and d is still there.
+    act(&mut log, &b, remove_body(&d));
+    assert!(!log.state().members.contains_key(&d.id()));
+    assert!(log.state().members.contains_key(&b.id()));
+}

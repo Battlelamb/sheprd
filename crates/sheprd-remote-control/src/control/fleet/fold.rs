@@ -127,6 +127,8 @@ fn hosts(
         }
     }
     let mut live: Vec<(usize, HostId, Host)> = Vec::new();
+    // Where each surviving addition was made; `None` for the base.
+    let mut preceding: BTreeMap<HostId, Vec<Option<usize>>> = BTreeMap::new();
     for (id, mut candidates) in adds {
         let removed_by = removals.get(&id).map(Vec::as_slice).unwrap_or_default();
         // An addition survives only when it saw every removal: a removal
@@ -140,6 +142,7 @@ fn hosts(
         let Some(first) = candidates.first() else {
             continue;
         };
+        preceding.insert(id, candidates.iter().map(|add| add.position).collect());
         let held = candidates.iter().any(|add| {
             add.intro.ca != first.intro.ca
                 || add.intro.record.ssh_host_keys != first.intro.record.ssh_host_keys
@@ -167,15 +170,27 @@ fn hosts(
     live.sort_by_key(|(earliest, id, _)| (*earliest, *id));
     live.truncate(MAX_HOSTS);
     state.hosts = live.into_iter().map(|(_, id, host)| (id, host)).collect();
-    // A computer is its own host. Two members naming one host, or a member
-    // naming a host added before with another account or other SSH host
-    // keys, is a copied intro: held until a person picks.
+    // A computer is its own host. Two members naming one host is a copied
+    // intro: held until a person picks. So is a member naming a host added
+    // before its bundle (an added host joining as itself) with another
+    // account or other SSH host keys. An addition the member's bundle did
+    // not see changes nothing: no member can hold another's host by adding
+    // a copy of it.
     for (id, claims) in member_hosts {
         let (intro, member) = claims[0];
-        let added = state.hosts.get(&id).map(|host| &host.intro);
+        let origin = members.origins.get(&member).copied();
+        let seen_by_member = preceding.get(&id).is_some_and(|positions| {
+            positions.iter().any(|at| match (at, origin) {
+                (None, _) => true,
+                (Some(at), Some(origin)) => graph.sees(origin, *at),
+                (Some(_), None) => false,
+            })
+        });
+        let added = state.hosts.get(&id).filter(|_| seen_by_member);
         let held = claims.len() > 1
             || added.is_some_and(|added| {
-                added.user != intro.user || added.record.ssh_host_keys != intro.record.ssh_host_keys
+                added.intro.user != intro.user
+                    || added.intro.record.ssh_host_keys != intro.record.ssh_host_keys
             });
         state.hosts.insert(
             id,

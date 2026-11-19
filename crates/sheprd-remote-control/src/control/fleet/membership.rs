@@ -33,6 +33,9 @@ pub(super) struct Members {
     pub(super) tombstones: BTreeSet<MemberId>,
     /// The removals that took effect, by place in the graph.
     pub(super) removals: Vec<usize>,
+    /// Where each member's bundle came from: its `Found`, `Admit`, or
+    /// latest `Rotate`. A member from the base has none.
+    pub(super) origins: BTreeMap<MemberId, usize>,
 }
 
 impl Members {
@@ -251,6 +254,7 @@ impl<'g, 'a> Folder<'g, 'a> {
             live: self.base.members.clone(),
             tombstones: self.base.tombstones.clone(),
             removals: Vec::new(),
+            origins: BTreeMap::new(),
         };
         let removed: BTreeSet<MemberId> = removals
             .iter()
@@ -264,6 +268,7 @@ impl<'g, 'a> Folder<'g, 'a> {
             let op = self.graph.order[position];
             match op.body() {
                 Body::Found(bundle) => {
+                    members.origins.insert(bundle.id(), position);
                     members.live.insert(
                         bundle.id(),
                         Member {
@@ -283,8 +288,10 @@ impl<'g, 'a> Folder<'g, 'a> {
                     // its own; the first in order are kept.
                     if !removed.contains(&id)
                         && !members.tombstones.contains(&id)
+                        && !members.live.contains_key(&id)
                         && members.kind_count(admit.bundle.kind) < limit
                     {
+                        members.origins.insert(id, position);
                         members.live.entry(id).or_insert(Member {
                             bundle: admit.bundle.clone(),
                             admitted_by: Some(op.signer()),
@@ -295,6 +302,7 @@ impl<'g, 'a> Folder<'g, 'a> {
                 Body::Rotate(bundle) if !self.voided(&partial, position) => {
                     if let Some(member) = members.live.get_mut(&op.signer()) {
                         member.bundle = bundle.clone();
+                        members.origins.insert(op.signer(), position);
                     }
                 }
                 _ => {}

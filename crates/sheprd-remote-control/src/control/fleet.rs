@@ -60,8 +60,10 @@ pub const MAX_OPS: usize = 2048;
 /// Membership operations (`Found`, `Admit`, `Remove`, `Rotate`) kept
 /// between checkpoints; they are the costly ones to fold.
 pub const MAX_MEMBERSHIP_OPS: usize = 256;
-/// Removals kept between checkpoints. They count against no other bound,
-/// so filling the log never stops a removal.
+/// Removals kept between checkpoints that members no longer live signed.
+/// Removals count against no other bound, and each live member has its
+/// own share ([`MAX_REMOVALS_PER_SIGNER`]), so filling the log never stops
+/// a live member's removal.
 pub const MAX_REMOVALS: usize = 1024;
 /// Removals one member may have signed between checkpoints.
 pub const MAX_REMOVALS_PER_SIGNER: usize = 32;

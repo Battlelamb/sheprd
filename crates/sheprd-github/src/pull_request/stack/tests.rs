@@ -271,3 +271,32 @@ fn a_position_outside_the_stack_is_not_trusted() {
     }));
     assert!(pr.stack().is_none());
 }
+
+#[test]
+fn a_layer_left_unread_below_keeps_the_verdict_from_ready_or_merged() {
+    // Layer 2 was hidden from this reader; layer 1 merged, layer 3 is ready.
+    let mut hidden = layer(2, "OPEN", "DIRTY", None, None);
+    hidden["pullRequest"] = Value::Null;
+    let gap = stack(vec![
+        layer(1, "MERGED", "UNKNOWN", None, None),
+        hidden,
+        layer(3, "OPEN", "CLEAN", None, None),
+    ]);
+    assert!(!gap.read_through(3));
+    assert_eq!(gap.verdict(3), Verdict::Unread);
+    assert_eq!(
+        gap.verdict(1),
+        Verdict::Merged,
+        "below the gap is still known"
+    );
+    // Past the read limit, all read layers merged: not known to be merged.
+    let entries = (1..=LAYER_LIMIT as u64)
+        .map(|position| layer(position, "MERGED", "UNKNOWN", None, None))
+        .collect();
+    let mut long = stack(entries);
+    long.size = LAYER_LIMIT as u64 + 1;
+    assert_eq!(long.verdict(LAYER_LIMIT as u64 + 1), Verdict::Unread);
+    // A blocked layer that was read still blocks.
+    let blocked = stack(vec![layer(1, "OPEN", "DIRTY", None, None)]);
+    assert!(matches!(blocked.verdict(3), Verdict::Blocked { .. }));
+}

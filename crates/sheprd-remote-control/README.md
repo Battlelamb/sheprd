@@ -188,6 +188,16 @@ computer's own `[remote] relays`, which it never changes. When the daemon
 does not answer, the command writes the file itself; the daemon builds each
 change on the file and reads it again every minute, so no offer is lost.
 
+A private relay admits only computers presenting its operator's listen
+token. Sheprd keeps this computer's tokens in `STATE_DIR/relay/tokens.json`
+(`app::relay_tokens`, mode 0600), never in the config, and sends the
+daemon `RelayTokens` to read them again; a listener whose token changed
+reconnects with the new one. An offer may carry `tokens`, keyed by relay,
+so the user's other computers listen on the private relays shared with
+them; those are kept with the shared relays and dropped with them. An
+older daemon ignores the field. `sheprd remote status` says, per relay,
+whether it is listened on with a token (`token`), never the token.
+
 Bluetooth pairing works from another network: the sealed nearby offer
 also carries `relay` (the same fields as `GET /api/relay`), revealing it
 opens a one-dial pairing key on each relay derived from the offer's

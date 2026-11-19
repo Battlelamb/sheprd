@@ -3,6 +3,7 @@ use crate::control::protocol::remote::Reply;
 use sheprd_remote_control::control::{Device, DeviceId, Status};
 
 mod addresses;
+mod relay_token;
 mod relays;
 
 fn status() -> Status {

@@ -42,7 +42,9 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
         } => {
             let bundle = Bundle::from_bytes(&sync::bytes(&bundle)?)?;
             let member = bundle.id();
-            fleet.joins().admissible(&member, &paired(state))?;
+            // Auth, released, then joins: the two locks never nest.
+            let paired = paired(state);
+            fleet.joins().admissible(&member, &paired)?;
             let joiner_signature = sync::bytes(&signature)?
                 .try_into()
                 .map_err(|_| crate::control::fleet::Error::JoinSignature)?;

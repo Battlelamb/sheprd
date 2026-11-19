@@ -119,6 +119,27 @@ impl Held {
         Ok(held)
     }
 
+    /// `fleet scrub`: forgets the fleet, its `authorized_keys` lines in
+    /// `keys`, its access file, and its suspensions, so no member of it
+    /// reaches this account through the agent. Desktops in `authorized`
+    /// stay. Blocking.
+    pub fn scrub(state_dir: &Path, keys: Option<&Path>) -> Result<()> {
+        let _lock = files::Lock::acquire(state_dir)?;
+        let held = Self::load(state_dir)?;
+        if let (Some(path), Some(access)) = (keys, &held.access) {
+            authorized_keys::set_fleet(path, &access.fleet.short(), &[])?;
+        }
+        for name in [access::FILE, SUSPENDED] {
+            let path = state_dir.join(name);
+            match std::fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(source) => return Err(Error::Io { path, source }),
+            }
+        }
+        Ok(())
+    }
+
     /// A removal exchange from member `sender`: suspends every target of
     /// `removals` in this fleet that is a member here, never `sender`
     /// itself. Returns the ids of the removals taken: every one for this

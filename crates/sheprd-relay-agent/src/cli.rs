@@ -15,6 +15,7 @@ Usage:
   sheprd-relay-agent authorize DIAL_KEY TUNNEL_KEY [LABEL]
   sheprd-relay-agent revoke DIAL_KEY
   sheprd-relay-agent fleet apply [--authorized-keys FILE] < ACCESS_FILE
+  sheprd-relay-agent fleet scrub [--authorized-keys FILE]
   sheprd-relay-agent --help | --version
 
 run         Listen on each relay and forward the sessions of authorized
@@ -30,6 +31,10 @@ fleet apply Merge the fleet access file Sheprd computed, read on stdin, into
             the one kept here, write the fleet's authorized_keys lines,
             and print the status as JSON. Run by Sheprd over SSH; a file
             for another fleet than the one this account holds is refused.
+fleet scrub Forget the fleet: remove its authorized_keys lines, its access
+            file, and its suspensions, so no member of it reaches this
+            account through the agent. Desktops authorized one by one
+            stay. Run by Sheprd over SSH after a person confirms there.
 
 --authorized-keys is where the fleet's lines go (default:
 ~/.ssh/authorized_keys). Every command takes --state-dir DIR (default:
@@ -50,6 +55,10 @@ pub enum Command {
     /// `fleet apply`, with where the fleet's lines go (`None`: the
     /// user's).
     FleetApply {
+        authorized_keys: Option<PathBuf>,
+    },
+    /// `fleet scrub`, with where the fleet's lines are.
+    FleetScrub {
         authorized_keys: Option<PathBuf>,
     },
     Help,
@@ -171,6 +180,9 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Err
             Some("apply") => Command::FleetApply {
                 authorized_keys: run.authorized_keys.take(),
             },
+            Some("scrub") => Command::FleetScrub {
+                authorized_keys: run.authorized_keys.take(),
+            },
             Some(other) => return Err(Error::Unexpected(other.to_owned())),
             None => return Err(Error::MissingValue("fleet")),
         },
@@ -190,7 +202,10 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Err
     if status_flag && !matches!(command, Command::Status { .. }) {
         return Err(Error::Unexpected("--json".to_owned()));
     }
-    let takes_keys = matches!(command, Command::Run(_) | Command::FleetApply { .. });
+    let takes_keys = matches!(
+        command,
+        Command::Run(_) | Command::FleetApply { .. } | Command::FleetScrub { .. }
+    );
     if keys_flag && !takes_keys {
         return Err(Error::Unexpected("--authorized-keys".to_owned()));
     }

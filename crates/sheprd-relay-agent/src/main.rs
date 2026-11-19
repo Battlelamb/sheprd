@@ -82,6 +82,11 @@ fn execute(command: Command, state_dir: &Path) -> Result<()> {
             fleet::Held::apply(state_dir, Some(&keys), incoming)?;
             print_json(state_dir, &Report::read(state_dir, SystemTime::now())?)
         }
+        Command::FleetScrub { authorized_keys } => {
+            let keys = keys_path(authorized_keys)?;
+            fleet::Held::scrub(state_dir, Some(&keys))?;
+            print_json(state_dir, &Report::read(state_dir, SystemTime::now())?)
+        }
         Command::Authorize(entry) => {
             let path = state_dir.join(sheprd_relay_agent::authorized::FILE);
             Authorized::update(state_dir, |authorized| {

@@ -294,3 +294,29 @@ fn the_report_names_the_fleet_and_the_digest_of_what_is_held() {
     assert_eq!((report.allowed, report.denied, report.removed), (1, 1, 1));
     assert!(Held::default().report().unwrap().is_none());
 }
+
+#[test]
+fn scrubbing_forgets_the_fleet_and_its_lines_and_keeps_the_rest() {
+    let host = Host::new();
+    std::fs::write(
+        host.keys(),
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOwn me@laptop\n",
+    )
+    .unwrap();
+    host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[]))
+        .unwrap();
+    host.suspend(1, &[removal(7, &[2])]);
+    assert_eq!(host.lines().len(), 1);
+    Held::scrub(host.state(), Some(&host.keys())).unwrap();
+    assert!(host.lines().is_empty());
+    let text = std::fs::read_to_string(host.keys()).unwrap();
+    assert!(text.contains("me@laptop"), "{text}");
+    let admitted = host.admitted();
+    assert_eq!(admitted.peer(&[1; 32]), None);
+    assert!(admitted.held().access.is_none());
+    assert!(admitted.held().suspended.is_empty());
+    // Another fleet may take the account now.
+    let mut other = file(&[(3, true, 0)], &[], &[]);
+    other.fleet = id(0xf2);
+    assert!(host.apply(other).is_ok());
+}

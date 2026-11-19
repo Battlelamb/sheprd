@@ -5,6 +5,7 @@ use std::{
     net::TcpListener,
     sync::atomic::Ordering,
     thread::{self, JoinHandle},
+    time::Duration,
 };
 
 const BODY: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
@@ -177,4 +178,88 @@ fn a_download_without_room_does_not_start() {
     assert!(matches!(failed, Err(Error::NoRoom { .. })));
     assert!(!target(&folder).exists());
     assert!(!partial(&target(&folder)).exists());
+}
+
+/// A kept download is reused only with room left for the install.
+#[test]
+fn a_finished_download_without_room_for_the_install_is_refused() {
+    let folder = tempfile::tempdir().unwrap();
+    fs::write(target(&folder), BODY).unwrap();
+    let failed = fetch(
+        &agent(),
+        "http://127.0.0.1:9/unused",
+        &target(&folder),
+        u64::MAX / 2,
+        &Counter::default(),
+    );
+    assert!(matches!(failed, Err(Error::NoRoom { .. })));
+    assert!(target(&folder).exists());
+}
+
+/// A whole answer replaces the part, so the part's space counts as free.
+#[test]
+fn starting_over_counts_the_part_it_replaces_as_room() {
+    const CLAIMED: u64 = 10 << 30;
+    let folder = tempfile::tempdir().unwrap();
+    let Some(free) = free_bytes(folder.path()) else {
+        return;
+    };
+    let Some(room) = free.checked_sub(4 << 30) else {
+        return;
+    };
+    // Sparse: as long as the answer, taking no space.
+    File::create(partial(&target(&folder)))
+        .unwrap()
+        .set_len(CLAIMED)
+        .unwrap();
+    let (url, server) = serve(|_| response("200 OK", BODY, CLAIMED as usize));
+    let failed = fetch(&agent(), &url, &target(&folder), room, &Counter::default());
+    server.join().unwrap();
+    // It started over, so it reached the body, which is cut short.
+    assert!(
+        matches!(failed, Err(Error::Incomplete { .. } | Error::Download(_))),
+        "{failed:?}"
+    );
+}
+
+/// Stop ends a download whose line stalled, once its read gives up.
+#[test]
+fn stop_ends_a_stalled_download_and_keeps_its_part() {
+    let folder = tempfile::tempdir().unwrap();
+    // Sends the headers and a little, then nothing until the test ends.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/macos.ipsw", listener.local_addr().unwrap());
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut line = String::new();
+        while reader.read_line(&mut line).unwrap() > 2 {
+            line.clear();
+        }
+        stream
+            .write_all(&response("200 OK", &BODY[..8], BODY.len()))
+            .unwrap();
+        let _ = released.recv();
+    });
+    let counter = std::sync::Arc::new(Counter::default());
+    let stopper = {
+        let counter = counter.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            counter.cancel.store(true, Ordering::Relaxed);
+        })
+    };
+    let stalling = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .timeout_per_read(Some(Duration::from_millis(200)))
+        .build()
+        .into();
+    let failed = fetch(&stalling, &url, &target(&folder), 0, &counter);
+    stopper.join().unwrap();
+    drop(release);
+    server.join().unwrap();
+    assert!(matches!(failed, Err(Error::Cancelled)), "{failed:?}");
+    assert!(!target(&folder).exists());
+    assert!(partial(&target(&folder)).exists());
 }

@@ -19,9 +19,10 @@ use super::{
     configuration::{Bundle, new_identity},
     store::{self, AUXILIARY, DISK, GUIDE, HARDWARE, IDENTITY},
 };
+use crate::window::SheprdWindow;
 use apple::{Installing, Release, Slot};
 use download::Counter;
-use gpui::{App, AsyncApp};
+use gpui::{App, AsyncApp, WeakEntity};
 use std::{
     cell::RefCell,
     fs,
@@ -93,9 +94,10 @@ pub(crate) fn making(name: &Name) -> bool {
     })
 }
 
-/// Starts making machine `name` from Apple's newest macOS for this Mac.
-/// Returns `false` while another install runs.
-pub(crate) fn begin(name: Name, cx: &mut App) -> bool {
+/// Starts making machine `name` from Apple's newest macOS for this Mac, and
+/// opens it in window `source` once made. Returns `false` while another
+/// install runs.
+pub(crate) fn begin(name: Name, source: WeakEntity<SheprdWindow>, cx: &mut App) -> bool {
     let busy = CURRENT.with_borrow(|current| {
         current
             .as_ref()
@@ -116,7 +118,10 @@ pub(crate) fn begin(name: Name, cx: &mut App) -> bool {
         let made = run(&name, &counter, cx).await;
         cx.update(|cx| {
             match made {
-                Ok(()) => CURRENT.set(None),
+                Ok(()) => {
+                    CURRENT.set(None);
+                    crate::browser::open_machine_in(&source, name.clone(), cx);
+                }
                 Err(error) => {
                     tracing::warn!(%name, %error, "Cannot make a machine");
                     let message = crate::i18n::Localize::localize(&error);
@@ -262,6 +267,8 @@ async fn run(name: &Name, counter: &Arc<Counter>, cx: &mut AsyncApp) -> Result<(
             .await?
     };
     let folder = staging.path().to_owned();
+    // A bundle is read only with its firmware storage in place.
+    cx.update(|_| apple::create_auxiliary(&folder.join(AUXILIARY), &release.hardware))?;
     let bundle = {
         let folder = folder.clone();
         cx.background_executor()
@@ -270,7 +277,6 @@ async fn run(name: &Name, counter: &Arc<Counter>, cx: &mut AsyncApp) -> Result<(
     };
     let done = cx.update(|cx| -> Result<_> {
         cancelled(counter)?;
-        apple::create_auxiliary(&folder.join(AUXILIARY), &release.hardware)?;
         let installing = Installing::start(&*bundle.configuration()?, &image)?;
         let done = installing.done.clone();
         set(|current| current.installing = Some(installing));

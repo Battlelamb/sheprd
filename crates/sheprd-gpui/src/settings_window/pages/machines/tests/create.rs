@@ -64,3 +64,19 @@ fn progress_is_a_fraction_of_what_is_known() {
     assert_eq!(fraction(5, 10), 0.5);
     assert_eq!(fraction(15, 10), 1.);
 }
+
+/// Try again makes the machine its failed row names, not the next default.
+#[test]
+fn a_retry_keeps_the_failed_name() {
+    use super::super::create::new_name;
+    let taken = |text: &str| text == "default";
+    assert_eq!(
+        new_name(None, Some(name("work")), taken),
+        Some(name("work"))
+    );
+    assert_eq!(
+        new_name(Some(name("ci")), Some(name("work")), taken),
+        Some(name("ci"))
+    );
+    assert_eq!(new_name(None, None, taken), Some(name("default-2")));
+}

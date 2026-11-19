@@ -14,6 +14,10 @@ use std::{
 /// How much is read before progress and the cancel flag are checked again.
 const CHUNK: usize = 1 << 20;
 
+/// How long a read waits for the next bytes. A stalled connection then ends
+/// the try, keeping its part, rather than leave Stop waiting on it.
+pub(super) const STALL: Duration = Duration::from_secs(20);
+
 /// Room kept free beyond the download for what the install then writes:
 /// macOS takes about this much on the new machine's disk.
 pub(super) const INSTALL_ROOM: u64 = 30_000_000_000;
@@ -28,10 +32,11 @@ pub(crate) struct Counter {
 }
 
 /// The agent Apple's server is reached with: HTTPS only, and no deadline on
-/// the body, which takes as long as the line needs.
+/// the whole body, which takes as long as the line needs, only on each read.
 pub(super) fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .https_only(true)
+        .timeout_per_read(Some(STALL))
         .http_status_as_error(false)
         .timeout_resolve(Some(Duration::from_secs(15)))
         .timeout_connect(Some(Duration::from_secs(15)))
@@ -60,6 +65,8 @@ pub(super) fn fetch(
     counter: &Counter,
 ) -> Result<(), Error> {
     if let Ok(whole) = fs::metadata(target) {
+        // Kept from a try whose install failed: the install still needs room.
+        check_room(target, 0, room)?;
         counter.total.store(whole.len(), Ordering::Relaxed);
         counter.done.store(whole.len(), Ordering::Relaxed);
         return Ok(());
@@ -80,13 +87,10 @@ pub(super) fn fetch(
     if let Some(folder) = target.parent() {
         fs::create_dir_all(folder).map_err(|source| file_error(folder, source))?;
     }
-    if matches!(status, 200 | 206)
-        && let (Some(length), Some(free)) = (length, target.parent().and_then(free_bytes))
-    {
-        let needed = length.saturating_add(room);
-        if free < needed {
-            return Err(Error::NoRoom { needed, free });
-        }
+    if let (200 | 206, Some(length)) = (status, length) {
+        // A whole answer replaces the part, freeing what it took.
+        let freed = if status == 200 { offset } else { 0 };
+        check_room(target, length.saturating_sub(freed), room)?;
     }
     let mut file = match status {
         // The rest of what an earlier try began.
@@ -120,6 +124,8 @@ pub(super) fn fetch(
             Ok(0) => break,
             Ok(read) => read,
             Err(source) if source.kind() == ErrorKind::Interrupted => continue,
+            // Stop pressed while the line was stalled.
+            Err(_) if counter.cancel.load(Ordering::Relaxed) => return Err(Error::Cancelled),
             Err(source) => return Err(Error::Download(Box::new(ureq::Error::Io(source)))),
         };
         file.write_all(&buffer[..read])
@@ -133,6 +139,19 @@ pub(super) fn fetch(
         return Err(Error::Incomplete { got, expected });
     }
     fs::rename(&part, target).map_err(|source| file_error(target, source))
+}
+
+/// Refuses unless the volume holding `target` has `growth` more bytes free,
+/// and `room` beyond them.
+fn check_room(target: &Path, growth: u64, room: u64) -> Result<(), Error> {
+    let Some(free) = target.parent().and_then(free_bytes) else {
+        return Ok(());
+    };
+    let needed = growth.saturating_add(room);
+    if free < needed {
+        return Err(Error::NoRoom { needed, free });
+    }
+    Ok(())
 }
 
 /// What the volume holding `folder` has free.

@@ -21,21 +21,15 @@ const FIRST_NAME: &str = "default";
 const BAR_HEIGHT: f32 = 4.;
 
 impl SettingsWindow {
-    /// Starts making a machine, under the first name no machine has.
+    /// Starts making a machine, named as [`new_name`] says.
     fn make_machine(&mut self, cx: &mut Context<Self>) {
         let taken = self.machines.listings.clone().unwrap_or_default();
-        let base = self
-            .machines
-            .create_name
-            .take()
-            .or_else(|| Name::try_from(FIRST_NAME.to_owned()).ok());
-        let name = base.and_then(|base| {
-            unused(&base, |text| {
-                taken.iter().any(|listing| listing.name.as_str() == text)
-            })
+        let failed = install::progress().map(|(name, _)| name);
+        let name = new_name(self.machines.create_name.take(), failed, |text| {
+            taken.iter().any(|listing| listing.name.as_str() == text)
         });
         if let Some(name) = name {
-            install::begin(name, cx);
+            install::begin(name, self.source.clone(), cx);
         }
         cx.notify();
     }
@@ -145,6 +139,20 @@ impl SettingsWindow {
                     .w(relative(fraction as f32)),
             )
     }
+}
+
+/// What a new machine is called: the name asked for, or the one a failed try
+/// had, so Try again makes what its row names, or else [`FIRST_NAME`]; the
+/// first of those `taken` does not hold, with a number added if it does.
+pub(super) fn new_name(
+    asked: Option<Name>,
+    failed: Option<Name>,
+    taken: impl Fn(&str) -> bool,
+) -> Option<Name> {
+    let base = asked
+        .or(failed)
+        .or_else(|| Name::try_from(FIRST_NAME.to_owned()).ok())?;
+    unused(&base, taken)
 }
 
 /// How much of `total` is `done`, from 0 to 1; 0 while the total is unknown.

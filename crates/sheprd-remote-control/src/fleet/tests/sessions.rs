@@ -122,3 +122,25 @@ async fn removing_a_member_ends_its_live_session() {
     assert!(ended.is_ok(), "the session outlived the removal");
     until(10, || a.lines().len() == 1).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scrub_ends_every_other_members_session_at_once() {
+    let (a, b, _c) = three().await;
+    until(10, || b.lines().len() == 2 && a.lines().len() == 2).await;
+    until(10, || {
+        b.dir
+            .path()
+            .join("desktop/hosts")
+            .read_dir()
+            .is_ok_and(|entries| entries.count() == 2)
+    })
+    .await;
+    let (_connection, mut tunnel) = opened(&b, &a).await;
+    let mut greeting = [0; 14];
+    tunnel.io.read_exact(&mut greeting).await.unwrap();
+    // Another session asked for the scrub: b's keeps no grace.
+    a.ask(Ask::Scrub { session: Some(1) });
+    let mut rest = Vec::new();
+    let ended = tokio::time::timeout(SCRUB_GRACE / 4, tunnel.io.read_to_end(&mut rest)).await;
+    assert!(ended.is_ok(), "the session outlived the scrub");
+}

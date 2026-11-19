@@ -384,7 +384,7 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
 fn fleet(state: &State, ask: control::fleet::sync::Ask, now: u64) -> Response {
     let Some(fleet) = &state.fleet else {
         // A fleet that did not load is what a scrub clears.
-        if ask == control::fleet::sync::Ask::Scrub {
+        if matches!(ask, control::fleet::sync::Ask::Scrub { .. }) {
             return match crate::fleet::scrub::unloaded(state) {
                 Ok(()) => Response::Fleet(Box::new(control::fleet::sync::Answer::Done)),
                 Err(error) => Response::Error {

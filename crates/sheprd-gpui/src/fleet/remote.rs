@@ -94,22 +94,24 @@ pub(crate) fn parse_applied(output: &[u8]) -> Result<Applied, Error> {
 }
 
 /// Removes every way a fleet reaches the host's account, without signing
-/// anything: the daemon's `fleet scrub` and the relay agent's, each when
+/// anything: the relay agent's `fleet scrub`, then the daemon's, each when
 /// installed. Prints whether either ran, and whether one that holds fleet
 /// state failed: an agent whose usage names no `fleet scrub` predates the
-/// fleet and holds none.
-const SCRUB: &str = "\
+/// fleet and holds none. The daemon goes last: forgetting its fleet ends
+/// the fleet sessions it carries, this one perhaps among them, and it
+/// keeps this one only long enough to read the answer.
+pub(super) const SCRUB: &str = "\
 cleared=false
 failed=false
-program=$(command -v sheprd-remote-control || command -v herdr-remote-control || true)
-[ -n \"$program\" ] || program=\"$HOME/.local/bin/sheprd-remote-control\"
-if [ -x \"$program\" ]; then
-  if \"$program\" fleet scrub >/dev/null 2>&1; then cleared=true; else failed=true; fi
-fi
 agent=$(command -v sheprd-relay-agent || true)
 [ -n \"$agent\" ] || agent=\"$HOME/.local/bin/sheprd-relay-agent\"
 if [ -x \"$agent\" ] && \"$agent\" --help 2>&1 | grep -q 'fleet scrub'; then
   if \"$agent\" fleet scrub >/dev/null 2>&1; then cleared=true; else failed=true; fi
+fi
+program=$(command -v sheprd-remote-control || command -v herdr-remote-control || true)
+[ -n \"$program\" ] || program=\"$HOME/.local/bin/sheprd-remote-control\"
+if [ -x \"$program\" ]; then
+  if \"$program\" fleet scrub >/dev/null 2>&1; then cleared=true; else failed=true; fi
 fi
 printf '{\"scrubbed\":%s,\"failed\":%s}\\n' \"$cleared\" \"$failed\"
 cat >/dev/null

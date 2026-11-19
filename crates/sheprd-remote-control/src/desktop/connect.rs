@@ -43,11 +43,13 @@ pub(crate) async fn open(
     let (connection, mut tunnel) = open_record(&record, &keys).await?;
     if record.fleet {
         use tokio::io::AsyncWriteExt as _;
-        tunnel
-            .io
-            .write_all(&[crate::control::fleet::removal::PURPOSE_SSH])
-            .await
-            .map_err(Error::Splice)?;
+        let (state, hash) = (state_dir.to_owned(), tunnel.hash);
+        let opening = tokio::task::spawn_blocking(move || {
+            crate::fleet::opening(&state, crate::control::fleet::removal::PURPOSE_SSH, &hash)
+        })
+        .await
+        .map_err(|_| Error::Cancelled)??;
+        tunnel.io.write_all(&opening).await.map_err(Error::Splice)?;
     }
     Ok((connection, tunnel))
 }

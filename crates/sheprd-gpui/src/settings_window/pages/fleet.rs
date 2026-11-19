@@ -148,7 +148,9 @@ impl SettingsWindow {
         // wrote is forgotten once the person says so.
         if !view.members.iter().any(|member| member.id == view.me) {
             let forget = ui::button(theme, "fleet-forget", fl!("settings-fleet-forget"), true)
-                .on_click(cx.listener(|this, _, _, cx| this.fleet_act(Ask::Scrub, cx)));
+                .on_click(
+                    cx.listener(|this, _, _, cx| this.fleet_act(Ask::Scrub { session: None }, cx)),
+                );
             return page
                 .child(
                     ui::row(theme, "fleet-removed", fl!("settings-fleet-removed"))
@@ -438,6 +440,7 @@ impl SettingsWindow {
                 Standing::Member => fl!("settings-fleet-machine-member"),
                 Standing::Outside => fl!("settings-fleet-machine-outside"),
                 Standing::Failed => fl!("settings-fleet-machine-failed"),
+                Standing::Removed => fl!("settings-fleet-machine-removed"),
                 Standing::Unknown => fl!("settings-fleet-machine-unknown"),
             };
             let mut row = ui::row(

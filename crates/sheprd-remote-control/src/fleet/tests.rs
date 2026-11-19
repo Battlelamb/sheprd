@@ -42,6 +42,8 @@ mod phone_relays;
 #[cfg(unix)]
 mod phones;
 #[cfg(unix)]
+mod proof;
+#[cfg(unix)]
 mod records;
 #[cfg(unix)]
 mod rejected;
@@ -54,11 +56,15 @@ mod route_claims;
 #[cfg(unix)]
 mod scrub;
 #[cfg(unix)]
+mod scrub_races;
+#[cfg(unix)]
 mod sessions;
 #[cfg(unix)]
 mod shared_records;
 #[cfg(unix)]
 mod store;
+#[cfg(unix)]
+mod unsaved;
 
 /// A stand-in SSH server that greets each connection, then echoes.
 async fn ssh_server() -> SocketAddr {

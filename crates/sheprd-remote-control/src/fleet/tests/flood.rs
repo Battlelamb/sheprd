@@ -61,7 +61,7 @@ async fn a_member_away_during_a_removal_gets_it_when_it_is_back() {
 }
 
 /// Opens a removal exchange from `from` to `to` with `from`'s own keys.
-async fn exchange(from: &Node, to: &Node) -> sheprd_tunnel::stream::Tunnel {
+pub(super) async fn exchange(from: &Node, to: &Node) -> sheprd_tunnel::stream::Tunnel {
     let info = to.relays.info().unwrap();
     let record = Record {
         computer: String::new(),
@@ -85,11 +85,16 @@ async fn exchange(from: &Node, to: &Node) -> sheprd_tunnel::stream::Tunnel {
     let (connection, mut tunnel) = opened.expect("never let through");
     // The connection lives as long as the test.
     std::mem::forget(connection);
-    tunnel.io.write_all(&[PURPOSE_REMOVAL]).await.unwrap();
+    let mut opening = vec![PURPOSE_REMOVAL];
+    opening.extend_from_slice(&crate::control::fleet::removal::prove(
+        from.fleet.key(),
+        &tunnel.hash,
+    ));
+    tunnel.io.write_all(&opening).await.unwrap();
     tunnel
 }
 
-async fn send(tunnel: &mut sheprd_tunnel::stream::Tunnel, message: &Message) {
+pub(super) async fn send(tunnel: &mut sheprd_tunnel::stream::Tunnel, message: &Message) {
     let bytes = message.encode().unwrap();
     tunnel
         .io
@@ -99,7 +104,7 @@ async fn send(tunnel: &mut sheprd_tunnel::stream::Tunnel, message: &Message) {
     tunnel.io.write_all(&bytes).await.unwrap();
 }
 
-async fn receive(tunnel: &mut sheprd_tunnel::stream::Tunnel) -> Message {
+pub(super) async fn receive(tunnel: &mut sheprd_tunnel::stream::Tunnel) -> Message {
     let mut length = [0; 4];
     tunnel.io.read_exact(&mut length).await.unwrap();
     let mut bytes = vec![0; usize::try_from(u32::from_be_bytes(length)).unwrap()];

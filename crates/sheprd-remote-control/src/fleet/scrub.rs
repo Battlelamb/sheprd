@@ -14,14 +14,17 @@ use crate::web::State;
 use std::path::Path;
 
 /// The daemon's answer to `Ask::Scrub`. Blocking.
-pub(crate) fn live(state: &State, fleet: &Fleet) -> Result<()> {
+pub(crate) fn live(state: &State, fleet: &Fleet, session: Option<u16>) -> Result<()> {
+    // A grants write already running finishes first, and none starts
+    // until the fleet is forgotten.
+    let _writing = fleet.writing();
     // As if every member were removed: pairings with keys they proved here
     // go first.
     for tunnel in fleet.proven_keys() {
         grants::supersede(state, &tunnel)?;
     }
     // Access goes even when a file stays; the failure is still reported.
-    let forgotten = fleet.scrub();
+    let forgotten = fleet.scrub(session);
     forget_access(daemon_keys(state).as_ref(), fleet.state_dir())?;
     forgotten
 }

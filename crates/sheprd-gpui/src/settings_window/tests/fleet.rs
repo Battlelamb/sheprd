@@ -219,7 +219,7 @@ fn a_computer_the_fleet_removed_forgets_it_when_asked(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("fleet-member-0").is_none());
     click(cx, "fleet-forget");
     cx.run_until_parked();
-    assert_eq!(*ASKED.lock().unwrap(), vec![Ask::Scrub]);
+    assert_eq!(*ASKED.lock().unwrap(), vec![Ask::Scrub { session: None }]);
 }
 
 #[gpui::test]

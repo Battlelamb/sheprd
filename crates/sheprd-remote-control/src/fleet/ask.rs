@@ -123,6 +123,11 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             }
             let heads = apply.heads()?;
             let ops = apply.ops()?;
+            if apply.more && fleet.inner().log.is_none() {
+                // A part of a log handed over: nothing to answer yet.
+                fleet.stage(ops, now_ms)?;
+                return Ok(Answer::Applied(sync::Applied::default()));
+            }
             let refused = fleet.receive(ops, now_ms)?;
             let mut applied = {
                 let inner = fleet.inner();

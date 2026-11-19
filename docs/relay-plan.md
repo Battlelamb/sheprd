@@ -1900,15 +1900,28 @@ manual multi-machine and phone steps left unticked in its QA list.
      a switch per computer allowed on it, and Remove everywhere; and the
      machines this Sheprd reaches, each with Invite (it joins: its own
      bundle over SSH, `Admit` here, the log handed over) or Share (its
-     CA-signed `fleet intro` over SSH, with the computers ticked).
+     CA-signed `fleet intro` over SSH, with the computers ticked, then
+     the log handed over: a Sheprd host that is not a member takes a log
+     that shares it, by its certificate authority's host id, and lets in
+     the computers allowed there). A log larger than one answer is handed
+     over in parts marked `more`, which the joining daemon keeps in
+     memory until the last. A compromised member's removal names at most
+     16 members beside it; the members it admitted past those are removed
+     by further removals in the same confirmation.
      Members cut off by an unconfirmed removal, and members that signed
-     in two places, show at the top. Every change asks first, on the
-     page, by a second click.
+     in two places, show at the top. Removing a member, removing a host,
+     inviting, and sharing ask first, on the page, by a second click;
+     creating a fleet is its own button on an empty page, and each
+     computer's access switch acts at once, as switches do.
    - **Sync** (`crate::fleet`): Sheprd syncs the log with every machine a
      window reaches, as `relay_sharing` offers relays: it asks the
-     machine for what this computer lacks, naming the fleet and sending
-     nothing, so a machine in no fleet or another learns nothing; then
-     its daemon says what the machine lacks, and Sheprd sends that. A
+     machine for what this computer lacks, naming no fleet and sending
+     only this computer's heads and a nonce, which the machine signs with
+     its certificate authority; only an answer for this fleet proven by
+     one of its computers or Sheprd hosts goes on, so a machine outside
+     it gets nothing. Then this computer's daemon says what the machine
+     lacks, and Sheprd sends that, one answer at a time in both
+     directions. A
      machine in the fleet is synced at once when this computer's heads
      move and every 10 minutes; one outside it every hour. A daemon
      refuses an `apply` naming another fleet.

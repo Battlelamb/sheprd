@@ -52,6 +52,8 @@ use sha2::{Digest, Sha256};
 
 /// What every signed message starts with, before its own suffix.
 pub const DOMAIN: &[u8] = b"sheprd-fleet-v1";
+/// Members one removal names beside its target.
+pub const MAX_ALSO_MEMBERS: usize = 16;
 /// Live computer members at once.
 pub const MAX_COMPUTERS: usize = 16;
 /// Live phone members at once.

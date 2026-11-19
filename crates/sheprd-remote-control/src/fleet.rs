@@ -23,8 +23,9 @@ mod store;
 
 pub use error::{Error, Result};
 
-use crate::control::fleet::{Body, Inserted, Log, MemberId, Op, OpId, Unsigned, sync};
+use crate::control::fleet::{Body, HostId, Inserted, Log, MemberId, Op, OpId, Unsigned, sync};
 use p256::ecdsa::SigningKey;
+use sha2::{Digest as _, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
@@ -41,6 +42,22 @@ pub(crate) const MAX_PROVEN: usize = 8;
 /// removal whose history does not exist outlives it.
 pub(crate) const UNCONFIRMED_TTL_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 
+/// How long the parts of a log handed over to a computer with no fleet
+/// wait for the rest ([`sync::Apply::more`]).
+const JOINING_TTL_MS: u64 = 10 * 60 * 1000;
+/// The most operation bytes those parts may hold: the largest log this
+/// daemon keeps.
+const MAX_JOINING_BYTES: usize = crate::control::fleet::saved::MAX_SAVED;
+
+/// The parts of a log handed over so far to a computer with no fleet,
+/// kept in memory until the last arrives.
+#[derive(Debug)]
+struct Joining {
+    ops: Vec<Op>,
+    bytes: usize,
+    since_ms: u64,
+}
+
 /// A suspension waiting for its removal's history.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Unconfirmed {
@@ -55,7 +72,12 @@ pub(crate) struct Fleet {
     state_dir: PathBuf,
     key: SigningKey,
     me: MemberId,
+    /// This computer as a host, from its certificate authority's
+    /// certificate: a computer that is not a member holds the log as a host
+    /// the fleet shares, and lets in the members allowed there.
+    host: Option<HostId>,
     inner: Mutex<Inner>,
+    joining: Mutex<Option<Joining>>,
     changed: watch::Sender<u64>,
     /// Removal exchanges other members dialed in for, at most
     /// `removals::CONCURRENT` at once.
@@ -86,11 +108,21 @@ impl Fleet {
         let key = store::load_or_create_key(state_dir)?;
         let me = member_id(&key);
         let inner = store::load(state_dir, now_ms)?;
+        let host = match crate::tls::Authority::stored_certificate(state_dir) {
+            Ok(certificate) => certificate.map(|der| HostId(Sha256::digest(&der).into())),
+            Err(error) => {
+                // Fails closed: with no host id, it is no fleet host here.
+                tracing::warn!(%error, "could not read the certificate authority for the fleet");
+                None
+            }
+        };
         Ok(Self {
             state_dir: state_dir.to_owned(),
             key,
             me,
+            host,
             inner: Mutex::new(inner),
+            joining: Mutex::new(None),
             changed: watch::Sender::new(0),
             inbound: tokio::sync::Semaphore::new(removals::CONCURRENT),
         })
@@ -98,6 +130,11 @@ impl Fleet {
 
     pub(crate) fn me(&self) -> MemberId {
         self.me
+    }
+
+    /// This computer's host id, from its certificate authority.
+    pub(crate) fn host(&self) -> Option<HostId> {
+        self.host
     }
 
     pub(crate) fn state_dir(&self) -> &Path {
@@ -199,7 +236,11 @@ impl Fleet {
                 .filter(|(_, result)| result.is_err())
                 .count(),
             None => {
-                let (log, refused) = join(ops, self.me, now_ms)?;
+                let mut all = self
+                    .take_joining(now_ms)
+                    .map_or_else(Vec::new, |kept| kept.ops);
+                all.extend(ops);
+                let (log, refused) = join(all, self.me, self.host, now_ms)?;
                 inner.log = Some(log);
                 refused
             }
@@ -212,6 +253,40 @@ impl Fleet {
             self.bump();
         }
         Ok(refused)
+    }
+
+    /// Keeps `ops`, one part of a log handed over to this computer while it
+    /// is in no fleet, until the last part arrives and [`Fleet::receive`]
+    /// joins with them all: the operation that admits this computer comes
+    /// last. Parts past [`MAX_JOINING_BYTES`] are refused and all dropped.
+    /// Kept in memory: a handover needs the running daemon. Blocking.
+    pub(crate) fn stage(&self, ops: Vec<Op>, now_ms: u64) -> Result<()> {
+        if self.inner().log.is_some() {
+            return Err(Error::InFleet);
+        }
+        let mut kept = self.take_joining(now_ms).unwrap_or(Joining {
+            ops: Vec::new(),
+            bytes: 0,
+            since_ms: now_ms,
+        });
+        kept.bytes = ops.iter().fold(kept.bytes, |bytes, op| {
+            bytes.saturating_add(op.encode().len())
+        });
+        if kept.bytes > MAX_JOINING_BYTES {
+            return Err(Error::JoinTooLarge);
+        }
+        kept.ops.extend(ops);
+        *self.joining.lock().unwrap_or_else(PoisonError::into_inner) = Some(kept);
+        Ok(())
+    }
+
+    /// The parts kept by [`Fleet::stage`], unless they waited too long.
+    fn take_joining(&self, now_ms: u64) -> Option<Joining> {
+        self.joining
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+            .filter(|kept| now_ms.saturating_sub(kept.since_ms) <= JOINING_TTL_MS)
     }
 
     /// Records that `member` proved `tunnel` by finishing the tunnel's
@@ -300,8 +375,12 @@ pub fn run_ask(state_dir: &Path, ask: sync::Ask) -> Result<sync::Answer> {
 }
 
 /// A log from operations that found a fleet, or `Error::NotAdmitted` when
-/// they do not admit `me`.
-fn join(mut ops: Vec<Op>, me: MemberId, now_ms: u64) -> Result<(Log, usize)> {
+/// they neither admit `me` nor share `host`, this computer as a host. A
+/// host's record is signed by its own certificate authority, so only a
+/// member that read it from this computer (over SSH, as `fleet intro`)
+/// can share it, and only a caller that can run `fleet apply` here can
+/// hand the log over: someone who controls this account already.
+fn join(mut ops: Vec<Op>, me: MemberId, host: Option<HostId>, now_ms: u64) -> Result<(Log, usize)> {
     let found = ops
         .iter()
         .position(|op| matches!(op.body(), Body::Found(_)))
@@ -312,7 +391,7 @@ fn join(mut ops: Vec<Op>, me: MemberId, now_ms: u64) -> Result<(Log, usize)> {
         .iter()
         .filter(|(_, result)| result.is_err())
         .count();
-    if !sync::admits(&log, &me) {
+    if !sync::admits(&log, &me) && !host.is_some_and(|host| sync::shares(&log, &host)) {
         return Err(Error::NotAdmitted);
     }
     Ok((log, refused))
@@ -351,7 +430,6 @@ fn standing(log: &Log, kept: &Unconfirmed) -> bool {
 }
 
 fn member_id(key: &SigningKey) -> MemberId {
-    use sha2::{Digest, Sha256};
     let point = key.verifying_key().to_sec1_point(true);
     MemberId(Sha256::digest(point.as_bytes()).into())
 }

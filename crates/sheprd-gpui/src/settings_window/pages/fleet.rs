@@ -1,10 +1,11 @@
 //! Fleet (`docs/relay-plan.md`, Fleet): this computer's computers and
-//! phones, the hosts they share, and who may reach which. Everything that
-//! signs asks here first: creating the fleet, removing a member (with why,
-//! which decides what goes with it), removing a host, allowing a computer
-//! on a host, inviting a computer this Sheprd reaches, or sharing a host
-//! with the computers ticked. The daemon signs; [`Fleet`] carries the log
-//! to the other machines.
+//! phones, the hosts they share, and who may reach which. Nothing signs
+//! but on a person's click here. Removing a member (with why, which
+//! decides what goes with it), removing a host, inviting a computer this
+//! Sheprd reaches, and sharing a host with the computers ticked ask first,
+//! by a second click; creating the fleet and each computer's access switch
+//! act at once. The daemon signs; [`Fleet`] carries the log to the other
+//! machines.
 
 use super::{SettingsWindow, ui};
 use crate::{
@@ -12,7 +13,9 @@ use crate::{
     i18n::fl,
 };
 use gpui::{prelude::*, *};
-use sheprd_remote_control::control::fleet::{HostKind, Kind, Reason, View, sync::Ask};
+use sheprd_remote_control::control::fleet::{
+    HostKind, Kind, MAX_ALSO_MEMBERS, Reason, View, sync::Ask,
+};
 use std::collections::BTreeSet;
 
 /// The page's state while it shows.
@@ -79,6 +82,19 @@ impl SettingsWindow {
         self.fleet.error = None;
         let view = cx.entity().downgrade();
         Fleet::act(cx, ask, move |failure, cx| {
+            let _ = view.update(cx, |view, cx| {
+                view.fleet.error = failure;
+                cx.notify();
+            });
+        });
+    }
+
+    /// Runs `asks` in order, one change a person here approved, and shows
+    /// a failure.
+    fn fleet_act_all(&mut self, asks: Vec<Ask>, cx: &mut Context<Self>) {
+        self.fleet.error = None;
+        let view = cx.entity().downgrade();
+        Fleet::act_all(cx, asks, move |failure, cx| {
             let _ = view.update(cx, |view, cx| {
                 view.fleet.error = failure;
                 cx.notify();
@@ -235,7 +251,7 @@ impl SettingsWindow {
                             .control(self.fleet_cancel(format!("fleet-member-{index}-cancel"), cx));
                     }
                     Some(Some(reason)) => {
-                        let ask = removal(view, &member.id, reason);
+                        let asks = removal(view, &member.id, reason);
                         row = row
                             .control(self.fleet_cancel(format!("fleet-member-{index}-cancel"), cx))
                             .control(
@@ -253,7 +269,7 @@ impl SettingsWindow {
                                 .on_click(cx.listener(
                                     move |this, _, _, cx| {
                                         this.fleet.removing = None;
-                                        this.fleet_act(ask.clone(), cx);
+                                        this.fleet_act_all(asks.clone(), cx);
                                     },
                                 )),
                             );
@@ -584,50 +600,71 @@ fn reason_label(reason: Reason) -> String {
 
 /// What removing `member` for `reason` takes with it: for a compromised
 /// member, every member it admitted and host it added; otherwise nothing.
-pub(in crate::settings_window) fn removal(view: &View, member: &str, reason: Reason) -> Ask {
-    let compromised = reason == Reason::Compromised;
-    Ask::Remove {
-        member: member.to_owned(),
-        also_members: if compromised {
-            view.members
-                .iter()
-                .filter(|other| other.admitted_by.as_deref() == Some(member) && other.id != view.me)
-                .map(|other| other.id.clone())
-                .take(16)
-                .collect()
-        } else {
-            Vec::new()
-        },
-        also_hosts: if compromised {
-            view.hosts
-                .iter()
-                .filter(|host| host.added_by == member && host.kind != HostKind::Member)
-                .map(|host| host.id.clone())
-                .collect()
-        } else {
-            Vec::new()
-        },
-        reason,
+/// One removal names at most [`MAX_ALSO_MEMBERS`] members beside its
+/// target, so the members it admitted past those are removed by more
+/// removals, each naming one of them and up to as many others: none is
+/// left out.
+pub(in crate::settings_window) fn removal(view: &View, member: &str, reason: Reason) -> Vec<Ask> {
+    if reason != Reason::Compromised {
+        return vec![Ask::Remove {
+            member: member.to_owned(),
+            also_members: Vec::new(),
+            also_hosts: Vec::new(),
+            reason,
+        }];
     }
+    let admitted: Vec<String> = view
+        .members
+        .iter()
+        .filter(|other| other.admitted_by.as_deref() == Some(member) && other.id != view.me)
+        .map(|other| other.id.clone())
+        .collect();
+    let (first, rest) = admitted.split_at(admitted.len().min(MAX_ALSO_MEMBERS));
+    let mut asks = vec![Ask::Remove {
+        member: member.to_owned(),
+        also_members: first.to_vec(),
+        also_hosts: view
+            .hosts
+            .iter()
+            .filter(|host| host.added_by == member && host.kind != HostKind::Member)
+            .map(|host| host.id.clone())
+            .collect(),
+        reason,
+    }];
+    asks.extend(rest.chunks(MAX_ALSO_MEMBERS + 1).filter_map(|chunk| {
+        let (target, also) = chunk.split_first()?;
+        Some(Ask::Remove {
+            member: target.clone(),
+            also_members: also.to_vec(),
+            also_hosts: Vec::new(),
+            reason,
+        })
+    }));
+    asks
 }
 
 /// What the confirmation says goes.
 fn removal_line(view: &View, member: &str, reason: Reason) -> String {
-    let Ask::Remove {
-        also_members,
-        also_hosts,
-        ..
-    } = removal(view, member, reason)
-    else {
-        return String::new();
-    };
-    if also_members.is_empty() && also_hosts.is_empty() {
+    let (mut members, mut hosts) = (0, 0);
+    for ask in removal(view, member, reason) {
+        if let Ask::Remove {
+            member: target,
+            also_members,
+            also_hosts,
+            ..
+        } = ask
+        {
+            members += also_members.len() + usize::from(target != member);
+            hosts += also_hosts.len();
+        }
+    }
+    if members == 0 && hosts == 0 {
         fl!("settings-fleet-remove-only")
     } else {
         fl!(
             "settings-fleet-remove-with",
-            members = also_members.len(),
-            hosts = also_hosts.len()
+            members = members,
+            hosts = hosts
         )
     }
 }

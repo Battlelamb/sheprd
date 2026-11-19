@@ -39,11 +39,14 @@ pub(super) fn output(reply: &Reply, part: Part) -> crate::Result<Output> {
     let Reply::Status { view, error } = reply;
     let Some(view) = view else {
         let json = serde_json::json!({ "fleet": null, "error": error });
-        let text = match error {
-            Some(error) => format!("Could not read the fleet: {error}"),
-            None => "This computer is in no fleet".to_owned(),
-        };
-        return Ok(Output::data(text, &json)?.nothing());
+        // A daemon that could not be read is a failure, not an answer that
+        // this computer is in no fleet.
+        return Ok(match error {
+            Some(error) => {
+                Output::data(format!("Could not read the fleet: {error}"), &json)?.failed()
+            }
+            None => Output::data("This computer is in no fleet", &json)?.nothing(),
+        });
     };
     let json = match part {
         Part::All => serde_json::to_value(view.as_ref())?,

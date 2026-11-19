@@ -49,7 +49,8 @@ pub(crate) fn peer(fleet: &Fleet, remote: &[u8; 32]) -> Option<Peer> {
     if holders.next().is_some() || suspended.contains(member) {
         return None;
     }
-    let ssh = own_host(state, &fleet.me()).is_some_and(|host| state.allowed(&host, member));
+    let ssh =
+        own_host(state, &fleet.me(), fleet.host()).is_some_and(|host| state.allowed(&host, member));
     Some(Peer {
         member: *member,
         ssh,
@@ -66,7 +67,7 @@ pub(crate) fn still_allowed(fleet: &Fleet, member: &MemberId) -> bool {
     let Some(state) = inner.log.as_ref().map(|log| log.state()) else {
         return false;
     };
-    own_host(state, &fleet.me()).is_some_and(|host| state.allowed(&host, member))
+    own_host(state, &fleet.me(), fleet.host()).is_some_and(|host| state.allowed(&host, member))
 }
 
 /// The dial keys of every live computer member but this one, for the
@@ -87,9 +88,14 @@ pub(crate) fn dial_keys(fleet: &Fleet) -> Vec<Key> {
         .collect()
 }
 
-/// This computer's own host in `state`.
-pub(crate) fn own_host(state: &Log, me: &MemberId) -> Option<HostId> {
-    state.members.get(me)?.bundle.host.as_ref()?.id().ok()
+/// This computer's own host in `state`: as a member, the host its bundle
+/// names; otherwise `host`, its certificate authority's, when the fleet
+/// shares it.
+pub(crate) fn own_host(state: &Log, me: &MemberId, host: Option<HostId>) -> Option<HostId> {
+    match state.members.get(me) {
+        Some(member) => member.bundle.host.as_ref()?.id().ok(),
+        None => host.filter(|host| state.hosts.contains_key(host)),
+    }
 }
 
 /// Rewrites the SSH lines and relay records from the log. Blocking.
@@ -99,7 +105,12 @@ pub(crate) fn apply(state: &State, fleet: &Fleet) -> Result<()> {
         let inner = fleet.inner();
         match inner.log.as_ref() {
             Some(log) => (
-                lines(log.state(), &log.fleet().short(), &fleet.me(), &suspended),
+                lines(
+                    log.state(),
+                    &log.fleet().short(),
+                    own_host(log.state(), &fleet.me(), fleet.host()),
+                    &suspended,
+                ),
                 records(log.state(), &fleet.me(), &suspended),
             ),
             None => (Vec::new(), Vec::new()),
@@ -170,8 +181,13 @@ pub(crate) fn supersede(state: &State, tunnel: &[u8; 32]) -> Result<()> {
 
 /// One line per computer member allowed on this computer, tagged with the
 /// fleet's and the member's short ids.
-fn lines(state: &Log, fleet: &str, me: &MemberId, suspended: &[MemberId]) -> Vec<(String, SshKey)> {
-    let Some(host) = own_host(state, me) else {
+fn lines(
+    state: &Log,
+    fleet: &str,
+    host: Option<HostId>,
+    suspended: &[MemberId],
+) -> Vec<(String, SshKey)> {
+    let Some(host) = host else {
         return Vec::new();
     };
     state
@@ -192,7 +208,7 @@ fn records(state: &Log, me: &MemberId, suspended: &[MemberId]) -> Vec<(Record, V
     if suspended.contains(me) {
         return Vec::new();
     }
-    let own = own_host(state, me);
+    let own = own_host(state, me, None);
     state
         .hosts
         .iter()
@@ -288,7 +304,8 @@ fn publish_record(state: &State, fleet: &Fleet) {
         let Some(log) = &inner.log else {
             return;
         };
-        let Some(host) = own_host(log.state(), &fleet.me()) else {
+        // Only a member signs: a host the fleet shares has no say in it.
+        let Some(host) = own_host(log.state(), &fleet.me(), None) else {
             return;
         };
         log.state().hosts.get(&host).map(|host| host.record.clone())

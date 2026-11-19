@@ -4,15 +4,13 @@
 //! a computer's own host the `Found`, `Admit`, or `Rotate` that named it.
 //! A removal of the host (`HostRemove`, or `Remove::also_hosts`) wins over
 //! every addition it had not seen, a computer's own included, and only an
-//! addition that saw every removal brings it back. Two anchors come out:
+//! addition that saw every removal brings it back.
 //!
-//! - `since`, the first addition that counts: what was said about the host
-//!   before it (exclusions, links) went with the removal.
-//! - `source`, the addition whose intro the host has now: its records and
-//!   routes count from there.
-//!
-//! Either is `None` when the host was live in the base and nothing since
-//! removed it, so a log pruned to a checkpoint decides as the whole log.
+//! The additions that survive are the host's lifetime ([`Lifetime`]):
+//! what is said about the host (exclusions, links) counts when it came
+//! after any of them, and what was said before them went with the
+//! removal. The base stands for the additions a checkpoint replaced, so a
+//! log pruned to it decides as the whole log.
 
 use super::{
     Body, HostId, HostIntro, HostKind, MAX_HOSTS, MemberId, Op,
@@ -20,20 +18,24 @@ use super::{
     membership::Members,
     state::{Host, State},
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-/// Where a live host's history starts ([module docs](self)).
-#[derive(Clone, Copy, Debug)]
-pub(super) struct Anchors {
-    pub(super) since: Option<usize>,
-    pub(super) source: Option<usize>,
-}
+/// The additions of a live host that survive: `None` for the base.
+#[derive(Clone, Debug, Default)]
+pub(super) struct Lifetime(Vec<Option<usize>>);
 
-impl Anchors {
-    /// Whether the operation at `position` came after `anchor`, and so
-    /// speaks of the host as it is.
-    pub(super) fn after(graph: &Graph<'_>, anchor: Option<usize>, position: usize) -> bool {
-        anchor.is_none_or(|anchor| anchor == position || graph.sees(position, anchor))
+impl Lifetime {
+    /// Whether the operation at `position` came after one of the
+    /// additions, and so speaks of the host as it is now.
+    pub(super) fn covers(&self, graph: &Graph<'_>, position: usize) -> bool {
+        self.0
+            .iter()
+            .any(|added| added.is_none_or(|added| added == position || graph.sees(position, added)))
+    }
+
+    /// Whether the host was live in the base and nothing since removed it.
+    pub(super) fn in_base(&self) -> bool {
+        self.0.contains(&None)
     }
 }
 
@@ -50,14 +52,16 @@ struct Add<'a> {
 }
 
 /// Sets `state.hosts` from the additions and removals in `effective`, on
-/// top of `base`, and says where each live host's history starts.
+/// top of `base`, and says where each live host's history starts. The
+/// `HostAdd`s in `held` are an equivocating member's, and do not count.
 pub(super) fn hosts(
     graph: &Graph<'_>,
     members: &Members,
     effective: &[(usize, &Op)],
+    held: &BTreeSet<usize>,
     base: &State,
     state: &mut State,
-) -> BTreeMap<HostId, Anchors> {
+) -> BTreeMap<HostId, Lifetime> {
     let mut adds: BTreeMap<HostId, Vec<Add<'_>>> = BTreeMap::new();
     for (id, host) in &base.hosts {
         if host.intro.kind != HostKind::Member {
@@ -73,7 +77,7 @@ pub(super) fn hosts(
     let mut removals: BTreeMap<HostId, Vec<usize>> = BTreeMap::new();
     for &(position, op) in effective {
         match op.body() {
-            Body::HostAdd(intro) if !state.equivocating.contains(&op.signer()) => {
+            Body::HostAdd(intro) if !held.contains(&position) => {
                 if let Ok(id) = intro.id()
                     && intro.kind != HostKind::Member
                 {
@@ -128,10 +132,7 @@ pub(super) fn hosts(
         });
         anchors.insert(
             id,
-            Anchors {
-                since: first.position,
-                source: first.position,
-            },
+            Lifetime(candidates.iter().map(|add| add.position).collect()),
         );
         live.push((
             first.position.map_or(0, |at| at + 1),
@@ -161,25 +162,6 @@ pub(super) fn hosts(
         state,
         &mut anchors,
     );
-    // Keep the base's newer records and its flags while the host still has
-    // the intro it had there.
-    for (id, host) in &mut state.hosts {
-        let Some(kept) = base.hosts.get(id) else {
-            continue;
-        };
-        if anchors
-            .get(id)
-            .is_some_and(|anchor| anchor.source.is_some())
-            || kept.intro != host.intro
-        {
-            continue;
-        }
-        if kept.record.rev > host.record.rev {
-            host.record = kept.record.clone();
-            host.record_signature = kept.record_signature;
-        }
-        host.flagged |= kept.flagged;
-    }
     anchors
 }
 
@@ -199,7 +181,7 @@ fn member_hosts(
     preceding: &BTreeMap<HostId, Vec<(Option<usize>, &HostIntro)>>,
     survives: &impl Fn(&HostId, Option<usize>) -> bool,
     state: &mut State,
-    anchors: &mut BTreeMap<HostId, Anchors>,
+    anchors: &mut BTreeMap<HostId, Lifetime>,
 ) {
     let mut named: BTreeMap<HostId, Vec<(&HostIntro, MemberId)>> = BTreeMap::new();
     for (id, member) in &members.live {
@@ -209,7 +191,18 @@ fn member_hosts(
             named.entry(host).or_default().push((intro, *id));
         }
     }
-    for (id, claimants) in named {
+    for (id, mut claimants) in named {
+        // The computer that named it first gives it its intro, the base's
+        // before any other; the others' intros are copies.
+        let kept = base.hosts.get(&id).map(|host| &host.intro);
+        claimants.sort_by_key(|(intro, member)| {
+            let at = match members.origins.get(member) {
+                Some(at) => at + 2,
+                None if kept == Some(*intro) => 0,
+                None => 1,
+            };
+            (at, *member)
+        });
         let (intro, member) = claimants[0];
         let origin = members.origins.get(&member).copied();
         // Where it named this host: the base, while the base had it live,
@@ -228,10 +221,14 @@ fn member_hosts(
                     .map(|&at| Some(at)),
             )
             .collect();
-        let Some(&since) = claims.iter().find(|at| survives(&id, **at)) else {
+        let surviving: Vec<Option<usize>> = claims
+            .iter()
+            .copied()
+            .filter(|at| survives(&id, *at))
+            .collect();
+        if surviving.is_empty() {
             continue;
-        };
-        let source = claims.last().copied().flatten();
+        }
         // Every addition weighed must name the same machine the same way:
         // one that differs, in account, CA, or SSH host keys, holds it.
         let weighed =
@@ -250,7 +247,7 @@ fn member_hosts(
         // removal of the host is what would have dropped it. When two of
         // the base's members claimed it, that is why it was held, and the
         // claims are counted again from the members live.
-        let carried = since.is_none()
+        let carried = surviving.contains(&None)
             && base.hosts.get(&id).is_some_and(|kept| {
                 kept.held
                     && kept.intro.kind == HostKind::Member
@@ -270,7 +267,7 @@ fn member_hosts(
                     || added.ca != intro.ca
                     || added.record.ssh_host_keys != intro.record.ssh_host_keys
             });
-        anchors.insert(id, Anchors { since, source });
+        anchors.insert(id, Lifetime(surviving));
         state.hosts.insert(
             id,
             Host {

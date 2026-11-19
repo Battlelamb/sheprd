@@ -1969,13 +1969,34 @@ manual multi-machine and phone steps left unticked in its QA list.
      removal suspending at once, the next file confirming it, and one
      lifting a suspension the log voided); and a member's daemon passing
      a removal to a real agent with no Sheprd running.
-   - **Left:** Sheprd's side: installing and updating the agent over SSH
-     behind its dialog, the service units, and the sharing worker reading
-     `status --json` and running `fleet apply` with the file `compute`
-     makes (passing the reported suspensions) on each plain host it
-     reaches; `--direct`, which stays off and is not built yet. A
-     member's rotated keys at an unchanged `rev` take the newer file's
-     keys, as the agent cannot order them otherwise.
+   - **Built (Sheprd's half):** Settings > Fleet lists a machine with no
+     Sheprd daemon and no agent of this fleet as one that can be shared as
+     a plain host. "Share as a plain host" asks first, with the computers
+     to allow and a line saying the agent is installed; on confirm, over
+     the app's own SSH (`fleet::plain`, `fleet::agent`), Sheprd copies the
+     agent build this app ships for the host's platform (`host_build`, as
+     automations do: its own build for a host of its kind, else
+     `relay-agent/TRIPLE/` beside the executable), unless the host holds
+     the same bytes; writes and restarts a systemd user unit (with
+     lingering asked for) or a launchd agent running `run` on this
+     computer's relays (its own host record's); reads `status --json`,
+     which now carries the SSH host keys; keeps only keys this computer's
+     known hosts list for the target (`sheprd_client::known_host_keys`),
+     the first of which must be one; and has the daemon add an `Agent`
+     intro (`verified: KnownHosts`) with the denies. Then, and on every
+     sync of a machine with no daemon, it reads the agent's status, finds
+     the fleet host by its first trusted key (`HostId::plain`), asks the
+     daemon for the access file (`Ask::AgentAccess`, which computes it so
+     the log never leaves the daemon, settling the reported suspensions),
+     and runs `fleet apply` when the digest differs or something settles.
+   - **Left:** the release does not ship agent builds yet: until
+     `relay-agent/TRIPLE/` builds sit beside the app (and in the signed
+     host manifest for Linux downloads, as `sheprd-remote-control`'s are),
+     a host of another platform than this computer is refused with "this
+     app ships no sheprd-relay-agent for PLATFORM". Uninstalling the agent
+     after "Remove everywhere"; `--direct`, which stays off and is not
+     built yet. A member's rotated keys at an unchanged `rev` take the
+     newer file's keys, as the agent cannot order them otherwise.
 5. **iOS:** joining at pairing, admitting a computer from the phone, the
    Secure Enclave key, sync, offers and `Link`, removing from the phone,
    pushes, and Settings > Fleet. Swift tests against phase 1's vectors.

@@ -8,13 +8,17 @@
 //! - [`flows`]: syncing a machine, inviting a computer, sharing a host.
 //! - [`saved`]: each fleet host this computer may reach, kept as a saved
 //!   device, `USER@r-ID.sheprd.invalid`.
+//! - [`plain`] and [`agent`]: plain hosts, which run no Sheprd daemon:
+//!   installing their relay agent and keeping its access file current.
 //!
 //! Syncing never hands this fleet's log to a machine outside it: a machine
 //! is first asked for what it holds of this fleet, and one that answers
 //! for another fleet, or for none, is left alone.
 
+mod agent;
 mod error;
 pub(crate) mod flows;
+pub(crate) mod plain;
 mod remote;
 pub(crate) mod saved;
 
@@ -74,8 +78,13 @@ pub(crate) enum Standing {
     Unknown,
     /// In this fleet.
     Member,
-    /// In no fleet, in another, or without the program.
+    /// In no fleet or in another.
     Outside,
+    /// Runs no Sheprd daemon, nor a relay agent of this fleet: it may be
+    /// shared as a plain host.
+    NoDaemon,
+    /// A plain host of this fleet, whose relay agent is kept current.
+    Agent,
     /// Could not be asked.
     Failed,
 }
@@ -91,8 +100,8 @@ impl Link {
         };
         match self.standing {
             Standing::Unknown => true,
-            Standing::Member => self.synced != mine || since(REFRESH),
-            Standing::Outside => since(OUTSIDE),
+            Standing::Member | Standing::Agent => self.synced != mine || since(REFRESH),
+            Standing::Outside | Standing::NoDaemon => since(OUTSIDE),
             Standing::Failed => since(RETRY),
         }
     }
@@ -310,6 +319,20 @@ impl Fleet {
             });
         })
         .detach();
+    }
+
+    /// Sets what `machine` said, as a sync that just ran would, so it is
+    /// not due again.
+    #[cfg(test)]
+    pub(crate) fn set_standing(cx: &mut App, machine: &str, standing: Standing) {
+        let heads = Self::view(cx)
+            .map(|view| view.heads.clone())
+            .unwrap_or_default();
+        Self::set_link(cx, machine, |link| {
+            link.standing = standing;
+            link.synced = heads;
+            link.last = Some(Instant::now());
+        });
     }
 
     fn set_link(cx: &mut App, id: &str, change: impl FnOnce(&mut Link)) {

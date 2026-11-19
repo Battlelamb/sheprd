@@ -16,7 +16,10 @@ use sheprd_remote_control::control::{
 use std::{sync::atomic::AtomicBool, time::Instant};
 
 /// Asks this computer's daemon `ask` and waits for its fleet answer.
-async fn daemon(client: &crate::remote::supervisor::Client, ask: Ask) -> Result<Answer, Error> {
+pub(super) async fn daemon(
+    client: &crate::remote::supervisor::Client,
+    ask: Ask,
+) -> Result<Answer, Error> {
     match client.request(Request::Fleet(Box::new(ask))).await {
         Ok(Response::Fleet(answer)) => Ok(*answer),
         Ok(Response::Error { message, .. }) => Err(Error::Daemon(message)),
@@ -43,6 +46,9 @@ async fn applied(
 /// 2. hands what it answered to this computer's daemon, which says what
 ///    the machine lacks;
 /// 3. sends the machine that.
+///
+/// A machine with no Sheprd daemon may be a plain host of this fleet: its
+/// relay agent is kept current instead (`plain::sync`).
 pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
     let Some(client) = Supervisor::client(cx) else {
         return;
@@ -84,8 +90,10 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
                 Ok(theirs) if theirs.fleet == fleet && sync::proven(&theirs, &nonce, &hosts) => {
                     theirs
                 }
-                Ok(_) | Err(Error::NoProgram) => {
-                    return Ok((Standing::Outside, Vec::new(), Vec::new()));
+                Ok(_) => return Ok((Standing::Outside, Vec::new(), Vec::new())),
+                Err(Error::NoProgram) => {
+                    let standing = super::plain::sync(&client, &executor, &machine, &view).await?;
+                    return Ok((standing, Vec::new(), view.heads.clone()));
                 }
                 Err(error) => return Err(error),
             };

@@ -17,7 +17,7 @@ use sheprd_remote_control::control::{
 };
 use std::path::Path;
 
-static ASKED: Mutex<Vec<Ask>> = Mutex::new(Vec::new());
+pub(super) static ASKED: Mutex<Vec<Ask>> = Mutex::new(Vec::new());
 /// The stand-in daemon is shared: these tests take turns.
 static SERIAL: Mutex<()> = Mutex::new(());
 static IN_FLEET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
@@ -87,13 +87,13 @@ fn daemon(_: &Path, request: &Request) -> Result<Response, control::Error> {
     Ok(Response::Fleet(Box::new(answer)))
 }
 
-fn serial() -> std::sync::MutexGuard<'static, ()> {
+pub(super) fn serial() -> std::sync::MutexGuard<'static, ()> {
     SERIAL
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-fn page(cx: &mut TestAppContext, in_fleet: bool) -> &mut VisualTestContext {
+pub(super) fn page(cx: &mut TestAppContext, in_fleet: bool) -> &mut VisualTestContext {
     IN_FLEET.store(in_fleet, Ordering::SeqCst);
     REMOVED.store(false, Ordering::SeqCst);
     ASKED.lock().unwrap().clear();

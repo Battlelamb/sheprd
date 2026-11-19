@@ -8,7 +8,7 @@
 
 use super::{SettingsWindow, ui};
 use crate::{
-    fleet::{Fleet, Standing, flows},
+    fleet::{Fleet, Standing, flows, plain},
     i18n::fl,
 };
 use gpui::{prelude::*, *};
@@ -26,6 +26,8 @@ pub(in crate::settings_window) struct FleetPage {
     inviting: Option<String>,
     /// The machine being shared, with the computers left out of it.
     sharing: Option<(String, BTreeSet<String>)>,
+    /// The share installs the relay agent: the machine runs no Sheprd.
+    sharing_plain: bool,
     /// The machine whose Remove fleet access waits for confirmation.
     scrubbing: Option<String>,
     /// The last failure, for a person.
@@ -407,7 +409,9 @@ impl SettingsWindow {
             let line = match standing {
                 _ if acting => fl!("settings-fleet-machine-working"),
                 Standing::Member => fl!("settings-fleet-machine-member"),
+                Standing::Agent => fl!("settings-fleet-machine-agent"),
                 Standing::Outside => fl!("settings-fleet-machine-outside"),
+                Standing::NoDaemon => fl!("settings-fleet-machine-no-daemon"),
                 Standing::Failed => fl!("settings-fleet-machine-failed"),
                 Standing::Unknown => fl!("settings-fleet-machine-unknown"),
             };
@@ -472,7 +476,7 @@ impl SettingsWindow {
                 this.fleet.sharing = None;
                 cx.notify();
             }));
-            if standing == Standing::Member || acting {
+            if matches!(standing, Standing::Member | Standing::Agent) || acting {
                 rows.push(row.description(line).control(scrub));
                 continue;
             }
@@ -508,7 +512,12 @@ impl SettingsWindow {
                 continue;
             }
             if let Some(deny) = sharing {
-                rows.push(row.description(fl!("settings-fleet-share-ask")));
+                let plain_share = self.fleet.sharing_plain;
+                rows.push(row.description(if plain_share {
+                    fl!("settings-fleet-share-plain-ask")
+                } else {
+                    fl!("settings-fleet-share-ask")
+                }));
                 for (slot, member) in computers.iter().enumerate() {
                     let allowed = !deny.contains(&member.id);
                     let member_id = member.id.clone();
@@ -553,7 +562,11 @@ impl SettingsWindow {
                         ui::button(
                             theme,
                             format!("fleet-machine-{index}-share-confirm"),
-                            fl!("settings-fleet-share"),
+                            if plain_share {
+                                fl!("settings-fleet-share-plain")
+                            } else {
+                                fl!("settings-fleet-share")
+                            },
                             true,
                         )
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -564,20 +577,44 @@ impl SettingsWindow {
                                 .map(|(_, deny)| deny.into_iter().collect())
                                 .unwrap_or_default();
                             let view = cx.entity().downgrade();
-                            flows::share(
-                                cx,
-                                id_confirm.clone(),
-                                machine.clone(),
-                                deny,
-                                move |failure, cx| {
-                                    let _ = view.update(cx, |view, cx| {
-                                        view.fleet.error = failure;
-                                        cx.notify();
-                                    });
-                                },
-                            );
+                            let done = move |failure, cx: &mut App| {
+                                let _ = view.update(cx, |view, cx| {
+                                    view.fleet.error = failure;
+                                    cx.notify();
+                                });
+                            };
+                            let (id, machine) = (id_confirm.clone(), machine.clone());
+                            if std::mem::take(&mut this.fleet.sharing_plain) {
+                                plain::share(cx, id, machine, deny, done);
+                            } else {
+                                flows::share(cx, id, machine, deny, done);
+                            }
                         })),
                     ),
+                );
+                continue;
+            }
+            if standing == Standing::NoDaemon {
+                let plain_id = id.clone();
+                rows.push(
+                    row.description(line)
+                        .control(
+                            ui::button(
+                                theme,
+                                format!("fleet-machine-{index}-share-plain"),
+                                fl!("settings-fleet-share-plain"),
+                                true,
+                            )
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.fleet.sharing = Some((plain_id.clone(), BTreeSet::new()));
+                                    this.fleet.sharing_plain = true;
+                                    this.fleet.inviting = None;
+                                    cx.notify();
+                                },
+                            )),
+                        )
+                        .control(scrub),
                 );
                 continue;
             }
@@ -606,6 +643,7 @@ impl SettingsWindow {
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.fleet.sharing = Some((share_id.clone(), BTreeSet::new()));
+                        this.fleet.sharing_plain = false;
                         this.fleet.inviting = None;
                         cx.notify();
                     })),
@@ -623,6 +661,7 @@ impl SettingsWindow {
                 this.fleet.removing_host = None;
                 this.fleet.inviting = None;
                 this.fleet.sharing = None;
+                this.fleet.sharing_plain = false;
                 this.fleet.scrubbing = None;
                 cx.notify();
             },

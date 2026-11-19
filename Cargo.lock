@@ -11135,6 +11135,7 @@ dependencies = [
  "sheprd-mods",
  "sheprd-orchestrator",
  "sheprd-relay",
+ "sheprd-relay-agent",
  "sheprd-remote",
  "sheprd-remote-control",
  "sheprd-session",

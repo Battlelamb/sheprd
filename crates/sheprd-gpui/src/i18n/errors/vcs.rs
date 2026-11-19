@@ -108,8 +108,8 @@ fn failed_step(operation: &str) -> &'static str {
         "fetch the pull request branch" => "fetch-pull-request", // i18n: data
         "fetch the stack's base" => "fetch-stack-base", // i18n: data
         "find the checkout" => "find-checkout", // i18n: data
-        "forget the fetched base" => "forget-fetched-base", // i18n: data
         "find where the branch started" => "find-branch-start", // i18n: data
+        "forget the fetched base" => "forget-fetched-base", // i18n: data
         "list attribute files" => "list-attribute-files", // i18n: data
         "list branches" => "list-branches", // i18n: data
         "list files" => "list-files",       // i18n: data

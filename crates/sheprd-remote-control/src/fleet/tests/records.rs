@@ -1,17 +1,24 @@
 //! The relay records the fleet writes: it never deletes one pairing took
-//! over, and it follows a host's signed new tunnel identity.
+//! over, it follows a host's signed new tunnel identity, and no host takes
+//! over another's record by claiming its route.
 
 use super::*;
 use crate::desktop::record::Record;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 
 fn record(identity: &str, fleet: bool) -> Record {
+    hosted(identity, fleet, fleet.then_some("a"))
+}
+
+/// A record written for the fleet host `host`.
+fn hosted(identity: &str, fleet: bool, host: Option<&str>) -> Record {
     Record {
         computer: "Studio".into(),
         identity: identity.into(),
         relays: vec!["https://relay.example.org".into()],
         route: URL_SAFE_NO_PAD.encode([7; 32]),
         fleet,
+        host: host.map(str::to_owned),
     }
 }
 
@@ -64,4 +71,78 @@ fn pairing_still_cannot_replace_an_identity() {
         Err(crate::desktop::Error::RecordConflict(_))
     ));
     assert!(!Record::load(dir.path(), &id).unwrap().fleet);
+}
+
+#[test]
+fn another_fleet_host_cannot_replace_a_records_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let kept = hosted("identity-one", true, Some("a"));
+    let id = kept.save(dir.path(), &keys()).unwrap();
+    for other in [
+        hosted("identity-two", true, Some("b")),
+        hosted("identity-one", true, Some("b")),
+        hosted("identity-two", true, None),
+    ] {
+        assert!(
+            matches!(
+                other.save(dir.path(), &keys()),
+                Err(crate::desktop::Error::RecordConflict(_))
+            ),
+            "{other:?}"
+        );
+    }
+    assert_eq!(Record::load(dir.path(), &id).unwrap(), kept);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_claiming_another_hosts_route_changes_nothing() {
+    let (a, b, c) = three().await;
+    let route = a.relays.info().unwrap().route;
+    // c signs, with its own authority, a record naming a's route.
+    let (mut claim, _) = me::record(&c.state, now_ms() + 1).unwrap();
+    claim.route = route.clone();
+    let signature = c
+        .state
+        .authority
+        .as_ref()
+        .unwrap()
+        .sign(&claim.message().unwrap())
+        .unwrap();
+    let own = |node: &Node| {
+        let a_record = Record {
+            computer: String::new(),
+            identity: String::new(),
+            relays: Vec::new(),
+            route: route.clone(),
+            fleet: true,
+            host: None,
+        };
+        Record::load(node.dir.path(), &a_record.id().unwrap()).unwrap()
+    };
+    grants::apply(&b.state, &b.fleet).unwrap();
+    let before = own(&b);
+    assert_eq!(before.identity, a.relays.info().unwrap().identity);
+    c.fleet
+        .sign(
+            Body::HostSeen(crate::control::fleet::HostSeen {
+                record: claim,
+                signature: Some(signature),
+            }),
+            now_ms(),
+        )
+        .unwrap();
+    b.fleet.receive(c.ops(), now_ms()).unwrap();
+    // The log took c's claim: only the records keep a's route a's.
+    let claimants = {
+        let inner = b.fleet.inner();
+        let state = inner.log.as_ref().unwrap().state();
+        state
+            .hosts
+            .values()
+            .filter(|host| host.record.route == route)
+            .count()
+    };
+    assert_eq!(claimants, 2);
+    grants::apply(&b.state, &b.fleet).unwrap();
+    assert_eq!(own(&b), before);
 }

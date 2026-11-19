@@ -28,6 +28,10 @@ pub(crate) struct Record {
     /// byte, and the fleet removes the record when access ends.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) fleet: bool,
+    /// For a fleet record, the fleet host it was written for, hex: only
+    /// that host's own signed records may change its tunnel identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) host: Option<String>,
 }
 
 impl Record {
@@ -59,12 +63,13 @@ impl Record {
         // whose route shares them must not take over this one's record
         // and host keys. The same machine paired again may update both.
         // A fleet record may also take a new tunnel identity for the same
-        // route from the fleet's signed log, which only that host can
-        // sign; pairing never replaces one that way.
+        // route, but only for the same fleet host, whose certificate
+        // authority signs it; never another host's, and never by pairing.
         match Self::load(state_dir, &id) {
             Ok(kept)
                 if kept.route != self.route
-                    || (kept.identity != self.identity && !(kept.fleet && self.fleet)) =>
+                    || (kept.identity != self.identity && !self.same_fleet_host(&kept))
+                    || (kept.fleet && self.fleet && kept.host != self.host) =>
             {
                 return Err(Error::RecordConflict(id));
             }
@@ -77,6 +82,11 @@ impl Record {
         let lines = known_hosts(&host, host_keys);
         files::write_private(&relay_host::known_hosts(state_dir, &host), lines.as_bytes())?;
         Ok(id)
+    }
+
+    /// Whether both are fleet records written for one fleet host.
+    fn same_fleet_host(&self, kept: &Self) -> bool {
+        self.fleet && kept.fleet && self.host.is_some() && self.host == kept.host
     }
 
     /// Removes the machine with `id` and its known hosts. Blocking.

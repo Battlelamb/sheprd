@@ -229,7 +229,12 @@ pub enum Ask {
     /// Forgets the fleet here without signing anything: its log, and the
     /// `authorized_keys` lines and relay records it wrote. For a computer
     /// the fleet removed, or a fleet that is gone (`sheprd fleet scrub`).
-    Scrub,
+    /// `session` is the loopback client port of the fleet SSH session that
+    /// asked, if one did: only it may finish reading the answer.
+    Scrub {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session: Option<u16>,
+    },
     /// A shared Sheprd host's current `fleet intro`, read over SSH by a
     /// member syncing it: the member carries its record into the log as a
     /// `HostSeen` when it moved, as a host that is no member cannot sign

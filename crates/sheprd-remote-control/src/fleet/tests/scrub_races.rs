@@ -13,7 +13,7 @@ fn an_offline_scrub_waits_for_the_fleet_lock() {
     let ran = AtomicBool::new(false);
     std::thread::scope(|scope| {
         let scrub = scope.spawn(|| {
-            scrub_with(dir.path(), |state_dir| {
+            scrub_with(dir.path(), None, |state_dir| {
                 // Run only while holding the lock itself.
                 assert!(lock::Lock::try_acquire(state_dir).unwrap().is_none());
                 ran.store(true, Ordering::SeqCst);
@@ -41,8 +41,9 @@ async fn a_scrub_waits_for_a_grants_write_under_way() {
     // A grants write has read the fleet and not yet written it.
     let writing = b.fleet.writing();
     let (state, fleet) = (b.state.clone(), b.fleet.clone());
-    let scrub =
-        tokio::task::spawn_blocking(move || ask::answer(&state, &fleet, Ask::Scrub, now_ms()));
+    let scrub = tokio::task::spawn_blocking(move || {
+        ask::answer(&state, &fleet, Ask::Scrub { session: None }, now_ms())
+    });
     // Blocking on purpose: the guard stands for a write on a blocking
     // thread, never held across an await.
     std::thread::sleep(Duration::from_millis(300));
@@ -56,13 +57,46 @@ async fn a_scrub_waits_for_a_grants_write_under_way() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_session_that_asked_for_a_scrub_may_read_its_answer() {
+async fn only_the_session_that_asked_for_a_scrub_may_read_its_answer() {
     let (http, _, _) = relay().await;
     let (a, b) = (Node::new(http, 1).await, Node::new(http, 2).await);
     assert_eq!(a.ask(Ask::Found), Answer::Done);
     join(&a, &b);
-    assert_eq!(b.fleet.scrub_grace(), None);
-    assert_eq!(b.ask(Ask::Scrub), Answer::Done);
-    let left = b.fleet.scrub_grace().unwrap();
+    assert_eq!(b.fleet.scrub_grace(4022), None);
+    assert_eq!(
+        b.ask(Ask::Scrub {
+            session: Some(4022)
+        }),
+        Answer::Done
+    );
+    let left = b.fleet.scrub_grace(4022).unwrap();
     assert!(left > Duration::ZERO && left <= SCRUB_GRACE);
+    // Any other session ends at once.
+    assert_eq!(b.fleet.scrub_grace(4023), None);
+    // In a fleet again, no session keeps anything.
+    assert_eq!(b.ask(Ask::Found), Answer::Done);
+    assert_eq!(b.fleet.scrub_grace(4022), None);
+}
+
+#[test]
+fn a_fleet_session_is_named_by_its_loopback_client_port() {
+    assert_eq!(
+        loopback_client_port("127.0.0.1 51234 127.0.0.1 22"),
+        Some(51234)
+    );
+    assert_eq!(loopback_client_port("::1 51234 ::1 22"), Some(51234));
+    // A session from elsewhere is no fleet session.
+    assert_eq!(loopback_client_port("192.0.2.7 51234 192.0.2.1 22"), None);
+    assert_eq!(loopback_client_port("garbage"), None);
+}
+
+#[test]
+fn a_scrub_with_no_session_keeps_its_wire_shape() {
+    // An older Sheprd asks without a session, and gets the same answer.
+    let older: Ask = serde_json::from_str(r#"{"ask":"scrub"}"#).unwrap();
+    assert_eq!(older, Ask::Scrub { session: None });
+    assert_eq!(
+        serde_json::to_string(&Ask::Scrub { session: None }).unwrap(),
+        r#"{"ask":"scrub"}"#
+    );
 }

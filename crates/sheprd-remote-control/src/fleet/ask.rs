@@ -126,8 +126,8 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
                 intro: sync::text(&intro.to_bytes()?),
             })
         }
-        Ask::Scrub => {
-            super::scrub::live(state, fleet)?;
+        Ask::Scrub { session } => {
+            super::scrub::live(state, fleet, session)?;
             Ok(Answer::Done)
         }
         Ask::Seen { intro } => {

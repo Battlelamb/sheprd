@@ -42,3 +42,33 @@ fn a_machine_whose_key_is_not_checked_is_asked_rarely() {
     };
     assert!(!link.due(&mine, now));
 }
+
+fn held(fleet: [u8; 32]) -> sheprd_relay_agent::fleet::Report {
+    sheprd_relay_agent::fleet::Report {
+        allowed: 1,
+        denied: 0,
+        digest: String::new(),
+        fleet: sheprd_relay_agent::access::Id(fleet),
+        removed: 0,
+        revoked: Vec::new(),
+        suspended: Default::default(),
+    }
+}
+
+#[test]
+fn an_agent_whose_fleet_access_was_removed_is_not_brought_back_by_a_sync() {
+    let ours = "ab".repeat(32);
+    // `fleet scrub` left the agent in no fleet: only a person shares it.
+    assert_eq!(
+        crate::fleet::plain::not_ours(None, &ours),
+        Some(Standing::NoDaemon)
+    );
+    assert_eq!(
+        crate::fleet::plain::not_ours(Some(&held([0xcd; 32])), &ours),
+        Some(Standing::Outside)
+    );
+    assert_eq!(
+        crate::fleet::plain::not_ours(Some(&held([0xab; 32])), &ours),
+        None
+    );
+}

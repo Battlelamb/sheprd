@@ -89,13 +89,17 @@ pub(crate) fn share(
                     let user = agent::user(&host, &cancelled)?;
                     let report = agent::install(&host, &installing, &cancelled)?;
                     let known = known_keys(&target)?;
-                    // The key that names the host must be the one it
-                    // negotiates, not only one it says it has.
-                    let first = report.ssh_host_keys.first().ok_or(Error::HostKey)?;
-                    if !sheprd_client::confirm_host_key(&target, first).map_err(Error::Trust)? {
-                        return Err(Error::HostKey);
+                    // Every key the record carries must be one the host
+                    // negotiates in a strictly checked session, which also
+                    // honours the user's `RevokedHostKeys`, not only one
+                    // known_hosts lists and the host says it has.
+                    let mut confirmed = Vec::new();
+                    for key in agent::trusted_keys(&report.ssh_host_keys, &known) {
+                        if sheprd_client::confirm_host_key(&target, &key).map_err(Error::Trust)? {
+                            confirmed.push(key);
+                        }
                     }
-                    Ok::<_, Error>((report, user, known))
+                    Ok::<_, Error>((report, user, confirmed))
                 })
                 .await?;
             let intro = agent::intro(&report, &known, &label, &user, &relays, now_ms())?;
@@ -149,12 +153,8 @@ pub(super) async fn sync(
     let Some(report) = report else {
         return Ok(Standing::NoDaemon);
     };
-    if report
-        .fleet
-        .as_ref()
-        .is_some_and(|held| held.fleet.0 != fleet_bytes(&view.fleet))
-    {
-        return Ok(Standing::Outside);
+    if let Some(standing) = not_ours(report.fleet.as_ref(), &view.fleet) {
+        return Ok(standing);
     }
     let reported = report.ssh_host_keys.clone();
     let known = executor.spawn(async move { known_keys(&target) }).await?;
@@ -217,6 +217,21 @@ fn now_ms() -> u64 {
         .map_or(0, |since| {
             u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
         })
+}
+
+/// Where an agent holding `held` stands when it is not this fleet's to
+/// keep current: one in no fleet, such as one whose fleet access was
+/// removed (`fleet scrub`), is shared again only when a person asks; one
+/// in another fleet is outside. `None` for an agent of `fleet`.
+pub(crate) fn not_ours(
+    held: Option<&sheprd_relay_agent::fleet::Report>,
+    fleet: &str,
+) -> Option<Standing> {
+    match held {
+        None => Some(Standing::NoDaemon),
+        Some(held) if held.fleet.0 != fleet_bytes(fleet) => Some(Standing::Outside),
+        Some(_) => None,
+    }
 }
 
 /// A fleet id's bytes from its hex; zeros for one that is not.

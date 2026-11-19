@@ -89,9 +89,25 @@ Darwin)
     "<key>ProgramArguments</key><array><string>$agent</string><string>run</string>{plist_args}</array>" \
     '<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>' \
     '</dict></plist>' > "$plist.part"
-  mv -f "$plist.part" "$plist"
-  launchctl bootout "gui/$(id -u)/{LABEL}" >/dev/null 2>&1 || true
-  launchctl bootstrap "gui/$(id -u)" "$plist" >&2
+  job="gui/$(id -u)/{LABEL}"
+  if cmp -s "$plist.part" "$plist" && launchctl print "$job" >/dev/null 2>&1; then
+    # The same job is loaded: restart it in place, so the new build runs
+    # and the agent is never unloaded.
+    rm -f "$plist.part"
+    launchctl kickstart -k "$job" >&2
+  else
+    mv -f "$plist.part" "$plist"
+    launchctl bootout "$job" >/dev/null 2>&1 || true
+    # `bootout` can return before the old job is gone, and a `bootstrap`
+    # sent until then fails: try again for a while rather than leave no
+    # service.
+    tries=0
+    until launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null; do
+      tries=$((tries + 1))
+      if [ "$tries" -ge 10 ]; then launchctl bootstrap "gui/$(id -u)" "$plist" >&2; break; fi
+      sleep 1
+    done
+  fi
   ;;
 *)
   dir="${{XDG_CONFIG_HOME:-$HOME/.config}}/systemd/user"

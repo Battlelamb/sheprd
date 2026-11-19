@@ -78,6 +78,11 @@ fn the_service_runs_the_agent_on_each_relay_on_both_systems() {
     );
     assert!(script.contains("systemctl --user restart sheprd-relay-agent.service"));
     assert!(script.contains("launchctl bootstrap"));
+    // An unchanged, loaded job restarts in place; a new one is loaded,
+    // retried while the old one is still on its way out.
+    assert!(script.contains("launchctl kickstart -k \"$job\""));
+    assert!(script.contains("until launchctl bootstrap"));
+    assert!(script.contains("sleep 1"));
     assert!(script.trim_end().ends_with("\"$agent\" status --json"));
 }
 

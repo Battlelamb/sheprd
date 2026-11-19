@@ -61,3 +61,72 @@ async fn a_member_is_in_one_fleet() {
         Err(Error::InFleet)
     ));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn joining_supersedes_a_pairing_here_so_removal_takes_every_way_in() {
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    let (http, _, _) = relay().await;
+    let (mut a, b) = (Node::new(http, 1).await, Node::new(http, 2).await);
+    // b was paired with a over Bluetooth before the fleet: a desktop
+    // device on a with b's own tunnel and SSH keys.
+    let keys = crate::desktop::keys::Keys::load_or_create(b.dir.path()).unwrap();
+    let ssh = crate::desktop::keys::ssh_public_key(b.dir.path()).unwrap();
+    let phone_key = SigningKey::from_slice(&[9; 32]).unwrap();
+    let point = phone_key.verifying_key().to_sec1_point(false);
+    let legacy = crate::control::DeviceId("legacy".into());
+    a.state
+        .auth()
+        .devices_mut()
+        .add(
+            crate::auth::NewDevice {
+                app: None,
+                id: legacy.clone(),
+                name: "b over Bluetooth".into(),
+                public_key: crate::auth::PublicKey::parse(
+                    &URL_SAFE_NO_PAD.encode(point.as_bytes()),
+                )
+                .unwrap(),
+                relay: Some(crate::control::host_relay::Keys {
+                    dial: URL_SAFE_NO_PAD
+                        .encode(keys.dial.verifying_key().to_sec1_point(true).as_bytes()),
+                    tunnel: URL_SAFE_NO_PAD.encode(keys.tunnel.identity().x25519()),
+                }),
+                ssh: Some(crate::ssh_access::SshKey::parse(&ssh).unwrap()),
+            },
+            now_ms(),
+        )
+        .unwrap();
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    join(&a, &b);
+    a.fleet.receive(b.ops(), now_ms()).unwrap();
+    a.start().await;
+    // A bundle naming b's keys proves nothing: the pairing stays until b
+    // itself opens SSH through the fleet with them.
+    until(10, || a.lines().len() == 1).await;
+    assert!(a.state.auth().devices().get(&legacy).is_some());
+    grants::apply(&b.state, &b.fleet).unwrap();
+    let info = a.relays.info().unwrap();
+    let record = crate::desktop::record::Record {
+        computer: String::new(),
+        identity: info.identity,
+        relays: info.relays,
+        route: info.route,
+        fleet: true,
+    };
+    let host = sheprd_client::relay_host::host_name(&record.id().unwrap());
+    let mut opened = None;
+    for _ in 0..100 {
+        if let Ok(tunnel) = crate::desktop::connect::open(b.dir.path(), &host).await {
+            opened = Some(tunnel);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let (_connection, mut tunnel) = opened.expect("never let through");
+    let mut greeting = [0; 14];
+    tunnel.io.read_exact(&mut greeting).await.unwrap();
+    // Now the device proved it holds the key, and the fleet lets it in:
+    // its pairing goes, and removing it from the fleet removes every way
+    // in it had.
+    until(10, || a.state.auth().devices().get(&legacy).is_none()).await;
+}

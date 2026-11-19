@@ -111,6 +111,36 @@ pub(crate) fn apply(state: &State, fleet: &Fleet) -> Result<()> {
     write_records(fleet.state_dir(), &records)
 }
 
+/// Revokes the desktop paired here one by one, over Bluetooth, whose
+/// tunnel key is `tunnel`, once that device has proved it is a fleet member
+/// allowed here: it just finished the tunnel's handshake with that key and
+/// asked for SSH. The fleet lets it in now, and a pairing left beside it
+/// would outlive its removal from the fleet. Matching on a key the device
+/// proved, not on what a bundle claims, keeps a member from revoking a
+/// desktop by naming its public keys. Blocking.
+pub(crate) fn supersede(state: &State, tunnel: &[u8; 32]) -> Result<()> {
+    let mut auth = state.auth();
+    let paired: Vec<crate::control::DeviceId> = auth
+        .devices()
+        .records()
+        .iter()
+        .filter(|record| {
+            record.ssh.is_some()
+                && record
+                    .relay
+                    .as_ref()
+                    .and_then(|relay| relay.tunnel_key())
+                    .is_some_and(|key| key == *tunnel)
+        })
+        .map(|record| record.id.clone())
+        .collect();
+    for device in paired {
+        tracing::info!("the fleet now lets in a desktop paired here; its own pairing goes");
+        auth.revoke(&device)?;
+    }
+    Ok(())
+}
+
 /// One line per computer member allowed on this computer, tagged with the
 /// fleet's and the member's short ids.
 fn lines(state: &Log, fleet: &str, me: &MemberId, suspended: &[MemberId]) -> Vec<(String, SshKey)> {

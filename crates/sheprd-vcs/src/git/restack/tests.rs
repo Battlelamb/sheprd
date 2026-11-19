@@ -262,3 +262,16 @@ fn edits_are_refused_rather_than_stashed_and_the_fetched_base_is_forgotten() {
     let refs = git_in(dir, &["for-each-ref", "refs/sheprd"]);
     assert_eq!(refs, "", "the action's own ref is deleted");
 }
+
+#[test]
+fn every_restack_fetches_into_a_ref_of_its_own() {
+    let first = onto_ref();
+    let second = onto_ref();
+    assert_ne!(first, second);
+    assert!(first.starts_with("refs/sheprd/restack/"));
+    assert!(
+        first
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"/-".contains(&byte))
+    );
+}

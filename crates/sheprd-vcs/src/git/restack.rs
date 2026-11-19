@@ -56,8 +56,19 @@ impl From<Restacked> for Outcome {
     }
 }
 
-/// Where the stack's base is fetched for one restack, then deleted.
-const ONTO_REF: &str = "refs/sheprd/restack-onto";
+/// Where restacks fetch the stack's base, each into a ref of its own.
+const ONTO_PREFIX: &str = "refs/sheprd/restack";
+
+/// A ref name no other restack uses: refs are shared by every worktree of a
+/// repository, and each window runs its own Git worker.
+fn onto_ref() -> String {
+    static COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let count = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{ONTO_PREFIX}/{}-{nanos}-{count}", std::process::id())
+}
 
 pub(super) fn restack(
     checkout: &str,
@@ -87,8 +98,10 @@ pub(super) fn restack(
         .name();
     // The base lands in a ref of this action's own, and the rebase names the
     // commit it captured: a fetch run elsewhere in this checkout meanwhile
-    // rewrites `FETCH_HEAD`, never this.
-    let refspec = format!("+refs/heads/{base}:{ONTO_REF}");
+    // rewrites `FETCH_HEAD`, and a restack in another worktree its own ref,
+    // never this one.
+    let onto_ref = onto_ref();
+    let refspec = format!("+refs/heads/{base}:{onto_ref}");
     git(
         checkout,
         &["fetch", "--no-tags", remote, &refspec],
@@ -98,14 +111,14 @@ pub(super) fn restack(
     )?;
     let onto = git(
         checkout,
-        &["rev-parse", "--verify", &format!("{ONTO_REF}^{{commit}}")],
+        &["rev-parse", "--verify", &format!("{onto_ref}^{{commit}}")],
         "read the stack's base",
         deadline,
         cancelled,
     );
     let _ = git(
         checkout,
-        &["update-ref", "-d", ONTO_REF],
+        &["update-ref", "-d", &onto_ref],
         "forget the fetched base",
         deadline,
         cancelled,

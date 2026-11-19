@@ -49,7 +49,7 @@ struct FleetRouteTests {
             record: Base64URL.encode(try FleetTests.hex(fixture["message"])),
             signature: Base64URL.encode(try FleetTests.hex(fixture["signature"]))
         )
-        let relay = try #require(route.verified())
+        let relay = try #require(route.verified()).relay
         #expect(!relay.relays.isEmpty && !relay.route.isEmpty && !relay.identity.isEmpty)
         // Another host's id: its certificate does not hash to it.
         let elsewhere = API.FleetRoute(
@@ -96,6 +96,32 @@ struct FleetRouteTests {
         #expect(foreign.verified() == nil)
         // Not linked: no route at all.
         #expect(Self.status([]).relayRecord(for: host.id.hexString, keys: RelayKeyPair()) == nil)
+    }
+
+    @Test func onlyANewerRecordReplacesSavedRelays() throws {
+        let host = Host()
+        let keys = RelayKeyPair()
+        let id = host.id.hexString
+        let saved = try #require(Self.status([try host.route(host.record(rev: 5))]).relayRecord(for: id, keys: keys))
+        #expect(saved.signedRev == 5 && saved.signedMs == 1)
+        // The same rev, or an older one a computer serves again, is refused,
+        // whatever relays it names.
+        for rev: UInt64 in [5, 4, 0] {
+            let older = Self.status([try host.route(host.record(rev: rev))])
+            #expect(older.relayRecord(for: id, keys: keys, replacing: saved) == nil)
+        }
+        let newer = try #require(
+            Self.status([try host.route(host.record(rev: 6))]).relayRecord(for: id, keys: keys, replacing: saved)
+        )
+        #expect(newer.signedRev == 6)
+        // Relays a computer told the phone itself carry no rev: any checked
+        // record replaces them.
+        var direct = saved
+        direct.signedRev = nil
+        #expect(Self.status([try host.route(host.record(rev: 1))]).relayRecord(for: id, keys: keys, replacing: direct) != nil)
+        // Kept across launches.
+        let decoded = try JSONDecoder().decode(RelayRecord.self, from: JSONEncoder().encode(newer))
+        #expect(decoded.signedRev == 6 && decoded.signedMs == 1)
     }
 
     @Test func routesDecode() throws {

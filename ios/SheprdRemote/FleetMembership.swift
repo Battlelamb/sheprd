@@ -218,16 +218,15 @@ final class FleetMembership {
 
     /// Gives each computer this phone linked the relays its host's own
     /// signed record names (`FleetRoute.verified`), when it has none or
-    /// they moved: a later record replaces a saved one, so a host that
-    /// changed relays is followed.
+    /// the record is newer than the one its relays came from: a host that
+    /// changed relays is followed, and an older record served again is
+    /// refused.
     private func route(_ status: API.FleetStatus) {
         guard let keys = relayKeys else { return }
         for computer in computers() where computer.via != nil && computer.device.hasPrefix("fleet-") {
             let host = computer.fingerprint.hex.lowercased()
             guard status.links.contains(host),
-                  let info = status.relay(for: host),
-                  computer.relay.map({ !$0.matches(info) }) ?? true,
-                  let relay = RelayRecord.make(from: info, keys: keys)
+                  let relay = status.relayRecord(for: host, keys: keys, replacing: computer.relay)
             else { continue }
             var routed = computer
             routed.relay = relay

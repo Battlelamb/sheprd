@@ -1950,8 +1950,9 @@ manual multi-machine and phone steps left unticked in its QA list.
      at once; a `Rotate` moves them, and they go with the device. Keys
      another device or member holds, or a member proved here, are never
      set, and keys the phone later sends itself stay. `Devices` holds each
-     relay key on one record only: a device paired here takes keys from
-     a fleet-admitted one, and every other clash is refused.
+     relay key on one record only and refuses every clash, a fleet
+     device's keys included: posting public keys proves nothing about
+     holding them.
    - **Built, the phone:** `FleetClient` in `SheprdRemoteCore`, checked
      against a new phone vector; a Secure Enclave key with user presence
      (a software key in the simulator only); "Join" after pairing with a
@@ -1961,7 +1962,7 @@ manual multi-machine and phone steps left unticked in its QA list.
      record (its route, relays, and identity, from the host's own record
      once the phone checked its CA's signature against the host id it
      pins, with the bundle's relay keys, kept in the Keychain; a later
-     checked record replaces it), so
+     checked record replaces it only when its `rev` is higher), so
      the relay race reaches it as it reaches computers paired directly.
    - **Left:** the
      phone's own copy of the log, so it checks what it signs on rather

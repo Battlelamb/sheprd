@@ -98,14 +98,14 @@ async fn keys_the_phone_sent_itself_stay() {
 }
 
 #[tokio::test]
-async fn a_device_paired_later_takes_its_keys_back() {
+async fn a_device_paired_later_cannot_take_a_linked_phones_keys() {
     let a = founded().await;
     let phone = Phone::new(7);
     admit(&a, &phone);
     link(&a, &phone, 20);
     apply(&a);
-    // A phone paired here directly sends these keys over its own session:
-    // the bundle named them, but they are its own.
+    // Another device posts the bundle's public keys: that proves nothing
+    // about holding them, so the linked phone keeps them.
     let (_, public_key) = links::device_id(&device_key(30)).unwrap();
     let direct = crate::control::DeviceId("direct".into());
     let mut auth = a.state.auth();
@@ -122,15 +122,13 @@ async fn a_device_paired_later_takes_its_keys_back() {
             now_ms(),
         )
         .unwrap();
-    auth.devices_mut()
-        .set_relay(&direct, bundle_keys(&phone), now_ms())
-        .unwrap();
+    assert!(matches!(
+        auth.devices_mut()
+            .set_relay(&direct, bundle_keys(&phone), now_ms()),
+        Err(crate::auth::Error::RelayKeysTaken)
+    ));
     drop(auth);
-    assert_eq!(device(&a, 20).unwrap().relay, None);
-    // The fleet does not put them back.
-    a.fleet.bump();
-    apply(&a);
-    assert_eq!(device(&a, 20).unwrap().relay, None);
+    assert_eq!(device(&a, 20).unwrap().relay, Some(bundle_keys(&phone)));
 }
 
 #[tokio::test]

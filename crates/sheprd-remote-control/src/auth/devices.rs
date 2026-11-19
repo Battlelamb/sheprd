@@ -167,10 +167,7 @@ impl Devices {
         links: Vec<Link>,
         share_github: bool,
     ) -> Result<()> {
-        let cleared = match &device.relay {
-            Some(keys) => self.make_room(&device.id, via.as_deref(), keys)?,
-            None => Vec::new(),
-        };
+        self.ensure_relay_free(&device.id, device.relay.as_ref())?;
         self.records.push(DeviceRecord {
             app: device.app,
             id: device.id,
@@ -189,7 +186,6 @@ impl Devices {
         });
         self.save_or_undo(|devices| {
             devices.records.pop();
-            devices.restore(cleared);
         })
     }
 
@@ -300,8 +296,7 @@ impl Devices {
 
     /// Replaces the device's relay keys with `keys`, or drops them with
     /// `None`, set at `now_ms`; whether it is paired. Keys another device
-    /// holds are refused, unless a device the fleet admitted holds them
-    /// and this one was paired here ([`relay_keys`]). Blocking.
+    /// holds are refused ([`relay_keys`]). Blocking.
     pub(crate) fn replace_relay(
         &mut self,
         id: &DeviceId,
@@ -311,11 +306,7 @@ impl Devices {
         let Some(index) = self.records.iter().position(|record| &record.id == id) else {
             return Ok(false);
         };
-        let via = self.records[index].via.clone();
-        let cleared = match &keys {
-            Some(keys) => self.make_room(id, via.as_deref(), keys)?,
-            None => Vec::new(),
-        };
+        self.ensure_relay_free(id, keys.as_ref())?;
         let record = &mut self.records[index];
         let set_ms = keys.is_some().then_some(now_ms);
         let before = (
@@ -326,7 +317,6 @@ impl Devices {
             if let Some(record) = devices.records.get_mut(index) {
                 (record.relay, record.relay_ms) = before;
             }
-            devices.restore(cleared);
         })?;
         Ok(true)
     }

@@ -54,15 +54,22 @@ extension API {
         /// (`FleetRoute.verified`): nil unless the host is linked and its
         /// certificate authority, whose hash is the host id this phone
         /// pins, signed the record.
-        public func relay(for host: String) -> RelayInfo? {
+        public func relay(for host: String) -> FleetRecord? {
             routes.first { $0.host.lowercased() == host.lowercased() }?.verified()
         }
 
         /// How this phone reaches `host` through its relays with `keys`, its
         /// fleet bundle's: nil unless `relay(for:)` checks out and names
-        /// relays.
-        public func relayRecord(for host: String, keys: RelayKeyPair) -> RelayRecord? {
-            relay(for: host).flatMap { RelayRecord.make(from: $0, keys: keys) }
+        /// relays, or when `saved` came from a record at least as new. A
+        /// record's `rev` only goes up, so a computer serving an older one
+        /// again cannot roll the phone back.
+        public func relayRecord(for host: String, keys: RelayKeyPair, replacing saved: RelayRecord? = nil) -> RelayRecord? {
+            guard let checked = relay(for: host) else { return nil }
+            if let savedRev = saved?.signedRev, checked.rev <= savedRev { return nil }
+            guard var record = RelayRecord.make(from: checked.relay, keys: keys) else { return nil }
+            record.signedRev = checked.rev
+            record.signedMs = checked.signedMs
+            return record
         }
 
         /// The direct addresses `host` publishes, as `https://` origins.
@@ -172,7 +179,7 @@ extension API {
         /// `host`, holds the key, and that key signed a record for `host`;
         /// nil otherwise. The same checks a member makes on a host's
         /// `HostSeen` (`HostIntro.vouches`, `Ca::check`).
-        public func verified() -> RelayInfo? {
+        public func verified() -> FleetRecord? {
             guard let id = Fleet.data(hex: host),
                   let certificate = Base64URL.decode(certificate),
                   let key = Base64URL.decode(key), key.count == 65, key.first == 0x04,
@@ -190,8 +197,19 @@ extension API {
             guard let record = try? Fleet.SelfRecord.read(&reader), (try? reader.finish()) != nil,
                   record.host == id
             else { return nil }
-            return RelayInfo(identity: record.identity, relays: record.relays, route: record.route)
+            return FleetRecord(
+                relay: RelayInfo(identity: record.identity, relays: record.relays, route: record.route),
+                rev: record.rev, signedMs: record.signedMs
+            )
         }
+    }
+
+    /// A linked host's relays from its checked record, with the record's
+    /// `rev` and signing time.
+    public struct FleetRecord: Equatable, Sendable {
+        public let relay: RelayInfo
+        public let rev: UInt64
+        public let signedMs: UInt64
     }
 
     public struct FleetReach: Decodable, Equatable, Sendable {

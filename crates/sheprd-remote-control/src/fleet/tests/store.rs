@@ -84,3 +84,19 @@ async fn an_answer_carries_what_the_caller_lacks() {
         .unwrap();
     assert_eq!(b.view().hosts, a.view().hosts);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_peers_file_that_does_not_read_is_an_error() {
+    let (http, _, _) = relay().await;
+    let a = Node::new(http, 1).await;
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    std::fs::write(
+        a.dir.path().join("fleet/peers.json"),
+        b"{\"unconfirmed\": [1]}",
+    )
+    .unwrap();
+    assert!(matches!(
+        Fleet::load(a.dir.path(), now_ms()),
+        Err(Error::Peers)
+    ));
+}

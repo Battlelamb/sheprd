@@ -25,6 +25,8 @@ pub enum Error {
     NotApplied,
     #[error("that bundle is not this computer's")]
     NotMine,
+    #[error("the fleet's peers file does not read")]
+    Peers,
     #[error(transparent)]
     SshAccess(#[from] crate::ssh_access::Error),
     #[error(transparent)]

@@ -127,6 +127,10 @@ pub async fn run(options: Options) -> Result<()> {
         Ok(fleet) => Some(Arc::new(fleet)),
         Err(error) => {
             tracing::warn!(%error, "Could not load the fleet; it stays off until the daemon restarts");
+            // Fail closed: what the fleet let in here goes until it loads.
+            if let Ok(access) = auth.ssh_access() {
+                let _ = access.keys.set_fleet(&[]);
+            }
             None
         }
     };

@@ -244,3 +244,47 @@ async fn a_suspension_ends_with_its_signer_and_never_cuts_off_this_computer() {
     })
     .await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_suspended_member_cannot_lift_its_own_suspension() {
+    let (a, b, c) = quiet().await;
+    until(10, || b.lines().len() == 2).await;
+    let (intro, _) = {
+        let other = Node::new("127.0.0.1:9".parse().unwrap(), 9).await;
+        (me::intro(&other.state, now_ms()).unwrap(), other)
+    };
+    let mut intro = intro;
+    intro.kind = HostKind::Sheprd;
+    a.fleet.sign(Body::HostAdd(intro), now_ms()).unwrap();
+    remove(&a, &c);
+    let removal = a
+        .ops()
+        .into_iter()
+        .find(|op| matches!(op.body(), Body::Remove(_)))
+        .unwrap();
+    b.fleet.receive(vec![removal], now_ms()).unwrap();
+    assert_eq!(b.fleet.suspended(), vec![c.fleet.me()]);
+    // c, suspended on b, removes a, whose removal suspends it.
+    let counter = {
+        let inner = c.fleet.inner();
+        inner
+            .log
+            .as_ref()
+            .unwrap()
+            .draft(c.fleet.me(), now_ms(), remove_body_of(&a))
+            .sign(c.fleet.key())
+            .unwrap()
+    };
+    b.fleet.receive(vec![counter], now_ms()).unwrap();
+    assert!(!has(&b, &a));
+    assert_eq!(b.fleet.suspended(), vec![c.fleet.me()]);
+}
+
+fn remove_body_of(member: &Node) -> Body {
+    Body::Remove(Remove {
+        member: member.fleet.me(),
+        also_members: Vec::new(),
+        also_hosts: Vec::new(),
+        reason: Reason::Compromised,
+    })
+}

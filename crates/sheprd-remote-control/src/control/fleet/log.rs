@@ -207,6 +207,20 @@ impl Log {
         wanted
     }
 
+    /// Who signed a removal of `member` among the operations held, whether
+    /// or not it took effect.
+    #[must_use]
+    pub fn removers(&self, member: &MemberId) -> Vec<MemberId> {
+        self.ops
+            .values()
+            .filter(|op| match op.body() {
+                Body::Remove(remove) => remove.targets().any(|target| target == member),
+                _ => false,
+            })
+            .map(Op::signer)
+            .collect()
+    }
+
     /// Whether `member` is live in this log.
     #[must_use]
     pub fn is_member(&self, member: &MemberId) -> bool {

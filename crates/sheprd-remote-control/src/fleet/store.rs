@@ -64,8 +64,12 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
     let log = read_bounded(&path(state_dir, LOG), saved::MAX_SAVED as u64)?
         .map(|bytes| saved::decode(&bytes, now_ms))
         .transpose()?;
+    // A file that no longer reads is an error, never an empty one: it may
+    // hold suspensions, and dropping them would let their targets back in.
     let peers: Peers = read_bounded(&path(state_dir, PEERS), MAX_PEERS)?
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .map(|bytes| serde_json::from_slice(&bytes))
+        .transpose()
+        .map_err(|_| Error::Peers)?
         .unwrap_or_default();
     Ok(Inner {
         log,

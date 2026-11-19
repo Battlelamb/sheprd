@@ -124,8 +124,7 @@ impl Fleet {
             .unconfirmed
             .values()
             .filter(|kept| {
-                log.is_member(&kept.signer)
-                    && now.saturating_sub(kept.since_ms) <= UNCONFIRMED_TTL_MS
+                standing(log, kept) && now.saturating_sub(kept.since_ms) <= UNCONFIRMED_TTL_MS
             })
             .flat_map(|kept| kept.targets.iter().copied())
             .collect();
@@ -295,9 +294,21 @@ fn settle_unconfirmed(inner: &mut Inner, now_ms: u64) {
     }
     inner.unconfirmed.retain(|id, kept| {
         log.get(id).is_none()
-            && log.is_member(&kept.signer)
+            && standing(log, kept)
             && now_ms.saturating_sub(kept.since_ms) <= UNCONFIRMED_TTL_MS
     });
+}
+
+/// Whether a suspension still stands: its signer is a member, or was
+/// removed by one of the members it suspends. A suspended member cannot
+/// lift its own suspension by removing whoever signed it; the history,
+/// once it arrives, settles both removals.
+fn standing(log: &Log, kept: &Unconfirmed) -> bool {
+    log.is_member(&kept.signer)
+        || log
+            .removers(&kept.signer)
+            .iter()
+            .any(|remover| kept.targets.contains(remover))
 }
 
 fn member_id(key: &SigningKey) -> MemberId {

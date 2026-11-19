@@ -296,6 +296,7 @@ impl OrchestratorView {
                         fl!("orchestrator-merge-menu"),
                         false,
                     )
+                    .debug_selector(|| "orchestrator-detail-merge".into())
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.merge_open = !this.merge_open;
                         cx.notify();

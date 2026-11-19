@@ -206,6 +206,7 @@ fn stack_info(pr: &PullRequest) -> Option<StackInfo> {
     let (verdict, ready, blocked) = match stack.verdict(position) {
         Verdict::Merged => ("merged", None, None),
         Verdict::Ready { count } => ("ready", Some(count), None),
+        Verdict::Unread => ("unread", None, None),
         Verdict::Blocked { number, blocker } => ("blocked", None, Some((number, blocker))),
     };
     Some(StackInfo {
@@ -439,8 +440,10 @@ pub(super) fn refusal(pr: &PullRequest, change: PrChange) -> Option<String> {
                 "The stack cannot merge yet: #{blocking} is {}",
                 blocker.key().replace('_', " ")
             )),
+            Some(Verdict::Unread) => Some(unread(number)),
             _ => None,
         },
+        PrChange::Queue(QueueOp::Add) if !pr.stack_known() => Some(unread(number)),
         PrChange::Queue(QueueOp::Add) if !pr.merge_queue => {
             Some(format!("#{number}'s base branch has no merge queue"))
         }
@@ -452,4 +455,13 @@ pub(super) fn refusal(pr: &PullRequest, change: PrChange) -> Option<String> {
         }
         PrChange::Queue(_) => None,
     }
+}
+
+/// Why a stack with a layer this reader could not see is not landed from
+/// here: the confirmation could not name everything GitHub would land.
+fn unread(number: u64) -> String {
+    format!(
+        "Not every pull request below #{number} in its stack could be read, so what would land \
+         is not known; check the stack on GitHub"
+    )
 }

@@ -166,7 +166,8 @@ pub struct StackInfo {
     pub size: u64,
     /// The pull request's own layer, from 1 at the bottom.
     pub position: u64,
-    /// `merged`, `ready`, or `blocked`.
+    /// `merged`, `ready`, `blocked`, or `unread` when a layer up to this
+    /// one was not read, so neither merged nor ready can be said.
     pub verdict: String,
     /// How many open layers merging here would land, when `ready`.
     pub ready: Option<usize>,

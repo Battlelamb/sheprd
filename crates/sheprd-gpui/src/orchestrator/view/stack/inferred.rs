@@ -3,8 +3,10 @@
 //! below, as `gh stack`, Graphite, or a person stacking by hand leaves them.
 //! Only the list already read is used, so nothing is asked of GitHub.
 //!
-//! A chain is followed only while it is unambiguous: a base two pull
-//! requests are opened from, or a head two build on, ends it there.
+//! A chain is followed only while each link is unambiguous at both ends:
+//! the lower pull request is the only one with that head, and the upper the
+//! only one opened onto it. A branch two pull requests build on ends the
+//! chain there, so every layer of a chain infers the same stack.
 
 use crate::{
     orchestrator::{CheckState, Item, PrStatus, Provider, Review},
@@ -30,7 +32,9 @@ pub(in crate::orchestrator::view) fn infer(
     let mut at = current;
     while below.len() + 1 < LAYER_LIMIT {
         let base = &at.pull_request.as_ref()?.base_ref;
-        let Some(next) = only(open.iter().copied().filter(|item| head(item) == Some(base))) else {
+        let Some(next) = only(open.iter().copied().filter(|item| head(item) == Some(base)))
+            .filter(|lower| linked(&open, lower, at))
+        else {
             break;
         };
         if next.key == current.key || below.iter().any(|seen| seen.key == next.key) {
@@ -43,7 +47,9 @@ pub(in crate::orchestrator::view) fn infer(
     let mut at = current;
     while below.len() + above.len() + 1 < LAYER_LIMIT {
         let tip = head(at)?;
-        let Some(next) = only(open.iter().copied().filter(|item| base(item) == Some(tip))) else {
+        let Some(next) = only(open.iter().copied().filter(|item| base(item) == Some(tip)))
+            .filter(|upper| linked(&open, at, upper))
+        else {
             break;
         };
         if next.key == current.key || below.iter().chain(&above).any(|seen| seen.key == next.key) {
@@ -80,15 +86,38 @@ pub(in crate::orchestrator::view) fn infer(
     ))
 }
 
-/// An open GitHub pull request whose head is in its own repository: a
-/// fork's branch names say nothing about this repository's branches.
+/// Whether `upper` is built on `lower` and on nothing else: `lower` is the
+/// only open pull request with `upper`'s base as its head, and `upper` the
+/// only one opened onto `lower`'s head.
+fn linked(open: &[&Item], lower: &Item, upper: &Item) -> bool {
+    let (Some(lower_head), Some(upper_base)) = (head(lower), base(upper)) else {
+        return false;
+    };
+    lower_head == upper_base
+        && only(
+            open.iter()
+                .copied()
+                .filter(|item| head(item) == Some(upper_base)),
+        )
+        .is_some_and(|found| found.key == lower.key)
+        && only(
+            open.iter()
+                .copied()
+                .filter(|item| base(item) == Some(lower_head)),
+        )
+        .is_some_and(|found| found.key == upper.key)
+}
+
+/// An open GitHub pull request whose head is known to be in its own
+/// repository: a fork's branch names, or those of a head GitHub no longer
+/// reports (a deleted fork), say nothing about this repository's branches.
 fn own_open(item: &Item) -> bool {
     item.key.source.provider == Provider::Github
         && matches!(item.state.as_str(), "open" | "draft")
         && item.pull_request.as_ref().is_some_and(|pr| {
             pr.head_repository
                 .as_deref()
-                .is_none_or(|head| head.eq_ignore_ascii_case(&item.key.source.repository))
+                .is_some_and(|head| head.eq_ignore_ascii_case(&item.key.source.repository))
         })
 }
 

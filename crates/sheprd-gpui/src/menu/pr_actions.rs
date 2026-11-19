@@ -505,7 +505,8 @@ impl SheprdWindow {
             );
             // A stacked pull request merges with the open layers below it.
             if pr.stack().is_some() {
-                let numbers = super::pr_queue::lands(&pr)
+                let numbers = pr
+                    .lands()
                     .iter()
                     .map(|number| format!("#{number}"))
                     .collect::<Vec<_>>()

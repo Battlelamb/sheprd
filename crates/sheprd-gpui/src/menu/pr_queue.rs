@@ -8,7 +8,6 @@ use crate::{
     SheprdWindow,
     i18n::fl,
     pr_actions::{Action, Landing},
-    pull_request::PullRequest,
 };
 use gpui::{prelude::*, *};
 use sheprd_control_protocol::protocol::hosts::QueueOp;
@@ -19,14 +18,6 @@ pub(crate) enum PrChange {
     /// The merge dialog, which lands the open layers below on a stack.
     Merge,
     Queue(QueueOp),
-}
-
-/// The pull requests merging or queueing `pr` lands, bottom first.
-pub(crate) fn lands(pr: &PullRequest) -> Vec<u64> {
-    match pr.stack() {
-        Some((stack, position)) => stack.landing(position).map(|layer| layer.number).collect(),
-        None => vec![pr.number],
-    }
 }
 
 impl SheprdWindow {
@@ -110,7 +101,7 @@ impl SheprdWindow {
         let numbers = pr
             .as_deref()
             .map(|pr| {
-                lands(pr)
+                pr.lands()
                     .iter()
                     .map(|number| format!("#{number}"))
                     .collect::<Vec<_>>()

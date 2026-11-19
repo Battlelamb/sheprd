@@ -20,6 +20,7 @@ mod agent_advice;
 mod agent_picker;
 mod agent_row_rescroll;
 mod attachments;
+mod auto_convert_typing;
 mod chats;
 mod code;
 mod code_options;

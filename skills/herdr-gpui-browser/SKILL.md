@@ -54,8 +54,9 @@ Tests :big[pass]: :huge[214 of 214]. :small[CI took 4 min.]
   `balloons`, `celebration`, `fireworks`, `love`, `lasers`, `echo`,
   `spotlight`, or `zap`, where pixel ships shoot down the message's letters)
   fills the chat pane for a moment, when long work finally succeeds. Never use them in routine replies.
-- Terminal views and the phone show the directives as plain text, so the reply
-  still reads well there.
+- The iPhone and iPad app draws them too (ink shows on a tap). Terminal views
+  and the phone web app show the directives as plain text, so the reply still
+  reads well there.
 
 For a small interactive selection, put a JSON document in a closed `herdr-ui`
 fence. The catalog supports native controls on Linux as well as macOS/Windows:
@@ -371,6 +372,7 @@ what Sheprd shows or keeps.
 | Run a command on a saved cloud machine (clone, build, commit, push) | `sheprd cloud exec ID --cwd ~/code/app -- git status` |
 | Delete saved cloud machines you are done with, then follow it | `sheprd cloud destroy ID... --json`, `sheprd cloud wait BATCH --timeout 600 --json` |
 | Check remote control and its daemon-host network interfaces, or pair a phone (Tailscale preferred; optionally choose an origin from status) | `sheprd remote status`, `sheprd remote pair [--address HTTPS_ORIGIN]` |
+| Keep this computer's listen token for a private relay (piped on stdin, never an argument), or forget it | `sheprd remote relays token ENDPOINT < FILE`, `sheprd remote relays token ENDPOINT --clear` |
 | Keep the machine awake during a long job | `sheprd caffeine on --for 2h` |
 | Check whether the app runs, and which windows and hosts it has | `sheprd status` |
 

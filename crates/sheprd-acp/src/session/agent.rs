@@ -217,6 +217,8 @@ impl<R: FnMut(Update)> Session<R> {
         if !options.is_empty() {
             self.emit(Change::Options { options });
         }
+        self.learn(loaded);
+        self.apply_deferred();
         self.projector.close();
         self.hand_over(loaded);
         self.status(Status::Idle);

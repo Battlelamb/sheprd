@@ -7,6 +7,7 @@
 mod agent;
 mod commands;
 mod harness;
+mod known;
 mod pictures;
 mod thread;
 
@@ -119,6 +120,9 @@ pub(crate) enum Update {
     /// A prompt just sent to the agent, as the transcript shows it, which
     /// names the pane and its tab.
     Prompt(String),
+    /// A new session of this built-in agent offered these settings, which
+    /// differ from those known for it: kept for its next start.
+    Settings(Agent, crate::known::Settings),
 }
 
 pub(crate) struct Config {
@@ -134,6 +138,8 @@ pub(crate) struct Config {
     /// The conversation so far, for a continued session whose agent does
     /// not replay it.
     pub history: Option<Transcript>,
+    /// The settings each built-in agent offered last, shown while it starts.
+    pub known: crate::known::Known,
     pub load: Option<String>,
     pub login_hint: Option<String>,
     pub pane: Option<String>,
@@ -178,6 +184,8 @@ pub(crate) struct Session<R: FnMut(Update)> {
     config: Config,
     /// What the agent has been told besides the person's words.
     context: Context,
+    /// Settings picked while the agent started, sent once its session opens.
+    deferred: Vec<known::Deferred>,
     epoch: Uuid,
     handled: VecDeque<(CommandId, Option<Rejection>)>,
     /// The agent process heard now.
@@ -221,6 +229,7 @@ impl<R: FnMut(Update)> Session<R> {
             available,
             current: config.harness,
         });
+        known::seed(&config.known, config.harness, &mut transcript);
         let thread = thread::Thread::new(config.harness, &transcript.entries);
         let projector = transcript
             .entries
@@ -245,6 +254,7 @@ impl<R: FnMut(Update)> Session<R> {
             asked: HashMap::new(),
             config,
             context,
+            deferred: Vec::new(),
             epoch: Uuid::new_v4(),
             handled: VecDeque::new(),
             harness: HarnessId::default(),

@@ -339,6 +339,7 @@ pub(crate) fn run_owned(
         }
         None => crate::context::Prompts::default(),
     };
+    let settings_dir = crate::known::dir();
     let config = Config {
         agent: agent.display,
         choices: harness.filter(|_| options.choose).map(choices),
@@ -346,6 +347,10 @@ pub(crate) fn run_owned(
         exit_with_agent: options.headless,
         harness,
         history,
+        known: settings_dir
+            .as_deref()
+            .map(crate::known::load)
+            .unwrap_or_default(),
         load: options.load,
         login_hint: agent.login_hint,
         pane: target.map(|target| target.pane),
@@ -384,6 +389,16 @@ pub(crate) fn run_owned(
                 Update::Prompt(prompt) => {
                     if let Some(report) = &report {
                         report.prompt(prompt);
+                    }
+                }
+                Update::Settings(agent, settings) => {
+                    if let Some(dir) = &settings_dir
+                        && let Err(error) = crate::known::save(dir, agent, &settings)
+                    {
+                        eprintln!(
+                            "sheprd-acp: could not keep {}'s settings: {error:#}",
+                            agent.name()
+                        );
                     }
                 }
             });

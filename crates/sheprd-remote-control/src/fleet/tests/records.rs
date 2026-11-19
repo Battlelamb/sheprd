@@ -190,3 +190,43 @@ async fn a_host_claiming_another_hosts_route_changes_nothing() {
     grants::apply(&b.state, &b.fleet).unwrap();
     assert_eq!(own(&b), before);
 }
+
+#[test]
+fn a_failed_refresh_keeps_a_granted_hosts_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let kept = record("identity-one", true);
+    let id = kept.id().unwrap();
+    grants::write_records(
+        dir.path(),
+        &[(kept.clone(), keys())],
+        &grants::Routes::default(),
+    )
+    .unwrap();
+    // Its known hosts cannot be written: a directory stands there.
+    let known = sheprd_client::relay_host::known_hosts(
+        dir.path(),
+        &sheprd_client::relay_host::host_name(&id),
+    );
+    std::fs::remove_file(&known).unwrap();
+    std::fs::create_dir(&known).unwrap();
+    std::fs::write(known.join("blocker"), b"").unwrap();
+    let moved = record("identity-two", true);
+    assert!(
+        grants::write_records(
+            dir.path(),
+            &[(moved.clone(), keys())],
+            &grants::Routes::default()
+        )
+        .is_err()
+    );
+    // Still granted, so not cleaned up; the error lets the write be retried.
+    assert!(Record::load(dir.path(), &id).is_ok());
+    std::fs::remove_dir_all(&known).unwrap();
+    grants::write_records(
+        dir.path(),
+        &[(moved.clone(), keys())],
+        &grants::Routes::default(),
+    )
+    .unwrap();
+    assert_eq!(Record::load(dir.path(), &id).unwrap(), moved);
+}

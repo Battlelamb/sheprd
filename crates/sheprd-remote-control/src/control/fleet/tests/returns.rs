@@ -104,3 +104,99 @@ fn a_rotation_after_pruning_claims_its_new_route() {
     both(&mut pruned, &mut whole, &b, Body::HostAdd(other.clone()));
     assert!(pruned.state().hosts[&other.id().unwrap()].held);
 }
+
+#[test]
+fn a_deny_on_either_concurrent_addition_counts() {
+    let (log, a, b, c) = three();
+    let host = plain_host(40).id().unwrap();
+    let before = log.heads().to_vec();
+    let next = |member: &Device| log.state().members[&member.id()].seq + 1;
+    let by_a = sign_on(&log, &a, &before, next(&a), Body::HostAdd(plain_host(40)));
+    let by_b = sign_on(&log, &b, &before, next(&b), Body::HostAdd(plain_host(40)));
+    for (on, by) in [(&by_a, &a), (&by_b, &b)] {
+        let mut log = copy(&log);
+        apply(&mut log, by_a.clone());
+        apply(&mut log, by_b.clone());
+        // Signed having seen only one of the two additions.
+        let rev = log.state().access_rev + 1;
+        let deny = sign_on(
+            &log,
+            by,
+            &[on.id()],
+            next(by) + 1,
+            Body::Access(Access {
+                host,
+                member: c.id(),
+                allow: false,
+                rev,
+            }),
+        );
+        apply(&mut log, deny);
+        assert!(!log.state().allowed(&host, &c.id()));
+    }
+}
+
+#[test]
+fn a_rotation_keeps_the_route_decisions_before_it() {
+    let (mut log, a, b, c) = three();
+    let own = c.bundle.host.as_ref().unwrap();
+    // Another host on c's route, added after c named it: held.
+    let (mut other, other_ca) = ca_host(41, HostKind::Sheprd);
+    other.record.route = own.record.route.clone();
+    other.record_signature = Some(raw_signature(&other_ca, &other.record.message().unwrap()));
+    act(&mut log, &b, Body::HostAdd(other.clone()));
+    let other_id = other.id().unwrap();
+    let own_id = own.id().unwrap();
+    assert!(log.state().hosts[&other_id].held);
+    assert!(!log.state().hosts[&own_id].held);
+    let (mut pruned, mut whole) = split(&mut log, &a);
+    let mut rotated = c.bundle.clone();
+    rotated.name = "renamed".into();
+    both(&mut pruned, &mut whole, &c, Body::Rotate(rotated));
+    let state = pruned.state();
+    assert!(state.hosts[&other_id].held);
+    assert!(!state.hosts[&own_id].held);
+    assert_eq!(state.routes[&own.record.route], own_id);
+}
+
+#[test]
+fn an_equivocation_after_a_checkpoint_holds_the_same_in_pruned_and_whole_logs() {
+    let (mut log, a, _, c) = three();
+    act(&mut log, &c, Body::HostAdd(plain_host(40)));
+    let (mut pruned, mut whole) = split(&mut log, &a);
+    both(&mut pruned, &mut whole, &c, Body::HostAdd(plain_host(41)));
+    // c's key signs in two places.
+    let heads = pruned.heads().to_vec();
+    let seq = pruned.state().members[&c.id()].seq + 1;
+    for n in [1, 2] {
+        let op = sign_on(&pruned, &c, &heads, seq, Body::HostRemove(HostId([n; 32])));
+        assert_eq!(pruned.insert(op.clone(), NOW), Ok(Inserted::Applied));
+        assert_eq!(whole.insert(op, NOW), Ok(Inserted::Applied));
+    }
+    assert_eq!(pruned.state(), whole.state());
+    let state = pruned.state();
+    assert!(state.equivocating.contains(&c.id()));
+    // What the checkpoint saw stands; what it had not is held.
+    assert!(state.hosts.contains_key(&plain_host(40).id().unwrap()));
+    assert!(!state.hosts.contains_key(&plain_host(41).id().unwrap()));
+}
+
+#[test]
+fn an_equivocators_own_checkpoint_settles_nothing() {
+    let (mut log, _, _, c) = three();
+    act(&mut log, &c, Body::HostAdd(plain_host(40)));
+    let hash = log.state().hash().unwrap();
+    act(&mut log, &c, Body::Checkpoint(hash));
+    let heads = log.heads().to_vec();
+    let seq = log.state().members[&c.id()].seq + 1;
+    for n in [1, 2] {
+        let op = sign_on(&log, &c, &heads, seq, Body::HostRemove(HostId([n; 32])));
+        apply(&mut log, op);
+    }
+    assert!(log.state().equivocating.contains(&c.id()));
+    assert!(
+        !log.state()
+            .hosts
+            .contains_key(&plain_host(40).id().unwrap())
+    );
+}

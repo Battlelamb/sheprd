@@ -5,7 +5,7 @@
 use super::{
     Body, HostId, Kind, MemberId, Op,
     graph::Bits,
-    hosts::{self, Anchors},
+    hosts::{self, Lifetime},
     membership::Folder,
     routes,
     state::{AccessRegister, Member, State},
@@ -39,11 +39,43 @@ pub(super) fn fold(folder: &Folder<'_, '_>, set: &Bits, base: &State) -> State {
             member.seq = member.seq.max(op.unsigned().seq);
         }
     }
-    let anchors = hosts::hosts(graph, &members, &effective, base, &mut state);
-    routes::records(graph, &anchors, &effective, base, &mut state);
-    access(folder, &positions, &anchors, &effective, base, &mut state);
+    let held = held(folder, &positions, &effective, &state.equivocating);
+    let anchors = hosts::hosts(graph, &members, &effective, &held, base, &mut state);
+    routes::records(graph, &members, &effective, &held, base, &mut state);
+    access(
+        folder, &positions, &anchors, &effective, &held, base, &mut state,
+    );
     links(folder, &anchors, &effective, base, &mut state);
     state
+}
+
+/// The operations of members found `equivocating` whose `HostAdd` and
+/// `Access` are held: those no checkpoint had seen. A checkpoint settles
+/// what it saw, as the state it names keeps it, so a log pruned to it
+/// and the whole log hold the same ones when an equivocation turns up
+/// later. Only a checkpoint that counts (`effective`, not voided) and
+/// whose signer is not equivocating settles anything: an equivocator
+/// cannot checkpoint its own fork out of the hold.
+fn held(
+    folder: &Folder<'_, '_>,
+    positions: &[usize],
+    effective: &[(usize, &Op)],
+    equivocating: &BTreeSet<MemberId>,
+) -> BTreeSet<usize> {
+    let graph = folder.graph();
+    let mut settled = Bits::new(graph.len());
+    for &(position, op) in effective {
+        if matches!(op.body(), Body::Checkpoint(_)) && !equivocating.contains(&op.signer()) {
+            settled.union(&graph.ancestors[position]);
+        }
+    }
+    positions
+        .iter()
+        .copied()
+        .filter(|&position| {
+            equivocating.contains(&graph.order[position].signer()) && !settled.contains(position)
+        })
+        .collect()
 }
 
 /// Members with two operations neither had seen.
@@ -73,16 +105,17 @@ fn equivocating(folder: &Folder<'_, '_>, positions: &[usize], base: &State) -> B
 type Grant = (usize, bool, u64);
 
 /// Sets the access registers. An `Access` counts when it is not void, its
-/// signer is not equivocating, and it came after the host was added
-/// (`Anchors::since`): a host added again starts without the exclusions
+/// signer is not equivocating (unless a checkpoint saw it, [`held`]), and it came after the host was added
+/// (any addition in its [`Lifetime`]): a host added again starts without the exclusions
 /// it had, as a pruned log, which dropped them with the host, does.
 /// Concurrent allow and deny: deny. `state.access_rev` is the highest
 /// `rev` any `Access` reached, voided or not: the floor the next signs on.
 fn access(
     folder: &Folder<'_, '_>,
     positions: &[usize],
-    anchors: &BTreeMap<HostId, Anchors>,
+    anchors: &BTreeMap<HostId, Lifetime>,
     effective: &[(usize, &Op)],
+    held: &BTreeSet<usize>,
     base: &State,
     state: &mut State,
 ) {
@@ -108,8 +141,8 @@ fn access(
         };
         let after = anchors
             .get(&access.host)
-            .is_some_and(|anchor| Anchors::after(graph, anchor.since, position));
-        if after && !state.equivocating.contains(&op.signer()) {
+            .is_some_and(|lifetime| lifetime.covers(graph, position));
+        if after && !held.contains(&position) {
             by_pair
                 .entry((access.host, access.member))
                 .or_default()
@@ -120,10 +153,7 @@ fn access(
         .access
         .iter()
         .filter(|((host, member), _)| {
-            live(host, member)
-                && anchors
-                    .get(host)
-                    .is_some_and(|anchor| anchor.since.is_none())
+            live(host, member) && anchors.get(host).is_some_and(Lifetime::in_base)
         })
         .map(|(pair, register)| (*pair, *register))
         .collect();
@@ -155,10 +185,10 @@ fn access(
 }
 
 /// Sets each phone's device key per host: the latest it signed after the
-/// host was added (`Anchors::since`).
+/// host was added (its [`Lifetime`]).
 fn links(
     folder: &Folder<'_, '_>,
-    anchors: &BTreeMap<HostId, Anchors>,
+    anchors: &BTreeMap<HostId, Lifetime>,
     effective: &[(usize, &Op)],
     base: &State,
     state: &mut State,
@@ -174,10 +204,7 @@ fn links(
         .links
         .iter()
         .filter(|((member, host), _)| {
-            phone(member)
-                && anchors
-                    .get(host)
-                    .is_some_and(|anchor| anchor.since.is_none())
+            phone(member) && anchors.get(host).is_some_and(Lifetime::in_base)
         })
         .map(|(key, device)| (*key, device.clone()))
         .collect();
@@ -188,7 +215,7 @@ fn links(
         };
         let after = anchors
             .get(&link.host)
-            .is_some_and(|anchor| Anchors::after(graph, anchor.since, position));
+            .is_some_and(|lifetime| lifetime.covers(graph, position));
         if !after || !phone(&op.signer()) {
             continue;
         }

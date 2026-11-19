@@ -46,6 +46,9 @@ pub(super) struct Members {
     /// each `Rotate` after. The last set the bundle it has now. A member
     /// from the base has none until it rotates.
     pub(super) claims: BTreeMap<MemberId, Vec<usize>>,
+    /// The `Found`, `Admit`, and `Rotate` operations that took effect: a
+    /// bundle refused or voided names nothing.
+    pub(super) bundles: BTreeSet<usize>,
 }
 
 impl Members {
@@ -296,6 +299,7 @@ impl<'g, 'a> Folder<'g, 'a> {
             removals: BTreeMap::new(),
             origins: BTreeMap::new(),
             claims: BTreeMap::new(),
+            bundles: BTreeSet::new(),
         };
         let removed: BTreeSet<MemberId> = removals.values().flatten().copied().collect();
         let partial = Members {
@@ -308,6 +312,7 @@ impl<'g, 'a> Folder<'g, 'a> {
                 Body::Found(bundle) => {
                     members.origins.insert(bundle.id(), position);
                     members.claims.insert(bundle.id(), vec![position]);
+                    members.bundles.insert(position);
                     members.live.insert(
                         bundle.id(),
                         Member {
@@ -332,6 +337,7 @@ impl<'g, 'a> Folder<'g, 'a> {
                     {
                         members.origins.insert(id, position);
                         members.claims.insert(id, vec![position]);
+                        members.bundles.insert(position);
                         members.live.entry(id).or_insert(Member {
                             bundle: admit.bundle.clone(),
                             admitted_by: Some(op.signer()),
@@ -347,6 +353,7 @@ impl<'g, 'a> Folder<'g, 'a> {
                             claims.clear();
                         }
                         claims.push(position);
+                        members.bundles.insert(position);
                         member.bundle = bundle.clone();
                     }
                 }

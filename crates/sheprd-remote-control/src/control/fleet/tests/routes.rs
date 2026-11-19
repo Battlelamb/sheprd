@@ -163,3 +163,78 @@ fn pruned_and_whole_logs_agree_on_route_owners() {
     assert!(!state.hosts[&newest].held);
     assert!(state.hosts[&later.id().unwrap()].flagged);
 }
+
+#[test]
+fn a_copied_intro_does_not_reset_the_first_computers_routes() {
+    // Every way round, by member id and by operation id.
+    for seeds in [(9, 10), (10, 9), (11, 12), (12, 11), (13, 14), (14, 13)] {
+        let (a, b) = (computer(1), computer(2));
+        let mut log = found(&a);
+        admit(&mut log, &a, &b);
+        // x and y join at once naming one host; y's intro carries another
+        // record the host's CA signed, on another route.
+        let (intro, ca) = ca_host(60, HostKind::Member);
+        let host = intro.id().unwrap();
+        let mut copied = intro.clone();
+        copied.user = "root".into();
+        copied.record = record(host, 61, 2);
+        copied.record.route = "copied-route".into();
+        copied.record_signature = Some(raw_signature(&ca, &copied.record.message().unwrap()));
+        let (mut x, mut y) = (computer(seeds.0), computer(seeds.1));
+        x.bundle.host = Some(intro.clone());
+        y.bundle.host = Some(copied);
+        let before = log.heads().to_vec();
+        let next = |member: &Device| log.state().members[&member.id()].seq + 1;
+        let ops = [
+            sign_on(&log, &a, &before, next(&a), admit_body(&log, &x)),
+            sign_on(&log, &b, &before, next(&b), admit_body(&log, &y)),
+        ];
+        for op in ops {
+            apply(&mut log, op);
+        }
+        let chosen = log.state().hosts[&host].clone();
+        assert!(chosen.held);
+        let route = chosen.intro.record.route.clone();
+        assert_eq!(log.state().routes[&route], host);
+        let hash = log.state().hash().unwrap();
+        let checkpoint = act(&mut log, &a, Body::Checkpoint(hash));
+        let mut whole = copy(&log);
+        log.prune(&checkpoint.id()).unwrap();
+        // A third host on the chosen intro's route is held, pruned or not.
+        let third = on_route(41, &route);
+        let op = act(&mut log, &a, Body::HostAdd(third.clone()));
+        apply(&mut whole, op);
+        assert_eq!(log.state(), whole.state());
+        assert_eq!(log.state().routes[&route], host);
+        assert!(log.state().hosts[&third.id().unwrap()].held);
+    }
+}
+
+#[test]
+fn a_refused_admission_claims_no_route() {
+    let a = computer(1);
+    let mut log = found(&a);
+    for seed in 2..u8::try_from(MAX_COMPUTERS).unwrap() {
+        admit(&mut log, &a, &computer(seed));
+    }
+    // Two admissions at once for the last seat: one is refused.
+    let before = log.heads().to_vec();
+    let seq = log.state().members[&a.id()].seq;
+    let (x, y) = (computer(200), computer(201));
+    let ops = [
+        sign_on(&log, &a, &before, seq + 1, admit_body(&log, &x)),
+        sign_on(&log, &a, &before, seq + 2, admit_body(&log, &y)),
+    ];
+    for op in ops {
+        apply(&mut log, op);
+    }
+    let refused = [&x, &y]
+        .into_iter()
+        .find(|joiner| !log.state().members.contains_key(&joiner.id()))
+        .unwrap();
+    let route = refused.bundle.host.as_ref().unwrap().record.route.clone();
+    assert!(!log.state().routes.contains_key(&route));
+    let other = on_route(41, &route);
+    act(&mut log, &computer(2), Body::HostAdd(other.clone()));
+    assert!(!log.state().hosts[&other.id().unwrap()].held);
+}

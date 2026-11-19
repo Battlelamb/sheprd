@@ -320,11 +320,13 @@ impl Access {
         Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
     }
 
-    /// The members that may reach SSH here, removed ones aside.
+    /// The members that may reach SSH here: allowed, not removed, and
+    /// sharing no key with another ([`Access::shared`]).
     pub fn allowed(&self) -> impl Iterator<Item = (&Id, &Member)> {
-        self.members
-            .iter()
-            .filter(|(id, member)| member.allow && !self.removed.contains(id))
+        let shared = self.shared();
+        self.members.iter().filter(move |(id, member)| {
+            member.allow && !self.removed.contains(id) && !shared.contains(id)
+        })
     }
 
     /// `incoming` merged into what was `held`: the same fleet only,
@@ -356,28 +358,29 @@ impl Access {
         merged.settled.clear();
         let removed = &merged.removed;
         merged.members.retain(|id, _| !removed.contains(id));
-        merged.deny_shared_keys();
         merged.check()?;
         Ok(merged)
     }
 
-    /// Keys are public: two members naming one would make one's sessions
-    /// look like the other's. Rather than refusing the file, which would
-    /// keep its removals and denies from landing, every member sharing a
-    /// key with another is denied SSH, and none of them is told apart at
-    /// the tunnel (`fleet::Admitted::peer`).
-    fn deny_shared_keys(&mut self) {
+    /// The members sharing a dial or tunnel key with another, suspended
+    /// ones included. Keys are public: two members naming one would make
+    /// one's sessions look like the other's, so none of them is let in
+    /// while they share it. Worked out every time rather than kept, so a
+    /// later file that ends the clash lets them in again; a file with a
+    /// clash is still taken, so its removals and denies land.
+    #[must_use]
+    pub fn shared(&self) -> BTreeSet<Id> {
         let mut dials: BTreeMap<Key, usize> = BTreeMap::new();
         let mut tunnels: BTreeMap<[u8; 32], usize> = BTreeMap::new();
         for member in self.members.values() {
             *dials.entry(member.dial).or_default() += 1;
             *tunnels.entry(member.tunnel).or_default() += 1;
         }
-        for member in self.members.values_mut() {
-            if dials[&member.dial] > 1 || tunnels[&member.tunnel] > 1 {
-                member.allow = false;
-            }
-        }
+        self.members
+            .iter()
+            .filter(|(_, member)| dials[&member.dial] > 1 || tunnels[&member.tunnel] > 1)
+            .map(|(id, _)| *id)
+            .collect()
     }
 }
 

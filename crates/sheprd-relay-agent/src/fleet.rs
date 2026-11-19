@@ -278,13 +278,20 @@ impl Admitted {
         &self.held
     }
 
-    /// Members admitted, with their ids.
+    /// Members admitted, with their ids: not suspended, and sharing no key
+    /// with another member, suspended or not ([`Access::shared`]).
     fn members(&self) -> impl Iterator<Item = (&Id, &Member)> {
+        let shared = self
+            .held
+            .access
+            .as_ref()
+            .map(Access::shared)
+            .unwrap_or_default();
         self.held
             .access
             .iter()
             .flat_map(|access| &access.members)
-            .filter(|(id, _)| !self.held.suspended.contains_key(id))
+            .filter(move |(id, _)| !self.held.suspended.contains_key(id) && !shared.contains(id))
     }
 
     /// A desktop in `authorized` with the keys of a suspended member, now
@@ -332,18 +339,23 @@ impl Admitted {
     #[must_use]
     pub fn peer(&self, tunnel: &[u8; 32]) -> Option<Peer> {
         let desktop = self.desktop(tunnel);
-        let mut holders = self
-            .members()
-            .filter(|(_, member)| member.tunnel == *tunnel);
-        match (holders.next(), holders.next()) {
-            (Some((id, member)), None) => Some(Peer::Member {
+        // `members` leaves out a key two members name, suspended ones
+        // included, and a suspended member's: either way the key is no
+        // one's, desktop or not.
+        let named = self
+            .held
+            .access
+            .iter()
+            .flat_map(|access| &access.members)
+            .any(|(_, member)| member.tunnel == *tunnel);
+        match self.members().find(|(_, member)| member.tunnel == *tunnel) {
+            Some((id, member)) => Some(Peer::Member {
                 id: *id,
                 ssh: member.allow,
                 desktop,
             }),
-            // Two members naming one key: neither is told apart.
-            (Some(_), Some(_)) => None,
-            (None, _) => desktop.then_some(Peer::Desktop),
+            None if named => None,
+            None => desktop.then_some(Peer::Desktop),
         }
     }
 
@@ -362,7 +374,7 @@ impl Admitted {
     /// Whether `member` may still pass removals.
     #[must_use]
     pub fn admits_member(&self, member: &Id) -> bool {
-        self.held.admits(member)
+        self.members().any(|(id, _)| id == member)
     }
 }
 

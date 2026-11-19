@@ -207,12 +207,27 @@ impl OrchestratorView {
                         super::dispatch::merge_action(method),
                         false,
                     )
+                    .debug_selector(move || format!("orchestrator-merge-{}", method.graphql()))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.merge_open = false;
-                        // The confirmation names what the row showed.
-                        if let Some(target) = this.pr.target().cloned() {
-                            this.ask(Confirm::Merge { method, target }, cx);
-                        }
+                        // The confirmation names what the row showed; a
+                        // stacked one's names every layer it lands.
+                        let Some(target) = this.pr.target().cloned() else {
+                            return;
+                        };
+                        let stacked = this
+                            .open_pull_request()
+                            .filter(|pr| pr.stack().is_some())
+                            .map(|pr| pr.lands());
+                        let confirm = match stacked {
+                            Some(lands) => Confirm::Land {
+                                change: super::stack::Change::Merge(method),
+                                target,
+                                lands,
+                            },
+                            None => Confirm::Merge { method, target },
+                        };
+                        this.ask(confirm, cx);
                     }))
                 }))
                 .when(pr.merge_methods.is_empty(), |el| {
@@ -223,8 +238,10 @@ impl OrchestratorView {
 
     /// Whether the open pull request can be merged from here.
     pub(super) fn mergeable(&self) -> bool {
+        // A stacked one merges with the layers below it, so only once all
+        // of them are known and ready, and through the stack's confirmation.
         self.open_pull_request()
-            .is_some_and(|pr| pr.state == State::Open && !pr.is_draft)
+            .is_some_and(|pr| pr.state == State::Open && !pr.is_draft && pr.stack_mergeable())
             && self.pr.target().is_some()
             && self.pr.running().is_none()
     }

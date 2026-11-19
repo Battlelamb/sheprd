@@ -241,6 +241,9 @@ impl OrchestratorView {
                 },
                 None,
             ),
+            (None, Verdict::Unread) => {
+                (fl!("pr-stack-unread"), fl!("pr-stack-unread-detail"), None)
+            }
             (None, Verdict::Blocked { number, blocker }) => {
                 let who = if number == pr.number {
                     fl!("pr-stack-this")
@@ -406,6 +409,7 @@ fn summary_color(
     let tone = match stack.verdict(position) {
         Verdict::Merged => Tone::Merged,
         Verdict::Ready { .. } => Tone::Ready,
+        Verdict::Unread => Tone::Muted,
         Verdict::Blocked { number, .. } => stack
             .layers
             .iter()

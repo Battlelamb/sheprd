@@ -188,3 +188,24 @@ fn merging_a_stacked_pull_request_lands_it_with_the_layers_below() {
     assert_eq!(puts[0].1["merge_method"], "rebase");
     assert!(outcome.message.contains("below it"));
 }
+
+#[test]
+fn an_accepted_landing_whose_result_cannot_be_read_is_not_called_a_failure() {
+    let mut reads = 0;
+    let outcome = land(
+        &target(),
+        Landing::Stack(MergeMethod::Squash),
+        |step| match step {
+            Step::Put { .. } => Ok(pending()),
+            Step::Pause(_) => Ok(Value::Null),
+            Step::Get { .. } => {
+                reads += 1;
+                Err(crate::Error::Status(502))
+            }
+        },
+    )
+    .unwrap();
+    assert_eq!(reads, 1, "a failed read is not retried");
+    assert!(outcome.message.contains("accepted"), "{}", outcome.message);
+    assert_eq!(outcome.url.as_deref(), Some(target().url.as_str()));
+}

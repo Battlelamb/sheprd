@@ -47,6 +47,9 @@ impl OrchestratorView {
         }
         let target = self.pr.target().filter(|_| writable(pr))?.clone();
         let lands: Vec<u64> = stack.landing(position).map(|layer| layer.number).collect();
+        // Queueing lands every open layer below too, so it is offered only
+        // when the confirmation can name them all.
+        let queueable = pr.merge_queue && stack.read_through(position);
         let row = footer(look);
         if pr.queue.is_some() {
             let target = target.clone();
@@ -94,7 +97,7 @@ impl OrchestratorView {
                     })),
                 )
             })
-            .when(pr.merge_queue, |row| {
+            .when(queueable, |row| {
                 let target = target.clone();
                 let lands = lands.clone();
                 row.child(
@@ -109,7 +112,7 @@ impl OrchestratorView {
                     })),
                 )
             });
-        if ready.is_none() && !pr.merge_queue {
+        if ready.is_none() && !queueable {
             return None;
         }
         let picker = (picking && ready.is_some() && methods.len() > 1).then(|| {

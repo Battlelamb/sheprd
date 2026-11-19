@@ -13,3 +13,17 @@ fn a_stacked_pull_request_shows_its_layer_beside_its_number() {
     let unopened = PrBadge::unopened(&theme);
     assert_eq!(unopened.label, unopened.number);
 }
+
+#[test]
+fn the_badge_is_measured_without_its_invisible_isolation_marks() {
+    let theme = crate::config::Theme::default();
+    let stacked = PrBadge::new(&crate::pull_request::stacked_fixture().unwrap(), &theme);
+    assert!(
+        stacked.label.chars().count() > "#1364 3/4".len(),
+        "marks stay in the text"
+    );
+    assert_eq!(
+        crate::sidebar::row::visible_chars(&stacked.label),
+        "#1364 3/4".len()
+    );
+}

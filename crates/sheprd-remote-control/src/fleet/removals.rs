@@ -72,17 +72,26 @@ async fn exchange_in(fleet: &Arc<Fleet>, io: &mut (impl AsyncRead + AsyncWrite +
                 .map(Op::id),
         );
         let taken = fleet.clone();
-        let wanted = tokio::task::spawn_blocking(move || {
-            let _ = taken.receive(ops, crate::web::now_ms());
-            taken
-                .inner()
-                .log
-                .as_ref()
-                .map(|log| log.wanted())
-                .unwrap_or_default()
+        // A removal not saved is not acknowledged: the dialer keeps it and
+        // sends it again, and that later exchange saves it.
+        let Ok(Some(wanted)) = tokio::task::spawn_blocking(move || {
+            if let Err(error) = taken.receive(ops, crate::web::now_ms()) {
+                tracing::warn!(error = %error, "could not keep removals another member passed");
+                return None;
+            }
+            Some(
+                taken
+                    .inner()
+                    .log
+                    .as_ref()
+                    .map(|log| log.wanted())
+                    .unwrap_or_default(),
+            )
         })
         .await
-        .unwrap_or_default();
+        else {
+            return;
+        };
         if wanted.is_empty() || round == MAX_ROUNDS {
             break;
         }
@@ -241,8 +250,13 @@ async fn push(fleet: &Arc<Fleet>, peer: MemberId, record: &Record, ops: Vec<Op>)
     else {
         return false;
     };
+    let mut opening = vec![PURPOSE_REMOVAL];
+    opening.extend_from_slice(&crate::control::fleet::removal::prove(
+        fleet.key(),
+        &tunnel.hash,
+    ));
     let io = &mut tunnel.io;
-    if io.write_all(&[PURPOSE_REMOVAL]).await.is_err() {
+    if io.write_all(&opening).await.is_err() {
         return false;
     }
     let sent = Message::Removal(ops.iter().map(Op::encode).collect());

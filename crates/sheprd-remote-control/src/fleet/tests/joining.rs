@@ -198,10 +198,12 @@ async fn removing_a_member_revokes_a_pairing_whose_key_it_proved() {
         if let Ok((_connection, mut tunnel)) =
             crate::desktop::connect::open_record(&record, &keys).await
         {
-            let _ = tunnel
-                .io
-                .write_all(&[crate::control::fleet::removal::PURPOSE_SSH])
-                .await;
+            let mut opening = vec![crate::control::fleet::removal::PURPOSE_SSH];
+            opening.extend_from_slice(&crate::control::fleet::removal::prove(
+                b.fleet.key(),
+                &tunnel.hash,
+            ));
+            let _ = tunnel.io.write_all(&opening).await;
             proved = true;
             break;
         }

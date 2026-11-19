@@ -1559,7 +1559,12 @@ while every Sheprd window is shut.
 **The message.** It travels inside the existing end-to-end tunnel,
 directly or through a relay. A new purpose byte after the handshake,
 `removal`, sits beside the SSH splice a desktop's session gets today.
-After it, one framed exchange:
+Every purpose byte is followed by a proof: the member's fleet key
+signing the tunnel's handshake hash. The handshake proves only the
+tunnel key, which is public and which any member's bundle can name, so
+only a proven session ties a tunnel key to a member (and to a desktop
+paired one by one with it, which the member's removal then revokes).
+A session without a valid proof ends. After it, one framed exchange:
 
 ```text
 → Removal { fleet, ops[..64] }   // the Remove ops, and the ancestors the peer asked for
@@ -1883,8 +1888,10 @@ manual multi-machine and phone steps left unticked in its QA list.
      operations), and members as hosts of each other through `ssh_access`
      with `sheprd-fleet:FLEET:MEMBER` lines, their dial keys on the
      relays, and their tunnel keys admitted. `relay-connect` sends a
-     purpose byte to a fleet host; a desktop paired over Bluetooth that
-     is also a member keeps its record and its session as before.
+     purpose byte and the fleet-key proof to a fleet host; a desktop
+     paired over Bluetooth that is also a member keeps its record and its
+     session as before, as the member once a proven session showed its
+     key is the member's.
    - **Joining over SSH:** creating a fleet, `fleet bundle` on the
      joiner, `Admit` on the member, and the log handed over; a daemon
      with no fleet takes a log only when it admits this computer.
@@ -1892,7 +1899,8 @@ manual multi-machine and phone steps left unticked in its QA list.
      its certificate authority when its relays, route, tunnel identity,
      or SSH host keys moved.
    - **Removals between daemons:** the `removal` tunnel purpose, the
-     flood with `Held`, suspend-then-confirm (`fleet/peers.json` keeps
+     flood with `Held` (sent only once the removal is saved),
+     suspend-then-confirm (`fleet/peers.json` keeps
      suspensions whose history has not arrived), and its bounds and
      retries.
    - **End-to-end tests on loopback relays** (`fleet/tests`): three

@@ -26,11 +26,10 @@ fn path(state_dir: &Path, name: &str) -> PathBuf {
 }
 
 /// The fleet key, made and kept the first time.
-pub(super) fn load_or_create_key(state_dir: &Path) -> Result<SigningKey> {
+pub(super) fn load_or_create_key(state_dir: &Path) -> crate::desktop::Result<SigningKey> {
     let file = path(state_dir, KEY);
     if let Some(bytes) = read_bounded(&file, 32)? {
-        return SigningKey::from_slice(&bytes)
-            .map_err(|_| Error::Desktop(crate::desktop::Error::RecordFormat));
+        return SigningKey::from_slice(&bytes).map_err(|_| crate::desktop::Error::RecordFormat);
     }
     let mut secret = [0; 32];
     // A scalar out of range is drawn again; vanishingly rare.

@@ -282,6 +282,10 @@ async fn fleet_ssh(
     let gone = async {
         loop {
             if !crate::fleet::grants::still_allowed(fleet, &member) {
+                // A scrub asked over this session: let it read the answer.
+                if let Some(left) = fleet.scrub_grace() {
+                    tokio::time::sleep(left).await;
+                }
                 return;
             }
             if changed.changed().await.is_err() {

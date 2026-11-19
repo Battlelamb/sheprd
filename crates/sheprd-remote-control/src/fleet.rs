@@ -66,6 +66,10 @@ pub(crate) struct Unconfirmed {
 /// Suspensions that keep their removal to check again.
 pub(crate) const MAX_KEPT_REMOVALS: usize = crate::control::fleet::MAX_PENDING;
 
+/// How long the SSH session that asked for a scrub keeps running after
+/// it, to read the answer.
+pub(crate) const SCRUB_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// The daemon's fleet: its key, and its log once it founded or joined one.
 #[derive(Debug)]
 pub(crate) struct Fleet {
@@ -84,6 +88,13 @@ pub(crate) struct Fleet {
     /// Parts of logs handed over while this computer is in no fleet.
     joining: joining::Handovers,
     changed: watch::Sender<u64>,
+    /// Held while what the log grants is read and written, and while a
+    /// scrub forgets it, so a write of the old fleet never lands after a
+    /// scrub took its access away.
+    writing: Mutex<()>,
+    /// When this computer last forgot its fleet (`fleet scrub`): the SSH
+    /// session that asked keeps [`SCRUB_GRACE`] to read the answer.
+    scrubbed: Mutex<Option<std::time::Instant>>,
     /// Removal exchanges other members dialed in for, at most
     /// `removals::CONCURRENT` at once.
     pub(crate) inbound: tokio::sync::Semaphore,
@@ -152,6 +163,8 @@ impl Fleet {
             inner: Mutex::new(inner),
             joining: joining::Handovers::default(),
             changed: watch::Sender::new(0),
+            writing: Mutex::new(()),
+            scrubbed: Mutex::new(None),
             inbound: tokio::sync::Semaphore::new(removals::CONCURRENT),
             _lock: lock,
         })
@@ -394,6 +407,8 @@ impl Fleet {
     /// the fleet the daemon reads at its next start, so it stays the fleet
     /// here too, and a peers file that stays keeps the keys to revoke.
     pub(crate) fn scrub(&self) -> Result<()> {
+        *self.scrubbed.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some(std::time::Instant::now());
         let mut inner = self.inner();
         store::remove_log(&self.state_dir)?;
         inner.log = None;
@@ -411,6 +426,20 @@ impl Fleet {
         let mut inner = self.inner();
         inner.held.entry(peer).or_default().extend(ids);
         self.save(&inner)
+    }
+
+    /// Held while what the log grants is read and written.
+    pub(crate) fn writing(&self) -> MutexGuard<'_, ()> {
+        self.writing.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// How long a fleet member's SSH session that a scrub cut off may
+    /// still run: what is left of [`SCRUB_GRACE`] since the scrub, so the
+    /// session that asked for it reads its answer. Its access is gone
+    /// already; no new session starts.
+    pub(crate) fn scrub_grace(&self) -> Option<std::time::Duration> {
+        let scrubbed = (*self.scrubbed.lock().unwrap_or_else(PoisonError::into_inner))?;
+        SCRUB_GRACE.checked_sub(scrubbed.elapsed())
     }
 
     pub(crate) fn bump(&self) {
@@ -479,15 +508,35 @@ pub fn run_ask(state_dir: &Path, ask: sync::Ask) -> Result<sync::Answer> {
 /// the fleet's `authorized_keys` lines and relay records itself
 /// ([`scrub`]). Succeeds only once they are gone. Blocking.
 pub fn run_scrub(state_dir: &Path) -> Result<()> {
+    scrub_with(state_dir, scrub::offline)
+}
+
+/// [`run_scrub`], with `offline` forgetting the fleet when no daemon
+/// answers, run only while holding the fleet folder's lock. Blocking.
+fn scrub_with(state_dir: &Path, offline: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
     use crate::control::{Request, Response};
     let request = Request::Fleet(Box::new(sync::Ask::Scrub));
-    match crate::control::request(&crate::control::address(state_dir), &request) {
-        Ok(Response::Fleet(answer)) if *answer == sync::Answer::Done => Ok(()),
-        Ok(Response::Error { message, .. }) => Err(Error::Daemon(message)),
-        Ok(_) => Err(Error::Daemon("an unexpected answer".to_owned())), // i18n: data
-        // No daemon: nothing holds the fleet but its files.
-        Err(crate::control::Error::Connect(_)) => scrub::offline(state_dir),
-        Err(error) => Err(error.into()),
+    let deadline = std::time::Instant::now() + lock::WAIT;
+    loop {
+        match crate::control::request(&crate::control::address(state_dir), &request) {
+            Ok(Response::Fleet(answer)) if *answer == sync::Answer::Done => return Ok(()),
+            Ok(Response::Error { message, .. }) => return Err(Error::Daemon(message)),
+            Ok(_) => return Err(Error::Daemon("an unexpected answer".to_owned())), // i18n: data
+            Err(crate::control::Error::Connect(_)) => {}
+            Err(error) => return Err(error.into()),
+        }
+        // No daemon answers. Held, the lock keeps a daemon from loading
+        // the fleet, and an offline update from writing it, until the
+        // files are gone; busy, a daemon is starting (it loads the fleet
+        // before it answers) or an update is writing, and the socket is
+        // tried again.
+        if let Some(_lock) = lock::Lock::try_acquire(state_dir)? {
+            return offline(state_dir);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(Error::Busy);
+        }
+        lock::pause();
     }
 }
 

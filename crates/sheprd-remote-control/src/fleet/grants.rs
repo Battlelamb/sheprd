@@ -114,6 +114,8 @@ pub(crate) fn own_host(state: &Log, me: &MemberId, host: Option<HostId>) -> Opti
 
 /// Rewrites the SSH lines and relay records from the log. Blocking.
 pub(crate) fn apply(state: &State, fleet: &Fleet) -> Result<()> {
+    // Read and written as one, so a scrub never runs between them.
+    let _writing = fleet.writing();
     let suspended = fleet.suspended();
     let (lines, records, routes) = {
         let inner = fleet.inner();

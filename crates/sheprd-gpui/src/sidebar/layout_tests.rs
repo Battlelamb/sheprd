@@ -731,6 +731,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         pending_toast: None,
         toast_motion: Default::default(),
         toasts_hidden: false,
+        traces: Default::default(),
         pending_releases: Vec::new(),
         selected_generation: 0,
         live: {
@@ -741,6 +742,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         focus,
         options: ConnectOptions::default(),
         last_queued_options: None,
+        last_typed: None,
         pending_resize: None,
         last_input: None,
         last_pointer: None,

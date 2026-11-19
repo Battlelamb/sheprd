@@ -335,15 +335,19 @@ impl OrchestratorView {
             }),
         };
         let mut providers: Vec<Provider> = Vec::new();
+        let mut number_chars = 0;
         for line in &lines {
             if let rows::Line::Row(row) = line {
-                let provider = self.row_item(row).key.source.provider;
+                let item = self.row_item(row);
+                let provider = item.key.source.provider;
                 if !providers.contains(&provider) {
                     providers.push(provider);
                 }
+                number_chars = number_chars.max(item.identifier.chars().count());
             }
         }
         self.mixed_sources = providers.len() > 1;
+        self.number_chars = number_chars;
         self.lines = lines;
         self.revision += 1;
         if self.selected.is_none() || !self.selection_listed() {

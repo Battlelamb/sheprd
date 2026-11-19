@@ -245,7 +245,7 @@ struct GitHubSettingsRow: View {
 
     var body: some View {
         NavigationLink {
-            GitHubSettingsView()
+            GitHubSettingsView().makesRoomForConnectionToast()
         } label: {
             LabeledContent {
                 if let login { Text(verbatim: login) }

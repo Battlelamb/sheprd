@@ -48,3 +48,61 @@ fn a_host_keeps_its_own_route_as_its_record_changes() {
     assert_eq!(host.record.rev, 2);
     assert_eq!(host.record.identity, "identity60");
 }
+
+#[test]
+fn a_record_that_does_not_verify_flags_nothing() {
+    let a = computer(1);
+    let mut log = found(&a);
+    let (first, _) = ca_host(40, HostKind::Sheprd);
+    let (second, _) = ca_host(41, HostKind::Sheprd);
+    act(&mut log, &a, Body::HostAdd(first.clone()));
+    act(&mut log, &a, Body::HostAdd(second.clone()));
+    // Signed by a key that is not the second host's CA.
+    let forged = seen(&second, &signing_key(99), 2, &first.record.route, 41);
+    act(&mut log, &a, forged);
+    for intro in [&first, &second] {
+        let host = &log.state().hosts[&intro.id().unwrap()];
+        assert!(!host.flagged);
+        assert!(!host.held);
+        assert_eq!(host.record, intro.record);
+    }
+}
+
+/// A Sheprd host whose intro names `route`.
+fn on_route(seed: u8, route: &str) -> HostIntro {
+    let (mut intro, ca) = ca_host(seed, HostKind::Sheprd);
+    intro.record.route = route.into();
+    intro.record_signature = Some(raw_signature(&ca, &intro.record.message().unwrap()));
+    intro
+}
+
+#[test]
+fn a_later_host_with_a_lower_id_cannot_take_a_route() {
+    let a = computer(1);
+    let mut log = found(&a);
+    let (first, first_ca) = ca_host(40, HostKind::Sheprd);
+    let route = first.record.route.clone();
+    // A seed whose host sorts before the first.
+    let later = (41..=255)
+        .map(|seed| on_route(seed, &route))
+        .find(|intro| intro.id().unwrap() < first.id().unwrap())
+        .unwrap();
+    act(&mut log, &a, Body::HostAdd(first.clone()));
+    act(&mut log, &a, Body::HostAdd(later.clone()));
+    let state = log.state();
+    assert!(state.hosts[&later.id().unwrap()].held);
+    assert!(!state.hosts[&first.id().unwrap()].held);
+    // The first keeps its route as its record moves on.
+    act(&mut log, &a, seen(&first, &first_ca, 2, &route, 60));
+    let host = &log.state().hosts[&first.id().unwrap()];
+    assert_eq!(host.record.rev, 2);
+    assert!(!host.flagged);
+    // And pruning gives it to the same host.
+    let before = log.state().clone();
+    let hash = before.hash().unwrap();
+    let checkpoint = act(&mut log, &a, Body::Checkpoint(hash));
+    log.prune(&checkpoint.id()).unwrap();
+    act(&mut log, &a, Body::HostRemove(HostId([9; 32])));
+    assert!(log.state().hosts[&later.id().unwrap()].held);
+    assert!(!log.state().hosts[&first.id().unwrap()].held);
+}

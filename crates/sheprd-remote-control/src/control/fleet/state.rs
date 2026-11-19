@@ -36,8 +36,9 @@ pub struct Host {
     pub record: SelfRecord,
     /// The CA's signature over `record`; none for a plain host.
     pub record_signature: Option<RawSignature>,
-    /// Two members added it with different keys: nothing is spread until
-    /// a person picks one.
+    /// Two members added it with different keys, or its intro names a
+    /// relay route an earlier host owns: nothing is spread until a person
+    /// picks one.
     pub held: bool,
     /// It signed two different records with one `rev`, or a record
     /// naming a relay route another host owns.

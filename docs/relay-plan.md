@@ -1356,8 +1356,8 @@ does not pass it on.
    members that did too, and no host. A `Remove` that reaches any further
    is void like the rest. A removal also reaches every member the
    removed one admitted that the remover had not seen, and those they
-   admitted in turn, when every admission of that member is void that
-   way: an admission it voids leaves no member behind, a replayed join
+   admitted in turn, when every admission of that member is void,
+   under this removal or another that takes effect: an admission it voids leaves no member behind, a replayed join
    signature cannot take a member another admission let in, and
    such a member's counter-removal counts only as its admitter's would.
    Removals that void each other
@@ -1374,7 +1374,7 @@ When two edits to the same thing are concurrent, the safer outcome wins:
 | `Access` allow and deny, concurrent | Deny. Otherwise the one that descends from the other wins. An `Access` whose `rev` is not one above the highest its history holds is refused, so no single operation can put the register out of a later deny's reach. One voided later still set the `rev` its descendants signed on, so a deny that saw it stays a deny. |
 | Two members naming one host as their own | A copied intro: the host is held. An `Admit` or `Rotate` naming the host of a member live in its history is refused outright. A member naming an added host is the same machine joining only when the account and SSH host keys match; otherwise the host is held, whether the addition came before the member's bundle or concurrently with it. Only a `HostAdd` that saw the bundle that first named the host is ignored (a `Rotate` that keeps the host keeps that claim), so no member can hold another's host by adding a copy, and no bundle can take over an added host by racing it. |
 | Two self-records | The higher `rev`. Equal `rev` with different content flags the host and keeps the one seen first. |
-| Two hosts naming one relay route | The first host to name it owns it. A record naming a route another host owns does not count and flags its host; a host keeps its own route whatever else its record changes. |
+| Two hosts naming one relay route | The host that claimed it first in the log owns it. A host added with a route another host owns is held; a verified record naming one does not count and flags its host, and a record that does not verify changes nothing. A host keeps its own route whatever else its record changes. |
 | Two `HostAdd` for one host | The first in hash order keeps the intro, and the other member is listed as having verified it too. If their pinned or SSH host keys differ, the host is held and not spread until a person picks one. |
 
 **Replay and reordering do nothing.** An operation already held is

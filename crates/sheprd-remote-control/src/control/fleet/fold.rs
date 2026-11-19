@@ -181,6 +181,11 @@ fn hosts(
     // added are kept.
     live.sort_by_key(|(earliest, id, _)| (*earliest, *id));
     live.truncate(MAX_HOSTS);
+    // Where each host was first claimed, in graph order; 0 for the base.
+    let mut claimed: BTreeMap<HostId, usize> = live
+        .iter()
+        .map(|(earliest, id, _)| (*id, *earliest))
+        .collect();
     state.hosts = live.into_iter().map(|(_, id, host)| (id, host)).collect();
     // A computer is its own host. Two members naming one host is a copied
     // intro: held until a person picks. So is a member naming an added
@@ -232,6 +237,7 @@ fn hosts(
                     || added.ca != intro.ca
                     || added.record.ssh_host_keys != intro.record.ssh_host_keys
             });
+        claimed.insert(id, origin.map_or(0, |at| at + 1));
         state.hosts.insert(
             id,
             Host {
@@ -258,16 +264,7 @@ fn hosts(
         }
         host.flagged |= kept.flagged;
     }
-    // Each relay route has one owner: the first host whose intro or
-    // record names it. A record naming a route another host owns does not
-    // count, and flags its host, as a second record with one `rev` does;
-    // a host keeps its own routes whatever else its record changes.
-    let mut routes: BTreeMap<String, HostId> = BTreeMap::new();
-    for host in state.hosts.values() {
-        for record in [&host.intro.record, &host.record] {
-            routes.entry(record.route.clone()).or_insert(record.host);
-        }
-    }
+    let mut routes = owners(&claimed, state);
     for &(_, op) in effective {
         let Body::HostSeen(seen) = op.body() else {
             continue;
@@ -275,18 +272,20 @@ fn hosts(
         let Some(host) = state.hosts.get_mut(&seen.record.host) else {
             continue;
         };
-        if routes
-            .get(&seen.record.route)
-            .is_some_and(|owner| *owner != seen.record.host)
-        {
-            host.flagged = true;
-            continue;
-        }
         // A plain host's keys only change through a member that checked
         // them strictly, and a changed key cannot be checked that way.
         let keys_kept =
             host.intro.ca.is_some() || seen.record.ssh_host_keys == host.intro.record.ssh_host_keys;
         if !keys_kept || !host.intro.vouches(&seen.record, seen.signature.as_ref()) {
+            continue;
+        }
+        // A record naming a route another host owns does not count, and
+        // flags its host, as a second record with one `rev` does.
+        if routes
+            .get(&seen.record.route)
+            .is_some_and(|owner| *owner != seen.record.host)
+        {
+            host.flagged = true;
             continue;
         }
         if seen.record.rev > host.record.rev {
@@ -299,6 +298,34 @@ fn hosts(
             host.flagged = true;
         }
     }
+}
+
+/// Each relay route's owner: the host that claimed it first, in graph
+/// order (`claimed`), with hosts the base held after the others it ties
+/// with, so pruning gives a route to the host it went to before. A host
+/// whose intro names a route an earlier host owns is held, as other
+/// conflicts are; a host keeps its own routes whatever its record changes.
+fn owners(claimed: &BTreeMap<HostId, usize>, state: &mut State) -> BTreeMap<String, HostId> {
+    let mut order: Vec<(usize, bool, HostId)> = state
+        .hosts
+        .iter()
+        .map(|(id, host)| (claimed.get(id).copied().unwrap_or(0), host.held, *id))
+        .collect();
+    order.sort_unstable();
+    let mut routes: BTreeMap<String, HostId> = BTreeMap::new();
+    for (_, _, id) in order {
+        let Some(host) = state.hosts.get_mut(&id) else {
+            continue;
+        };
+        let intro = &host.intro.record.route;
+        if routes.get(intro).is_some_and(|owner| *owner != id) {
+            host.held = true;
+        }
+        for route in [intro, &host.record.route] {
+            routes.entry(route.clone()).or_insert(id);
+        }
+    }
+    routes
 }
 
 /// One `Access` operation: its place, what it says, and whether it counts

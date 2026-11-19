@@ -2651,9 +2651,11 @@ window at once, and `sheprd ui panel NAME` shows a section.
   hours or with delivery off; clicking one goes to its pane.
   **Notification History** in the palette opens it, and `sheprd window alerts`
   prints it. An alert about the tab you are looking at is not kept.
-  **Clear** on the shelf, or **Clear All Notifications** in the palette (no
-  default shortcut; bind `clear_all_notifications` under `[keybindings]`, or
-  run `sheprd run clear_all_notifications`), empties it in every window,
+  **Clear all** at the top of the page, shown while there is an alert or a
+  toast to clear, **Clear** on the shelf, or **Clear All Notifications** in
+  the palette (no default shortcut; bind `clear_all_notifications` under
+  `[keybindings]`, or run `sheprd run clear_all_notifications`), empties it
+  in every window,
   dismisses every toast, shown or waiting, and withdraws the app's OS
   notifications (see [System notifications](#system-notifications)). Agents
   keep their status: a finished agent's Done dot and the Dock badge clear as

@@ -258,6 +258,8 @@ final class Fleet {
     /// again on leaving.
     func clearCache() {
         cache.clear()
+        // Followed chats no screen shows would be saved again on leaving.
+        for key in chats.keys where chatViewers[key] == nil { unfollow(key) }
         let open = chats
         drafts.forget { open[$0] == nil }
     }
@@ -405,16 +407,22 @@ final class Fleet {
     }
 
     /// Follows the chats `WarmChats` picks and lets go of the rest no
-    /// screen shows, saving what they hold for the next opening.
+    /// screen shows, saving what they hold for the next opening, unless
+    /// their computer was forgotten and its cache cleared.
     private func rewarm() {
         let listed = chatItems.map { WarmChats.Listed(key: $0.key, busy: $0.working || $0.needsYou, lastAnswer: $0.lastAnswer) }
         let wanted = warmth.keys(listed, at: .now)
         for key in wanted { _ = follow(key) }
+        let known = Set(machines.map(\.id))
         for (key, store) in chats where chatViewers[key] == nil && !wanted.contains(key) {
-            chats[key] = nil
-            save(store)
-            Task { await links[key.device]?.unwatch(.chat(pane: key.pane)) }
+            if known.contains(key.device) { save(store) }
+            unfollow(key)
         }
+    }
+
+    private func unfollow(_ key: PaneKey) {
+        chats[key] = nil
+        Task { await links[key.device]?.unwatch(.chat(pane: key.pane)) }
     }
 
     func openTerm(_ key: PaneKey) -> TermStore {

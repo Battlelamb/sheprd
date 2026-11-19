@@ -24,6 +24,13 @@ public struct RelayRecord: Codable, Hashable, Sendable {
     /// What the computer's owner calls each relay, keyed by the endpoint's
     /// `description`; refreshed whenever the computer says, without new keys.
     public var labels: [String: RelayLabel]
+    /// The `rev` of the host's own fleet record this came from, checked
+    /// against its certificate authority (`API.FleetRoute`), so an older
+    /// record a computer serves again never replaces it; nil for relays a
+    /// computer told this phone itself.
+    public var signedRev: UInt64?
+    /// When the host signed that record, in milliseconds since 1970.
+    public var signedMs: UInt64?
 
     public init(
         relays: [RelayEndpoint], route: Data, identity: Data, dialKey: Data, tunnelKey: Data,
@@ -38,7 +45,7 @@ public struct RelayRecord: Codable, Hashable, Sendable {
         self.labels = labels
     }
 
-    enum CodingKeys: String, CodingKey { case relays, listenerRtt, route, identity, dialKey, tunnelKey, labels }
+    enum CodingKeys: String, CodingKey { case relays, listenerRtt, route, identity, dialKey, tunnelKey, labels, signedRev, signedMs }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -50,6 +57,8 @@ public struct RelayRecord: Codable, Hashable, Sendable {
         tunnelKey = try c.decode(Data.self, forKey: .tunnelKey)
         // Records saved before relays had labels have none.
         labels = try c.decodeIfPresent([String: RelayLabel].self, forKey: .labels) ?? [:]
+        signedRev = try c.decodeIfPresent(UInt64.self, forKey: .signedRev)
+        signedMs = try c.decodeIfPresent(UInt64.self, forKey: .signedMs)
     }
 
     /// A record for what `info` says, with fresh keys for this phone; nil

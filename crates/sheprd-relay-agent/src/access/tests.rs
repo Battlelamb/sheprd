@@ -16,6 +16,12 @@ pub(crate) fn member(seed: u8, allow: bool, rev: u64) -> Member {
     Member {
         allow,
         dial: dial(seed),
+        fleet_key: fleet_key(seed)
+            .verifying_key()
+            .to_sec1_point(true)
+            .as_bytes()
+            .try_into()
+            .unwrap(),
         name: format!("computer{seed}"),
         rev,
         ssh: crate::authorized_keys::tests::key(seed),
@@ -23,6 +29,11 @@ pub(crate) fn member(seed: u8, allow: bool, rev: u64) -> Member {
         keys: 0,
         former: Vec::new(),
     }
+}
+
+/// A member's fleet key from `seed`.
+pub(crate) fn fleet_key(seed: u8) -> p256::ecdsa::SigningKey {
+    p256::ecdsa::SigningKey::from_slice(&[seed.wrapping_add(100).max(1); 32]).unwrap()
 }
 
 pub(crate) fn id(seed: u8) -> Id {

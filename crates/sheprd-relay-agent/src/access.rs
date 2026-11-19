@@ -153,6 +153,10 @@ pub struct Member {
     /// What it proves to the relay.
     #[serde(with = "b64")]
     pub dial: Key,
+    /// Its fleet key (P-256, SEC1 compressed): what signs the proof that
+    /// opens each of its sessions (`removal::prove`).
+    #[serde(with = "b64")]
+    pub fleet_key: Key,
     /// The person's name for it; never used to decide anything.
     pub name: String,
     /// The `Access` register's `rev`: zero until someone set it.
@@ -193,6 +197,7 @@ pub const MAX_STORED_BYTES: usize = MAX_BYTES + MAX_MEMBERS * MAX_FORMER * MAX_P
 impl Member {
     fn valid(&self) -> bool {
         p256::PublicKey::from_sec1_bytes(&self.dial).is_ok()
+            && p256::PublicKey::from_sec1_bytes(&self.fleet_key).is_ok()
             && self.dial.len() == KEY_LEN
             && crate::authorized_keys::ed25519(&self.ssh).as_deref() == Some(self.ssh.as_str())
             && self.name.len() <= MAX_NAME

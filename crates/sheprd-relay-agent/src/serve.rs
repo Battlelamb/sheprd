@@ -13,7 +13,7 @@ use crate::{
     Error, Result,
     agent::Agent,
     fleet::{Held, Peer},
-    removal::{self, MAX_OPS, Message, PURPOSE_REMOVAL, PURPOSE_SSH},
+    removal::{self, MAX_OPS, Message, PROOF_LEN, PURPOSE_REMOVAL, PURPOSE_SSH},
 };
 use sheprd_relay::{RouteId, client::Pending};
 use sheprd_tunnel::{Responder, stream};
@@ -52,7 +52,7 @@ async fn serve(agent: &Arc<Agent>, pending: Pending, route: RouteId) -> Result<(
         .await
         .map_err(|_| sheprd_tunnel::Error::Closed)??
     };
-    let remote = accepted.remote;
+    let (remote, hash) = (accepted.remote, accepted.hash);
     let Some(peer) = admitted.borrow().peer(&dial, &remote) else {
         return Ok(());
     };
@@ -65,6 +65,19 @@ async fn serve(agent: &Arc<Agent>, pending: Pending, route: RouteId) -> Result<(
         .await
         .map_err(|_| sheprd_tunnel::Error::Closed)?
         .map_err(Error::Splice)?;
+    if matches!(first[0], PURPOSE_REMOVAL | PURPOSE_SSH) {
+        // The member's fleet key signs this session's handshake: without
+        // it, the session is only a device holding keys a bundle names.
+        let mut proof = [0; PROOF_LEN];
+        tokio::time::timeout(HANDSHAKE, tunnel.read_exact(&mut proof))
+            .await
+            .map_err(|_| sheprd_tunnel::Error::Closed)?
+            .map_err(Error::Splice)?;
+        if !admitted.borrow().proves(&id, &hash, &proof) {
+            tracing::info!("ended a fleet session whose proof did not check out");
+            return Ok(());
+        }
+    }
     match first[0] {
         PURPOSE_REMOVAL => removals(agent, id, &mut tunnel).await,
         PURPOSE_SSH if ssh => splice(agent, tunnel, peer, dial, remote, None).await,

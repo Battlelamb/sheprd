@@ -145,6 +145,7 @@ pub fn compute(
             let member = Member {
                 allow: state.allowed(host, id),
                 dial: member.bundle.dial,
+                fleet_key: member.bundle.key,
                 name: member.bundle.name.clone(),
                 rev,
                 ssh,

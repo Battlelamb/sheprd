@@ -105,3 +105,20 @@ fn malformed_messages_are_refused() {
     assert_eq!(Raw::decode(&[HELD, 0, 1, 1]), Err(Error::Encoding));
     assert_eq!(Raw::decode(&[HELD, 0, 0, 1]), Err(Error::Encoding));
 }
+
+#[test]
+fn a_proof_checks_out_only_for_its_key_and_handshake() {
+    let key = SigningKey::from_slice(&[7; 32]).unwrap();
+    let other = SigningKey::from_slice(&[8; 32]).unwrap();
+    let public = key.verifying_key().to_sec1_point(true);
+    let proof = prove(&key, &[1; 32]);
+    assert!(verify(public.as_bytes(), &[1; 32], &proof));
+    assert!(!verify(public.as_bytes(), &[2; 32], &proof));
+    assert!(!verify(
+        public.as_bytes(),
+        &[1; 32],
+        &prove(&other, &[1; 32])
+    ));
+    assert!(!verify(&[0; 33], &[1; 32], &proof));
+    assert!(!verify(public.as_bytes(), &[1; 32], &[0; PROOF_LEN]));
+}

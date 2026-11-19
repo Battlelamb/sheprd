@@ -1436,7 +1436,7 @@ sequenceDiagram
    with an **access file** computed from the log:
    - the fleet id, which pins the account to this fleet: a file for
      another fleet is refused, naming the fleet that holds it;
-   - per computer member: its dial, tunnel, and SSH keys, its name,
+   - per computer member: its fleet, dial, tunnel, and SSH keys, its name,
      whether it is allowed, and the `Access` `rev` (0 until set);
    - every removed member id;
    - `settled`: of the removals the agent reported suspending for, those
@@ -1611,9 +1611,13 @@ accepted on this purpose.
   itself that removed every member they name (a voided removal may name
   a member another removal took, beside one still live). Each member's
   keys carry the sequence number of its own latest rotation, so an
-  agent never prefers keys a rotation replaced. An agent takes `removal`
+  agent never prefers keys a rotation replaced. Every member session to
+  an agent, SSH or removal, carries the member's fleet key signing the
+  tunnel handshake hash after the purpose byte, checked against the fleet
+  key in the access file; a session whose proof is missing or wrong ends.
+  An agent takes `removal`
   from the member tunnel keys in its access file. It checks no
-  signatures and wants no parents, so it only **suspends** the target:
+  operation's signature and wants no parents, so it only **suspends** the target:
   it stops admitting that member's keys (and any enrolled desktop with
   both of them), removes its `authorized_keys` line, and
   keeps the id in a suspended list with the removals that named it.

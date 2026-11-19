@@ -121,3 +121,44 @@ fn a_removal_suspending_several_members_counts_once_against_the_settled_bound() 
     assert_eq!(file.settled.len(), 9);
     assert!(file.settled.contains(&Id([0xf0; 32])));
 }
+
+#[test]
+fn a_session_proof_is_the_fleet_key_signing_the_logs_domain_and_the_hash() {
+    use p256::ecdsa::signature::Verifier as _;
+    let (log, b) = {
+        let (a, b) = (computer(1), computer(2));
+        let mut log = found(&a);
+        admit(&mut log, &a, &b);
+        (log, b)
+    };
+    let hash = [9; 32];
+    let proof = crate::control::fleet::removal::prove(&b.key, &hash);
+    // The agent's wire signs the same bytes the log's domain names.
+    let message = [DOMAIN, b"session".as_slice(), &hash].concat();
+    let signature = p256::ecdsa::Signature::from_slice(&proof).unwrap();
+    assert!(b.key.verifying_key().verify(&message, &signature).is_ok());
+    assert!(crate::control::fleet::removal::proves(
+        log.state(),
+        &b.id(),
+        &hash,
+        &proof
+    ));
+    assert!(!crate::control::fleet::removal::proves(
+        log.state(),
+        &b.id(),
+        &[8; 32],
+        &proof
+    ));
+}
+
+#[test]
+fn an_agents_access_file_names_each_members_fleet_key() {
+    let (a, b) = (computer(1), computer(2));
+    let mut log = found(&a);
+    admit(&mut log, &a, &b);
+    let intro = plain_host(40);
+    let host = intro.id().unwrap();
+    act(&mut log, &a, Body::HostAdd(intro));
+    let file = host_access::compute(&log, &host, [], |_| false).unwrap();
+    assert_eq!(file.members[&Id(b.id().0)].fleet_key, b.bundle.key);
+}

@@ -9,6 +9,8 @@ use crate::{
 };
 use std::sync::{Arc, Mutex, mpsc};
 
+mod races;
+
 const DEVICE: &str = "/org/bluez/hci0/dev_AA";
 
 fn info(name: &str) -> Vec<u8> {
@@ -43,6 +45,7 @@ fn listed(central: &mut Central, name: &str) -> String {
     });
     central.input(Input::Info {
         device: DEVICE.into(),
+        attempt: 1,
         value: Some(info(name)),
     });
     central.id(DEVICE)
@@ -105,12 +108,16 @@ fn a_computer_is_connected_resolved_read_and_listed_once() {
             pair: true,
             chunk: 180,
         }),
-        [act(Action::ReadInfo(DEVICE.into()))]
+        [act(Action::ReadInfo {
+            device: DEVICE.into(),
+            attempt: 1,
+        })]
     );
     let id = central.id(DEVICE);
     assert_eq!(
         central.input(Input::Info {
             device: DEVICE.into(),
+            attempt: 1,
             value: Some(info("Studio")),
         }),
         [emit(Event::Found {
@@ -122,6 +129,7 @@ fn a_computer_is_connected_resolved_read_and_listed_once() {
     assert_eq!(
         central.input(Input::Info {
             device: DEVICE.into(),
+            attempt: 1,
             value: Some(info("Studio")),
         }),
         []
@@ -145,6 +153,7 @@ fn a_computer_not_pairing_is_not_listed_and_one_that_stops_is_unlisted() {
     assert_eq!(
         central.input(Input::Info {
             device: DEVICE.into(),
+            attempt: 1,
             value: Some(br#"{"v":1}"#.to_vec()),
         }),
         []
@@ -154,6 +163,7 @@ fn a_computer_not_pairing_is_not_listed_and_one_that_stops_is_unlisted() {
     assert_eq!(
         central.input(Input::Info {
             device: DEVICE.into(),
+            attempt: 1,
             value: None,
         }),
         [emit(Event::PeripheralDisconnected { peripheral: id })]
@@ -174,6 +184,7 @@ fn names_are_cleaned_and_bounded() {
         });
         central.input(Input::Info {
             device: DEVICE.into(),
+            attempt: 1,
             value: Some(info(name)),
         })
     };
@@ -258,7 +269,10 @@ fn connecting_before_resolution_finishes_it_first() {
             chunk: 20,
         }),
         [
-            act(Action::ReadInfo(DEVICE.into())),
+            act(Action::ReadInfo {
+                device: DEVICE.into(),
+                attempt: 1,
+            }),
             act(Action::Subscribe {
                 device: DEVICE.into(),
                 on: true
@@ -416,7 +430,13 @@ fn notifications_become_whole_frames() {
 fn info_is_read_again_while_scanning() {
     let mut central = scanning();
     listed(&mut central, "Studio");
-    assert_eq!(central.tick(), [act(Action::ReadInfo(DEVICE.into()))]);
+    assert_eq!(
+        central.tick(),
+        [act(Action::ReadInfo {
+            device: DEVICE.into(),
+            attempt: 1,
+        })]
+    );
     central.command(Command::Scan(false));
     assert_eq!(central.tick(), []);
 }
@@ -481,7 +501,13 @@ fn disconnecting_while_scanning_unsubscribes_and_keeps_it_listed() {
         }),
         []
     );
-    assert_eq!(central.tick(), [act(Action::ReadInfo(DEVICE.into()))]);
+    assert_eq!(
+        central.tick(),
+        [act(Action::ReadInfo {
+            device: DEVICE.into(),
+            attempt: 1,
+        })]
+    );
 }
 
 #[test]

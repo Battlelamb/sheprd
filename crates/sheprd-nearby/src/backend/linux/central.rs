@@ -3,12 +3,14 @@
 //! `GattCharacteristic1` to read `info` and carry `pair`. Every call that
 //! can wait on the radio runs on a thread of its own and reports back
 //! through the [`Inbox`]; BlueZ's signals are followed on one more.
+//! Discovery is the exception: starting and stopping it run on one worker,
+//! in the order asked, so a late stop cannot undo a later start.
 
 use super::{BLUEZ, CHARACTERISTIC, Managed, Properties};
 use crate::{
     Error, Result,
     backend::{INFO, PAIR, SERVICE},
-    central::{Action, Inbox, Input, Link},
+    central::{Action, Inbox, Input, Link, latest::Latest},
     framing::MIN_CHUNK,
     protocol::Radio,
 };
@@ -50,6 +52,8 @@ pub(crate) struct Scanner {
     adapter: String,
     known: Known,
     inbox: Inbox,
+    /// Discovery's latest change, for the worker that applies them.
+    discovery: Arc<Latest<bool>>,
 }
 
 impl Scanner {
@@ -80,9 +84,28 @@ impl Scanner {
             adapter: adapter.as_str().to_owned(),
             known: Arc::default(),
             inbox,
+            discovery: Arc::default(),
         };
         scanner.watch()?;
+        scanner.discover_in_order();
         Ok(scanner)
+    }
+
+    /// Applies discovery changes one at a time, each only after the one
+    /// before it returned; a refusal is reported so the central asks again.
+    fn discover_in_order(&self) {
+        let (conn, adapter, inbox) = (self.conn.clone(), self.adapter.clone(), self.inbox.clone());
+        let discovery = self.discovery.clone();
+        thread::spawn(move || {
+            while let Some(on) = discovery.take() {
+                if let Err(error) = discover(&conn, &adapter, on) {
+                    inbox.send(Input::DiscoveryFailed {
+                        on,
+                        failure: error.to_string(),
+                    });
+                }
+            }
+        });
     }
 
     /// Follows the adapter's power, computers appearing and leaving, and
@@ -115,18 +138,17 @@ impl Scanner {
     }
 }
 
+impl Drop for Scanner {
+    fn drop(&mut self) {
+        self.discovery.close();
+    }
+}
+
 impl Link for Scanner {
     fn act(&self, action: Action) {
         let (conn, inbox) = (self.conn.clone(), self.inbox.clone());
         match action {
-            Action::Discover(on) => {
-                let adapter = self.adapter.clone();
-                thread::spawn(move || {
-                    if let Err(error) = discover(&conn, &adapter, on) {
-                        inbox.send(Input::Failure(format!("discovery: {error}")));
-                    }
-                });
-            }
+            Action::Discover(on) => self.discovery.put(on),
             Action::Connect(device) => {
                 thread::spawn(move || match call(&conn, &device, DEVICE, "Connect", &()) {
                     Ok(()) => inbox.send(Input::Connected(device)),
@@ -157,7 +179,7 @@ impl Link for Scanner {
                     });
                 });
             }
-            Action::ReadInfo(device) => {
+            Action::ReadInfo { device, attempt } => {
                 let Some(path) = self.characteristics(&device).info else {
                     return;
                 };
@@ -172,7 +194,11 @@ impl Link for Scanner {
                         )
                         .ok()
                         .and_then(|reply| reply.body().deserialize::<Vec<u8>>().ok());
-                    inbox.send(Input::Info { device, value });
+                    inbox.send(Input::Info {
+                        device,
+                        attempt,
+                        value,
+                    });
                 });
             }
             Action::Subscribe { device, on } => {

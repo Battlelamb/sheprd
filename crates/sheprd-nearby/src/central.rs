@@ -15,6 +15,9 @@
 //! [`Link`] only turns actions into BlueZ or WinRT calls and their results
 //! back into [`Input`]s.
 
+#[cfg(any(target_os = "linux", test))]
+pub(crate) mod latest;
+
 use crate::{
     Result,
     framing::{self, MIN_CHUNK, Outcome, Reassembly},
@@ -67,9 +70,11 @@ pub(crate) enum Input {
         pair: bool,
         chunk: usize,
     },
-    /// What `info` read, or `None` when the read was refused or failed.
+    /// What `info` read, or `None` when the read was refused or failed,
+    /// for the [`Action::ReadInfo`] of the same `attempt`.
     Info {
         device: String,
+        attempt: u64,
         value: Option<Vec<u8>>,
     },
     /// Whether `pair` now notifies, after a subscribe or unsubscribe.
@@ -89,8 +94,11 @@ pub(crate) enum Input {
     },
     /// The link failed or ended.
     Disconnected(String),
-    /// What the radio could not do, for the log.
-    Failure(String),
+    /// The radio refused the [`Action::Discover`] asking for `on`.
+    DiscoveryFailed {
+        on: bool,
+        failure: String,
+    },
 }
 
 /// What the radio does next, for the platform's [`Link`].
@@ -101,7 +109,12 @@ pub(crate) enum Action {
     Connect(String),
     /// Looks up the nearby service and its `info` and `pair`.
     Resolve(String),
-    ReadInfo(String),
+    /// Reads `info`; the answer carries `attempt` back, so one from an
+    /// earlier connection to the computer is told apart.
+    ReadInfo {
+        device: String,
+        attempt: u64,
+    },
     Subscribe {
         device: String,
         on: bool,
@@ -124,6 +137,9 @@ pub(crate) enum Step {
 /// A computer connected to read its `info`, or to pair.
 #[derive(Debug)]
 struct Peer {
+    /// Which connection to the computer this is: reads started for an
+    /// earlier one answer with an older number.
+    attempt: u64,
     connected: bool,
     info: bool,
     /// Whether its `pair` characteristic is known, so frames can go.
@@ -137,6 +153,7 @@ struct Peer {
 impl Default for Peer {
     fn default() -> Self {
         Self {
+            attempt: 0,
             connected: false,
             info: false,
             pair: false,
@@ -158,8 +175,10 @@ struct Info {
 #[derive(Debug)]
 pub(crate) struct Central {
     scanning: bool,
-    /// Whether the radio was asked to discover.
+    /// Whether the radio was asked to discover; set back when it refuses.
     discovering: bool,
+    /// The last [`Peer::attempt`] given out.
+    attempts: u64,
     radio: Option<Radio>,
     peers: HashMap<String, Peer>,
     /// The computers to subscribe to once their characteristics are known.
@@ -175,6 +194,7 @@ impl Central {
         Self {
             scanning: false,
             discovering: false,
+            attempts: 0,
             radio: None,
             peers: HashMap::new(),
             wanted: HashSet::new(),
@@ -317,7 +337,12 @@ impl Central {
             }
             Input::Discovered(device) => {
                 if self.scanning && !self.peers.contains_key(&device) {
-                    self.peers.insert(device.clone(), Peer::default());
+                    self.attempts += 1;
+                    let peer = Peer {
+                        attempt: self.attempts,
+                        ..Peer::default()
+                    };
+                    self.peers.insert(device.clone(), peer);
                     steps.push(Step::Act(Action::Connect(device)));
                 }
             }
@@ -333,7 +358,11 @@ impl Central {
                 pair,
                 chunk,
             } => self.resolved(device, info, pair, chunk, &mut steps),
-            Input::Info { device, value } => self.info(&device, value.as_deref(), &mut steps),
+            Input::Info {
+                device,
+                attempt,
+                value,
+            } => self.info(&device, attempt, value.as_deref(), &mut steps),
             Input::Subscribed { device, notifying } => {
                 if self.wanted.contains(&device) {
                     let peripheral = self.ids.id(&device);
@@ -350,7 +379,17 @@ impl Central {
                 self.left(&device, &mut steps);
                 self.peers.remove(&device);
             }
-            Input::Failure(failure) => steps.push(Step::Emit(Event::error(failure))),
+            Input::DiscoveryFailed { on, failure } => {
+                // Only the latest ask counts: an earlier one refused after
+                // another was made changes nothing. Recording it as not done
+                // lets the next refresh or scan ask again.
+                if self.discovering == on {
+                    self.discovering = !on;
+                }
+                steps.push(Step::Emit(Event::error(format_args!(
+                    "discovery: {failure}"
+                ))));
+            }
         }
         steps
     }
@@ -378,7 +417,10 @@ impl Central {
         peer.pair = pair;
         peer.chunk = chunk.max(MIN_CHUNK);
         if info {
-            steps.push(Step::Act(Action::ReadInfo(device.clone())));
+            steps.push(Step::Act(Action::ReadInfo {
+                device: device.clone(),
+                attempt: peer.attempt,
+            }));
         }
         if pair && self.wanted.contains(&device) {
             steps.push(Step::Act(Action::Subscribe { device, on: true }));
@@ -387,8 +429,16 @@ impl Central {
 
     /// Only a computer showing Pair device names itself; one advertising
     /// for presence alone does not, nor does one whose dialog closed, which
-    /// refuses the read.
-    fn info(&mut self, device: &str, value: Option<&[u8]>, steps: &mut Vec<Step>) {
+    /// refuses the read. A reply for a computer that left since, or from an
+    /// earlier connection to it, is stale and changes nothing.
+    fn info(&mut self, device: &str, attempt: u64, value: Option<&[u8]>, steps: &mut Vec<Step>) {
+        if self
+            .peers
+            .get(device)
+            .is_none_or(|peer| peer.attempt != attempt)
+        {
+            return;
+        }
         let named = value
             .and_then(|value| serde_json::from_slice::<Info>(value).ok())
             .and_then(|info| {
@@ -450,21 +500,28 @@ impl Central {
         }
     }
 
-    /// Reads `info` again from every computer found and not being paired.
+    /// Reads `info` again from every computer found and not being paired,
+    /// and asks again for discovery the radio refused.
     pub(crate) fn tick(&mut self) -> Vec<Step> {
+        let mut steps = Vec::new();
         if !self.scanning {
-            return Vec::new();
+            return steps;
         }
-        let mut due: Vec<&String> = self
+        self.apply(&mut steps);
+        let mut due: Vec<(&String, u64)> = self
             .peers
             .iter()
             .filter(|(device, peer)| peer.connected && peer.info && !self.wanted.contains(*device))
-            .map(|(device, _)| device)
+            .map(|(device, peer)| (device, peer.attempt))
             .collect();
         due.sort();
-        due.into_iter()
-            .map(|device| Step::Act(Action::ReadInfo(device.clone())))
-            .collect()
+        steps.extend(due.into_iter().map(|(device, attempt)| {
+            Step::Act(Action::ReadInfo {
+                device: device.clone(),
+                attempt,
+            })
+        }));
+        steps
     }
 
     /// Tells Sheprd that `device`, if it was listed or being paired, is gone.
@@ -482,6 +539,39 @@ impl Central {
         if self.radio == Some(Radio::PoweredOn) && self.scanning != self.discovering {
             self.discovering = self.scanning;
             steps.push(Step::Act(Action::Discover(self.scanning)));
+        }
+    }
+}
+
+/// When the loop next reads `info` again. It is checked after every
+/// message as well as on waking, so a queue busy at the deadline delays a
+/// refresh by one message at most rather than skipping it.
+#[derive(Debug, Default)]
+pub(crate) struct Refresh {
+    next: Option<Instant>,
+}
+
+impl Refresh {
+    /// How long the loop may wait for a message.
+    pub(crate) fn wait(&self, now: Instant) -> Duration {
+        self.next.map_or(Duration::from_secs(3600), |at| {
+            at.saturating_duration_since(now)
+        })
+    }
+
+    /// Whether a refresh is due at `now`, scheduling the one after it.
+    /// The first comes a full [`REFRESH`] after scanning starts.
+    pub(crate) fn due(&mut self, scanning: bool, now: Instant) -> bool {
+        match self.next {
+            _ if !scanning => {
+                self.next = None;
+                false
+            }
+            Some(at) if at > now => false,
+            next => {
+                self.next = Some(now + REFRESH);
+                next.is_some()
+            }
         }
     }
 }
@@ -531,12 +621,9 @@ pub(crate) fn run<L: Link>(
 ) {
     let mut central = Central::new(ids::random_seed());
     let mut link: Option<L> = None;
-    let mut next_refresh: Option<Instant> = None;
+    let mut refresh = Refresh::default();
     loop {
-        let wait = next_refresh.map_or(Duration::from_secs(3600), |at| {
-            at.saturating_duration_since(Instant::now())
-        });
-        let steps = match messages.recv_timeout(wait) {
+        let mut steps = match messages.recv_timeout(refresh.wait(Instant::now())) {
             Ok(Message::Command(command)) => {
                 if link.is_none() && command == Command::Scan(true) {
                     match open(inbox) {
@@ -550,15 +637,12 @@ pub(crate) fn run<L: Link>(
                 central.command(command)
             }
             Ok(Message::Input(input)) => central.input(input),
-            Err(RecvTimeoutError::Timeout) => central.tick(),
+            Err(RecvTimeoutError::Timeout) => Vec::new(),
             Err(RecvTimeoutError::Disconnected) => return,
         };
-        let now = Instant::now();
-        next_refresh = match next_refresh {
-            _ if !central.scanning() => None,
-            Some(at) if at > now => Some(at),
-            _ => Some(now + REFRESH),
-        };
+        if refresh.due(central.scanning(), Instant::now()) {
+            steps.extend(central.tick());
+        }
         for step in steps {
             match step {
                 Step::Emit(event) => out.emit(&event),

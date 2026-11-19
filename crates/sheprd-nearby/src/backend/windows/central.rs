@@ -135,7 +135,10 @@ impl Link for Scanner {
                     self.watcher.Stop()
                 };
                 if let Err(error) = result {
-                    inbox.send(Input::Failure(format!("discovery: {error}")));
+                    inbox.send(Input::DiscoveryFailed {
+                        on,
+                        failure: error.to_string(),
+                    });
                 }
             }
             Action::Connect(device) => {
@@ -175,7 +178,7 @@ impl Link for Scanner {
                     });
                 });
             }
-            Action::ReadInfo(device) => {
+            Action::ReadInfo { device, attempt } => {
                 let Some(info) = self.characteristic(&device, |peer| peer.info.as_ref()) else {
                     return;
                 };
@@ -191,7 +194,11 @@ impl Link for Scanner {
                     })()
                     .ok()
                     .flatten();
-                    inbox.send(Input::Info { device, value });
+                    inbox.send(Input::Info {
+                        device,
+                        attempt,
+                        value,
+                    });
                 });
             }
             Action::Subscribe { device, on } => {

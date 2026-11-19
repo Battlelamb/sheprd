@@ -191,7 +191,7 @@ struct PullRequestDetailScreen: View {
             Section {
                 ForEach(files.files) { file in
                     NavigationLink {
-                        PatchScreen(file: file)
+                        PatchScreen(file: file).makesRoomForConnectionToast()
                     } label: {
                         FileRow(file: file.file)
                     }

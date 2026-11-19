@@ -218,11 +218,14 @@ async fn request(
         builder = builder.header(hyper::header::CONTENT_TYPE, "application/json");
     }
     let request = builder.body(Full::new(Bytes::from(body.unwrap_or_default())))?;
-    // HTTP/1 takes one request at a time: the last answer may still be
-    // settling on the connection, and a request sent before it is ready
-    // is cancelled ("connection was not ready").
-    timeout(sender.ready()).await??;
-    let response = timeout(sender.send_request(request)).await??;
+    let response = timeout(async {
+        // Collecting the previous body can finish before the connection
+        // driver advertises readiness for the next request. Wait; never replay
+        // a claim that may already have spent its pairing token.
+        sender.ready().await?;
+        sender.send_request(request).await
+    })
+    .await??;
     let status = response.status();
     let body = timeout(Limited::new(response.into_body(), MAX_ANSWER).collect())
         .await?
@@ -283,6 +286,9 @@ async fn timeout<T>(step: impl Future<Output = T>) -> Result<T> {
         .await
         .map_err(|_| Error::Tunnel(sheprd_tunnel::Error::Closed))
 }
+
+#[cfg(test)]
+mod tests;
 
 /// TLS that trusts only the authority whose SHA-256 is `fingerprint`: the
 /// other computer sends it after its certificate, and the code both

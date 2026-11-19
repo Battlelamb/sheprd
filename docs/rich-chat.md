@@ -69,7 +69,7 @@ short: when its plan has hit a limit, is 80% used, or is half used and on
 pace to run out before it resets, the button starts the installed agent with
 the most room instead, and its tooltip says why. Usage comes from the status
 bar's last reading of the selected host, matched by name (Claude, Codex,
-Copilot, Gemini, OpenCode, Pi); every window counts, so a weekly limit
+Copilot, Gemini, Kimi Code, OpenCode, Pi); every window counts, so a weekly limit
 running out matters even when a session window is fuller. An agent without
 a reading, or whose limits have reset since, counts as having room, and one
 tight plan never replaces another. With usage turned off
@@ -182,6 +182,49 @@ Limitations:
 - If `sheprd-acp` cannot continue the session, the pane keeps its error, and
   the agent's own command (such as `claude --resume ID`) still can.
 
+### Opening new agents as chats
+
+Turn on **Open new agents as chats** in Settings > Chat, or run
+`sheprd config set chat.auto_convert true`, and each agent that starts in a
+terminal afterwards moves into a chat on its own, as `chat convert` would.
+It does not matter what started it: typing `claude` at a prompt, `herdr agent
+start`, or another agent or tool driving Herdr. The calling tool needs no
+change. It is off by default.
+
+- Only agents that start after the window connected to their daemon move.
+  Turning it on, restarting Sheprd, or reconnecting leaves what already runs
+  in its terminal.
+- An agent moves once it has been idle for 10 seconds with no change Herdr
+  reports. A tool that prompts the agent as soon as it is ready makes it work,
+  which starts the wait again, so the move comes after that turn rather than
+  in the middle of the tool's handshake. An agent that turns busy just as it
+  was to move is watched again, up to twice.
+- Each pane is tried once. A refusal, such as a missing Herdr integration, is
+  logged and leaves the terminal; a chat moved back to its terminal stays
+  there.
+- Typing, composing, or pasting into the agent's pane from this window keeps
+  its terminal, since a move would clear what is typed. That holds while the
+  move is still checking the agent too: it stops before pressing Ctrl+C, or,
+  for an agent you quit meanwhile, before typing its line. Once Ctrl+C is
+  pressed, the move finishes, since the agent is on its way out and only its
+  chat can continue the conversation.
+  Typing into another pane, then clicking the agent's, does not count, nor
+  does moving the pointer, scrolling, or clicking. Text typed from another
+  client, such as the Herdr TUI, is not seen: that is what the wait is for.
+- Several Sheprd windows on one daemon move each agent once: a window claims
+  the pane before it stops the agent, and the others leave it alone. The same
+  claim keeps **Move Agent into Chat** in one window from racing a move
+  another window started. Two separate Sheprd processes do not see each
+  other's claims.
+- A tool that must keep an agent in its terminal can mark the pane:
+  `herdr pane report-metadata PANE --source ID --token sheprd_terminal=keep`.
+- Agents move one at a time, so ten started together move one after another.
+- The moved agent runs as a chat, which Herdr reports as an `acp` agent with
+  the original agent's display name. A tool that later finds the pane's agent
+  by its kind, such as `claude`, no longer finds it there.
+- Herdr 1 panes only, with the limitations above; Herdr 2 panes stay as they
+  are.
+
 ## Chats after a reboot
 
 When Herdr restores its panes after a reboot or a server restart, a pane that
@@ -256,7 +299,7 @@ Limitations:
   folder could be handed the old chat.
 - A chat whose shell folder differs from the chat's own (started with
   `--cwd`) is not continued.
-- Only the built-in agents (`claude`, `codex`, `copilot`, `gemini`,
+- Only the built-in agents (`claude`, `codex`, `copilot`, `gemini`, `kimi`,
   `opencode`, `pi`) started without extra agent arguments. Custom commands
   are not continued.
 - `[chat.env]` variables are not set again: typing their values into a shell
@@ -644,7 +687,13 @@ again only when they differ from the last ones sent, and the origin only on
 another device or a change between this machine and SSH. Where the person cannot open paths on the
 agent's machine, the note asks the agent to link pictures as Markdown images,
 which [linked pictures](#messages-and-controls) attach to the chat, and to
-render HTML mockups to screenshots. The transcript shows only the person's
+render HTML mockups to screenshots. It also says the person cannot touch
+the agent's computer, so a hardware key, Touch ID, or an on-screen prompt
+is out of their reach: the agent pushes and fetches over HTTPS with the
+GitHub CLI's credentials rather than SSH, and stops rather than turning
+off signing when a commit needs a key (`phone.md` and `remote.md`; the
+iPhone and iPad app's `phone-app.md` follows `phone.md`, so says it once
+through it). The transcript shows only the person's
 words. An older program ignores the field, and an older client sends none.
 
 The note's texts are templates (`context/prompts.rs`): the built-in ones in

@@ -15,6 +15,7 @@
 //! be reached shows its terminal cells as before.
 // i18n: migrated
 
+mod auto_convert;
 mod chats;
 pub(crate) mod code_block;
 mod code_choices;
@@ -52,6 +53,7 @@ pub(crate) mod visual;
 pub(crate) mod widgets;
 mod window;
 
+pub(crate) use auto_convert::Typed;
 pub(crate) use chats::{ChatInput, Chats, LauncherDeck, Toward};
 
 /// The wall clock in milliseconds since the Unix epoch, which the program

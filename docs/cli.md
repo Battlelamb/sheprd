@@ -197,6 +197,8 @@ share at least two of its keywords and were not shown yet in that chat.
 | `chat [status]` | The `sheprd-acp` chat panes of the window's host, this machine or an SSH host: agent, status, model, context window use, and whether the chat view or the terminal shows |
 | `chat convert [--pane ID]` | Move the terminal agent in your pane (or ID, else the focused one) into a `sheprd-acp` chat in the same pane, keeping its conversation. From a Herdr 2 pane, your pane is your terminal (`HC_TERMINAL_ID`), whose id in `chat` is `core:` and the terminal's (see [Moving a terminal agent into a chat](rich-chat.md#moving-a-terminal-agent-into-a-chat)). Returns once the move has started; `chat` shows the chat when it attaches. Exits 6 while the agent works, 5 when the pane has no terminal agent, and 8 for an agent or pane that cannot move. `config set chat.auto_convert true` moves every new agent this way ([Opening new agents as chats](rich-chat.md#opening-new-agents-as-chats)) |
 | `chat shortcuts` | Your text shortcuts, the prompts every chat's composer offers (type `/`, or use the shortcuts button beside +), in order: each label and its text. `--json` adds each one's `id` and `title`, the list's `updated_ms`, and `complete`, false when the list holds more text than one answer carries. The list is the same on this computer, every connected SSH host with `sheprd-remote-control`, and the phones paired with them; Settings > Text Shortcuts edits it. Exits 4 when there are none |
+| `chat pr [list]` | Run as the agent of a `sheprd-acp` chat: the pull requests that chat's side rail lists, oldest first, each with its repository, address, and what was done to it (`created`, `pushed`, `edited`, `commented`, `reviewed`, `ready`, `merged`, `closed`, `reopened`). Reaches the chat named by `SHEPRD_CHAT_ENDPOINT`, which the chat sets on its agent, over the chat's own socket; Sheprd need not run. Exits 4 when there are none, 2 outside a chat, and 3 when the chat cannot be reached (see [Pull requests in a chat's rail](#pull-requests-in-a-chats-rail)) |
+| `chat pr add URL` | List a pull request (`https://github.com/OWNER/REPO/pull/N`) in your chat's rail, for one you changed without `gh`. Exits 2 for an address that is not a GitHub pull request |
 | `chat show\|hide\|toggle [--pane ID]` | Show the native chat view over your pane (or ID, else the focused one), or its terminal |
 | `chat new AGENT [--pane ID]` | Open a tab running a `sheprd-acp` chat with a built-in agent (`claude`, `codex`, `copilot`, `gemini`, `kimi`, `opencode`, `pi`) in the workspace and folder of your pane (or ID). While its agent is idle, a chat on this machine can switch to another installed agent from its composer, which hands the new agent the conversation. On an SSH host the tab runs that host's `sheprd-acp` (see [Chats on SSH hosts](#chats-on-ssh-hosts)). With no Herdr pane to go by, as when called from a Herdr 2 pane, a Herdr 2 tab in the active group splits its pane in use with the chat instead (see [Chats in Herdr 2 panes](rich-chat.md#chats-in-herdr-2-panes)); its pane id in `chat` is `core:` and the terminal's. Exits 8 when `sheprd-acp` is missing here, the host cannot be reached, or the agent is not installed on it (`sheprd-acp agents` lists those that are) |
 
@@ -566,6 +568,24 @@ A pipe has no receive or send timeout. Reads poll with `PeekNamedPipe`, as
 the daemon client does; writes have no deadline, so the app's out buffer
 holds a whole answer and the connection bound limits what a stalled caller
 can hold.
+
+## Pull requests in a chat's rail
+
+A `sheprd-acp` chat lists the pull requests its agent worked on in the
+**Pull requests** section of its side rail, beside the plan and the changed
+files, on every client attached to it. The chat program reads them from the
+agent's finished commands: `gh pr create`, `edit`, `merge`, `comment`,
+`review`, `ready`, `close`, and `reopen`, `gh api` writes to
+`repos/OWNER/REPO/pulls/N`, and `git push` output that links to a pull
+request. Commands that only read, such as `gh pr view`, list nothing. Only
+`https://github.com/OWNER/REPO/pull/N` addresses are kept, at most 64 a chat.
+For a pull request changed another way, the agent runs
+`sheprd chat pr add URL`; the note sent ahead of the first prompt tells it
+so when a `sheprd` command is beside the chat program.
+
+Each row shows the number and title, colored as the pull request's badge is
+when Sheprd has looked it up for a workspace or lists it in the Pull
+requests section; a click opens it there, else its page on GitHub.
 
 ## Recovering a kept Herdr 2 chat
 

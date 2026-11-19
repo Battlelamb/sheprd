@@ -477,9 +477,15 @@ the **Plan** section; an assistant's Markdown checklist does not. Child tasks
 remain separate from the parent's plan. Sheprd does not enable agent tools
 or change OpenCode configuration automatically.
 
-Every rail section folds to one line. While anything runs, **Plan** and
-**Changed** fold on their own to leave room, showing the current step and the
-change totals; once nothing runs they open again. Clicking a section's header
+**Pull requests** lists each pull request the agent created, pushed to,
+commented on, reviewed, merged, or closed in this chat, newest first; a click
+opens it in Sheprd's Pull requests section when that lists it, else on GitHub.
+See [Pull requests in a chat's rail](cli.md#pull-requests-in-a-chats-rail)
+for what is picked up and `sheprd chat pr add` for the rest.
+
+Every rail section folds to one line. While anything runs, **Plan**,
+**Changed**, and **Pull requests** fold on their own to leave room, showing
+the current step and the change totals; once nothing runs they open again. Clicking a section's header
 overrides that for as long as the chat is open.
 
 Drag the rail's left edge to resize it, up to half the chat's width; a

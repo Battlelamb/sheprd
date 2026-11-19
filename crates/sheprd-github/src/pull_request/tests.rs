@@ -22,6 +22,7 @@ use std::{
 mod actions;
 mod batch;
 mod by_number;
+mod by_url;
 mod cache;
 mod fetch;
 mod fork_branch;

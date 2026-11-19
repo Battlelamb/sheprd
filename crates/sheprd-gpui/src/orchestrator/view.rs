@@ -9,6 +9,7 @@
 
 mod adoption;
 mod browse;
+mod by_url;
 mod conversation;
 mod core_removal;
 mod detail;

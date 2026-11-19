@@ -8,6 +8,7 @@ mod agent;
 mod commands;
 mod harness;
 mod pictures;
+mod pull_requests;
 mod thread;
 
 use std::{
@@ -134,6 +135,9 @@ pub(crate) struct Config {
     /// The conversation so far, for a continued session whose agent does
     /// not replay it.
     pub history: Option<Transcript>,
+    /// Clients can attach, and the agent was told where: its
+    /// `sheprd chat pr add` reaches this chat.
+    pub listens: bool,
     pub load: Option<String>,
     pub login_hint: Option<String>,
     pub pane: Option<String>,
@@ -237,7 +241,8 @@ impl<R: FnMut(Update)> Session<R> {
             .as_ref()
             .and_then(|_| crate::context::Recall::open(&config.cwd));
         let context = Context::new(std::mem::take(&mut config.prompts), facts, told)
-            .with_memory(config.sheprd.as_deref(), recall);
+            .with_memory(config.sheprd.as_deref(), recall)
+            .with_pull_requests(config.sheprd.as_deref().filter(|_| config.listens));
         Self {
             accepts: crate::files::Accepts::default(),
             acp_session: None,
@@ -383,6 +388,7 @@ impl<R: FnMut(Update)> Session<R> {
         }
         self.report_activity();
         self.pictures_after(&change);
+        self.find_pull_requests(&change);
     }
 
     fn emit_all(&mut self, changes: impl IntoIterator<Item = Change>) {

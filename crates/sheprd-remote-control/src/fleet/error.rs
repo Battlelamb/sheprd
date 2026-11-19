@@ -3,6 +3,8 @@ pub enum Error {
     // keep-sorted start
     #[error(transparent)]
     Auth(#[from] crate::auth::Error),
+    #[error("the fleet's files are busy: another update, or the daemon starting, holds them")]
+    Busy,
     #[error(transparent)]
     Control(#[from] crate::control::Error),
     #[error("the remote control daemon refused: {0}")]
@@ -11,6 +13,8 @@ pub enum Error {
     Desktop(#[from] crate::desktop::Error),
     #[error("this computer is in a fleet already; leave it first")]
     InFleet,
+    #[error("the log handed over is larger than this computer keeps")]
+    JoinTooLarge,
     #[error(transparent)]
     Log(#[from] crate::control::fleet::Error),
     #[error("this computer cannot sign with its certificate authority")]

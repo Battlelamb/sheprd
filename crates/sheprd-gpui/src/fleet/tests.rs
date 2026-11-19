@@ -1,5 +1,10 @@
 use super::*;
-use std::time::{Duration, Instant};
+use std::{
+    collections::BTreeSet,
+    time::{Duration, Instant},
+};
+
+mod scrub;
 
 mod plain;
 
@@ -69,4 +74,108 @@ fn an_answer_reads_or_says_why_not() {
         remote::parse_applied(b"nope"),
         Err(Error::Answer(_))
     ));
+}
+
+fn fleet_view(heads: &[&str]) -> View {
+    View {
+        fleet: "f".repeat(64),
+        me: "a".into(),
+        members: Vec::new(),
+        hosts: Vec::new(),
+        removed: 0,
+        equivocating: Vec::new(),
+        suspended: Vec::new(),
+        pending: 0,
+        heads: heads.iter().map(|head| (*head).to_owned()).collect(),
+    }
+}
+
+#[test]
+fn an_older_read_never_replaces_a_newer_view() {
+    let mut fleet = Fleet {
+        reads: 2,
+        asking: true,
+        ..Fleet::default()
+    };
+    // The second read answered first; the first answers late.
+    assert!(fleet.answered(2, Ok(Some(fleet_view(&["new"])))));
+    assert!(!fleet.answered(1, Ok(Some(fleet_view(&["old"])))));
+    assert!(!fleet.answered(1, Ok(None)));
+    assert_eq!(fleet.view, Some(fleet_view(&["new"])));
+    assert!(!fleet.asking);
+}
+
+#[test]
+fn a_log_handed_over_asks_again_from_the_tips_of_what_it_sent() {
+    let op = |id: &str, parents: &[&str]| {
+        (
+            id.to_owned(),
+            parents.iter().map(|parent| (*parent).to_owned()).collect(),
+        )
+    };
+    // A first part with the root and two concurrent children: both are
+    // tips, the root is not.
+    let first = flows::heads_after(&[], [op("r", &[]), op("x", &["r"]), op("y", &["r"])]);
+    assert_eq!(first, vec!["x".to_owned(), "y".to_owned()]);
+    // The next part merges them, and one more leaves a tip of the first.
+    assert_eq!(
+        flows::heads_after(&first, [op("m", &["x"])]),
+        vec!["m".to_owned(), "y".to_owned()]
+    );
+    assert_eq!(flows::tips(&first, &[]).unwrap(), first);
+    assert!(matches!(
+        flows::tips(&[], &["not base64!".into()]),
+        Err(Error::Log(_))
+    ));
+}
+
+fn host(id: &str, target: &str) -> sheprd_client::SavedHost {
+    sheprd_client::SavedHost {
+        id: id.into(),
+        label: id.into(),
+        target: target.into(),
+        session: "default".into(),
+        enabled: true,
+    }
+}
+
+#[test]
+fn a_fleet_host_whose_route_moved_is_saved_again_not_forgotten() {
+    let before = BTreeSet::from(["moved".to_owned(), "same".to_owned(), "gone".to_owned()]);
+    let saved_now = [
+        host("moved", "me@r-old.sheprd.invalid"),
+        host("same", "me@r-same.sheprd.invalid"),
+        host("gone", "me@r-gone.sheprd.invalid"),
+        host("mine", "me@build-01"),
+    ];
+    let wanted = [
+        host("moved", "me@r-new.sheprd.invalid"),
+        host("same", "me@r-same.sheprd.invalid"),
+        host("new", "me@r-fresh.sheprd.invalid"),
+        // A person saved this id: it is left alone.
+        host("mine", "me@r-other.sheprd.invalid"),
+    ];
+    let plan = saved::plan(&before, &saved_now, &wanted);
+    assert_eq!(plan.forget, vec!["moved".to_owned(), "gone".to_owned()]);
+    assert_eq!(
+        plan.save,
+        vec![
+            host("moved", "me@r-new.sheprd.invalid"),
+            host("new", "me@r-fresh.sheprd.invalid"),
+        ]
+    );
+    assert_eq!(
+        plan.kept,
+        BTreeSet::from(["moved".to_owned(), "new".to_owned(), "same".to_owned()])
+    );
+}
+
+#[test]
+fn an_older_update_of_the_saved_devices_never_runs_after_a_newer_one() {
+    let saving = saved::Saving::default();
+    let ran = std::cell::RefCell::new(Vec::new());
+    saving.run(2, || ran.borrow_mut().push(2));
+    saving.run(1, || ran.borrow_mut().push(1));
+    saving.run(3, || ran.borrow_mut().push(3));
+    assert_eq!(*ran.borrow(), vec![2, 3]);
 }

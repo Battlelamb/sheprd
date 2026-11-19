@@ -41,6 +41,7 @@ async fn fleet_apply_with_no_daemon_running_keeps_the_log() {
         heads: Vec::new(),
         ops: sync::encode_ops(&a.ops()),
         nonce: None,
+        more: false,
     };
     let applied = run_apply(b.dir.path(), apply).unwrap();
     assert_eq!(applied.fleet, fleet);
@@ -77,6 +78,7 @@ async fn an_answer_carries_what_the_caller_lacks() {
         heads: caller.iter().map(ToString::to_string).collect(),
         ops: Vec::new(),
         nonce: None,
+        more: false,
     })) else {
         panic!("no answer");
     };
@@ -136,6 +138,7 @@ async fn apply_naming_another_fleet_learns_nothing() {
         heads: Vec::new(),
         ops: Vec::new(),
         nonce: None,
+        more: false,
     };
     assert!(matches!(
         ask::answer(&a.state, &a.fleet, Ask::Apply(apply), now_ms()),
@@ -154,6 +157,7 @@ async fn an_answer_proves_which_host_gave_it() {
         heads: Vec::new(),
         ops: Vec::new(),
         nonce: Some(nonce.into()),
+        more: false,
     })) else {
         panic!("no answer");
     };
@@ -171,73 +175,6 @@ async fn an_answer_proves_which_host_gave_it() {
         ..applied
     };
     assert!(!sync::proven(&echoed, nonce, &hosts));
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn scrubbing_forgets_the_fleet_and_what_it_wrote() {
-    let (http, _, _) = relay().await;
-    let (a, b) = (Node::new(http, 1).await, Node::new(http, 2).await);
-    assert_eq!(a.ask(Ask::Found), Answer::Done);
-    join(&a, &b);
-    grants::apply(&b.state, &b.fleet).unwrap();
-    assert_eq!(b.lines().len(), 1);
-    let records = b.dir.path().join("desktop/hosts");
-    assert_eq!(records.read_dir().unwrap().count(), 1);
-    // A desktop paired with b one by one whose key a member proved.
-    let proved = [0x5a; 32];
-    {
-        use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-        let point = SigningKey::from_slice(&[9; 32])
-            .unwrap()
-            .verifying_key()
-            .to_sec1_point(false);
-        b.state
-            .auth()
-            .devices_mut()
-            .add(
-                crate::auth::NewDevice {
-                    app: None,
-                    id: crate::control::DeviceId("legacy".into()),
-                    name: "a over Bluetooth".into(),
-                    public_key: crate::auth::PublicKey::parse(
-                        &URL_SAFE_NO_PAD.encode(point.as_bytes()),
-                    )
-                    .unwrap(),
-                    relay: Some(crate::control::host_relay::Keys {
-                        dial: URL_SAFE_NO_PAD.encode(
-                            SigningKey::from_slice(&[8; 32])
-                                .unwrap()
-                                .verifying_key()
-                                .to_sec1_point(true)
-                                .as_bytes(),
-                        ),
-                        tunnel: URL_SAFE_NO_PAD.encode(proved),
-                    }),
-                    ssh: Some(
-                        crate::ssh_access::SshKey::parse(
-                            &crate::desktop::keys::ssh_public_key(a.dir.path()).unwrap(),
-                        )
-                        .unwrap(),
-                    ),
-                },
-                now_ms(),
-            )
-            .unwrap();
-    }
-    b.fleet.proved(a.fleet.me(), proved).unwrap();
-    assert_eq!(b.ask(Ask::Scrub), Answer::Done);
-    let legacy = crate::control::DeviceId("legacy".into());
-    assert!(b.state.auth().devices().get(&legacy).is_none());
-    grants::apply(&b.state, &b.fleet).unwrap();
-    assert!(b.lines().is_empty());
-    assert_eq!(records.read_dir().unwrap().count(), 0);
-    assert!(ask::view(&b.fleet).is_none());
-    // The same key may found or join another fleet after.
-    assert!(!b.dir.path().join("fleet/log.bin").exists());
-    assert_eq!(
-        Fleet::load(b.dir.path(), now_ms()).unwrap().me(),
-        b.fleet.me()
-    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

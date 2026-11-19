@@ -29,6 +29,8 @@ pub enum Error {
     Permission,
     #[error(transparent)]
     Removal(#[from] sheprd_relay_agent::removal::Error),
+    #[error("an access rev is not one above the highest its history holds")]
+    Rev,
     #[error("a host's record is not signed by the key that pins it")]
     SelfRecord,
     #[error("a fleet operation's sequence number does not follow its signer's")]

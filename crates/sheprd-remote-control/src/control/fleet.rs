@@ -16,7 +16,9 @@
 //! - A removal voids every operation by the removed member that the
 //!   remover had not seen. The one exception is a counter-removal of
 //!   whoever removed it concurrently, so a removed attacker can take with
-//!   it only the members that removed it.
+//!   it only the members that removed it. It also reaches the members
+//!   the removed member admitted that the remover had not seen, so no one
+//!   keeps trust that came only from a voided admission.
 //! - Every conflict resolves to the safer side: a removal over an
 //!   addition, a deny over an allow.
 //!
@@ -33,6 +35,7 @@ mod log;
 mod membership;
 mod op;
 pub mod removal;
+mod routes;
 pub mod saved;
 mod state;
 pub mod sync;
@@ -53,6 +56,8 @@ use sha2::{Digest, Sha256};
 
 /// What every signed message starts with, before its own suffix.
 pub const DOMAIN: &[u8] = b"sheprd-fleet-v1";
+/// Members one removal names beside its target.
+pub const MAX_ALSO_MEMBERS: usize = 16;
 /// Live computer members at once.
 pub const MAX_COMPUTERS: usize = 16;
 /// Live phone members at once.

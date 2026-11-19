@@ -24,9 +24,23 @@ use tokio::{
 #[cfg(unix)]
 mod agent;
 #[cfg(unix)]
+mod atomic;
+#[cfg(unix)]
 mod flood;
 #[cfg(unix)]
+mod handover;
+#[cfg(unix)]
 mod joining;
+#[cfg(unix)]
+mod offline;
+#[cfg(unix)]
+mod records;
+#[cfg(unix)]
+mod rejected;
+#[cfg(unix)]
+mod restore;
+#[cfg(unix)]
+mod scrub;
 #[cfg(unix)]
 mod sessions;
 #[cfg(unix)]

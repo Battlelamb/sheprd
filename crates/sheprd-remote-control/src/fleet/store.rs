@@ -1,10 +1,11 @@
 //! The fleet's files, in the state directory's `fleet` folder, private to
 //! this user: `key` (the fleet key's 32-byte secret), `log.bin` (the log,
 //! `control::fleet::saved`), and `peers.json` (which removals each member
-//! and plain host holds, and which suspensions wait for their history).
+//! and plain host holds, and which suspensions wait for their history);
+//! `lock` is `super::lock`'s.
 
 use super::{Error, Holder, Inner, Result};
-use crate::control::fleet::{HostId, MemberId, OpId, saved};
+use crate::control::fleet::{HostId, MemberId, Op, OpId, saved, sync};
 use crate::desktop::files::{read_bounded, write_private};
 use p256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
@@ -13,11 +14,15 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const DIRECTORY: &str = "fleet";
+pub(super) const DIRECTORY: &str = "fleet";
 const KEY: &str = "key";
 const LOG: &str = "log.bin";
 const PEERS: &str = "peers.json";
-const MAX_PEERS: u64 = 1024 * 1024;
+/// The fleet id this computer joined as a host the fleet shares, not as a
+/// member.
+const HOSTED: &str = "hosted";
+/// The removals suspensions keep to check again take most of it.
+const MAX_PEERS: u64 = 16 * 1024 * 1024;
 
 fn path(state_dir: &Path, name: &str) -> PathBuf {
     state_dir.join(DIRECTORY).join(name)
@@ -82,6 +87,9 @@ struct Kept {
     signer: String,
     targets: Vec<String>,
     since_ms: u64,
+    /// The removal, base64url; absent from files an earlier build wrote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    op: Option<String>,
 }
 
 /// What the fleet folder keeps, read at `now_ms`. A log that no longer
@@ -93,11 +101,7 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
         .transpose()?;
     // A file that no longer reads is an error, never an empty one: it may
     // hold suspensions, and dropping them would let their targets back in.
-    let peers: Peers = read_bounded(&path(state_dir, PEERS), MAX_PEERS)?
-        .map(|bytes| serde_json::from_slice(&bytes))
-        .transpose()
-        .map_err(|_| Error::Peers)?
-        .unwrap_or_default();
+    let peers = read_peers(state_dir)?;
     Ok(Inner {
         log,
         held: peers
@@ -115,17 +119,7 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
                 (holder, ids)
             })
             .collect(),
-        proven: peers
-            .proven
-            .iter()
-            .filter_map(|(member, keys)| {
-                let keys = keys
-                    .keys()
-                    .filter_map(|key| HostId::from_hex(key).map(|key| key.0))
-                    .collect();
-                Some((MemberId::from_hex(member)?, keys))
-            })
-            .collect(),
+        proven: proven(&peers),
         unknown: peers
             .unknown
             .iter()
@@ -135,8 +129,9 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
             .unconfirmed
             .iter()
             .filter_map(|(id, kept)| {
+                let id = OpId::from_hex(id)?;
                 Some((
-                    OpId::from_hex(id)?,
+                    id,
                     super::Unconfirmed {
                         signer: MemberId::from_hex(&kept.signer)?,
                         targets: kept
@@ -145,6 +140,13 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
                             .filter_map(|member| MemberId::from_hex(member))
                             .collect(),
                         since_ms: kept.since_ms,
+                        // One that no longer reads keeps its suspension.
+                        op: kept
+                            .op
+                            .as_deref()
+                            .and_then(|op| sync::bytes(op).ok())
+                            .and_then(|op| Op::decode(&op).ok())
+                            .filter(|op| op.id() == id),
                     },
                 ))
             })
@@ -152,7 +154,51 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
     })
 }
 
+fn read_peers(state_dir: &Path) -> Result<Peers> {
+    Ok(read_bounded(&path(state_dir, PEERS), MAX_PEERS)?
+        .map(|bytes| serde_json::from_slice(&bytes))
+        .transpose()
+        .map_err(|_| Error::Peers)?
+        .unwrap_or_default())
+}
+
+fn proven(peers: &Peers) -> BTreeMap<MemberId, BTreeSet<[u8; 32]>> {
+    peers
+        .proven
+        .iter()
+        .filter_map(|(member, keys)| {
+            let keys = keys
+                .keys()
+                .filter_map(|key| HostId::from_hex(key).map(|key| key.0))
+                .collect();
+            Some((MemberId::from_hex(member)?, keys))
+        })
+        .collect()
+}
+
+/// Every tunnel key a member proved, read from the peers' state alone, so
+/// a damaged log does not stop a scrub from revoking their pairings.
+/// Blocking.
+pub(super) fn proven_keys(state_dir: &Path) -> Result<Vec<[u8; 32]>> {
+    Ok(proven(&read_peers(state_dir)?)
+        .into_values()
+        .flatten()
+        .collect())
+}
+
 /// Writes the log and the peers' state. Blocking.
+/// The fleet id this computer joined as a shared host, if it did. Blocking.
+pub(super) fn load_hosted(state_dir: &Path) -> Result<Option<String>> {
+    Ok(read_bounded(&path(state_dir, HOSTED), 64)?
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned()))
+}
+
+/// Records that this computer joined `fleet` as a shared host. Blocking.
+pub(super) fn save_hosted(state_dir: &Path, fleet: &str) -> Result<()> {
+    write_private(&path(state_dir, HOSTED), fleet.as_bytes())?;
+    Ok(())
+}
+
 pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
     if let Some(log) = &inner.log {
         write_private(&path(state_dir, LOG), &saved::encode(log)?)?;
@@ -200,6 +246,7 @@ pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
                         signer: kept.signer.to_string(),
                         targets: kept.targets.iter().map(ToString::to_string).collect(),
                         since_ms: kept.since_ms,
+                        op: kept.op.as_ref().map(|op| sync::text(&op.encode())),
                     },
                 )
             })
@@ -210,21 +257,25 @@ pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
     Ok(())
 }
 
-/// Removes the log and the peers' state. Blocking.
-pub(super) fn scrub(state_dir: &Path) -> Result<()> {
-    for name in [LOG, PEERS] {
-        let file = path(state_dir, name);
-        match std::fs::remove_file(&file) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(source) => {
-                return Err(Error::Desktop(crate::desktop::Error::File {
-                    operation: "remove",
-                    path: file,
-                    source,
-                }));
-            }
-        }
+/// Removes the log. Blocking.
+pub(super) fn remove_log(state_dir: &Path) -> Result<()> {
+    remove(state_dir, LOG)
+}
+
+/// Removes the peers' state. Blocking.
+pub(super) fn remove_peers(state_dir: &Path) -> Result<()> {
+    remove(state_dir, PEERS)
+}
+
+fn remove(state_dir: &Path, name: &str) -> Result<()> {
+    let file = path(state_dir, name);
+    match std::fs::remove_file(&file) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(Error::Desktop(crate::desktop::Error::File {
+            operation: "remove",
+            path: file,
+            source,
+        })),
     }
-    Ok(())
 }

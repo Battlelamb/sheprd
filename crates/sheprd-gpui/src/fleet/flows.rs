@@ -5,15 +5,16 @@
 
 use super::{Error, Fleet, Machine, Standing, remote};
 use crate::remote::Supervisor;
-use gpui::App;
+use gpui::{App, BackgroundExecutor};
+use sheprd_client::ConnectTarget;
 use sheprd_remote_control::control::{
     Request, Response,
     fleet::{
-        HostKind, Method,
+        HostKind, Method, saved,
         sync::{self, Answer, Applied, Apply, Ask},
     },
 };
-use std::{sync::atomic::AtomicBool, time::Instant};
+use std::{collections::BTreeSet, sync::atomic::AtomicBool, time::Instant};
 
 /// Asks this computer's daemon `ask` and waits for its fleet answer.
 pub(super) async fn daemon(
@@ -38,14 +39,122 @@ async fn applied(
     }
 }
 
+/// The most parts a log is carried in: the largest log a daemon keeps,
+/// one answer at a time, and one more.
+const MAX_PARTS: usize = saved::MAX_SAVED.div_ceil(sync::MAX_ANSWER_BYTES) + 1;
+
+/// Asks `target` for what this computer lacks, from `heads`, naming no
+/// fleet and with a fresh nonce: its answer, when it proves it is one of
+/// `hosts` (the fleet's computers and Sheprd hosts) in `fleet`; `None` for
+/// a machine outside it, which learns nothing.
+async fn ask_proven(
+    executor: &BackgroundExecutor,
+    target: &ConnectTarget,
+    heads: Vec<String>,
+    fleet: &str,
+    hosts: &[String],
+) -> Result<Option<Applied>, Error> {
+    let nonce = uuid::Uuid::new_v4().simple().to_string();
+    let ask = Apply {
+        fleet: None,
+        heads,
+        nonce: Some(nonce.clone()),
+        ..Apply::default()
+    };
+    let target = target.clone();
+    match executor
+        .spawn(async move { remote::apply(&target, &ask, &AtomicBool::new(false)) })
+        .await
+    {
+        Ok(theirs) if theirs.fleet == fleet && sync::proven(&theirs, &nonce, hosts) => {
+            Ok(Some(theirs))
+        }
+        Ok(_) => Ok(None),
+        // A machine with no Sheprd daemon: the caller decides.
+        Err(error) => Err(error),
+    }
+}
+
+/// Hands this computer's whole log to `target`, which is in no fleet yet,
+/// in parts of at most one answer each, every part but the last marked
+/// `more`: the machine joins with the last, as the operation that admits
+/// it, or shares it as a host, comes last.
+async fn hand_over(
+    client: &crate::remote::supervisor::Client,
+    executor: &BackgroundExecutor,
+    target: &ConnectTarget,
+    fleet: &str,
+) -> Result<(), Error> {
+    let mut sent = Vec::new();
+    for _ in 0..MAX_PARTS {
+        let part = applied(
+            client,
+            Apply {
+                fleet: Some(fleet.to_owned()),
+                heads: sent.clone(),
+                ..Apply::default()
+            },
+        )
+        .await?;
+        sent = tips(&sent, &part.ops)?;
+        let more = part.more;
+        let send = Apply {
+            ops: part.ops,
+            more,
+            ..Apply::default()
+        };
+        let target = target.clone();
+        executor
+            .spawn(async move { remote::apply(&target, &send, &AtomicBool::new(false)) })
+            .await?;
+        if !more {
+            return Ok(());
+        }
+    }
+    Err(Error::TooLarge)
+}
+
+/// The heads of what was sent, after `ops`, base64url, as [`heads_after`].
+pub(super) fn tips(before: &[String], ops: &[String]) -> Result<Vec<String>, Error> {
+    let ops = sync::decode_ops(ops)?;
+    Ok(heads_after(
+        before,
+        ops.iter().map(|op| {
+            (
+                op.id().to_string(),
+                op.parents().iter().map(ToString::to_string).collect(),
+            )
+        }),
+    ))
+}
+
+/// The heads of what was sent: `before`'s and the ids of `ops` (each with
+/// its parents), but for those `ops` name as parents. As the daemon
+/// answers from the start of the log, what was sent holds every ancestor
+/// of what it holds, so asking from these heads gives the rest.
+pub(super) fn heads_after(
+    before: &[String],
+    ops: impl IntoIterator<Item = (String, Vec<String>)>,
+) -> Vec<String> {
+    let mut tips: BTreeSet<String> = before.iter().cloned().collect();
+    let mut parents = BTreeSet::new();
+    for (id, named) in ops {
+        tips.insert(id);
+        parents.extend(named);
+    }
+    tips.retain(|id| !parents.contains(id));
+    tips.into_iter().collect()
+}
+
 /// Syncs `machine` with this computer's fleet `fleet`:
 ///
-/// 1. asks the machine for what this computer lacks, naming the fleet and
-///    this computer's heads, and sending nothing: a machine in no fleet or
-///    another answers nothing and learns nothing;
+/// 1. asks the machine for what this computer lacks, naming no fleet,
+///    sending only this computer's heads and a nonce it must sign with
+///    its certificate authority: a machine that is not one of the fleet's
+///    hosts learns nothing and gets nothing;
 /// 2. hands what it answered to this computer's daemon, which says what
-///    the machine lacks;
-/// 3. sends the machine that.
+///    the machine lacks, asking again while the machine has more;
+/// 3. sends the machine that, one answer at a time.
 ///
 /// A machine with no Sheprd daemon may be a plain host of this fleet: its
 /// relay agent is kept current instead (`plain::sync`).
@@ -73,53 +182,75 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
                 .filter(|host| host.kind != HostKind::Agent)
                 .map(|host| host.id.clone())
                 .collect();
-            let nonce = uuid::Uuid::new_v4().simple().to_string();
-            let target = machine.target.clone();
-            // The fleet is not named: a machine outside it learns nothing,
-            // and one that names it back must still prove it.
-            let ask = Apply {
-                fleet: None,
-                heads: view.heads.clone(),
-                ops: Vec::new(),
-                nonce: Some(nonce.clone()),
-            };
-            let theirs = executor
-                .spawn(async move { remote::apply(&target, &ask, &AtomicBool::new(false)) })
-                .await;
-            let theirs = match theirs {
-                Ok(theirs) if theirs.fleet == fleet && sync::proven(&theirs, &nonce, &hosts) => {
-                    theirs
-                }
-                Ok(_) => return Ok((Standing::Outside, Vec::new(), Vec::new())),
+            let target = &machine.target;
+            let mut theirs = match ask_proven(&executor, target, view.heads.clone(), &fleet, &hosts)
+                .await
+            {
+                Ok(Some(theirs)) => theirs,
+                Ok(None) => return Ok((Standing::Outside, Vec::new(), Vec::new())),
+                // No Sheprd daemon: perhaps a plain host of this fleet.
                 Err(Error::NoProgram) => {
                     let standing = super::plain::sync(&client, &executor, &machine, &view).await?;
                     return Ok((standing, Vec::new(), view.heads.clone()));
                 }
                 Err(error) => return Err(error),
             };
-            let ours = applied(
-                &client,
-                Apply {
-                    fleet: Some(fleet.clone()),
-                    heads: theirs.heads.clone(),
-                    ops: theirs.ops,
-                    nonce: None,
-                },
-            )
-            .await?;
+            let mut ours;
+            let mut parts = 1;
+            loop {
+                ours = applied(
+                    &client,
+                    Apply {
+                        fleet: Some(fleet.clone()),
+                        heads: theirs.heads.clone(),
+                        ops: std::mem::take(&mut theirs.ops),
+                        ..Apply::default()
+                    },
+                )
+                .await?;
+                if !theirs.more || parts >= MAX_PARTS {
+                    break;
+                }
+                parts += 1;
+                let next =
+                    match ask_proven(&executor, target, ours.heads.clone(), &fleet, &hosts).await {
+                        Ok(Some(next)) => next,
+                        Ok(None) | Err(Error::NoProgram) => {
+                            return Ok((Standing::Outside, Vec::new(), Vec::new()));
+                        }
+                        Err(error) => return Err(error),
+                    };
+                theirs = next;
+            }
             let mut heads = theirs.heads;
-            if !ours.ops.is_empty() {
-                let target = machine.target.clone();
+            for _ in 0..MAX_PARTS {
+                if ours.ops.is_empty() {
+                    break;
+                }
+                let more = ours.more;
                 let send = Apply {
                     fleet: Some(fleet.clone()),
                     heads: ours.heads.clone(),
                     ops: ours.ops,
-                    nonce: None,
+                    ..Apply::default()
                 };
-                let answer = executor
+                let target = target.clone();
+                heads = executor
                     .spawn(async move { remote::apply(&target, &send, &AtomicBool::new(false)) })
-                    .await?;
-                heads = answer.heads;
+                    .await?
+                    .heads;
+                if !more {
+                    break;
+                }
+                ours = applied(
+                    &client,
+                    Apply {
+                        fleet: Some(fleet.clone()),
+                        heads: heads.clone(),
+                        ..Apply::default()
+                    },
+                )
+                .await?;
             }
             Ok::<_, Error>((Standing::Member, heads, ours.heads))
         }
@@ -181,26 +312,7 @@ pub(crate) fn invite(
                 },
             )
             .await?;
-            let everything = applied(
-                &client,
-                Apply {
-                    fleet: Some(fleet.clone()),
-                    heads: Vec::new(),
-                    ops: Vec::new(),
-                    nonce: None,
-                },
-            )
-            .await?;
-            let target = machine.target.clone();
-            let send = Apply {
-                fleet: None,
-                heads: Vec::new(),
-                ops: everything.ops,
-                nonce: None,
-            };
-            executor
-                .spawn(async move { remote::apply(&target, &send, &AtomicBool::new(false)) })
-                .await?;
+            hand_over(&client, &executor, &machine.target, &fleet).await?;
             Ok::<_, Error>(())
         }
         .await;
@@ -215,8 +327,9 @@ pub(crate) fn invite(
 
 /// Shares the Sheprd host `machine` with the fleet, leaving out the
 /// computer members in `deny`: it signs its own record with its
-/// certificate authority, and this computer's daemon adds it (a person
-/// here asked for it).
+/// certificate authority, this computer's daemon adds it (a person here
+/// asked for it), and the whole log is handed over, which the host takes
+/// only because it shares it.
 pub(crate) fn share(
     cx: &mut App,
     id: String,
@@ -224,7 +337,10 @@ pub(crate) fn share(
     deny: Vec<String>,
     done: impl FnOnce(Option<String>, &mut App) + 'static,
 ) {
-    let Some(client) = Supervisor::client(cx) else {
+    let (Some(client), Some(fleet)) = (
+        Supervisor::client(cx),
+        Fleet::view(cx).map(|view| view.fleet.clone()),
+    ) else {
         done(Some(Error::NoDaemon.to_string()), cx);
         return;
     };
@@ -237,6 +353,9 @@ pub(crate) fn share(
                 .spawn(async move { remote::intro(&target, &AtomicBool::new(false)) })
                 .await?;
             daemon(&client, Ask::AddHost { intro, deny }).await?;
+            // The host takes the log because it shares it, then lets in
+            // the computers allowed there; syncing keeps it current.
+            hand_over(&client, &executor, &machine.target, &fleet).await?;
             Ok::<_, Error>(())
         }
         .await;
@@ -269,14 +388,7 @@ pub(crate) fn scrub(
             Fleet::set_acting(cx, &id, false);
             Fleet::set_link(cx, &id, |link| *link = super::Link::default());
             Fleet::refresh(cx);
-            done(
-                match outcome {
-                    Ok(true) => None,
-                    Ok(false) => Some(Error::NoProgram.to_string()),
-                    Err(error) => Some(error.to_string()),
-                },
-                cx,
-            );
+            done(outcome.err().map(|error| error.to_string()), cx);
         });
     })
     .detach();

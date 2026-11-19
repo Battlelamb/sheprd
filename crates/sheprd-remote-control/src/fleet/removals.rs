@@ -204,6 +204,7 @@ fn record(state: &State, host: &crate::control::fleet::HostId, name: &str) -> Op
         relays: record.relays.clone(),
         route: record.route.clone(),
         fleet: true,
+        host: None,
     })
 }
 

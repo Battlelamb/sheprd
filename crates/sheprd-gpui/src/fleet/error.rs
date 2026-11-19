@@ -17,6 +17,8 @@ pub enum Error {
     HostKey,
     #[error("The host is not one the fleet can share")]
     Intro(#[source] sheprd_remote_control::control::fleet::Error),
+    #[error(transparent)]
+    Log(#[from] sheprd_remote_control::control::fleet::Error),
     #[error("This app ships no sheprd-relay-agent for {platform}")]
     NoBuild { platform: String },
     #[error("Remote control is off on this computer")]
@@ -33,12 +35,16 @@ pub enum Error {
     Request(#[source] sheprd_remote_control::control::Error),
     #[error("Could not run sheprd-remote-control on the host")]
     Run(#[source] sheprd_client::Error),
+    #[error("The fleet's log is larger than a daemon keeps")]
+    TooLarge,
     #[error("Could not check the host's SSH key against this computer's known hosts")]
     Trust(#[source] sheprd_client::Error),
     #[error(
         "This host's SSH key is not checked; the fleet shares only hosts whose key is checked strictly"
     )]
     Unchecked,
+    #[error("Could not remove all fleet access on the host; some may remain")]
+    Unscrubbed,
     #[error("The fleet cannot reach this kind of device")]
     Unsupported,
     // keep-sorted end

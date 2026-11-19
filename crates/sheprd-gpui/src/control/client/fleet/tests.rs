@@ -71,3 +71,17 @@ fn no_fleet_prints_nothing_found() {
     assert_eq!(output.text, "This computer is in no fleet");
     assert_eq!(output.status, crate::control::client::exit::NOTHING);
 }
+
+#[test]
+fn a_daemon_that_cannot_be_read_fails_rather_than_saying_no_fleet() {
+    let output = output(
+        &Reply::Status {
+            view: None,
+            error: Some("Connection refused".into()),
+        },
+        Part::All,
+    )
+    .unwrap();
+    assert_eq!(output.text, "Could not read the fleet: Connection refused");
+    assert_eq!(output.status, crate::control::client::exit::REFUSED);
+}

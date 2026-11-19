@@ -72,7 +72,7 @@ fn settles(log: &Log, asked: &Asked, graced: &impl Fn(&OpId) -> bool) -> bool {
     if log
         .pending_removals()
         .iter()
-        .any(|(id, _, _)| *id == asked.removal)
+        .any(|(op, _)| op.id() == asked.removal)
     {
         return false;
     }

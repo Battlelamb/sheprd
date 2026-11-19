@@ -3,7 +3,7 @@
 //! malformed body never reaches the fold.
 
 use super::{
-    DOMAIN, Error, HostId, MAX_HOSTS, MemberId, Result, sha256,
+    DOMAIN, Error, HostId, MAX_ALSO_MEMBERS, MAX_HOSTS, MemberId, Result, sha256,
     wire::{Reader, Writer},
 };
 use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
@@ -31,7 +31,6 @@ const MAX_DIRECT: usize = 8;
 const MAX_ADDRESS: usize = 128;
 const MAX_HOST_KEYS: usize = 4;
 const MAX_HOST_KEY: usize = 1024;
-const MAX_ALSO_MEMBERS: usize = 16;
 const MAX_DEVICE_KEY: usize = 65;
 
 macro_rules! byte_enum {

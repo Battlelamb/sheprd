@@ -3,6 +3,8 @@
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum Error {
     // keep-sorted start
+    #[error(transparent)]
+    Access(#[from] sheprd_relay_agent::access::Error),
     #[error("a fleet operation is over its bounds")]
     Bounds,
     #[error("a checkpoint does not match the state its history computes")]
@@ -15,6 +17,8 @@ pub enum Error {
     Full,
     #[error("a fleet operation was signed too far in the future")]
     Future,
+    #[error("a host two members added with different keys waits for a person to pick one")]
+    HostHeld,
     #[error("a fleet operation's fields are not valid")]
     Invalid,
     #[error("a joining member did not sign its own admission")]
@@ -23,6 +27,8 @@ pub enum Error {
     ParentMissing,
     #[error("a fleet member may not sign this operation")]
     Permission,
+    #[error(transparent)]
+    Removal(#[from] sheprd_relay_agent::removal::Error),
     #[error("a host's record is not signed by the key that pins it")]
     SelfRecord,
     #[error("a fleet operation's sequence number does not follow its signer's")]

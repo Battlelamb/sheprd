@@ -100,3 +100,17 @@ async fn a_peers_file_that_does_not_read_is_an_error() {
         Err(Error::Peers)
     ));
 }
+
+#[test]
+fn what_members_and_plain_hosts_hold_survives_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let fleet = Fleet::load(dir.path(), now_ms()).unwrap();
+    let member = Holder::Member(MemberId([1; 32]));
+    let host = Holder::Host(HostId([1; 32]));
+    fleet.held(member, [OpId([7; 32])]).unwrap();
+    fleet.held(host, [OpId([8; 32])]).unwrap();
+    let again = Fleet::load(dir.path(), now_ms()).unwrap();
+    let held = &again.inner().held;
+    assert_eq!(held[&member].iter().collect::<Vec<_>>(), [&OpId([7; 32])]);
+    assert_eq!(held[&host].iter().collect::<Vec<_>>(), [&OpId([8; 32])]);
+}

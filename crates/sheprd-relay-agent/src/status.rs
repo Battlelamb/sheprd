@@ -1,12 +1,13 @@
 //! What `status --json` reports, for Sheprd to read over SSH when it
 //! enrolls this machine: the route and identity to pin, how many desktops
-//! may dial, and, while the agent runs, each relay's state.
+//! may dial, the fleet it belongs to and the digest of its access file,
+//! and, while the agent runs, each relay's state.
 //!
 //! The running agent writes `status.json` in its state directory whenever
 //! a relay's state changes and every [`HEARTBEAT`], and removes it when it
 //! stops. A file older than [`STALE`] is from an agent that died.
 
-use crate::{Error, Result, authorized::Authorized, files, keys::Keys};
+use crate::{Error, Result, authorized::Authorized, files, fleet, keys::Keys};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -73,8 +74,12 @@ fn seconds(time: SystemTime) -> u64 {
 /// What `status` prints.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Report {
-    /// How many desktops may dial.
+    /// How many desktops enrolled one by one may dial.
     pub authorized: usize,
+    /// The fleet this account belongs to, once Sheprd gave it an access
+    /// file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fleet: Option<fleet::Report>,
     /// The tunnel identity desktops pin, base64url.
     pub identity: String,
     /// Each relay's state while the agent runs; empty when it does not.
@@ -95,8 +100,10 @@ impl Report {
         let keys = Keys::load_or_create(state_dir)?;
         let authorized = Authorized::load(state_dir)?;
         let live = Live::load(state_dir, now)?;
+        let fleet = fleet::Held::load(state_dir)?.report()?;
         Ok(Self {
             authorized: authorized.entries().len(),
+            fleet,
             identity: keys.identity(),
             relays: live
                 .as_ref()
@@ -117,6 +124,16 @@ impl Report {
             if self.running { "yes" } else { "no" },
             self.authorized
         );
+        if let Some(fleet) = &self.fleet {
+            text.push_str(&format!(
+                "fleet {}: {} members may reach SSH, {} may not, {} removed, {} suspended\n",
+                fleet.fleet.short(),
+                fleet.allowed,
+                fleet.denied,
+                fleet.removed,
+                fleet.suspended.len()
+            ));
+        }
         for (relay, state) in &self.relays {
             let state = match state {
                 RelayState::Connecting => "connecting".to_owned(),

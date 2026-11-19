@@ -110,6 +110,8 @@ sheprd-orchestrator   = { path = "crates/sheprd-orchestrator" }
 sheprd-protocol       = { path = "crates/sheprd-protocol" }
 sheprd-remote         = { default-features = false, path = "crates/sheprd-remote" }
 sheprd-relay          = { default-features = false, path = "crates/sheprd-relay" }
+# The fleet access file and removal frames, without the agent's runtime.
+sheprd-relay-agent    = { default-features = false, path = "crates/sheprd-relay-agent" }
 sheprd-remote-control         = { default-features = false, path = "crates/sheprd-remote-control" }
 sheprd-session        = { path = "crates/sheprd-session" }
 sheprd-t3             = { path = "crates/sheprd-t3" }

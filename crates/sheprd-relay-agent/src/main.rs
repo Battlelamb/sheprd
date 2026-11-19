@@ -2,15 +2,18 @@
 
 use sheprd_relay_agent::{
     Error, Result,
+    access::{self, Access},
     agent::{Agent, Options, Relay},
     authorized::Authorized,
+    authorized_keys,
     cli::{self, Command, RelayArg},
-    files,
+    files, fleet,
     status::Report,
 };
 use std::{
+    io::Read as _,
     net::{Ipv4Addr, SocketAddr},
-    path::Path,
+    path::{Path, PathBuf},
     process::ExitCode,
     time::SystemTime,
 };
@@ -59,17 +62,25 @@ fn execute(command: Command, state_dir: &Path) -> Result<()> {
         Command::Status { json } => {
             let report = Report::read(state_dir, SystemTime::now())?;
             if json {
-                let text = serde_json::to_string_pretty(&report).map_err(|source| {
-                    Error::StatusFormat {
-                        path: state_dir.to_owned(),
-                        source,
-                    }
-                })?;
-                println!("{text}");
+                print_json(state_dir, &report)
             } else {
                 print!("{}", report.text());
+                Ok(())
             }
-            Ok(())
+        }
+        Command::FleetApply { authorized_keys } => {
+            let mut bytes = Vec::new();
+            std::io::stdin()
+                .take(access::MAX_BYTES as u64 + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|source| Error::Io {
+                    path: PathBuf::from("-"),
+                    source,
+                })?;
+            let incoming = Access::parse(&bytes)?;
+            let keys = keys_path(authorized_keys)?;
+            fleet::Held::apply(state_dir, Some(&keys), incoming)?;
+            print_json(state_dir, &Report::read(state_dir, SystemTime::now())?)
         }
         Command::Authorize(entry) => {
             let path = state_dir.join(sheprd_relay_agent::authorized::FILE);
@@ -90,6 +101,9 @@ fn execute(command: Command, state_dir: &Path) -> Result<()> {
                 .map(relay)
                 .collect::<Result<Vec<_>>>()?;
             let options = Options {
+                // An account with nowhere to put the fleet's lines still
+                // cuts a suspended member off in the tunnel.
+                authorized_keys: keys_path(run.authorized_keys).ok(),
                 forward: SocketAddr::from((Ipv4Addr::LOCALHOST, run.forward)),
                 relays,
                 state_dir: state_dir.to_owned(),
@@ -97,6 +111,21 @@ fn execute(command: Command, state_dir: &Path) -> Result<()> {
             serve(options)
         }
     }
+}
+
+fn print_json(state_dir: &Path, report: &Report) -> Result<()> {
+    let text = serde_json::to_string_pretty(report).map_err(|source| Error::StatusFormat {
+        path: state_dir.to_owned(),
+        source,
+    })?;
+    println!("{text}");
+    Ok(())
+}
+
+/// Where the fleet's `authorized_keys` lines go: the path given, or the
+/// user's.
+fn keys_path(given: Option<PathBuf>) -> Result<PathBuf> {
+    given.map_or_else(authorized_keys::of_user, Ok)
 }
 
 /// A relay with its token read from its file, trimmed.

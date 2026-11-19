@@ -20,6 +20,7 @@ use tokio::{
     sync::watch,
 };
 
+mod fleet;
 mod status;
 
 /// A relay serving QUIC and HTTP on loopback: its HTTP address, and its
@@ -125,6 +126,7 @@ async fn start(dir: &Path) -> Running {
 async fn start_on(dir: &Path, http: SocketAddr) -> (Arc<Agent>, watch::Sender<bool>) {
     let forward = ssh_server().await;
     let options = Options {
+        authorized_keys: Some(dir.join("authorized_keys")),
         forward,
         relays: vec![Relay {
             endpoint: Endpoint::parse(&format!("http://{http}")).unwrap(),

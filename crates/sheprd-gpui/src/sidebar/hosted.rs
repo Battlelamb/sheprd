@@ -122,6 +122,7 @@ fn panel_id(panel: ActivityPanel) -> &'static str {
         ActivityPanel::Security => "security",
         ActivityPanel::Tasks => "tasks",
         ActivityPanel::Usage => "usage",
+        ActivityPanel::Traces => "traces",
         ActivityPanel::Workspaces => "workspaces",
     }
 }

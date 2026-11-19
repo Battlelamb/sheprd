@@ -143,10 +143,10 @@ class ReleaseTargets(unittest.TestCase):
             self.assertEqual(jobs["checks"].count(command), 1, command)
         self.assertNotIn("--release", windows)
         self.assertNotIn("cargo build", windows)
-        # The installer check runs only for its inputs, and the gate requires
-        # it then, and its absence otherwise.
+        # The installer check runs only for its inputs and with every
+        # platform, and the gate requires it then, and its absence otherwise.
         package = jobs["windows-package"]
-        self.assertIn("needs.commits.outputs.windows_package == 'true'", package)
+        self.assertIn("needs.commits.outputs.windows_package == 'true' && needs.commits.outputs.full == 'true'", package)
         self.assertIn("    needs: commits\n", package)
         self.assertNotIn("secrets.", package)
         # Bash, so "$TARGET" and friends expand on the Windows runner.
@@ -175,7 +175,9 @@ class ReleaseTargets(unittest.TestCase):
         self.assertIn('{ [ "$NATIVE_INPUTS" = false ] || [ "$FULL" = false ]; } && test "$NATIVE" = skipped', jobs["checks-passed"])
         self.assertIn("PACKAGE: ${{ needs.windows-package.result }}", jobs["checks-passed"])
         self.assertIn('test "$PACKAGE" = success', jobs["checks-passed"])
-        self.assertIn('test "$PACKAGE_INPUTS" = false && test "$PACKAGE" = skipped', jobs["checks-passed"])
+        self.assertIn('{ [ "$PACKAGE_INPUTS" = false ] || [ "$FULL" = false ]; } && test "$PACKAGE" = skipped', jobs["checks-passed"])
+        # The optimized performance build waits for the merge queue and main.
+        self.assertIn("      - name: Release-mode performance budget\n        if: github.event_name != 'pull_request'\n", native)
 
     def test_workflow_and_metadata_contract(self):
         # Keep this offline and dependency-free; actionlint validates YAML syntax.

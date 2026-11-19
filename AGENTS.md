@@ -253,26 +253,30 @@ what was deferred to CI.
   runs workspace tests with default and all features, including headless UI and
   CLI tests, split like `checks` into parallel `default` and `all` legs. The
   `windows-native` job runs `live_gui` (the `test-gui` and `test-sidebar`
-  equivalents) against a pinned `herdr.exe`, and the release-mode performance
-  budget, on both Windows runners, on main and on pull requests that change
-  what the app is built from (`scripts/ci-changes.sh`), except the live-daemon test on
-  ARM64, where the emulated daemon ignores Enter; the optimized Windows build
-  and its installer run in `windows-package` when their inputs change, and in
+  equivalents) against a pinned `herdr.exe` on both Windows runners, with
+  every platform, when what the app is built from changes
+  (`scripts/ci-changes.sh`), except the live-daemon test on ARM64, where the
+  emulated daemon ignores Enter; its release-mode performance budget runs in
+  the merge queue and on main only. The optimized Windows build and its
+  installer run in `windows-package` when their inputs change, with every
+  platform, and in
   the release workflow, which only smoke-tests the CLI of the bytes it ships
   and requires CI to have passed on the commit. Keep the `cfg(unix)`/`cfg(windows)`
   split honest and say plainly what a platform cannot do instead of stubbing
   behavior that appears to work.
 - Pull requests run CI on `ubuntu-24.04` alone and lint and test only the
-  crates their changes reach (`scripts/ci-scope.py`). The merge queue, `main`,
-  and a pull request that changes a platform `cfg` line or file, a
-  dependency (any `Cargo.toml`, `Cargo.lock`) or the toolchain, or the CI
-  selection itself, or carries the `windows`, `macos`, or `full-ci` label,
-  run every platform over the whole workspace.
+  crates their changes reach (`scripts/ci-scope.py`); a dependency or
+  toolchain change reaches the whole workspace, still on Linux. The merge
+  queue, which every change passes, `main`, and a pull request carrying the
+  `windows`, `macos`, or `full-ci` label run every platform over the whole
+  workspace. The Nix flake builds on pull requests only when the flake or
+  the toolchain pin changes, and on `main` and every release otherwise.
 - A `cfg` gate is only proven on the platform it names. For changes that touch
   one, rely on the corresponding platform CI jobs: a macOS run cannot see a
-  Linux-only gate, and neither can the Windows cross-check. Code inside an
-  existing gate changes no `cfg` line, so label such a pull request
-  `windows` or `macos`. `just lint-linux` and `just lint-windows` are
+  Linux-only gate, and neither can the Windows cross-check. A pull request
+  runs Linux alone, so label one that touches platform code `windows` or
+  `macos` to see those platforms before queueing it. `just lint-linux` and
+  `just lint-windows` are
   available for local investigation when needed.
 - Documentation-only changes need command/path/link review and `git diff --check`; do not claim a code test run that did not happen.
 - Add deterministic tests for invariants: ordering, cancellation, fragmentation, revision fencing, error paths, geometry, and cleanup. Prefer explicit coordination and bounded waits over timing guesses.

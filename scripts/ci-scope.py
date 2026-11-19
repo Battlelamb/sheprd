@@ -4,10 +4,13 @@
 A pull request runs on Linux alone and lints and tests only the crates its
 changes can reach: each changed crate and every crate that depends on it, by
 any dependency kind. Any other build input (`assets/`, `scripts/`, `skills/`,
-`crates/test-support`) reaches every crate. The merge queue, main, and pull
-requests that touch platform code or dependencies, or ask for it with a
-label, run every platform over the whole workspace, so a release still
-requires the full matrix on main (scripts/release/check-ci.py).
+`crates/test-support`) reaches every crate, as do dependency and toolchain
+changes. Platform code and dependencies do not pull macOS and Windows into a
+pull request: the merge queue, which every change passes, and main run every
+platform over the whole workspace, so a platform break bounces the change
+from the queue and a release still requires the full matrix on main
+(scripts/release/check-ci.py). A label asks a pull request for every
+platform before it is queued.
 
 Prints GitHub step outputs:
   full           `true` for every platform and the whole workspace
@@ -26,18 +29,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 # The existing platform labels, and one to ask for every platform outright.
 FULL_LABELS = frozenset({"full-ci", "macos", "windows"})
-# A change to how CI picks its work has to prove itself on every platform.
-FULL_PATHS = frozenset({".github/workflows/ci.yml", "scripts/ci-changes.sh", "scripts/ci-scope.py"})
-# What each platform builds: dependencies (a manifest's target tables, and
-# crates only one platform compiles, change with the lockfile) and the
-# toolchain.
-BUILD_PATH = re.compile(r"(^|/)Cargo\.toml$|^Cargo\.lock$|^rust-toolchain\.toml$|^\.cargo/")
-# Code only a Windows or macOS runner compiles or runs: platform files,
-# PowerShell, cfg gates, and build scripts reading the target.
-PLATFORM_PATH = re.compile(r"(^|[/_.-])(windows|win32|macos|darwin)([/_.-]|$)|\.ps1$", re.IGNORECASE)
-PLATFORM_CFG = re.compile(
-    r"\bcfg(!|_attr)?\(.*\b(windows|macos|target_os|target_vendor|target_family|unix)\b"
-    r"|CARGO_CFG_TARGET_(OS|VENDOR|FAMILY)\b")
 # Outside a crate, what no crate builds or tests read: Markdown but the
 # skills the app embeds, the website but the relay list sheprd-relay's tests
 # check, the hosted site, and other workflows. Anything else there reaches
@@ -89,13 +80,9 @@ def owner(path, members):
     return None
 
 
-def plan(event, labels, changed, diff_lines, members, dependents):
+def plan(event, labels, changed, members, dependents):
     """The step outputs. `changed` is None when the run has no usable base."""
-    full = (event != "pull_request" or changed is None
-            or bool(FULL_LABELS & set(labels))
-            or any(path in FULL_PATHS or BUILD_PATH.search(path) or PLATFORM_PATH.search(path)
-                   for path in changed)
-            or any(PLATFORM_CFG.search(line) for line in diff_lines))
+    full = event != "pull_request" or changed is None or bool(FULL_LABELS & set(labels))
     if full:
         return {"full": "true", "cargo_scope": "--workspace", "gpui": "true"}
     seeds = set()
@@ -118,27 +105,24 @@ def git(*args):
 
 
 def changes(event, base, head):
-    """Changed paths, both sides of a rename, and changed Rust lines, or None."""
+    """Changed paths, both sides of a rename, or None."""
     if not re.fullmatch(r"[0-9a-f]{40}", base or ""):
-        return None, []
+        return None
     if subprocess.run(["git", "cat-file", "-e", f"{base}^{{commit}}"], cwd=ROOT,
                       stderr=subprocess.DEVNULL).returncode != 0:
-        return None, []
+        return None
     # Pull requests use their merge base, as scripts/ci-changes.sh does.
     if event == "pull_request":
         base = git("merge-base", base, head).strip()
-    paths = git("diff", "--name-only", "--no-renames", base, head).splitlines()
-    lines = [line for line in git("diff", "-U0", "--no-renames", base, head, "--", "*.rs").splitlines()
-             if line[:1] in "+-" and not line.startswith(("+++", "---"))]
-    return paths, lines
+    return git("diff", "--name-only", "--no-renames", base, head).splitlines()
 
 
 def main():
     event = os.environ["EVENT"]
     labels = json.loads(os.environ.get("LABELS") or "[]") or []
-    changed, diff_lines = changes(event, os.environ.get("BASE", ""), os.environ["HEAD_SHA"])
+    changed = changes(event, os.environ.get("BASE", ""), os.environ["HEAD_SHA"])
     members, dependents = workspace()
-    for key, value in plan(event, labels, changed, diff_lines, members, dependents).items():
+    for key, value in plan(event, labels, changed, members, dependents).items():
         print(f"{key}={value}")
 
 

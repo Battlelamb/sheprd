@@ -372,7 +372,11 @@ jobs:
         run: |
           HERDR_TEST_SIGNED_FILE="$(dirname "$HERDR_TEST_BINARY")/conpty/x64/OpenConsole.exe" \
             cargo test --locked -p sheprd-gpui signer_matches_what_powershell_reports -- --ignored --nocapture
+      # An optimized build, too slow for a pull request: the merge queue and
+      # main run it, and a labeled pull request asking for every platform
+      # leaves it to them.
       - name: Release-mode performance budget
+        if: github.event_name != 'pull_request'
         env:
           HERDR_PERF_P95_MS: '100'
         run: |
@@ -381,11 +385,13 @@ jobs:
 
   # The optimized Windows build, its zip, and its installer, made and installed
   # as the release workflow does, so a packaging or installer mistake fails the
-  # pull request rather than a release. A release build is too slow for every
-  # change, so this runs only when what those artifacts are made from changes.
+  # merge queue rather than a release. A release build is too slow for every
+  # change, so this runs only when what those artifacts are made from changes,
+  # and with every platform: in the merge queue, on main, and on a pull
+  # request labeled for it.
   windows-package:
     if: >-
-      needs.commits.outputs.windows_package == 'true' &&
+      needs.commits.outputs.windows_package == 'true' && needs.commits.outputs.full == 'true' &&
       (github.repository == 'sheprd-labs/sheprd' || github.repository == 'penso/herdr-gpui') &&
       (github.event_name == 'pull_request' || github.event_name == 'merge_group' ||
        ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
@@ -541,10 +547,10 @@ jobs:
           else
             test "$MACOS_RELEASE" = skipped || exit 1
           fi
-          if [ "$PACKAGE_INPUTS" = true ]; then
+          if [ "$PACKAGE_INPUTS" = true ] && [ "$FULL" = true ]; then
             test "$PACKAGE" = success || exit 1
           else
-            test "$PACKAGE_INPUTS" = false && test "$PACKAGE" = skipped || exit 1
+            { [ "$PACKAGE_INPUTS" = false ] || [ "$FULL" = false ]; } && test "$PACKAGE" = skipped || exit 1
           fi
           if [ "$SITE_INPUTS" = true ]; then
             test "$SITE" = success

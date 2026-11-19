@@ -5,7 +5,7 @@
 devices-nearby-intro = For a computer nearby that is on another network. On it, open Remote control > Pair device; it then shows up here, and Sheprd reaches it through its relays.
 devices-nearby-looking = Looking for computers showing Pair device…
 devices-nearby-pair = Pair
-devices-nearby-macos-only = Finding computers over Bluetooth needs macOS for now.
+devices-nearby-platform-unsupported = Finding computers over Bluetooth needs macOS, Linux, or Windows.
 devices-nearby-bluetooth-off = Turn on Bluetooth to find computers nearby.
 devices-nearby-bluetooth-allow = To find computers nearby, allow Sheprd in System Settings > Privacy & Security > Bluetooth.
 devices-nearby-bluetooth-unsupported = This computer has no Bluetooth to find computers nearby with.

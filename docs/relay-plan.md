@@ -1015,10 +1015,14 @@ Sheprd A ─ssh─▶ sheprd-remote-control relay-connect ──QUIC──▶ re
 
 1. **B** opens Remote control > Pair device (or `sheprd remote pair`). Its
    Bluetooth helper advertises as it does for phones.
-2. **A** opens Add Device > Nearby Sheprd (macOS only for now). Its helper
-   scans as a central (`macos/sheprd-nearby/Central.swift`), connects to
-   each computer it finds to read `info`, and lists those that name
-   themselves, which only happens while Pair device is open.
+2. **A** opens Add Device > Nearby Sheprd. Its helper scans as a central
+   (`macos/sheprd-nearby/Central.swift` on macOS; on Linux and Windows
+   `crates/sheprd-nearby`'s `central`, over BlueZ's `Adapter1`, `Device1`,
+   and `GattCharacteristic1`, or WinRT's `BluetoothLEAdvertisementWatcher`
+   and `GattDeviceService`), connects to each computer it finds to read
+   `info`, and lists those that name themselves, which only happens while
+   Pair device is open. All three speak the same lines on stdio, so Sheprd
+   drives them alike.
 3. Picking one starts `sheprd-remote-control desktop-pair` (`desktop`),
    which runs a phone's side of nearby pairing over the same `pair`
    characteristic, with Sheprd carrying its frames on stdio
@@ -1063,9 +1067,11 @@ through. B's daemon admits that tunnel key, sees that the device has an
 SSH key, splices the session to its SSH server instead of serving the
 API, and marks the device seen.
 
-Not yet: Linux and Windows helpers that scan, sharing a relay record
-when B's relays change, and racing the relays. As with SSH machines,
-`git` and a typed `ssh` do not use the proxy.
+Not yet: sharing a relay record when B's relays change, and racing the
+relays. As with SSH machines, `git` and a typed `ssh` do not use the
+proxy. The Linux and Windows scanning is compile-checked and its state
+machine tested without a radio; it has not yet been tried between two
+real computers.
 
 ## Deployment
 

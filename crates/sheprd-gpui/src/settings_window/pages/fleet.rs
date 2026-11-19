@@ -15,6 +15,8 @@ use gpui::{prelude::*, *};
 use sheprd_remote_control::control::fleet::{HostKind, Kind, Reason, View, sync::Ask};
 use std::collections::BTreeSet;
 
+mod scrub;
+
 /// The page's state while it shows.
 #[derive(Default)]
 pub(in crate::settings_window) struct FleetPage {
@@ -120,7 +122,7 @@ impl SettingsWindow {
                     None => fl!("settings-fleet-none-description"),
                 })
                 .control(create);
-            return page.child(row);
+            return page.child(row).children(self.fleet_scrub_only(cx));
         };
         page = page.children(self.fleet_notices(&view));
         // Removed from the fleet: nothing here counts any more; what it
@@ -128,12 +130,14 @@ impl SettingsWindow {
         if !view.members.iter().any(|member| member.id == view.me) {
             let forget = ui::button(theme, "fleet-forget", fl!("settings-fleet-forget"), true)
                 .on_click(cx.listener(|this, _, _, cx| this.fleet_act(Ask::Scrub, cx)));
-            return page.child(
-                ui::row(theme, "fleet-removed", fl!("settings-fleet-removed"))
-                    .description(fl!("settings-fleet-removed-description"))
-                    .dot(theme.ink(theme.palette[1]))
-                    .control(forget),
-            );
+            return page
+                .child(
+                    ui::row(theme, "fleet-removed", fl!("settings-fleet-removed"))
+                        .description(fl!("settings-fleet-removed-description"))
+                        .dot(theme.ink(theme.palette[1]))
+                        .control(forget),
+                )
+                .children(self.fleet_scrub_only(cx));
         }
         page = page
             .child(ui::section(theme, &fl!("settings-fleet-members"), None))
@@ -424,54 +428,10 @@ impl SettingsWindow {
                 .map(|(_, deny)| deny.clone());
             let inviting = self.fleet.inviting.as_ref() == Some(&id);
             if self.fleet.scrubbing.as_ref() == Some(&id) && !acting {
-                let (machine, id_confirm) = (machine.clone(), id.clone());
-                rows.push(
-                    row.description(fl!("settings-fleet-scrub-ask"))
-                        .control(
-                            self.fleet_cancel(format!("fleet-machine-{index}-scrub-cancel"), cx),
-                        )
-                        .control(
-                            ui::button(
-                                theme,
-                                format!("fleet-machine-{index}-scrub-confirm"),
-                                fl!("settings-fleet-scrub"),
-                                true,
-                            )
-                            .text_color(crate::menu::danger(theme))
-                            .on_click(cx.listener(
-                                move |this, _, _, cx| {
-                                    this.fleet.scrubbing = None;
-                                    let view = cx.entity().downgrade();
-                                    flows::scrub(
-                                        cx,
-                                        id_confirm.clone(),
-                                        machine.clone(),
-                                        move |failure, cx| {
-                                            let _ = view.update(cx, |view, cx| {
-                                                view.fleet.error = failure;
-                                                cx.notify();
-                                            });
-                                        },
-                                    );
-                                },
-                            )),
-                        ),
-                );
+                rows.push(self.fleet_scrub_confirm(row, index, &id, &machine, cx));
                 continue;
             }
-            let scrub_id = id.clone();
-            let scrub = ui::button(
-                theme,
-                format!("fleet-machine-{index}-scrub"),
-                fl!("settings-fleet-scrub"),
-                !acting,
-            )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.fleet.scrubbing = Some(scrub_id.clone());
-                this.fleet.inviting = None;
-                this.fleet.sharing = None;
-                cx.notify();
-            }));
+            let scrub = self.fleet_scrub_button(index, &id, acting, cx);
             if standing == Standing::Member || acting {
                 rows.push(row.description(line).control(scrub));
                 continue;

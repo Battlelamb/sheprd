@@ -127,11 +127,16 @@ fn a_server_that_never_answers_a_ping_ends_the_stream() {
         pings
     });
     let stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
-    stream
-        .set_read_timeout(Some(Duration::from_millis(50)))
-        .unwrap();
+    // The same socket, to make reads quiet once the handshake is done: a slow
+    // server thread must not fail the handshake itself as idle.
+    let socket = stream.try_clone().unwrap();
     let url = url::Url::parse(&format!("ws://127.0.0.1:{port}/ws")).unwrap();
     let connection = Connection::handshake(&url, stream).unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_millis(50)))
+        .unwrap();
+    // Held open, it would keep the server reading after the worker lets go.
+    drop(socket);
     let (updates, changes) = bounded(4);
     follow(connection, Follower::new("2".to_owned()), &updates);
     assert_eq!(

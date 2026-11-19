@@ -209,6 +209,9 @@ async fn fleet_session(
     mut tunnel: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 ) -> Result<()> {
     use crate::control::fleet::removal::{PURPOSE_REMOVAL, PURPOSE_SSH};
+    // The handshake proved this device holds the member's tunnel key.
+    let (proving, remote_key, member) = (fleet.clone(), *remote, peer.member);
+    let _ = tokio::task::spawn_blocking(move || proving.proved(member, remote_key)).await;
     let mut first = [0];
     tokio::io::AsyncReadExt::read_exact(&mut tunnel, &mut first)
         .await
@@ -219,21 +222,31 @@ async fn fleet_session(
             Ok(())
         }
         PURPOSE_SSH if peer.ssh => {
-            // The handshake proved this device holds the member's tunnel
-            // key: a pairing it had here one by one is the fleet's now.
-            let (superseding, remote) = (state.clone(), *remote);
-            let _ = tokio::task::spawn_blocking(move || {
-                crate::fleet::grants::supersede(&superseding, &remote)
-            })
-            .await;
-            fleet_ssh(state, fleet, peer.member, tunnel).await
+            supersede(state, remote).await;
+            fleet_ssh(state, fleet, peer.member, None, tunnel).await
         }
         PURPOSE_SSH => Ok(()),
+        // A session with no purpose byte: an older `relay-connect` for a
+        // desktop paired here one by one. When the fleet lets that member
+        // in here, the pairing is the fleet's now, and so is the session.
+        byte if peer.ssh => {
+            supersede(state, remote).await;
+            fleet_ssh(state, fleet, peer.member, Some(byte), tunnel).await
+        }
         byte => match desktop(state, remote) {
             Some((device, server)) => ssh(state, device, server, Some(byte), tunnel).await,
             None => Ok(()),
         },
     }
+}
+
+/// Revokes a desktop paired here one by one with the tunnel key `remote`,
+/// which the handshake just proved, as `fleet::grants::supersede` does.
+async fn supersede(state: &Shared, remote: &[u8; 32]) {
+    let (superseding, remote) = (state.clone(), *remote);
+    let _ =
+        tokio::task::spawn_blocking(move || crate::fleet::grants::supersede(&superseding, &remote))
+            .await;
 }
 
 /// Splices a fleet member's tunnel to the SSH server on loopback, until
@@ -242,6 +255,7 @@ async fn fleet_ssh(
     state: &Shared,
     fleet: &crate::fleet::Fleet,
     member: crate::control::fleet::MemberId,
+    first: Option<u8>,
     mut tunnel: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 ) -> Result<()> {
     let server = state
@@ -253,6 +267,11 @@ async fn fleet_ssh(
     let mut server = tokio::net::TcpStream::connect(server)
         .await
         .map_err(super::Error::Ssh)?;
+    if let Some(first) = first {
+        tokio::io::AsyncWriteExt::write_all(&mut server, &[first])
+            .await
+            .map_err(super::Error::Ssh)?;
+    }
     let gone = async {
         loop {
             if !crate::fleet::grants::still_allowed(fleet, &member) {

@@ -89,7 +89,7 @@ impl RowBadge {
         layout: &SidebarMetrics,
     ) -> f32 {
         let glyph = glyph_width(font);
-        let number = self.pr.as_ref().map_or(0, |pr| pr.label.chars().count());
+        let number = self.pr.as_ref().map_or(0, |pr| visible_chars(&pr.label));
         let pr = (glyph * number as f32).ceil();
         // Reserve the icon and the gap before the PR number, even at small fonts.
         let mark = line_height(font) + glyph;
@@ -217,6 +217,14 @@ impl RowBadge {
                 )
             })
     }
+}
+
+/// The characters of `text` that take room: Fluent's invisible isolation
+/// marks around each value stay in the text but are not measured.
+pub(in crate::sidebar) fn visible_chars(text: &str) -> usize {
+    text.chars()
+        .filter(|c| !matches!(c, '\u{2066}'..='\u{2069}'))
+        .count()
 }
 
 /// Cached pull request state for a worktree row: the number carries the

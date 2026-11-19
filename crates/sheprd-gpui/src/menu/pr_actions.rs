@@ -502,6 +502,21 @@ impl SheprdWindow {
                         base = pr.base_ref_name.as_str(),
                     ))),
             );
+            // A stacked pull request merges with the open layers below it.
+            if pr.stack().is_some() {
+                let numbers = pr
+                    .lands()
+                    .iter()
+                    .map(|number| format!("#{number}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                body = body.child(div().debug_selector(|| "pr-merge-stack".into()).child(
+                    crate::sidebar::label_text(&fl!(
+                        "pr-actions-merge-stack",
+                        numbers = numbers.as_str()
+                    )),
+                ));
+            }
             // GitHub has the final word; this is what it last reported.
             for (heading, label) in [
                 (fl!("pr-actions-review-heading"), pr.review().to_owned()),

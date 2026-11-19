@@ -24,6 +24,8 @@ pr-stack-ready-detail = { $count ->
 }
 pr-stack-merged = Merged
 pr-stack-merged-detail = This pull request and every one below it merged.
+pr-stack-unread = Can't tell yet
+pr-stack-unread-detail = Not every pull request below this one could be read, so what merging here would land is not known. Check the stack on GitHub.
 
 # Why a layer cannot merge. $who is "#1362" or pr-stack-this.
 pr-stack-this = This pull request

@@ -83,8 +83,12 @@ pub enum Verdict {
     Merged,
     /// `count` open layers, up to and including that one, can merge.
     Ready { count: usize },
-    /// The lowest layer up to that one that cannot merge, and why.
+    /// The lowest layer read up to that one that cannot merge, and why.
     Blocked { number: u64, blocker: Blocker },
+    /// No layer read blocks, but some layer up to that one was not read
+    /// (past the read limit, or hidden from this reader), so whether it can
+    /// merge, and what it would land, is not known.
+    Unread,
 }
 
 impl Layer {
@@ -151,7 +155,8 @@ impl Stack {
             .filter(move |layer| layer.position <= position && layer.state != State::Merged)
     }
 
-    /// What merging at `position` would do.
+    /// What merging at `position` would do. Ready and merged need every
+    /// layer up to it read: an unread one may be open, and blocked.
     pub fn verdict(&self, position: u64) -> Verdict {
         let mut count = 0;
         for layer in self.landing(position) {
@@ -163,15 +168,50 @@ impl Stack {
             }
             count += 1;
         }
+        if !self.read_through(position) {
+            return Verdict::Unread;
+        }
         match count {
             0 => Verdict::Merged,
             count => Verdict::Ready { count },
         }
     }
 
+    /// Whether every layer from the bottom up to `position` was read.
+    pub fn read_through(&self, position: u64) -> bool {
+        (1..=position).all(|wanted| self.layers.iter().any(|layer| layer.position == wanted))
+    }
+
     /// Whether some layers were not read.
     pub fn truncated(&self) -> bool {
         self.size > self.layers.len() as u64
+    }
+}
+
+impl super::PullRequest {
+    /// The pull requests merging or queueing this one lands, bottom first:
+    /// on a stack, every open layer up to it as read; else itself.
+    pub fn lands(&self) -> Vec<u64> {
+        match self.stack() {
+            Some((stack, position)) => stack.landing(position).map(|layer| layer.number).collect(),
+            None => vec![self.number],
+        }
+    }
+
+    /// Whether a merge may be offered as far as its stack goes: in no
+    /// stack, or every layer up to it read and ready, so a confirmation can
+    /// name all that lands.
+    pub fn stack_mergeable(&self) -> bool {
+        self.stack().is_none_or(|(stack, position)| {
+            matches!(stack.verdict(position), Verdict::Ready { .. })
+        })
+    }
+
+    /// Whether queueing may be offered as far as its stack goes: in no
+    /// stack, or every layer up to it read.
+    pub fn stack_known(&self) -> bool {
+        self.stack()
+            .is_none_or(|(stack, position)| stack.read_through(position))
     }
 }
 

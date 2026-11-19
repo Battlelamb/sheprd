@@ -205,6 +205,7 @@ fn stack_info(pr: &PullRequest) -> Option<StackInfo> {
     let (verdict, ready, blocked) = match stack.verdict(position) {
         Verdict::Merged => ("merged", None, None),
         Verdict::Ready { count } => ("ready", Some(count), None),
+        Verdict::Unread => ("unread", None, None),
         Verdict::Blocked { number, blocker } => ("blocked", None, Some((number, blocker))),
     };
     Some(StackInfo {

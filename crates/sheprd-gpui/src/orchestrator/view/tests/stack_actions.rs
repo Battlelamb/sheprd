@@ -130,3 +130,27 @@ fn a_pull_request_in_no_stack_is_queued_from_its_status_box(cx: &mut TestAppCont
         ));
     });
 }
+
+#[gpui::test]
+fn the_status_boxs_merge_of_a_stacked_pull_request_names_every_layer(cx: &mut TestAppContext) {
+    let mut pr = ready_stacked_fixture().unwrap();
+    pr.merge_methods = vec![MergeMethod::Squash];
+    let (_dir, view, cx) = open_stacked(cx, pr);
+    click(cx, "orchestrator-detail-merge");
+    click(cx, "orchestrator-merge-SQUASH");
+    cx.update(|_, cx| {
+        assert!(matches!(
+            &view.read(cx).confirm,
+            Some(Confirm::Land { change: Change::Merge(MergeMethod::Squash), lands, .. })
+                if lands == &[1362, 1364]
+        ));
+    });
+}
+
+#[gpui::test]
+fn a_blocked_stack_offers_no_merge_in_the_status_box(cx: &mut TestAppContext) {
+    let mut pr = stacked_fixture().unwrap();
+    pr.merge_methods = vec![MergeMethod::Squash];
+    let (_dir, _view, cx) = open_stacked(cx, pr);
+    assert!(cx.debug_bounds("orchestrator-detail-merge").is_none());
+}

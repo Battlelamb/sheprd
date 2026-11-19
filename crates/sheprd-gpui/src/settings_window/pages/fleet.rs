@@ -26,6 +26,8 @@ pub(in crate::settings_window) struct FleetPage {
     inviting: Option<String>,
     /// The machine being shared, with the computers left out of it.
     sharing: Option<(String, BTreeSet<String>)>,
+    /// The machine whose Remove fleet access waits for confirmation.
+    scrubbing: Option<String>,
     /// The last failure, for a person.
     error: Option<String>,
 }
@@ -38,6 +40,8 @@ pub(crate) enum Pending {
     Remove(String),
     /// Whether to remove this host everywhere.
     RemoveHost(String),
+    /// Whether to remove every way a fleet reaches this machine.
+    Scrub(String),
 }
 
 /// Opens Settings at Fleet, asking what `pending` says.
@@ -57,6 +61,7 @@ pub(crate) fn open(source: WeakEntity<crate::SheprdWindow>, pending: Pending, cx
                 Pending::Nothing => {}
                 Pending::Remove(member) => view.fleet.removing = Some((member, None)),
                 Pending::RemoveHost(host) => view.fleet.removing_host = Some(host),
+                Pending::Scrub(machine) => view.fleet.scrubbing = Some(machine),
             }
             cx.notify();
         });
@@ -118,6 +123,18 @@ impl SettingsWindow {
             return page.child(row);
         };
         page = page.children(self.fleet_notices(&view));
+        // Removed from the fleet: nothing here counts any more; what it
+        // wrote is forgotten once the person says so.
+        if !view.members.iter().any(|member| member.id == view.me) {
+            let forget = ui::button(theme, "fleet-forget", fl!("settings-fleet-forget"), true)
+                .on_click(cx.listener(|this, _, _, cx| this.fleet_act(Ask::Scrub, cx)));
+            return page.child(
+                ui::row(theme, "fleet-removed", fl!("settings-fleet-removed"))
+                    .description(fl!("settings-fleet-removed-description"))
+                    .dot(theme.ink(theme.palette[1]))
+                    .control(forget),
+            );
+        }
         page = page
             .child(ui::section(theme, &fl!("settings-fleet-members"), None))
             .children(self.fleet_members(&view, cx))
@@ -406,8 +423,57 @@ impl SettingsWindow {
                 .filter(|(sharing, _)| *sharing == id)
                 .map(|(_, deny)| deny.clone());
             let inviting = self.fleet.inviting.as_ref() == Some(&id);
+            if self.fleet.scrubbing.as_ref() == Some(&id) && !acting {
+                let (machine, id_confirm) = (machine.clone(), id.clone());
+                rows.push(
+                    row.description(fl!("settings-fleet-scrub-ask"))
+                        .control(
+                            self.fleet_cancel(format!("fleet-machine-{index}-scrub-cancel"), cx),
+                        )
+                        .control(
+                            ui::button(
+                                theme,
+                                format!("fleet-machine-{index}-scrub-confirm"),
+                                fl!("settings-fleet-scrub"),
+                                true,
+                            )
+                            .text_color(crate::menu::danger(theme))
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.fleet.scrubbing = None;
+                                    let view = cx.entity().downgrade();
+                                    flows::scrub(
+                                        cx,
+                                        id_confirm.clone(),
+                                        machine.clone(),
+                                        move |failure, cx| {
+                                            let _ = view.update(cx, |view, cx| {
+                                                view.fleet.error = failure;
+                                                cx.notify();
+                                            });
+                                        },
+                                    );
+                                },
+                            )),
+                        ),
+                );
+                continue;
+            }
+            let scrub_id = id.clone();
+            let scrub = ui::button(
+                theme,
+                format!("fleet-machine-{index}-scrub"),
+                fl!("settings-fleet-scrub"),
+                !acting,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.fleet.scrubbing = Some(scrub_id.clone());
+                this.fleet.inviting = None;
+                this.fleet.sharing = None;
+                cx.notify();
+            }));
             if standing == Standing::Member || acting {
-                rows.push(row.description(line));
+                rows.push(row.description(line).control(scrub));
                 continue;
             }
             if inviting {
@@ -543,7 +609,8 @@ impl SettingsWindow {
                         this.fleet.inviting = None;
                         cx.notify();
                     })),
-                );
+                )
+                .control(scrub);
             rows.push(row);
         }
         rows
@@ -556,6 +623,7 @@ impl SettingsWindow {
                 this.fleet.removing_host = None;
                 this.fleet.inviting = None;
                 this.fleet.sharing = None;
+                this.fleet.scrubbing = None;
                 cx.notify();
             },
         ))

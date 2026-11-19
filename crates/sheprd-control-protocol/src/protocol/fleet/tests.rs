@@ -20,6 +20,12 @@ fn fleet_requests_have_a_stable_wire_form() {
         (r#"{"op":"status"}"#, FleetOp::Status),
         (r#"{"op":"open"}"#, FleetOp::Open),
         (
+            r#"{"op":"scrub","machine":"build-01"}"#,
+            FleetOp::Scrub {
+                machine: "build-01".into(),
+            },
+        ),
+        (
             r#"{"op":"remove_host","host":"build-01"}"#,
             FleetOp::RemoveHost {
                 host: "build-01".into(),

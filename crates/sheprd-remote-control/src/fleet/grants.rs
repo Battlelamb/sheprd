@@ -209,6 +209,11 @@ fn records(state: &Log, me: &MemberId, suspended: &[MemberId]) -> Vec<(Record, V
         .collect()
 }
 
+/// Removes every relay record the fleet wrote. Blocking.
+pub(crate) fn forget_records(state_dir: &Path) -> Result<()> {
+    write_records(state_dir, &[])
+}
+
 /// Writes `records`, and removes those the fleet wrote before and no
 /// longer grants. A record pairing wrote under the same id is left alone.
 fn write_records(state_dir: &Path, records: &[(Record, Vec<String>)]) -> Result<()> {

@@ -1933,8 +1933,23 @@ manual multi-machine and phone steps left unticked in its QA list.
 5. **iOS:** joining at pairing, admitting a computer from the phone, the
    Secure Enclave key, sync, offers and `Link`, removing from the phone,
    pushes, and Settings > Fleet. Swift tests against phase 1's vectors.
-6. **Migration:** the lists in "Create a fleet", replacing
-   `sheprd-desktop:` lines, and `sheprd fleet scrub`.
+6. **Migration and scrub** (built):
+   - **`fleet scrub`:** `sheprd-remote-control fleet scrub` forgets the
+     fleet on a computer, with the `authorized_keys` lines and relay
+     records it wrote, whether its daemon runs or not;
+     `sheprd-relay-agent fleet scrub` does the same for an agent. Sheprd
+     runs both over SSH from Settings > Fleet's Remove fleet access, and
+     `sheprd fleet scrub MACHINE` opens that confirmation. Neither signs
+     anything: they only take access away.
+   - **Removed computers:** Settings > Fleet says so, and Forget the
+     fleet scrubs it here.
+   - **Desktops paired one by one:** once a member's device opens SSH
+     through the fleet, its pairing is superseded; a removed member's
+     pairings go with it (phase 2).
+   - **Bringing existing machines in:** saved devices, cloud machines,
+     and computers paired over Bluetooth show under Machines this Sheprd
+     reaches, to Share or Invite; paired phones join from the phone
+     (phase 5). Nothing is spread without that step.
 7. **Bluetooth on Linux and Windows:** scanning in `crates/sheprd-nearby`,
    then the transport measurement and its verdict here.
 

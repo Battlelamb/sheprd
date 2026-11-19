@@ -92,3 +92,42 @@ pub(super) fn intro(target: &ConnectTarget, cancelled: &AtomicBool) -> Result<St
 pub(crate) fn parse_applied(output: &[u8]) -> Result<Applied, Error> {
     serde_json::from_slice(output).map_err(Error::Answer)
 }
+
+/// Removes every way a fleet reaches the host's account, without signing
+/// anything: the daemon's `fleet scrub` and the relay agent's, each when
+/// installed. Prints whether either ran.
+const SCRUB: &str = "\
+cleared=false
+program=$(command -v sheprd-remote-control || command -v herdr-remote-control || true)
+[ -n \"$program\" ] || program=\"$HOME/.local/bin/sheprd-remote-control\"
+if [ -x \"$program\" ] && \"$program\" fleet scrub >/dev/null 2>&1; then cleared=true; fi
+agent=$(command -v sheprd-relay-agent || true)
+[ -n \"$agent\" ] || agent=\"$HOME/.local/bin/sheprd-relay-agent\"
+if [ -x \"$agent\" ] && \"$agent\" fleet scrub >/dev/null 2>&1; then cleared=true; fi
+printf '{\"scrubbed\":%s}\\n' \"$cleared\"
+cat >/dev/null
+";
+
+/// `fleet scrub` on the host, the last resort for a host no member can
+/// reach or a fleet that is gone: whether anything there held a fleet.
+pub(super) fn scrub(target: &ConnectTarget, cancelled: &AtomicBool) -> Result<bool, Error> {
+    #[derive(serde::Deserialize)]
+    struct Scrubbed {
+        scrubbed: bool,
+    }
+    let host = Host::new(target).map_err(|_| Error::Unsupported)?;
+    let mut output = Vec::new();
+    host.stream(
+        SCRUB,
+        &b""[..],
+        &mut output,
+        ScriptLimits {
+            output: 1024,
+            idle: IDLE,
+        },
+        cancelled,
+    )
+    .map_err(Error::Run)?;
+    let answer: Scrubbed = serde_json::from_slice(&output).map_err(Error::Answer)?;
+    Ok(answer.scrubbed)
+}

@@ -167,6 +167,8 @@ pub enum FleetAction {
     /// Prints this computer as a Sheprd host, its record signed by its
     /// certificate authority, for the member about to share it.
     Intro,
+    /// Forgets the fleet here and the lines and records it wrote.
+    Scrub,
 }
 
 pub const USAGE: &str = "\
@@ -180,6 +182,7 @@ Usage: sheprd-remote-control serve --state-dir DIR [options]
        sheprd-remote-control fleet apply [--state-dir DIR] < APPLY.json
        sheprd-remote-control fleet bundle --fleet ID [--state-dir DIR]
        sheprd-remote-control fleet intro [--state-dir DIR]
+       sheprd-remote-control fleet scrub [--state-dir DIR]
        sheprd-remote-control desktop-pair --name NAME [--state-dir DIR]
        sheprd-remote-control relay-connect [--state-dir DIR] HOST
 
@@ -239,7 +242,9 @@ computer runs here over SSH: apply takes signed fleet operations and
 prints what this computer holds that the caller lacks; bundle prints this
 computer's keys, signed, for the member about to admit it; intro prints
 this computer as a host, signed by its certificate authority, for a
-member about to share it.
+member about to share it; scrub forgets the fleet here, with the
+authorized_keys lines and relay records it wrote, without signing
+anything: for a computer the fleet removed, or a fleet that is gone.
 Their state directory defaults to the one Sheprd on this computer uses.
 ";
 
@@ -533,7 +538,7 @@ fn parse_fleet(mut args: impl Iterator<Item = OsString>) -> Result<Invocation, P
     let verb = args
         .next()
         .and_then(|verb| verb.to_str().map(str::to_owned))
-        .ok_or(ParseError::Missing("apply, bundle, or intro"))?;
+        .ok_or(ParseError::Missing("apply, bundle, intro, or scrub"))?;
     let (mut state_dir, mut fleet) = (None, None);
     while let Some(arg) = args.next() {
         let name = arg.to_str().unwrap_or_default().to_owned();
@@ -561,6 +566,7 @@ fn parse_fleet(mut args: impl Iterator<Item = OsString>) -> Result<Invocation, P
     let action = match verb.as_str() {
         "apply" if fleet.is_none() => FleetAction::Apply,
         "intro" if fleet.is_none() => FleetAction::Intro,
+        "scrub" if fleet.is_none() => FleetAction::Scrub,
         "bundle" => FleetAction::Bundle {
             fleet: fleet.ok_or(ParseError::Missing("--fleet"))?,
         },

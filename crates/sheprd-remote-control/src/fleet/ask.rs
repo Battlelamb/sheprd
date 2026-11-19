@@ -113,6 +113,10 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
                 intro: sync::text(&intro.to_bytes()?),
             })
         }
+        Ask::Scrub => {
+            fleet.scrub()?;
+            Ok(Answer::Done)
+        }
         Ask::Apply(apply) => {
             // A caller naming another fleet learns nothing of this one.
             if let Some(named) = &apply.fleet

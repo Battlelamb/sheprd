@@ -240,3 +240,36 @@ pub(crate) fn share(
     })
     .detach();
 }
+
+/// Removes every way a fleet reaches `machine`'s account, over SSH: the
+/// last resort for a host no member can reach or a fleet that is gone (a
+/// person here asked for it). Signs nothing: it only takes access away.
+pub(crate) fn scrub(
+    cx: &mut App,
+    id: String,
+    machine: Machine,
+    done: impl FnOnce(Option<String>, &mut App) + 'static,
+) {
+    Fleet::set_acting(cx, &id, true);
+    let target = machine.target;
+    let task = cx
+        .background_executor()
+        .spawn(async move { remote::scrub(&target, &AtomicBool::new(false)) });
+    cx.spawn(async move |cx| {
+        let outcome = task.await;
+        cx.update(|cx| {
+            Fleet::set_acting(cx, &id, false);
+            Fleet::set_link(cx, &id, |link| *link = super::Link::default());
+            Fleet::refresh(cx);
+            done(
+                match outcome {
+                    Ok(true) => None,
+                    Ok(false) => Some(Error::NoProgram.to_string()),
+                    Err(error) => Some(error.to_string()),
+                },
+                cx,
+            );
+        });
+    })
+    .detach();
+}

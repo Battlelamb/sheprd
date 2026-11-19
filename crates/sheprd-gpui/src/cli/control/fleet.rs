@@ -17,6 +17,11 @@ pub enum FleetCommand {
     RemoveHost {
         host: String,
     },
+    /// Ask in Settings > Fleet to remove every way a fleet reaches a
+    /// machine, by device ID or name.
+    Scrub {
+        machine: String,
+    },
 }
 
 pub(super) fn fleet(args: &mut Args) -> Result<FleetCommand, CliError> {
@@ -39,6 +44,12 @@ pub(super) fn fleet(args: &mut Args) -> Result<FleetCommand, CliError> {
             host: args.words()?.ok_or(CliError::MissingArgument {
                 command: "fleet remove-host",
                 what: "HOST",
+            })?,
+        },
+        Some("scrub") => FleetCommand::Scrub {
+            machine: args.words()?.ok_or(CliError::MissingArgument {
+                command: "fleet scrub",
+                what: "MACHINE",
             })?,
         },
         _ => return Err(unknown("fleet", verb)),

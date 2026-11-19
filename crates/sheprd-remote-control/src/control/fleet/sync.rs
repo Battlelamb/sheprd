@@ -216,6 +216,10 @@ pub enum Ask {
     /// This computer as a Sheprd host, its record signed by its own
     /// certificate authority, for a member about to share it.
     Intro,
+    /// Forgets the fleet here without signing anything: its log, and the
+    /// `authorized_keys` lines and relay records it wrote. For a computer
+    /// the fleet removed, or a fleet that is gone (`sheprd fleet scrub`).
+    Scrub,
 }
 
 /// What the daemon answers.

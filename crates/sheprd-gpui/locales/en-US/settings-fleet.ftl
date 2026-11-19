@@ -63,3 +63,9 @@ settings-fleet-invite = Invite
 settings-fleet-invite-ask = Invite this computer? It will open terminals on your hosts, and your computers on it.
 settings-fleet-share = Share
 settings-fleet-share-ask = Share this host with the computers allowed below:
+
+settings-fleet-removed = This computer is not in the fleet any more
+settings-fleet-removed-description = A member removed it. Its keys no longer count anywhere; forget the fleet here to remove what it wrote, then join again with a new approval.
+settings-fleet-forget = Forget the fleet
+settings-fleet-scrub = Remove fleet access
+settings-fleet-scrub-ask = Remove every way a fleet reaches this account: its authorized_keys lines and the relay agent's entries. Nothing is signed; it only takes access away.

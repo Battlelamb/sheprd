@@ -158,3 +158,26 @@ async fn an_answer_proves_which_host_gave_it() {
     };
     assert!(!sync::proven(&echoed, nonce, &hosts));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scrubbing_forgets_the_fleet_and_what_it_wrote() {
+    let (http, _, _) = relay().await;
+    let (a, b) = (Node::new(http, 1).await, Node::new(http, 2).await);
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    join(&a, &b);
+    grants::apply(&b.state, &b.fleet).unwrap();
+    assert_eq!(b.lines().len(), 1);
+    let records = b.dir.path().join("desktop/hosts");
+    assert_eq!(records.read_dir().unwrap().count(), 1);
+    assert_eq!(b.ask(Ask::Scrub), Answer::Done);
+    grants::apply(&b.state, &b.fleet).unwrap();
+    assert!(b.lines().is_empty());
+    assert_eq!(records.read_dir().unwrap().count(), 0);
+    assert!(ask::view(&b.fleet).is_none());
+    // The same key may found or join another fleet after.
+    assert!(!b.dir.path().join("fleet/log.bin").exists());
+    assert_eq!(
+        Fleet::load(b.dir.path(), now_ms()).unwrap().me(),
+        b.fleet.me()
+    );
+}

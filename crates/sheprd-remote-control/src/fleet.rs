@@ -219,6 +219,18 @@ impl Fleet {
         self.save(&inner)
     }
 
+    /// Forgets the fleet: its log, which removals each peer holds, and the
+    /// suspensions waiting for history. The key stays: a fleet founded or
+    /// joined later is another one, where it was never removed. Blocking.
+    pub(crate) fn scrub(&self) -> Result<()> {
+        let mut inner = self.inner();
+        *inner = Inner::default();
+        store::scrub(&self.state_dir)?;
+        drop(inner);
+        self.bump();
+        Ok(())
+    }
+
     /// Records that `peer` holds the removals `ids`. Blocking.
     pub(crate) fn held(&self, peer: MemberId, ids: impl IntoIterator<Item = OpId>) -> Result<()> {
         let mut inner = self.inner();
@@ -272,6 +284,28 @@ pub fn run_ask(state_dir: &Path, ask: sync::Ask) -> Result<sync::Answer> {
         Response::Fleet(answer) => Ok(*answer),
         Response::Error { message, .. } => Err(Error::Daemon(message)),
         _ => Err(Error::Daemon("an unexpected answer".to_owned())), // i18n: data
+    }
+}
+
+/// `fleet scrub`, run over SSH or by hand: asks the running daemon to
+/// forget its fleet, or, with none running, forgets it here and removes
+/// the fleet's `authorized_keys` lines and relay records itself. Blocking.
+pub fn run_scrub(state_dir: &Path) -> Result<()> {
+    use crate::control::{Request, Response};
+    let request = Request::Fleet(Box::new(sync::Ask::Scrub));
+    match crate::control::request(&crate::control::address(state_dir), &request) {
+        Ok(Response::Fleet(_)) => Ok(()),
+        Ok(Response::Error { message, .. }) => Err(Error::Daemon(message)),
+        Ok(_) => Err(Error::Daemon("an unexpected answer".to_owned())), // i18n: data
+        Err(crate::control::Error::Connect(_)) => {
+            let fleet = Fleet::load(state_dir, crate::web::now_ms())?;
+            fleet.scrub()?;
+            if let Ok(keys) = crate::ssh_access::AuthorizedKeys::of_user() {
+                keys.set_fleet(&[])?;
+            }
+            grants::forget_records(state_dir)
+        }
+        Err(error) => Err(error.into()),
     }
 }
 

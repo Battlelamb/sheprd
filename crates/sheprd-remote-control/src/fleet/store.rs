@@ -159,3 +159,22 @@ pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
     write_private(&path(state_dir, PEERS), &json)?;
     Ok(())
 }
+
+/// Removes the log and the peers' state. Blocking.
+pub(super) fn scrub(state_dir: &Path) -> Result<()> {
+    for name in [LOG, PEERS] {
+        let file = path(state_dir, name);
+        match std::fs::remove_file(&file) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(Error::Desktop(crate::desktop::Error::File {
+                    operation: "remove",
+                    path: file,
+                    source,
+                }));
+            }
+        }
+    }
+    Ok(())
+}

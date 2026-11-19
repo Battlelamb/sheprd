@@ -20,13 +20,17 @@ pub enum FleetOp {
     /// Shows Settings > Fleet asking to remove a host everywhere, by its ID
     /// or name; the user confirms there.
     RemoveHost { host: String },
+    /// Shows Settings > Fleet asking to remove every way a fleet reaches a
+    /// machine this Sheprd connects to, by its device ID or name; the user
+    /// confirms there.
+    Scrub { machine: String },
 }
 
 impl FleetOp {
     pub fn wait_seconds(&self) -> u64 {
         match self {
             Self::Status => DAEMON_WAIT_SECONDS,
-            Self::Open | Self::Remove { .. } | Self::RemoveHost { .. } => 0,
+            Self::Open | Self::Remove { .. } | Self::RemoveHost { .. } | Self::Scrub { .. } => 0,
         }
     }
 }

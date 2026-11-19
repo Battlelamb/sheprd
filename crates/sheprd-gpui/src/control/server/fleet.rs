@@ -43,6 +43,16 @@ pub(super) fn serve(
             Ok(host) => Some(FleetPending::RemoveHost(host)),
             Err(response) => return incoming.respond(response),
         },
+        FleetOp::Scrub { machine } => {
+            let machines = crate::fleet::Fleet::machines(cx);
+            let named = machines
+                .iter()
+                .map(|(id, machine)| (id.as_str(), machine.label.as_str()));
+            match pick(named, &machine, "machine") {
+                Ok(id) => Some(FleetPending::Scrub(id)),
+                Err(response) => return incoming.respond(response),
+            }
+        }
     };
     if let Some(pending) = pending {
         let asking = !matches!(pending, FleetPending::Nothing);
@@ -122,7 +132,7 @@ fn pick<'a>(
         )),
         (None, _) => Err(Response::error(
             ErrorCode::NotFound,
-            format!("No {what} of the fleet is named {needle}"),
+            format!("No {what} is named {needle}"),
         )),
     }
 }

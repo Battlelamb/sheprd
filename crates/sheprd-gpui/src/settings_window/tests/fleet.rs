@@ -21,6 +21,8 @@ static ASKED: Mutex<Vec<Ask>> = Mutex::new(Vec::new());
 /// The stand-in daemon is shared: these tests take turns.
 static SERIAL: Mutex<()> = Mutex::new(());
 static IN_FLEET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+/// The fleet removed this computer.
+static REMOVED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn view() -> View {
     let member = |id: &str, name: &str, kind, by: Option<&str>| MemberView {
@@ -69,7 +71,13 @@ fn daemon(_: &Path, request: &Request) -> Result<Response, control::Error> {
     };
     let answer = match ask.as_ref() {
         Ask::Status => Answer::Status {
-            view: IN_FLEET.load(Ordering::SeqCst).then(|| Box::new(view())),
+            view: IN_FLEET.load(Ordering::SeqCst).then(|| {
+                let mut view = view();
+                if REMOVED.load(Ordering::SeqCst) {
+                    view.members.retain(|member| member.id != view.me);
+                }
+                Box::new(view)
+            }),
         },
         ask => {
             ASKED.lock().unwrap().push(ask.clone());
@@ -87,6 +95,7 @@ fn serial() -> std::sync::MutexGuard<'static, ()> {
 
 fn page(cx: &mut TestAppContext, in_fleet: bool) -> &mut VisualTestContext {
     IN_FLEET.store(in_fleet, Ordering::SeqCst);
+    REMOVED.store(false, Ordering::SeqCst);
     ASKED.lock().unwrap().clear();
     let (view, cx) = cx.add_window_view(skill_fixture);
     let config = RemoteConfig {
@@ -185,4 +194,18 @@ fn with_no_fleet_the_page_offers_to_create_one(cx: &mut TestAppContext) {
     click(cx, "fleet-create");
     cx.run_until_parked();
     assert_eq!(*ASKED.lock().unwrap(), vec![Ask::Found]);
+}
+
+#[gpui::test]
+fn a_computer_the_fleet_removed_forgets_it_when_asked(cx: &mut TestAppContext) {
+    let _serial = serial();
+    let cx = page(cx, true);
+    REMOVED.store(true, Ordering::SeqCst);
+    cx.update(|_, cx| Fleet::refresh(cx));
+    cx.run_until_parked();
+    draw(cx);
+    assert!(cx.debug_bounds("fleet-member-0").is_none());
+    click(cx, "fleet-forget");
+    cx.run_until_parked();
+    assert_eq!(*ASKED.lock().unwrap(), vec![Ask::Scrub]);
 }

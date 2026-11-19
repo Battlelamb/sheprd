@@ -70,6 +70,10 @@ fn main() -> ExitCode {
                     state_dir,
                     control::fleet::sync::Ask::Intro,
                 )?),
+                FleetAction::Scrub => {
+                    fleet::run_scrub(state_dir)?;
+                    print_json(&serde_json::json!({ "scrubbed": true }))
+                }
             });
         }
         Ok(Invocation::DesktopPair { state_dir, name }) => {

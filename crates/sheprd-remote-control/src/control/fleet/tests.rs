@@ -19,6 +19,7 @@ mod pending;
 mod pruning;
 mod removal;
 mod rotation;
+mod routes;
 mod vectors;
 
 /// A fixed "now": 2027-01-15.

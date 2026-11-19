@@ -258,6 +258,16 @@ fn hosts(
         }
         host.flagged |= kept.flagged;
     }
+    // Each relay route has one owner: the first host whose intro or
+    // record names it. A record naming a route another host owns does not
+    // count, and flags its host, as a second record with one `rev` does;
+    // a host keeps its own routes whatever else its record changes.
+    let mut routes: BTreeMap<String, HostId> = BTreeMap::new();
+    for host in state.hosts.values() {
+        for record in [&host.intro.record, &host.record] {
+            routes.entry(record.route.clone()).or_insert(record.host);
+        }
+    }
     for &(_, op) in effective {
         let Body::HostSeen(seen) = op.body() else {
             continue;
@@ -265,6 +275,13 @@ fn hosts(
         let Some(host) = state.hosts.get_mut(&seen.record.host) else {
             continue;
         };
+        if routes
+            .get(&seen.record.route)
+            .is_some_and(|owner| *owner != seen.record.host)
+        {
+            host.flagged = true;
+            continue;
+        }
         // A plain host's keys only change through a member that checked
         // them strictly, and a changed key cannot be checked that way.
         let keys_kept =
@@ -275,6 +292,9 @@ fn hosts(
         if seen.record.rev > host.record.rev {
             host.record = seen.record.clone();
             host.record_signature = seen.signature;
+            routes
+                .entry(seen.record.route.clone())
+                .or_insert(seen.record.host);
         } else if seen.record.rev == host.record.rev && seen.record != host.record {
             host.flagged = true;
         }

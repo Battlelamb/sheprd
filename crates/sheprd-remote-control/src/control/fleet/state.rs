@@ -39,7 +39,8 @@ pub struct Host {
     /// Two members added it with different keys: nothing is spread until
     /// a person picks one.
     pub held: bool,
-    /// It signed two different records with one `rev`.
+    /// It signed two different records with one `rev`, or a record
+    /// naming a relay route another host owns.
     pub flagged: bool,
 }
 

@@ -165,6 +165,29 @@ pub(super) fn hosts(
     anchors
 }
 
+/// A computer naming a host: its intro, its id, where it first named the
+/// host (`Members::origins`), and its claims that survive.
+type Claimant<'a> = (&'a HostIntro, MemberId, Option<usize>, Vec<Option<usize>>);
+
+/// How early a computer named a host, for which one gives it its intro:
+/// the base's intro first, then other computers from the base, then by
+/// where each first named it, ties by member id. `origin` is the place of
+/// the computer's first operation naming the host since it last named
+/// another; `kept` says its intro is the one the base kept. The host fold
+/// and the route pass both rank by this, so they pick the same intro.
+pub(super) fn named_first(
+    origin: Option<usize>,
+    kept: bool,
+    member: MemberId,
+) -> (usize, MemberId) {
+    let at = match origin {
+        Some(at) => at + 2,
+        None if kept => 0,
+        None => 1,
+    };
+    (at, member)
+}
+
 /// A computer is its own host, from the operations that named it.
 ///
 /// Two members naming one host is a copied intro: held until a person
@@ -191,44 +214,41 @@ fn member_hosts(
             named.entry(host).or_default().push((intro, *id));
         }
     }
-    for (id, mut claimants) in named {
-        // The computer that named it first gives it its intro, the base's
-        // before any other; the others' intros are copies.
+    for (id, claimants) in named {
         let kept = base.hosts.get(&id).map(|host| &host.intro);
-        claimants.sort_by_key(|(intro, member)| {
-            let at = match members.origins.get(member) {
-                Some(at) => at + 2,
-                None if kept == Some(*intro) => 0,
-                None => 1,
-            };
-            (at, *member)
-        });
-        let (intro, member) = claimants[0];
-        let origin = members.origins.get(&member).copied();
-        // Where it named this host: the base, while the base had it live,
-        // then each operation since. The host lives from the first that
-        // saw every removal of it; its intro is the last's.
-        let from_base = origin.is_none() && base.hosts.contains_key(&id);
-        let claims: Vec<Option<usize>> = from_base
-            .then_some(None)
+        // Where each named this host: the base, while the base had it
+        // live, then each operation since. A computer's claim lives from
+        // the first that saw every removal of the host.
+        let mut claimants: Vec<Claimant<'_>> = claimants
             .into_iter()
-            .chain(
-                members
-                    .claims
-                    .get(&member)
+            .map(|(intro, member)| {
+                let origin = members.origins.get(&member).copied();
+                let from_base = origin.is_none() && base.hosts.contains_key(&id);
+                let surviving = from_base
+                    .then_some(None)
                     .into_iter()
-                    .flatten()
-                    .map(|&at| Some(at)),
-            )
+                    .chain(
+                        members
+                            .claims
+                            .get(&member)
+                            .into_iter()
+                            .flatten()
+                            .map(|&at| Some(at)),
+                    )
+                    .filter(|at| survives(&id, *at))
+                    .collect();
+                (intro, member, origin, surviving)
+            })
+            .filter(|(.., surviving): &Claimant<'_>| !surviving.is_empty())
             .collect();
-        let surviving: Vec<Option<usize>> = claims
-            .iter()
-            .copied()
-            .filter(|at| survives(&id, *at))
-            .collect();
-        if surviving.is_empty() {
+        // The computer that named it first gives it its intro
+        // ([`named_first`]); the others' intros are copies.
+        claimants.sort_by_key(|(intro, member, origin, _)| {
+            named_first(*origin, kept == Some(*intro), *member)
+        });
+        let Some((intro, member, origin, surviving)) = claimants.first().cloned() else {
             continue;
-        }
+        };
         // Every addition weighed must name the same machine the same way:
         // one that differs, in account, CA, or SSH host keys, holds it.
         let weighed =

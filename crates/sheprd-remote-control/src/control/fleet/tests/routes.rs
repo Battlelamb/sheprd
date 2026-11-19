@@ -238,3 +238,75 @@ fn a_refused_admission_claims_no_route() {
     act(&mut log, &computer(2), Body::HostAdd(other.clone()));
     assert!(!log.state().hosts[&other.id().unwrap()].held);
 }
+
+#[test]
+fn a_rotation_and_an_admission_naming_one_host_pick_one_intro_everywhere() {
+    for seeds in [(9, 10), (10, 9), (11, 12), (12, 11)] {
+        for later in [false, true] {
+            let (a, b) = (computer(1), computer(2));
+            let mut log = found(&a);
+            admit(&mut log, &a, &b);
+            let mut x = computer(seeds.0);
+            admit(&mut log, &a, &x);
+            let before = log.heads().to_vec();
+            // x moves to a host y joins with, neither seeing the other; the
+            // rotation after another of x's operations, or beside it.
+            let (intro, ca) = ca_host(60, HostKind::Member);
+            let host = intro.id().unwrap();
+            let mut y = computer(seeds.1);
+            y.bundle.host = Some(intro.clone());
+            let mut seq = log.state().members[&x.id()].seq + 1;
+            let mut parents = before.clone();
+            if later {
+                let step = sign_on(&log, &x, &before, seq, Body::HostRemove(HostId([3; 32])));
+                apply(&mut log, step.clone());
+                parents = vec![step.id()];
+                seq += 1;
+            }
+            let mut moved = x.bundle.clone();
+            let mut copied = intro.clone();
+            copied.user = "root".into();
+            copied.record = record(host, 61, 2);
+            copied.record.route = "copied-route".into();
+            copied.record_signature = Some(raw_signature(&ca, &copied.record.message().unwrap()));
+            moved.host = Some(copied);
+            x.bundle = moved.clone();
+            let next = log.state().members[&a.id()].seq + 1;
+            let ops = [
+                sign_on(&log, &x, &parents, seq, Body::Rotate(moved)),
+                sign_on(&log, &a, &before, next, admit_body(&log, &y)),
+            ];
+            for op in ops {
+                apply(&mut log, op);
+            }
+            let chosen = log.state().hosts[&host].clone();
+            assert!(chosen.held);
+            assert_eq!(
+                log.state().routes.get(&chosen.intro.record.route),
+                Some(&host)
+            );
+            // The computer whose intro it has leaves: the other's takes
+            // over, in the host fold and the route pass alike.
+            let (gone, stays) = if chosen.added_by == x.id() {
+                (&x, &y)
+            } else {
+                (&y, &x)
+            };
+            act(&mut log, &b, remove_body(gone));
+            let kept = stays.bundle.host.clone().unwrap();
+            assert_eq!(log.state().hosts[&host].intro, kept);
+            let route = kept.record.route.clone();
+            assert_eq!(log.state().routes.get(&route), Some(&host));
+            let hash = log.state().hash().unwrap();
+            let checkpoint = act(&mut log, &a, Body::Checkpoint(hash));
+            let mut whole = copy(&log);
+            log.prune(&checkpoint.id()).unwrap();
+            let third = on_route(41, &route);
+            let op = act(&mut log, &b, Body::HostAdd(third.clone()));
+            apply(&mut whole, op);
+            assert_eq!(log.state(), whole.state());
+            assert_eq!(log.state().hosts[&host].intro, kept);
+            assert!(log.state().hosts[&third.id().unwrap()].held);
+        }
+    }
+}

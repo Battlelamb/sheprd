@@ -116,7 +116,7 @@ pub(crate) fn apply(state: &State, fleet: &Fleet) -> Result<()> {
                 if suspended.contains(&fleet.me()) {
                     Routes::default()
                 } else {
-                    Routes::of(log.state())
+                    Routes::of(log.state(), &fleet.me())
                 },
             ),
             None => (Vec::new(), Vec::new(), Routes::default()),
@@ -264,27 +264,33 @@ fn route_owners(state: &Log) -> BTreeMap<&str, Option<HostId>> {
 pub(super) struct Routes {
     /// The routes whose owner is unclear: their kept records stay.
     pub(super) unclear: BTreeSet<String>,
-    /// Every live host, hex, with each route its intro or its current
-    /// record names: a record kept for one of them on that route is never
-    /// replaced by another host's, whatever the log's owner, so no claim,
-    /// even one ordered first, takes a host's saved keys.
+    /// Each host, hex, with the route its current record names, when it
+    /// still stands there: not held, the route's owner in the log or the
+    /// route unclear, and this member allowed on it. A record kept for one
+    /// of them on that route is not replaced by another host's; any other
+    /// binding gives way to the log's owner.
     pub(super) named: BTreeSet<(String, String)>,
 }
 
 impl Routes {
-    fn of(state: &Log) -> Self {
-        let unclear = route_owners(state)
+    pub(super) fn of(state: &Log, me: &MemberId) -> Self {
+        let unclear: BTreeSet<String> = route_owners(state)
             .into_iter()
             .filter(|(_, owner)| owner.is_none())
             .map(|(route, _)| route.to_owned())
             .collect();
+        // Only the current record counts: an intro whose host has moved
+        // off its route pins nothing.
         let named = state
             .hosts
             .iter()
-            .flat_map(|(id, host)| {
-                [&host.intro.record.route, &host.record.route]
-                    .map(|route| (id.to_string(), route.clone()))
+            .filter(|(id, host)| {
+                let route = &host.record.route;
+                !host.held
+                    && state.allowed(id, me)
+                    && (state.routes.get(route) == Some(*id) || unclear.contains(route))
             })
+            .map(|(id, host)| (id.to_string(), host.record.route.clone()))
             .collect();
         Self { unclear, named }
     }

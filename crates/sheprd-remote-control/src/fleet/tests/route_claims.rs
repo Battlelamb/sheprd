@@ -105,3 +105,54 @@ fn keys_saved_for_a_host_that_still_names_the_route_stay() {
         record("c", "identity-c")
     );
 }
+
+/// Whether `state` lets `host`'s kept record on `route` stand for `me`.
+fn pins(
+    state: &crate::control::fleet::State,
+    me: &MemberId,
+    host: crate::control::fleet::HostId,
+    route: &str,
+) -> bool {
+    grants::Routes::of(state, me)
+        .named
+        .contains(&(host.to_string(), route.to_owned()))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn only_a_host_still_standing_on_its_route_pins_it() {
+    let (a, b, _c) = three().await;
+    let me = b.fleet.me();
+    let (state, host, route) = {
+        let inner = b.fleet.inner();
+        let state = inner.log.as_ref().unwrap().state().clone();
+        let host = grants::own_host(&state, &a.fleet.me()).unwrap();
+        let route = state.hosts[&host].record.route.clone();
+        (state, host, route)
+    };
+    assert!(pins(&state, &me, host, &route));
+    // Moved off: its intro still names the route, which pins nothing.
+    let mut moved = state.clone();
+    moved.hosts.get_mut(&host).unwrap().record.route = URL_SAFE_NO_PAD.encode([0x33; 32]);
+    assert_eq!(moved.hosts[&host].intro.record.route, route);
+    assert!(!pins(&moved, &me, host, &route));
+    // Held: never.
+    let mut held = state.clone();
+    held.hosts.get_mut(&host).unwrap().held = true;
+    assert!(!pins(&held, &me, host, &route));
+    // Not the route's owner in the log, the route being clear: no.
+    let mut owned = state.clone();
+    owned
+        .routes
+        .insert(route.clone(), crate::control::fleet::HostId([0x44; 32]));
+    assert!(!pins(&owned, &me, host, &route));
+    // Denied to this member: no longer.
+    a.ask(Ask::Access {
+        host: host.to_string(),
+        member: b.me(),
+        allow: false,
+    });
+    b.fleet.receive(a.ops(), now_ms()).unwrap();
+    let denied = b.fleet.inner().log.as_ref().unwrap().state().clone();
+    assert!(!denied.allowed(&host, &me));
+    assert!(!pins(&denied, &me, host, &route));
+}

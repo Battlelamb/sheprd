@@ -24,6 +24,8 @@ use tokio::{
 #[cfg(unix)]
 mod atomic;
 #[cfg(unix)]
+mod catch_up;
+#[cfg(unix)]
 mod flood;
 #[cfg(unix)]
 mod handover;
@@ -39,6 +41,10 @@ mod records;
 mod rejected;
 #[cfg(unix)]
 mod restore;
+#[cfg(unix)]
+mod retry;
+#[cfg(unix)]
+mod route_claims;
 #[cfg(unix)]
 mod sessions;
 #[cfg(unix)]

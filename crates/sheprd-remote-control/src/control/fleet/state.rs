@@ -64,6 +64,9 @@ pub struct State {
     pub hosts: BTreeMap<HostId, Host>,
     /// Explicit access; a pair without one is allowed.
     pub access: BTreeMap<(HostId, MemberId), AccessRegister>,
+    /// The highest `rev` any `Access` reached: the next is one above the
+    /// highest its own history holds, this one included.
+    pub access_rev: u64,
     /// Each phone's device key per host.
     pub links: BTreeMap<(MemberId, HostId), Vec<u8>>,
     /// Members that signed two operations neither had seen: their key is
@@ -144,6 +147,7 @@ impl State {
             writer.bool(register.allow);
             writer.u64(register.rev);
         }
+        writer.u64(self.access_rev);
         writer.count(self.links.len())?;
         for ((member, host), key) in &self.links {
             writer.raw(&member.0);
@@ -218,6 +222,7 @@ impl State {
             };
             state.access.insert(key, register);
         }
+        state.access_rev = reader.u64()?;
         for _ in 0..reader.count(MAX_ALL_HOSTS * MAX_PHONES)? {
             let key = (MemberId(reader.array()?), HostId(reader.array()?));
             state.links.insert(key, reader.bytes(MAX_DEVICE_KEY)?);

@@ -6,8 +6,13 @@
 //! naming one does not count and flags its host, as a second record with
 //! one `rev` does. Ownership is kept in the state, so a log pruned to a
 //! checkpoint decides as the whole log would.
+//!
+//! A host's records and routes count from the addition whose intro it has
+//! now (`Anchors::source`): a record that had not seen it speaks of an
+//! intro the host no longer has, and at that addition the host gives up
+//! every route it held before for the one its intro names.
 
-use super::{Body, HostId, HostSeen, Op, State};
+use super::{Body, HostId, HostSeen, Op, State, graph::Graph, hosts::Anchors};
 use std::collections::BTreeMap;
 
 /// One claim on a route, in graph order.
@@ -19,13 +24,11 @@ enum Claim<'a> {
 }
 
 /// Applies the records `effective` carries to `state`'s hosts and settles
-/// who owns each route, starting from `base`'s owners. `claimed` is where
-/// each host was first added, one past its place in graph order, and 0
-/// for a host the base held. A host added again since keeps none of the
-/// base's routes: its claim there went with the addition a removal
-/// dropped, and it claims again where it was added.
+/// who owns each route, starting from `base`'s owners for the hosts whose
+/// intro comes from the base.
 pub(super) fn records(
-    claimed: &BTreeMap<HostId, usize>,
+    graph: &Graph<'_>,
+    anchors: &BTreeMap<HostId, Anchors>,
     effective: &[(usize, &Op)],
     base: &State,
     state: &mut State,
@@ -33,22 +36,29 @@ pub(super) fn records(
     let mut routes: BTreeMap<String, HostId> = base
         .routes
         .iter()
-        .filter(|(_, owner)| claimed.get(*owner) == Some(&0))
+        .filter(|(_, owner)| {
+            anchors
+                .get(*owner)
+                .is_some_and(|anchor| anchor.source.is_none())
+        })
         .map(|(route, owner)| (route.clone(), *owner))
         .collect();
-    let mut claims: Vec<(usize, Claim<'_>)> = claimed
+    let mut claims: Vec<(usize, Claim<'_>)> = anchors
         .iter()
-        .filter(|(_, at)| **at > 0)
-        .map(|(id, at)| (at - 1, Claim::Intro(*id)))
+        .filter_map(|(id, anchor)| anchor.source.map(|at| (at, Claim::Intro(*id))))
         .collect();
-    claims.extend(
-        effective
-            .iter()
-            .filter_map(|&(position, op)| match op.body() {
-                Body::HostSeen(seen) => Some((position, Claim::Seen(seen))),
-                _ => None,
-            }),
-    );
+    claims.extend(effective.iter().filter_map(|&(position, op)| {
+        match op.body() {
+            Body::HostSeen(seen)
+                if anchors
+                    .get(&seen.record.host)
+                    .is_some_and(|anchor| Anchors::after(graph, anchor.source, position)) =>
+            {
+                Some((position, Claim::Seen(seen)))
+            }
+            _ => None,
+        }
+    }));
     claims.sort_by_key(|(position, _)| *position);
     for (_, claim) in claims {
         match claim {
@@ -56,6 +66,7 @@ pub(super) fn records(
                 let Some(host) = state.hosts.get_mut(&id) else {
                     continue;
                 };
+                routes.retain(|_, owner| *owner != id);
                 let route = &host.intro.record.route;
                 match routes.get(route) {
                     Some(owner) if *owner != id => host.held = true,

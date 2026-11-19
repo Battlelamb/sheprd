@@ -32,7 +32,7 @@ fn a_host_paired_after_the_fleet_wrote_it_is_kept() {
     let dir = tempfile::tempdir().unwrap();
     let fleet = record("identity-one", true);
     let id = fleet.id().unwrap();
-    grants::write_records(dir.path(), &[(fleet, keys())], &BTreeSet::new()).unwrap();
+    grants::write_records(dir.path(), &[(fleet, keys())], &grants::Routes::default()).unwrap();
     // Paired here over Bluetooth since: pairing owns the record now.
     let paired = record("identity-one", false);
     paired.save(dir.path(), &keys()).unwrap();
@@ -40,11 +40,11 @@ fn a_host_paired_after_the_fleet_wrote_it_is_kept() {
     grants::write_records(
         dir.path(),
         &[(record("identity-one", true), keys())],
-        &BTreeSet::new(),
+        &grants::Routes::default(),
     )
     .unwrap();
     assert_eq!(Record::load(dir.path(), &id).unwrap(), paired);
-    grants::write_records(dir.path(), &[], &BTreeSet::new()).unwrap();
+    grants::write_records(dir.path(), &[], &grants::Routes::default()).unwrap();
     assert_eq!(Record::load(dir.path(), &id).unwrap(), paired);
 }
 
@@ -53,13 +53,21 @@ fn a_route_whose_owner_is_unclear_keeps_its_last_record() {
     let dir = tempfile::tempdir().unwrap();
     let kept = record("identity-one", true);
     let id = kept.id().unwrap();
-    grants::write_records(dir.path(), &[(kept.clone(), keys())], &BTreeSet::new()).unwrap();
+    grants::write_records(
+        dir.path(),
+        &[(kept.clone(), keys())],
+        &grants::Routes::default(),
+    )
+    .unwrap();
     // Two hosts name the route: neither gets it, and the record stays.
-    let unclear = BTreeSet::from([kept.route.clone()]);
+    let unclear = grants::Routes {
+        unclear: BTreeSet::from([kept.route.clone()]),
+        ..Default::default()
+    };
     grants::write_records(dir.path(), &[], &unclear).unwrap();
     assert_eq!(Record::load(dir.path(), &id).unwrap(), kept);
     // Once the route is clear again and no host is granted, it goes.
-    grants::write_records(dir.path(), &[], &BTreeSet::new()).unwrap();
+    grants::write_records(dir.path(), &[], &grants::Routes::default()).unwrap();
     assert!(Record::load(dir.path(), &id).is_err());
 }
 
@@ -70,11 +78,16 @@ fn a_fleet_host_that_changed_its_tunnel_identity_keeps_its_record() {
     grants::write_records(
         dir.path(),
         &[(record("identity-one", true), keys())],
-        &BTreeSet::new(),
+        &grants::Routes::default(),
     )
     .unwrap();
     let moved = record("identity-two", true);
-    grants::write_records(dir.path(), &[(moved.clone(), keys())], &BTreeSet::new()).unwrap();
+    grants::write_records(
+        dir.path(),
+        &[(moved.clone(), keys())],
+        &grants::Routes::default(),
+    )
+    .unwrap();
     assert_eq!(Record::load(dir.path(), &id).unwrap(), moved);
 }
 
@@ -85,7 +98,7 @@ fn pairing_still_cannot_replace_an_identity() {
     grants::write_records(
         dir.path(),
         &[(record("identity-one", true), keys())],
-        &BTreeSet::new(),
+        &grants::Routes::default(),
     )
     .unwrap();
     assert!(matches!(

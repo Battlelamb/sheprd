@@ -24,6 +24,13 @@ use std::{
 
 /// How often this computer checks whether its own record moved.
 const RECORD_CHECK: Duration = Duration::from_secs(10 * 60);
+/// How long after a failed write of the grants they are written again,
+/// with no fleet change needed.
+const RETRY: Duration = if cfg!(test) {
+    Duration::from_millis(200)
+} else {
+    Duration::from_secs(30)
+};
 /// The ids of the relay records the fleet wrote, so it removes only its
 /// own.
 const RECORDS: &str = "fleet/records.json";
@@ -108,7 +115,7 @@ pub(crate) fn own_host(state: &Log, me: &MemberId, host: Option<HostId>) -> Opti
 /// Rewrites the SSH lines and relay records from the log. Blocking.
 pub(crate) fn apply(state: &State, fleet: &Fleet) -> Result<()> {
     let suspended = fleet.suspended();
-    let (lines, records, unclear) = {
+    let (lines, records, routes) = {
         let inner = fleet.inner();
         match inner.log.as_ref() {
             Some(log) => (
@@ -121,19 +128,19 @@ pub(crate) fn apply(state: &State, fleet: &Fleet) -> Result<()> {
                 records(log.state(), &fleet.me(), &suspended),
                 // Cut off, this computer keeps no record at all.
                 if suspended.contains(&fleet.me()) {
-                    BTreeSet::new()
+                    Routes::default()
                 } else {
-                    unclear(log.state())
+                    Routes::of(log.state(), &fleet.me())
                 },
             ),
-            None => (Vec::new(), Vec::new(), BTreeSet::new()),
+            None => (Vec::new(), Vec::new(), Routes::default()),
         }
     };
     if let Ok(access) = state.auth().ssh_access() {
         access.keys.set_fleet(&lines)?;
     }
     revoke_removed(state, fleet)?;
-    write_records(fleet.state_dir(), &records, &unclear)
+    write_records(fleet.state_dir(), &records, &routes)
 }
 
 /// Revokes every desktop paired here one by one with a tunnel key a member
@@ -271,13 +278,41 @@ fn route_owners(state: &Log) -> BTreeMap<&str, Option<HostId>> {
     owners
 }
 
-/// The routes whose owner is unclear: their kept records stay.
-fn unclear(state: &Log) -> BTreeSet<String> {
-    route_owners(state)
-        .into_iter()
-        .filter(|(_, owner)| owner.is_none())
-        .map(|(route, _)| route.to_owned())
-        .collect()
+/// What the log says of routes that keeps a record already written.
+#[derive(Debug, Default)]
+pub(super) struct Routes {
+    /// The routes whose owner is unclear: their kept records stay.
+    pub(super) unclear: BTreeSet<String>,
+    /// Each host, hex, with the route its current record names, when it
+    /// still stands there: not held, the route's owner in the log or the
+    /// route unclear, and this member allowed on it. A record kept for one
+    /// of them on that route is not replaced by another host's; any other
+    /// binding gives way to the log's owner.
+    pub(super) named: BTreeSet<(String, String)>,
+}
+
+impl Routes {
+    pub(super) fn of(state: &Log, me: &MemberId) -> Self {
+        let unclear: BTreeSet<String> = route_owners(state)
+            .into_iter()
+            .filter(|(_, owner)| owner.is_none())
+            .map(|(route, _)| route.to_owned())
+            .collect();
+        // Only the current record counts: an intro whose host has moved
+        // off its route pins nothing.
+        let named = state
+            .hosts
+            .iter()
+            .filter(|(id, host)| {
+                let route = &host.record.route;
+                !host.held
+                    && state.allowed(id, me)
+                    && (state.routes.get(route) == Some(*id) || unclear.contains(route))
+            })
+            .map(|(id, host)| (id.to_string(), host.record.route.clone()))
+            .collect();
+        Self { unclear, named }
+    }
 }
 
 /// Writes `records`, and removes those the fleet wrote before and no
@@ -285,7 +320,7 @@ fn unclear(state: &Log) -> BTreeSet<String> {
 pub(super) fn write_records(
     state_dir: &Path,
     records: &[(Record, Vec<String>)],
-    unclear: &BTreeSet<String>,
+    routes: &Routes,
 ) -> Result<()> {
     let file = state_dir.join(RECORDS);
     let before: BTreeSet<String> = files::read_bounded(&file, 64 * 1024)?
@@ -304,6 +339,15 @@ pub(super) fn write_records(
             // record kept for another host (or for none, as written before
             // records named their host) on the same full route.
             Ok(kept) if kept.route == record.route && kept.host != record.host => {
+                let still = kept
+                    .host
+                    .as_ref()
+                    .is_some_and(|host| routes.named.contains(&(host.clone(), kept.route.clone())));
+                if still {
+                    tracing::warn!("two fleet hosts name one route; the record kept for it stays");
+                    written.insert(id);
+                    continue;
+                }
                 Record::remove(state_dir, &id)?;
             }
             _ => {}
@@ -321,7 +365,7 @@ pub(super) fn write_records(
         // whose owner is unclear keeps its last record.
         match Record::load(state_dir, gone) {
             Ok(kept) if !kept.fleet => continue,
-            Ok(kept) if unclear.contains(&kept.route) => {
+            Ok(kept) if routes.unclear.contains(&kept.route) => {
                 written.insert(gone.clone());
                 continue;
             }
@@ -347,6 +391,10 @@ pub(crate) async fn follow(state: Shared) {
     // What the log grants is written at start too: it may have changed on
     // disk while the daemon was stopped (`fleet apply` with no daemon).
     changed.mark_changed();
+    // A write that failed (a full disk, say) is tried again until it
+    // lands: a member let in, or a record cleaned up, must not wait for
+    // the next fleet change.
+    let mut failed = false;
     loop {
         tokio::select! {
             result = changed.changed() => {
@@ -354,6 +402,7 @@ pub(crate) async fn follow(state: Shared) {
                     return;
                 }
             }
+            () = tokio::time::sleep(RETRY), if failed => {}
             _ = check.tick() => {
                 let (state, fleet) = (state.clone(), fleet.clone());
                 let _ = tokio::task::spawn_blocking(move || publish_record(&state, &fleet)).await;
@@ -362,8 +411,9 @@ pub(crate) async fn follow(state: Shared) {
         }
         let (blocking, fleet_ref) = (state.clone(), fleet.clone());
         let applied = tokio::task::spawn_blocking(move || apply(&blocking, &fleet_ref)).await;
+        failed = !matches!(applied, Ok(Ok(())));
         if let Ok(Err(error)) = applied {
-            tracing::warn!(error = %error, "could not apply the fleet's grants");
+            tracing::warn!(error = %error, "could not apply the fleet's grants; trying again");
         }
         if let Some(relay) = &state.relay {
             relay.devices_changed();

@@ -290,6 +290,19 @@ The native pairing dialog, shown with synthetic addresses and an inactive QR:
 
 [Expanded alternatives in a narrow native window](../../docs/screenshots/remote-pairing-narrow.png).
 
+### Fleet
+
+A person's computers and phones form one fleet (`docs/relay-plan.md`,
+Fleet), so a host added on one reaches every other. `control::fleet`
+holds its signed log, without the `server` feature so Sheprd shares it:
+operations signed with each member's own P-256 key, linked by hash to
+the ones their signer had seen, and the state they compute, the same on
+every member whatever order they arrived in. A removal voids what the
+removed member signed without having seen it, and every conflict
+resolves to the safer side. The iOS app's Swift copy
+(`SheprdRemoteCore/Fleet`) is checked against the vectors its tests
+write. Nothing stores, syncs, or acts on the log yet.
+
 ## Workspace pull requests and titles
 
 Mobile workspace headers show the PR number and the same readiness/lifecycle

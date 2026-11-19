@@ -13,6 +13,7 @@ pub mod app_update;
 pub mod changes;
 pub mod desktop;
 pub mod edited;
+pub mod fleet;
 pub mod github;
 pub mod host_relay;
 pub mod hosts;

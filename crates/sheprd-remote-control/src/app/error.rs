@@ -48,6 +48,8 @@ pub enum Error {
         #[source]
         source: crate::relay_label::Error,
     },
+    #[error("Sheprd keeps listen tokens for at most {max} relays")]
+    RelayTokens { max: usize },
     #[error("{program} failed ({status}): {stderr}")]
     Service {
         program: &'static str,

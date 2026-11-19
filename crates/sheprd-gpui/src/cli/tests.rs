@@ -24,6 +24,7 @@ mod remote_update;
 mod security;
 mod ui_agent_group;
 mod ui_panel;
+mod ui_traces;
 mod usage_pick;
 mod worktrees;
 

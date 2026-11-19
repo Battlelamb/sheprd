@@ -18,6 +18,7 @@ pub(crate) mod ask;
 mod error;
 pub(crate) mod grants;
 mod me;
+mod plain;
 pub(crate) mod removals;
 mod store;
 
@@ -85,6 +86,10 @@ pub(crate) struct Inner {
     /// removed, a desktop paired here one by one with any of them goes
     /// with it, keys it rotated away from included.
     pub(crate) proven: BTreeMap<MemberId, BTreeSet<[u8; 32]>>,
+    /// Removals plain hosts' agents reported suspending for that the log
+    /// has not heard of, with when first and how many times
+    /// (`plain::Unknown`).
+    pub(crate) unknown: BTreeMap<OpId, plain::Unknown>,
 }
 
 impl Fleet {

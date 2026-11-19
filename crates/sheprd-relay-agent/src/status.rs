@@ -100,7 +100,7 @@ impl Report {
         let keys = Keys::load_or_create(state_dir)?;
         let authorized = Authorized::load(state_dir)?;
         let live = Live::load(state_dir, now)?;
-        let fleet = fleet::Held::load(state_dir)?.report()?;
+        let fleet = fleet::Held::load(state_dir)?.report(&authorized)?;
         Ok(Self {
             authorized: authorized.entries().len(),
             fleet,

@@ -174,7 +174,7 @@ pub struct Member {
 
 /// A device's dial and tunnel keys together: what makes a desktop enrolled
 /// one by one the same device as a member.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct Pair {
     #[serde(with = "b64")]
     pub dial: Key,

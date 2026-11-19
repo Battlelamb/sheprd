@@ -34,6 +34,7 @@ fn a_removal_is_read_with_its_targets_and_id() {
     let removed = peek(&op).unwrap().unwrap();
     assert_eq!(removed.fleet, [1; 32]);
     assert_eq!(removed.signer, [2; 32]);
+    assert_eq!(removed.seq, 7);
     assert_eq!(removed.targets, [[3; 32], [4; 32]]);
     let signed = &op[..op.len() - SIGNATURE_LEN];
     assert_eq!(removed.id, <[u8; 32]>::from(Sha256::digest(signed)));

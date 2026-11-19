@@ -3,11 +3,9 @@
 //! the next access file the log computes confirms it.
 
 use super::*;
-use crate::control::fleet::{
-    HostId, HostIntro, HostKind, Reason, SelfRecord, Verified, access as host_access, sync,
-};
+use crate::control::fleet::{HostId, HostIntro, HostKind, Reason, SelfRecord, Verified, sync};
 use sheprd_relay_agent::{
-    access::Id,
+    access::{Access, Id},
     agent::{Agent, Options, Relay},
     fleet::Held,
     status::Report,
@@ -63,22 +61,27 @@ async fn plain_host(
     (dir, agent, stop, intro)
 }
 
-/// What Sheprd would run over SSH: `fleet apply` with the file `node`'s
-/// log computes, settling what the agent reported suspending.
+/// What Sheprd runs over SSH: `fleet apply` with the file `node`'s daemon
+/// computes (`Ask::AgentAccess`), settling what the agent reported
+/// suspending.
 fn fleet_apply(node: &Node, host: &HostId, dir: &Path, agent: &Agent) -> Held {
-    let suspended: Vec<OpId> = Held::load(dir)
-        .unwrap()
-        .suspended
-        .values()
-        .flat_map(|suspension| suspension.removals.iter().map(|id| OpId(id.0)))
-        .collect();
-    let file = {
-        let inner = node.fleet.inner();
-        host_access::compute(inner.log.as_ref().unwrap(), host, suspended).unwrap()
-    };
+    let file = access_file(node, host, dir);
     let held = Held::apply(dir, Some(&dir.join("authorized_keys")), file).unwrap();
     agent.reload().unwrap();
     held
+}
+
+/// The access file `node`'s daemon answers for `host`, with what the agent
+/// in `dir` reports suspending.
+fn access_file(node: &Node, host: &HostId, dir: &Path) -> Access {
+    let suspended = Held::load(dir).unwrap().suspended;
+    let Answer::AgentAccess { access } = node.ask(Ask::AgentAccess {
+        host: host.to_string(),
+        suspended,
+    }) else {
+        panic!("no access file");
+    };
+    Access::parse(access.as_bytes()).unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -128,4 +131,77 @@ async fn a_removal_reaches_a_plain_hosts_agent_with_no_sheprd_running() {
     assert!(held.suspended.is_empty());
     assert!(held.access.unwrap().removed.contains(&c_id));
     drop(b);
+}
+
+/// `seq` past what `node`'s log holds of `signer`: a removal that may be
+/// on its way.
+fn ahead(node: &Node, signer: &Node) -> u64 {
+    let inner = node.fleet.inner();
+    inner.log.as_ref().unwrap().state().members[&signer.fleet.me()].seq + 1
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unknown_removal_is_settled_after_three_syncs_over_an_hour() {
+    let (http, _, _) = relay().await;
+    let (a, b) = (Node::new(http, 1).await, Node::new(http, 2).await);
+    a.ask(Ask::Found);
+    join(&a, &b);
+    let (_dir, _agent, _stop, intro) = plain_host(http).await;
+    let host = intro.id().unwrap();
+    a.ask(Ask::AddHost {
+        intro: sync::text(&intro.to_bytes().unwrap()),
+        deny: Vec::new(),
+    });
+    let made_up = OpId([0x42; 32]);
+    let asked = vec![crate::control::fleet::access::Asked {
+        removal: made_up,
+        signer: a.fleet.me(),
+        seq: ahead(&a, &a),
+        target: b.fleet.me(),
+    }];
+    let at = |now| a.fleet.agent_access(&host, asked.clone(), now).unwrap();
+    let start = now_ms();
+    // Three syncs within the hour: not yet.
+    for minutes in [0, 10, 20] {
+        assert!(at(start + minutes * 60_000).settled.is_empty());
+    }
+    // A fourth after the hour: settled.
+    let file = at(start + plain::GRACE_MS + 1);
+    assert!(file.settled.contains(&Id(made_up.0)));
+    // Kept across a restart.
+    let again = Fleet::load(a.dir.path(), now_ms()).unwrap();
+    assert!(again.inner().unknown.contains_key(&made_up));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unknown_removal_reported_once_is_settled_at_the_latest_after_a_week() {
+    let (http, _, _) = relay().await;
+    let (a, b) = (Node::new(http, 1).await, Node::new(http, 2).await);
+    a.ask(Ask::Found);
+    join(&a, &b);
+    let (_dir, _agent, _stop, intro) = plain_host(http).await;
+    let host = intro.id().unwrap();
+    a.ask(Ask::AddHost {
+        intro: sync::text(&intro.to_bytes().unwrap()),
+        deny: Vec::new(),
+    });
+    let asked = vec![crate::control::fleet::access::Asked {
+        removal: OpId([0x43; 32]),
+        signer: a.fleet.me(),
+        seq: ahead(&a, &a),
+        target: b.fleet.me(),
+    }];
+    let start = now_ms();
+    assert!(
+        a.fleet
+            .agent_access(&host, asked.clone(), start)
+            .unwrap()
+            .settled
+            .is_empty()
+    );
+    let late = a
+        .fleet
+        .agent_access(&host, asked, start + UNCONFIRMED_TTL_MS + 1)
+        .unwrap();
+    assert_eq!(late.settled.len(), 1);
 }

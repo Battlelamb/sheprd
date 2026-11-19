@@ -139,6 +139,18 @@ pub enum Ask {
     RemoveHost { host: String },
     /// Takes operations another member carried, and says what it lacks.
     Apply(Apply),
+    /// The access file for plain host `host`, for Sheprd to hand its
+    /// agent (`fleet apply`): computed here, so the log never leaves the
+    /// daemon. `suspended` is what the agent's `status --json` reports
+    /// suspending, which the file settles as the log allows.
+    AgentAccess {
+        host: String,
+        #[serde(default)]
+        suspended: std::collections::BTreeMap<
+            sheprd_relay_agent::access::Id,
+            sheprd_relay_agent::fleet::Suspension,
+        >,
+    },
 }
 
 /// What the daemon answers.
@@ -155,6 +167,11 @@ pub enum Answer {
     },
     Applied(Applied),
     Done,
+    /// [`Ask::AgentAccess`]'s answer: the access file, as the agent reads
+    /// it on stdin.
+    AgentAccess {
+        access: String,
+    },
 }
 
 /// Reads a member id from hex.

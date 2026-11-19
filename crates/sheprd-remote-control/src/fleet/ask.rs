@@ -106,6 +106,17 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             fleet.sign(Body::HostRemove(sync::host(&host)?), now_ms)?;
             Ok(Answer::Done)
         }
+        Ask::AgentAccess { host, suspended } => {
+            let host = sync::host(&host)?;
+            let asked = crate::control::fleet::access::asked(&suspended);
+            let file = fleet.agent_access(&host, asked, now_ms)?;
+            let bytes = file
+                .to_bytes()
+                .map_err(crate::control::fleet::Error::from)?;
+            Ok(Answer::AgentAccess {
+                access: String::from_utf8_lossy(&bytes).into_owned(),
+            })
+        }
         Ask::Apply(apply) => {
             let heads = apply.heads()?;
             let ops = apply.ops()?;

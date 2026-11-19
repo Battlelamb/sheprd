@@ -23,7 +23,7 @@ mod store;
 
 pub use error::{Error, Result};
 
-use crate::control::fleet::{Body, Inserted, Log, MemberId, Op, OpId, Unsigned, sync};
+use crate::control::fleet::{Body, HostId, Inserted, Log, MemberId, Op, OpId, Unsigned, sync};
 use p256::ecdsa::SigningKey;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -62,11 +62,19 @@ pub(crate) struct Fleet {
     pub(crate) inbound: tokio::sync::Semaphore,
 }
 
+/// What removals are passed to: a member's daemon, or a plain host's
+/// agent.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum Holder {
+    Host(HostId),
+    Member(MemberId),
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct Inner {
     pub(crate) log: Option<Log>,
     /// The removals each peer said it holds, so none is sent twice.
-    pub(crate) held: BTreeMap<MemberId, BTreeSet<OpId>>,
+    pub(crate) held: BTreeMap<Holder, BTreeSet<OpId>>,
     /// Members cut off by a removal whose history has not arrived, by the
     /// removal: kept after the removal expires from the pending pool,
     /// until its history arrives and settles it, its signer is no longer a
@@ -264,7 +272,7 @@ impl Fleet {
     }
 
     /// Records that `peer` holds the removals `ids`. Blocking.
-    pub(crate) fn held(&self, peer: MemberId, ids: impl IntoIterator<Item = OpId>) -> Result<()> {
+    pub(crate) fn held(&self, peer: Holder, ids: impl IntoIterator<Item = OpId>) -> Result<()> {
         let mut inner = self.inner();
         inner.held.entry(peer).or_default().extend(ids);
         self.save(&inner)

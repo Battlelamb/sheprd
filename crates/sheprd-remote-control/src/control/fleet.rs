@@ -24,6 +24,7 @@
 //! and the iOS app's Swift copy is checked against the vectors
 //! `tests/vectors.rs` writes.
 
+pub mod access;
 mod body;
 mod error;
 mod fold;
@@ -108,6 +109,18 @@ macro_rules! ids {
         impl std::fmt::Debug for $name {
             fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(formatter, "{}({})", stringify!($name), self.short())
+            }
+        }
+
+        impl From<[u8; 32]> for $name {
+            fn from(bytes: [u8; 32]) -> Self {
+                Self(bytes)
+            }
+        }
+
+        impl From<$name> for [u8; 32] {
+            fn from(id: $name) -> Self {
+                id.0
             }
         }
 

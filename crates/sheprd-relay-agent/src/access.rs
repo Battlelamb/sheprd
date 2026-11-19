@@ -1,0 +1,388 @@
+//! The fleet access file (`docs/relay-plan.md`, Fleet, Spreading a host):
+//! what a plain host's agent is told about the fleet. Sheprd computes it
+//! from the signed fleet log (`sheprd_remote_control::control::fleet::
+//! access`) and hands it to `sheprd-relay-agent fleet apply` over SSH; the
+//! agent keeps the merge of every file it was given in `fleet`, in its
+//! state directory.
+//!
+//! ```json
+//! {
+//!   "fleet": "FLEET_ID",
+//!   "members": {
+//!     "MEMBER_ID": {"allow": true, "dial": "…", "name": "studio", "rev": 2,
+//!                   "ssh": "ssh-ed25519 AAAA…", "tunnel": "…"}
+//!   },
+//!   "removed": ["MEMBER_ID", …],
+//!   "settled": ["REMOVAL_ID", …]
+//! }
+//! ```
+//!
+//! Ids and keys are base64url without padding: a member's id, its relay
+//! dial key (P-256, SEC1 compressed), and its tunnel key (X25519).
+//! `settled` names, of the removals the agent reported suspending for,
+//! those the log that computed the file holds; it is not kept.
+//!
+//! [`Access::merge`] is what stops a member that has not heard of a
+//! removal from undoing it over SSH: removed members are a union, kept
+//! forever and never admitted again, and per member the higher `rev` wins,
+//! a deny winning a tie.
+
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use sha2::{Digest, Sha256};
+use sheprd_relay::wire::{KEY_LEN, Key};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+};
+
+/// The file the merged access lives in, in the state directory.
+pub const FILE: &str = "fleet";
+/// The largest access file read or written.
+pub const MAX_BYTES: usize = 64 * 1024;
+/// Members one file names, allowed or not: a host names at most 32 fleet
+/// dial keys, keeping room in a relay's 64 for desktops enrolled one by one.
+pub const MAX_MEMBERS: usize = 32;
+/// Removed members remembered, forever; the fleet log's own bound.
+pub const MAX_REMOVED: usize = 1024;
+/// Removals one file settles.
+pub const MAX_SETTLED: usize = 64;
+/// The longest member name.
+pub const MAX_NAME: usize = 64;
+
+/// Why an access file is not one the agent takes.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum Error {
+    // keep-sorted start
+    #[error("the fleet access file is over its bounds")]
+    Bounds,
+    #[error("fleet member {} has keys or a name that are not valid", member.short())]
+    Member { member: Id },
+    #[error(
+        "this account belongs to fleet {}; a host account joins one fleet, and fleet {} is another",
+        held.short(),
+        offered.short()
+    )]
+    OtherFleet { held: Id, offered: Id },
+    // keep-sorted end
+}
+
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+/// A fleet, member, or removal id: 32 bytes, base64url in the file.
+#[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct Id(pub [u8; 32]);
+
+impl Id {
+    /// The first eight bytes in hex, as `authorized_keys` tags and logs
+    /// show it, and as the fleet log's own `short` does.
+    #[must_use]
+    pub fn short(&self) -> String {
+        self.0[..8]
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+}
+
+impl std::fmt::Debug for Id {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "Id({})", self.short())
+    }
+}
+
+impl From<[u8; 32]> for Id {
+    fn from(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl From<Id> for [u8; 32] {
+    fn from(id: Id) -> Self {
+        id.0
+    }
+}
+
+impl Serialize for Id {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&URL_SAFE_NO_PAD.encode(self.0))
+    }
+}
+
+impl<'de> Deserialize<'de> for Id {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        bytes(deserializer).map(Self)
+    }
+}
+
+/// Fixed-size bytes as base64url.
+mod b64 {
+    use super::*;
+
+    pub(super) fn serialize<S: Serializer, const N: usize>(
+        bytes: &[u8; N],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&URL_SAFE_NO_PAD.encode(bytes))
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>, const N: usize>(
+        deserializer: D,
+    ) -> Result<[u8; N], D::Error> {
+        bytes(deserializer)
+    }
+}
+
+fn bytes<'de, D: Deserializer<'de>, const N: usize>(deserializer: D) -> Result<[u8; N], D::Error> {
+    let text = String::deserialize(deserializer)?;
+    URL_SAFE_NO_PAD
+        .decode(text.as_bytes())
+        .ok()
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or_else(|| de::Error::custom("not base64url of the right length"))
+}
+
+/// A computer member, as the log has it for this host.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct Member {
+    /// Whether it may reach SSH here. A member that may not still passes
+    /// removals.
+    pub allow: bool,
+    /// What it proves to the relay.
+    #[serde(with = "b64")]
+    pub dial: Key,
+    /// The person's name for it; never used to decide anything.
+    pub name: String,
+    /// The `Access` register's `rev`: zero until someone set it.
+    pub rev: u64,
+    /// Its `ssh-ed25519 BASE64` key.
+    pub ssh: String,
+    /// What its end-to-end handshake must show.
+    #[serde(with = "b64")]
+    pub tunnel: [u8; 32],
+    /// How new its keys are: its highest sequence number in the log that
+    /// computed the file, which only climbs. Keys from a file computed
+    /// before a rotation never replace newer ones.
+    #[serde(default)]
+    pub keys: u64,
+    /// The keys it rotated away from, as the agent saw them replaced, so a
+    /// desktop enrolled one by one with an old pair goes with the member.
+    /// Kept by the agent alone; never in a file Sheprd computes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub former: Vec<Pair>,
+}
+
+/// A device's dial and tunnel keys together: what makes a desktop enrolled
+/// one by one the same device as a member.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct Pair {
+    #[serde(with = "b64")]
+    pub dial: Key,
+    #[serde(with = "b64")]
+    pub tunnel: [u8; 32],
+}
+
+/// Former key pairs kept per member.
+pub const MAX_FORMER: usize = 8;
+
+impl Member {
+    fn valid(&self) -> bool {
+        p256::PublicKey::from_sec1_bytes(&self.dial).is_ok()
+            && self.dial.len() == KEY_LEN
+            && crate::authorized_keys::ed25519(&self.ssh).as_deref() == Some(self.ssh.as_str())
+            && self.name.len() <= MAX_NAME
+            && !self.name.chars().any(char::is_control)
+    }
+
+    /// Two views of one member merged: whether it may reach SSH by the
+    /// higher `rev`, a deny winning a tie; its keys and name by the higher
+    /// `keys`, the held ones kept on a tie, so a file computed before a
+    /// rotation cannot bring back the keys it replaced.
+    fn merged(self, held: &Self) -> Self {
+        let allow = match self.rev.cmp(&held.rev) {
+            Ordering::Greater => self.allow,
+            Ordering::Less => held.allow,
+            Ordering::Equal => self.allow && held.allow,
+        };
+        let rev = self.rev.max(held.rev);
+        let mut former = held.former.clone();
+        let mut merged = if self.keys > held.keys {
+            let replaced = held.pair();
+            if replaced != self.pair() && !former.contains(&replaced) {
+                former.push(replaced);
+            }
+            self
+        } else {
+            held.clone()
+        };
+        // The oldest go first; a member rotating more often than this
+        // between files leaves its oldest pairs behind.
+        let excess = former.len().saturating_sub(MAX_FORMER);
+        former.drain(..excess);
+        merged.former = former;
+        merged.allow = allow;
+        merged.rev = rev;
+        merged
+    }
+
+    /// Its keys now.
+    #[must_use]
+    pub fn pair(&self) -> Pair {
+        Pair {
+            dial: self.dial,
+            tunnel: self.tunnel,
+        }
+    }
+
+    /// Every pair it has had here: its keys now, and those it rotated
+    /// away from.
+    pub fn pairs(&self) -> impl Iterator<Item = Pair> + '_ {
+        std::iter::once(self.pair()).chain(self.former.iter().copied())
+    }
+}
+
+/// What a plain host is told about its fleet.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct Access {
+    pub fleet: Id,
+    /// Live computer members, by id.
+    #[serde(default)]
+    pub members: BTreeMap<Id, Member>,
+    /// Every member ever removed.
+    #[serde(default)]
+    pub removed: BTreeSet<Id>,
+    /// Removals the computing log holds, of those asked about: a
+    /// suspension for one whose target is still a member is lifted.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub settled: BTreeSet<Id>,
+}
+
+impl Access {
+    /// An access file for `fleet` naming no one.
+    #[must_use]
+    pub fn new(fleet: Id) -> Self {
+        Self {
+            fleet,
+            members: BTreeMap::new(),
+            removed: BTreeSet::new(),
+            settled: BTreeSet::new(),
+        }
+    }
+
+    /// Reads a file, checking its bounds and every member's keys.
+    pub fn parse(bytes: &[u8]) -> crate::Result<Self> {
+        if bytes.len() > MAX_BYTES {
+            return Err(Error::Bounds.into());
+        }
+        let access: Self = serde_json::from_slice(bytes).map_err(crate::Error::AccessFormat)?;
+        access.check()?;
+        Ok(access)
+    }
+
+    /// Checks bounds and every member's keys and name.
+    pub fn check(&self) -> Result<()> {
+        if self.members.len() > MAX_MEMBERS
+            || self.removed.len() > MAX_REMOVED
+            || self.settled.len() > MAX_SETTLED
+        {
+            return Err(Error::Bounds);
+        }
+        if let Some((id, _)) = self.members.iter().find(|(_, member)| !member.valid()) {
+            return Err(Error::Member { member: *id });
+        }
+        Ok(())
+    }
+
+    /// The file's bytes: compact JSON, maps in id order, so one access
+    /// has one encoding.
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        self.check()?;
+        let bytes = serde_json::to_vec(self).map_err(|_| Error::Bounds)?;
+        if bytes.len() > MAX_BYTES {
+            return Err(Error::Bounds);
+        }
+        Ok(bytes)
+    }
+
+    /// The SHA-256 of what is kept, `settled` left out, in hex: equal on
+    /// the agent and on a member that computed the same file, so Sheprd
+    /// sees when a host is behind.
+    pub fn digest(&self) -> Result<String> {
+        let mut kept = Self {
+            settled: BTreeSet::new(),
+            ..self.clone()
+        };
+        // Former keys are the agent's own memory; Sheprd computes none.
+        for member in kept.members.values_mut() {
+            member.former.clear();
+        }
+        let digest = Sha256::digest(kept.to_bytes()?);
+        Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+    }
+
+    /// The members that may reach SSH here: allowed, not removed, and
+    /// sharing no key with another ([`Access::shared`]).
+    pub fn allowed(&self) -> impl Iterator<Item = (&Id, &Member)> {
+        let shared = self.shared();
+        self.members.iter().filter(move |(id, member)| {
+            member.allow && !self.removed.contains(id) && !shared.contains(id)
+        })
+    }
+
+    /// `incoming` merged into what was `held`: the same fleet only,
+    /// removed members a union that no member outlives, and per member
+    /// [`Member::merged`]. `settled` is not kept.
+    pub fn merge(held: Option<&Self>, incoming: Self) -> Result<Self> {
+        incoming.check()?;
+        let mut merged = match held {
+            Some(held) if held.fleet != incoming.fleet => {
+                return Err(Error::OtherFleet {
+                    held: held.fleet,
+                    offered: incoming.fleet,
+                });
+            }
+            Some(held) => {
+                let mut merged = held.clone();
+                merged.removed.extend(incoming.removed);
+                for (id, member) in incoming.members {
+                    let member = match merged.members.get(&id) {
+                        Some(kept) => member.merged(kept),
+                        None => member,
+                    };
+                    merged.members.insert(id, member);
+                }
+                merged
+            }
+            None => incoming,
+        };
+        merged.settled.clear();
+        let removed = &merged.removed;
+        merged.members.retain(|id, _| !removed.contains(id));
+        merged.check()?;
+        Ok(merged)
+    }
+
+    /// The members sharing a dial or tunnel key with another, suspended
+    /// ones included. Keys are public: two members naming one would make
+    /// one's sessions look like the other's, so none of them is let in
+    /// while they share it. Worked out every time rather than kept, so a
+    /// later file that ends the clash lets them in again; a file with a
+    /// clash is still taken, so its removals and denies land.
+    #[must_use]
+    pub fn shared(&self) -> BTreeSet<Id> {
+        let mut dials: BTreeMap<Key, usize> = BTreeMap::new();
+        let mut tunnels: BTreeMap<[u8; 32], usize> = BTreeMap::new();
+        for member in self.members.values() {
+            *dials.entry(member.dial).or_default() += 1;
+            *tunnels.entry(member.tunnel).or_default() += 1;
+        }
+        self.members
+            .iter()
+            .filter(|(_, member)| dials[&member.dial] > 1 || tunnels[&member.tunnel] > 1)
+            .map(|(id, _)| *id)
+            .collect()
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests;

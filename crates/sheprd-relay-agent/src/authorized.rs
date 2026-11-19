@@ -160,6 +160,18 @@ impl Authorized {
         self.entries.len() != before
     }
 
+    /// Removes the desktop with both `dial` and `tunnel`, the device that
+    /// is that fleet member: one removed for good leaves no way in behind
+    /// it. Whether any went.
+    pub fn forget(&mut self, dial: &Key, tunnel: &[u8; TUNNEL_LEN]) -> bool {
+        let before = self.entries.len();
+        // Only the desktop that is that member, both keys alike: a member
+        // naming one of another desktop's keys removes nothing of it.
+        self.entries
+            .retain(|entry| entry.dial != *dial || entry.tunnel != *tunnel);
+        self.entries.len() != before
+    }
+
     /// The keys the relays let dial.
     #[must_use]
     pub fn dial_keys(&self) -> Vec<Key> {

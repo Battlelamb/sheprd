@@ -22,6 +22,8 @@ use tokio::{
 };
 
 #[cfg(unix)]
+mod agent;
+#[cfg(unix)]
 mod flood;
 #[cfg(unix)]
 mod joining;

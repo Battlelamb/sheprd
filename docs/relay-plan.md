@@ -934,6 +934,15 @@ daemon is.
   keys when they are missing, so enrolling reads the route before the
   agent first runs. Still to come: the service units, the WebSocket
   fallback, and `"default"` (Sheprd's signed list).
+- **Fleet** (Fleet, Spreading a host): `fleet apply` merges the access
+  file Sheprd computes and writes the fleet's `authorized_keys` lines;
+  members are admitted from that file, not from `authorized`, which stays
+  the list of desktops enrolled one by one; members' sessions start with
+  a purpose byte, so they also pass removals. `status --json` reports the
+  fleet, the access file's digest, and what is suspended. The crate's
+  library without its default `runtime` feature holds the access file,
+  the removal frames, and the `authorized_keys` lines, with no Tokio, and
+  `sheprd-remote-control` depends on it for them.
 
 **`sheprd relay connect`.** A mode of the `sheprd` executable that SSH
 runs as its `ProxyCommand`, parsed before GPUI starts, as the setup relay's
@@ -1417,18 +1426,29 @@ sequenceDiagram
    sheprd-relay-agent on H". A installs or updates it over its working
    SSH session (Enrolling), then runs `sheprd-relay-agent fleet apply`
    with an **access file** computed from the log:
-   - the fleet id, which pins the account to this fleet;
-   - per allowed member: its dial, tunnel, and SSH keys, and the
-     `Access` `rev`;
-   - every removed member id.
+   - the fleet id, which pins the account to this fleet: a file for
+     another fleet is refused, naming the fleet that holds it;
+   - per computer member: its dial, tunnel, and SSH keys, its name,
+     whether it is allowed, and the `Access` `rev` (0 until set);
+   - every removed member id;
+   - `settled`: of the removals the agent reported suspending for, those
+     the log holds.
 
-   The agent keeps what it was given and merges each new file into it:
-   removed ids are kept forever and never readmitted, and per member the
-   higher `rev` wins. So a member that has not yet heard of a removal
-   cannot undo it there. The agent writes `authorized` and the
-   `authorized_keys` lines the way `ssh_access` does: atomically,
-   refusing a linked file, and touching only lines with its own tag. It
-   then names the dial keys to its relays. A plain host trusts the SSH
+   The file is JSON with ids and keys in base64url, so 32 members and
+   1,024 removed ids fit its 64 KiB (`sheprd_relay_agent::access`;
+   `control::fleet::access::compute` makes it from the log). The agent
+   keeps what it was given and merges each new file into it: removed ids
+   are kept forever and never readmitted, and per member the higher `rev`
+   wins, a deny winning a tie. So a member that has not yet heard of a
+   removal cannot undo it there. Members are admitted from that file:
+   denied ones only to pass removals, allowed ones to SSH too. The agent
+   writes the `authorized_keys` lines the way `ssh_access` does, with the
+   same shared code: atomically, refusing a linked file, and touching
+   only lines with its own fleet's tag. A member removed for good also
+   loses any `authorized` line with its keys. It then names the dial keys
+   to its relays. `status --json` and `fleet apply` report the fleet and
+   the digest of the merged file, which Sheprd compares with the file it
+   would write to see a host that is behind. A plain host trusts the SSH
    session that wrote the file, as it does today for everything else.
 4. **Every other computer member** gets the operations from Sheprd's
    sharing worker, which runs `fleet apply` over SSH on each member it
@@ -1572,16 +1592,21 @@ accepted on this purpose.
 - Each receiver that did not hold it already does the same, so a
   removal floods the fleet in about two hops. It sends each `Remove` to
   each peer until that peer answers `Held`, then never again.
-- Plain hosts get it too. An agent takes `removal` from the member
-  tunnel keys in its access file. It checks no signatures, so it only
-  **suspends** the target: it removes that member's `authorized` entry
-  and `authorized_keys` line, and keeps the id in a suspended list. That
-  holds when the sender is a member it admits and the target is any
-  member but the sender.
+- Plain hosts get it too. Every daemon dials each plain host in its
+  state from the host's record, and sends it the removals that took
+  effect in its log. An agent takes `removal` from the member tunnel
+  keys in its access file. It checks no signatures and wants no
+  parents, so it only **suspends** the target: it stops admitting that
+  member's keys (and a desktop line that shares them), removes its
+  `authorized_keys` line, and keeps the id in a suspended list with the
+  removals that named it. That holds when the sender is a member it
+  admits and the target is any member but the sender. It answers `Held`
+  with every removal of its fleet it took.
 - The next access file, computed over SSH from the signed log, settles
   it. A confirmed removal becomes a permanent tombstone. A removal the
   log voids, such as one from a member that was itself removed first, is
-  lifted.
+  lifted: the file's `settled` names every removal the member was
+  suspended for, and the log still lists it as a member.
 - A suspension the agent cannot settle stays in place. Settings > Fleet
   lists it, so a member can only ever take access away on an agent this
   way, never give it.
@@ -1651,8 +1676,9 @@ Then, with no other prompt:
 - **Each daemon** that hears of it removes the member's `ssh_access`
   lines, stops naming its dial key to relays (the relays end its sessions
   at once), and forgets its tunnel key.
-- **Each agent** does the same with `authorized` and `authorized_keys`
-  when a member daemon passes it the removal (Removals between daemons),
+- **Each agent** stops admitting the member and removes its
+  `authorized_keys` line when a member daemon passes it the removal
+  (Removals between daemons),
   or when its access file arrives, whichever is first.
 - **Each member** drops the removed member's records. Phones get a push.
 - **Backdated operations** the remover had not seen are void (rule 7).
@@ -1680,7 +1706,7 @@ all of them. It needs no fleet key, because it only removes access.
 | One `fleet apply` or sync message | 256 KiB and 64 operations. More takes several rounds. |
 | Operations waiting for parents | 256 per peer, dropped after 1 hour |
 | Pending joins | 8 at once, each valid for 10 minutes |
-| Agent access file | 64 KiB |
+| Agent access file | 64 KiB: 32 members, 1,024 removed ids, and 64 settled removals; 8 removals remembered per suspended member, past which only its removal settles it |
 | `removal` sessions | 8 out and 8 in at once, 30 seconds each; 64 operations and 256 KiB per message; 4 `Want` rounds; retries from 5 seconds to 10 minutes |
 
 ### Storage and logs
@@ -1689,7 +1715,8 @@ all of them. It needs no fleet key, because it only removes access.
   `STATE_DIR/fleet/log.bin` the operations (written atomically), and
   `STATE_DIR/fleet/peers.json` each peer's last heads and backoff. All
   three are 0600.
-- **Agents:** the access file sits in the agent's state directory, 0600.
+- **Agents:** the merged access file (`fleet`) and the suspensions
+  (`suspended`) sit in the agent's state directory, 0600.
 - **Phones:** the key is in the Secure Enclave, and the log in the app
   group container under complete file protection.
 - **Logs:** nothing beyond counts and short ids. No route, relay,
@@ -1930,6 +1957,25 @@ manual multi-machine and phone steps left unticked in its QA list.
    `removal` purpose with its suspended list. Loopback tests as in
    phase 2, with an agent host, including a suspension the next access
    file confirms and one it lifts.
+   - **Built (the agent's half):** the access file, its merge and digest
+     (`sheprd_relay_agent::access`, without the agent's runtime);
+     `control::fleet::access::compute` from the log; `fleet apply` and the
+     fleet in `status --json`; the `authorized_keys` lines, shared with
+     `ssh_access`; the `removal` purpose with the agent's `suspended`
+     file, settled by the next access file; daemons flooding removals that
+     took effect to plain hosts, with `Held` kept per host in
+     `fleet/peers.json`. Tests: the merge, bounds, and lines; the agent on
+     a loopback relay (an allowed member reaching SSH, a denied one not, a
+     removal suspending at once, the next file confirming it, and one
+     lifting a suspension the log voided); and a member's daemon passing
+     a removal to a real agent with no Sheprd running.
+   - **Left:** Sheprd's side: installing and updating the agent over SSH
+     behind its dialog, the service units, and the sharing worker reading
+     `status --json` and running `fleet apply` with the file `compute`
+     makes (passing the reported suspensions) on each plain host it
+     reaches; `--direct`, which stays off and is not built yet. A
+     member's rotated keys at an unchanged `rev` take the newer file's
+     keys, as the agent cannot order them otherwise.
 5. **iOS:** joining at pairing, admitting a computer from the phone, the
    Secure Enclave key, sync, offers and `Link`, removing from the phone,
    pushes, and Settings > Fleet. Swift tests against phase 1's vectors.

@@ -1,10 +1,10 @@
 //! The fleet's files, in the state directory's `fleet` folder, private to
 //! this user: `key` (the fleet key's 32-byte secret), `log.bin` (the log,
-//! `control::fleet::saved`), and `peers.json` (which removals each peer
-//! holds, and which suspensions wait for their history).
+//! `control::fleet::saved`), and `peers.json` (which removals each member
+//! and plain host holds, and which suspensions wait for their history).
 
-use super::{Error, Inner, Result};
-use crate::control::fleet::{MemberId, OpId, saved};
+use super::{Error, Holder, Inner, Result};
+use crate::control::fleet::{HostId, MemberId, OpId, saved};
 use crate::desktop::files::{read_bounded, write_private};
 use p256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
@@ -44,8 +44,12 @@ pub(super) fn load_or_create_key(state_dir: &Path) -> Result<SigningKey> {
 
 #[derive(Default, Serialize, Deserialize)]
 struct Peers {
+    /// By member.
     #[serde(default)]
     held: BTreeMap<String, BTreeSet<String>>,
+    /// By plain host, whose agent holds them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    held_hosts: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
     unconfirmed: BTreeMap<String, Kept>,
     #[serde(default)]
@@ -96,11 +100,16 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
         held: peers
             .held
             .iter()
-            .filter_map(|(peer, ids)| {
-                Some((
-                    MemberId::from_hex(peer)?,
-                    ids.iter().filter_map(|id| OpId::from_hex(id)).collect(),
-                ))
+            .filter_map(|(peer, ids)| Some((Holder::Member(MemberId::from_hex(peer)?), ids)))
+            .chain(
+                peers
+                    .held_hosts
+                    .iter()
+                    .filter_map(|(host, ids)| Some((Holder::Host(HostId::from_hex(host)?), ids))),
+            )
+            .map(|(holder, ids)| {
+                let ids = ids.iter().filter_map(|id| OpId::from_hex(id)).collect();
+                (holder, ids)
             })
             .collect(),
         proven: peers
@@ -109,7 +118,7 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
             .filter_map(|(member, keys)| {
                 let keys = keys
                     .keys()
-                    .filter_map(|key| crate::control::fleet::HostId::from_hex(key).map(|key| key.0))
+                    .filter_map(|key| HostId::from_hex(key).map(|key| key.0))
                     .collect();
                 Some((MemberId::from_hex(member)?, keys))
             })
@@ -140,28 +149,31 @@ pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
     if let Some(log) = &inner.log {
         write_private(&path(state_dir, LOG), &saved::encode(log)?)?;
     }
-    let peers = Peers {
-        held: inner
+    let held = |key: fn(&Holder) -> Option<String>| {
+        inner
             .held
             .iter()
-            .map(|(peer, ids)| {
-                (
-                    peer.to_string(),
-                    ids.iter().map(ToString::to_string).collect(),
-                )
+            .filter_map(|(peer, ids)| {
+                Some((key(peer)?, ids.iter().map(ToString::to_string).collect()))
             })
-            .collect(),
+            .collect()
+    };
+    let peers = Peers {
+        held: held(|peer| match peer {
+            Holder::Member(member) => Some(member.to_string()),
+            Holder::Host(_) => None,
+        }),
+        held_hosts: held(|peer| match peer {
+            Holder::Host(host) => Some(host.to_string()),
+            Holder::Member(_) => None,
+        }),
         proven: inner
             .proven
             .iter()
             .map(|(member, keys)| {
                 (
                     member.to_string(),
-                    Proven::Many(
-                        keys.iter()
-                            .map(|key| crate::control::fleet::HostId(*key).to_string())
-                            .collect(),
-                    ),
+                    Proven::Many(keys.iter().map(|key| HostId(*key).to_string()).collect()),
                 )
             })
             .collect(),

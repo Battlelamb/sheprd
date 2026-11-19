@@ -5,6 +5,7 @@ use super::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use p256::ecdsa::{SigningKey, VerifyingKey, signature::Signer};
 
+mod access;
 mod admission;
 mod checkpoint;
 mod convergence;

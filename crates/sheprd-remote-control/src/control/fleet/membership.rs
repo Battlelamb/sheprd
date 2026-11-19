@@ -185,7 +185,7 @@ impl<'g, 'a> Folder<'g, 'a> {
                 let id = admit.bundle.id();
                 if members.live.contains_key(&id)
                     || members.tombstones.contains(&id)
-                    || host_taken(members, &admit.bundle, id)
+                    || taken(members, &admit.bundle, id)
                 {
                     return Err(Error::Invalid);
                 }
@@ -227,7 +227,7 @@ impl<'g, 'a> Folder<'g, 'a> {
                 if bundle.key != current.bundle.key || bundle.kind != kind {
                     return Err(Error::Permission);
                 }
-                if host_taken(members, bundle, op.signer()) {
+                if taken(members, bundle, op.signer()) {
                     return Err(Error::Invalid);
                 }
                 Ok(())
@@ -402,20 +402,20 @@ impl<'g, 'a> Folder<'g, 'a> {
     }
 }
 
-/// Whether another live member already names the host `bundle` names: a
-/// copied intro, perhaps with another user to log in as.
-fn host_taken(members: &Members, bundle: &super::Bundle, own: MemberId) -> bool {
-    let Some(id) = bundle.host.as_ref().and_then(|intro| intro.id().ok()) else {
-        return false;
-    };
+/// Whether another live member already holds a key or the host `bundle`
+/// names: its tunnel key, its dial key, or its own host (a copied intro,
+/// perhaps with another user to log in as). Keys are public, so a bundle
+/// naming another member's would make that member's sessions look like
+/// its own.
+fn taken(members: &Members, bundle: &super::Bundle, own: MemberId) -> bool {
+    let host = bundle.host.as_ref().and_then(|intro| intro.id().ok());
     members.live.iter().any(|(member, other)| {
         *member != own
-            && other
-                .bundle
-                .host
-                .as_ref()
-                .and_then(|intro| intro.id().ok())
-                .is_some_and(|other| other == id)
+            && (other.bundle.tunnel == bundle.tunnel
+                || other.bundle.dial == bundle.dial
+                || host.is_some_and(|host| {
+                    other.bundle.host.as_ref().and_then(|intro| intro.id().ok()) == Some(host)
+                }))
     })
 }
 

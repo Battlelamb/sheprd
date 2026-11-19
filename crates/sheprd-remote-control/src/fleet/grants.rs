@@ -38,12 +38,17 @@ pub(crate) fn peer(fleet: &Fleet, remote: &[u8; 32]) -> Option<Peer> {
     let suspended = fleet.suspended();
     let inner = fleet.inner();
     let state = inner.log.as_ref()?.state();
-    let (member, _) = state.members.iter().find(|(id, member)| {
+    let mut holders = state.members.iter().filter(|(id, member)| {
         **id != fleet.me()
             && member.bundle.kind == Kind::Computer
             && member.bundle.tunnel == *remote
-            && !suspended.contains(id)
-    })?;
+    });
+    let (member, _) = holders.next()?;
+    // Two members naming one key (admitted concurrently, which the log
+    // cannot refuse) say nothing about who dialed: neither is let in.
+    if holders.next().is_some() || suspended.contains(member) {
+        return None;
+    }
     let ssh = own_host(state, &fleet.me()).is_some_and(|host| state.allowed(&host, member));
     Some(Peer {
         member: *member,

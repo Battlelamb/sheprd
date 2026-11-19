@@ -47,7 +47,14 @@ struct Peers {
     #[serde(default)]
     held: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
-    unconfirmed: BTreeMap<String, Vec<String>>,
+    unconfirmed: BTreeMap<String, Kept>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Kept {
+    signer: String,
+    targets: Vec<String>,
+    since_ms: u64,
 }
 
 /// What the fleet folder keeps, read at `now_ms`. A log that no longer
@@ -75,13 +82,18 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
         unconfirmed: peers
             .unconfirmed
             .iter()
-            .filter_map(|(id, members)| {
+            .filter_map(|(id, kept)| {
                 Some((
                     OpId::from_hex(id)?,
-                    members
-                        .iter()
-                        .filter_map(|member| MemberId::from_hex(member))
-                        .collect(),
+                    super::Unconfirmed {
+                        signer: MemberId::from_hex(&kept.signer)?,
+                        targets: kept
+                            .targets
+                            .iter()
+                            .filter_map(|member| MemberId::from_hex(member))
+                            .collect(),
+                        since_ms: kept.since_ms,
+                    },
                 ))
             })
             .collect(),
@@ -107,10 +119,14 @@ pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
         unconfirmed: inner
             .unconfirmed
             .iter()
-            .map(|(id, members)| {
+            .map(|(id, kept)| {
                 (
                     id.to_string(),
-                    members.iter().map(ToString::to_string).collect(),
+                    Kept {
+                        signer: kept.signer.to_string(),
+                        targets: kept.targets.iter().map(ToString::to_string).collect(),
+                        since_ms: kept.since_ms,
+                    },
                 )
             })
             .collect(),

@@ -32,6 +32,19 @@ use std::{
 };
 use tokio::sync::watch;
 
+/// How long a removal whose history never arrives keeps its targets cut
+/// off: any member that syncs brings the history long before, so only a
+/// removal whose history does not exist outlives it.
+pub(crate) const UNCONFIRMED_TTL_MS: u64 = 7 * 24 * 60 * 60 * 1000;
+
+/// A suspension waiting for its removal's history.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct Unconfirmed {
+    pub(crate) signer: MemberId,
+    pub(crate) targets: Vec<MemberId>,
+    pub(crate) since_ms: u64,
+}
+
 /// The daemon's fleet: its key, and its log once it founded or joined one.
 #[derive(Debug)]
 pub(crate) struct Fleet {
@@ -51,9 +64,10 @@ pub(crate) struct Inner {
     /// The removals each peer said it holds, so none is sent twice.
     pub(crate) held: BTreeMap<MemberId, BTreeSet<OpId>>,
     /// Members cut off by a removal whose history has not arrived, by the
-    /// removal: kept after the removal expires from the pending pool, until
-    /// its history arrives and settles it.
-    pub(crate) unconfirmed: BTreeMap<OpId, Vec<MemberId>>,
+    /// removal: kept after the removal expires from the pending pool,
+    /// until its history arrives and settles it, its signer is no longer a
+    /// member, or [`UNCONFIRMED_TTL_MS`] passes.
+    pub(crate) unconfirmed: BTreeMap<OpId, Unconfirmed>,
 }
 
 impl Fleet {
@@ -102,16 +116,23 @@ impl Fleet {
         let Some(log) = &inner.log else {
             return Vec::new();
         };
+        let now = crate::web::now_ms();
+        // Only while the removal's signer is still a member, and never this
+        // computer: a removal that cannot be checked yet only takes others'
+        // access away here.
         let mut members: BTreeSet<MemberId> = inner
             .unconfirmed
             .values()
-            .flatten()
-            .filter(|member| log.is_member(member))
-            .copied()
+            .filter(|kept| {
+                log.is_member(&kept.signer)
+                    && now.saturating_sub(kept.since_ms) <= UNCONFIRMED_TTL_MS
+            })
+            .flat_map(|kept| kept.targets.iter().copied())
             .collect();
         for (_, _, targets) in log.pending_removals() {
             members.extend(targets);
         }
+        members.retain(|member| *member != self.me && log.is_member(member));
         members.into_iter().collect()
     }
 
@@ -175,7 +196,7 @@ impl Fleet {
                 refused
             }
         };
-        settle_unconfirmed(&mut inner);
+        settle_unconfirmed(&mut inner, now_ms);
         let after = inner.log.as_ref().map(|log| log.heads().to_vec());
         if after != before || !inner.unconfirmed.is_empty() {
             self.save(&inner)?;
@@ -261,14 +282,22 @@ fn join(mut ops: Vec<Op>, me: MemberId, now_ms: u64) -> Result<(Log, usize)> {
 
 /// Moves the log's pending removals into `unconfirmed`, and drops those
 /// whose history arrived: once in the log, the log settles them.
-fn settle_unconfirmed(inner: &mut Inner) {
+fn settle_unconfirmed(inner: &mut Inner, now_ms: u64) {
     let Some(log) = &inner.log else {
         return;
     };
-    for (id, _, targets) in log.pending_removals() {
-        inner.unconfirmed.insert(id, targets);
+    for (id, signer, targets) in log.pending_removals() {
+        inner.unconfirmed.entry(id).or_insert(Unconfirmed {
+            signer,
+            targets,
+            since_ms: now_ms,
+        });
     }
-    inner.unconfirmed.retain(|id, _| log.get(id).is_none());
+    inner.unconfirmed.retain(|id, kept| {
+        log.get(id).is_none()
+            && log.is_member(&kept.signer)
+            && now_ms.saturating_sub(kept.since_ms) <= UNCONFIRMED_TTL_MS
+    });
 }
 
 fn member_id(key: &SigningKey) -> MemberId {

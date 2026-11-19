@@ -311,3 +311,22 @@ fn every_addition_weighed_must_match_the_members_intro() {
     assert!(log.state().hosts[&host].held);
     assert!(!log.state().allowed(&host, &c.id()));
 }
+
+#[test]
+fn a_bundle_cannot_name_another_members_keys() {
+    let (mut log, a, b, _, _) = four();
+    // A joiner whose tunnel key is b's, then one whose dial key is.
+    let mut tunnel = computer(9);
+    tunnel.bundle.tunnel = b.bundle.tunnel;
+    let op = sign(&log, &a, admit_body(&log, &tunnel));
+    assert_eq!(log.insert(op, NOW), Err(Error::Invalid));
+    let mut dial = computer(10);
+    dial.bundle.dial = b.bundle.dial;
+    let op = sign(&log, &a, admit_body(&log, &dial));
+    assert_eq!(log.insert(op, NOW), Err(Error::Invalid));
+    // Nor can a member rotate onto another's keys.
+    let mut rotated = a.bundle.clone();
+    rotated.tunnel = b.bundle.tunnel;
+    let op = sign(&log, &a, Body::Rotate(rotated));
+    assert_eq!(log.insert(op, NOW), Err(Error::Invalid));
+}

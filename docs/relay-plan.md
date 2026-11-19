@@ -1365,6 +1365,7 @@ When two edits to the same thing are concurrent, the safer outcome wins:
 | A member added and removed | Removed. Tombstones win. |
 | A host updated and removed | Removed. An addition made after seeing the removal brings it back. |
 | `Access` allow and deny, concurrent | Deny. Otherwise the one that descends from the other wins. An `Access` counts only when its `rev` is one above the highest counted one it saw, so no single operation can put the register out of a later deny's reach. |
+| A bundle naming another member's tunnel or dial key | Refused, as a copied host is: keys are public, and a member naming another's would make that member's sessions look like its own. Two members admitted concurrently with one key are both refused at the tunnel, and a paired phone's key always reaches the API. |
 | Two members naming one host as their own | A copied intro: the host is held. An `Admit` or `Rotate` naming the host of a member live in its history is refused outright. A member naming an added host is the same machine joining only when the account and SSH host keys match; otherwise the host is held, whether the addition came before the member's bundle or concurrently with it. Only a `HostAdd` that saw the bundle is ignored, so no member can hold another's host by adding a copy, and no bundle can take over an added host by racing it. |
 | Two self-records | The higher `rev`. Equal `rev` with different content flags the host and keeps the one seen first. |
 | Two `HostAdd` for one host | The first in hash order keeps the intro, and the other member is listed as having verified it too. If their pinned or SSH host keys differ, the host is held and not spread until a person picks one. |
@@ -1593,9 +1594,12 @@ history still acts on it at once, to fail closed:
   before asking for any missing parents.
 - Once the parents arrive, the full rules (Validity and conflicts)
   either make the suspension permanent or lift it.
-- A suspension whose history never arrives, within 1 hour of the last
-  attempt, is kept and listed in Settings > Fleet as "suspended,
-  unconfirmed" rather than lifted.
+- A suspension whose history has not arrived is kept, and listed in
+  Settings > Fleet as "suspended, unconfirmed", while the removal's
+  signer is still a member and for at most 7 days: any member that
+  syncs brings the history long before, so only a removal whose history
+  does not exist outlives it. A removal that cannot be checked yet never
+  cuts off the computer receiving it.
 
 That last case is only a member removing another member, which any
 member can do anyway.

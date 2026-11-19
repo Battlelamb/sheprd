@@ -207,3 +207,40 @@ async fn a_removal_without_its_history_suspends_first() {
     assert!(!has(&b, &c));
     assert!(b.fleet.suspended().is_empty());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_suspension_ends_with_its_signer_and_never_cuts_off_this_computer() {
+    let (a, b, c) = quiet().await;
+    until(10, || b.lines().len() == 2).await;
+    let (intro, _) = {
+        let other = Node::new("127.0.0.1:9".parse().unwrap(), 9).await;
+        (me::intro(&other.state, now_ms()).unwrap(), other)
+    };
+    let mut intro = intro;
+    intro.kind = HostKind::Sheprd;
+    a.fleet.sign(Body::HostAdd(intro), now_ms()).unwrap();
+    // a removes c, and then b, each on the host b has not heard of.
+    remove(&a, &c);
+    remove(&a, &b);
+    let removals: Vec<Op> = a
+        .ops()
+        .into_iter()
+        .filter(|op| matches!(op.body(), Body::Remove(_)))
+        .collect();
+    b.fleet.receive(removals, now_ms()).unwrap();
+    // c is cut off at once; b never cuts itself off on a removal it
+    // cannot check yet.
+    assert_eq!(b.fleet.suspended(), vec![c.fleet.me()]);
+    // Once a is no longer a member, what it signed suspends nothing.
+    b.ask(Ask::Remove {
+        member: a.me(),
+        also_members: Vec::new(),
+        also_hosts: Vec::new(),
+        reason: Reason::Compromised,
+    });
+    assert!(b.fleet.suspended().is_empty());
+    until(10, || {
+        b.lines().iter().any(|line| line.ends_with(&c.me()[..16]))
+    })
+    .await;
+}

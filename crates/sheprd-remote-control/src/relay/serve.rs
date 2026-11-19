@@ -61,7 +61,11 @@ async fn serve(relays: &Relays, incoming: Incoming, route: RouteId, served: Serv
     )
     .await
     .map_err(|_| sheprd_tunnel::Error::Closed)??;
+    // A paired phone's key reaches the API whatever a fleet bundle names:
+    // keys are public, and a member must not be able to divert a phone's
+    // sessions by naming its key.
     if pairing.is_none()
+        && !paired_phone(state, &accepted.remote)
         && let Some(fleet) = &state.fleet
         && let Some(peer) = crate::fleet::grants::peer(fleet, &accepted.remote)
     {
@@ -108,6 +112,19 @@ fn paired(state: &Shared, remote: &[u8; 32]) -> bool {
         .iter()
         .filter_map(|record| record.relay.as_ref()?.tunnel_key())
         .any(|key| key == *remote)
+}
+
+/// Whether `remote` is the tunnel key of a paired device that is not a
+/// desktop let in over SSH: a phone.
+fn paired_phone(state: &Shared, remote: &[u8; 32]) -> bool {
+    state.auth().devices().records().iter().any(|record| {
+        record.ssh.is_none()
+            && record
+                .relay
+                .as_ref()
+                .and_then(|relay| relay.tunnel_key())
+                .is_some_and(|key| key == *remote)
+    })
 }
 
 /// The desktop let in over SSH whose tunnel key `remote` is, and the SSH

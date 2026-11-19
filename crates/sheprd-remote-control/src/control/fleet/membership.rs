@@ -49,6 +49,9 @@ pub(super) struct Members {
     /// The `Found`, `Admit`, and `Rotate` operations that took effect: a
     /// bundle refused or voided names nothing.
     pub(super) bundles: BTreeSet<usize>,
+    /// Where a computer's own host went with it, as if removed there: the
+    /// computer removed, or naming another host instead.
+    pub(super) dropped: Vec<(usize, super::HostId)>,
 }
 
 impl Members {
@@ -300,12 +303,14 @@ impl<'g, 'a> Folder<'g, 'a> {
             origins: BTreeMap::new(),
             claims: BTreeMap::new(),
             bundles: BTreeSet::new(),
+            dropped: Vec::new(),
         };
         let removed: BTreeSet<MemberId> = removals.values().flatten().copied().collect();
         let partial = Members {
             removals: removals.clone(),
             ..Members::default()
         };
+        let mut unseated: BTreeMap<MemberId, super::HostId> = BTreeMap::new();
         for &position in &checked {
             let op = self.graph.order[position];
             match op.body() {
@@ -328,6 +333,13 @@ impl<'g, 'a> Folder<'g, 'a> {
                         Kind::Computer => MAX_COMPUTERS,
                         Kind::Phone => MAX_PHONES,
                     };
+                    // A member removed in this set never goes live here,
+                    // but the host it named still goes with it.
+                    if removed.contains(&id)
+                        && let Some(host) = host_id(&admit.bundle)
+                    {
+                        unseated.entry(id).or_insert(host);
+                    }
                     // Concurrent admissions can pass the bound each on
                     // its own; the first in order are kept.
                     if !removed.contains(&id)
@@ -349,15 +361,34 @@ impl<'g, 'a> Folder<'g, 'a> {
                     if let Some(member) = members.live.get_mut(&op.signer()) {
                         let claims = members.claims.entry(op.signer()).or_default();
                         if host_id(&member.bundle) != host_id(bundle) {
+                            if let Some(old) = host_id(&member.bundle) {
+                                members.dropped.push((position, old));
+                            }
                             members.origins.insert(op.signer(), position);
                             claims.clear();
                         }
                         claims.push(position);
                         members.bundles.insert(position);
                         member.bundle = bundle.clone();
+                    } else if let Some(host) = unseated.get_mut(&op.signer())
+                        && let Some(id) = host_id(bundle)
+                    {
+                        *host = id;
                     }
                 }
                 _ => {}
+            }
+        }
+        for (&position, reach) in &removals {
+            for member in reach {
+                let host = members
+                    .live
+                    .get(member)
+                    .and_then(|live| host_id(&live.bundle))
+                    .or_else(|| unseated.get(member).copied());
+                if let Some(host) = host {
+                    members.dropped.push((position, host));
+                }
             }
         }
         for id in removed {

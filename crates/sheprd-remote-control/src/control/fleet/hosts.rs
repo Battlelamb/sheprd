@@ -99,6 +99,10 @@ pub(super) fn hosts(
             _ => {}
         }
     }
+    // A computer's own host goes with it, as if removed there.
+    for &(position, host) in &members.dropped {
+        removals.entry(host).or_default().push(position);
+    }
     // An addition survives only when it saw every removal: a removal wins
     // over every addition it is concurrent with.
     let survives = |id: &HostId, at: Option<usize>| {
@@ -215,6 +219,10 @@ fn member_hosts(
         }
     }
     for (id, claimants) in named {
+        // Every live computer naming the host weighs on whether it is
+        // held, whether or not its claim survives; only one whose claim
+        // survives can give it its intro.
+        let naming = claimants.len();
         let kept = base.hosts.get(&id).map(|host| &host.intro);
         // Where each named this host: the base, while the base had it
         // live, then each operation since. A computer's claim lives from
@@ -280,7 +288,7 @@ fn member_hosts(
                         .count()
                         <= 1
             });
-        let held = claimants.len() > 1
+        let held = naming > 1
             || carried
             || weighed.into_iter().any(|(_, added)| {
                 added.user != intro.user

@@ -285,14 +285,19 @@ fn a_rotation_and_an_admission_naming_one_host_pick_one_intro_everywhere() {
                 log.state().routes.get(&chosen.intro.record.route),
                 Some(&host)
             );
-            // The computer whose intro it has leaves: the other's takes
-            // over, in the host fold and the route pass alike.
+            // The computer whose intro it has leaves and takes the host
+            // with it; the other naming it again brings it back with its
+            // own intro, in the host fold and the route pass alike.
             let (gone, stays) = if chosen.added_by == x.id() {
                 (&x, &y)
             } else {
                 (&y, &x)
             };
             act(&mut log, &b, remove_body(gone));
+            assert!(!log.state().hosts.contains_key(&host));
+            let mut again = stays.bundle.clone();
+            again.name = "again".into();
+            act(&mut log, stays, Body::Rotate(again));
             let kept = stays.bundle.host.clone().unwrap();
             assert_eq!(log.state().hosts[&host].intro, kept);
             let route = kept.record.route.clone();

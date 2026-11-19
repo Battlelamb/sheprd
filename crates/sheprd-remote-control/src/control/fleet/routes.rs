@@ -132,7 +132,6 @@ impl<'a> Pass<'a> {
         intro: &'a HostIntro,
     ) {
         let survives = self.survives(graph, position, id);
-        let before = self.own.get(&member).map(|named| named.host);
         let named = match self.own.get(&member) {
             Some(named) if named.host == id => Named {
                 host: id,
@@ -148,19 +147,13 @@ impl<'a> Pass<'a> {
             },
         };
         self.own.insert(member, named);
-        if let Some(before) = before
-            && before != id
-        {
-            self.settle(before);
-        }
         self.settle(id);
     }
 
-    /// A computer gone: its host stays only while another names it.
-    fn leave(&mut self, member: MemberId) {
-        if let Some(named) = self.own.remove(&member) {
-            self.settle(named.host);
-        }
+    /// A removal of `id` at `position`.
+    fn removal(&mut self, position: usize, id: HostId) {
+        self.removed.entry(id).or_default().push(position);
+        self.remove(id);
     }
 
     /// Gives a computer's own host the intro of the computer that named it
@@ -288,7 +281,15 @@ pub(super) fn records(
     state: &mut State,
 ) {
     let mut pass = Pass::new(base);
+    // Where a computer's own host went with it (`Members::dropped`).
+    let mut dropped: BTreeMap<usize, Vec<HostId>> = BTreeMap::new();
+    for &(position, host) in &members.dropped {
+        dropped.entry(position).or_default().push(host);
+    }
     for &(position, op) in effective {
+        for &host in dropped.get(&position).into_iter().flatten() {
+            pass.removal(position, host);
+        }
         match op.body() {
             Body::HostAdd(intro) if intro.kind != HostKind::Member && !held.contains(&position) => {
                 if let Ok(id) = intro.id() {
@@ -301,20 +302,16 @@ pub(super) fn records(
             Body::Admit(admit) if members.bundles.contains(&position) => {
                 own(&mut pass, graph, position, &admit.bundle, admit.bundle.id());
             }
-            Body::HostRemove(id) => {
-                pass.removed.entry(*id).or_default().push(position);
-                pass.remove(*id);
-            }
+            Body::HostRemove(id) => pass.removal(position, *id),
             Body::Remove(remove) => {
                 let Some(reach) = members.removals.get(&position) else {
                     continue;
                 };
                 for member in reach {
-                    pass.leave(*member);
+                    pass.own.remove(member);
                 }
                 for id in &remove.also_hosts {
-                    pass.removed.entry(*id).or_default().push(position);
-                    pass.remove(*id);
+                    pass.removal(position, *id);
                 }
             }
             Body::HostSeen(seen) => pass.seen(seen),
@@ -354,6 +351,8 @@ fn own<'a>(
 ) {
     match bundle.host.as_ref().map(|intro| (intro, intro.id())) {
         Some((intro, Ok(id))) => pass.claim(graph, position, member, id, intro),
-        _ => pass.leave(member),
+        _ => {
+            pass.own.remove(&member);
+        }
     }
 }

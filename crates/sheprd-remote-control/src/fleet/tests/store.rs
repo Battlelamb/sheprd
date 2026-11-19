@@ -114,3 +114,31 @@ fn what_members_and_plain_hosts_hold_survives_a_restart() {
     assert_eq!(held[&member].iter().collect::<Vec<_>>(), [&OpId([7; 32])]);
     assert_eq!(held[&host].iter().collect::<Vec<_>>(), [&OpId([8; 32])]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_peers_file_with_one_proven_key_per_member_still_reads() {
+    let (http, _, _) = relay().await;
+    let a = Node::new(http, 1).await;
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    let member = "11".repeat(32);
+    let key = "5a".repeat(32);
+    std::fs::write(
+        a.dir.path().join("fleet/peers.json"),
+        format!("{{\"proven\": {{\"{member}\": \"{key}\"}}}}"),
+    )
+    .unwrap();
+    let again = Fleet::load(a.dir.path(), now_ms()).unwrap();
+    assert_eq!(again.inner().proven[&MemberId([0x11; 32])].len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_key_past_the_bound_is_not_kept() {
+    let (http, _, _) = relay().await;
+    let a = Node::new(http, 1).await;
+    let member = MemberId([1; 32]);
+    for seed in 0..u8::try_from(MAX_PROVEN).unwrap() {
+        assert!(a.fleet.proved(member, [seed; 32]).unwrap());
+    }
+    assert!(!a.fleet.proved(member, [0xee; 32]).unwrap());
+    assert!(a.fleet.proved(member, [0; 32]).unwrap());
+}

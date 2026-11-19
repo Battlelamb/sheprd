@@ -52,6 +52,26 @@ struct Peers {
     held_hosts: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
     unconfirmed: BTreeMap<String, Kept>,
+    #[serde(default)]
+    proven: BTreeMap<String, Proven>,
+}
+
+/// A member's proven keys: one, as an earlier build kept it, or several.
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum Proven {
+    Many(BTreeSet<String>),
+    One(String),
+}
+
+impl Proven {
+    fn keys(&self) -> impl Iterator<Item = &String> {
+        let (many, one) = match self {
+            Self::Many(keys) => (Some(keys), None),
+            Self::One(key) => (None, Some(key)),
+        };
+        many.into_iter().flatten().chain(one)
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -90,6 +110,17 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
             .map(|(holder, ids)| {
                 let ids = ids.iter().filter_map(|id| OpId::from_hex(id)).collect();
                 (holder, ids)
+            })
+            .collect(),
+        proven: peers
+            .proven
+            .iter()
+            .filter_map(|(member, keys)| {
+                let keys = keys
+                    .keys()
+                    .filter_map(|key| HostId::from_hex(key).map(|key| key.0))
+                    .collect();
+                Some((MemberId::from_hex(member)?, keys))
             })
             .collect(),
         unconfirmed: peers
@@ -136,6 +167,16 @@ pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
             Holder::Host(host) => Some(host.to_string()),
             Holder::Member(_) => None,
         }),
+        proven: inner
+            .proven
+            .iter()
+            .map(|(member, keys)| {
+                (
+                    member.to_string(),
+                    Proven::Many(keys.iter().map(|key| HostId(*key).to_string()).collect()),
+                )
+            })
+            .collect(),
         unconfirmed: inner
             .unconfirmed
             .iter()

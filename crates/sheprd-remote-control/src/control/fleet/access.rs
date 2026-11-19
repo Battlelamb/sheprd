@@ -51,6 +51,7 @@ pub fn compute(
                 ssh,
                 tunnel: member.bundle.tunnel,
                 keys: member.seq,
+                former: Vec::new(),
             };
             Some((Id(id.0), member))
         })

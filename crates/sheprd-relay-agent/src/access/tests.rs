@@ -21,6 +21,7 @@ pub(crate) fn member(seed: u8, allow: bool, rev: u64) -> Member {
         ssh: crate::authorized_keys::tests::key(seed),
         tunnel: [seed; 32],
         keys: 0,
+        former: Vec::new(),
     }
 }
 
@@ -124,13 +125,41 @@ fn keys_follow_their_own_version_never_a_staler_file() {
 }
 
 #[test]
-fn a_file_naming_one_key_for_two_members_is_refused() {
-    let mut shared = access(&[(1, true, 0), (2, true, 0)], &[]);
-    shared.members.get_mut(&id(2)).unwrap().tunnel = [1; 32];
-    assert!(Access::merge(None, shared).is_err());
-    let mut shared = access(&[(1, true, 0), (2, true, 0)], &[]);
-    shared.members.get_mut(&id(2)).unwrap().dial = dial(1);
-    assert!(Access::merge(None, shared).is_err());
+fn members_sharing_a_key_are_denied_and_the_rest_still_lands() {
+    let held = Access::merge(
+        None,
+        access(&[(1, true, 0), (2, true, 0), (3, true, 0)], &[]),
+    )
+    .unwrap();
+    // A file whose member 2 names member 1's tunnel key, and that removes
+    // member 3: the removal lands, and 1 and 2 are both denied.
+    let mut shared = access(&[(1, true, 0), (2, true, 0)], &[3]);
+    let rotated = shared.members.get_mut(&id(2)).unwrap();
+    rotated.tunnel = [1; 32];
+    rotated.keys = 1;
+    let merged = Access::merge(Some(&held), shared).unwrap();
+    assert!(merged.removed.contains(&id(3)));
+    assert!(!merged.members[&id(1)].allow);
+    assert!(!merged.members[&id(2)].allow);
+}
+
+#[test]
+fn a_rotation_remembers_the_keys_it_replaced_outside_the_digest() {
+    let mut first = access(&[(1, true, 0)], &[]);
+    first.members.get_mut(&id(1)).unwrap().keys = 1;
+    let held = Access::merge(None, first.clone()).unwrap();
+    let mut rotated = access(&[(1, true, 0)], &[]);
+    rotated.members.get_mut(&id(1)).unwrap().tunnel = [0x44; 32];
+    rotated.members.get_mut(&id(1)).unwrap().keys = 2;
+    let merged = Access::merge(Some(&held), rotated.clone()).unwrap();
+    let pairs: Vec<_> = merged.members[&id(1)].pairs().collect();
+    assert_eq!(pairs.len(), 2);
+    assert_eq!(pairs[1].tunnel, [1; 32]);
+    // Sheprd computes no former keys; the digests still agree.
+    assert_eq!(
+        merged.digest().unwrap(),
+        Access::merge(None, rotated).unwrap().digest().unwrap()
+    );
 }
 
 #[test]

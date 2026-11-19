@@ -165,7 +165,25 @@ pub struct Member {
     /// before a rotation never replace newer ones.
     #[serde(default)]
     pub keys: u64,
+    /// The keys it rotated away from, as the agent saw them replaced, so a
+    /// desktop enrolled one by one with an old pair goes with the member.
+    /// Kept by the agent alone; never in a file Sheprd computes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub former: Vec<Pair>,
 }
+
+/// A device's dial and tunnel keys together: what makes a desktop enrolled
+/// one by one the same device as a member.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct Pair {
+    #[serde(with = "b64")]
+    pub dial: Key,
+    #[serde(with = "b64")]
+    pub tunnel: [u8; 32],
+}
+
+/// Former key pairs kept per member.
+pub const MAX_FORMER: usize = 8;
 
 impl Member {
     fn valid(&self) -> bool {
@@ -187,14 +205,39 @@ impl Member {
             Ordering::Equal => self.allow && held.allow,
         };
         let rev = self.rev.max(held.rev);
+        let mut former = held.former.clone();
         let mut merged = if self.keys > held.keys {
+            let replaced = held.pair();
+            if replaced != self.pair() && !former.contains(&replaced) {
+                former.push(replaced);
+            }
             self
         } else {
             held.clone()
         };
+        // The oldest go first; a member rotating more often than this
+        // between files leaves its oldest pairs behind.
+        let excess = former.len().saturating_sub(MAX_FORMER);
+        former.drain(..excess);
+        merged.former = former;
         merged.allow = allow;
         merged.rev = rev;
         merged
+    }
+
+    /// Its keys now.
+    #[must_use]
+    pub fn pair(&self) -> Pair {
+        Pair {
+            dial: self.dial,
+            tunnel: self.tunnel,
+        }
+    }
+
+    /// Every pair it has had here: its keys now, and those it rotated
+    /// away from.
+    pub fn pairs(&self) -> impl Iterator<Item = Pair> + '_ {
+        std::iter::once(self.pair()).chain(self.former.iter().copied())
     }
 }
 
@@ -247,15 +290,6 @@ impl Access {
         if let Some((id, _)) = self.members.iter().find(|(_, member)| !member.valid()) {
             return Err(Error::Member { member: *id });
         }
-        // Keys are public: two members naming one would make one's
-        // sessions look like the other's.
-        let mut dials = BTreeSet::new();
-        let mut tunnels = BTreeSet::new();
-        for (id, member) in &self.members {
-            if !dials.insert(member.dial) || !tunnels.insert(member.tunnel) {
-                return Err(Error::Member { member: *id });
-            }
-        }
         Ok(())
     }
 
@@ -274,10 +308,14 @@ impl Access {
     /// the agent and on a member that computed the same file, so Sheprd
     /// sees when a host is behind.
     pub fn digest(&self) -> Result<String> {
-        let kept = Self {
+        let mut kept = Self {
             settled: BTreeSet::new(),
             ..self.clone()
         };
+        // Former keys are the agent's own memory; Sheprd computes none.
+        for member in kept.members.values_mut() {
+            member.former.clear();
+        }
         let digest = Sha256::digest(kept.to_bytes()?);
         Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
     }
@@ -318,8 +356,28 @@ impl Access {
         merged.settled.clear();
         let removed = &merged.removed;
         merged.members.retain(|id, _| !removed.contains(id));
+        merged.deny_shared_keys();
         merged.check()?;
         Ok(merged)
+    }
+
+    /// Keys are public: two members naming one would make one's sessions
+    /// look like the other's. Rather than refusing the file, which would
+    /// keep its removals and denies from landing, every member sharing a
+    /// key with another is denied SSH, and none of them is told apart at
+    /// the tunnel (`fleet::Admitted::peer`).
+    fn deny_shared_keys(&mut self) {
+        let mut dials: BTreeMap<Key, usize> = BTreeMap::new();
+        let mut tunnels: BTreeMap<[u8; 32], usize> = BTreeMap::new();
+        for member in self.members.values() {
+            *dials.entry(member.dial).or_default() += 1;
+            *tunnels.entry(member.tunnel).or_default() += 1;
+        }
+        for member in self.members.values_mut() {
+            if dials[&member.dial] > 1 || tunnels[&member.tunnel] > 1 {
+                member.allow = false;
+            }
+        }
     }
 }
 

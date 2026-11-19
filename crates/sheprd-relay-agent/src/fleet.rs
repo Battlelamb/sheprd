@@ -100,8 +100,8 @@ impl Held {
             let mut desktops = Authorized::load(state_dir)?;
             // Every one is forgotten, not only the first that was there.
             let mut forgot = false;
-            for member in &gone {
-                forgot |= desktops.forget(&member.dial, &member.tunnel);
+            for pair in gone.iter().flat_map(|member| member.pairs()) {
+                forgot |= desktops.forget(&pair.dial, &pair.tunnel);
             }
             if forgot {
                 desktops.save(state_dir)?;
@@ -287,8 +287,8 @@ impl Admitted {
             .filter(|(id, _)| !self.held.suspended.contains_key(id))
     }
 
-    /// A desktop in `authorized` that shares a key with a suspended member
-    /// is cut off with it.
+    /// A desktop in `authorized` with the keys of a suspended member, now
+    /// or before a rotation, is that member's device: cut off with it.
     fn cut_off(&self, dial: &Key, tunnel: &[u8; 32]) -> bool {
         let Some(access) = &self.held.access else {
             return false;
@@ -297,7 +297,8 @@ impl Admitted {
             .suspended
             .keys()
             .filter_map(|id| access.members.get(id))
-            .any(|member| member.dial == *dial && member.tunnel == *tunnel)
+            .flat_map(Member::pairs)
+            .any(|pair| pair.dial == *dial && pair.tunnel == *tunnel)
     }
 
     /// The keys the relays let dial: members first, then desktops, at
@@ -331,13 +332,18 @@ impl Admitted {
     #[must_use]
     pub fn peer(&self, tunnel: &[u8; 32]) -> Option<Peer> {
         let desktop = self.desktop(tunnel);
-        match self.members().find(|(_, member)| member.tunnel == *tunnel) {
-            Some((id, member)) => Some(Peer::Member {
+        let mut holders = self
+            .members()
+            .filter(|(_, member)| member.tunnel == *tunnel);
+        match (holders.next(), holders.next()) {
+            (Some((id, member)), None) => Some(Peer::Member {
                 id: *id,
                 ssh: member.allow,
                 desktop,
             }),
-            None => desktop.then_some(Peer::Desktop),
+            // Two members naming one key: neither is told apart.
+            (Some(_), Some(_)) => None,
+            (None, _) => desktop.then_some(Peer::Desktop),
         }
     }
 

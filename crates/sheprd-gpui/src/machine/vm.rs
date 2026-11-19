@@ -528,7 +528,16 @@ pub(crate) fn delete(name: &Name, cx: &mut App, done: impl FnOnce(Result<()>, &m
         };
         cx.update(|cx| {
             if removed.is_ok() {
-                MACHINES.with(|machines| machines.borrow_mut().remove(&name));
+                // Tabs still naming it keep their views, so a machine made
+                // later under this name shows in them.
+                MACHINES.with(|machines| {
+                    if let Some(entry) = machines.borrow_mut().get_mut(&name) {
+                        *entry = Entry {
+                            views: std::mem::take(&mut entry.views),
+                            ..Entry::default()
+                        };
+                    }
+                });
                 // A machine made later under this name starts its setup over.
                 super::guide::forget(&name);
             } else {

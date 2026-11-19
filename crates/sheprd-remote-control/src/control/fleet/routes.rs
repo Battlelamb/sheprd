@@ -28,6 +28,8 @@ struct Tracked<'a> {
     flagged: bool,
     /// Its intro named a route another host owned.
     held: bool,
+    /// The computer whose own host it is, whose bundle gave the intro.
+    by: Option<MemberId>,
 }
 
 impl<'a> Tracked<'a> {
@@ -38,6 +40,7 @@ impl<'a> Tracked<'a> {
             signature: intro.record_signature,
             flagged: false,
             held: false,
+            by: None,
         }
     }
 }
@@ -64,6 +67,7 @@ impl<'a> Pass<'a> {
                     signature: host.record_signature,
                     flagged: host.flagged,
                     held: false,
+                    by: (host.intro.kind == HostKind::Member).then_some(host.added_by),
                 };
                 (*id, tracked)
             })
@@ -101,11 +105,27 @@ impl<'a> Pass<'a> {
         if !survives {
             return;
         }
-        if let Some(member) = member
-            && let Some(old) = self.own.insert(member, id)
-            && old != id
-        {
-            self.remove(old);
+        if let Some(member) = member {
+            // Another live computer named this host first: this one's
+            // intro is a copy, held (`hosts`), and changes nothing here.
+            let copied = self
+                .hosts
+                .get(&id)
+                .and_then(|tracked| tracked.by)
+                .is_some_and(|by| by != member && self.own.get(&by) == Some(&id));
+            let old = if copied {
+                self.own.remove(&member)
+            } else {
+                self.own.insert(member, id)
+            };
+            if let Some(old) = old
+                && old != id
+            {
+                self.remove(old);
+            }
+            if copied {
+                return;
+            }
         }
         let tracked = match self.hosts.get_mut(&id) {
             Some(_) if member.is_none() => return,
@@ -116,9 +136,13 @@ impl<'a> Pass<'a> {
                         ..Tracked::new(intro)
                     };
                 }
+                tracked.by = member;
                 tracked
             }
-            None => self.hosts.entry(id).or_insert(Tracked::new(intro)),
+            None => self.hosts.entry(id).or_insert(Tracked {
+                by: member,
+                ..Tracked::new(intro)
+            }),
         };
         let route = &tracked.intro.record.route;
         let record = &tracked.record.route;
@@ -181,12 +205,10 @@ impl<'a> Pass<'a> {
 
 /// Applies the records `effective` carries to `state`'s hosts, holds those
 /// whose intro names a route another host owns, and settles who owns each
-/// route. `bundles` are the places of the `Found`, `Admit`, and `Rotate`
-/// operations that count.
+/// route.
 pub(super) fn records(
     graph: &Graph<'_>,
     members: &Members,
-    bundles: &BTreeSet<usize>,
     effective: &[(usize, &Op)],
     held: &BTreeSet<usize>,
     base: &State,
@@ -200,10 +222,10 @@ pub(super) fn records(
                     pass.add(graph, position, id, intro, None);
                 }
             }
-            Body::Found(bundle) | Body::Rotate(bundle) if bundles.contains(&position) => {
+            Body::Found(bundle) | Body::Rotate(bundle) if members.bundles.contains(&position) => {
                 own(&mut pass, graph, position, bundle, bundle.id());
             }
-            Body::Admit(admit) if bundles.contains(&position) => {
+            Body::Admit(admit) if members.bundles.contains(&position) => {
                 own(&mut pass, graph, position, &admit.bundle, admit.bundle.id());
             }
             Body::HostRemove(id) => {

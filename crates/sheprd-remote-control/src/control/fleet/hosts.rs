@@ -191,7 +191,18 @@ fn member_hosts(
             named.entry(host).or_default().push((intro, *id));
         }
     }
-    for (id, claimants) in named {
+    for (id, mut claimants) in named {
+        // The computer that named it first gives it its intro, the base's
+        // before any other; the others' intros are copies.
+        let kept = base.hosts.get(&id).map(|host| &host.intro);
+        claimants.sort_by_key(|(intro, member)| {
+            let at = match members.origins.get(member) {
+                Some(at) => at + 2,
+                None if kept == Some(*intro) => 0,
+                None => 1,
+            };
+            (at, *member)
+        });
         let (intro, member) = claimants[0];
         let origin = members.origins.get(&member).copied();
         // Where it named this host: the base, while the base had it live,

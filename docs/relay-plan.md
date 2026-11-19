@@ -1763,7 +1763,8 @@ all of them. It needs no fleet key, because it only removes access.
 from the other mean its key is in use in two places: a cloned disk, a
 restored backup, or theft. Both are kept, because they may be honest.
 The member is flagged everywhere, and its `HostAdd` and `Access`
-operations that no checkpoint had seen count for nothing until a person
+operations that no checkpoint had seen count for nothing (only a
+checkpoint that counts and whose signer is not equivocating itself) until a person
 removes it or picks Keep (an operation that clears the flag, which comes
 with Settings > Fleet in phase 3). A checkpoint settles what it saw, as
 the state it names keeps it, so a member that pruned to it holds the same

@@ -180,3 +180,23 @@ fn an_equivocation_after_a_checkpoint_holds_the_same_in_pruned_and_whole_logs() 
     assert!(state.hosts.contains_key(&plain_host(40).id().unwrap()));
     assert!(!state.hosts.contains_key(&plain_host(41).id().unwrap()));
 }
+
+#[test]
+fn an_equivocators_own_checkpoint_settles_nothing() {
+    let (mut log, _, _, c) = three();
+    act(&mut log, &c, Body::HostAdd(plain_host(40)));
+    let hash = log.state().hash().unwrap();
+    act(&mut log, &c, Body::Checkpoint(hash));
+    let heads = log.heads().to_vec();
+    let seq = log.state().members[&c.id()].seq + 1;
+    for n in [1, 2] {
+        let op = sign_on(&log, &c, &heads, seq, Body::HostRemove(HostId([n; 32])));
+        apply(&mut log, op);
+    }
+    assert!(log.state().equivocating.contains(&c.id()));
+    assert!(
+        !log.state()
+            .hosts
+            .contains_key(&plain_host(40).id().unwrap())
+    );
+}

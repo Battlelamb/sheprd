@@ -39,20 +39,9 @@ pub(super) fn fold(folder: &Folder<'_, '_>, set: &Bits, base: &State) -> State {
             member.seq = member.seq.max(op.unsigned().seq);
         }
     }
-    let held = held(folder, &positions, &state.equivocating);
+    let held = held(folder, &positions, &effective, &state.equivocating);
     let anchors = hosts::hosts(graph, &members, &effective, &held, base, &mut state);
-    // The bundles that count: a voided `Admit` or `Rotate` names no host.
-    let bundles: BTreeSet<usize> = effective
-        .iter()
-        .filter(|(position, op)| {
-            matches!(op.body(), Body::Found(_) | Body::Admit(_) | Body::Rotate(_))
-                && !folder.voided(&members, *position)
-        })
-        .map(|(position, _)| *position)
-        .collect();
-    routes::records(
-        graph, &members, &bundles, &effective, &held, base, &mut state,
-    );
+    routes::records(graph, &members, &effective, &held, base, &mut state);
     access(
         folder, &positions, &anchors, &effective, &held, base, &mut state,
     );
@@ -64,16 +53,19 @@ pub(super) fn fold(folder: &Folder<'_, '_>, set: &Bits, base: &State) -> State {
 /// `Access` are held: those no checkpoint had seen. A checkpoint settles
 /// what it saw, as the state it names keeps it, so a log pruned to it
 /// and the whole log hold the same ones when an equivocation turns up
-/// later.
+/// later. Only a checkpoint that counts (`effective`, not voided) and
+/// whose signer is not equivocating settles anything: an equivocator
+/// cannot checkpoint its own fork out of the hold.
 fn held(
     folder: &Folder<'_, '_>,
     positions: &[usize],
+    effective: &[(usize, &Op)],
     equivocating: &BTreeSet<MemberId>,
 ) -> BTreeSet<usize> {
     let graph = folder.graph();
     let mut settled = Bits::new(graph.len());
-    for &position in positions {
-        if matches!(graph.order[position].body(), Body::Checkpoint(_)) {
+    for &(position, op) in effective {
+        if matches!(op.body(), Body::Checkpoint(_)) && !equivocating.contains(&op.signer()) {
             settled.union(&graph.ancestors[position]);
         }
     }

@@ -38,6 +38,16 @@ public enum Fleet {
         public var ssh: String?
         public var host: HostIntro?
 
+        public init(key: Data, kind: Kind, name: String, dial: Data, tunnel: Data, ssh: String?, host: HostIntro?) {
+            self.key = key
+            self.kind = kind
+            self.name = name
+            self.dial = dial
+            self.tunnel = tunnel
+            self.ssh = ssh
+            self.host = host
+        }
+
         /// The member it describes.
         public var id: Data { Data(SHA256.hash(data: key)) }
 
@@ -52,8 +62,27 @@ public enum Fleet {
             return writer.bytes
         }
 
+        /// What the daemon checks: valid keys, a name a person can read,
+        /// and a computer's SSH key and own host, which a phone has neither
+        /// of.
+        func check() throws {
+            guard key.count == 33, dial.count == 33, tunnel.count == 32,
+                  Fleet.isPoint(key), Fleet.isPoint(dial)
+            else { throw FleetError.invalid }
+            try Fleet.checkName(name, max: maxName)
+            switch (kind, ssh, host) {
+            case let (.computer, ssh?, host?) where host.kind == .member:
+                try Fleet.checkSSHKey(ssh, max: maxSSHKey)
+                try host.check()
+            case (.phone, nil, nil):
+                break
+            default:
+                throw FleetError.invalid
+            }
+        }
+
         func write(_ writer: inout FleetWriter) throws {
-            guard key.count == 33, dial.count == 33, tunnel.count == 32 else { throw FleetError.invalid }
+            try check()
             writer.raw(key)
             writer.u8(kind.rawValue)
             try writer.text(name)
@@ -64,7 +93,7 @@ public enum Fleet {
         }
 
         static func read(_ reader: inout FleetReader) throws -> Bundle {
-            Bundle(
+            let bundle = Bundle(
                 key: try reader.raw(33),
                 kind: try enumValue(&reader),
                 name: try reader.text(max: maxName),
@@ -73,6 +102,8 @@ public enum Fleet {
                 ssh: try reader.option { try $0.text(max: maxSSHKey) },
                 host: try reader.option { try HostIntro.read(&$0) }
             )
+            try bundle.check()
+            return bundle
         }
     }
 
@@ -81,6 +112,20 @@ public enum Fleet {
         public var certificate: Data
         /// SEC1 uncompressed.
         public var key: Data
+
+        public init(certificate: Data, key: Data) {
+            self.certificate = certificate
+            self.key = key
+        }
+
+        /// The key must be the certificate's own, as the daemon checks it.
+        func check() throws {
+            guard !certificate.isEmpty, certificate.count <= maxCertificate,
+                  key.count == 65, key.first == 0x04,
+                  certificate.range(of: key) != nil,
+                  (try? P256.Signing.PublicKey(x963Representation: key)) != nil
+            else { throw FleetError.invalid }
+        }
     }
 
     /// How a host was added.
@@ -92,6 +137,19 @@ public enum Fleet {
         public var record: SelfRecord
         public var recordSignature: Data?
         public var verified: Verified
+
+        public init(
+            kind: HostKind, name: String, user: String, ca: CA?, record: SelfRecord,
+            recordSignature: Data?, verified: Verified
+        ) {
+            self.kind = kind
+            self.name = name
+            self.user = user
+            self.ca = ca
+            self.record = record
+            self.recordSignature = recordSignature
+            self.verified = verified
+        }
 
         /// Its id: the CA's fingerprint, or the hash of a plain host's first
         /// SSH host key.
@@ -117,7 +175,25 @@ public enum Fleet {
             }
         }
 
+        /// What the daemon checks: readable names, a valid record for this
+        /// very host, a CA exactly when something but the agent runs there,
+        /// and the record signed by that CA.
+        func check() throws {
+            try Fleet.checkName(name, max: maxName)
+            try Fleet.checkName(user, max: maxUser)
+            try record.check()
+            switch (kind, ca) {
+            case let (.member, ca?), let (.sheprd, ca?): try ca.check()
+            case (.agent, nil): break
+            default: throw FleetError.invalid
+            }
+            guard record.host == id else { throw FleetError.invalid }
+            if let recordSignature, recordSignature.count != 64 { throw FleetError.invalid }
+            guard vouches(for: record, signature: recordSignature) else { throw FleetError.signature }
+        }
+
         func write(_ writer: inout FleetWriter) throws {
+            try check()
             writer.u8(kind.rawValue)
             try writer.text(name)
             try writer.text(user)
@@ -131,7 +207,7 @@ public enum Fleet {
         }
 
         static func read(_ reader: inout FleetReader) throws -> HostIntro {
-            HostIntro(
+            let intro = HostIntro(
                 kind: try enumValue(&reader),
                 name: try reader.text(max: maxName),
                 user: try reader.text(max: maxUser),
@@ -140,6 +216,8 @@ public enum Fleet {
                 recordSignature: try reader.option { try $0.raw(64) },
                 verified: try enumValue(&reader)
             )
+            try intro.check()
+            return intro
         }
     }
 
@@ -154,6 +232,20 @@ public enum Fleet {
         public var sshHostKeys: [String]
         public var signedMs: UInt64
 
+        public init(
+            host: Data, rev: UInt64, route: String, relays: [String], identity: String,
+            direct: [String], sshHostKeys: [String], signedMs: UInt64
+        ) {
+            self.host = host
+            self.rev = rev
+            self.route = route
+            self.relays = relays
+            self.identity = identity
+            self.direct = direct
+            self.sshHostKeys = sshHostKeys
+            self.signedMs = signedMs
+        }
+
         /// What the host's CA signs.
         public func message() throws -> Data {
             var writer = FleetWriter()
@@ -163,8 +255,22 @@ public enum Fleet {
             return writer.bytes
         }
 
+        /// What the daemon checks: fields without spaces or control
+        /// characters, at least one relay and SSH host key, and keys that
+        /// fit on a `known_hosts` line.
+        func check() throws {
+            guard host.count == 32, !relays.isEmpty, relays.count <= maxRelays, direct.count <= maxDirect,
+                  !sshHostKeys.isEmpty, sshHostKeys.count <= maxHostKeys
+            else { throw FleetError.invalid }
+            try Fleet.checkField(route, max: maxField)
+            try Fleet.checkField(identity, max: maxField)
+            try relays.forEach { try Fleet.checkField($0, max: maxField) }
+            try direct.forEach { try Fleet.checkField($0, max: maxAddress) }
+            try sshHostKeys.forEach { try Fleet.checkSSHKey($0, max: maxHostKey) }
+        }
+
         func write(_ writer: inout FleetWriter) throws {
-            guard host.count == 32 else { throw FleetError.invalid }
+            try check()
             writer.raw(host)
             writer.u64(rev)
             try writer.text(route)
@@ -176,7 +282,7 @@ public enum Fleet {
         }
 
         static func read(_ reader: inout FleetReader) throws -> SelfRecord {
-            SelfRecord(
+            let record = SelfRecord(
                 host: try reader.raw(32),
                 rev: try reader.u64(),
                 route: try reader.text(max: maxField),
@@ -186,6 +292,8 @@ public enum Fleet {
                 sshHostKeys: try reader.texts(count: maxHostKeys, max: maxHostKey),
                 signedMs: try reader.u64()
             )
+            try record.check()
+            return record
         }
     }
 
@@ -217,7 +325,27 @@ public enum Fleet {
             }
         }
 
+        /// Fixed-length fields have their length, as the daemon's arrays do.
+        func checkLengths() throws {
+            let fixed: [(Data, Int)] = switch self {
+            case .found, .rotate, .hostAdd: []
+            case let .admit(_, _, joinerSignature): [(joinerSignature, 64)]
+            case let .remove(member, alsoMembers, alsoHosts, _):
+                [(member, 32)] + (alsoMembers + alsoHosts).map { ($0, 32) }
+            case let .access(host, member, _, _): [(host, 32), (member, 32)]
+            case let .hostSeen(_, signature): signature.map { [($0, 64)] } ?? []
+            case let .hostRemove(host): [(host, 32)]
+            case let .link(host, _): [(host, 32)]
+            case let .checkpoint(hash): [(hash, 32)]
+            }
+            guard fixed.allSatisfy({ $0.0.count == $0.1 }) else { throw FleetError.invalid }
+            if case let .link(_, deviceKey) = self {
+                guard deviceKey.count <= maxDeviceKey, Fleet.isPoint(deviceKey) else { throw FleetError.invalid }
+            }
+        }
+
         func write(_ writer: inout FleetWriter) throws {
+            try checkLengths()
             writer.u8(tag)
             switch self {
             case let .found(bundle), let .rotate(bundle):
@@ -270,7 +398,10 @@ public enum Fleet {
                 return .access(host: try reader.raw(32), member: try reader.raw(32), allow: try reader.bool(), rev: try reader.u64())
             case 7: return .hostSeen(try SelfRecord.read(&reader), signature: try reader.option { try $0.raw(64) })
             case 8: return .hostRemove(try reader.raw(32))
-            case 9: return .link(host: try reader.raw(32), deviceKey: try reader.bytes(max: maxDeviceKey))
+            case 9:
+                let link = Body.link(host: try reader.raw(32), deviceKey: try reader.bytes(max: maxDeviceKey))
+                try link.checkLengths()
+                return link
             case 10: return .checkpoint(try reader.raw(32))
             default: throw FleetError.encoding
             }

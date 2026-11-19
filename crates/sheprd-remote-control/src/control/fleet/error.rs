@@ -23,6 +23,8 @@ pub enum Error {
     ParentMissing,
     #[error("a fleet member may not sign this operation")]
     Permission,
+    #[error("an access rev is not one above the highest its history holds")]
+    Rev,
     #[error("a host's record is not signed by the key that pins it")]
     SelfRecord,
     #[error("a fleet operation's sequence number does not follow its signer's")]

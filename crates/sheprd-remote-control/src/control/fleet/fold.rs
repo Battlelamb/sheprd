@@ -38,7 +38,7 @@ pub(super) fn fold(folder: &Folder<'_, '_>, set: &Bits, base: &State) -> State {
         }
     }
     hosts(folder, &members, &effective, base, &mut state);
-    access(folder, &effective, base, &mut state);
+    access(folder, &positions, &effective, base, &mut state);
     links(folder, &effective, base, &mut state);
     state
 }
@@ -73,6 +73,9 @@ struct Add<'a> {
     intro: &'a HostIntro,
     added_by: MemberId,
     order: [u8; 32],
+    /// The base held it: the additions that disagreed went with the
+    /// history a checkpoint replaced, and still disagree.
+    held: bool,
 }
 
 fn hosts(
@@ -99,6 +102,7 @@ fn hosts(
                 intro: &host.intro,
                 added_by: host.added_by,
                 order: [0; 32],
+                held: host.held,
             });
         }
     }
@@ -114,11 +118,12 @@ fn hosts(
                         intro,
                         added_by: op.signer(),
                         order: op.id().0,
+                        held: false,
                     });
                 }
             }
             Body::HostRemove(host) => removals.entry(*host).or_default().push(position),
-            Body::Remove(remove) if members.removals.contains(&position) => {
+            Body::Remove(remove) if members.removals.contains_key(&position) => {
                 for host in &remove.also_hosts {
                     removals.entry(*host).or_default().push(position);
                 }
@@ -150,7 +155,8 @@ fn hosts(
                 .collect(),
         );
         let held = candidates.iter().any(|add| {
-            add.intro.ca != first.intro.ca
+            add.held
+                || add.intro.ca != first.intro.ca
                 || add.intro.record.ssh_host_keys != first.intro.record.ssh_host_keys
         });
         let earliest = candidates
@@ -175,6 +181,11 @@ fn hosts(
     // added are kept.
     live.sort_by_key(|(earliest, id, _)| (*earliest, *id));
     live.truncate(MAX_HOSTS);
+    // Where each host was first claimed, in graph order; 0 for the base.
+    let mut claimed: BTreeMap<HostId, usize> = live
+        .iter()
+        .map(|(earliest, id, _)| (*id, *earliest))
+        .collect();
     state.hosts = live.into_iter().map(|(_, id, host)| (id, host)).collect();
     // A computer is its own host. Two members naming one host is a copied
     // intro: held until a person picks. So is a member naming an added
@@ -183,7 +194,8 @@ fn hosts(
     // addition the copy, and it changes nothing, so no member can hold
     // another's host by adding a copy of it. An addition before the bundle
     // or concurrent with it is weighed, so a bundle cannot silently take
-    // over a host another member added.
+    // over a host another member added. "The bundle" is the one that first
+    // named this host: a rotation that keeps the host keeps its claim.
     for (id, claims) in member_hosts {
         let (intro, member) = claims[0];
         let origin = members.origins.get(&member).copied();
@@ -200,12 +212,32 @@ fn hosts(
                     // A member from the base came before every addition here.
                     (Some(_), None) => false,
                 });
+        // A host the base held for an addition that disagreed stays held:
+        // the addition went with the history a checkpoint replaced, and a
+        // removal of the host is what would have dropped it. When two of
+        // the base's members claimed it, that is why it was held, and the
+        // claims are counted again from the members live.
+        let carried = !removals.contains_key(&id)
+            && base.hosts.get(&id).is_some_and(|kept| {
+                kept.held
+                    && kept.intro.kind == super::HostKind::Member
+                    && base
+                        .members
+                        .values()
+                        .filter(|other| {
+                            other.bundle.host.as_ref().and_then(|intro| intro.id().ok()) == Some(id)
+                        })
+                        .count()
+                        <= 1
+            });
         let held = claims.len() > 1
+            || carried
             || weighed.into_iter().any(|(_, added)| {
                 added.user != intro.user
                     || added.ca != intro.ca
                     || added.record.ssh_host_keys != intro.record.ssh_host_keys
             });
+        claimed.insert(id, origin.map_or(0, |at| at + 1));
         state.hosts.insert(
             id,
             Host {
@@ -218,17 +250,21 @@ fn hosts(
             },
         );
     }
-    // Keep the base's newer records, then apply carried ones.
+    // Keep the base's newer records and its flags, then apply carried ones.
     for (id, host) in &mut state.hosts {
-        if let Some(kept) = base.hosts.get(id)
-            && kept.intro == host.intro
-            && kept.record.rev > host.record.rev
-        {
+        let Some(kept) = base.hosts.get(id) else {
+            continue;
+        };
+        if kept.intro != host.intro {
+            continue;
+        }
+        if kept.record.rev > host.record.rev {
             host.record = kept.record.clone();
             host.record_signature = kept.record_signature;
-            host.flagged = kept.flagged;
         }
+        host.flagged |= kept.flagged;
     }
+    let mut routes = owners(&claimed, state);
     for &(_, op) in effective {
         let Body::HostSeen(seen) = op.body() else {
             continue;
@@ -243,51 +279,91 @@ fn hosts(
         if !keys_kept || !host.intro.vouches(&seen.record, seen.signature.as_ref()) {
             continue;
         }
+        // A record naming a route another host owns does not count, and
+        // flags its host, as a second record with one `rev` does.
+        if routes
+            .get(&seen.record.route)
+            .is_some_and(|owner| *owner != seen.record.host)
+        {
+            host.flagged = true;
+            continue;
+        }
         if seen.record.rev > host.record.rev {
             host.record = seen.record.clone();
             host.record_signature = seen.signature;
+            routes
+                .entry(seen.record.route.clone())
+                .or_insert(seen.record.host);
         } else if seen.record.rev == host.record.rev && seen.record != host.record {
             host.flagged = true;
         }
     }
 }
 
-/// One `Access` operation: its place, and what it says.
-type Grant = (usize, bool, u64);
+/// Each relay route's owner: the host that claimed it first, in graph
+/// order (`claimed`), with hosts the base held after the others it ties
+/// with, so pruning gives a route to the host it went to before. A host
+/// whose intro names a route an earlier host owns is held, as other
+/// conflicts are; a host keeps its own routes whatever its record changes.
+fn owners(claimed: &BTreeMap<HostId, usize>, state: &mut State) -> BTreeMap<String, HostId> {
+    let mut order: Vec<(usize, bool, HostId)> = state
+        .hosts
+        .iter()
+        .map(|(id, host)| (claimed.get(id).copied().unwrap_or(0), host.held, *id))
+        .collect();
+    order.sort_unstable();
+    let mut routes: BTreeMap<String, HostId> = BTreeMap::new();
+    for (_, _, id) in order {
+        let Some(host) = state.hosts.get_mut(&id) else {
+            continue;
+        };
+        let intro = &host.intro.record.route;
+        if routes.get(intro).is_some_and(|owner| *owner != id) {
+            host.held = true;
+        }
+        for route in [intro, &host.record.route] {
+            routes.entry(route.clone()).or_insert(id);
+        }
+    }
+    routes
+}
 
-fn access(folder: &Folder<'_, '_>, effective: &[(usize, &Op)], base: &State, state: &mut State) {
+/// One `Access` operation: its place, what it says, and whether it counts
+/// toward the register (not void, its signer not equivocating).
+type Grant = (usize, bool, u64, bool);
+
+fn access(
+    folder: &Folder<'_, '_>,
+    positions: &[usize],
+    effective: &[(usize, &Op)],
+    base: &State,
+    state: &mut State,
+) {
     let graph = folder.graph();
+    let counts: BTreeSet<usize> = effective.iter().map(|(position, _)| *position).collect();
     let mut by_pair: BTreeMap<(HostId, MemberId), Vec<Grant>> = BTreeMap::new();
-    for &(position, op) in effective {
-        if let Body::Access(access) = op.body()
-            && !state.equivocating.contains(&op.signer())
-        {
+    for &position in positions {
+        let op = graph.order[position];
+        if let Body::Access(access) = op.body() {
+            let counts = counts.contains(&position) && !state.equivocating.contains(&op.signer());
             by_pair
                 .entry((access.host, access.member))
                 .or_default()
-                .push((position, access.allow, access.rev));
+                .push((position, access.allow, access.rev, counts));
         }
     }
     let mut registers = base.access.clone();
     for (pair, entries) in by_pair {
-        let floor = base.access.get(&pair).map_or(0, |register| register.rev);
-        // A `rev` is one above the highest it saw, so an agent merging by
-        // `rev` alone orders it rightly, and no single operation can put
-        // the register out of reach of a later deny.
-        // `entries` are in graph order, so each one's counted ancestors
-        // are known before it; one that did not count sets no floor.
-        let mut counted: Vec<&Grant> = Vec::new();
-        for entry in &entries {
-            let (position, _, rev) = entry;
-            let seen = counted
-                .iter()
-                .filter(|(other, ..)| graph.sees(*position, *other))
-                .map(|(_, _, other_rev)| *other_rev)
-                .fold(floor, u64::max);
-            if seen.checked_add(1) == Some(*rev) {
-                counted.push(entry);
-            }
-        }
+        // Every `Access` held is one above the highest in its own history
+        // (`Folder::check`), so an agent merging by `rev` alone orders it
+        // rightly. One a removal voided later still raised the floor its
+        // descendants signed on, so a deny that saw it stays a deny, and
+        // the register keeps the highest any history reached: the floor
+        // the next one signs on.
+        let Some(highest) = entries.iter().map(|(_, _, rev, _)| *rev).max() else {
+            continue;
+        };
+        let counted: Vec<&Grant> = entries.iter().filter(|(.., counts)| *counts).collect();
         let latest: Vec<&&Grant> = counted
             .iter()
             .filter(|(position, ..)| {
@@ -296,15 +372,19 @@ fn access(folder: &Folder<'_, '_>, effective: &[(usize, &Op)], base: &State, sta
                     .any(|(other, ..)| graph.sees(*other, *position))
             })
             .collect();
-        if latest.is_empty() {
-            continue;
-        }
+        // Concurrent allow and deny: deny. With none counted, what the base
+        // said stands; the `rev` is the highest any history reached, the
+        // floor the next one signs on.
+        let allow = if latest.is_empty() {
+            base.access.get(&pair).is_none_or(|register| register.allow)
+        } else {
+            latest.iter().all(|(_, allow, ..)| *allow)
+        };
         registers.insert(
             pair,
             AccessRegister {
-                // Concurrent allow and deny: deny.
-                allow: latest.iter().all(|(_, allow, _)| *allow),
-                rev: latest.iter().map(|(_, _, rev)| *rev).max().unwrap_or(floor),
+                allow,
+                rev: highest,
             },
         );
     }

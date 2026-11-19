@@ -36,6 +36,10 @@ extension Fleet {
                   parents == parents.sorted(by: { $0.lexicographicallyPrecedes($1) }),
                   Set(parents).count == parents.count
             else { throw FleetError.invalid }
+            // Only the `found` that makes a fleet has no parents, and its
+            // fleet id is zero.
+            let found = if case .found = body { true } else { false }
+            guard found == parents.isEmpty, found == (fleet == Data(count: 32)) else { throw FleetError.invalid }
             var writer = FleetWriter()
             writer.raw(Fleet.domain)
             writer.u8(version)

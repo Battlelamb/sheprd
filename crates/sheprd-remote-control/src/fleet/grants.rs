@@ -99,21 +99,27 @@ pub(crate) fn own_host(state: &Log, me: &MemberId) -> Option<HostId> {
 /// Rewrites the SSH lines and relay records from the log. Blocking.
 pub(crate) fn apply(state: &State, fleet: &Fleet) -> Result<()> {
     let suspended = fleet.suspended();
-    let (lines, records) = {
+    let (lines, records, unclear) = {
         let inner = fleet.inner();
         match inner.log.as_ref() {
             Some(log) => (
                 lines(log.state(), &log.fleet().short(), &fleet.me(), &suspended),
                 records(log.state(), &fleet.me(), &suspended),
+                // Cut off, this computer keeps no record at all.
+                if suspended.contains(&fleet.me()) {
+                    BTreeSet::new()
+                } else {
+                    unclear(log.state())
+                },
             ),
-            None => (Vec::new(), Vec::new()),
+            None => (Vec::new(), Vec::new(), BTreeSet::new()),
         }
     };
     if let Ok(access) = state.auth().ssh_access() {
         access.keys.set_fleet(&lines)?;
     }
     revoke_removed(state, fleet)?;
-    write_records(fleet.state_dir(), &records)
+    write_records(fleet.state_dir(), &records, &unclear)
 }
 
 /// Revokes every desktop paired here one by one with a tunnel key a member
@@ -222,41 +228,39 @@ fn records(state: &Log, me: &MemberId, suspended: &[MemberId]) -> Vec<(Record, V
         .collect()
 }
 
-/// Which live host each route belongs to, `None` when that is unclear. A
-/// host's record names its route, but another host may sign a record
-/// naming the same one: the route stays with the one host whose own
-/// introduction named it, and with none when that is not exactly one, so
-/// no host can take over another's record by claiming its route.
+/// Which live host each route belongs to, `None` when that is unclear.
+/// The log gives a route to the host that claimed it first and holds or
+/// flags any later claimant, so only hosts not held count here; should two
+/// still name one route, it belongs to neither, and the record kept for it
+/// stays as it was ([`write_records`]), so no claim can take a route over
+/// or take it away.
 fn route_owners(state: &Log) -> BTreeMap<&str, Option<HostId>> {
-    let mut claims: BTreeMap<&str, Vec<(HostId, bool)>> = BTreeMap::new();
-    for (id, host) in &state.hosts {
-        let route = host.record.route.as_str();
-        claims
-            .entry(route)
-            .or_default()
-            .push((*id, host.intro.record.route == route));
+    let mut owners: BTreeMap<&str, Option<HostId>> = BTreeMap::new();
+    for (id, host) in state.hosts.iter().filter(|(_, host)| !host.held) {
+        owners
+            .entry(host.record.route.as_str())
+            .and_modify(|owner| *owner = None)
+            .or_insert(Some(*id));
     }
-    claims
+    owners
+}
+
+/// The routes whose owner is unclear: their kept records stay.
+fn unclear(state: &Log) -> BTreeSet<String> {
+    route_owners(state)
         .into_iter()
-        .map(|(route, hosts)| {
-            let owner = match hosts.as_slice() {
-                [(id, _)] => Some(*id),
-                _ => {
-                    let mut named = hosts.iter().filter(|(_, named)| *named);
-                    match (named.next(), named.next()) {
-                        (Some((id, _)), None) => Some(*id),
-                        _ => None,
-                    }
-                }
-            };
-            (route, owner)
-        })
+        .filter(|(_, owner)| owner.is_none())
+        .map(|(route, _)| route.to_owned())
         .collect()
 }
 
 /// Writes `records`, and removes those the fleet wrote before and no
 /// longer grants. A record pairing wrote under the same id is left alone.
-pub(super) fn write_records(state_dir: &Path, records: &[(Record, Vec<String>)]) -> Result<()> {
+pub(super) fn write_records(
+    state_dir: &Path,
+    records: &[(Record, Vec<String>)],
+    unclear: &BTreeSet<String>,
+) -> Result<()> {
     let file = state_dir.join(RECORDS);
     let before: BTreeSet<String> = files::read_bounded(&file, 64 * 1024)?
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
@@ -285,10 +289,17 @@ pub(super) fn write_records(state_dir: &Path, records: &[(Record, Vec<String>)])
             Err(error) => tracing::warn!(error = %error, "could not keep a fleet host's record"),
         }
     }
-    for gone in before.difference(&written) {
-        // Paired here since the fleet wrote it: pairing owns it now.
-        if Record::load(state_dir, gone).is_ok_and(|kept| !kept.fleet) {
-            continue;
+    let gone: Vec<String> = before.difference(&written).cloned().collect();
+    for gone in &gone {
+        // Paired here since the fleet wrote it: pairing owns it now. A route
+        // whose owner is unclear keeps its last record.
+        match Record::load(state_dir, gone) {
+            Ok(kept) if !kept.fleet => continue,
+            Ok(kept) if unclear.contains(&kept.route) => {
+                written.insert(gone.clone());
+                continue;
+            }
+            _ => {}
         }
         Record::remove(state_dir, gone)?;
     }

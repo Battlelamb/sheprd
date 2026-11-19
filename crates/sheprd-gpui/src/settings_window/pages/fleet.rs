@@ -431,6 +431,7 @@ impl SettingsWindow {
                 Standing::Member => fl!("settings-fleet-machine-member"),
                 Standing::Outside => fl!("settings-fleet-machine-outside"),
                 Standing::Failed => fl!("settings-fleet-machine-failed"),
+                Standing::Removed => fl!("settings-fleet-machine-removed"),
                 Standing::Unknown => fl!("settings-fleet-machine-unknown"),
             };
             let mut row = ui::row(

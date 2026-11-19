@@ -57,6 +57,7 @@ settings-fleet-machines-none-description = Machines this Sheprd connects to over
 settings-fleet-machine-member = In your fleet
 settings-fleet-machine-outside = Not in your fleet
 settings-fleet-machine-failed = Could not be asked
+settings-fleet-machine-removed = Removed from your fleet
 settings-fleet-machine-unknown = Checking…
 settings-fleet-machine-working = Working…
 settings-fleet-invite = Invite

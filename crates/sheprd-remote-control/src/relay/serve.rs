@@ -69,7 +69,14 @@ async fn serve(relays: &Relays, incoming: Incoming, route: RouteId, served: Serv
         && let Some(fleet) = &state.fleet
         && let Some(peer) = crate::fleet::grants::peer(fleet, &accepted.remote)
     {
-        return fleet_session(state, fleet, peer, &accepted.remote, accepted.io).await;
+        return fleet_session(
+            state,
+            fleet,
+            peer,
+            (&accepted.remote, &accepted.hash),
+            accepted.io,
+        )
+        .await;
     }
     if pairing.is_none()
         && let Some((device, server)) = desktop(state, &accepted.remote)
@@ -196,20 +203,57 @@ async fn ssh(
     Ok(())
 }
 
-/// A fleet member's session: its first byte says what for. A removal
+/// A fleet member's session: its first byte says what for, and a proof
+/// that the device holds the member's fleet key follows it. A removal
 /// exchange is served whether or not the member may reach SSH here; SSH
-/// only when it may. A desktop paired here over Bluetooth that is also a
-/// member sends no purpose byte: its session is spliced as before, that
-/// byte included.
+/// only when it may. Only a proven session ties the tunnel key to the
+/// member: a bundle names keys that are public, so a member could name a
+/// desktop paired here that is no member at all. A desktop paired here
+/// over Bluetooth sends no purpose byte: its session is spliced as before,
+/// as the member only once it proved that key in an earlier session.
 async fn fleet_session(
     state: &Shared,
     fleet: &Arc<crate::fleet::Fleet>,
     peer: crate::fleet::grants::Peer,
-    remote: &[u8; 32],
+    (remote, hash): (&[u8; 32], &[u8; 32]),
     mut tunnel: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 ) -> Result<()> {
-    use crate::control::fleet::removal::{PURPOSE_REMOVAL, PURPOSE_SSH};
-    // The handshake proved this device holds the member's tunnel key.
+    use crate::control::fleet::removal::{PROOF_LEN, PURPOSE_REMOVAL, PURPOSE_SSH, proves};
+    let mut first = [0];
+    tokio::io::AsyncReadExt::read_exact(&mut tunnel, &mut first)
+        .await
+        .map_err(super::Error::Ssh)?;
+    if !matches!(first[0], PURPOSE_REMOVAL | PURPOSE_SSH) {
+        // No purpose byte, so no proof: the member's only if an earlier
+        // session proved this key for it.
+        let proven = fleet
+            .inner()
+            .proven
+            .get(&peer.member)
+            .is_some_and(|keys| keys.contains(remote));
+        if proven && peer.ssh {
+            supersede(state, remote).await;
+            return fleet_ssh(state, fleet, peer.member, Some(first[0]), tunnel).await;
+        }
+        return match desktop(state, remote) {
+            Some((device, server)) => ssh(state, device, server, Some(first[0]), tunnel).await,
+            None => Ok(()),
+        };
+    }
+    let mut proof = [0; PROOF_LEN];
+    tokio::io::AsyncReadExt::read_exact(&mut tunnel, &mut proof)
+        .await
+        .map_err(super::Error::Ssh)?;
+    let proven = fleet
+        .inner()
+        .log
+        .as_ref()
+        .is_some_and(|log| proves(log.state(), &peer.member, hash, &proof));
+    if !proven {
+        tracing::info!("a fleet session did not prove its member's key; it ends");
+        return Ok(());
+    }
+    // This device holds the member's tunnel key and its fleet key.
     let (proving, remote_key, member) = (fleet.clone(), *remote, peer.member);
     let kept = tokio::task::spawn_blocking(move || proving.proved(member, remote_key))
         .await
@@ -219,31 +263,16 @@ async fn fleet_session(
         // member's removal, so it goes now.
         supersede(state, remote).await;
     }
-    let mut first = [0];
-    tokio::io::AsyncReadExt::read_exact(&mut tunnel, &mut first)
-        .await
-        .map_err(super::Error::Ssh)?;
     match first[0] {
         PURPOSE_REMOVAL => {
             crate::fleet::removals::serve(fleet.clone(), &fleet.inbound, &mut tunnel).await;
             Ok(())
         }
-        PURPOSE_SSH if peer.ssh => {
+        _ if peer.ssh => {
             supersede(state, remote).await;
             fleet_ssh(state, fleet, peer.member, None, tunnel).await
         }
-        PURPOSE_SSH => Ok(()),
-        // A session with no purpose byte: an older `relay-connect` for a
-        // desktop paired here one by one. When the fleet lets that member
-        // in here, the pairing is the fleet's now, and so is the session.
-        byte if peer.ssh => {
-            supersede(state, remote).await;
-            fleet_ssh(state, fleet, peer.member, Some(byte), tunnel).await
-        }
-        byte => match desktop(state, remote) {
-            Some((device, server)) => ssh(state, device, server, Some(byte), tunnel).await,
-            None => Ok(()),
-        },
+        _ => Ok(()),
     }
 }
 

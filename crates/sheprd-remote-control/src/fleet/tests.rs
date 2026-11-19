@@ -36,6 +36,8 @@ mod leaving;
 #[cfg(unix)]
 mod offline;
 #[cfg(unix)]
+mod proof;
+#[cfg(unix)]
 mod records;
 #[cfg(unix)]
 mod rejected;
@@ -55,6 +57,8 @@ mod sessions;
 mod shared_records;
 #[cfg(unix)]
 mod store;
+#[cfg(unix)]
+mod unsaved;
 
 /// A stand-in SSH server that greets each connection, then echoes.
 async fn ssh_server() -> SocketAddr {

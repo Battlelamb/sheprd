@@ -41,6 +41,7 @@ async fn serve(agent: &Arc<Agent>, pending: Pending, route: RouteId) -> Result<(
     let tunnel_keys = &agent.keys.tunnel;
     let responder = Responder::session(tunnel_keys, route.as_bytes())?;
     let admitted = agent.admitted();
+    let dial = incoming.key;
     let io = join(incoming.recv, incoming.send);
     let accepted = {
         let admits = |remote: &[u8; 32]| admitted.borrow().peer(remote).is_some();
@@ -52,6 +53,13 @@ async fn serve(agent: &Arc<Agent>, pending: Pending, route: RouteId) -> Result<(
         .map_err(|_| sheprd_tunnel::Error::Closed)??
     };
     let remote = accepted.remote;
+    // The handshake proved the tunnel key, and the relay the dial key: an
+    // enrolled desktop with both that a member's bundle names is that
+    // member's device.
+    let binds = admitted.borrow().binds(&dial, &remote);
+    if binds {
+        bind(agent, dial, remote).await;
+    }
     let Some(peer) = admitted.borrow().peer(&remote) else {
         return Ok(());
     };
@@ -64,12 +72,6 @@ async fn serve(agent: &Arc<Agent>, pending: Pending, route: RouteId) -> Result<(
         .await
         .map_err(|_| sheprd_tunnel::Error::Closed)?
         .map_err(Error::Splice)?;
-    // A purpose byte, which no desktop enrolled one by one sends, from the
-    // device holding a desktop's tunnel key proves that desktop is this
-    // member's: its suspension and removal then take the desktop too.
-    if desktop && matches!(first[0], PURPOSE_REMOVAL | PURPOSE_SSH) {
-        bind(agent, id, remote).await;
-    }
     match first[0] {
         PURPOSE_REMOVAL => removals(agent, id, &mut tunnel).await,
         PURPOSE_SSH if ssh => splice(agent, tunnel, peer, remote, None).await,
@@ -79,12 +81,13 @@ async fn serve(agent: &Arc<Agent>, pending: Pending, route: RouteId) -> Result<(
     }
 }
 
-/// Binds the enrolled desktop with `tunnel` to `member`, off the runtime's
-/// threads; a failure binds nothing, which only leaves the desktop alone.
-async fn bind(agent: &Arc<Agent>, member: crate::access::Id, tunnel: [u8; 32]) {
+/// Binds the enrolled desktop with `dial` and `tunnel` to the member that
+/// names them, off the runtime's threads. A failure binds nothing, which
+/// only leaves the desktop enrolled when its member is removed.
+async fn bind(agent: &Arc<Agent>, dial: sheprd_relay::wire::Key, tunnel: [u8; 32]) {
     let blocking = Arc::clone(agent);
     let bound = tokio::task::spawn_blocking(move || {
-        Held::bind(blocking.state_dir(), member, tunnel).and_then(|bound| {
+        Held::bind(blocking.state_dir(), dial, tunnel).and_then(|bound| {
             if bound {
                 blocking.reload()?;
             }

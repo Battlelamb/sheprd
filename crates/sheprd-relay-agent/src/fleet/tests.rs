@@ -25,6 +25,7 @@ fn removal(op: u8, targets: &[u8]) -> Removed {
         id: [op; 32],
         fleet: [FLEET; 32],
         signer: [0x99; 32],
+        seq: 9,
         targets: targets.iter().map(|&seed| [seed; 32]).collect(),
     }
 }
@@ -282,8 +283,8 @@ fn a_desktop_bound_to_a_suspended_member_is_cut_off_with_it() {
         host.admitted().peer(&[2; 32]),
         Some(Peer::Member { desktop: true, .. })
     ));
-    // The device holding the desktop's key spoke as member 2.
-    assert!(Held::bind(host.state(), id(2), [2; 32]).unwrap());
+    // A session from the desktop proved both of member 2's keys.
+    assert!(Held::bind(host.state(), member(2, true, 0).dial, [2; 32]).unwrap());
     host.suspend(1, &[removal(0x51, &[2])]);
     let admitted = host.admitted();
     assert_eq!(admitted.peer(&[2; 32]), None);
@@ -309,11 +310,16 @@ fn the_report_names_the_fleet_and_the_digest_of_what_is_held() {
     let host = Host::new();
     let sent = file(&[(1, true, 0), (2, false, 1)], &[9], &[]);
     let held = host.apply(sent.clone()).unwrap();
-    let report = held.report().unwrap().unwrap();
+    let report = held.report(&Authorized::default()).unwrap().unwrap();
     assert_eq!(report.fleet, id(FLEET));
     assert_eq!(report.digest, sent.digest().unwrap());
     assert_eq!((report.allowed, report.denied, report.removed), (1, 1, 1));
-    assert!(Held::default().report().unwrap().is_none());
+    assert!(
+        Held::default()
+            .report(&Authorized::default())
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
@@ -343,34 +349,81 @@ fn scrubbing_forgets_the_fleet_and_its_lines_and_keeps_the_rest() {
 }
 
 #[test]
-fn a_desktop_whose_keys_a_member_only_names_is_not_cut_off_or_forgotten() {
+fn an_unbound_desktop_with_a_suspended_members_keys_fails_closed() {
     let host = Host::new();
     host.enroll(2);
     host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[]))
         .unwrap();
     host.suspend(1, &[removal(0x51, &[2])]);
-    // Not bound: the desktop is still the desktop it was enrolled as.
+    // Never bound, still cut off: a suspended member's key is no one's.
     let admitted = host.admitted();
-    assert_eq!(admitted.peer(&[2; 32]), Some(Peer::Desktop));
-    assert!(admitted.keeps_ssh(&Peer::Desktop, &[2; 32]));
-    host.apply(file(&[(1, true, 0)], &[2], &[])).unwrap();
-    assert_eq!(Authorized::load(host.state()).unwrap().entries().len(), 1);
-    assert_eq!(host.admitted().peer(&[2; 32]), Some(Peer::Desktop));
+    assert_eq!(admitted.peer(&[2; 32]), None);
+    assert!(!admitted.keeps_ssh(&Peer::Desktop, &[2; 32]));
+    assert!(!admitted.dial_keys().contains(&member(2, true, 0).dial));
 }
 
 #[test]
-fn a_desktop_is_bound_only_to_the_member_that_names_its_key_and_is_enrolled() {
+fn an_unbound_desktop_a_removed_member_named_stays_enrolled_cut_off_and_listed() {
     let host = Host::new();
     host.enroll(2);
     host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[]))
         .unwrap();
-    // Member 1 does not hold key 2; no desktop holds key 1.
-    assert!(!Held::bind(host.state(), id(1), [2; 32]).unwrap());
-    assert!(!Held::bind(host.state(), id(1), [1; 32]).unwrap());
-    assert!(Held::bind(host.state(), id(2), [2; 32]).unwrap());
-    assert!(!Held::bind(host.state(), id(2), [2; 32]).unwrap());
+    host.apply(file(&[(1, true, 0)], &[2], &[])).unwrap();
+    // Not proven member 2's device: not forgotten, but cut off.
+    let desktops = Authorized::load(host.state()).unwrap();
+    assert_eq!(desktops.entries().len(), 1);
+    assert_eq!(host.admitted().peer(&[2; 32]), None);
+    let report = Held::load(host.state())
+        .unwrap()
+        .report(&desktops)
+        .unwrap()
+        .unwrap();
+    assert_eq!(report.revoked.len(), 1);
+    assert_eq!(report.revoked[0].tunnel, Id([2; 32]));
+    // A person enrolls it again.
+    let keys = member(2, true, 0);
+    Held::release(host.state(), keys.dial, keys.tunnel).unwrap();
+    assert_eq!(host.admitted().peer(&[2; 32]), Some(Peer::Desktop));
+}
+
+#[test]
+fn a_desktop_sharing_only_a_tunnel_key_with_a_removed_member_is_not_cut_off() {
+    let host = Host::new();
+    let mut desktops = Authorized::default();
+    desktops
+        .insert(Entry {
+            dial: member(7, true, 0).dial,
+            tunnel: [2; 32],
+            label: "other".to_owned(),
+        })
+        .unwrap();
+    desktops.save(host.state()).unwrap();
+    host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[]))
+        .unwrap();
+    host.apply(file(&[(1, true, 0)], &[2], &[])).unwrap();
+    assert_eq!(host.admitted().peer(&[2; 32]), Some(Peer::Desktop));
+}
+
+#[test]
+fn a_desktop_is_bound_only_by_a_session_proving_both_of_a_members_keys() {
+    let host = Host::new();
+    host.enroll(2);
+    host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[]))
+        .unwrap();
+    let (one, two) = (member(1, true, 0), member(2, true, 0));
+    assert!(host.admitted().binds(&two.dial, &[2; 32]));
+    // Member 1's dial key with the desktop's tunnel key is no member's
+    // pair; member 1's own keys are no enrolled desktop's.
+    assert!(!Held::bind(host.state(), one.dial, [2; 32]).unwrap());
+    assert!(!Held::bind(host.state(), one.dial, [1; 32]).unwrap());
+    assert!(Held::bind(host.state(), two.dial, [2; 32]).unwrap());
+    assert!(!Held::bind(host.state(), two.dial, [2; 32]).unwrap());
+    assert!(!host.admitted().binds(&two.dial, &[2; 32]));
     let held = Held::load(host.state()).unwrap();
     assert_eq!(held.bound.len(), 1);
+    // Bound, its member's removal forgets it.
+    host.apply(file(&[(1, true, 0)], &[2], &[])).unwrap();
+    assert!(Authorized::load(host.state()).unwrap().entries().is_empty());
 }
 
 #[test]

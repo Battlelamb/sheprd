@@ -7,9 +7,62 @@
 //! without its runtime, so the agent never depends on this crate and this
 //! crate brings no Tokio to the app.
 
-use super::{Body, Error, HostId, HostKind, Kind, Log, MAX_TOMBSTONES, OpId, Result};
+use super::{Error, HostId, HostKind, Kind, Log, MAX_TOMBSTONES, MemberId, OpId, Result};
+use sheprd_relay_agent::fleet::Suspension;
+use std::collections::BTreeMap;
 
 pub use sheprd_relay_agent::access::{Access, Id, MAX_SETTLED, Member};
+
+/// A removal a plain host's agent reported suspending `target` for: its
+/// id, and the signer and sequence number the agent read in it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Asked {
+    pub removal: OpId,
+    pub signer: MemberId,
+    pub seq: u64,
+    pub target: MemberId,
+}
+
+/// Every removal the agent's `status --json` reports suspending for.
+pub fn asked(suspended: &BTreeMap<Id, Suspension>) -> Vec<Asked> {
+    suspended
+        .iter()
+        .flat_map(|(target, suspension)| {
+            suspension.removals.iter().map(|(removal, cause)| Asked {
+                removal: OpId(removal.0),
+                signer: MemberId(cause.signer.0),
+                seq: cause.seq,
+                target: MemberId(target.0),
+            })
+        })
+        .collect()
+}
+
+/// Whether `asked` no longer stands in `log`, so the agent may lift what it
+/// suspended for it. It does when the log holds the operation (a `Remove`
+/// whose target is still a member was voided; anything else is no
+/// removal). One the log does not hold stands while it waits for its
+/// parents; otherwise it is void when its signer or target is no member,
+/// when the log holds a later operation of its signer (the log synced with
+/// the signer, and the signer never made it), or once `graced` says it
+/// stayed unknown long enough.
+fn settles(log: &Log, asked: &Asked, graced: &impl Fn(&OpId) -> bool) -> bool {
+    if log.get(&asked.removal).is_some() {
+        return true;
+    }
+    if log
+        .pending_removals()
+        .iter()
+        .any(|(id, _, _)| *id == asked.removal)
+    {
+        return false;
+    }
+    let state = log.state();
+    let Some(signer) = state.members.get(&asked.signer) else {
+        return true;
+    };
+    !state.members.contains_key(&asked.target) || signer.seq >= asked.seq || graced(&asked.removal)
+}
 
 // The agent remembers as many removed members as the log does.
 const _: () = assert!(sheprd_relay_agent::access::MAX_REMOVED == MAX_TOMBSTONES);
@@ -17,18 +70,16 @@ const _: () = assert!(sheprd_relay_agent::access::MAX_REMOVED == MAX_TOMBSTONES)
 /// The access file for plain host `host` as `log` has it: every live
 /// computer member, allowed or not, with the `rev` of its `Access`
 /// register, and every removed member. `suspended` are the removals the
-/// host's agent reported suspending for (`status --json`); each goes in
-/// `settled` once the log can say it no longer stands: it holds it as a
-/// `Remove` (so a target still a member was not removed by it), or, with
-/// nothing waiting for its parents, it holds no such `Remove` at all (an
-/// id no member's removal has, or one that is no removal). The agent then
-/// lifts a suspension the log voided, and no member can keep another
-/// suspended by naming removals that do not exist. Refuses a host that is
-/// not a plain host, or that is held.
+/// host's agent reported suspending for (`asked`); each goes in `settled`
+/// once it no longer stands ([`settles`], with `graced` for one the log
+/// has not heard of), so the agent lifts a suspension the log voided and
+/// no member can keep another suspended by naming removals that do not
+/// exist. Refuses a host that is not a plain host, or that is held.
 pub fn compute(
     log: &Log,
     host: &HostId,
-    suspended: impl IntoIterator<Item = OpId>,
+    suspended: impl IntoIterator<Item = Asked>,
+    graced: impl Fn(&OpId) -> bool,
 ) -> Result<Access> {
     let state = log.state();
     let entry = state.hosts.get(host).ok_or(Error::Unknown)?;
@@ -61,15 +112,11 @@ pub fn compute(
             Some((Id(id.0), member))
         })
         .collect();
-    let current = log.pending() == 0;
     let settled = suspended
         .into_iter()
-        .filter(|id| match log.get(id) {
-            Some(op) => matches!(op.body(), Body::Remove(_)) || current,
-            None => current,
-        })
+        .filter(|asked| settles(log, asked, &graced))
+        .map(|asked| Id(asked.removal.0))
         .take(MAX_SETTLED)
-        .map(|id| Id(id.0))
         .collect();
     let access = Access {
         fleet: Id(log.fleet().0),

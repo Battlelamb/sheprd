@@ -54,6 +54,9 @@ struct Peers {
     unconfirmed: BTreeMap<String, Kept>,
     #[serde(default)]
     proven: BTreeMap<String, Proven>,
+    /// Removals plain hosts reported that the log has not heard of.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    unknown: BTreeMap<String, super::plain::Unknown>,
 }
 
 /// A member's proven keys: one, as an earlier build kept it, or several.
@@ -123,6 +126,11 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
                 Some((MemberId::from_hex(member)?, keys))
             })
             .collect(),
+        unknown: peers
+            .unknown
+            .iter()
+            .filter_map(|(id, seen)| Some((OpId::from_hex(id)?, *seen)))
+            .collect(),
         unconfirmed: peers
             .unconfirmed
             .iter()
@@ -176,6 +184,11 @@ pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
                     Proven::Many(keys.iter().map(|key| HostId(*key).to_string()).collect()),
                 )
             })
+            .collect(),
+        unknown: inner
+            .unknown
+            .iter()
+            .map(|(id, seen)| (id.to_string(), *seen))
             .collect(),
         unconfirmed: inner
             .unconfirmed

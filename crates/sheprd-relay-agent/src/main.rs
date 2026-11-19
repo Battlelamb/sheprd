@@ -89,12 +89,16 @@ fn execute(command: Command, state_dir: &Path) -> Result<()> {
         }
         Command::Authorize(entry) => {
             let path = state_dir.join(sheprd_relay_agent::authorized::FILE);
+            let (dial, tunnel) = (entry.dial, entry.tunnel);
             Authorized::update(state_dir, |authorized| {
                 authorized
                     .insert(entry)
                     .map_err(|_| Error::AuthorizedFull { path })?;
                 Ok(true)
-            })
+            })?;
+            // A person enrolled it again: a removed member's having named
+            // its keys no longer cuts it off.
+            fleet::Held::release(state_dir, dial, tunnel)
         }
         Command::Revoke(dial) => {
             Authorized::update(state_dir, |authorized| Ok(authorized.remove(&dial)))

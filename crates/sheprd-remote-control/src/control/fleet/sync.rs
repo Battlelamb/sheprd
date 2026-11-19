@@ -222,12 +222,15 @@ pub enum Ask {
     Scrub,
     /// The access file for plain host `host`, for Sheprd to hand its
     /// agent (`fleet apply`): computed here, so the log never leaves the
-    /// daemon. `suspended` are the removals, hex, the agent reported
-    /// suspending for; those the log holds are settled.
+    /// daemon. `suspended` is what the agent's `status --json` reports
+    /// suspending, which the file settles as the log allows.
     AgentAccess {
         host: String,
         #[serde(default)]
-        suspended: Vec<String>,
+        suspended: std::collections::BTreeMap<
+            sheprd_relay_agent::access::Id,
+            sheprd_relay_agent::fleet::Suspension,
+        >,
     },
 }
 

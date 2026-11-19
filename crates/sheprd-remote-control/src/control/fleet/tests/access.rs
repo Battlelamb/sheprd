@@ -2,7 +2,7 @@
 //! reading of operations and frames checked against the log's own.
 
 use super::*;
-use crate::control::fleet::access::{self as host_access, Id};
+use crate::control::fleet::access::{self as host_access, Asked, Id};
 use sheprd_relay_agent::removal;
 
 fn access_body(host: HostId, member: &Device, allow: bool, rev: u64) -> Body {
@@ -35,7 +35,7 @@ fn id(member: &Device) -> Id {
 fn every_computer_is_named_with_its_keys_and_access() {
     let (mut log, [a, b, c], host) = fleet();
     act(&mut log, &a, access_body(host, &c, false, 1));
-    let file = host_access::compute(&log, &host, []).unwrap();
+    let file = host_access::compute(&log, &host, [], never).unwrap();
     assert_eq!(file.fleet, Id(log.fleet().0));
     assert_eq!(file.members.len(), 3, "phones are not named");
     let first = &file.members[&id(&a)];
@@ -55,55 +55,108 @@ fn every_computer_is_named_with_its_keys_and_access() {
 fn removed_members_are_tombstones_and_named_no_more() {
     let (mut log, [a, b, _], host) = fleet();
     act(&mut log, &a, remove_body(&b));
-    let file = host_access::compute(&log, &host, []).unwrap();
+    let file = host_access::compute(&log, &host, [], never).unwrap();
     assert!(file.removed.contains(&id(&b)));
     assert!(!file.members.contains_key(&id(&b)));
 }
 
-#[test]
-fn a_current_log_settles_every_removal_asked_about() {
-    let (mut log, [a, b, _], host) = fleet();
-    let removal = act(&mut log, &a, remove_body(&b));
-    let access = act(&mut log, &a, access_body(host, &a, true, 1));
-    // An id no removal has, as a member could make up to keep another
-    // suspended, and one that is no removal: neither stands.
-    let unknown = OpId([0x42; 32]);
-    let file = host_access::compute(&log, &host, [removal.id(), access.id(), unknown]).unwrap();
-    let mut wanted = vec![Id(removal.id().0), Id(access.id().0), Id(unknown.0)];
-    wanted.sort();
-    assert_eq!(file.settled.into_iter().collect::<Vec<_>>(), wanted);
+/// No removal has stayed unknown long enough.
+fn never(_: &OpId) -> bool {
+    false
+}
+
+/// `removal`, signed by `signer` at `seq`, suspending `target`.
+fn asked(removal: OpId, signer: &Device, seq: u64, target: &Device) -> Asked {
+    Asked {
+        removal,
+        signer: signer.id(),
+        seq,
+        target: target.id(),
+    }
+}
+
+fn settled(file: host_access::Access) -> Vec<Id> {
+    file.settled.into_iter().collect()
 }
 
 #[test]
-fn a_log_waiting_for_parents_settles_only_the_removals_it_holds() {
+fn an_operation_the_log_holds_is_settled_whatever_it_is() {
     let (mut log, [a, b, c], host) = fleet();
-    let removal = act(&mut log, &a, remove_body(&c));
-    // An operation whose parent has not arrived: the log may lack a
-    // removal it is about to get.
-    let mut other = copy(&log);
-    let admitted = admit(&mut other, &b, &computer(5));
-    let child = act(&mut other, &b, Body::HostAdd(plain_host(41)));
-    assert_eq!(log.insert(child, NOW), Ok(Inserted::Pending));
+    let removal = act(&mut log, &a, remove_body(&b));
+    let other = act(&mut log, &a, access_body(host, &a, true, 1));
+    let file = host_access::compute(
+        &log,
+        &host,
+        [asked(removal.id(), &a, 1, &b), asked(other.id(), &a, 1, &c)],
+        never,
+    )
+    .unwrap();
+    let mut wanted = vec![Id(removal.id().0), Id(other.id().0)];
+    wanted.sort();
+    assert_eq!(settled(file), wanted);
+}
+
+#[test]
+fn an_unknown_removal_is_settled_on_evidence_it_is_no_members() {
+    let (log, [a, b, _], host) = fleet();
     let unknown = OpId([0x42; 32]);
-    let file = host_access::compute(&log, &host, [removal.id(), unknown]).unwrap();
-    assert_eq!(
-        file.settled.into_iter().collect::<Vec<_>>(),
-        [Id(removal.id().0)]
-    );
-    drop(admitted);
+    let seq = log.state().members[&a.id()].seq;
+    let stranger = computer(77);
+    for (signer, seq, target) in [
+        // Its signer is no member.
+        (&stranger, seq + 5, &b),
+        // Its target is no member.
+        (&a, seq + 5, &stranger),
+        // The log holds a later operation of its signer, and not it.
+        (&a, seq, &b),
+    ] {
+        let file = host_access::compute(&log, &host, [asked(unknown, signer, seq, target)], never)
+            .unwrap();
+        assert_eq!(settled(file), [Id(unknown.0)]);
+    }
+}
+
+#[test]
+fn an_unknown_removal_that_may_be_on_its_way_waits_for_the_grace() {
+    let (log, [a, b, _], host) = fleet();
+    let unknown = OpId([0x42; 32]);
+    // A sequence number past what the log holds of its signer.
+    let seq = log.state().members[&a.id()].seq + 1;
+    let ask = || [asked(unknown, &a, seq, &b)];
+    let waiting = host_access::compute(&log, &host, ask(), never).unwrap();
+    assert!(waiting.settled.is_empty());
+    let graced = host_access::compute(&log, &host, ask(), |id| *id == unknown).unwrap();
+    assert_eq!(settled(graced), [Id(unknown.0)]);
+}
+
+#[test]
+fn a_removal_waiting_for_its_parents_is_never_settled() {
+    let (mut log, [a, b, c], host) = fleet();
+    let mut other = copy(&log);
+    admit(&mut other, &b, &computer(5));
+    let removal = act(&mut other, &b, remove_body(&c));
+    assert_eq!(log.insert(removal.clone(), NOW), Ok(Inserted::Pending));
+    let seq = removal.unsigned().seq;
+    let file =
+        host_access::compute(&log, &host, [asked(removal.id(), &b, seq, &c)], |_| true).unwrap();
+    assert!(file.settled.is_empty());
+    drop(a);
 }
 
 #[test]
 fn only_a_known_plain_host_has_an_access_file() {
     let (mut log, [a, ..], _) = fleet();
     assert_eq!(
-        host_access::compute(&log, &HostId([7; 32]), []),
+        host_access::compute(&log, &HostId([7; 32]), [], never),
         Err(Error::Unknown)
     );
     let (intro, _) = ca_host(41, HostKind::Sheprd);
     let sheprd = intro.id().unwrap();
     act(&mut log, &a, Body::HostAdd(intro));
-    assert_eq!(host_access::compute(&log, &sheprd, []), Err(Error::Invalid));
+    assert_eq!(
+        host_access::compute(&log, &sheprd, [], never),
+        Err(Error::Invalid)
+    );
 }
 
 #[test]
@@ -124,7 +177,10 @@ fn a_host_two_members_added_with_different_keys_has_none() {
     for op in ops {
         apply(&mut log, op);
     }
-    assert_eq!(host_access::compute(&log, &host, []), Err(Error::HostHeld));
+    assert_eq!(
+        host_access::compute(&log, &host, [], never),
+        Err(Error::HostHeld)
+    );
 }
 
 #[test]
@@ -132,9 +188,9 @@ fn a_stale_members_file_cannot_undo_a_removal_on_the_agent() {
     let (mut log, [a, b, _], host) = fleet();
     let stale = copy(&log);
     act(&mut log, &a, remove_body(&b));
-    let fresh = host_access::compute(&log, &host, []).unwrap();
+    let fresh = host_access::compute(&log, &host, [], never).unwrap();
     let held = host_access::Access::merge(None, fresh).unwrap();
-    let old = host_access::compute(&stale, &host, []).unwrap();
+    let old = host_access::compute(&stale, &host, [], never).unwrap();
     let merged = host_access::Access::merge(Some(&held), old).unwrap();
     assert!(!merged.members.contains_key(&id(&b)));
     assert_eq!(merged.digest().unwrap(), held.digest().unwrap());
@@ -143,7 +199,7 @@ fn a_stale_members_file_cannot_undo_a_removal_on_the_agent() {
 #[test]
 fn a_file_the_agent_merged_has_the_digest_the_log_computes() {
     let (log, _, host) = fleet();
-    let file = host_access::compute(&log, &host, []).unwrap();
+    let file = host_access::compute(&log, &host, [], never).unwrap();
     let held = host_access::Access::merge(None, file.clone()).unwrap();
     assert_eq!(held.digest().unwrap(), file.digest().unwrap());
 }

@@ -188,6 +188,10 @@ pub struct Removed {
     pub id: [u8; ID_LEN],
     pub fleet: [u8; ID_LEN],
     pub signer: [u8; ID_LEN],
+    /// The signer's sequence number for it: once a log holds a later one
+    /// of the same signer and not this, this is no operation the signer
+    /// made.
+    pub seq: u64,
     /// The member it removes, then the members removed with it.
     pub targets: Vec<[u8; ID_LEN]>,
 }
@@ -205,7 +209,8 @@ pub fn peek(bytes: &[u8]) -> Result<Option<Removed>> {
     }
     let fleet = reader.id()?;
     let signer = reader.id()?;
-    reader.take(16)?; // seq, issued_ms
+    let seq = u64::from_be_bytes(reader.take(8)?.try_into().map_err(|_| Error::Encoding)?);
+    reader.take(8)?; // issued_ms
     let parents = usize::from(reader.byte()?);
     if parents > MAX_PARENTS {
         return Err(Error::Bounds);
@@ -228,6 +233,7 @@ pub fn peek(bytes: &[u8]) -> Result<Option<Removed>> {
         id: Sha256::digest(signed).into(),
         fleet,
         signer,
+        seq,
         targets,
     }))
 }

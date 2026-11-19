@@ -10,7 +10,7 @@ use gpui::{App, BackgroundExecutor};
 use sheprd_client::ConnectTarget;
 use sheprd_relay_agent::access::Access;
 use sheprd_remote_control::control::fleet::{
-    HostKind, OpId, View,
+    HostKind, View,
     sync::{self, Answer, Ask},
 };
 use std::sync::atomic::AtomicBool;
@@ -183,12 +183,7 @@ async fn keep(
     report: &sheprd_relay_agent::status::Report,
 ) -> Result<(), Error> {
     let held = report.fleet.as_ref();
-    let suspended: Vec<String> = held
-        .into_iter()
-        .flat_map(|held| held.suspended.values())
-        .flat_map(|suspension| &suspension.removals)
-        .map(|id| OpId(id.0).to_string())
-        .collect();
+    let suspended = held.map(|held| held.suspended.clone()).unwrap_or_default();
     let access = match daemon(
         client,
         Ask::AgentAccess {

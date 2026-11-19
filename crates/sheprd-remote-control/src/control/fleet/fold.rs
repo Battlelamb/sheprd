@@ -128,7 +128,7 @@ fn hosts(
     }
     let mut live: Vec<(usize, HostId, Host)> = Vec::new();
     // Where each surviving addition was made; `None` for the base.
-    let mut preceding: BTreeMap<HostId, Vec<Option<usize>>> = BTreeMap::new();
+    let mut preceding: BTreeMap<HostId, Vec<(Option<usize>, &HostIntro)>> = BTreeMap::new();
     for (id, mut candidates) in adds {
         let removed_by = removals.get(&id).map(Vec::as_slice).unwrap_or_default();
         // An addition survives only when it saw every removal: a removal
@@ -142,7 +142,13 @@ fn hosts(
         let Some(first) = candidates.first() else {
             continue;
         };
-        preceding.insert(id, candidates.iter().map(|add| add.position).collect());
+        preceding.insert(
+            id,
+            candidates
+                .iter()
+                .map(|add| (add.position, add.intro))
+                .collect(),
+        );
         let held = candidates.iter().any(|add| {
             add.intro.ca != first.intro.ca
                 || add.intro.record.ssh_host_keys != first.intro.record.ssh_host_keys
@@ -181,19 +187,24 @@ fn hosts(
     for (id, claims) in member_hosts {
         let (intro, member) = claims[0];
         let origin = members.origins.get(&member).copied();
-        let weighed = preceding.get(&id).is_some_and(|positions| {
-            positions.iter().any(|at| match (at, origin) {
-                (None, _) => true,
-                (Some(at), Some(origin)) => !graph.sees(*at, origin),
-                // A member from the base came before every addition here.
-                (Some(_), None) => false,
-            })
-        });
-        let added = state.hosts.get(&id).filter(|_| weighed);
+        // Every addition weighed must name the same machine the same way:
+        // one that differs, in account, CA, or SSH host keys, holds it.
+        let weighed =
+            preceding
+                .get(&id)
+                .into_iter()
+                .flatten()
+                .filter(|(at, _)| match (at, origin) {
+                    (None, _) => true,
+                    (Some(at), Some(origin)) => !graph.sees(*at, origin),
+                    // A member from the base came before every addition here.
+                    (Some(_), None) => false,
+                });
         let held = claims.len() > 1
-            || added.is_some_and(|added| {
-                added.intro.user != intro.user
-                    || added.intro.record.ssh_host_keys != intro.record.ssh_host_keys
+            || weighed.into_iter().any(|(_, added)| {
+                added.user != intro.user
+                    || added.ca != intro.ca
+                    || added.record.ssh_host_keys != intro.record.ssh_host_keys
             });
         state.hosts.insert(
             id,

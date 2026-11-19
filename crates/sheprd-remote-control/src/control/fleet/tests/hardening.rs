@@ -286,3 +286,28 @@ fn a_bundle_concurrent_with_an_added_host_cannot_take_it_over() {
     assert!(log.state().hosts[&host].held);
     assert!(!log.state().allowed(&host, &c.id()));
 }
+
+#[test]
+fn every_addition_weighed_must_match_the_members_intro() {
+    let (mut log, a, b, c, _) = four();
+    let (intro, _) = ca_host(60, HostKind::Sheprd);
+    let host = intro.id().unwrap();
+    // Two additions before the member: one as it is, one with another
+    // account. The member matches the first; the second still holds it.
+    let mut other = intro.clone();
+    other.user = "root".into();
+    let before = log.heads().to_vec();
+    let next = |member: &Device| log.state().members[&member.id()].seq + 1;
+    let ops = [
+        sign_on(&log, &a, &before, next(&a), Body::HostAdd(intro.clone())),
+        sign_on(&log, &b, &before, next(&b), Body::HostAdd(other)),
+    ];
+    for op in ops {
+        apply(&mut log, op);
+    }
+    let mut same = intro;
+    same.kind = HostKind::Member;
+    admit(&mut log, &a, &joiner_with(9, same));
+    assert!(log.state().hosts[&host].held);
+    assert!(!log.state().allowed(&host, &c.id()));
+}

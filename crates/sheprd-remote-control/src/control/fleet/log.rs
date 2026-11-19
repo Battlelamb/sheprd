@@ -2,8 +2,9 @@
 //! waiting for their parents, and the state they compute.
 
 use super::{
-    Body, Error, FleetId, MAX_OPS, MAX_PENDING, MAX_SKEW_MS, MemberId, Op, OpId, PENDING_TTL_MS,
-    Result, State, Unsigned,
+    Body, Error, FleetId, MAX_MEMBERSHIP_OPS, MAX_OPS, MAX_PARENTS, MAX_PENDING, MAX_REMOVALS,
+    MAX_REMOVALS_PER_SIGNER, MAX_SKEW_MS, MemberId, Op, OpId, PENDING_TTL_MS, Result, State,
+    Unsigned,
     fold::fold,
     graph::{Bits, Graph},
     membership::Folder,
@@ -138,11 +139,32 @@ impl Log {
         self.pending.len()
     }
 
-    /// An operation for `signer` to sign next: on every head, with the
+    /// An operation for `signer` to sign next: on the heads, with the
     /// next sequence number.
+    ///
+    /// An operation names at most [`MAX_PARENTS`] heads. When there are
+    /// more, it names those of members not flagged for signing in two
+    /// places first: a member that forks its key cannot crowd out the
+    /// others, and what it signed that a removal did not name is void
+    /// anyway. The heads left out are named by the next operations.
     #[must_use]
     pub fn draft(&self, signer: MemberId, issued_ms: u64, body: Body) -> Unsigned {
-        let mut parents = self.heads.clone();
+        let mut heads: Vec<(bool, OpId)> = self
+            .heads
+            .iter()
+            .map(|id| {
+                let forked = self
+                    .get(id)
+                    .is_some_and(|op| self.state.equivocating.contains(&op.signer()));
+                (forked, *id)
+            })
+            .collect();
+        heads.sort_unstable();
+        let mut parents: Vec<OpId> = heads
+            .into_iter()
+            .take(MAX_PARENTS)
+            .map(|(_, id)| id)
+            .collect();
         parents.sort_unstable();
         let seq = self
             .ops
@@ -292,10 +314,13 @@ impl Log {
         self.pending
             .retain(|_, (_, since)| now_ms.saturating_sub(*since) <= PENDING_TTL_MS);
         while self.pending.len() > MAX_PENDING {
+            // Removals are dropped last.
             let oldest = self
                 .pending
                 .iter()
-                .min_by_key(|(id, (_, since))| (*since, **id))
+                .min_by_key(|(id, (op, since))| {
+                    (matches!(op.body(), Body::Remove(_)), *since, **id)
+                })
                 .map(|(id, _)| *id);
             if let Some(oldest) = oldest {
                 self.pending.remove(&oldest);
@@ -306,10 +331,29 @@ impl Log {
     /// Checks the operations just `added`, removes those refused and their
     /// descendants, and folds. Says why each was refused.
     fn settle(&mut self, added: &[OpId]) -> Result<BTreeMap<OpId, Error>> {
-        if self.ops.len() > MAX_OPS {
-            return Err(Error::Full);
+        let mut refused = self.over_caps(added);
+        // What builds on an operation refused is refused with it.
+        loop {
+            let orphans: Vec<OpId> = added
+                .iter()
+                .filter(|id| !refused.contains_key(*id))
+                .filter(|id| {
+                    self.ops.get(*id).is_some_and(|op| {
+                        op.parents()
+                            .iter()
+                            .any(|parent| refused.contains_key(parent))
+                    })
+                })
+                .copied()
+                .collect();
+            if orphans.is_empty() {
+                break;
+            }
+            refused.extend(orphans.into_iter().map(|id| (id, Error::ParentMissing)));
         }
-        let mut refused = BTreeMap::new();
+        for id in refused.keys() {
+            self.ops.remove(id);
+        }
         {
             let graph = self.graph()?;
             let folder = self.folder(&graph)?;
@@ -342,6 +386,49 @@ impl Log {
         self.checked = self.ops.keys().copied().collect();
         self.recompute()?;
         Ok(refused)
+    }
+
+    /// The operations just `added` that would take the log past a bound.
+    /// A removal never counts against the others' bounds, so filling the
+    /// log cannot stop its signer's removal; removals have their own,
+    /// per signer, so no member can fill theirs for another.
+    fn over_caps(&self, added: &[OpId]) -> BTreeMap<OpId, Error> {
+        let removal = |op: &Op| matches!(op.body(), Body::Remove(_));
+        let costly = |op: &Op| op.body().membership() && !removal(op);
+        let mut ops = self.ops.values().filter(|op| !removal(op)).count();
+        let mut membership = self.ops.values().filter(|op| costly(op)).count();
+        let mut removals = self.ops.values().filter(|op| removal(op)).count();
+        let mut by_signer: BTreeMap<MemberId, usize> = BTreeMap::new();
+        let fresh: HashSet<&OpId> = added.iter().collect();
+        for op in self
+            .ops
+            .values()
+            .filter(|op| removal(op) && !fresh.contains(&op.id()))
+        {
+            *by_signer.entry(op.signer()).or_default() += 1;
+        }
+        let mut refused = BTreeMap::new();
+        // Newest last: the batch is in id order, which every member shares.
+        let mut batch: Vec<&Op> = added.iter().filter_map(|id| self.ops.get(id)).collect();
+        batch.sort_by_key(|op| op.id());
+        for op in batch {
+            if removal(op) {
+                let mine = by_signer.entry(op.signer()).or_default();
+                *mine += 1;
+                if *mine > MAX_REMOVALS_PER_SIGNER || removals > MAX_REMOVALS {
+                    refused.insert(op.id(), Error::Full);
+                    *mine -= 1;
+                    removals -= 1;
+                }
+            } else if ops > MAX_OPS || (costly(op) && membership > MAX_MEMBERSHIP_OPS) {
+                refused.insert(op.id(), Error::Full);
+                ops -= 1;
+                if costly(op) {
+                    membership -= 1;
+                }
+            }
+        }
+        refused
     }
 
     fn recompute(&mut self) -> Result<()> {

@@ -417,8 +417,9 @@ pub struct Access {
     pub host: HostId,
     pub member: MemberId,
     pub allow: bool,
-    /// Above every earlier `Access` for this host and member it descends
-    /// from, so an agent that only sees the latest can merge by it.
+    /// One above the highest counted `Access` for this host and member it
+    /// descends from, so an agent that only sees the latest can merge by
+    /// it, and no one operation can put the register out of reach.
     pub rev: u64,
 }
 

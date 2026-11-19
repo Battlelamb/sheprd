@@ -72,7 +72,11 @@ impl<'g, 'a> Folder<'g, 'a> {
                 mask.insert(position);
             }
         }
-        if mask.iter().count() > MAX_MEMBERSHIP_OPS {
+        let costly = mask
+            .iter()
+            .filter(|&position| !matches!(graph.order[position].body(), Body::Remove(_)))
+            .count();
+        if costly > MAX_MEMBERSHIP_OPS {
             return Err(Error::Full);
         }
         let mut folder = Self {
@@ -176,7 +180,10 @@ impl<'g, 'a> Folder<'g, 'a> {
             Body::Found(_) | Body::HostRemove(_) => Ok(()),
             Body::Admit(admit) => {
                 let id = admit.bundle.id();
-                if members.live.contains_key(&id) || members.tombstones.contains(&id) {
+                if members.live.contains_key(&id)
+                    || members.tombstones.contains(&id)
+                    || host_taken(members, &admit.bundle, id)
+                {
                     return Err(Error::Invalid);
                 }
                 let limit = match admit.bundle.kind {
@@ -216,6 +223,9 @@ impl<'g, 'a> Folder<'g, 'a> {
                 let current = members.live.get(&op.signer()).ok_or(Error::Signer)?;
                 if bundle.key != current.bundle.key || bundle.kind != kind {
                     return Err(Error::Permission);
+                }
+                if host_taken(members, bundle, op.signer()) {
+                    return Err(Error::Invalid);
                 }
                 Ok(())
             }
@@ -309,10 +319,11 @@ impl<'g, 'a> Folder<'g, 'a> {
         let voiders: Vec<Vec<usize>> = removals
             .iter()
             .map(|&removal| {
+                let could_counter = self.could_counter(removal, &removals);
                 removals
                     .iter()
                     .copied()
-                    .filter(|&other| self.voids(other, removal))
+                    .filter(|&other| self.voids(other, removal, could_counter))
                     .collect()
             })
             .collect();
@@ -352,14 +363,52 @@ impl<'g, 'a> Folder<'g, 'a> {
 
     /// Whether removal `by`, if it takes effect, voids removal `of`: it
     /// removes `of`'s signer without having seen `of`, and `of` is not a
-    /// counter-removal of `by`'s signer.
-    fn voids(&self, by: usize, of: usize) -> bool {
+    /// counter-removal of `by`'s signer. `counters` says, for `of`,
+    /// whether it could be one ([`Folder::could_counter`]).
+    fn voids(&self, by: usize, of: usize, could_counter: bool) -> bool {
         let (by_op, of_op) = (self.graph.order[by], self.graph.order[of]);
         by != of
             && !self.graph.sees(by, of)
             && targets(by_op).any(|target| *target == of_op.signer())
-            && !targets(of_op).any(|target| *target == by_op.signer())
+            && !(could_counter && targets(of_op).any(|target| *target == by_op.signer()))
     }
+
+    /// Whether `of` removes only members that removed its signer without
+    /// its having seen them, and no host: what a counter-removal may do. A
+    /// removed member takes with it the members that removed it, and
+    /// nothing more.
+    fn could_counter(&self, of: usize, removals: &[usize]) -> bool {
+        let of_op = self.graph.order[of];
+        let Body::Remove(remove) = of_op.body() else {
+            return false;
+        };
+        remove.also_hosts.is_empty()
+            && remove.targets().all(|target| {
+                removals.iter().any(|&other| {
+                    let other_op = self.graph.order[other];
+                    other_op.signer() == *target
+                        && !self.graph.sees(of, other)
+                        && targets(other_op).any(|removed| *removed == of_op.signer())
+                })
+            })
+    }
+}
+
+/// Whether another live member already names the host `bundle` names: a
+/// copied intro, perhaps with another user to log in as.
+fn host_taken(members: &Members, bundle: &super::Bundle, own: MemberId) -> bool {
+    let Some(id) = bundle.host.as_ref().and_then(|intro| intro.id().ok()) else {
+        return false;
+    };
+    members.live.iter().any(|(member, other)| {
+        *member != own
+            && other
+                .bundle
+                .host
+                .as_ref()
+                .and_then(|intro| intro.id().ok())
+                .is_some_and(|other| other == id)
+    })
 }
 
 /// The members an operation removes; none unless it is a removal.

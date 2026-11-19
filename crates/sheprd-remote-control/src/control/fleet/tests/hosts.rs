@@ -61,11 +61,13 @@ fn an_access_rev_must_climb() {
     let (mut log, a, _, c) = three();
     let host = plain_host(40).id().unwrap();
     act(&mut log, &a, Body::HostAdd(plain_host(40)));
-    act(&mut log, &a, access_body(host, &c, false, 5));
+    act(&mut log, &a, access_body(host, &c, false, 1));
     // Applied, but it does not count: an agent merging by rev would order
-    // it before the deny.
-    act(&mut log, &a, access_body(host, &c, true, 5));
+    // it with the deny.
+    act(&mut log, &a, access_body(host, &c, true, 1));
     assert!(!log.state().allowed(&host, &c.id()));
+    act(&mut log, &a, access_body(host, &c, true, 2));
+    assert!(log.state().allowed(&host, &c.id()));
 }
 
 #[test]

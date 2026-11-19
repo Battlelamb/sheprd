@@ -9,6 +9,7 @@ mod admission;
 mod checkpoint;
 mod convergence;
 mod encoding;
+mod hardening;
 mod hosts;
 mod removal;
 mod vectors;

@@ -1350,8 +1350,10 @@ does not pass it on.
    the signer exists whose history does not include this operation, the
    operation is void. That covers additions that race a revocation, and
    operations signed after removal and backdated: revocation wins. The
-   only exception is a counter-removal, a `Remove` of exactly the member
-   that removed this signer concurrently. Removals that void each other
+   only exception is a counter-removal: a `Remove` that removes the
+   member that removed this signer concurrently, and otherwise only other
+   members that did too, and no host. A `Remove` that reaches any further
+   is void like the rest. Removals that void each other
    in a cycle (a removes b, b removes c, c removes a, none having seen
    the others) all take effect: when the rules cannot say who wins,
    everyone involved is removed.
@@ -1362,7 +1364,8 @@ When two edits to the same thing are concurrent, the safer outcome wins:
 | --- | --- |
 | A member added and removed | Removed. Tombstones win. |
 | A host updated and removed | Removed. An addition made after seeing the removal brings it back. |
-| `Access` allow and deny, concurrent | Deny. Otherwise the one that descends from the other wins. |
+| `Access` allow and deny, concurrent | Deny. Otherwise the one that descends from the other wins. An `Access` counts only when its `rev` is one above the highest counted one it saw, so no single operation can put the register out of a later deny's reach. |
+| Two members naming one host as their own | A copied intro: the host is held. An `Admit` or `Rotate` naming the host of a member live in its history is refused outright. A member naming a host added before is the same machine joining only when the account and SSH host keys match; otherwise the host is held. |
 | Two self-records | The higher `rev`. Equal `rev` with different content flags the host and keeps the one seen first. |
 | Two `HostAdd` for one host | The first in hash order keeps the intro, and the other member is listed as having verified it too. If their pinned or SSH host keys differ, the host is held and not spread until a person picks one. |
 
@@ -1665,7 +1668,9 @@ all of them. It needs no fleet key, because it only removes access.
 | Live members | 16 computers and 16 phones, so a host names at most 32 fleet dial keys and keeps room in a relay's 64 for its own paired devices |
 | Hosts | 256 |
 | Member tombstones | 1,024, kept forever. Past that, create a new fleet. |
-| Membership operations between checkpoints | 256 (`Found`, `Admit`, `Remove`, `Rotate`): the costly ones to fold |
+| Membership operations between checkpoints | 256 (`Found`, `Admit`, `Rotate`): the costly ones to fold |
+| Removals between checkpoints | 1,024, and 32 per signer. They count against no other bound, so a member that fills the log cannot keep out its own removal. |
+| Parents | 16 per operation. With more heads, a member names those of members not flagged for equivocation first, so a member forking its key cannot crowd out everyone's operations, removals included. |
 | Operations between checkpoints | 2,048. A computer signs a `Checkpoint` after 512 operations or 30 days, and earlier operations are pruned once every live member's heads descend from it. A Sheprd host never trusts a checkpoint it cannot recompute from what it holds. |
 | One operation | 16 KiB. A bundle with ML-KEM-768 is about 2 KiB. |
 | One `fleet apply` or sync message | 256 KiB and 64 operations. More takes several rounds. |

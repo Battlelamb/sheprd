@@ -83,17 +83,17 @@ fn hosts(
     state: &mut State,
 ) {
     let graph = folder.graph();
-    let member_hosts: BTreeMap<HostId, (&HostIntro, MemberId)> = members
-        .live
-        .iter()
-        .filter_map(|(id, member)| {
-            let intro = member.bundle.host.as_ref()?;
-            Some((intro.id().ok()?, (intro, *id)))
-        })
-        .collect();
+    let mut member_hosts: BTreeMap<HostId, Vec<(&HostIntro, MemberId)>> = BTreeMap::new();
+    for (id, member) in &members.live {
+        if let Some(intro) = member.bundle.host.as_ref()
+            && let Ok(host) = intro.id()
+        {
+            member_hosts.entry(host).or_default().push((intro, *id));
+        }
+    }
     let mut adds: BTreeMap<HostId, Vec<Add<'_>>> = BTreeMap::new();
     for (id, host) in &base.hosts {
-        if !member_hosts.contains_key(id) && host.intro.kind != super::HostKind::Member {
+        if host.intro.kind != super::HostKind::Member {
             adds.entry(*id).or_default().push(Add {
                 position: None,
                 intro: &host.intro,
@@ -108,7 +108,6 @@ fn hosts(
             Body::HostAdd(intro) if !state.equivocating.contains(&op.signer()) => {
                 if let Ok(id) = intro.id()
                     && intro.kind != super::HostKind::Member
-                    && !member_hosts.contains_key(&id)
                 {
                     adds.entry(id).or_default().push(Add {
                         position: Some(position),
@@ -168,7 +167,16 @@ fn hosts(
     live.sort_by_key(|(earliest, id, _)| (*earliest, *id));
     live.truncate(MAX_HOSTS);
     state.hosts = live.into_iter().map(|(_, id, host)| (id, host)).collect();
-    for (id, (intro, member)) in member_hosts {
+    // A computer is its own host. Two members naming one host, or a member
+    // naming a host added before with another account or other SSH host
+    // keys, is a copied intro: held until a person picks.
+    for (id, claims) in member_hosts {
+        let (intro, member) = claims[0];
+        let added = state.hosts.get(&id).map(|host| &host.intro);
+        let held = claims.len() > 1
+            || added.is_some_and(|added| {
+                added.user != intro.user || added.record.ssh_host_keys != intro.record.ssh_host_keys
+            });
         state.hosts.insert(
             id,
             Host {
@@ -176,7 +184,7 @@ fn hosts(
                 added_by: member,
                 record: intro.record.clone(),
                 record_signature: intro.record_signature,
-                held: false,
+                held,
                 flagged: false,
             },
         );
@@ -234,17 +242,23 @@ fn access(folder: &Folder<'_, '_>, effective: &[(usize, &Op)], base: &State, sta
     let mut registers = base.access.clone();
     for (pair, entries) in by_pair {
         let floor = base.access.get(&pair).map_or(0, |register| register.rev);
-        // A `rev` must climb above what it saw, or an agent merging by
-        // `rev` alone would order it wrongly.
-        let counted: Vec<&Grant> = entries
-            .iter()
-            .filter(|(position, _, rev)| {
-                *rev > floor
-                    && entries.iter().all(|(other, _, other_rev)| {
-                        !graph.sees(*position, *other) || other_rev < rev
-                    })
-            })
-            .collect();
+        // A `rev` is one above the highest it saw, so an agent merging by
+        // `rev` alone orders it rightly, and no single operation can put
+        // the register out of reach of a later deny.
+        // `entries` are in graph order, so each one's counted ancestors
+        // are known before it; one that did not count sets no floor.
+        let mut counted: Vec<&Grant> = Vec::new();
+        for entry in &entries {
+            let (position, _, rev) = entry;
+            let seen = counted
+                .iter()
+                .filter(|(other, ..)| graph.sees(*position, *other))
+                .map(|(_, _, other_rev)| *other_rev)
+                .fold(floor, u64::max);
+            if seen.checked_add(1) == Some(*rev) {
+                counted.push(entry);
+            }
+        }
         let latest: Vec<&&Grant> = counted
             .iter()
             .filter(|(position, ..)| {

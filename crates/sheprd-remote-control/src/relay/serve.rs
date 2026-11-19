@@ -218,7 +218,16 @@ async fn fleet_session(
             crate::fleet::removals::serve(fleet.clone(), &fleet.inbound, &mut tunnel).await;
             Ok(())
         }
-        PURPOSE_SSH if peer.ssh => fleet_ssh(state, fleet, peer.member, tunnel).await,
+        PURPOSE_SSH if peer.ssh => {
+            // The handshake proved this device holds the member's tunnel
+            // key: a pairing it had here one by one is the fleet's now.
+            let (superseding, remote) = (state.clone(), *remote);
+            let _ = tokio::task::spawn_blocking(move || {
+                crate::fleet::grants::supersede(&superseding, &remote)
+            })
+            .await;
+            fleet_ssh(state, fleet, peer.member, tunnel).await
+        }
         PURPOSE_SSH => Ok(()),
         byte => match desktop(state, remote) {
             Some((device, server)) => ssh(state, device, server, Some(byte), tunnel).await,

@@ -98,9 +98,35 @@ async fn joining_supersedes_a_pairing_here_so_removal_takes_every_way_in() {
         .unwrap();
     assert_eq!(a.ask(Ask::Found), Answer::Done);
     join(&a, &b);
+    a.fleet.receive(b.ops(), now_ms()).unwrap();
     a.start().await;
-    // The fleet lets b in now; the pairing beside it goes, so removing b
-    // from the fleet leaves it no way in.
+    // A bundle naming b's keys proves nothing: the pairing stays until b
+    // itself opens SSH through the fleet with them.
+    until(10, || a.lines().len() == 1).await;
+    assert!(a.state.auth().devices().get(&legacy).is_some());
+    grants::apply(&b.state, &b.fleet).unwrap();
+    let info = a.relays.info().unwrap();
+    let record = crate::desktop::record::Record {
+        computer: String::new(),
+        identity: info.identity,
+        relays: info.relays,
+        route: info.route,
+        fleet: true,
+    };
+    let host = sheprd_client::relay_host::host_name(&record.id().unwrap());
+    let mut opened = None;
+    for _ in 0..100 {
+        if let Ok(tunnel) = crate::desktop::connect::open(b.dir.path(), &host).await {
+            opened = Some(tunnel);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let (_connection, mut tunnel) = opened.expect("never let through");
+    let mut greeting = [0; 14];
+    tunnel.io.read_exact(&mut greeting).await.unwrap();
+    // Now the device proved it holds the key, and the fleet lets it in:
+    // its pairing goes, and removing it from the fleet removes every way
+    // in it had.
     until(10, || a.state.auth().devices().get(&legacy).is_none()).await;
-    assert_eq!(a.lines().len(), 1);
 }

@@ -5,6 +5,7 @@ use gpui::{Entity, TestAppContext, VisualTestContext, point, px, size};
 
 mod en_xa;
 mod queue;
+mod stacked;
 
 fn input() -> crate::pull_request::Input {
     crate::pull_request::Input {
@@ -44,7 +45,7 @@ pub(super) fn draw(cx: &mut VisualTestContext) {
     });
 }
 
-fn labels(view: &crate::SheprdWindow) -> Vec<String> {
+pub(super) fn labels(view: &crate::SheprdWindow) -> Vec<String> {
     view.git_rows()
         .into_iter()
         .map(|(_, label)| label)

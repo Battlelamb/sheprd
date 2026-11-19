@@ -139,3 +139,28 @@ fn an_inferred_stack_shows_its_chip_with_a_note_and_no_stack_merge(cx: &mut Test
     assert!(cx.debug_bounds("orchestrator-stack-merge").is_none());
     assert!(cx.debug_bounds("orchestrator-stack-enqueue").is_none());
 }
+
+#[test]
+fn a_split_below_gives_no_stack_from_any_of_its_layers() {
+    let items = vec![
+        pr(1, "main", "feat/a"),
+        pr(2, "feat/a", "feat/b"),
+        pr(3, "feat/a", "feat/c"),
+    ];
+    for current in &items {
+        assert!(
+            infer(&items, &HashMap::new(), current).is_none(),
+            "#{} sees the same answer as the others",
+            current.pull_request.as_ref().unwrap().number
+        );
+    }
+}
+
+#[test]
+fn a_pull_request_whose_head_repository_is_unknown_never_joins() {
+    let mut items = chain();
+    items[1].pull_request.as_mut().unwrap().head_repository = None;
+    let (stack, at) = infer(&items, &HashMap::new(), &items[0]).unwrap();
+    assert_eq!((numbers(&stack), at), (vec![2, 3], 1));
+    assert!(infer(&items, &HashMap::new(), &items[1]).is_none());
+}

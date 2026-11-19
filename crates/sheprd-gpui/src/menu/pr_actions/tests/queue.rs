@@ -29,9 +29,7 @@ fn queueing_a_stack_opens_a_confirmation_naming_every_layer_that_lands(cx: &mut 
     cx.update(|_, cx| assert_eq!(view.read(cx).menu.page, Some(Page::PrQueue)));
     assert!(cx.debug_bounds("pr-queue-body").is_some());
     assert!(cx.debug_bounds("pr-queue-confirm").is_some());
-    let lands = cx.update(|_, cx| {
-        crate::menu::pr_queue::lands(&view.read(cx).git_open_pull_request().unwrap())
-    });
+    let lands = cx.update(|_, cx| view.read(cx).git_open_pull_request().unwrap().lands());
     assert_eq!(lands, [1362, 1364]);
 }
 

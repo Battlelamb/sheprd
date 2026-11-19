@@ -268,8 +268,10 @@ impl SheprdWindow {
         {
             rows.push((Row::Review, fl!("git-menu-checks-and-comments")));
             rows.push((Row::Comment, fl!("git-menu-comment")));
-            // GitHub refuses to merge a draft; the repository may allow nothing.
-            if !pr.is_draft && !pr.merge_methods.is_empty() {
+            // GitHub refuses to merge a draft; the repository may allow
+            // nothing. A stacked one merges the layers below it too, so only
+            // once they are all known and ready.
+            if !pr.is_draft && !pr.merge_methods.is_empty() && pr.stack_mergeable() {
                 rows.push((Row::Merge, fl!("git-menu-merge")));
             }
         }

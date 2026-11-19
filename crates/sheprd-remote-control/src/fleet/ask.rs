@@ -41,6 +41,7 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             method,
         } => {
             let bundle = Bundle::from_bytes(&sync::bytes(&bundle)?)?;
+            let member = bundle.id();
             let joiner_signature = sync::bytes(&signature)?
                 .try_into()
                 .map_err(|_| crate::control::fleet::Error::JoinSignature)?;
@@ -52,6 +53,7 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
                 }),
                 now_ms,
             )?;
+            fleet.joins().admitted(&member);
             Ok(Answer::Done)
         }
         Ask::Remove {
@@ -152,6 +154,9 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             }
             Ok(Answer::Applied(applied))
         }
+        Ask::Joins => Ok(Answer::Joins {
+            joins: fleet.joins().list(now_ms),
+        }),
     }
 }
 

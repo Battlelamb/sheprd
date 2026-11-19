@@ -12,6 +12,7 @@
 mod api;
 mod assets;
 pub(crate) mod attention;
+mod fleet;
 mod fragments;
 mod github;
 mod hosts;
@@ -246,6 +247,15 @@ pub(crate) fn router(state: Shared) -> Router {
             post(crate::native::summarize),
         )
         .route("/api/v2/chat/{pane}/title", post(crate::native::title))
+        .route("/api/v2/fleet", get(fleet::status))
+        .route(
+            "/api/v2/fleet/join",
+            post(fleet::join).layer(DefaultBodyLimit::max(fleet::MAX_JOIN_BODY)),
+        )
+        .route(
+            "/api/v2/fleet/sync",
+            post(fleet::sync).layer(DefaultBodyLimit::max(fleet::MAX_SYNC_BODY)),
+        )
         .route("/api/v2/github/token", get(crate::native::github::token))
         .route("/api/v2/home", get(crate::native::get_home))
         .route("/api/v2/hosts", get(hosts::list))
@@ -417,6 +427,19 @@ async fn cors(Extract(state): Extract<Shared>, request: Request, next: Next) -> 
     response
 }
 
+/// How a phone hears of a fleet failure: what it sent is refused, the
+/// fleet is not there, or this computer failed.
+fn fleet_status(error: &crate::fleet::Error) -> StatusCode {
+    use crate::fleet::{Error, joins};
+    match error {
+        Error::NoFleet => StatusCode::CONFLICT,
+        Error::Joins(joins::Error::Full) => StatusCode::TOO_MANY_REQUESTS,
+        Error::Joins(joins::Error::Removed) => StatusCode::FORBIDDEN,
+        Error::Joins(_) | Error::Log(_) => StatusCode::BAD_REQUEST,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
 pub(crate) fn allowed_origin(origins: &[String], origin: &str) -> bool {
     origins.iter().any(|allowed| allowed == origin)
 }
@@ -464,6 +487,8 @@ pub(crate) enum ApiError {
     Auth(#[from] auth::Error),
     #[error(transparent)]
     Changes(#[from] crate::native::changes::Error),
+    #[error(transparent)]
+    Fleet(#[from] crate::fleet::Error),
     #[error("that is not a folder you can start a workspace in")]
     Folder,
     #[error(transparent)]
@@ -530,6 +555,7 @@ impl IntoResponse for ApiError {
                     | crate::ssh_access::Error::UnknownUser,
                 ),
             ) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Fleet(error) => fleet_status(error),
             Self::Update(update::Error::AppClosed) => StatusCode::CONFLICT,
             Self::App(_) | Self::Upload(uploads::Error::Write(_)) => {
                 StatusCode::INTERNAL_SERVER_ERROR

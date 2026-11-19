@@ -1933,6 +1933,28 @@ manual multi-machine and phone steps left unticked in its QA list.
 5. **iOS:** joining at pairing, admitting a computer from the phone, the
    Secure Enclave key, sync, offers and `Link`, removing from the phone,
    pushes, and Settings > Fleet. Swift tests against phase 1's vectors.
+   - **Built, the daemon:** `GET /api/v2/fleet` (the view, heads, and a
+     live member's next sequence number and parents),
+     `POST /api/v2/fleet/sync` (64 operations, 256 KiB), and
+     `POST /api/v2/fleet/join`, kept in memory (8, 10 minutes) for
+     Sheprd's `Ask::Joins` and admitted only by `Ask::Admit`.
+     `fleet::links` admits a phone's linked key as an API device with an
+     id derived from the key, and revokes it with the member or a newer
+     link.
+   - **Built, the phone:** `FleetClient` in `SheprdRemoteCore`, checked
+     against a new phone vector; a Secure Enclave key with user presence
+     (a software key in the simulator only); "Join" after pairing with a
+     computer in a fleet; Settings > Fleet with members, hosts and their
+     paths, and removals with Face ID; and the offer card, which signs
+     one `Link` per Sheprd host and keeps each as a computer reached
+     through the one it joined through.
+   - **Left:** Sheprd's join dialog for `Ask::Joins` (phase 3); the
+     phone's own copy of the log, so it checks what it signs on rather
+     than trusting the member it asks; admitting a computer from the
+     phone; pushes; the pairing dialog's fleet line; history; and a path
+     to linked hosts before they publish `direct` addresses or Sheprd
+     carries the phone's relay keys to them (`host_relay`), which needs
+     members as SSH hosts in Sheprd (phase 3).
 6. **Migration and scrub** (built):
    - **`fleet scrub`:** `sheprd-remote-control fleet scrub` forgets the
      fleet on a computer, with the `authorized_keys` lines and relay

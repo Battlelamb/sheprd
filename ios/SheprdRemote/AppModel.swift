@@ -235,6 +235,8 @@ final class AppModel {
     let fleet: Fleet
     /// Pairing with the hosts each computer's Sheprd knows.
     let hostLinks: HostLinks
+    /// This phone as a member of the person's fleet.
+    let fleetMembership: FleetMembership
     let nearby = NearbyBrowser()
     let collapsed = CollapsedStore()
     let tagFilter = TagFilterStore()
@@ -258,6 +260,7 @@ final class AppModel {
         tokens = ActivityTokens(sessions: sessions)
         fleet = Fleet(sessions: sessions)
         hostLinks = HostLinks(sessions: sessions)
+        fleetMembership = FleetMembership(sessions: sessions)
         var loaded = false
         do {
             computers = try ComputerStore.load()
@@ -290,7 +293,12 @@ final class AppModel {
         presence.computers = computers
         hostLinks.computers = { [weak self] in self?.computers ?? [] }
         hostLinks.onPaired = { [weak self] in self?.add($0) }
-        fleet.onOnline = { [weak self] in self?.hostLinks.check($0) }
+        fleetMembership.computers = { [weak self] in self?.computers ?? [] }
+        fleetMembership.onLinked = { [weak self] in self?.add($0) }
+        fleet.onOnline = { [weak self] computer in
+            self?.hostLinks.check(computer)
+            self?.fleetMembership.online(computer)
+        }
         fleet.onTags = { [weak self] in self?.tagsArrived($0, for: $1) }
         fleet.onTagsAnswer = { [weak self] in self?.tagsAnswered($0, for: $1) }
         shortcuts.perform = { [weak fleet] actions in
@@ -331,6 +339,8 @@ final class AppModel {
         Task { await AppDelegate.enableAlerts() }
         Task { await tokens.sync(only: computer.fingerprint) }
         hostLinks.check(computer, force: true)
+        // A computer in a fleet offers joining it.
+        if computer.via == nil { Task { await fleetMembership.check(computer) } }
     }
 
     /// Turns Bluetooth presence on or off for one computer.

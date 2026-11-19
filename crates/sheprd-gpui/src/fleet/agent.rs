@@ -89,6 +89,8 @@ else
   esac
 fi
 case "$state" in *'&'*|*'<'*|*'>'*|*'"'*|*'%'*|*'\'*) echo "the state directory's name cannot go in a service" >&2; exit 5;; esac
+case "$HOME" in *'&'*|*'<'*|*'>'*|*'"'*|*'%'*) echo "the home directory's name cannot go in a service" >&2; exit 5;; esac
+case "$(uname -s)" in
 Darwin)
   plist="$HOME/Library/LaunchAgents/{LABEL}.plist"
   mkdir -p "$HOME/Library/LaunchAgents"

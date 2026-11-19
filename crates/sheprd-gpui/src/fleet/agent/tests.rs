@@ -144,3 +144,26 @@ fn a_share_waits_for_a_running_agent() {
     assert!(matches!(running(stopped), Err(Error::NotRunning)));
     assert!(running(report(&[ED25519])).is_ok());
 }
+
+/// Every script this module runs on a host parses as POSIX shell.
+#[cfg(unix)]
+#[test]
+fn the_host_scripts_parse() {
+    let scripts = [
+        service_script(&["https://fra1.relay.sheprd.org".to_owned()]),
+        probe_script("1.2.3"),
+        RUN.replace("ARGS", "status --json"),
+    ];
+    for script in scripts {
+        #[allow(clippy::disallowed_methods)] // A local `sh -n`, in a test.
+        let checked = std::process::Command::new("sh")
+            .args(["-n", "-c", &script])
+            .output()
+            .unwrap();
+        assert!(
+            checked.status.success(),
+            "{}\n{script}",
+            String::from_utf8_lossy(&checked.stderr)
+        );
+    }
+}

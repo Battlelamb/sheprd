@@ -68,6 +68,10 @@ fn symbol_cascade(window: &mut Window, cx: &mut App) -> Result<&'static str> {
 }
 
 pub fn start_sidebar(handle: WindowHandle<SheprdWindow>, cx: &mut App) {
+    if std::env::var_os("HERDR_TEST_TRACES_ONLY").is_some() {
+        crate::traces::native::start(handle, cx);
+        return;
+    }
     if std::env::var_os("HERDR_TEST_GITHUB_QUOTA_ONLY").is_some() {
         cx.spawn(async move |cx| match quota::run(handle, cx).await {
             Ok(()) => {

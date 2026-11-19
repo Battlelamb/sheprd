@@ -258,7 +258,7 @@ not take it either.
 | `config reload` | Reread Herdr's config and this app's |
 | `theme [list]`, `theme set NAME` | The app theme. A device's terminal theme is `config set devices.ID.theme NAME`, with the ID from `host list` minus its `ssh:` prefix |
 | `font [list]`, `font set NAME`, `font reset` | |
-| `language [status]`, `language list`, `language set system\|TAG` | The language set and the locale Sheprd shows, the languages there are, each with its name in itself as Settings > General lists it, or save the `language` setting (a BCP 47 tag; `en-XA` and `en-XB` are pseudo-locales). Only `status` asks the app, and without it reports what it would show |
+| `language [status]`, `language list`, `language set system\|TAG` | The language set and the locale Sheprd shows, the languages available for direct selection plus pseudo-locales, or save the `language` setting (a BCP 47 tag; `en-XA` and `en-XB` are pseudo-locales). `system` also uses Simplified Chinese when it matches the OS's preferred languages. Only `status` asks the app, and without it reports what it would show |
 | `keybinds [list]`, `keybinds check` | Shortcuts; custom Herdr commands this client cannot reach |
 | `caffeine [status]`, `caffeine on\|off\|toggle [--for 30m]` | Keep the machine awake |
 | `sound [list]`, `sound play [done\|request]`, `bell` | Sounds play at `sound.volume` percent (`config set sound.volume 30`) |

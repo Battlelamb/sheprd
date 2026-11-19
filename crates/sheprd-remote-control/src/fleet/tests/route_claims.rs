@@ -3,7 +3,7 @@
 //! claim the log orders first arrives after the keys were saved.
 
 use super::*;
-use crate::control::fleet::{HostKind, HostSeen};
+use crate::control::fleet::{HostId, HostKind, HostSeen};
 use crate::desktop::record::Record;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 
@@ -107,12 +107,7 @@ fn keys_saved_for_a_host_that_still_names_the_route_stay() {
 }
 
 /// Whether `state` lets `host`'s kept record on `route` stand for `me`.
-fn pins(
-    state: &crate::control::fleet::State,
-    me: &MemberId,
-    host: crate::control::fleet::HostId,
-    route: &str,
-) -> bool {
+fn pins(state: &crate::control::fleet::State, me: &MemberId, host: HostId, route: &str) -> bool {
     grants::Routes::of(state, me)
         .named
         .contains(&(host.to_string(), route.to_owned()))
@@ -141,9 +136,7 @@ async fn only_a_host_still_standing_on_its_route_pins_it() {
     assert!(!pins(&held, &me, host, &route));
     // Not the route's owner in the log, the route being clear: no.
     let mut owned = state.clone();
-    owned
-        .routes
-        .insert(route.clone(), crate::control::fleet::HostId([0x44; 32]));
+    owned.routes.insert(route.clone(), HostId([0x44; 32]));
     assert!(!pins(&owned, &me, host, &route));
     // Denied to this member: no longer.
     a.ask(Ask::Access {

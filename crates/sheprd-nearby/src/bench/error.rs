@@ -16,9 +16,9 @@ pub enum Error {
     Report(#[source] serde_json::Error),
     #[error("Bluetooth is not available here")]
     Unavailable,
-    #[error("unknown option {0:?}")]
-    UnknownOption(String),
     #[error("unknown mode {0:?}: use serve or run")]
     UnknownMode(String),
+    #[error("unknown option {0:?}")]
+    UnknownOption(String),
     // keep-sorted end
 }

@@ -64,12 +64,36 @@ async fn serve(agent: &Arc<Agent>, pending: Pending, route: RouteId) -> Result<(
         .await
         .map_err(|_| sheprd_tunnel::Error::Closed)?
         .map_err(Error::Splice)?;
+    // A purpose byte, which no desktop enrolled one by one sends, from the
+    // device holding a desktop's tunnel key proves that desktop is this
+    // member's: its suspension and removal then take the desktop too.
+    if desktop && matches!(first[0], PURPOSE_REMOVAL | PURPOSE_SSH) {
+        bind(agent, id, remote).await;
+    }
     match first[0] {
         PURPOSE_REMOVAL => removals(agent, id, &mut tunnel).await,
         PURPOSE_SSH if ssh => splice(agent, tunnel, peer, remote, None).await,
         PURPOSE_SSH => Ok(()),
         byte if desktop => splice(agent, tunnel, Peer::Desktop, remote, Some(byte)).await,
         _ => Ok(()),
+    }
+}
+
+/// Binds the enrolled desktop with `tunnel` to `member`, off the runtime's
+/// threads; a failure binds nothing, which only leaves the desktop alone.
+async fn bind(agent: &Arc<Agent>, member: crate::access::Id, tunnel: [u8; 32]) {
+    let blocking = Arc::clone(agent);
+    let bound = tokio::task::spawn_blocking(move || {
+        Held::bind(blocking.state_dir(), member, tunnel).and_then(|bound| {
+            if bound {
+                blocking.reload()?;
+            }
+            Ok(bound)
+        })
+    })
+    .await;
+    if let Ok(Err(error)) = bound {
+        tracing::debug!(error = %error, "could not bind a desktop to its member");
     }
 }
 

@@ -17,9 +17,14 @@ const _: () = assert!(sheprd_relay_agent::access::MAX_REMOVED == MAX_TOMBSTONES)
 /// The access file for plain host `host` as `log` has it: every live
 /// computer member, allowed or not, with the `rev` of its `Access`
 /// register, and every removed member. `suspended` are the removals the
-/// host's agent reported suspending for (`status --json`); those `log`
-/// holds go in `settled`, so the agent lifts a suspension the log voided.
-/// Refuses a host that is not a plain host, or that is held.
+/// host's agent reported suspending for (`status --json`); each goes in
+/// `settled` once the log can say it no longer stands: it holds it as a
+/// `Remove` (so a target still a member was not removed by it), or, with
+/// nothing waiting for its parents, it holds no such `Remove` at all (an
+/// id no member's removal has, or one that is no removal). The agent then
+/// lifts a suspension the log voided, and no member can keep another
+/// suspended by naming removals that do not exist. Refuses a host that is
+/// not a plain host, or that is held.
 pub fn compute(
     log: &Log,
     host: &HostId,
@@ -56,11 +61,12 @@ pub fn compute(
             Some((Id(id.0), member))
         })
         .collect();
+    let current = log.pending() == 0;
     let settled = suspended
         .into_iter()
-        .filter(|id| {
-            log.get(id)
-                .is_some_and(|op| matches!(op.body(), Body::Remove(_)))
+        .filter(|id| match log.get(id) {
+            Some(op) => matches!(op.body(), Body::Remove(_)) || current,
+            None => current,
         })
         .take(MAX_SETTLED)
         .map(|id| Id(id.0))

@@ -52,8 +52,36 @@ impl Host {
         Held::apply(self.state(), Some(&self.keys()), access)
     }
 
+    /// `sender` passes `removals`, each signed by itself.
     fn suspend(&self, sender: u8, removals: &[Removed]) -> Vec<[u8; 32]> {
+        let signed: Vec<Removed> = removals
+            .iter()
+            .cloned()
+            .map(|removal| Removed {
+                signer: [sender; 32],
+                ..removal
+            })
+            .collect();
+        self.pass(sender, &signed)
+    }
+
+    /// `sender` passes `removals` as they are.
+    fn pass(&self, sender: u8, removals: &[Removed]) -> Vec<[u8; 32]> {
         Held::suspend(self.state(), Some(&self.keys()), id(sender), removals).unwrap()
+    }
+
+    /// Enrolls the desktop with member `seed`'s keys one by one.
+    fn enroll(&self, seed: u8) {
+        let keys = member(seed, true, 0);
+        let mut desktops = Authorized::load(self.state()).unwrap();
+        desktops
+            .insert(Entry {
+                dial: keys.dial,
+                tunnel: keys.tunnel,
+                label: "laptop".to_owned(),
+            })
+            .unwrap();
+        desktops.save(self.state()).unwrap();
     }
 
     fn admitted(&self) -> Admitted {
@@ -245,24 +273,17 @@ fn a_member_named_by_too_many_removals_stays_suspended() {
 }
 
 #[test]
-fn a_desktop_sharing_keys_with_a_suspended_member_is_cut_off_with_it() {
+fn a_desktop_bound_to_a_suspended_member_is_cut_off_with_it() {
     let host = Host::new();
-    let mut desktops = Authorized::default();
-    let shared = member(2, true, 0);
-    desktops
-        .insert(Entry {
-            dial: shared.dial,
-            tunnel: shared.tunnel,
-            label: "laptop".to_owned(),
-        })
-        .unwrap();
-    desktops.save(host.state()).unwrap();
+    host.enroll(2);
     host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[]))
         .unwrap();
     assert!(matches!(
         host.admitted().peer(&[2; 32]),
         Some(Peer::Member { desktop: true, .. })
     ));
+    // The device holding the desktop's key spoke as member 2.
+    assert!(Held::bind(host.state(), id(2), [2; 32]).unwrap());
     host.suspend(1, &[removal(0x51, &[2])]);
     let admitted = host.admitted();
     assert_eq!(admitted.peer(&[2; 32]), None);
@@ -319,4 +340,77 @@ fn scrubbing_forgets_the_fleet_and_its_lines_and_keeps_the_rest() {
     let mut other = file(&[(3, true, 0)], &[], &[]);
     other.fleet = id(0xf2);
     assert!(host.apply(other).is_ok());
+}
+
+#[test]
+fn a_desktop_whose_keys_a_member_only_names_is_not_cut_off_or_forgotten() {
+    let host = Host::new();
+    host.enroll(2);
+    host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[]))
+        .unwrap();
+    host.suspend(1, &[removal(0x51, &[2])]);
+    // Not bound: the desktop is still the desktop it was enrolled as.
+    let admitted = host.admitted();
+    assert_eq!(admitted.peer(&[2; 32]), Some(Peer::Desktop));
+    assert!(admitted.keeps_ssh(&Peer::Desktop, &[2; 32]));
+    host.apply(file(&[(1, true, 0)], &[2], &[])).unwrap();
+    assert_eq!(Authorized::load(host.state()).unwrap().entries().len(), 1);
+    assert_eq!(host.admitted().peer(&[2; 32]), Some(Peer::Desktop));
+}
+
+#[test]
+fn a_desktop_is_bound_only_to_the_member_that_names_its_key_and_is_enrolled() {
+    let host = Host::new();
+    host.enroll(2);
+    host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[]))
+        .unwrap();
+    // Member 1 does not hold key 2; no desktop holds key 1.
+    assert!(!Held::bind(host.state(), id(1), [2; 32]).unwrap());
+    assert!(!Held::bind(host.state(), id(1), [1; 32]).unwrap());
+    assert!(Held::bind(host.state(), id(2), [2; 32]).unwrap());
+    assert!(!Held::bind(host.state(), id(2), [2; 32]).unwrap());
+    let held = Held::load(host.state()).unwrap();
+    assert_eq!(held.bound.len(), 1);
+}
+
+#[test]
+fn a_removal_another_member_signed_is_taken_but_acted_on_by_no_one() {
+    let host = Host::new();
+    host.apply(file(&[(1, true, 0), (2, true, 0), (3, true, 0)], &[], &[]))
+        .unwrap();
+    // Member 1 passes a removal of 2 it says 3 signed.
+    let mut forged = removal(0x51, &[2]);
+    forged.signer = [3; 32];
+    assert_eq!(host.pass(1, &[forged]), [[0x51; 32]]);
+    assert!(Held::load(host.state()).unwrap().suspended.is_empty());
+}
+
+#[test]
+fn a_member_denied_ssh_here_suspends_only_members_denied_too() {
+    let host = Host::new();
+    host.apply(file(
+        &[(1, false, 1), (2, true, 0), (3, false, 1)],
+        &[],
+        &[],
+    ))
+    .unwrap();
+    host.suspend(1, &[removal(0x51, &[2, 3])]);
+    let held = Held::load(host.state()).unwrap();
+    assert!(!held.suspended.contains_key(&id(2)));
+    assert!(held.suspended.contains_key(&id(3)));
+}
+
+#[test]
+fn a_suspension_for_removals_the_log_never_held_lifts_once_settled() {
+    let host = Host::new();
+    host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[]))
+        .unwrap();
+    // Member 1 names a removal no log will hold.
+    host.suspend(1, &[removal(0x5f, &[2])]);
+    assert!(host.admitted().peer(&[2; 32]).is_none());
+    // A current log settles ids it does not hold too.
+    let held = host
+        .apply(file(&[(1, true, 0), (2, true, 0)], &[], &[0x5f]))
+        .unwrap();
+    assert!(held.suspended.is_empty());
 }

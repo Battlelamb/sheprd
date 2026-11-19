@@ -11,7 +11,16 @@
 //! member is readmitted once every removal it was suspended for is one
 //! that log holds, which means the log voided it. A suspension the agent
 //! cannot settle stays: a member can only ever take access away here this
-//! way, never give it.
+//! way, never give it. A member suspends only in its own name (the
+//! removal's signer must be the member that passed it), and a member
+//! denied SSH here suspends only members denied too.
+//!
+//! A desktop enrolled one by one in `authorized` is no member's because a
+//! member's bundle names its keys: anyone may name any key. It is bound
+//! to a member (kept in `bound`) only once the device holding its tunnel
+//! key opens a session as that member, with a purpose byte no enrolled
+//! desktop sends. Only a bound desktop is cut off with its member's
+//! suspension, and forgotten with its removal.
 
 use crate::{
     Error, Result,
@@ -29,6 +38,8 @@ use std::{
 
 /// The members suspended, in the state directory.
 pub const SUSPENDED: &str = "suspended";
+/// The desktops proven to be members' devices, in the state directory.
+pub const BOUND: &str = "bound";
 /// Removals remembered per suspended member; past that, its suspension is
 /// one no access file lifts.
 pub const MAX_CAUSES: usize = 8;
@@ -45,11 +56,15 @@ pub struct Suspension {
     pub overflow: bool,
 }
 
-/// The access this agent holds, and who is suspended.
+/// The access this agent holds, who is suspended, and which enrolled
+/// desktops are members' devices.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Held {
     pub access: Option<Access>,
     pub suspended: BTreeMap<Id, Suspension>,
+    /// By member, the tunnel keys of desktops in `authorized` its device
+    /// proved it holds.
+    pub bound: BTreeMap<Id, BTreeSet<Id>>,
 }
 
 impl Held {
@@ -59,25 +74,19 @@ impl Held {
         let access = files::read_bounded(&state_dir.join(access::FILE), access::MAX_BYTES as u64)?
             .map(|bytes| Access::parse(&bytes))
             .transpose()?;
-        let path = state_dir.join(SUSPENDED);
-        let suspended = match files::read_bounded(&path, MAX_SUSPENDED_BYTES)? {
-            Some(bytes) => serde_json::from_slice(&bytes)
-                .map_err(|source| Error::FleetFormat { path, source })?,
-            None => BTreeMap::new(),
-        };
-        Ok(Self { access, suspended })
+        Ok(Self {
+            access,
+            suspended: read_json(state_dir, SUSPENDED)?,
+            bound: read_json(state_dir, BOUND)?,
+        })
     }
 
     fn save(&self, state_dir: &Path) -> Result<()> {
         if let Some(access) = &self.access {
             files::write_private(&state_dir.join(access::FILE), &access.to_bytes()?)?;
         }
-        let path = state_dir.join(SUSPENDED);
-        let json = serde_json::to_vec(&self.suspended).map_err(|source| Error::FleetFormat {
-            path: path.clone(),
-            source,
-        })?;
-        files::write_private(&path, &json)
+        write_json(state_dir, SUSPENDED, &self.suspended)?;
+        write_json(state_dir, BOUND, &self.bound)
     }
 
     /// `fleet apply`: merges `incoming` into what `state_dir` holds,
@@ -89,24 +98,21 @@ impl Held {
         let mut held = Self::load(state_dir)?;
         let settled = incoming.settled.clone();
         let merged = Access::merge(held.access.as_ref(), incoming)?;
-        let gone: Vec<&Member> = held
-            .access
+        // A member removed for good takes the desktops it proved were its
+        // devices with it; no other desktop, whatever its bundle names.
+        let gone: BTreeSet<Id> = held
+            .bound
             .iter()
-            .flat_map(|access| &access.members)
             .filter(|(id, _)| merged.removed.contains(id))
-            .map(|(_, member)| member)
+            .flat_map(|(_, tunnels)| tunnels.iter().copied())
             .collect();
         if !gone.is_empty() {
             let mut desktops = Authorized::load(state_dir)?;
-            // Every one is forgotten, not only the first that was there.
-            let mut forgot = false;
-            for pair in gone.iter().flat_map(|member| member.pairs()) {
-                forgot |= desktops.forget(&pair.dial, &pair.tunnel);
-            }
-            if forgot {
+            if desktops.forget_tunnels(gone.iter().map(|tunnel| &tunnel.0)) {
                 desktops.save(state_dir)?;
             }
         }
+        held.bound.retain(|id, _| !merged.removed.contains(id));
         held.suspended.retain(|member, suspension| {
             let removed = merged.removed.contains(member);
             let voided =
@@ -129,7 +135,7 @@ impl Held {
         if let (Some(path), Some(access)) = (keys, &held.access) {
             authorized_keys::set_fleet(path, &access.fleet.short(), &[])?;
         }
-        for name in [access::FILE, SUSPENDED] {
+        for name in [access::FILE, SUSPENDED, BOUND] {
             let path = state_dir.join(name);
             match std::fs::remove_file(&path) {
                 Ok(()) => {}
@@ -141,9 +147,11 @@ impl Held {
     }
 
     /// A removal exchange from member `sender`: suspends every target of
-    /// `removals` in this fleet that is a member here, never `sender`
-    /// itself. Returns the ids of the removals taken: every one for this
-    /// fleet, so the sender owes them no more. Blocking.
+    /// `removals` in this fleet that `sender` signed and that is a member
+    /// here, never `sender` itself, and, when `sender` is denied SSH here,
+    /// only members denied too. Returns the ids of the removals taken:
+    /// every one for this fleet, acted on or not, so the sender owes them
+    /// no more. Blocking.
     pub fn suspend(
         state_dir: &Path,
         keys: Option<&Path>,
@@ -159,6 +167,10 @@ impl Held {
         if !access.members.contains_key(&sender) || held.suspended.contains_key(&sender) {
             return Ok(Vec::new());
         }
+        let sender_allowed = access
+            .members
+            .get(&sender)
+            .is_some_and(|member| member.allow);
         let mut taken = Vec::new();
         let mut changed = false;
         for removal in removals
@@ -166,11 +178,22 @@ impl Held {
             .filter(|removal| removal.fleet == access.fleet.0)
         {
             taken.push(removal.id);
+            // Only in its own name: the agent checks no signature, so a
+            // removal another member signed is the log's to bring here.
+            if removal.signer != sender.0 {
+                continue;
+            }
             let targets = removal
                 .targets
                 .iter()
                 .map(|target| Id(*target))
-                .filter(|target| *target != sender && access.members.contains_key(target));
+                .filter(|target| *target != sender)
+                .filter(|target| {
+                    access
+                        .members
+                        .get(target)
+                        .is_some_and(|member| sender_allowed || !member.allow)
+                });
             for target in targets {
                 let suspension = held.suspended.entry(target).or_default();
                 let id = Id(removal.id);
@@ -190,6 +213,32 @@ impl Held {
             held.write_keys(keys)?;
         }
         Ok(taken)
+    }
+
+    /// Binds the desktops in `authorized` with `tunnel` to `member`, whose
+    /// device just opened a session as that member with that key: proof
+    /// it holds the key. Blocking.
+    pub fn bind(state_dir: &Path, member: Id, tunnel: [u8; 32]) -> Result<bool> {
+        let _lock = files::Lock::acquire(state_dir)?;
+        let mut held = Self::load(state_dir)?;
+        let named = held
+            .access
+            .as_ref()
+            .and_then(|access| access.members.get(&member))
+            .is_some_and(|entry| entry.tunnel == tunnel);
+        let enrolled = Authorized::load(state_dir)?
+            .entries()
+            .iter()
+            .any(|entry| entry.tunnel == tunnel);
+        if !named || !enrolled || held.suspended.contains_key(&member) {
+            return Ok(false);
+        }
+        let tunnels = held.bound.entry(member).or_default();
+        if !tunnels.insert(Id(tunnel)) || tunnels.len() > crate::authorized::MAX_ENTRIES {
+            return Ok(false);
+        }
+        held.save(state_dir)?;
+        Ok(true)
     }
 
     /// Whether `member` is admitted at all: a member here, not suspended.
@@ -315,18 +364,15 @@ impl Admitted {
             .filter(move |(id, _)| !self.held.suspended.contains_key(id) && !shared.contains(id))
     }
 
-    /// A desktop in `authorized` with the keys of a suspended member, now
-    /// or before a rotation, is that member's device: cut off with it.
-    fn cut_off(&self, dial: &Key, tunnel: &[u8; 32]) -> bool {
-        let Some(access) = &self.held.access else {
-            return false;
-        };
+    /// A desktop in `authorized` bound to a suspended member is that
+    /// member's device: cut off with it. A desktop whose keys a member only
+    /// names is not.
+    fn cut_off(&self, tunnel: &[u8; 32]) -> bool {
         self.held
             .suspended
             .keys()
-            .filter_map(|id| access.members.get(id))
-            .flat_map(Member::pairs)
-            .any(|pair| pair.dial == *dial && pair.tunnel == *tunnel)
+            .filter_map(|id| self.held.bound.get(id))
+            .any(|tunnels| tunnels.contains(&Id(*tunnel)))
     }
 
     /// The keys the relays let dial: members first, then desktops, at
@@ -338,7 +384,7 @@ impl Admitted {
             .desktops
             .entries()
             .iter()
-            .filter(|entry| !self.cut_off(&entry.dial, &entry.tunnel))
+            .filter(|entry| !self.cut_off(&entry.tunnel))
             .map(|entry| entry.dial);
         for key in desktops {
             if !keys.contains(&key) {
@@ -353,29 +399,21 @@ impl Admitted {
         self.desktops
             .entries()
             .iter()
-            .any(|entry| entry.tunnel == *tunnel && !self.cut_off(&entry.dial, &entry.tunnel))
+            .any(|entry| entry.tunnel == *tunnel && !self.cut_off(&entry.tunnel))
     }
 
-    /// Who a handshake showing `tunnel` is, if admitted.
+    /// Who a handshake showing `tunnel` is, if admitted. A key no admitted
+    /// member holds (suspended, or named by two) is still an enrolled
+    /// desktop's when one has it and is not cut off.
     #[must_use]
     pub fn peer(&self, tunnel: &[u8; 32]) -> Option<Peer> {
         let desktop = self.desktop(tunnel);
-        // `members` leaves out a key two members name, suspended ones
-        // included, and a suspended member's: either way the key is no
-        // one's, desktop or not.
-        let named = self
-            .held
-            .access
-            .iter()
-            .flat_map(|access| &access.members)
-            .any(|(_, member)| member.tunnel == *tunnel);
         match self.members().find(|(_, member)| member.tunnel == *tunnel) {
             Some((id, member)) => Some(Peer::Member {
                 id: *id,
                 ssh: member.allow,
                 desktop,
             }),
-            None if named => None,
             None => desktop.then_some(Peer::Desktop),
         }
     }
@@ -397,6 +435,25 @@ impl Admitted {
     pub fn admits_member(&self, member: &Id) -> bool {
         self.members().any(|(id, _)| id == member)
     }
+}
+
+fn read_json<T: serde::de::DeserializeOwned + Default>(state_dir: &Path, name: &str) -> Result<T> {
+    let path = state_dir.join(name);
+    match files::read_bounded(&path, MAX_SUSPENDED_BYTES)? {
+        Some(bytes) => {
+            serde_json::from_slice(&bytes).map_err(|source| Error::FleetFormat { path, source })
+        }
+        None => Ok(T::default()),
+    }
+}
+
+fn write_json(state_dir: &Path, name: &str, value: &impl Serialize) -> Result<()> {
+    let path = state_dir.join(name);
+    let json = serde_json::to_vec(value).map_err(|source| Error::FleetFormat {
+        path: path.clone(),
+        source,
+    })?;
+    files::write_private(&path, &json)
 }
 
 #[cfg(test)]

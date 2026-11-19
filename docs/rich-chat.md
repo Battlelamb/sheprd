@@ -687,7 +687,13 @@ again only when they differ from the last ones sent, and the origin only on
 another device or a change between this machine and SSH. Where the person cannot open paths on the
 agent's machine, the note asks the agent to link pictures as Markdown images,
 which [linked pictures](#messages-and-controls) attach to the chat, and to
-render HTML mockups to screenshots. The transcript shows only the person's
+render HTML mockups to screenshots. It also says the person cannot touch
+the agent's computer, so a hardware key, Touch ID, or an on-screen prompt
+is out of their reach: the agent pushes and fetches over HTTPS with the
+GitHub CLI's credentials rather than SSH, and stops rather than turning
+off signing when a commit needs a key (`phone.md` and `remote.md`; the
+iPhone and iPad app's `phone-app.md` follows `phone.md`, so says it once
+through it). The transcript shows only the person's
 words. An older program ignores the field, and an older client sends none.
 
 The note's texts are templates (`context/prompts.rs`): the built-in ones in

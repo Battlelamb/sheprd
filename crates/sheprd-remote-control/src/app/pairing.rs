@@ -8,7 +8,9 @@
 //! phone's name and matching code and waits for Allow or Deny.
 
 use super::qr::Qr;
-use crate::control::{self, ErrorCode, Offer, PairingId, PairingState, Request, Response};
+use crate::control::{
+    self, DeviceId, ErrorCode, Offer, PairingId, PairingState, Request, Response,
+};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -45,6 +47,8 @@ pub enum Phase {
         answer: Option<Answer>,
     },
     Approved {
+        /// The paired device, as the daemon names it.
+        device: DeviceId,
         device_name: String,
         /// Another computer, let in over SSH rather than to the chats.
         ssh: bool,
@@ -324,9 +328,14 @@ impl Pairing {
                 Phase::Claimed {
                     device_name, ssh, ..
                 },
-                PairingState::Approved { .. },
-            ) => Phase::Approved { device_name, ssh },
-            (Phase::Showing { .. }, PairingState::Approved { .. }) => Phase::Approved {
+                PairingState::Approved { device },
+            ) => Phase::Approved {
+                device,
+                device_name,
+                ssh,
+            },
+            (Phase::Showing { .. }, PairingState::Approved { device }) => Phase::Approved {
+                device,
                 device_name: "The device".into(),
                 ssh: false,
             },

@@ -15,6 +15,7 @@ use sheprd_remote_control::control::Request;
 use std::{sync::Arc, time::Duration};
 
 mod addresses;
+mod fleet_line;
 mod hosts;
 mod share_github;
 
@@ -38,6 +39,10 @@ pub(crate) struct PairingDialog {
     pub(crate) pairing: Pairing,
     /// The other machines the phone may be allowed on too.
     pub(crate) hosts: Vec<hosts::Choice>,
+    /// Whether the phone, once approved, is admitted to this computer's
+    /// fleet when it asks to join (`fleet_line`). Ticked by default, as
+    /// the design has it; shown only while this computer is a member.
+    pub(crate) join_fleet: bool,
     addresses_scroll: ScrollHandle,
     other_addresses: crate::motion::Toggle,
     client: Option<Client>,
@@ -104,6 +109,7 @@ impl SheprdWindow {
         self.menu.remote_pairing = Some(PairingDialog {
             pairing: pairing.with_address(address),
             hosts: hosts::choices(Supervisor::hosts(cx)),
+            join_fleet: true,
             addresses_scroll: ScrollHandle::new(),
             other_addresses: crate::motion::Toggle::default(),
             client,
@@ -165,7 +171,10 @@ impl SheprdWindow {
                         Phase::Showing { .. } | Phase::Claimed { .. } => {}
                         _ => dialog._nearby = None,
                     }
-                    if matches!(dialog.pairing.phase(), Phase::Approved { .. }) {
+                    if let Phase::Approved { device, ssh, .. } = dialog.pairing.phase() {
+                        if dialog.join_fleet && !ssh {
+                            crate::fleet::Fleet::expect(cx, device.clone());
+                        }
                         Supervisor::refresh(cx);
                     }
                     cx.notify();
@@ -312,7 +321,9 @@ impl SheprdWindow {
                 answer,
                 ..
             } => self.pairing_claim(device_name, code, app.as_deref(), *ssh, *answer, cx),
-            Phase::Approved { device_name, ssh } => self.pairing_message(
+            Phase::Approved {
+                device_name, ssh, ..
+            } => self.pairing_message(
                 &if *ssh {
                     fl!("remote-pair-approved-ssh", device = name(device_name))
                 } else {
@@ -591,6 +602,7 @@ impl SheprdWindow {
                     .then(|| self.pairing_share_github(!waiting, cx))
                     .flatten(),
             )
+            .children((!ssh).then(|| self.pairing_fleet(!waiting, cx)).flatten())
             .child(
                 div()
                     .flex()

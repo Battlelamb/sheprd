@@ -57,6 +57,7 @@ fn joins_keep_their_wire_names() {
             bundle: "b".into(),
             signature: "s".into(),
             device: "iPhone".into(),
+            device_id: DeviceId("d1".into()),
             received_ms: 5,
         }],
     }));
@@ -64,7 +65,8 @@ fn joins_keep_their_wire_names() {
         serde_json::to_value(&answer).unwrap(),
         json!({"response": "fleet", "answer": "joins", "joins": [{
             "member": "m", "name": "phone", "kind": "phone", "bundle": "b",
-            "signature": "s", "device": "iPhone", "received_ms": 5,
+            "signature": "s", "device": "iPhone", "device_id": "d1",
+            "received_ms": 5,
         }]})
     );
 }

@@ -1918,10 +1918,14 @@ manual multi-machine and phone steps left unticked in its QA list.
    - **Command line:** `sheprd fleet [status|members|hosts|open]`, and
      `fleet remove MEMBER` and `fleet remove-host HOST`, which open the
      page asking; `docs/cli.md` and the skill.
-   - **Left:** the join approval for phones (`Ask::Joins`, phase 5),
-     joining over Bluetooth in one step (today: pair, then Invite over
-     the SSH that pairing opened, which proves the same), the pairing
-     dialog's fleet line, `relay-connect`'s race with direct tunnels and
+   - **Phones joining:** Settings > Fleet lists the joins the daemon
+     keeps (`Ask::Joins`) under Waiting to join, and admits one on a
+     second click. The pairing dialog's line, ticked by default, admits
+     the phone it approved, matched by the daemon's device id, when that
+     phone asks to join within ten minutes; no other join is admitted
+     through it.
+   - **Left:** joining over Bluetooth in one step (today: pair, then Invite over
+     the SSH that pairing opened, which proves the same), `relay-connect`'s race with direct tunnels and
      `desktop/paths` for the host indicator, history, and native
      screenshots.
 4. **`sheprd-relay-agent` in Sheprd:** install and update over SSH,
@@ -1948,10 +1952,10 @@ manual multi-machine and phone steps left unticked in its QA list.
      paths, and removals with Face ID; and the offer card, which signs
      one `Link` per Sheprd host and keeps each as a computer reached
      through the one it joined through.
-   - **Left:** Sheprd's join dialog for `Ask::Joins` (phase 3); the
+   - **Left:** the
      phone's own copy of the log, so it checks what it signs on rather
      than trusting the member it asks; admitting a computer from the
-     phone; pushes; the pairing dialog's fleet line; history; and a path
+     phone; pushes; history; and a path
      to linked hosts before they publish `direct` addresses or Sheprd
      carries the phone's relay keys to them (`host_relay`), which needs
      members as SSH hosts in Sheprd (phase 3).

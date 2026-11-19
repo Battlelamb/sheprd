@@ -117,6 +117,7 @@ impl Joins {
                     bundle: sync::text(&waiting.bundle.to_bytes().ok()?),
                     signature: sync::text(&waiting.signature),
                     device: waiting.device_name.clone(),
+                    device_id: waiting.device.clone(),
                     received_ms: waiting.received_ms,
                 })
             })

@@ -15,6 +15,7 @@
 
 mod error;
 pub(crate) mod flows;
+pub(crate) mod joins;
 mod remote;
 pub(crate) mod saved;
 
@@ -118,6 +119,10 @@ pub(crate) struct Fleet {
     links: HashMap<String, Link>,
     /// Machines an invitation or share runs for.
     acting: BTreeSet<String>,
+    /// Phones approved at pairing with Also add to your fleet, by when.
+    expected: HashMap<sheprd_remote_control::control::DeviceId, Instant>,
+    /// Joins waiting for a person.
+    joins: Vec<sheprd_remote_control::control::fleet::sync::Join>,
 }
 
 impl Global for Fleet {}
@@ -211,7 +216,7 @@ impl Fleet {
         if !this.asking
             && this
                 .asked
-                .is_none_or(|asked| now.duration_since(asked) >= VIEW)
+                .is_none_or(|asked| now.duration_since(asked) >= this.pace())
         {
             Self::refresh(cx);
         }
@@ -258,6 +263,7 @@ impl Fleet {
                     Ok(_) => Err(None),
                     Err(error) => Err(Some(error.to_string())),
                 };
+                let member = matches!(&view, Ok(Some(view)) if view.members.iter().any(|member| member.id == view.me));
                 let changed = cx.update_global::<Self, _>(|this, _| {
                     this.asking = false;
                     match view {
@@ -275,6 +281,9 @@ impl Fleet {
                         }
                     }
                 });
+                if member {
+                    Self::read_joins(cx);
+                }
                 if changed {
                     saved::keep(cx);
                     Self::tick(cx);

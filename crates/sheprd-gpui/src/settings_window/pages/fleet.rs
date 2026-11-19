@@ -15,6 +15,8 @@ use gpui::{prelude::*, *};
 use sheprd_remote_control::control::fleet::{HostKind, Kind, Reason, View, sync::Ask};
 use std::collections::BTreeSet;
 
+mod joins;
+
 /// The page's state while it shows.
 #[derive(Default)]
 pub(in crate::settings_window) struct FleetPage {
@@ -28,6 +30,8 @@ pub(in crate::settings_window) struct FleetPage {
     sharing: Option<(String, BTreeSet<String>)>,
     /// The machine whose Remove fleet access waits for confirmation.
     scrubbing: Option<String>,
+    /// The joining member whose Admit waits for confirmation.
+    admitting: Option<String>,
     /// The last failure, for a person.
     error: Option<String>,
 }
@@ -134,6 +138,12 @@ impl SettingsWindow {
                     .dot(theme.ink(theme.palette[1]))
                     .control(forget),
             );
+        }
+        let joins = self.fleet_joins(&view, cx);
+        if !joins.is_empty() {
+            page = page
+                .child(ui::section(theme, &fl!("settings-fleet-joins"), None))
+                .children(joins);
         }
         page = page
             .child(ui::section(theme, &fl!("settings-fleet-members"), None))
@@ -624,6 +634,7 @@ impl SettingsWindow {
                 this.fleet.inviting = None;
                 this.fleet.sharing = None;
                 this.fleet.scrubbing = None;
+                this.fleet.admitting = None;
                 cx.notify();
             },
         ))

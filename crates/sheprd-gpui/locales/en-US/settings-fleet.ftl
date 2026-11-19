@@ -69,3 +69,8 @@ settings-fleet-removed-description = A member removed it. Its keys no longer cou
 settings-fleet-forget = Forget the fleet
 settings-fleet-scrub = Remove fleet access
 settings-fleet-scrub-ask = Remove every way a fleet reaches this account: its authorized_keys lines and the relay agent's entries. Nothing is signed; it only takes access away.
+
+settings-fleet-joins = Waiting to join
+settings-fleet-join-line = Phone · asked through { $device }
+settings-fleet-join-ask = Admit this phone? It will reach every Sheprd host in the fleet, and may approve computers joining it.
+settings-fleet-admit = Admit

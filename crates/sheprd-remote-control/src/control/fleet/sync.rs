@@ -266,6 +266,9 @@ pub struct Join {
     pub signature: String,
     /// The paired device that asked, as this computer names it.
     pub device: String,
+    /// That device's id, which a pairing approved with "Also add to your
+    /// fleet" names, so Sheprd admits only the phone just approved.
+    pub device_id: crate::control::DeviceId,
     pub received_ms: u64,
 }
 

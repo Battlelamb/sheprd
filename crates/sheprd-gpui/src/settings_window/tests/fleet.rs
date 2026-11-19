@@ -23,6 +23,10 @@ static SERIAL: Mutex<()> = Mutex::new(());
 static IN_FLEET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// The fleet removed this computer.
 static REMOVED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The joins the daemon lists.
+static JOINS: Mutex<Vec<control::fleet::sync::Join>> = Mutex::new(Vec::new());
+
+mod joins;
 
 fn view() -> View {
     let member = |id: &str, name: &str, kind, by: Option<&str>| MemberView {
@@ -79,7 +83,14 @@ fn daemon(_: &Path, request: &Request) -> Result<Response, control::Error> {
                 Box::new(view)
             }),
         },
+        Ask::Joins => Answer::Joins {
+            joins: JOINS.lock().unwrap().clone(),
+        },
         ask => {
+            // The daemon drops a join once it is admitted.
+            if let Ask::Admit { bundle, .. } = ask {
+                JOINS.lock().unwrap().retain(|join| join.bundle != *bundle);
+            }
             ASKED.lock().unwrap().push(ask.clone());
             Answer::Done
         }
@@ -97,6 +108,7 @@ fn page(cx: &mut TestAppContext, in_fleet: bool) -> &mut VisualTestContext {
     IN_FLEET.store(in_fleet, Ordering::SeqCst);
     REMOVED.store(false, Ordering::SeqCst);
     ASKED.lock().unwrap().clear();
+    JOINS.lock().unwrap().clear();
     let (view, cx) = cx.add_window_view(skill_fixture);
     let config = RemoteConfig {
         enabled: true,

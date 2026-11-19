@@ -241,7 +241,13 @@ async fn an_unknown_removal_reported_once_is_settled_at_the_latest_after_a_week(
     );
     let late = a
         .fleet
-        .agent_access(&host, asked, start + UNCONFIRMED_TTL_MS + 1)
+        .agent_access(&host, asked.clone(), start + UNCONFIRMED_TTL_MS + 1)
         .unwrap();
     assert_eq!(late.settled.len(), 1);
+    // Reported again long after: its wait is not started over.
+    let later = a
+        .fleet
+        .agent_access(&host, asked, start + 3 * UNCONFIRMED_TTL_MS)
+        .unwrap();
+    assert_eq!(later.settled.len(), 1);
 }

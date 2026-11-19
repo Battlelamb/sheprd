@@ -56,16 +56,20 @@ impl Fleet {
         let mut ids: Vec<OpId> = asked.iter().map(|asked| asked.removal).collect();
         ids.sort_unstable();
         ids.dedup();
-        for id in ids.into_iter().filter(|id| log.get(id).is_none()) {
+        for id in ids.iter().copied().filter(|id| log.get(id).is_none()) {
             let seen = inner.unknown.entry(id).or_insert(Unknown {
                 first_ms: now_ms,
                 syncs: 0,
             });
             seen.syncs = seen.syncs.saturating_add(1);
         }
-        // Heard of now, or long past every grace: nothing left to count.
+        // Heard of now: nothing left to count. Long past every grace and
+        // reported no more: forgotten. One still reported is kept however
+        // old, so its wait is not started over.
         inner.unknown.retain(|id, seen| {
-            log.get(id).is_none() && now_ms.saturating_sub(seen.first_ms) <= 2 * UNCONFIRMED_TTL_MS
+            log.get(id).is_none()
+                && (ids.contains(id)
+                    || now_ms.saturating_sub(seen.first_ms) <= 2 * UNCONFIRMED_TTL_MS)
         });
         while inner.unknown.len() > MAX_UNKNOWN {
             let Some(oldest) = inner

@@ -97,12 +97,17 @@ impl Held {
         })
     }
 
+    /// Writes each file whole, in the order that fails closed when it
+    /// stops part way: the revoked pairs before the access file that drops
+    /// the members they come from (a retry finds them there again), and
+    /// the suspensions after it, so one is lifted only once the file that
+    /// lifts it, or removes its member, is kept.
     fn save(&self, state_dir: &Path) -> Result<()> {
+        write_json(state_dir, REVOKED, &self.revoked)?;
         if let Some(access) = &self.access {
             files::write_private(&state_dir.join(access::FILE), &access.to_stored_bytes()?)?;
         }
-        write_json(state_dir, SUSPENDED, &self.suspended)?;
-        write_json(state_dir, REVOKED, &self.revoked)
+        write_json(state_dir, SUSPENDED, &self.suspended)
     }
 
     /// `fleet apply`: merges `incoming` into what `state_dir` holds,

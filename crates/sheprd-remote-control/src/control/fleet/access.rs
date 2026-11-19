@@ -12,7 +12,7 @@ use super::{
     State,
 };
 use sheprd_relay_agent::fleet::Suspension;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub use sheprd_relay_agent::access::{Access, Id, MAX_SETTLED, Member};
 
@@ -155,12 +155,14 @@ pub fn compute(
             Some((Id(id.0), member))
         })
         .collect();
-    let settled = suspended
+    // One removal may suspend several members: each id counts once
+    // against the bound, so repeats cannot crowd out another's.
+    let settled: BTreeSet<Id> = suspended
         .into_iter()
         .filter(|asked| settles(log, asked, &graced))
         .map(|asked| Id(asked.removal.0))
-        .take(MAX_SETTLED)
         .collect();
+    let settled = settled.into_iter().take(MAX_SETTLED).collect();
     let access = Access {
         fleet: Id(log.fleet().0),
         members,

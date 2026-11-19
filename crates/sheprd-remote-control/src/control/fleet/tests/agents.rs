@@ -97,3 +97,27 @@ fn a_rotation_on_a_shorter_branch_still_outranks_the_keys_it_replaced() {
     let after = host_access::Access::merge(Some(&held), merged).unwrap();
     assert_eq!(after.members[&Id(b.id().0)].tunnel, [0x62; 32]);
 }
+
+#[test]
+fn a_removal_suspending_several_members_counts_once_against_the_settled_bound() {
+    let (a, b) = (computer(1), computer(2));
+    let mut log = found(&a);
+    admit(&mut log, &a, &b);
+    let intro = plain_host(40);
+    let host = intro.id().unwrap();
+    act(&mut log, &a, Body::HostAdd(intro));
+    let stranger = computer(77);
+    // Eight removals, each reported for eight members, then one more:
+    // signed by no member, so every one is void.
+    let asked = |removal: u8| host_access::Asked {
+        removal: OpId([removal; 32]),
+        signer: stranger.id(),
+        seq: 1,
+        target: b.id(),
+    };
+    let mut reported: Vec<_> = (0..8).flat_map(|_| (0x10..0x18).map(asked)).collect();
+    reported.push(asked(0xf0));
+    let file = host_access::compute(&log, &host, reported, |_| false).unwrap();
+    assert_eq!(file.settled.len(), 9);
+    assert!(file.settled.contains(&Id([0xf0; 32])));
+}

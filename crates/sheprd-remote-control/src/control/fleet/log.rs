@@ -2,14 +2,14 @@
 //! waiting for their parents, and the state they compute.
 
 use super::{
-    Body, Error, FleetId, MAX_MEMBERSHIP_OPS, MAX_OPS, MAX_PARENTS, MAX_PENDING, MAX_REMOVALS,
-    MAX_REMOVALS_PER_SIGNER, MAX_SKEW_MS, MemberId, Op, OpId, PENDING_TTL_MS, Result, State,
-    Unsigned,
+    Admit, Body, Bundle, Error, FleetId, HostId, MAX_MEMBERSHIP_OPS, MAX_OPS, MAX_PARENTS,
+    MAX_PENDING, MAX_REMOVALS, MAX_REMOVALS_PER_SIGNER, MAX_SKEW_MS, MemberId, Op, OpId,
+    PENDING_TTL_MS, Result, State, Unsigned,
     fold::fold,
     graph::{Bits, Graph},
     membership::Folder,
 };
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// What inserting an operation came to.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -30,6 +30,9 @@ pub struct Log {
     /// descends from, and the state it names.
     root: Option<Op>,
     base: State,
+    /// The checkpoint signer's sequence number in the state `root` names:
+    /// `base` counts the checkpoint itself, the state it names does not.
+    root_seq: u64,
     ops: BTreeMap<OpId, Op>,
     /// Operations waiting for parents, with when each arrived.
     pending: BTreeMap<OpId, (Op, u64)>,
@@ -49,6 +52,7 @@ impl Log {
             fleet: FleetId(found.id().0),
             root: None,
             base: State::default(),
+            root_seq: 0,
             ops: BTreeMap::from([(found.id(), found)]),
             pending: BTreeMap::new(),
             state: State::default(),
@@ -86,9 +90,10 @@ impl Log {
         }
         checkpoint.verify(&signer.bundle.verifying_key()?)?;
         let mut base = base;
-        counted(&mut base, &checkpoint);
+        let root_seq = counted(&mut base, &checkpoint);
         Ok(Self {
             fleet: checkpoint.unsigned().fleet,
+            root_seq,
             heads: vec![checkpoint.id()],
             root: Some(checkpoint),
             state: base.clone(),
@@ -230,16 +235,24 @@ impl Log {
     /// An operation for `signer` to sign next: on the heads, with the
     /// next sequence number.
     ///
-    /// An operation names at most [`MAX_PARENTS`] heads. When there are
-    /// more, it names those of members not flagged for signing in two
-    /// places first: a member that forks its key cannot crowd out the
-    /// others, and what it signed that a removal did not name is void
-    /// anyway. The heads left out are named by the next operations.
+    /// An operation names at most [`MAX_PARENTS`] heads. The first is one
+    /// that descends from the signer's own latest operation, so its chain
+    /// never looks forked. The rest are those of members not flagged for
+    /// signing in two places first: a member that forks its key cannot
+    /// crowd out the others, and what it signed that a removal did not
+    /// name is void anyway. The heads left out are named by the next
+    /// operations.
+    ///
+    /// An `Access` gets the `rev` its parents call for, one above the
+    /// highest for its host and member they hold, whatever it was drafted
+    /// with: the register can be ahead of what the parents name.
     #[must_use]
-    pub fn draft(&self, signer: MemberId, issued_ms: u64, body: Body) -> Unsigned {
+    pub fn draft(&self, signer: MemberId, issued_ms: u64, mut body: Body) -> Unsigned {
+        let own = self.own_head(signer);
         let mut heads: Vec<(bool, OpId)> = self
             .heads
             .iter()
+            .filter(|id| Some(**id) != own)
             .map(|id| {
                 let forked = self
                     .get(id)
@@ -248,12 +261,17 @@ impl Log {
             })
             .collect();
         heads.sort_unstable();
-        let mut parents: Vec<OpId> = heads
+        let mut parents: Vec<OpId> = own
             .into_iter()
+            .chain(heads.into_iter().map(|(_, id)| id))
             .take(MAX_PARENTS)
-            .map(|(_, id)| id)
             .collect();
         parents.sort_unstable();
+        if let Body::Access(access) = &mut body {
+            access.rev = self
+                .access_floor(&parents, access.host, access.member)
+                .saturating_add(1);
+        }
         let seq = self
             .ops
             .values()
@@ -272,6 +290,62 @@ impl Log {
             parents,
             body,
         }
+    }
+
+    /// The highest `rev` of an `Access` for `host` and `member` that
+    /// `parents` and their ancestors hold, or the base's.
+    fn access_floor(&self, parents: &[OpId], host: HostId, member: MemberId) -> u64 {
+        let mut floor = self
+            .base
+            .access
+            .get(&(host, member))
+            .map_or(0, |register| register.rev);
+        let mut seen: HashSet<OpId> = parents.iter().copied().collect();
+        let mut queue = parents.to_vec();
+        while let Some(id) = queue.pop() {
+            let Some(op) = self.ops.get(&id) else {
+                continue;
+            };
+            if let Body::Access(access) = op.body()
+                && access.host == host
+                && access.member == member
+            {
+                floor = floor.max(access.rev);
+            }
+            queue.extend(op.parents().iter().filter(|parent| seen.insert(**parent)));
+        }
+        floor
+    }
+
+    /// The first head, by id, that is or descends from `signer`'s latest
+    /// operation held; none when it signed nothing since the root.
+    fn own_head(&self, signer: MemberId) -> Option<OpId> {
+        let latest = self
+            .ops
+            .values()
+            .filter(|op| op.signer() == signer)
+            .max_by_key(|op| (op.unsigned().seq, op.id()))?
+            .id();
+        let mut children: HashMap<OpId, Vec<OpId>> = HashMap::new();
+        for op in self.ops.values() {
+            for parent in op.parents() {
+                children.entry(*parent).or_default().push(op.id());
+            }
+        }
+        let mut seen = HashSet::from([latest]);
+        let mut queue = vec![latest];
+        while let Some(id) = queue.pop() {
+            for child in children.get(&id).into_iter().flatten() {
+                if seen.insert(*child) {
+                    queue.push(*child);
+                }
+            }
+        }
+        self.heads
+            .iter()
+            .filter(|id| seen.contains(id))
+            .min()
+            .copied()
     }
 
     /// Inserts one operation that arrived at `now_ms`.
@@ -300,6 +374,8 @@ impl Log {
                 other => results.push((id, other)),
             }
         }
+        // Expired operations go first; the bound waits until those whose
+        // parents are present have left the pool.
         self.expire(now_ms);
         let mut added = Vec::new();
         loop {
@@ -319,6 +395,7 @@ impl Log {
                 }
             }
         }
+        self.bound();
         let refused = match self.settle(&added) {
             Ok(refused) => refused,
             Err(error) => {
@@ -334,7 +411,9 @@ impl Log {
             let result = match refused.get(&id) {
                 Some(error) => Err(error.clone()),
                 None if self.ops.contains_key(&id) => Ok(Inserted::Applied),
-                None => Ok(Inserted::Pending),
+                None if self.pending.contains_key(&id) => Ok(Inserted::Pending),
+                // Dropped to keep the pool for missing parents bounded.
+                None => Err(Error::Full),
             };
             results.push((id, result));
         }
@@ -344,8 +423,12 @@ impl Log {
     /// The state of the history of `id`, which a checkpoint at `id` names
     /// and a joining member is handed with it.
     pub fn state_at(&self, id: &OpId) -> Result<State> {
-        if self.root.as_ref().is_some_and(|root| root.id() == *id) {
-            return Ok(self.base.clone());
+        if let Some(root) = self.root.as_ref().filter(|root| root.id() == *id) {
+            let mut state = self.base.clone();
+            if let Some(member) = state.members.get_mut(&root.signer()) {
+                member.seq = self.root_seq;
+            }
+            return Ok(state);
         }
         let graph = self.graph()?;
         let folder = self.folder(&graph)?;
@@ -366,7 +449,7 @@ impl Log {
         }
         let folder = self.folder(&graph)?;
         let mut base = fold(&folder, &graph.ancestors[position], &self.base);
-        counted(&mut base, graph.order[position]);
+        let root_seq = counted(&mut base, graph.order[position]);
         let dropped: Vec<OpId> = graph.ancestors[position]
             .iter()
             .map(|ancestor| graph.order[ancestor].id())
@@ -378,6 +461,7 @@ impl Log {
         }
         self.root = self.ops.remove(id);
         self.base = base;
+        self.root_seq = root_seq;
         self.recompute()
     }
 
@@ -401,6 +485,10 @@ impl Log {
     fn expire(&mut self, now_ms: u64) {
         self.pending
             .retain(|_, (_, since)| now_ms.saturating_sub(*since) <= PENDING_TTL_MS);
+    }
+
+    /// Keeps at most [`MAX_PENDING`] operations waiting for parents.
+    fn bound(&mut self) {
         while self.pending.len() > MAX_PENDING {
             // Removals are dropped last.
             let oldest = self
@@ -419,26 +507,11 @@ impl Log {
     /// Checks the operations just `added`, removes those refused and their
     /// descendants, and folds. Says why each was refused.
     fn settle(&mut self, added: &[OpId]) -> Result<BTreeMap<OpId, Error>> {
-        let mut refused = self.over_caps(added);
-        // What builds on an operation refused is refused with it.
-        loop {
-            let orphans: Vec<OpId> = added
-                .iter()
-                .filter(|id| !refused.contains_key(*id))
-                .filter(|id| {
-                    self.ops.get(*id).is_some_and(|op| {
-                        op.parents()
-                            .iter()
-                            .any(|parent| refused.contains_key(parent))
-                    })
-                })
-                .copied()
-                .collect();
-            if orphans.is_empty() {
-                break;
-            }
-            refused.extend(orphans.into_iter().map(|id| (id, Error::ParentMissing)));
-        }
+        let mut refused = self.forged(added);
+        self.orphans(added, &mut refused);
+        let over = self.over_caps(added, &refused);
+        refused.extend(over);
+        self.orphans(added, &mut refused);
         for id in refused.keys() {
             self.ops.remove(id);
         }
@@ -481,46 +554,109 @@ impl Log {
     /// log cannot stop its signer's removal. Removals have their own: per
     /// signer, so no member can use up a live member's share, and one
     /// shared by members no longer live.
-    fn over_caps(&self, added: &[OpId]) -> BTreeMap<OpId, Error> {
+    /// The operations just `added` that no key of the member they name
+    /// signed. Checked before any bound is charged to that member, so
+    /// forgeries in its name cannot use up its share. A member's id is the
+    /// hash of its key, so any bundle held for it gives the key, whatever
+    /// operation carries it.
+    fn forged(&self, added: &[OpId]) -> BTreeMap<OpId, Error> {
+        let mut keys: HashMap<MemberId, &Bundle> = self
+            .base
+            .members
+            .iter()
+            .map(|(id, member)| (*id, &member.bundle))
+            .collect();
+        for op in self.ops.values() {
+            if let Body::Found(bundle) | Body::Rotate(bundle) | Body::Admit(Admit { bundle, .. }) =
+                op.body()
+            {
+                keys.entry(bundle.id()).or_insert(bundle);
+            }
+        }
+        added
+            .iter()
+            .filter_map(|id| self.ops.get(id))
+            .filter_map(|op| {
+                let checked = keys
+                    .get(&op.signer())
+                    .ok_or(Error::Signer)
+                    .and_then(|bundle| bundle.verifying_key())
+                    .and_then(|key| op.verify(&key));
+                checked.err().map(|error| (op.id(), error))
+            })
+            .collect()
+    }
+
+    /// Operations already `refused` (forgeries and what builds on them)
+    /// are not counted, so they take no share.
+    fn over_caps(&self, added: &[OpId], refused: &BTreeMap<OpId, Error>) -> BTreeMap<OpId, Error> {
         let removal = |op: &Op| matches!(op.body(), Body::Remove(_));
         let costly = |op: &Op| op.body().membership() && !removal(op);
         let gone = |op: &Op| removal(op) && !self.state.members.contains_key(&op.signer());
-        let mut ops = self.ops.values().filter(|op| !removal(op)).count();
-        let mut membership = self.ops.values().filter(|op| costly(op)).count();
-        let mut removals = self.ops.values().filter(|op| gone(op)).count();
+        let held = || {
+            self.ops
+                .values()
+                .filter(|op| !refused.contains_key(&op.id()))
+        };
+        let mut ops = held().filter(|op| !removal(op)).count();
+        let mut membership = held().filter(|op| costly(op)).count();
+        let mut removals = held().filter(|op| gone(op)).count();
         let mut by_signer: BTreeMap<MemberId, usize> = BTreeMap::new();
         let fresh: HashSet<&OpId> = added.iter().collect();
-        for op in self
-            .ops
-            .values()
-            .filter(|op| removal(op) && !fresh.contains(&op.id()))
-        {
+        for op in held().filter(|op| removal(op) && !fresh.contains(&op.id())) {
             *by_signer.entry(op.signer()).or_default() += 1;
         }
-        let mut refused = BTreeMap::new();
+        let mut over = BTreeMap::new();
         // Newest last: the batch is in id order, which every member shares.
-        let mut batch: Vec<&Op> = added.iter().filter_map(|id| self.ops.get(id)).collect();
+        let mut batch: Vec<&Op> = added
+            .iter()
+            .filter(|id| !refused.contains_key(*id))
+            .filter_map(|id| self.ops.get(id))
+            .collect();
         batch.sort_by_key(|op| op.id());
         for op in batch {
             if removal(op) {
                 let mine = by_signer.entry(op.signer()).or_default();
                 *mine += 1;
                 if *mine > MAX_REMOVALS_PER_SIGNER || (gone(op) && removals > MAX_REMOVALS) {
-                    refused.insert(op.id(), Error::Full);
+                    over.insert(op.id(), Error::Full);
                     *mine -= 1;
                     if gone(op) {
                         removals -= 1;
                     }
                 }
             } else if ops > MAX_OPS || (costly(op) && membership > MAX_MEMBERSHIP_OPS) {
-                refused.insert(op.id(), Error::Full);
+                over.insert(op.id(), Error::Full);
                 ops -= 1;
                 if costly(op) {
                     membership -= 1;
                 }
             }
         }
-        refused
+        over
+    }
+
+    /// Adds to `refused` every operation just `added` that builds on one
+    /// refused: it is refused with it.
+    fn orphans(&self, added: &[OpId], refused: &mut BTreeMap<OpId, Error>) {
+        loop {
+            let orphans: Vec<OpId> = added
+                .iter()
+                .filter(|id| !refused.contains_key(*id))
+                .filter(|id| {
+                    self.ops.get(*id).is_some_and(|op| {
+                        op.parents()
+                            .iter()
+                            .any(|parent| refused.contains_key(parent))
+                    })
+                })
+                .copied()
+                .collect();
+            if orphans.is_empty() {
+                return;
+            }
+            refused.extend(orphans.into_iter().map(|id| (id, Error::ParentMissing)));
+        }
     }
 
     fn recompute(&mut self) -> Result<()> {
@@ -551,10 +687,14 @@ impl Log {
 
 /// Counts the checkpoint `root` itself in a state computed from its
 /// history, so its signer's next sequence number follows it.
-fn counted(base: &mut State, root: &Op) {
-    if let Some(member) = base.members.get_mut(&root.signer()) {
-        member.seq = member.seq.max(root.unsigned().seq);
-    }
+/// Says the signer's sequence number before, as the state `root` names it.
+fn counted(base: &mut State, root: &Op) -> u64 {
+    let Some(member) = base.members.get_mut(&root.signer()) else {
+        return 0;
+    };
+    let before = member.seq;
+    member.seq = before.max(root.unsigned().seq);
+    before
 }
 
 /// A checkpoint must name the state of its own history.

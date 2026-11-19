@@ -16,7 +16,9 @@
 //! - A removal voids every operation by the removed member that the
 //!   remover had not seen. The one exception is a counter-removal of
 //!   whoever removed it concurrently, so a removed attacker can take with
-//!   it only the members that removed it.
+//!   it only the members that removed it. It also reaches the members
+//!   the removed member admitted that the remover had not seen, so no one
+//!   keeps trust that came only from a voided admission.
 //! - Every conflict resolves to the safer side: a removal over an
 //!   addition, a deny over an allow.
 //!

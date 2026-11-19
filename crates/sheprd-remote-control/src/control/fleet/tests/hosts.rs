@@ -62,9 +62,9 @@ fn an_access_rev_must_climb() {
     let host = plain_host(40).id().unwrap();
     act(&mut log, &a, Body::HostAdd(plain_host(40)));
     act(&mut log, &a, access_body(host, &c, false, 1));
-    // Applied, but it does not count: an agent merging by rev would order
-    // it with the deny.
-    act(&mut log, &a, access_body(host, &c, true, 1));
+    // Refused: an agent merging by rev would order it with the deny.
+    let op = as_drafted(&log, &a, access_body(host, &c, true, 1));
+    assert_eq!(log.insert(op, NOW), Err(Error::Rev));
     assert!(!log.state().allowed(&host, &c.id()));
     act(&mut log, &a, access_body(host, &c, true, 2));
     assert!(log.state().allowed(&host, &c.id()));

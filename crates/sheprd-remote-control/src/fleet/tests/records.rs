@@ -5,6 +5,7 @@
 use super::*;
 use crate::desktop::record::Record;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use std::collections::BTreeSet;
 
 fn record(identity: &str, fleet: bool) -> Record {
     hosted(identity, fleet, fleet.then_some("a"))
@@ -31,24 +32,49 @@ fn a_host_paired_after_the_fleet_wrote_it_is_kept() {
     let dir = tempfile::tempdir().unwrap();
     let fleet = record("identity-one", true);
     let id = fleet.id().unwrap();
-    grants::write_records(dir.path(), &[(fleet, keys())]).unwrap();
+    grants::write_records(dir.path(), &[(fleet, keys())], &BTreeSet::new()).unwrap();
     // Paired here over Bluetooth since: pairing owns the record now.
     let paired = record("identity-one", false);
     paired.save(dir.path(), &keys()).unwrap();
     // Granted still, then no longer: neither deletes it.
-    grants::write_records(dir.path(), &[(record("identity-one", true), keys())]).unwrap();
+    grants::write_records(
+        dir.path(),
+        &[(record("identity-one", true), keys())],
+        &BTreeSet::new(),
+    )
+    .unwrap();
     assert_eq!(Record::load(dir.path(), &id).unwrap(), paired);
-    grants::write_records(dir.path(), &[]).unwrap();
+    grants::write_records(dir.path(), &[], &BTreeSet::new()).unwrap();
     assert_eq!(Record::load(dir.path(), &id).unwrap(), paired);
+}
+
+#[test]
+fn a_route_whose_owner_is_unclear_keeps_its_last_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let kept = record("identity-one", true);
+    let id = kept.id().unwrap();
+    grants::write_records(dir.path(), &[(kept.clone(), keys())], &BTreeSet::new()).unwrap();
+    // Two hosts name the route: neither gets it, and the record stays.
+    let unclear = BTreeSet::from([kept.route.clone()]);
+    grants::write_records(dir.path(), &[], &unclear).unwrap();
+    assert_eq!(Record::load(dir.path(), &id).unwrap(), kept);
+    // Once the route is clear again and no host is granted, it goes.
+    grants::write_records(dir.path(), &[], &BTreeSet::new()).unwrap();
+    assert!(Record::load(dir.path(), &id).is_err());
 }
 
 #[test]
 fn a_fleet_host_that_changed_its_tunnel_identity_keeps_its_record() {
     let dir = tempfile::tempdir().unwrap();
     let id = record("identity-one", true).id().unwrap();
-    grants::write_records(dir.path(), &[(record("identity-one", true), keys())]).unwrap();
+    grants::write_records(
+        dir.path(),
+        &[(record("identity-one", true), keys())],
+        &BTreeSet::new(),
+    )
+    .unwrap();
     let moved = record("identity-two", true);
-    grants::write_records(dir.path(), &[(moved.clone(), keys())]).unwrap();
+    grants::write_records(dir.path(), &[(moved.clone(), keys())], &BTreeSet::new()).unwrap();
     assert_eq!(Record::load(dir.path(), &id).unwrap(), moved);
 }
 
@@ -56,7 +82,12 @@ fn a_fleet_host_that_changed_its_tunnel_identity_keeps_its_record() {
 fn pairing_still_cannot_replace_an_identity() {
     let dir = tempfile::tempdir().unwrap();
     let id = record("identity-one", true).id().unwrap();
-    grants::write_records(dir.path(), &[(record("identity-one", true), keys())]).unwrap();
+    grants::write_records(
+        dir.path(),
+        &[(record("identity-one", true), keys())],
+        &BTreeSet::new(),
+    )
+    .unwrap();
     assert!(matches!(
         record("identity-two", false).save(dir.path(), &keys()),
         Err(crate::desktop::Error::RecordConflict(_))
@@ -132,7 +163,7 @@ async fn a_host_claiming_another_hosts_route_changes_nothing() {
         )
         .unwrap();
     b.fleet.receive(c.ops(), now_ms()).unwrap();
-    // The log took c's claim: only the records keep a's route a's.
+    // The log does not count c's claim, and the records keep a's route a's.
     let claimants = {
         let inner = b.fleet.inner();
         let state = inner.log.as_ref().unwrap().state();
@@ -142,7 +173,7 @@ async fn a_host_claiming_another_hosts_route_changes_nothing() {
             .filter(|host| host.record.route == route)
             .count()
     };
-    assert_eq!(claimants, 2);
+    assert_eq!(claimants, 1);
     grants::apply(&b.state, &b.fleet).unwrap();
     assert_eq!(own(&b), before);
 }

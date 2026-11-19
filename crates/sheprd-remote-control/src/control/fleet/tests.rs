@@ -5,13 +5,20 @@ use super::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use p256::ecdsa::{SigningKey, VerifyingKey, signature::Signer};
 
+mod access_floor;
 mod admission;
 mod checkpoint;
 mod convergence;
+mod drafting;
 mod encoding;
+mod forgery;
 mod hardening;
 mod hosts;
+mod lineage;
+mod pending;
+mod pruning;
 mod removal;
+mod rotation;
 mod vectors;
 
 /// A fixed "now": 2027-01-15.

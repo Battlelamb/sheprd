@@ -9,8 +9,10 @@
 //!
 //! Which removals take effect depends on the whole set being folded,
 //! because a removal voids every concurrent operation by the member it
-//! removes, removals included. The one exception is a counter-removal of
-//! whoever removed it. Removals that void each other in a cycle take
+//! removes, removals included. A removal also reaches the members its
+//! target admitted that the remover had not seen, and theirs in turn: an
+//! admission it voids leaves no member behind whose trust came only from
+//! it. The one exception is a counter-removal of whoever removed it. Removals that void each other in a cycle take
 //! effect, every one: when the rules cannot say who wins, everyone involved
 //! is removed.
 
@@ -31,10 +33,13 @@ use std::{
 pub(super) struct Members {
     pub(super) live: BTreeMap<MemberId, Member>,
     pub(super) tombstones: BTreeSet<MemberId>,
-    /// The removals that took effect, by place in the graph.
-    pub(super) removals: Vec<usize>,
-    /// Where each member's bundle came from: its `Found`, `Admit`, or
-    /// latest `Rotate`. A member from the base has none.
+    /// The removals that took effect, by place in the graph, with every
+    /// member each removes ([`Folder::reach`]).
+    pub(super) removals: BTreeMap<usize, BTreeSet<MemberId>>,
+    /// Where each member first named the host its bundle names: its
+    /// `Found`, `Admit`, or the `Rotate` that moved it to that host. A
+    /// rotation that keeps the host keeps the claim where it was. A member
+    /// from the base has none.
     pub(super) origins: BTreeMap<MemberId, usize>,
 }
 
@@ -125,10 +130,8 @@ impl<'g, 'a> Folder<'g, 'a> {
     /// signer, in `members`, had not seen it.
     pub(super) fn voided(&self, members: &Members, position: usize) -> bool {
         let signer = self.graph.order[position].signer();
-        members.removals.iter().any(|&removal| {
-            removal != position
-                && !self.graph.sees(removal, position)
-                && targets(self.graph.order[removal]).any(|target| *target == signer)
+        members.removals.iter().any(|(&removal, reach)| {
+            removal != position && !self.graph.sees(removal, position) && reach.contains(&signer)
         })
     }
 
@@ -253,13 +256,10 @@ impl<'g, 'a> Folder<'g, 'a> {
         let mut members = Members {
             live: self.base.members.clone(),
             tombstones: self.base.tombstones.clone(),
-            removals: Vec::new(),
+            removals: BTreeMap::new(),
             origins: BTreeMap::new(),
         };
-        let removed: BTreeSet<MemberId> = removals
-            .iter()
-            .flat_map(|&removal| targets(self.graph.order[removal]).copied())
-            .collect();
+        let removed: BTreeSet<MemberId> = removals.values().flatten().copied().collect();
         let partial = Members {
             removals: removals.clone(),
             ..Members::default()
@@ -301,8 +301,10 @@ impl<'g, 'a> Folder<'g, 'a> {
                 }
                 Body::Rotate(bundle) if !self.voided(&partial, position) => {
                     if let Some(member) = members.live.get_mut(&op.signer()) {
+                        if host_id(&member.bundle) != host_id(bundle) {
+                            members.origins.insert(op.signer(), position);
+                        }
                         member.bundle = bundle.clone();
-                        members.origins.insert(op.signer(), position);
                     }
                 }
                 _ => {}
@@ -316,38 +318,42 @@ impl<'g, 'a> Folder<'g, 'a> {
         members
     }
 
-    /// The removals among `checked` that take effect.
-    fn effective_removals(&self, checked: &[usize]) -> Vec<usize> {
+    /// The removals among `checked` that take effect, each with every
+    /// member it removes.
+    fn effective_removals(&self, checked: &[usize]) -> BTreeMap<usize, BTreeSet<MemberId>> {
         let removals: Vec<usize> = checked
             .iter()
             .copied()
             .filter(|&position| matches!(self.graph.order[position].body(), Body::Remove(_)))
             .collect();
-        // Who could void each removal.
-        let voiders: Vec<Vec<usize>> = removals
+        let admissions: Vec<usize> = checked
             .iter()
-            .map(|&removal| {
-                let could_counter = self.could_counter(removal, &removals);
-                removals
-                    .iter()
-                    .copied()
-                    .filter(|&other| self.voids(other, removal, could_counter))
+            .copied()
+            .filter(|&position| matches!(self.graph.order[position].body(), Body::Admit(_)))
+            .collect();
+        let reach: Vec<BTreeSet<MemberId>> = removals
+            .iter()
+            .map(|&removal| self.reach(removal, targets(self.graph.order[removal]), &admissions))
+            .collect();
+        let could_counter: Vec<bool> = (0..removals.len())
+            .map(|slot| self.could_counter(slot, &removals, &reach, &admissions))
+            .collect();
+        // Who could void each removal.
+        let voiders: Vec<Vec<usize>> = (0..removals.len())
+            .map(|of| {
+                (0..removals.len())
+                    .filter(|&by| self.voids(&removals, &reach, by, of, could_counter[of]))
                     .collect()
             })
             .collect();
         let mut decided: Vec<Option<bool>> = vec![None; removals.len()];
-        let place: HashMap<usize, usize> = removals
-            .iter()
-            .enumerate()
-            .map(|(slot, &position)| (position, slot))
-            .collect();
         loop {
             let mut changed = false;
             for slot in 0..removals.len() {
                 if decided[slot].is_some() {
                     continue;
                 }
-                let states = voiders[slot].iter().map(|other| decided[place[other]]);
+                let states = voiders[slot].iter().map(|&other| decided[other]);
                 if states.clone().any(|state| state == Some(true)) {
                     decided[slot] = Some(false);
                     changed = true;
@@ -363,60 +369,106 @@ impl<'g, 'a> Folder<'g, 'a> {
         // What is left voids itself in a cycle: fail closed.
         removals
             .into_iter()
+            .zip(reach)
             .zip(decided)
             .filter(|(_, state)| *state != Some(false))
-            .map(|(position, _)| position)
+            .map(|(entry, _)| entry)
             .collect()
+    }
+
+    /// Every member removal `removal` removes when it starts from `seeds`:
+    /// those, and every member one of them admitted that `removal` had
+    /// not seen, and so on. Such an admission is void with its signer, so
+    /// whoever it admitted has no trust left of its own.
+    fn reach<'m>(
+        &self,
+        removal: usize,
+        seeds: impl Iterator<Item = &'m MemberId>,
+        admissions: &[usize],
+    ) -> BTreeSet<MemberId> {
+        let mut reach: BTreeSet<MemberId> = seeds.copied().collect();
+        loop {
+            let before = reach.len();
+            for &admission in admissions {
+                let op = self.graph.order[admission];
+                if let Body::Admit(admit) = op.body()
+                    && reach.contains(&op.signer())
+                    && !self.graph.sees(removal, admission)
+                {
+                    reach.insert(admit.bundle.id());
+                }
+            }
+            if reach.len() == before {
+                return reach;
+            }
+        }
     }
 
     /// Whether removal `by`, if it takes effect, voids removal `of`: it
     /// removes `of`'s signer without having seen `of`, and `of` is not a
-    /// counter-removal of `by`'s signer. `counters` says, for `of`,
+    /// counter-removal of `by`'s signer. `could_counter` says, for `of`,
     /// whether it could be one ([`Folder::could_counter`]).
-    fn voids(&self, by: usize, of: usize, could_counter: bool) -> bool {
-        let (by_op, of_op) = (self.graph.order[by], self.graph.order[of]);
+    fn voids(
+        &self,
+        removals: &[usize],
+        reach: &[BTreeSet<MemberId>],
+        by: usize,
+        of: usize,
+        could_counter: bool,
+    ) -> bool {
+        let (by_op, of_op) = (
+            self.graph.order[removals[by]],
+            self.graph.order[removals[of]],
+        );
         by != of
-            && !self.graph.sees(by, of)
-            && targets(by_op).any(|target| *target == of_op.signer())
-            && !(could_counter && targets(of_op).any(|target| *target == by_op.signer()))
+            && !self.graph.sees(removals[by], removals[of])
+            && reach[by].contains(&of_op.signer())
+            && !(could_counter && reach[of].contains(&by_op.signer()))
     }
 
-    /// Whether `of` removes only members that removed its signer without
-    /// its having seen them, and no host: what a counter-removal may do. A
-    /// removed member takes with it the members that removed it, and
-    /// nothing more.
-    fn could_counter(&self, of: usize, removals: &[usize]) -> bool {
-        let of_op = self.graph.order[of];
+    /// Whether removal `of` removes only members that removed its signer
+    /// without its having seen them, each itself or through a member it
+    /// admitted that `of` had not seen, and no host: what a
+    /// counter-removal may do. A removed member takes with it the members
+    /// that removed it, and nothing more.
+    fn could_counter(
+        &self,
+        of: usize,
+        removals: &[usize],
+        reach: &[BTreeSet<MemberId>],
+        admissions: &[usize],
+    ) -> bool {
+        let of_op = self.graph.order[removals[of]];
         let Body::Remove(remove) = of_op.body() else {
             return false;
         };
         remove.also_hosts.is_empty()
             && remove.targets().all(|target| {
-                removals.iter().any(|&other| {
-                    let other_op = self.graph.order[other];
-                    other_op.signer() == *target
-                        && !self.graph.sees(of, other)
-                        && targets(other_op).any(|removed| *removed == of_op.signer())
+                let lineage = self.reach(removals[of], std::iter::once(target), admissions);
+                removals.iter().zip(reach).any(|(&other, other_reach)| {
+                    lineage.contains(&self.graph.order[other].signer())
+                        && !self.graph.sees(removals[of], other)
+                        && other_reach.contains(&of_op.signer())
                 })
             })
     }
 }
 
+/// The host a bundle names as its own.
+fn host_id(bundle: &super::Bundle) -> Option<super::HostId> {
+    bundle.host.as_ref().and_then(|intro| intro.id().ok())
+}
+
 /// Whether another live member already names the host `bundle` names: a
 /// copied intro, perhaps with another user to log in as.
 fn host_taken(members: &Members, bundle: &super::Bundle, own: MemberId) -> bool {
-    let Some(id) = bundle.host.as_ref().and_then(|intro| intro.id().ok()) else {
+    let Some(id) = host_id(bundle) else {
         return false;
     };
-    members.live.iter().any(|(member, other)| {
-        *member != own
-            && other
-                .bundle
-                .host
-                .as_ref()
-                .and_then(|intro| intro.id().ok())
-                .is_some_and(|other| other == id)
-    })
+    members
+        .live
+        .iter()
+        .any(|(member, other)| *member != own && host_id(&other.bundle) == Some(id))
 }
 
 /// The members an operation removes; none unless it is a removal.

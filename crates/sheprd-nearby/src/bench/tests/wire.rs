@@ -1,4 +1,5 @@
 use super::*;
+use crate::bench::wire::Server;
 
 #[test]
 fn every_message_survives_encoding() {

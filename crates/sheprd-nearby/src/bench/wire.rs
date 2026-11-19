@@ -2,10 +2,14 @@
 //! then a body. The serving side answers each with [`Server::reply`].
 
 use crate::framing::MAX_MESSAGE;
+use std::collections::HashMap;
 
 /// The most a [`Message::Pull`] may ask for, so a stray frame cannot keep
 /// the radio busy for long.
 pub(crate) const MAX_PULL: u32 = 4 * 1024 * 1024;
+/// The most [`Message::Data`] replies one pull is answered with: a tiny
+/// `size` is raised so a seven-byte request cannot queue millions of frames.
+pub(crate) const MAX_PULL_REPLIES: usize = 2048;
 /// The largest body a message carries beside its tag.
 pub(crate) const MAX_BODY: usize = MAX_MESSAGE - 1;
 
@@ -95,8 +99,10 @@ impl Server {
                 vec![Message::Tallied(sunk).encode()]
             }
             Some(Message::Pull { bytes, size }) => {
-                let size = usize::from(size).clamp(1, MAX_BODY);
                 let mut left = usize::try_from(bytes.min(MAX_PULL)).unwrap_or(0);
+                let size = usize::from(size)
+                    .max(left.div_ceil(MAX_PULL_REPLIES))
+                    .clamp(1, MAX_BODY);
                 let mut replies = Vec::with_capacity(left.div_ceil(size));
                 while left > 0 {
                     let take = left.min(size);
@@ -107,5 +113,25 @@ impl Server {
             }
             Some(Message::Tallied(_) | Message::Data(_)) | None => Vec::new(),
         }
+    }
+}
+
+/// One [`Server`] for each connected computer, so two running at once
+/// each tally only their own upload. A computer's count goes with it.
+#[derive(Debug, Default)]
+pub(crate) struct Servers(HashMap<String, Server>);
+
+impl Servers {
+    /// The answers to `message` from the computer `central`.
+    pub(crate) fn reply(&mut self, central: &str, message: &[u8]) -> Vec<Vec<u8>> {
+        if let Some(server) = self.0.get_mut(central) {
+            return server.reply(message);
+        }
+        self.0.entry(central.to_owned()).or_default().reply(message)
+    }
+
+    /// Forgets the computer `central`, which disconnected.
+    pub(crate) fn forget(&mut self, central: &str) {
+        self.0.remove(central);
     }
 }

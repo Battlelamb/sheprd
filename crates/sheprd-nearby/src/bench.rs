@@ -34,7 +34,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use wire::{MAX_BODY, Message, Server};
+use wire::{MAX_BODY, Message, Servers};
 
 /// What `serve` puts in `info` where Pair device puts the CA fingerprint.
 const FINGERPRINT: &str = "0000000000000000";
@@ -92,7 +92,7 @@ fn serve(name: &str) -> Result<()> {
         fingerprint: FINGERPRINT.to_owned(),
     });
     eprintln!("advertising as {name:?}; stop with Ctrl-C");
-    let mut server = Server::default();
+    let mut servers = Servers::default();
     for event in events {
         match event {
             Event::State { state } => {
@@ -102,11 +102,12 @@ fn serve(name: &str) -> Result<()> {
                 }
             }
             Event::Error { message } => eprintln!("error: {message}"),
+            Event::Disconnected { central } => servers.forget(&central),
             Event::Frame { central, data } => {
                 let Ok(data) = STANDARD.decode(data) else {
                     continue;
                 };
-                for reply in server.reply(&data) {
+                for reply in servers.reply(&central, &data) {
                     let _ = commands.send(Command::Frame {
                         central: central.clone(),
                         channel: Channel::Pair,

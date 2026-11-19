@@ -5,4 +5,5 @@ use super::*;
 
 mod options;
 mod report;
+mod serving;
 mod wire;

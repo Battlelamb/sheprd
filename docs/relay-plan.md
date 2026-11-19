@@ -1379,8 +1379,8 @@ When two edits to the same thing are concurrent, the safer outcome wins:
 | What | Resolution |
 | --- | --- |
 | A member added and removed | Removed. Tombstones win. |
-| A host updated and removed | Removed. An addition made after seeing the removal brings it back. |
-| `Access` allow and deny, concurrent | Deny. Otherwise the one that descends from the other wins. An `Access` whose `rev` is not one above the highest its history holds is refused, so no single operation can put the register out of a later deny's reach. One voided later still set the `rev` its descendants signed on, so a deny that saw it stays a deny. |
+| A host updated and removed | Removed, a computer's own host included. An addition made after seeing the removal brings it back (for a computer's own host, a `Rotate` naming it), and the host starts over from that addition: exclusions, links, records, and routes from before it are gone. |
+| `Access` allow and deny, concurrent | Deny. Otherwise the one that descends from the other wins. An `Access` whose `rev` is not one above the highest `rev` of any `Access` its history holds is refused, so no single operation can put the register out of a later deny's reach. One floor for every host and member is kept whole in a checkpoint, and one voided later still set the floor its descendants signed on, so a deny that saw it stays a deny. |
 | A bundle naming another member's tunnel or dial key | Refused, as a copied host is: keys are public, and a member naming another's would make that member's sessions look like its own. Two members admitted concurrently with one key are both refused at the tunnel, and a paired phone's key always reaches the API. |
 | Two members naming one host as their own | A copied intro: the host is held. An `Admit` or `Rotate` naming the host of a member live in its history is refused outright. A member naming an added host is the same machine joining only when the account and SSH host keys match; otherwise the host is held, whether the addition came before the member's bundle or concurrently with it. Only a `HostAdd` that saw the bundle that first named the host is ignored (a `Rotate` that keeps the host keeps that claim), so no member can hold another's host by adding a copy, and no bundle can take over an added host by racing it. |
 | Two self-records | The higher `rev`. Equal `rev` with different content flags the host and keeps the one seen first. |
@@ -1739,10 +1739,11 @@ all of them. It needs no fleet key, because it only removes access.
 | Membership operations between checkpoints | 256 (`Found`, `Admit`, `Rotate`): the costly ones to fold |
 | Removals between checkpoints | 32 per signer, a share no one else can use up, and 1,024 in all from members no longer live. They count against no other bound, so a member that fills the log cannot keep out its own removal. |
 | Parents | 16 per operation. With more heads, a member names those of members not flagged for equivocation first, so a member forking its key cannot crowd out everyone's operations, removals included. |
+| Checkpoints between prunes | 8 per signer. They count against no other bound, so a full log can always checkpoint and prune. |
 | Operations between checkpoints | 2,048. A computer signs a `Checkpoint` after 512 operations or 30 days, and earlier operations are pruned once every live member's heads descend from it. A Sheprd host never trusts a checkpoint it cannot recompute from what it holds. |
 | One operation | 16 KiB. A bundle with ML-KEM-768 is about 2 KiB. |
 | One `fleet apply` or sync message | 256 KiB and 64 operations. More takes several rounds. |
-| Operations waiting for parents | 256 per peer, dropped after 1 hour |
+| Operations waiting for parents | 256 per peer, dropped after 1 hour. Copies of one operation with different signatures wait side by side, and the one whose signature checks out is kept, so a damaged copy cannot keep out the genuine one. |
 | Pending joins | 8 at once, each valid for 10 minutes |
 | Agent access file | 64 KiB: 32 members, 1,024 removed ids, and 64 settled removals; the copy the agent keeps adds 32 KiB for 8 former key pairs per member; 8 removals remembered per suspended member, past which only its removal settles it |
 | `removal` sessions | 8 out and 8 in at once, 30 seconds each; 64 operations and 256 KiB per message; 4 `Want` rounds; retries from 5 seconds to 10 minutes |

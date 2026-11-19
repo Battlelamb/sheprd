@@ -49,12 +49,14 @@ async fn an_offline_update_waits_for_the_lock() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_daemon_holds_the_lock_while_it_lives() {
-    let (_a, b, _) = admitted().await;
-    let dir = b.dir.path();
+    let dir = tempfile::tempdir().unwrap();
+    let dir = dir.path();
     let daemon = Fleet::load_exclusive(dir, now_ms()).unwrap();
     assert!(lock::Lock::try_acquire(dir).unwrap().is_none());
     drop(daemon);
-    assert!(lock::Lock::try_acquire(dir).unwrap().is_some());
+    // A process another test forks in the meantime shares the lock's open
+    // file until it execs, so the release can lag for a moment.
+    until(5, || lock::Lock::try_acquire(dir).unwrap().is_some()).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

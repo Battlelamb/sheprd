@@ -328,9 +328,9 @@ Every call needs a paired device's session:
 computer's own host makes its key a paired device here, for the API
 only (no SSH, GitHub sharing off), with the dial and tunnel keys of the
 phone's own bundle as its relay keys unless another device or member
-holds them (`Devices` keeps each relay key on one record, and a device
-paired here takes its keys back from a fleet one), named `fleet-` and 16 bytes of the key's hash so the phone knows
-its id. It goes when the phone is removed or links another key; one
+holds them (`Devices` keeps each relay key on one record and refuses
+every clash), named `fleet-` and 16 bytes of the key's hash so the
+phone knows its id. It goes when the phone is removed or links another key; one
 revoked here by hand stays revoked.
 
 ## Workspace pull requests and titles

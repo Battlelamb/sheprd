@@ -95,38 +95,25 @@ fn a_fleet_device_never_takes_a_paired_devices_keys() {
 }
 
 #[test]
-fn a_paired_device_takes_its_keys_from_a_fleet_device() {
+fn a_paired_device_never_takes_a_fleet_devices_keys() {
     let dir = tempfile::tempdir().unwrap();
     let mut devices = Devices::load(dir.path()).unwrap();
     add(&mut devices, "fleet-1", Some(keys(10))).unwrap();
-    add(&mut devices, "fleet-2", Some(keys(20))).unwrap();
-    // Sent over its own session (`POST /api/relay`): the fleet device,
-    // whose keys only a bundle named, gives them up.
+    // Posting the same public keys proves nothing about holding their
+    // private halves: taking them would cut the fleet phone off.
     add(&mut devices, "a", None).unwrap();
-    devices
-        .set_relay(&DeviceId("a".into()), keys(10), 2)
-        .unwrap();
-    assert_eq!(relay(&devices, "a"), Some(keys(10)));
-    assert_eq!(relay(&devices, "fleet-1"), None);
-    // At pairing too.
-    add(&mut devices, "b", Some(keys(20))).unwrap();
-    assert_eq!(relay(&devices, "fleet-2"), None);
-    // And it is so on disk.
-    let reread = Devices::load(dir.path()).unwrap();
-    assert_eq!(relay(&reread, "fleet-1"), None);
-    assert_eq!(relay(&reread, "a"), Some(keys(10)));
-}
-
-#[test]
-fn a_fleet_id_without_the_fleets_via_is_a_paired_device() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut devices = Devices::load(dir.path()).unwrap();
-    devices
-        .add_with(device("fleet-1", Some(keys(10))), 1, None, Vec::new(), true)
-        .unwrap();
-    add(&mut devices, "a", None).unwrap();
+    for taken in [keys(10), mixed(11, 10), mixed(10, 11)] {
+        assert!(matches!(
+            devices.set_relay(&DeviceId("a".into()), taken, 2),
+            Err(Error::RelayKeysTaken)
+        ));
+    }
     assert!(matches!(
-        devices.set_relay(&DeviceId("a".into()), keys(10), 2),
+        add(&mut devices, "b", Some(keys(10))),
         Err(Error::RelayKeysTaken)
     ));
+    assert_eq!(relay(&devices, "fleet-1"), Some(keys(10)));
+    assert_eq!(relay(&devices, "a"), None);
+    let reread = Devices::load(dir.path()).unwrap();
+    assert_eq!(relay(&reread, "fleet-1"), Some(keys(10)));
 }

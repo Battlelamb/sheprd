@@ -108,7 +108,31 @@ pub(crate) fn apply(state: &State, fleet: &Fleet) -> Result<()> {
     if let Ok(access) = state.auth().ssh_access() {
         access.keys.set_fleet(&lines)?;
     }
+    revoke_removed(state, fleet)?;
     write_records(fleet.state_dir(), &records)
+}
+
+/// Revokes every desktop paired here one by one with a tunnel key a member
+/// proved here and that is no longer a member: removing it from the fleet
+/// removes every way in it had. Blocking.
+fn revoke_removed(state: &State, fleet: &Fleet) -> Result<()> {
+    let gone: Vec<(MemberId, [u8; 32])> = {
+        let inner = fleet.inner();
+        let Some(log) = &inner.log else {
+            return Ok(());
+        };
+        inner
+            .proven
+            .iter()
+            .filter(|(member, _)| !log.is_member(member))
+            .map(|(member, tunnel)| (*member, *tunnel))
+            .collect()
+    };
+    for (member, tunnel) in &gone {
+        supersede(state, tunnel)?;
+        fleet.inner().proven.remove(member);
+    }
+    Ok(())
 }
 
 /// Revokes the desktop paired here one by one, over Bluetooth, whose

@@ -68,6 +68,10 @@ pub(crate) struct Inner {
     /// until its history arrives and settles it, its signer is no longer a
     /// member, or [`UNCONFIRMED_TTL_MS`] passes.
     pub(crate) unconfirmed: BTreeMap<OpId, Unconfirmed>,
+    /// The tunnel key each computer member proved by finishing the
+    /// tunnel's handshake here: once it is removed, a desktop paired here
+    /// one by one with that key goes with it.
+    pub(crate) proven: BTreeMap<MemberId, [u8; 32]>,
 }
 
 impl Fleet {
@@ -203,6 +207,16 @@ impl Fleet {
             self.bump();
         }
         Ok(refused)
+    }
+
+    /// Records that `member` proved `tunnel` by finishing the tunnel's
+    /// handshake here. Blocking.
+    pub(crate) fn proved(&self, member: MemberId, tunnel: [u8; 32]) -> Result<()> {
+        let mut inner = self.inner();
+        if inner.proven.insert(member, tunnel) == Some(tunnel) {
+            return Ok(());
+        }
+        self.save(&inner)
     }
 
     /// Records that `peer` holds the removals `ids`. Blocking.

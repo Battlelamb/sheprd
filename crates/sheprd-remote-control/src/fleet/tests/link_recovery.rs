@@ -34,6 +34,35 @@ async fn a_device_the_file_never_named_still_goes_with_its_member() {
     assert!(device(&a, 20).is_none());
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_revocation_that_failed_to_save_is_retried() {
+    let (http, _, _) = relay().await;
+    let mut a = Node::new(http, 1).await;
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    a.start().await;
+    let phone = Phone::new(7);
+    admit(&a, &phone);
+    link(&a, &phone, 20);
+    until(10, || device(&a, 20).is_some()).await;
+    // `devices.json` cannot be replaced: a directory stands there, so the
+    // revocation's save fails and the device is put back.
+    let path = a.dir.path().join("devices.json");
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    std::fs::write(path.join("blocker"), b"").unwrap();
+    a.ask(Ask::Remove {
+        member: phone.bundle.id().to_string(),
+        also_members: Vec::new(),
+        also_hosts: Vec::new(),
+        reason: Reason::Lost,
+    });
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(device(&a, 20).is_some());
+    // Freed, with no fleet change: the next try revokes it.
+    std::fs::remove_dir_all(&path).unwrap();
+    until(10, || device(&a, 20).is_none()).await;
+}
+
 #[tokio::test]
 async fn a_device_only_named_like_the_fleets_is_not_taken() {
     let a = Node::new(nowhere(), 1).await;

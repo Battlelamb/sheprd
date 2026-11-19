@@ -297,7 +297,7 @@ impl Admitted {
             .suspended
             .keys()
             .filter_map(|id| access.members.get(id))
-            .any(|member| member.dial == *dial || member.tunnel == *tunnel)
+            .any(|member| member.dial == *dial && member.tunnel == *tunnel)
     }
 
     /// The keys the relays let dial: members first, then desktops, at

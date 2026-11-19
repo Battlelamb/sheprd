@@ -50,6 +50,7 @@ pub fn compute(
                 rev,
                 ssh,
                 tunnel: member.bundle.tunnel,
+                keys: member.seq,
             };
             Some((Id(id.0), member))
         })

@@ -20,6 +20,7 @@ pub(crate) fn member(seed: u8, allow: bool, rev: u64) -> Member {
         rev,
         ssh: crate::authorized_keys::tests::key(seed),
         tunnel: [seed; 32],
+        keys: 0,
     }
 }
 
@@ -94,12 +95,42 @@ fn a_tie_between_allow_and_deny_is_a_deny() {
 }
 
 #[test]
-fn a_tie_with_the_same_answer_takes_the_newer_keys() {
-    let held = Access::merge(None, access(&[(1, true, 2)], &[])).unwrap();
-    let mut renewed = access(&[(1, true, 2)], &[]);
-    renewed.members.get_mut(&id(1)).unwrap().tunnel = [0x42; 32];
-    let merged = Access::merge(Some(&held), renewed).unwrap();
-    assert_eq!(merged.members[&id(1)].tunnel, [0x42; 32]);
+fn keys_follow_their_own_version_never_a_staler_file() {
+    let mut first = access(&[(1, true, 2)], &[]);
+    first.members.get_mut(&id(1)).unwrap().keys = 5;
+    let held = Access::merge(None, first).unwrap();
+    // A file computed before the rotation, at the same access rev: its
+    // older keys do not come back.
+    let mut stale = access(&[(1, true, 2)], &[]);
+    stale.members.get_mut(&id(1)).unwrap().tunnel = [0x42; 32];
+    stale.members.get_mut(&id(1)).unwrap().keys = 4;
+    let merged = Access::merge(Some(&held), stale).unwrap();
+    assert_eq!(merged.members[&id(1)].tunnel, [1; 32]);
+    // Nor do keys of the same version from another file.
+    let mut same = access(&[(1, true, 2)], &[]);
+    same.members.get_mut(&id(1)).unwrap().tunnel = [0x43; 32];
+    same.members.get_mut(&id(1)).unwrap().keys = 5;
+    let merged = Access::merge(Some(&merged), same).unwrap();
+    assert_eq!(merged.members[&id(1)].tunnel, [1; 32]);
+    // A rotation, newer: taken, whatever the access rev says.
+    let mut rotated = access(&[(1, false, 1)], &[]);
+    rotated.members.get_mut(&id(1)).unwrap().tunnel = [0x44; 32];
+    rotated.members.get_mut(&id(1)).unwrap().keys = 6;
+    let merged = Access::merge(Some(&merged), rotated).unwrap();
+    assert_eq!(merged.members[&id(1)].tunnel, [0x44; 32]);
+    // The access answer still follows the higher rev.
+    assert!(merged.members[&id(1)].allow);
+    assert_eq!(merged.members[&id(1)].rev, 2);
+}
+
+#[test]
+fn a_file_naming_one_key_for_two_members_is_refused() {
+    let mut shared = access(&[(1, true, 0), (2, true, 0)], &[]);
+    shared.members.get_mut(&id(2)).unwrap().tunnel = [1; 32];
+    assert!(Access::merge(None, shared).is_err());
+    let mut shared = access(&[(1, true, 0), (2, true, 0)], &[]);
+    shared.members.get_mut(&id(2)).unwrap().dial = dial(1);
+    assert!(Access::merge(None, shared).is_err());
 }
 
 #[test]

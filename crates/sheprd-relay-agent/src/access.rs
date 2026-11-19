@@ -160,6 +160,11 @@ pub struct Member {
     /// What its end-to-end handshake must show.
     #[serde(with = "b64")]
     pub tunnel: [u8; 32],
+    /// How new its keys are: its highest sequence number in the log that
+    /// computed the file, which only climbs. Keys from a file computed
+    /// before a rotation never replace newer ones.
+    #[serde(default)]
+    pub keys: u64,
 }
 
 impl Member {
@@ -171,15 +176,25 @@ impl Member {
             && !self.name.chars().any(char::is_control)
     }
 
-    /// Which of two views of one member wins: the higher `rev`, and on a
-    /// tie the deny, then the newer file, whose keys are fresher.
-    fn wins_over(&self, held: &Self) -> bool {
-        match self.rev.cmp(&held.rev) {
-            Ordering::Greater => true,
-            Ordering::Less => false,
-            Ordering::Equal if self.allow != held.allow => !self.allow,
-            Ordering::Equal => true,
-        }
+    /// Two views of one member merged: whether it may reach SSH by the
+    /// higher `rev`, a deny winning a tie; its keys and name by the higher
+    /// `keys`, the held ones kept on a tie, so a file computed before a
+    /// rotation cannot bring back the keys it replaced.
+    fn merged(self, held: &Self) -> Self {
+        let allow = match self.rev.cmp(&held.rev) {
+            Ordering::Greater => self.allow,
+            Ordering::Less => held.allow,
+            Ordering::Equal => self.allow && held.allow,
+        };
+        let rev = self.rev.max(held.rev);
+        let mut merged = if self.keys > held.keys {
+            self
+        } else {
+            held.clone()
+        };
+        merged.allow = allow;
+        merged.rev = rev;
+        merged
     }
 }
 
@@ -232,6 +247,15 @@ impl Access {
         if let Some((id, _)) = self.members.iter().find(|(_, member)| !member.valid()) {
             return Err(Error::Member { member: *id });
         }
+        // Keys are public: two members naming one would make one's
+        // sessions look like the other's.
+        let mut dials = BTreeSet::new();
+        let mut tunnels = BTreeSet::new();
+        for (id, member) in &self.members {
+            if !dials.insert(member.dial) || !tunnels.insert(member.tunnel) {
+                return Err(Error::Member { member: *id });
+            }
+        }
         Ok(())
     }
 
@@ -266,8 +290,8 @@ impl Access {
     }
 
     /// `incoming` merged into what was `held`: the same fleet only,
-    /// removed members a union that no member outlives, and per member the
-    /// view [`Member::wins_over`] picks. `settled` is not kept.
+    /// removed members a union that no member outlives, and per member
+    /// [`Member::merged`]. `settled` is not kept.
     pub fn merge(held: Option<&Self>, incoming: Self) -> Result<Self> {
         incoming.check()?;
         let mut merged = match held {
@@ -281,13 +305,11 @@ impl Access {
                 let mut merged = held.clone();
                 merged.removed.extend(incoming.removed);
                 for (id, member) in incoming.members {
-                    let wins = merged
-                        .members
-                        .get(&id)
-                        .is_none_or(|kept| member.wins_over(kept));
-                    if wins {
-                        merged.members.insert(id, member);
-                    }
+                    let member = match merged.members.get(&id) {
+                        Some(kept) => member.merged(kept),
+                        None => member,
+                    };
+                    merged.members.insert(id, member);
                 }
                 merged
             }

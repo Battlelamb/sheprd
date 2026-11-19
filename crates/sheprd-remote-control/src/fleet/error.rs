@@ -9,20 +9,20 @@ pub enum Error {
     Daemon(String),
     #[error(transparent)]
     Desktop(#[from] crate::desktop::Error),
-    #[error(transparent)]
-    Log(#[from] crate::control::fleet::Error),
     #[error("this computer is in a fleet already; leave it first")]
     InFleet,
+    #[error(transparent)]
+    Log(#[from] crate::control::fleet::Error),
     #[error("this computer cannot sign with its certificate authority")]
     NoAuthority,
     #[error("this computer is not in a fleet")]
     NoFleet,
     #[error("this computer listens on no relay; turn one on first")]
     NoRelays,
-    #[error("the fleet did not take the operation this computer signed")]
-    NotApplied,
     #[error("the operations handed over do not admit this computer to a fleet")]
     NotAdmitted,
+    #[error("the fleet did not take the operation this computer signed")]
+    NotApplied,
     #[error("that bundle is not this computer's")]
     NotMine,
     #[error(transparent)]

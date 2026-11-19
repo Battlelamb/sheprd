@@ -300,11 +300,17 @@ public struct Home: Codable, Hashable, Sendable {
             /// When the computer saw it last change state; unknown until
             /// it does, and from older computers.
             public var changedMs: UInt64?
+            /// Whether its conversation opens as a read-only chat on its
+            /// pane, beside the terminal; older computers leave it out.
+            public var transcript: Bool?
 
             enum CodingKeys: String, CodingKey {
-                case name, status, pane, title
+                case name, status, pane, title, transcript
                 case changedMs = "changed_ms"
             }
+
+            /// Whether the computer shows its conversation as a chat.
+            public var opensAsChat: Bool { transcript == true && pane != nil }
         }
 
         /// The pane a phone opens for the tab's agent: its own, else the

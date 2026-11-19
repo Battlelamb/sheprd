@@ -59,8 +59,17 @@ struct TerminalItem: Identifiable, Hashable {
     var changed: Date? { agent?.changedMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
     var working: Bool { agent?.status == .working }
 
-    /// Where a list opens it: the agent's pane, else the focused one.
+    /// Where a list opens it: an agent's conversation, when its computer
+    /// shows it as a chat, else the agent's pane, else the focused one.
     var route: Route? {
+        if let agent, agent.opensAsChat, let pane = terminal.agentPane {
+            return .chat(PaneKey(device: computer.device, pane: pane.pane), title: title)
+        }
+        return terminalRoute
+    }
+
+    /// The terminal itself, at the agent's pane or the focused one.
+    var terminalRoute: Route? {
         terminal.agentPane.map { .term(PaneKey(device: computer.device, pane: $0.pane), title: terminal.label) }
     }
 }
@@ -847,6 +856,9 @@ final class Fleet {
         case let .event(.refused(view, message)):
             log.error("\(self.machines[index].computer.name, privacy: .public) refused \(String(describing: view), privacy: .public): \(message, privacy: .public)")
             if case let .term(pane) = view, let store = terms[PaneKey(device: device, pane: pane)], store.screen == nil {
+                store.problem = message
+            }
+            if case let .chat(pane) = view, let store = chats[PaneKey(device: device, pane: pane)], store.transcript == nil {
                 store.problem = message
             }
         case let .event(.reload(.term(pane))):

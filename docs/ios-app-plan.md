@@ -157,7 +157,7 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
     "terminals": [{
       "tab": "t2", "label": "zsh", "cwd": "/Users/me/code/sheprd", "zoomed": false,
       "panes": [{"pane": "p2", "label": null, "cwd": "/Users/me/code/sheprd", "focused": true}],
-      "agent": {"name": "claude", "status": "done", "pane": "p2", "title": "Fix the build"},
+      "agent": {"name": "claude", "status": "done", "pane": "p2", "title": "Fix the build", "transcript": true},
       "convert": {"agent": "claude", "pane": "p2"}
     }]
   }]
@@ -172,6 +172,38 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
   `claude` run in a shell: `pane` is the pane it runs in and `title` its
   terminal title, both absent from older daemons. Home lists these tabs
   with the chats, by status, and opens the agent's pane.
+- `agent.transcript` is `true` when the agent's own conversation can be
+  read as a chat: Claude Code or Codex in a Herdr 1 pane, as
+  `sheprd_client::herdr::observe` lists them. The phone then opens it
+  with `{"type": "subscribe", "view": "chat", "pane": PANE}` on the
+  agent's pane, as it opens a chat, and `GET /api/v2/chat/{pane}` answers
+  the same. The daemon starts `sheprd-acp observe` for it then, on the
+  pane's host, with the session Herdr reports and the process's birth read
+  there; the transcript is `read_only`, its steps reach no notifications,
+  and no terminal is attached, so the pane keeps its size. At most eight
+  observers run; past that the oldest no phone follows ends. Where it
+  cannot be read (a Windows host, a session Herdr does not name, a Codex
+  launched to resume another session, a `CLAUDE_CONFIG_DIR` or
+  `CODEX_HOME` on macOS) the subscription answers `error`, and the
+  phone offers the terminal. Replies go to the terminal through
+  `/api/term/{pane}/paste` and Enter. Absent (false) from older daemons.
+- `GET /api/term/{pane}/prompt` answers `{"prompt": PROMPT}`, or `null`
+  when nothing waits: the numbered menu at the bottom of the pane's
+  screen, as `sheprd_client::herdr::prompt` reads it (Claude Code's
+  questions and permission prompts, Codex's approvals). It is a menu only
+  when exactly one choice carries the highlight (`❯` or `›`), so a numbered
+  list in an answer never is. `question` is its lines top to bottom,
+  `choices` each `{number, label, detail?, text?}` (`text: true` takes
+  typed words), and `selected` the highlighted index. Reading uses
+  `pane.read`, which neither attaches nor resizes.
+- `POST /api/term/{pane}/prompt` with `{"question", "number", "label",
+  "text"?}` takes that choice: the daemon reads the screen again, refuses
+  with 400 unless the question's lines are the ones the phone showed and
+  the choice is still there under that number and label (so a late answer
+  never approves another command with the same choices), then presses
+  Up or Down to it and Enter, typing `text` into a choice that takes
+  words first. A set of questions goes one at a time, ending on the
+  agent's own review, as at the desk.
 - A chat's `summary.first_prompt` is the start of its first prompt, which
   names a chat its agent has not titled; absent before one is sent and
   from older daemons.

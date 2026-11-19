@@ -9,8 +9,9 @@
 //! one does the same, so a removal floods the fleet in about two hops,
 //! with no Sheprd running anywhere.
 //!
-//! Plain hosts get the removals that took effect the same way, from every
-//! member: their agent checks no signature, so it only suspends the
+//! Plain hosts get the removals that took effect the same way, each from
+//! the member that signed it: their agent checks no signature, so it takes
+//! a removal only in the dialing member's own name, only suspends the
 //! targets until Sheprd's next access file settles it, and answers `Held`
 //! at once.
 //!
@@ -179,7 +180,12 @@ fn owed(fleet: &Fleet) -> Vec<(Holder, Record, Vec<Op>)> {
         .filter_map(|(id, host)| {
             let record = record(state, id, &host.intro.name)?;
             let holder = Holder::Host(*id);
-            let mut effective = removals.iter().filter(|op| took_effect(state, op));
+            // An agent suspends only in the dialing member's own name, so
+            // it is passed only this computer's removals; the others reach
+            // it in the access file.
+            let mut effective = removals
+                .iter()
+                .filter(|op| op.signer() == fleet.me() && took_effect(state, op));
             let ops = unheld(&holder, &mut effective);
             Some((holder, record, ops))
         });

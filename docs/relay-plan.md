@@ -1445,7 +1445,7 @@ sequenceDiagram
    writes the `authorized_keys` lines the way `ssh_access` does, with the
    same shared code: atomically, refusing a linked file, and touching
    only lines with its own fleet's tag. A member removed for good also
-   loses any `authorized` line with its keys. It then names the dial keys
+   loses any `authorized` line its device proved was its own. It then names the dial keys
    to its relays. `status --json` and `fleet apply` report the fleet and
    the digest of the merged file, which Sheprd compares with the file it
    would write to see a host that is behind. A plain host trusts the SSH
@@ -1594,19 +1594,33 @@ accepted on this purpose.
   each peer until that peer answers `Held`, then never again.
 - Plain hosts get it too. Every daemon dials each plain host in its
   state from the host's record, and sends it the removals that took
-  effect in its log. An agent takes `removal` from the member tunnel
-  keys in its access file. It checks no signatures and wants no
-  parents, so it only **suspends** the target: it stops admitting that
-  member's keys (and a desktop line that shares them), removes its
-  `authorized_keys` line, and keeps the id in a suspended list with the
-  removals that named it. That holds when the sender is a member it
-  admits and the target is any member but the sender. It answers `Held`
-  with every removal of its fleet it took.
+  effect in its log and that it signed itself. An agent takes `removal`
+  from the member tunnel keys in its access file. It checks no
+  signatures and wants no parents, so it only **suspends** the target:
+  it stops admitting that member's keys (and a desktop the member's
+  device proved was its own), removes its `authorized_keys` line, and
+  keeps the id in a suspended list with the removals that named it.
+  That holds when the sender is a member it admits, the removal names
+  the sender as its signer, the target is any member but the sender,
+  and, for a sender denied SSH on that host, the target is denied too.
+  It answers `Held` with every removal of its fleet it took, acted on or
+  not; the others reach it in the access file.
 - The next access file, computed over SSH from the signed log, settles
   it. A confirmed removal becomes a permanent tombstone. A removal the
   log voids, such as one from a member that was itself removed first, is
   lifted: the file's `settled` names every removal the member was
-  suspended for, and the log still lists it as a member.
+  suspended for that no longer stands, and the log still lists it as a
+  member. A removal stands no longer when the log holds it, or, with
+  nothing waiting for its parents, when it holds no such removal at all,
+  so a member cannot keep another suspended by naming removal ids that
+  do not exist.
+- A desktop enrolled one by one in `authorized` is no member's because a
+  member's bundle names its keys. It is bound to a member (`bound`, in
+  the agent's state directory) only once the device holding its tunnel
+  key opens a session as that member, with a purpose byte no enrolled
+  desktop sends; only then does the member's suspension cut it off and
+  its removal forget it. Otherwise a key no admitted member holds is
+  still that desktop's.
 - A suspension the agent cannot settle stays in place. Settings > Fleet
   lists it, so a member can only ever take access away on an agent this
   way, never give it.

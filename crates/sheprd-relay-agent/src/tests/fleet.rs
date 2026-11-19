@@ -127,6 +127,31 @@ async fn an_allowed_member_reaches_ssh_and_a_denied_one_does_not() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_desktop_is_bound_to_a_member_only_once_its_device_speaks_as_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let laptop = Desktop::new(0x51);
+    authorize(dir.path(), &[&laptop]);
+    let running = start(dir.path()).await;
+    apply(
+        &running,
+        dir.path(),
+        vec![member(&laptop, 1, true, 0)],
+        &[],
+        &[],
+    );
+    // As the enrolled desktop, with no purpose byte: no proof.
+    let mut session = dial(&running, &laptop).await.unwrap();
+    session.io.write_all(b"SSH-2.0-client\r\n").await.unwrap();
+    assert_eq!(greeting(&mut session.io).await, b"SSH-2.0-test\r\n");
+    assert!(Held::load(dir.path()).unwrap().bound.is_empty());
+    // As the member: the device holding the key is the member's.
+    let mut session = open(&running, &laptop, PURPOSE_SSH).await;
+    assert_eq!(greeting(&mut session.io).await, b"SSH-2.0-test\r\n");
+    let bound = Held::load(dir.path()).unwrap().bound;
+    assert!(bound[&Id([1; 32])].contains(&Id(laptop.tunnel.identity().x25519())));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_desktop_enrolled_one_by_one_keeps_its_session_beside_the_fleet() {
     let dir = tempfile::tempdir().unwrap();
     let desktop = Desktop::new(0x31);
@@ -154,7 +179,7 @@ async fn a_removal_suspends_at_once_and_the_next_access_file_confirms_it() {
     let mut live = open(&running, &b, PURPOSE_SSH).await;
     greeting(&mut live.io).await;
 
-    let op = remove_op(FLEET, [0x77; 32], &[[2; 32]]);
+    let op = remove_op(FLEET, [1; 32], &[[2; 32]]);
     assert_eq!(
         pass(&running, &a, vec![op.clone()]).await,
         Message::Held(vec![removal_id(&op)])
@@ -194,7 +219,7 @@ async fn the_next_access_file_lifts_a_suspension_the_log_voided() {
     let (a, b) = (Desktop::new(0x51), Desktop::new(0x52));
     let members = || vec![member(&a, 1, true, 0), member(&b, 2, true, 0)];
     apply(&running, dir.path(), members(), &[], &[]);
-    let op = remove_op(FLEET, [0x77; 32], &[[2; 32]]);
+    let op = remove_op(FLEET, [1; 32], &[[2; 32]]);
     pass(&running, &a, vec![op.clone()]).await;
     until_offline(&running, &b).await;
 
@@ -214,7 +239,7 @@ async fn a_member_cannot_suspend_itself_and_a_stranger_passes_nothing() {
     let running = start(dir.path()).await;
     let a = Desktop::new(0x51);
     apply(&running, dir.path(), vec![member(&a, 1, true, 0)], &[], &[]);
-    let op = remove_op(FLEET, [0x77; 32], &[[1; 32]]);
+    let op = remove_op(FLEET, [1; 32], &[[1; 32]]);
     // Taken, so the sender owes it no more, but acted on by someone else.
     assert_eq!(
         pass(&running, &a, vec![op.clone()]).await,

@@ -61,16 +61,36 @@ fn removed_members_are_tombstones_and_named_no_more() {
 }
 
 #[test]
-fn only_removals_the_log_holds_are_settled() {
+fn a_current_log_settles_every_removal_asked_about() {
     let (mut log, [a, b, _], host) = fleet();
     let removal = act(&mut log, &a, remove_body(&b));
     let access = act(&mut log, &a, access_body(host, &a, true, 1));
+    // An id no removal has, as a member could make up to keep another
+    // suspended, and one that is no removal: neither stands.
     let unknown = OpId([0x42; 32]);
     let file = host_access::compute(&log, &host, [removal.id(), access.id(), unknown]).unwrap();
+    let mut wanted = vec![Id(removal.id().0), Id(access.id().0), Id(unknown.0)];
+    wanted.sort();
+    assert_eq!(file.settled.into_iter().collect::<Vec<_>>(), wanted);
+}
+
+#[test]
+fn a_log_waiting_for_parents_settles_only_the_removals_it_holds() {
+    let (mut log, [a, b, c], host) = fleet();
+    let removal = act(&mut log, &a, remove_body(&c));
+    // An operation whose parent has not arrived: the log may lack a
+    // removal it is about to get.
+    let mut other = copy(&log);
+    let admitted = admit(&mut other, &b, &computer(5));
+    let child = act(&mut other, &b, Body::HostAdd(plain_host(41)));
+    assert_eq!(log.insert(child, NOW), Ok(Inserted::Pending));
+    let unknown = OpId([0x42; 32]);
+    let file = host_access::compute(&log, &host, [removal.id(), unknown]).unwrap();
     assert_eq!(
         file.settled.into_iter().collect::<Vec<_>>(),
         [Id(removal.id().0)]
     );
+    drop(admitted);
 }
 
 #[test]

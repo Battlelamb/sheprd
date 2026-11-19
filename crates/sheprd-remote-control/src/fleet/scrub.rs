@@ -52,7 +52,7 @@ pub(crate) fn offline(state_dir: &Path) -> Result<()> {
         }
         let mut auth = crate::auth::Auth::load(state_dir, crate::auth::Limits::default())?;
         for tunnel in tunnels {
-            grants::revoke_paired(&mut auth, tunnel)?;
+            grants::revoke_paired(&mut auth, keys.as_ref(), tunnel)?;
         }
         Ok(())
     })

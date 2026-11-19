@@ -170,12 +170,20 @@ fn revoke_removed(state: &State, fleet: &Fleet) -> Result<()> {
 /// proved, not on what a bundle claims, keeps a member from revoking a
 /// desktop by naming its public keys. Blocking.
 pub(crate) fn supersede(state: &State, tunnel: &[u8; 32]) -> Result<()> {
-    revoke_paired(&mut state.auth(), tunnel)
+    let mut auth = state.auth();
+    let keys = auth.ssh_access().ok().map(|access| access.keys.clone());
+    revoke_paired(&mut auth, keys.as_ref(), tunnel)
 }
 
 /// Revokes every desktop paired one by one in `auth` whose tunnel key is
-/// `tunnel`. Blocking.
-pub(crate) fn revoke_paired(auth: &mut crate::auth::Auth, tunnel: &[u8; 32]) -> Result<()> {
+/// `tunnel`, removing its line from `keys` first: a line that stays is
+/// reported rather than left behind a device that is gone, whose proof
+/// would no longer say whose line it was. Blocking.
+pub(crate) fn revoke_paired(
+    auth: &mut crate::auth::Auth,
+    keys: Option<&crate::ssh_access::AuthorizedKeys>,
+    tunnel: &[u8; 32],
+) -> Result<()> {
     let paired: Vec<crate::control::DeviceId> = auth
         .devices()
         .records()
@@ -192,6 +200,9 @@ pub(crate) fn revoke_paired(auth: &mut crate::auth::Auth, tunnel: &[u8; 32]) -> 
         .collect();
     for device in paired {
         tracing::info!("a desktop paired here is a fleet member's device; its own pairing goes");
+        if let Some(keys) = keys {
+            keys.remove(&device)?;
+        }
         auth.revoke(&device)?;
     }
     Ok(())

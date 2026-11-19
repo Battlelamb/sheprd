@@ -141,3 +141,44 @@ async fn a_scrub_that_cannot_delete_the_log_keeps_the_fleet() {
     assert!(ask::view(&b.fleet).is_some());
     assert!(folder.join("log.bin").exists());
 }
+
+/// The `sheprd-desktop:` lines in `node`'s `authorized_keys`.
+fn desktop_lines(node: &Node) -> usize {
+    std::fs::read_to_string(node.dir.path().join("authorized_keys"))
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| line.contains("sheprd-desktop:"))
+        .count()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scrub_with_no_daemon_removes_the_paired_desktops_line() {
+    let (a, b, _) = joined().await;
+    let legacy = paired_and_proved(&a, &b);
+    let keys = AuthorizedKeys::at(b.dir.path().join("authorized_keys"));
+    let ssh = crate::ssh_access::SshKey::parse(
+        &crate::desktop::keys::ssh_public_key(a.dir.path()).unwrap(),
+    )
+    .unwrap();
+    keys.allow(&legacy, &ssh).unwrap();
+    assert_eq!(desktop_lines(&b), 1);
+    // As `fleet scrub` with no daemon loads it: no SSH access of its own.
+    let mut auth = crate::auth::Auth::load(b.dir.path(), crate::auth::Limits::default()).unwrap();
+    grants::revoke_paired(&mut auth, Some(&keys), &[0x5a; 32]).unwrap();
+    assert_eq!(desktop_lines(&b), 0);
+    assert!(auth.devices().get(&legacy).is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_desktops_line_that_cannot_go_keeps_its_pairing() {
+    let (a, b, _) = joined().await;
+    let legacy = paired_and_proved(&a, &b);
+    let linked = b.dir.path().join("linked_keys");
+    std::os::unix::fs::symlink(b.dir.path().join("authorized_keys"), &linked).unwrap();
+    let mut auth = crate::auth::Auth::load(b.dir.path(), crate::auth::Limits::default()).unwrap();
+    let error = grants::revoke_paired(&mut auth, Some(&AuthorizedKeys::at(linked)), &[0x5a; 32])
+        .unwrap_err();
+    assert!(matches!(error, Error::SshAccess(_)), "{error:?}");
+    // Kept, with the proof that names it, for another try.
+    assert!(auth.devices().get(&legacy).is_some());
+}

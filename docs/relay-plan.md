@@ -1938,27 +1938,37 @@ manual multi-machine and phone steps left unticked in its QA list.
    Secure Enclave key, sync, offers and `Link`, removing from the phone,
    pushes, and Settings > Fleet. Swift tests against phase 1's vectors.
    - **Built, the daemon:** `GET /api/v2/fleet` (the view, heads, and a
-     live member's next sequence number and parents),
+     live member's next sequence number and parents, and for each Sheprd
+     host it linked, that host's latest record with its CA's certificate
+     and signature, which the phone checks itself),
      `POST /api/v2/fleet/sync` (64 operations, 256 KiB), and
      `POST /api/v2/fleet/join`, kept in memory (8, 10 minutes) for
      Sheprd's `Ask::Joins` and admitted only by `Ask::Admit`.
      `fleet::links` admits a phone's linked key as an API device with an
-     id derived from the key, and revokes it with the member or a newer
-     link.
+     id derived from the key, with the dial and tunnel keys of the
+     phone's own bundle as its relay keys, so the relays let it through
+     at once; a `Rotate` moves them, and they go with the device. Keys
+     another device or member holds, or a member proved here, are never
+     set, and keys the phone later sends itself stay. `Devices` holds each
+     relay key on one record only: a device paired here takes keys from
+     a fleet-admitted one, and every other clash is refused.
    - **Built, the phone:** `FleetClient` in `SheprdRemoteCore`, checked
      against a new phone vector; a Secure Enclave key with user presence
      (a software key in the simulator only); "Join" after pairing with a
      computer in a fleet; Settings > Fleet with members, hosts and their
      paths, and removals with Face ID; and the offer card, which signs
-     one `Link` per Sheprd host and keeps each as a computer reached
-     through the one it joined through.
+     one `Link` per Sheprd host and keeps each as a computer with a relay
+     record (its route, relays, and identity, from the host's own record
+     once the phone checked its CA's signature against the host id it
+     pins, with the bundle's relay keys, kept in the Keychain; a later
+     checked record replaces it), so
+     the relay race reaches it as it reaches computers paired directly.
    - **Left:** the
      phone's own copy of the log, so it checks what it signs on rather
      than trusting the member it asks; admitting a computer from the
-     phone; pushes; history; and a path
-     to linked hosts before they publish `direct` addresses or Sheprd
-     carries the phone's relay keys to them (`host_relay`), which needs
-     members as SSH hosts in Sheprd (phase 3).
+     phone; pushes; and history. A
+     phone's bundle relay keys are set before it proves the tunnel key:
+     the relays must name the dial key before it can dial at all.
 6. **Migration and scrub** (built):
    - **`fleet scrub`:** `sheprd-remote-control fleet scrub` forgets the
      fleet on a computer, with the `authorized_keys` lines and relay
@@ -1976,6 +1986,13 @@ manual multi-machine and phone steps left unticked in its QA list.
      and computers paired over Bluetooth show under Machines this Sheprd
      reaches, to Share or Invite; paired phones join from the phone
      (phase 5). Nothing is spread without that step.
+||||||| 1467dd690
+     phone; pushes; the pairing dialog's fleet line; history; and a path
+     to linked hosts before they publish `direct` addresses or Sheprd
+     carries the phone's relay keys to them (`host_relay`), which needs
+     members as SSH hosts in Sheprd (phase 3).
+6. **Migration:** the lists in "Create a fleet", replacing
+   `sheprd-desktop:` lines, and `sheprd fleet scrub`.
 7. **Bluetooth on Linux and Windows:** scanning in `crates/sheprd-nearby`,
    then the transport measurement and its verdict here.
 

@@ -8,15 +8,15 @@ use crate::control::fleet::{Body, Link, Method, Reason, Remove};
 use crate::web::tests::fleet::{Phone, device_key};
 
 /// An address no relay listens on: these tests never dial.
-fn nowhere() -> SocketAddr {
+pub(super) fn nowhere() -> SocketAddr {
     "127.0.0.1:9".parse().unwrap()
 }
 
-fn fleet_id(node: &Node) -> crate::control::fleet::FleetId {
+pub(super) fn fleet_id(node: &Node) -> crate::control::fleet::FleetId {
     node.fleet.inner().log.as_ref().unwrap().fleet()
 }
 
-fn admit(node: &Node, phone: &Phone) {
+pub(super) fn admit(node: &Node, phone: &Phone) {
     let (bundle, signature) = phone.join(&fleet_id(node));
     assert_eq!(
         node.ask(Ask::Admit {
@@ -30,7 +30,7 @@ fn admit(node: &Node, phone: &Phone) {
 
 /// `phone` signs `body` and hands it to `node`, as `POST /api/v2/fleet/sync`
 /// does.
-fn post(node: &Node, phone: &Phone, body: Body) -> usize {
+pub(super) fn post(node: &Node, phone: &Phone, body: Body) -> usize {
     let op = {
         let inner = node.fleet.inner();
         phone.sign(inner.log.as_ref().unwrap(), body)
@@ -38,12 +38,12 @@ fn post(node: &Node, phone: &Phone, body: Body) -> usize {
     node.fleet.receive(vec![op], now_ms()).unwrap()
 }
 
-fn own_host(node: &Node) -> crate::control::fleet::HostId {
+pub(super) fn own_host(node: &Node) -> crate::control::fleet::HostId {
     let inner = node.fleet.inner();
     grants::own_host(inner.log.as_ref().unwrap().state(), &node.fleet.me()).unwrap()
 }
 
-fn link(node: &Node, phone: &Phone, seed: u8) {
+pub(super) fn link(node: &Node, phone: &Phone, seed: u8) {
     let body = Body::Link(Link {
         host: own_host(node),
         device_key: device_key(seed),
@@ -51,12 +51,12 @@ fn link(node: &Node, phone: &Phone, seed: u8) {
     assert_eq!(post(node, phone, body), 0);
 }
 
-fn device(node: &Node, seed: u8) -> Option<crate::auth::DeviceRecord> {
+pub(super) fn device(node: &Node, seed: u8) -> Option<crate::auth::DeviceRecord> {
     let (id, _) = links::device_id(&device_key(seed)).unwrap();
     node.state.auth().devices().get(&id).cloned()
 }
 
-fn apply(node: &Node) -> bool {
+pub(super) fn apply(node: &Node) -> bool {
     links::apply(&node.state, &node.fleet, now_ms()).unwrap()
 }
 
@@ -77,7 +77,7 @@ async fn a_phones_link_admits_its_key_to_the_api_only() {
         Some(format!("fleet {}", fleet_id(&a).short()).as_str())
     );
     assert!(!record.share_github);
-    assert!(record.ssh.is_none() && record.relay.is_none());
+    assert!(record.ssh.is_none());
     assert!(record.id.0.starts_with("fleet-"));
     // A phone is never a host's SSH user.
     grants::apply(&a.state, &a.fleet).unwrap();

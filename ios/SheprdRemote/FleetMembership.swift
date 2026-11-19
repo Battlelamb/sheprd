@@ -30,8 +30,10 @@ final class FleetMembership {
         var through: String
         /// A person admitted it; until then the join waits on `through`.
         var admitted: Bool
-        /// The relay keys its bundle published (dial, then tunnel), kept for
-        /// when fleet hosts let phones through their relays by them.
+        /// The private halves of the relay keys its bundle published (dial,
+        /// then tunnel): every host it links lets these through its relays,
+        /// and each linked computer's relay record carries them. Kept in the
+        /// Keychain as other relay keys are.
         var relayDial: Data
         var relayTunnel: Data
     }
@@ -113,6 +115,7 @@ final class FleetMembership {
                 return
             }
             self.status = status
+            route(status)
             if !record.admitted, status.join == .member {
                 var admitted = record
                 admitted.admitted = true
@@ -188,17 +191,47 @@ final class FleetMembership {
             return
         }
         let bodies: [FleetLog.Body] = made.map { .link(host: $0.id, deviceKey: $0.point) }
+        // Signing reads the fleet again, so `self.status` now carries the
+        // linked hosts' relays.
         await sign(reason, bodies)
         guard problem == nil else { return }
+        let linked = self.status ?? status
         for (host, _, key, point) in made {
             guard let device = FleetLog.linkDevice(key: point),
                   let fingerprint = Fingerprint(host.id)
             else { continue }
             let enrolled = HostState.Enrolled(
                 device: device, computer: host.name, fingerprint: fingerprint,
-                origins: status.origins(of: host.id)
+                origins: linked.origins(of: host.id)
             )
-            onLinked(Computer(host: enrolled, key: key, via: through.fingerprint))
+            var computer = Computer(host: enrolled, key: key, via: through.fingerprint)
+            computer.relay = relayKeys.flatMap { linked.relayRecord(for: host.id, keys: $0) }
+            onLinked(computer)
+        }
+    }
+
+    /// The relay keys of this phone's fleet bundle: the ones every host it
+    /// linked lets through.
+    private var relayKeys: RelayKeyPair? {
+        record.map { RelayKeyPair(dialKey: $0.relayDial, tunnelKey: $0.relayTunnel) }
+    }
+
+    /// Gives each computer this phone linked the relays its host's own
+    /// signed record names (`FleetRoute.verified`), when it has none or
+    /// they moved: a later record replaces a saved one, so a host that
+    /// changed relays is followed.
+    private func route(_ status: API.FleetStatus) {
+        guard let keys = relayKeys else { return }
+        for computer in computers() where computer.via != nil && computer.device.hasPrefix("fleet-") {
+            let host = computer.fingerprint.hex.lowercased()
+            guard status.links.contains(host),
+                  let info = status.relay(for: host),
+                  computer.relay.map({ !$0.matches(info) }) ?? true,
+                  let relay = RelayRecord.make(from: info, keys: keys)
+            else { continue }
+            var routed = computer
+            routed.relay = relay
+            onLinked(routed)
         }
     }
 

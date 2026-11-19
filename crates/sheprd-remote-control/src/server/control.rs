@@ -243,7 +243,13 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
         Request::RelayEnroll(request) => return relay_enroll(state, &request, now),
         Request::Fleet(ask) => return fleet(state, *ask, now),
         Request::Revoke { device } => match state.auth().revoke(&device) {
-            Ok(true) => Ok(Response::Done),
+            Ok(true) => {
+                // A join it asked for ends with it.
+                if let Some(fleet) = &state.fleet {
+                    fleet.joins().forget_device(&device);
+                }
+                Ok(Response::Done)
+            }
             Ok(false) => {
                 return Response::Error {
                     code: ErrorCode::UnknownDevice,

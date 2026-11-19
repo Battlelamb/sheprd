@@ -42,6 +42,7 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
         } => {
             let bundle = Bundle::from_bytes(&sync::bytes(&bundle)?)?;
             let member = bundle.id();
+            fleet.joins().admissible(&member, &paired(state))?;
             let joiner_signature = sync::bytes(&signature)?
                 .try_into()
                 .map_err(|_| crate::control::fleet::Error::JoinSignature)?;
@@ -116,10 +117,19 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             let log = inner.log.as_ref().ok_or(Error::NoFleet)?;
             Ok(Answer::Applied(sync::answer(log, &heads, refused)))
         }
-        Ask::Joins => Ok(Answer::Joins {
-            joins: fleet.joins().list(now_ms),
-        }),
+        Ask::Joins => {
+            let paired = paired(state);
+            Ok(Answer::Joins {
+                joins: fleet.joins().list(now_ms, &paired),
+            })
+        }
     }
+}
+
+/// The devices paired here now, read before the joins are locked so the
+/// two locks never nest.
+fn paired(state: &State) -> std::collections::HashSet<crate::control::DeviceId> {
+    state.auth().devices().ids().cloned().collect()
 }
 
 fn access(

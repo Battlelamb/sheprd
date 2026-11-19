@@ -95,26 +95,29 @@ pub(crate) fn parse_applied(output: &[u8]) -> Result<Applied, Error> {
 
 /// Removes every way a fleet reaches the host's account, without signing
 /// anything: the daemon's `fleet scrub` and the relay agent's, each when
-/// installed. Prints whether either ran.
+/// installed. Prints whether either ran, and whether one that holds fleet
+/// state failed: an agent whose usage names no `fleet scrub` predates the
+/// fleet and holds none.
 const SCRUB: &str = "\
 cleared=false
+failed=false
 program=$(command -v sheprd-remote-control || command -v herdr-remote-control || true)
 [ -n \"$program\" ] || program=\"$HOME/.local/bin/sheprd-remote-control\"
-if [ -x \"$program\" ] && \"$program\" fleet scrub >/dev/null 2>&1; then cleared=true; fi
+if [ -x \"$program\" ]; then
+  if \"$program\" fleet scrub >/dev/null 2>&1; then cleared=true; else failed=true; fi
+fi
 agent=$(command -v sheprd-relay-agent || true)
 [ -n \"$agent\" ] || agent=\"$HOME/.local/bin/sheprd-relay-agent\"
-if [ -x \"$agent\" ] && \"$agent\" fleet scrub >/dev/null 2>&1; then cleared=true; fi
-printf '{\"scrubbed\":%s}\\n' \"$cleared\"
+if [ -x \"$agent\" ] && \"$agent\" --help 2>&1 | grep -q 'fleet scrub'; then
+  if \"$agent\" fleet scrub >/dev/null 2>&1; then cleared=true; else failed=true; fi
+fi
+printf '{\"scrubbed\":%s,\"failed\":%s}\\n' \"$cleared\" \"$failed\"
 cat >/dev/null
 ";
 
 /// `fleet scrub` on the host, the last resort for a host no member can
-/// reach or a fleet that is gone: whether anything there held a fleet.
-pub(super) fn scrub(target: &ConnectTarget, cancelled: &AtomicBool) -> Result<bool, Error> {
-    #[derive(serde::Deserialize)]
-    struct Scrubbed {
-        scrubbed: bool,
-    }
+/// reach or a fleet that is gone.
+pub(super) fn scrub(target: &ConnectTarget, cancelled: &AtomicBool) -> Result<(), Error> {
     let host = Host::new(target).map_err(|_| Error::Unsupported)?;
     let mut output = Vec::new();
     host.stream(
@@ -128,6 +131,25 @@ pub(super) fn scrub(target: &ConnectTarget, cancelled: &AtomicBool) -> Result<bo
         cancelled,
     )
     .map_err(Error::Run)?;
-    let answer: Scrubbed = serde_json::from_slice(&output).map_err(Error::Answer)?;
-    Ok(answer.scrubbed)
+    scrub_outcome(&output)
+}
+
+/// What `fleet scrub` on a host printed, as an outcome: success only
+/// when something there held a fleet and nothing failed, so a host that
+/// cannot say its access is gone is never reported clean.
+pub(crate) fn scrub_outcome(output: &[u8]) -> Result<(), Error> {
+    #[derive(serde::Deserialize)]
+    struct Scrubbed {
+        /// Something there held a fleet and forgot it.
+        scrubbed: bool,
+        /// Something there that may hold a fleet could not forget it.
+        failed: bool,
+    }
+    match serde_json::from_slice(output).map_err(Error::Answer)? {
+        Scrubbed { failed: true, .. } => Err(Error::Unscrubbed),
+        Scrubbed {
+            scrubbed: false, ..
+        } => Err(Error::NoProgram),
+        Scrubbed { .. } => Ok(()),
+    }
 }

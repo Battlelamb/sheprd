@@ -14,6 +14,7 @@ fn host_name(to: &Node) -> String {
         relays: info.relays,
         route: info.route,
         fleet: true,
+        host: None,
     };
     sheprd_client::relay_host::host_name(&record.id().unwrap())
 }

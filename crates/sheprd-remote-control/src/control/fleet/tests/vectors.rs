@@ -1,6 +1,7 @@
 //! The vectors the iOS app's Swift copy is checked against: one signed
 //! operation of every body, a joining member's signature, a host's signed
-//! self-record, and a state with its hash. Keys are fixed and P-256
+//! self-record, a state with its hash, and operations that break a rule
+//! of their fields, which both must refuse. Keys are fixed and P-256
 //! signatures deterministic (RFC 6979), so the bytes never move unless the
 //! encoding does. `HERDR_UPDATE_FIXTURES=1` rewrites them.
 
@@ -123,4 +124,74 @@ fn state_vector() {
         "state",
         &json!({ "state": hex(&bytes), "hash": hex(&log.state().hash().unwrap()) }),
     );
+}
+
+/// Replaces the first `find` in `bytes` with `replace`.
+fn patched(bytes: &[u8], find: &[u8], replace: &[u8]) -> Vec<u8> {
+    let at = bytes
+        .windows(find.len())
+        .position(|window| window == find)
+        .unwrap();
+    [&bytes[..at], replace, &bytes[at + find.len()..]].concat()
+}
+
+/// Operations that read byte for byte but break a rule of their fields or
+/// shape: the Swift copy must refuse every one as the daemon does.
+#[test]
+fn invalid_vectors() {
+    let ops: Vec<Vec<u8>> = encoding::every_body().iter().map(Op::encode).collect();
+    let phone_key = phone(3).bundle.key;
+    let host = ca_host(40, HostKind::Sheprd).0.id().unwrap();
+    let device_key = compressed(&signing_key(70));
+    let mut invalid_point = [0xff; 33];
+    invalid_point[0] = 0x02;
+    let mut other_host = host.0;
+    other_host[0] ^= 1;
+    let parents_at = DOMAIN.len() + 1 + 32 + 32 + 16;
+    let mut found_with_fleet = ops[0].clone();
+    found_with_fleet[DOMAIN.len() + 1..DOMAIN.len() + 33].fill(1);
+    let mut duplicate_parents = ops[4].clone();
+    assert_eq!(duplicate_parents[parents_at], 1);
+    duplicate_parents[parents_at] = 2;
+    let parent = duplicate_parents[parents_at + 1..parents_at + 33].to_vec();
+    duplicate_parents.splice(parents_at + 1..parents_at + 1, parent);
+    let cases = [
+        (
+            "phone_as_computer",
+            patched(
+                &ops[2],
+                &[&phone_key[..], &[2]].concat(),
+                &[&phone_key[..], &[1]].concat(),
+            ),
+        ),
+        (
+            "blank_name",
+            patched(&ops[2], b"\x00\x06phone3", b"\x00\x06      "),
+        ),
+        ("control_in_name", patched(&ops[2], b"phone3", b"phon\x073")),
+        ("invalid_key", patched(&ops[2], &phone_key, &invalid_point)),
+        ("found_with_fleet", found_with_fleet),
+        ("duplicate_parents", duplicate_parents),
+        (
+            "bad_ssh_key",
+            patched(&ops[8], b"ssh-ed25519 A", b"ssh-ed25519 !"),
+        ),
+        (
+            "record_for_another_host",
+            patched(&ops[3], &host.0, &other_host),
+        ),
+        (
+            "bad_device_key",
+            patched(&ops[6], &device_key, &invalid_point),
+        ),
+        ("space_in_relay", patched(&ops[5], b"relay41", b"rela 41")),
+    ];
+    for (name, bytes) in &cases {
+        assert!(Op::decode(bytes).is_err(), "{name} decodes");
+    }
+    let vectors: Vec<Value> = cases
+        .iter()
+        .map(|(name, bytes)| json!({ "case": name, "op": hex(bytes) }))
+        .collect();
+    check("invalid", &json!({ "ops": vectors }));
 }

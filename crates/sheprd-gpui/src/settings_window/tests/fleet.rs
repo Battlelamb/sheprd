@@ -221,3 +221,26 @@ fn a_computer_the_fleet_removed_forgets_it_when_asked(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(*ASKED.lock().unwrap(), vec![Ask::Scrub]);
 }
+
+#[gpui::test]
+fn with_no_fleet_a_machine_still_offers_to_remove_fleet_access(cx: &mut TestAppContext) {
+    let _serial = serial();
+    let cx = page(cx, false);
+    let reachable = std::collections::BTreeMap::from([(
+        "build".to_owned(),
+        crate::device_tags::Daemon::Remote(sheprd_client::ConnectTarget::Ssh {
+            target: "me@build-01".into(),
+            session: "default".into(),
+        }),
+    )]);
+    cx.update(|_, cx| Fleet::reach(cx, EntityId::from(1_u64), &reachable));
+    cx.run_until_parked();
+    draw(cx);
+    assert!(cx.debug_bounds("fleet-create").is_some());
+    // As `sheprd fleet scrub build` opens it: asked here first.
+    click(cx, "fleet-machine-0-scrub");
+    assert!(cx.debug_bounds("fleet-machine-0-scrub-confirm").is_some());
+    click(cx, "fleet-machine-0-scrub-cancel");
+    assert!(cx.debug_bounds("fleet-machine-0-scrub-confirm").is_none());
+    assert!(ASKED.lock().unwrap().is_empty());
+}

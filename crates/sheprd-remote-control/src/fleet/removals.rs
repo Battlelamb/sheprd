@@ -173,6 +173,7 @@ fn owed(fleet: &Fleet) -> Vec<(MemberId, Record, Vec<Op>)> {
                         relays: record.relays.clone(),
                         route: record.route.clone(),
                         fleet: true,
+                        host: None,
                     },
                     ops,
                 )

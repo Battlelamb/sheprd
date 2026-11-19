@@ -214,9 +214,12 @@ async fn a_phones_link_and_removal_go_through_sync() {
     let phone = Phone::new(7);
     admit(&state, &phone);
     let fleet = state.fleet.clone().unwrap();
-    let own =
-        crate::fleet::grants::own_host(fleet.inner().log.as_ref().unwrap().state(), &fleet.me())
-            .unwrap();
+    let own = crate::fleet::grants::own_host(
+        fleet.inner().log.as_ref().unwrap().state(),
+        &fleet.me(),
+        None,
+    )
+    .unwrap();
     // The phone builds its operation from what the computer answered.
     let path = format!("/api/v2/fleet?member={}", phone.bundle.id());
     let (_, body) = call(&state, &token, get(&path)).await;

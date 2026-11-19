@@ -314,6 +314,8 @@ pub(crate) struct Auth {
     /// Where desktops paired with an SSH key are let in; `None` refuses
     /// them (`set_ssh_access`).
     ssh_access: Option<SshAccess>,
+    /// The state directory the devices were read from.
+    state_dir: PathBuf,
 }
 
 impl Auth {
@@ -344,6 +346,7 @@ impl Auth {
             revoked: watch::Sender::new(0),
             sessions: Sessions::default(),
             ssh_access: None,
+            state_dir: state_dir.to_owned(),
         })
     }
 
@@ -365,6 +368,11 @@ impl Auth {
             Err(error) => tracing::warn!(error = %error, "could not check authorized_keys"),
         }
         self.ssh_access = Some(access);
+    }
+
+    /// The state directory the devices were read from.
+    pub(crate) fn state_dir(&self) -> &Path {
+        &self.state_dir
     }
 
     /// Where desktops are let in, when they can be.

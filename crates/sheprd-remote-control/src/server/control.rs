@@ -383,6 +383,16 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
 /// own error text, which names the rule and nothing it carried.
 fn fleet(state: &State, ask: control::fleet::sync::Ask, now: u64) -> Response {
     let Some(fleet) = &state.fleet else {
+        // A fleet that did not load is what a scrub clears.
+        if ask == control::fleet::sync::Ask::Scrub {
+            return match crate::fleet::scrub::unloaded(state) {
+                Ok(()) => Response::Fleet(Box::new(control::fleet::sync::Answer::Done)),
+                Err(error) => Response::Error {
+                    code: ErrorCode::Other,
+                    message: error.to_string(),
+                },
+            };
+        }
         return Response::Error {
             code: ErrorCode::Unsupported,
             message: "this computer could not load its fleet key".into(), // i18n: data

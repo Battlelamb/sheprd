@@ -38,9 +38,9 @@ pub(super) fn post(node: &Node, phone: &Phone, body: Body) -> usize {
     node.fleet.receive(vec![op], now_ms()).unwrap()
 }
 
-pub(super) fn own_host(node: &Node) -> crate::control::fleet::HostId {
+pub(super) fn own_host(node: &Node) -> HostId {
     let inner = node.fleet.inner();
-    grants::own_host(inner.log.as_ref().unwrap().state(), &node.fleet.me()).unwrap()
+    grants::own_host(inner.log.as_ref().unwrap().state(), &node.fleet.me(), None).unwrap()
 }
 
 pub(super) fn link(node: &Node, phone: &Phone, seed: u8) {
@@ -94,7 +94,7 @@ async fn a_link_to_another_host_admits_nothing_here() {
     admit(&a, &phone);
     // A host the fleet does not know: the link names nothing live.
     let body = Body::Link(Link {
-        host: crate::control::fleet::HostId([5; 32]),
+        host: HostId([5; 32]),
         device_key: device_key(20),
     });
     post(&a, &phone, body);
@@ -171,6 +171,7 @@ async fn a_refusal_outlives_a_suspension() {
             signer: a.fleet.me(),
             targets: vec![phone.bundle.id()],
             since_ms: now_ms(),
+            op: None,
         },
     );
     assert_eq!(a.fleet.suspended(), vec![phone.bundle.id()]);
@@ -197,6 +198,7 @@ async fn a_suspension_lifted_restores_a_device_not_refused() {
             signer: a.fleet.me(),
             targets: vec![phone.bundle.id()],
             since_ms: now_ms(),
+            op: None,
         },
     );
     assert!(apply(&a));

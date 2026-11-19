@@ -16,7 +16,11 @@ use crate::desktop::{files, record::Record};
 use crate::ssh_access::SshKey;
 use crate::web::{Shared, State};
 use sheprd_relay::wire::Key;
-use std::{collections::BTreeSet, path::Path, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+    time::Duration,
+};
 
 /// How often this computer checks whether its own record moved.
 const RECORD_CHECK: Duration = Duration::from_secs(10 * 60);
@@ -49,7 +53,8 @@ pub(crate) fn peer(fleet: &Fleet, remote: &[u8; 32]) -> Option<Peer> {
     if holders.next().is_some() || suspended.contains(member) {
         return None;
     }
-    let ssh = own_host(state, &fleet.me()).is_some_and(|host| state.allowed(&host, member));
+    let ssh =
+        own_host(state, &fleet.me(), fleet.host()).is_some_and(|host| state.allowed(&host, member));
     Some(Peer {
         member: *member,
         ssh,
@@ -66,7 +71,7 @@ pub(crate) fn still_allowed(fleet: &Fleet, member: &MemberId) -> bool {
     let Some(state) = inner.log.as_ref().map(|log| log.state()) else {
         return false;
     };
-    own_host(state, &fleet.me()).is_some_and(|host| state.allowed(&host, member))
+    own_host(state, &fleet.me(), fleet.host()).is_some_and(|host| state.allowed(&host, member))
 }
 
 /// The dial keys of every live computer member but this one, for the
@@ -87,29 +92,48 @@ pub(crate) fn dial_keys(fleet: &Fleet) -> Vec<Key> {
         .collect()
 }
 
-/// This computer's own host in `state`.
-pub(crate) fn own_host(state: &Log, me: &MemberId) -> Option<HostId> {
-    state.members.get(me)?.bundle.host.as_ref()?.id().ok()
+/// This computer's own host in `state`: as a member, the host its bundle
+/// names; otherwise `host`, its certificate authority's, which
+/// [`Fleet::host`] gives only for a computer that joined as a shared host,
+/// when the fleet still shares it and never once this computer was removed
+/// as a member.
+pub(crate) fn own_host(state: &Log, me: &MemberId, host: Option<HostId>) -> Option<HostId> {
+    match state.members.get(me) {
+        Some(member) => member.bundle.host.as_ref()?.id().ok(),
+        None if state.tombstones.contains(me) => None,
+        None => host.filter(|host| state.hosts.contains_key(host)),
+    }
 }
 
 /// Rewrites the SSH lines and relay records from the log. Blocking.
 pub(crate) fn apply(state: &State, fleet: &Fleet) -> Result<()> {
     let suspended = fleet.suspended();
-    let (lines, records) = {
+    let (lines, records, unclear) = {
         let inner = fleet.inner();
         match inner.log.as_ref() {
             Some(log) => (
-                lines(log.state(), &log.fleet().short(), &fleet.me(), &suspended),
+                lines(
+                    log.state(),
+                    &log.fleet().short(),
+                    own_host(log.state(), &fleet.me(), fleet.host()),
+                    &suspended,
+                ),
                 records(log.state(), &fleet.me(), &suspended),
+                // Cut off, this computer keeps no record at all.
+                if suspended.contains(&fleet.me()) {
+                    BTreeSet::new()
+                } else {
+                    unclear(log.state())
+                },
             ),
-            None => (Vec::new(), Vec::new()),
+            None => (Vec::new(), Vec::new(), BTreeSet::new()),
         }
     };
     if let Ok(access) = state.auth().ssh_access() {
         access.keys.set_fleet(&lines)?;
     }
     revoke_removed(state, fleet)?;
-    write_records(fleet.state_dir(), &records)
+    write_records(fleet.state_dir(), &records, &unclear)
 }
 
 /// Revokes every desktop paired here one by one with a tunnel key a member
@@ -175,8 +199,13 @@ pub(crate) fn revoke_paired(auth: &mut crate::auth::Auth, tunnel: &[u8; 32]) -> 
 
 /// One line per computer member allowed on this computer, tagged with the
 /// fleet's and the member's short ids.
-fn lines(state: &Log, fleet: &str, me: &MemberId, suspended: &[MemberId]) -> Vec<(String, SshKey)> {
-    let Some(host) = own_host(state, me) else {
+fn lines(
+    state: &Log,
+    fleet: &str,
+    host: Option<HostId>,
+    suspended: &[MemberId],
+) -> Vec<(String, SshKey)> {
+    let Some(host) = host else {
         return Vec::new();
     };
     state
@@ -197,12 +226,17 @@ fn records(state: &Log, me: &MemberId, suspended: &[MemberId]) -> Vec<(Record, V
     if suspended.contains(me) {
         return Vec::new();
     }
-    let own = own_host(state, me);
+    let own = own_host(state, me, None);
+    let owners = route_owners(state);
     state
         .hosts
         .iter()
-        .filter(|(id, _)| Some(**id) != own && state.allowed(id, me))
-        .map(|(_, host)| {
+        .filter(|(id, host)| {
+            Some(**id) != own
+                && state.allowed(id, me)
+                && owners.get(host.record.route.as_str()) == Some(&Some(**id))
+        })
+        .map(|(id, host)| {
             (
                 Record {
                     computer: host.intro.name.clone(),
@@ -210,6 +244,7 @@ fn records(state: &Log, me: &MemberId, suspended: &[MemberId]) -> Vec<(Record, V
                     relays: host.record.relays.clone(),
                     route: host.record.route.clone(),
                     fleet: true,
+                    host: Some(id.to_string()),
                 },
                 host.record.ssh_host_keys.clone(),
             )
@@ -217,14 +252,66 @@ fn records(state: &Log, me: &MemberId, suspended: &[MemberId]) -> Vec<(Record, V
         .collect()
 }
 
-/// Removes every relay record the fleet wrote. Blocking.
+/// Removes every relay record the fleet wrote: those it listed, and any
+/// record marked as the fleet's, so a damaged list still lets them go.
+/// Blocking.
 pub(crate) fn forget_records(state_dir: &Path) -> Result<()> {
-    write_records(state_dir, &[])
+    let file = state_dir.join(RECORDS);
+    let mut gone: BTreeSet<String> = files::read_bounded(&file, 64 * 1024)
+        .ok()
+        .flatten()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    // A machine paired here over Bluetooth since keeps its record.
+    gone.retain(|id| !Record::load(state_dir, id).is_ok_and(|kept| !kept.fleet));
+    gone.extend(Record::fleet_ids(state_dir)?);
+    for id in &gone {
+        Record::remove(state_dir, id)?;
+    }
+    files::write_private(&file, b"[]")?;
+    Ok(())
+}
+
+/// Which live host each route belongs to, `None` when that is unclear.
+/// The log keeps each route's owner (`State::routes`): the host that
+/// claimed it first, later claimants being held or flagged. A host's record
+/// counts here only when the log names it the owner of the route it names;
+/// a route some host names that the log gives to no one is unclear, and
+/// the record kept for it stays as it was ([`write_records`]), so no claim
+/// can take a route over or take it away.
+fn route_owners(state: &Log) -> BTreeMap<&str, Option<HostId>> {
+    let mut owners: BTreeMap<&str, Option<HostId>> = BTreeMap::new();
+    for (id, host) in state.hosts.iter().filter(|(_, host)| !host.held) {
+        let route = host.record.route.as_str();
+        match state.routes.get(route) {
+            Some(owner) if owner == id => {
+                owners.insert(route, Some(*id));
+            }
+            Some(_) => {}
+            None => {
+                owners.entry(route).or_insert(None);
+            }
+        }
+    }
+    owners
+}
+
+/// The routes whose owner is unclear: their kept records stay.
+fn unclear(state: &Log) -> BTreeSet<String> {
+    route_owners(state)
+        .into_iter()
+        .filter(|(_, owner)| owner.is_none())
+        .map(|(route, _)| route.to_owned())
+        .collect()
 }
 
 /// Writes `records`, and removes those the fleet wrote before and no
 /// longer grants. A record pairing wrote under the same id is left alone.
-fn write_records(state_dir: &Path, records: &[(Record, Vec<String>)]) -> Result<()> {
+pub(super) fn write_records(
+    state_dir: &Path,
+    records: &[(Record, Vec<String>)],
+    unclear: &BTreeSet<String>,
+) -> Result<()> {
     let file = state_dir.join(RECORDS);
     let before: BTreeSet<String> = files::read_bounded(&file, 64 * 1024)?
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
@@ -233,10 +320,18 @@ fn write_records(state_dir: &Path, records: &[(Record, Vec<String>)]) -> Result<
     for (record, host_keys) in records {
         // A machine paired here over Bluetooth keeps the record pairing
         // wrote; the fleet never takes it over.
-        if let Ok(id) = record.id()
-            && Record::load(state_dir, &id).is_ok_and(|kept| !kept.fleet)
-        {
+        let Ok(id) = record.id() else {
             continue;
+        };
+        match Record::load(state_dir, &id) {
+            Ok(kept) if !kept.fleet => continue,
+            // The route's owner, resolved from the log, replaces a fleet
+            // record kept for another host (or for none, as written before
+            // records named their host) on the same full route.
+            Ok(kept) if kept.route == record.route && kept.host != record.host => {
+                Record::remove(state_dir, &id)?;
+            }
+            _ => {}
         }
         match record.save(state_dir, host_keys) {
             Ok(id) => {
@@ -245,7 +340,18 @@ fn write_records(state_dir: &Path, records: &[(Record, Vec<String>)]) -> Result<
             Err(error) => tracing::warn!(error = %error, "could not keep a fleet host's record"),
         }
     }
-    for gone in before.difference(&written) {
+    let gone: Vec<String> = before.difference(&written).cloned().collect();
+    for gone in &gone {
+        // Paired here since the fleet wrote it: pairing owns it now. A route
+        // whose owner is unclear keeps its last record.
+        match Record::load(state_dir, gone) {
+            Ok(kept) if !kept.fleet => continue,
+            Ok(kept) if unclear.contains(&kept.route) => {
+                written.insert(gone.clone());
+                continue;
+            }
+            _ => {}
+        }
         Record::remove(state_dir, gone)?;
     }
     let json = serde_json::to_vec(&written).map_err(|_| crate::desktop::Error::RecordFormat)?;
@@ -308,7 +414,8 @@ fn publish_record(state: &State, fleet: &Fleet) {
         let Some(log) = &inner.log else {
             return;
         };
-        let Some(host) = own_host(log.state(), &fleet.me()) else {
+        // Only a member signs: a host the fleet shares has no say in it.
+        let Some(host) = own_host(log.state(), &fleet.me(), None) else {
             return;
         };
         log.state().hosts.get(&host).map(|host| host.record.clone())

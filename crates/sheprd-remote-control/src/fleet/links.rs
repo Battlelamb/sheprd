@@ -200,7 +200,7 @@ fn wanted(fleet: &Fleet) -> (BTreeMap<String, Wanted>, BTreeSet<String>, String)
     };
     let state = log.state();
     let via = format!("{FLEET_VIA}{}", log.fleet().short());
-    let Some(host) = own_host(state, &fleet.me()) else {
+    let Some(host) = own_host(state, &fleet.me(), fleet.host()) else {
         return (BTreeMap::new(), BTreeSet::new(), via);
     };
     let phones: Vec<(&MemberId, &Vec<u8>)> = state

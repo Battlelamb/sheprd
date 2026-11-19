@@ -7,6 +7,8 @@ pub enum Error {
     Answer(#[source] serde_json::Error),
     #[error("The remote control daemon refused: {0}")]
     Daemon(String),
+    #[error(transparent)]
+    Log(#[from] sheprd_remote_control::control::fleet::Error),
     #[error("Remote control is off on this computer")]
     NoDaemon,
     #[error("The host has no Sheprd remote control to ask")]
@@ -15,6 +17,10 @@ pub enum Error {
     Request(#[source] sheprd_remote_control::control::Error),
     #[error("Could not run sheprd-remote-control on the host")]
     Run(#[source] sheprd_client::Error),
+    #[error("The fleet's log is larger than a daemon keeps")]
+    TooLarge,
+    #[error("Could not remove all fleet access on the host; some may remain")]
+    Unscrubbed,
     #[error("The fleet cannot reach this kind of device")]
     Unsupported,
     // keep-sorted end

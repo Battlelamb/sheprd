@@ -17,9 +17,10 @@
 //!   does.
 //! - A device this module admitted that is gone from `devices.json` while
 //!   its link stands was revoked here by hand, a local refusal: it is not
-//!   admitted again. `fleet/links.json` keeps the ids admitted, with the
-//!   relay keys last set on each, so this module only ever removes its own
-//!   devices, and leaves relay keys a phone sent itself.
+//!   admitted again, even after a suspension of the phone comes and goes.
+//!   `fleet/links.json` keeps the ids admitted, with the relay keys last
+//!   set on each, and those refused, so this module only ever removes its
+//!   own devices, and leaves relay keys a phone sent itself.
 
 mod error;
 
@@ -71,23 +72,41 @@ struct Wanted {
 /// no longer does; whether any changed. Blocking: it writes
 /// `devices.json` and `fleet/links.json`.
 pub(crate) fn apply(state: &State, fleet: &Fleet, now_ms: u64) -> Result<bool> {
-    let (wanted, via) = wanted(fleet);
+    let (wanted, linked, via) = wanted(fleet);
     let file = fleet.state_dir().join(FILE);
     let before = read(&file)?;
-    let mut kept: BTreeMap<String, Option<RelayKeys>> = BTreeMap::new();
+    let mut kept = Kept::default();
     let mut changed = false;
     let mut auth = state.auth();
-    for gone in before.keys().filter(|id| !wanted.contains_key(*id)) {
+    // A device this module admitted that is gone from `devices.json` was
+    // revoked here by hand: a local refusal, kept while its link stands,
+    // suspended or not, so a suspension lifted later never brings it back.
+    kept.refused = before
+        .admitted
+        .keys()
+        .filter(|id| auth.devices().get(&DeviceId((*id).clone())).is_none())
+        .chain(&before.refused)
+        .filter(|id| linked.contains(*id))
+        .cloned()
+        .collect();
+    for gone in before
+        .admitted
+        .keys()
+        .filter(|id| !wanted.contains_key(*id))
+    {
         changed |= auth.revoke(&DeviceId(gone.clone()))?;
     }
     for (id, device) in &wanted {
         let id = DeviceId(id.clone());
+        if kept.refused.contains(&id.0) {
+            continue;
+        }
         let relay = device
             .relay
             .clone()
             .filter(|keys| !auth.devices().relay_taken(&id, keys));
         if let Some(record) = auth.devices().get(&id) {
-            let Some(set) = before.get(&id.0) else {
+            let Some(set) = before.admitted.get(&id.0) else {
                 // A device this module did not admit is not its own.
                 continue;
             };
@@ -98,18 +117,13 @@ pub(crate) fn apply(state: &State, fleet: &Fleet, now_ms: u64) -> Result<bool> {
                 changed |= auth
                     .devices_mut()
                     .replace_relay(&id, relay.clone(), now_ms)?;
-                kept.insert(id.0, relay);
+                kept.admitted.insert(id.0, relay);
             } else {
-                kept.insert(id.0, set.clone());
+                kept.admitted.insert(id.0, set.clone());
             }
             continue;
         }
-        if let Some(set) = before.get(&id.0) {
-            // Revoked here by hand: a local refusal, kept.
-            kept.insert(id.0, set.clone());
-            continue;
-        }
-        kept.insert(id.0.clone(), relay.clone());
+        kept.admitted.insert(id.0.clone(), relay.clone());
         auth.devices_mut().add_with(
             NewDevice {
                 app: None,
@@ -135,49 +149,82 @@ pub(crate) fn apply(state: &State, fleet: &Fleet, now_ms: u64) -> Result<bool> {
     }
     if changed {
         tracing::info!(
-            devices = kept.len(),
+            devices = kept.admitted.len(),
             "fleet links changed this computer's devices"
         );
     }
     Ok(changed)
 }
 
-/// The devices this module admitted, by id, with the relay keys it last
-/// set on each. A file from before relay keys, a list of ids, reads as
-/// having set none.
-fn read(file: &std::path::Path) -> Result<BTreeMap<String, Option<RelayKeys>>> {
+/// What `fleet/links.json` keeps.
+#[derive(Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+struct Kept {
+    /// The devices this module admitted, with the relay keys it last set
+    /// on each.
+    admitted: BTreeMap<String, Option<RelayKeys>>,
+    /// Devices revoked here by hand while their link stood: never admitted
+    /// again while it stands, whatever suspensions come and go.
+    #[serde(default)]
+    refused: BTreeSet<String>,
+}
+
+/// What this module kept. Older files read too: a map of admitted ids to
+/// relay keys, or before that a list of ids, with no refusals recorded.
+fn read(file: &std::path::Path) -> Result<Kept> {
     let Some(bytes) = files::read_bounded(file, 64 * 1024)? else {
-        return Ok(BTreeMap::new());
+        return Ok(Kept::default());
     };
-    if let Ok(map) = serde_json::from_slice(&bytes) {
-        return Ok(map);
+    if let Ok(kept) = serde_json::from_slice(&bytes) {
+        return Ok(kept);
+    }
+    if let Ok(admitted) = serde_json::from_slice(&bytes) {
+        return Ok(Kept {
+            admitted,
+            refused: BTreeSet::new(),
+        });
     }
     let ids: BTreeSet<String> = serde_json::from_slice(&bytes).unwrap_or_default();
-    Ok(ids.into_iter().map(|id| (id, None)).collect())
+    Ok(Kept {
+        admitted: ids.into_iter().map(|id| (id, None)).collect(),
+        refused: BTreeSet::new(),
+    })
 }
 
 /// The devices the log links to this computer, by id, and what they say
 /// vouched for them.
-fn wanted(fleet: &Fleet) -> (BTreeMap<String, Wanted>, String) {
+fn wanted(fleet: &Fleet) -> (BTreeMap<String, Wanted>, BTreeSet<String>, String) {
     let suspended = fleet.suspended();
     let inner = fleet.inner();
     let Some(log) = inner.log.as_ref() else {
-        return (BTreeMap::new(), String::new());
+        return (BTreeMap::new(), BTreeSet::new(), String::new());
     };
     let state = log.state();
     let via = format!("{FLEET_VIA}{}", log.fleet().short());
     let Some(host) = own_host(state, &fleet.me()) else {
-        return (BTreeMap::new(), via);
+        return (BTreeMap::new(), BTreeSet::new(), via);
     };
-    let wanted = state
+    let phones: Vec<(&MemberId, &Vec<u8>)> = state
         .links
         .iter()
-        .filter(|((phone, linked), _)| *linked == host && !suspended.contains(phone))
-        .filter_map(|((phone, _), key)| {
+        .filter(|((phone, linked), _)| {
+            *linked == host
+                && state
+                    .members
+                    .get(phone)
+                    .is_some_and(|member| member.bundle.kind == Kind::Phone)
+        })
+        .map(|((phone, _), key)| (phone, key))
+        .collect();
+    // Every device the log links here, suspended phones' included.
+    let linked = phones
+        .iter()
+        .filter_map(|(_, key)| device_id(key).map(|(id, _)| id.0))
+        .collect();
+    let wanted = phones
+        .into_iter()
+        .filter(|(phone, _)| !suspended.contains(phone))
+        .filter_map(|(phone, key)| {
             let member = state.members.get(phone)?;
-            if member.bundle.kind != Kind::Phone {
-                return None;
-            }
             let (id, public_key) = device_id(key)?;
             let name = crate::auth::device_name(&member.bundle.name).ok()?;
             let relay = (!members_hold(state, &inner.proven, phone, &member.bundle))
@@ -192,7 +239,7 @@ fn wanted(fleet: &Fleet) -> (BTreeMap<String, Wanted>, String) {
             ))
         })
         .collect();
-    (wanted, via)
+    (wanted, linked, via)
 }
 
 /// A bundle's relay keys as devices keep them, in the encodings

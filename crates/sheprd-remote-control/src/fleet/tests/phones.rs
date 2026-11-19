@@ -153,6 +153,60 @@ async fn a_device_revoked_here_stays_revoked() {
 }
 
 #[tokio::test]
+async fn a_refusal_outlives_a_suspension() {
+    let a = Node::new(nowhere(), 1).await;
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    let phone = Phone::new(7);
+    admit(&a, &phone);
+    link(&a, &phone, 20);
+    apply(&a);
+    let id = device(&a, 20).unwrap().id;
+    assert!(a.state.auth().revoke(&id).unwrap());
+    // The phone is suspended a while, by a removal whose history has not
+    // arrived, then the suspension lifts.
+    let removal = OpId([7; 32]);
+    a.fleet.inner().unconfirmed.insert(
+        removal,
+        Unconfirmed {
+            signer: a.fleet.me(),
+            targets: vec![phone.bundle.id()],
+            since_ms: now_ms(),
+        },
+    );
+    assert_eq!(a.fleet.suspended(), vec![phone.bundle.id()]);
+    apply(&a);
+    a.fleet.inner().unconfirmed.remove(&removal);
+    assert!(a.fleet.suspended().is_empty());
+    // Revoked here by hand: it stays revoked.
+    assert!(!apply(&a));
+    assert!(device(&a, 20).is_none());
+}
+
+#[tokio::test]
+async fn a_suspension_lifted_restores_a_device_not_refused() {
+    let a = Node::new(nowhere(), 1).await;
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    let phone = Phone::new(7);
+    admit(&a, &phone);
+    link(&a, &phone, 20);
+    apply(&a);
+    let removal = OpId([7; 32]);
+    a.fleet.inner().unconfirmed.insert(
+        removal,
+        Unconfirmed {
+            signer: a.fleet.me(),
+            targets: vec![phone.bundle.id()],
+            since_ms: now_ms(),
+        },
+    );
+    assert!(apply(&a));
+    assert!(device(&a, 20).is_none());
+    a.fleet.inner().unconfirmed.remove(&removal);
+    assert!(apply(&a));
+    assert!(device(&a, 20).is_some());
+}
+
+#[tokio::test]
 async fn a_phone_removing_itself_ends_its_device() {
     let a = Node::new(nowhere(), 1).await;
     assert_eq!(a.ask(Ask::Found), Answer::Done);
@@ -180,6 +234,8 @@ async fn a_pending_join_is_never_admitted_on_its_own() {
     let phone = Phone::new(7);
     let (_, signature) = phone.join(&fleet_id(&a));
     let signature = sync::bytes(&signature).unwrap().try_into().unwrap();
+    // Asked from a phone paired here.
+    let (asker, _) = crate::web::tests::signed_in(&a.state, 1);
     {
         let inner = a.fleet.inner();
         let standing = a
@@ -189,7 +245,7 @@ async fn a_pending_join_is_never_admitted_on_its_own() {
                 inner.log.as_ref().unwrap(),
                 phone.bundle.clone(),
                 signature,
-                (crate::control::DeviceId("d".into()), "iPhone".into()),
+                (asker, "iPhone".into()),
                 now_ms(),
             )
             .unwrap();

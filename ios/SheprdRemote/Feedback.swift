@@ -82,6 +82,7 @@ final class Feedback {
     }
 
     private func sound(_ synth: Synth) {
+        guard !synth.voices.isEmpty else { return }
         if let data = sounds[synth] {
             start(data)
             return

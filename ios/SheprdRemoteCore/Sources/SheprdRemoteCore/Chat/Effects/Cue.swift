@@ -24,6 +24,20 @@ public struct Cue: Hashable, Sendable {
         self.sound = sound
         self.taps = taps
     }
+
+    /// What is left of it `elapsed` seconds in: the voices and taps still
+    /// to come, moved to start now.
+    public func after(_ elapsed: Double) -> Cue {
+        guard elapsed > 0 else { return self }
+        return Cue(
+            sound: Synth(sound.voices.filter { $0.at >= elapsed }.map { voice in
+                var voice = voice
+                voice.at -= elapsed
+                return voice
+            }),
+            taps: taps.filter { $0.at >= elapsed }.map { Tap(at: $0.at - elapsed, intensity: $0.intensity, sharpness: $0.sharpness) }
+        )
+    }
 }
 
 private typealias Voice = Synth.Voice
@@ -175,16 +189,23 @@ extension ScreenEffect {
                 taps: pulses.map { Cue.Tap(at: $0, intensity: 1, sharpness: 0.6) }
             )
         case .zap:
-            let hits = (0..<min(letters, Zap.maxTargets)).map(Zap.hitTime)
-            return Cue(
-                sound: Synth(hits.flatMap { hit in
-                    [
-                        Voice(at: hit - Zap.flight, length: 0.09, wave: .square, from: 1_400, to: 700, gain: 0.08),
-                        Voice(at: hit, length: 0.18, wave: .noise, from: 4_000, to: 500, gain: 0.3),
-                    ]
-                }),
-                taps: hits.map { Cue.Tap(at: $0, intensity: 0.55, sharpness: 0.9) }
-            )
+            return Self.zap(0..<letters)
         }
+    }
+
+    /// Zap's sound and taps for the letters in `letters` it shoots down, of
+    /// those it has room for: a message streams in after its directive, so
+    /// its letters arrive a few at a time.
+    public static func zap(_ letters: Range<Int>) -> Cue {
+        let hits = letters.clamped(to: 0..<Zap.maxTargets).map(Zap.hitTime)
+        return Cue(
+            sound: Synth(hits.flatMap { hit in
+                [
+                    Voice(at: hit - Zap.flight, length: 0.09, wave: .square, from: 1_400, to: 700, gain: 0.08),
+                    Voice(at: hit, length: 0.18, wave: .noise, from: 4_000, to: 500, gain: 0.3),
+                ]
+            }),
+            taps: hits.map { Cue.Tap(at: $0, intensity: 0.55, sharpness: 0.9) }
+        )
     }
 }

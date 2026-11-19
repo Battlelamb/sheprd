@@ -129,9 +129,13 @@ struct WizzShake: ViewModifier {
                 // Begun a moment ago, as when the chat opened mid-wizz: the
                 // shake picks up where it is.
                 let start = since.map { max(0, Date.now.timeIntervalSince($0)) } ?? ScreenEffect.wizz.length
-                let steps = reduceMotion ? 0 : Int((ScreenEffect.wizz.length - start) * Self.rate)
-                for step in 0...max(steps, 0) {
-                    LinearKeyframe(EffectScene.wizzShake(at: start + Double(step) / Self.rate), duration: 1 / Self.rate)
+                let steps = Int((ScreenEffect.wizz.length - start) * Self.rate)
+                // With Reduce Motion on, the chat stays where it is.
+                let shifts = reduceMotion ? [CGSize.zero] : (0...max(steps, 0)).map {
+                    EffectScene.wizzShake(at: start + Double($0) / Self.rate)
+                }
+                for shift in shifts {
+                    LinearKeyframe(shift, duration: 1 / Self.rate)
                 }
             }
         }

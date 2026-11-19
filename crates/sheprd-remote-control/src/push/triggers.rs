@@ -247,6 +247,8 @@ fn turn_ended(
     }
     let facts = summary.describe();
     let last = last_answer(before);
+    // Only this turn's reply may nudge: an older one already did.
+    let wizz = this_turns_answer(before).is_some_and(wizzes);
     let answer = last
         .filter(|_| privacy == Privacy::Excerpt)
         .map(|text| excerpt(&without_directives(text)));
@@ -258,7 +260,7 @@ fn turn_ended(
         body(chat, answer, Some(&facts)),
     );
     // Whether it asked is no part of what was said: a generic push buzzes too.
-    Some(if last.is_some_and(wizzes) {
+    Some(if wizz {
         Notification {
             urgency: Urgency::High,
             wizz: true,
@@ -275,6 +277,20 @@ fn last_answer(transcript: &Transcript) -> Option<&str> {
         .entries
         .iter()
         .rev()
+        .find_map(|entry| match &entry.kind {
+            EntryKind::Agent { text } if !text.trim().is_empty() => Some(text.as_str()),
+            _ => None,
+        })
+}
+
+/// The agent's last answer since the user last spoke, if the turn that
+/// ends wrote one.
+fn this_turns_answer(transcript: &Transcript) -> Option<&str> {
+    transcript
+        .entries
+        .iter()
+        .rev()
+        .take_while(|entry| !matches!(entry.kind, EntryKind::User { .. }))
         .find_map(|entry| match &entry.kind {
             EntryKind::Agent { text } if !text.trim().is_empty() => Some(text.as_str()),
             _ => None,

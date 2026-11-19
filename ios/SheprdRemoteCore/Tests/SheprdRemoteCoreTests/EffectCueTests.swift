@@ -116,6 +116,29 @@ import Testing
         #expect(fresh.live(both, changed: [EntryId(2)], now: now.addingTimeInterval(0.5)).isEmpty)
     }
 
+    @Test func zapLettersStreamingInAreShotDownStill() {
+        var effects = ChatEffects()
+        let early = transcript(["::zap"])
+        #expect(effects.live(early, changed: [EntryId(1)], now: now) == [.screen(.zap, text: "")])
+        // The words follow half a second later: their shots are still due.
+        let later = transcript(["::zap\nhi you"])
+        let began = effects.live(later, changed: [EntryId(1)], now: now.addingTimeInterval(0.5))
+        #expect(began == [.letters(0..<5, at: 0.5)])
+        let cue = began[0].cue
+        #expect(cue.taps.map(\.at) == (0..<5).map { Zap.hitTime($0) - 0.5 })
+        // Nothing new arrived: nothing more begins.
+        #expect(effects.live(later, changed: [EntryId(1)], now: now.addingTimeInterval(0.6)).isEmpty)
+    }
+
+    @Test func aCueLaterInKeepsWhatIsStillToCome() {
+        let cue = ScreenEffect.fireworks.cue()
+        let rest = cue.after(2)
+        #expect(rest.taps.map(\.at) == cue.taps.filter { $0.at >= 2 }.map { $0.at - 2 })
+        #expect(rest.sound.voices.allSatisfy { $0.at >= 0 })
+        #expect(rest.sound.voices.count == cue.sound.voices.filter { $0.at >= 2 }.count)
+        #expect(cue.after(0) == cue)
+    }
+
     @Test func aReplayedScreenEffectBegins() {
         var effects = ChatEffects()
         let entry = Entry(id: EntryId(1), kind: .agent(text: "::echo\nhello"))

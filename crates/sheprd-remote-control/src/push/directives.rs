@@ -15,25 +15,49 @@ fn directive(line: &str) -> Option<&str> {
     name.chars().all(|c| c.is_ascii_lowercase()).then_some(name)
 }
 
-/// The lines of `text` outside code fences, where a directive counts.
+/// A code fence: its marker, and how long a run of it opened the fence.
+#[derive(Clone, Copy)]
+struct Fence {
+    marker: char,
+    length: usize,
+}
+
+impl Fence {
+    /// The fence `line` opens: three or more backticks or tildes, indented
+    /// by three spaces at most.
+    fn open(line: &str) -> Option<Self> {
+        let trimmed = line.trim_start_matches(' ');
+        if line.len() - trimmed.len() > 3 {
+            return None;
+        }
+        let marker = trimmed.chars().next().filter(|c| matches!(c, '`' | '~'))?;
+        let length = trimmed.chars().take_while(|c| *c == marker).count();
+        (length >= 3).then_some(Self { marker, length })
+    }
+
+    /// Whether `line` closes the fence: a run of its marker at least as
+    /// long, and nothing after it.
+    fn closes(self, line: &str) -> bool {
+        let trimmed = line.trim_start_matches(' ');
+        let run = trimmed.chars().take_while(|c| *c == self.marker).count();
+        run >= self.length && trimmed[run * self.marker.len_utf8()..].trim().is_empty()
+    }
+}
+
+/// The lines of `text`, each with whether it is prose: outside a code
+/// fence, where a directive counts.
 fn prose(text: &str) -> impl Iterator<Item = (&str, bool)> {
-    let mut fence: Option<&str> = None;
-    text.lines().map(move |line| {
-        let trimmed = line.trim_start();
-        let marker = ["```", "~~~"]
-            .into_iter()
-            .find(|marker| trimmed.starts_with(marker));
-        match (fence, marker) {
-            (Some(open), Some(marker)) if open == marker => {
+    let mut fence: Option<Fence> = None;
+    text.lines().map(move |line| match fence {
+        Some(open) => {
+            if open.closes(line) {
                 fence = None;
-                (line, false)
             }
-            (Some(_), _) => (line, false),
-            (None, Some(marker)) => {
-                fence = Some(marker);
-                (line, false)
-            }
-            (None, None) => (line, true),
+            (line, false)
+        }
+        None => {
+            fence = Fence::open(line);
+            (line, fence.is_none())
         }
     })
 }

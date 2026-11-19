@@ -48,11 +48,15 @@ public struct ChatEffects: Hashable, Sendable {
         case bubble(BubbleEffect)
         /// A screen effect, and its message's words.
         case screen(ScreenEffect, text: String)
+        /// More of the letters zap shoots down streamed in, `at` seconds
+        /// after it began: their shots are still to come.
+        case letters(Range<Int>, at: Double)
 
         public var cue: Cue {
             switch self {
             case let .bubble(effect): effect.cue
             case let .screen(effect, text): effect.cue(letters: EffectScene.letters(in: text))
+            case let .letters(letters, at): ScreenEffect.zap(letters).after(at)
             }
         }
     }
@@ -89,8 +93,16 @@ public struct ChatEffects: Hashable, Sendable {
         var seen: Set<EntryId> = []
         for id in changed where seen.insert(id).inserted {
             guard let entry = transcript.entry(id), let message = Self.message(entry) else { continue }
-            // The words an effect draws stream in after its directive.
-            if playing?.entry == id { playing?.text = message.gist() }
+            // The words an effect draws stream in after its directive, and
+            // zap's newly arrived letters are still to be shot down.
+            if let shown = playing, shown.entry == id {
+                let text = message.gist()
+                let (had, has) = (EffectScene.letters(in: shown.text), EffectScene.letters(in: text))
+                if shown.effect == .zap, has > had, let at = shown.elapsed(at: now) {
+                    began.append(.letters(had..<has, at: at))
+                }
+                playing?.text = text
+            }
             let met = bubbles[id] ?? 0
             let count = message.bubbles
             if count > met {

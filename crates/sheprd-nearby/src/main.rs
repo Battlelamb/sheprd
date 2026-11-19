@@ -16,6 +16,7 @@
 
 // keep-sorted start
 mod backend;
+mod bench;
 mod central;
 mod error;
 mod framing;
@@ -36,14 +37,19 @@ use std::{
 
 const USAGE: &str = "\
 Usage: sheprd-nearby [--no-bluetooth]
+       sheprd-nearby bench serve|run [OPTIONS]   (sheprd-nearby bench --help)
 
 Sheprd's Bluetooth helper for nearby pairing and presence with its phone
 app, and for finding another computer's Sheprd. Sheprd runs it and speaks
-newline-delimited JSON on stdio; it is not meant to be run by hand.
+newline-delimited JSON on stdio; it is not meant to be run by hand, except
+for `bench`, which measures Bluetooth between two computers.
 ";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|arg| arg == "bench") {
+        return bench::main(&args[1..]);
+    }
     if args.iter().any(|arg| arg == "-V" || arg == "--version") {
         println!(
             "sheprd-nearby {}",

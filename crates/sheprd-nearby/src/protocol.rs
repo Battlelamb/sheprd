@@ -213,7 +213,8 @@ impl Event {
 }
 
 /// Writes events to Sheprd, one line each; shared by every thread that
-/// reports something. Tests read the events from a channel instead.
+/// reports something. The measurement harness (`bench`) drives the helper
+/// in-process and reads the events from a channel instead.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Out {
     sink: Option<mpsc::Sender<Event>>,
@@ -221,7 +222,6 @@ pub(crate) struct Out {
 
 impl Out {
     /// Events go to `sink` rather than to standard output.
-    #[cfg(test)]
     pub(crate) fn to(sink: mpsc::Sender<Event>) -> Self {
         Self { sink: Some(sink) }
     }

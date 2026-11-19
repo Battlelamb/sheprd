@@ -1986,6 +1986,7 @@ manual multi-machine and phone steps left unticked in its QA list.
      and computers paired over Bluetooth show under Machines this Sheprd
      reaches, to Share or Invite; paired phones join from the phone
      (phase 5). Nothing is spread without that step.
+7. **Bluetooth on Linux and Windows:** scanning in `crates/sheprd-nearby`,
    then the transport measurement and its verdict here.
 
 ## Deployment

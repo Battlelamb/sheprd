@@ -124,6 +124,8 @@ impl Localize for Error {
                 error = source.to_string()
             ),
             Self::MalformedLink => fl!("error-malformed-link"),
+            #[cfg(feature = "mcp")]
+            Self::Mcp(error) => error.localize(),
             Self::MissingDeletion => fl!("error-missing-deletion"),
             Self::MissingHome => fl!("error-missing-home"),
             Self::MissingStateRoot => fl!("error-missing-state-root"),

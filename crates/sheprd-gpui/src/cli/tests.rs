@@ -13,6 +13,8 @@ mod control_commands;
 mod language;
 mod links;
 mod local_ports;
+#[cfg(feature = "mcp")]
+mod mcp;
 mod memory;
 mod menu_bar;
 mod mods;

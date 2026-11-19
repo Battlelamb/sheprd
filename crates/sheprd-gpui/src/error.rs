@@ -200,6 +200,9 @@ pub enum Error {
     },
     #[error("This link's address is not valid, so it opens nothing.")]
     MalformedLink,
+    #[cfg(feature = "mcp")]
+    #[error(transparent)]
+    Mcp(#[from] crate::mcp::Error),
     #[error("Reopen the deletion dialog.")]
     MissingDeletion,
     #[error("HOME is not set")]

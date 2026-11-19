@@ -39,6 +39,8 @@ mod link_handlers;
 mod listen_token;
 mod listening_ports;
 mod local_ports;
+#[cfg(feature = "mcp")]
+mod mcp;
 mod mods;
 mod nearby;
 mod notification_mutes;

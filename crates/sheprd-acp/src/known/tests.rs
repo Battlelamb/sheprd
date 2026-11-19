@@ -24,7 +24,9 @@ fn saved_settings_load_back_per_agent() {
     let known = load(&dir);
     assert_eq!(known.len(), 1);
     assert_eq!(known.get(&Agent::Codex), Some(&settings()));
-    // Saving again replaces the file whole.
+    // Saving nothing forgets the agent's, and forgetting twice is fine.
+    save(&dir, Agent::Codex, &Settings::default()).unwrap();
+    assert!(!path(&dir, Agent::Codex).exists());
     save(&dir, Agent::Codex, &Settings::default()).unwrap();
     assert!(load(&dir).is_empty());
 }

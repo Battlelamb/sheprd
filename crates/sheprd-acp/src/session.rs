@@ -121,7 +121,8 @@ pub(crate) enum Update {
     /// names the pane and its tab.
     Prompt(String),
     /// A new session of this built-in agent offered these settings, which
-    /// differ from those known for it: kept for its next start.
+    /// differ from those known for it: kept for its next start, or, when
+    /// empty, what was known forgotten.
     Settings(Agent, crate::known::Settings),
 }
 

@@ -72,11 +72,15 @@ fn read(path: &Path) -> Option<Settings> {
 }
 
 /// Keeps `settings` as `agent`'s, replacing the file whole so a reader
-/// never sees half of it.
+/// never sees half of it. None, or more than a file holds, forgets the
+/// agent's, so no setting it dropped shows again.
 pub(crate) fn save(dir: &Path, agent: Agent, settings: &Settings) -> crate::Result<()> {
     let bytes = serde_json::to_vec(settings).map_err(crate::Error::Encode)?;
-    if bytes.len() as u64 > MAX_FILE {
-        return Ok(());
+    if settings.is_empty() || bytes.len() as u64 > MAX_FILE {
+        return match fs::remove_file(path(dir, agent)) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.into()),
+            _ => Ok(()),
+        };
     }
     let mut builder = fs::DirBuilder::new();
     builder.recursive(true);

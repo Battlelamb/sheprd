@@ -204,3 +204,69 @@ fn switching_shows_the_new_agents_settings_and_back_the_old_ones() {
     // Claude left on Sonnet, and its session continues where it was.
     assert_eq!(harness.transcript().options, [model("sonnet")]);
 }
+
+#[test]
+fn a_session_offering_nothing_clears_the_known_settings() {
+    let mut harness = harness_with(Config {
+        known: known(Agent::Claude),
+        ..config()
+    });
+    harness.session.start();
+    // A pick the session will not offer is not sent.
+    harness.command(
+        1,
+        Command::SetOption {
+            id: "model".to_owned(),
+            value: OptionValue::Choice {
+                id: "sonnet".to_owned(),
+            },
+        },
+    );
+    open(&mut harness, json!([]));
+    assert_eq!(harness.transcript().status, Status::Idle);
+    assert!(harness.transcript().options.is_empty());
+    assert_eq!(harness.transcript().modes, None);
+    assert!(
+        harness
+            .sent()
+            .iter()
+            .all(|message| message["method"] != "session/set_config_option")
+    );
+    // Forgotten for the next start too.
+    assert_eq!(
+        *harness.settings.borrow(),
+        [(Agent::Claude, Settings::default())]
+    );
+}
+
+#[test]
+fn a_pick_the_agent_cannot_be_sent_leaves_the_session_failed() {
+    let (sender, receiver) = bounded(64);
+    let mut harness = harness_with(Config {
+        known: known(Agent::Claude),
+        ..config()
+    });
+    harness.session.outbox = Outbox(sender);
+    harness.session.start();
+    let initialize = serde_json::from_slice::<Value>(&receiver.recv().unwrap()).unwrap();
+    harness.command(
+        1,
+        Command::SetMode {
+            id: "plan".to_owned(),
+        },
+    );
+    harness.respond(
+        initialize["id"].as_i64().unwrap(),
+        json!({"protocolVersion": 1, "agentCapabilities": {}}),
+    );
+    let new = serde_json::from_slice::<Value>(&receiver.recv().unwrap()).unwrap();
+    // The agent stops reading its input before the pick is sent.
+    drop(receiver);
+    harness.respond(
+        new["id"].as_i64().unwrap(),
+        json!({"sessionId": "s1", "configOptions": options_json("opus"),
+            "modes": {"currentModeId": "default", "availableModes": [
+                {"id": "default", "name": "default"}, {"id": "plan", "name": "plan"}]}}),
+    );
+    assert!(matches!(harness.transcript().status, Status::Failed { .. }));
+}

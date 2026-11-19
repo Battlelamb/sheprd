@@ -39,10 +39,17 @@ impl<R: FnMut(Update)> Session<R> {
             return;
         };
         let settings = self.settings();
-        if settings.is_empty() || self.config.known.get(&agent) == Some(&settings) {
+        let known = self.config.known.get(&agent);
+        // Nothing offered forgets what was known, so the next start shows
+        // no settings the agent dropped.
+        if known == Some(&settings) || (known.is_none() && settings.is_empty()) {
             return;
         }
-        self.config.known.insert(agent, settings.clone());
+        if settings.is_empty() {
+            self.config.known.remove(&agent);
+        } else {
+            self.config.known.insert(agent, settings.clone());
+        }
         (self.report)(Update::Settings(agent, settings));
     }
 
@@ -107,12 +114,18 @@ impl<R: FnMut(Update)> Session<R> {
 
     /// Sends the picks made while the agent started. One its session no
     /// longer offers is dropped: the setting then shows the agent's own.
-    pub(super) fn apply_deferred(&mut self) {
+    /// `false` when the agent could not be sent one, which failed the
+    /// session; the rest are dropped with it.
+    pub(super) fn apply_deferred(&mut self) -> bool {
         for deferred in std::mem::take(&mut self.deferred) {
-            let _ = match deferred {
+            let sent = match deferred {
                 Deferred::Mode(mode) => self.set_mode(mode),
                 Deferred::Option { id, value } => self.set_option(id, &value),
             };
+            if sent == Err(Rejection::AgentUnavailable) {
+                return false;
+            }
         }
+        true
     }
 }

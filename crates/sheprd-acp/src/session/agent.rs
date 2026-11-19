@@ -209,16 +209,21 @@ impl<R: FnMut(Update)> Session<R> {
         self.emit(Change::Session {
             session: Some(project::session(&id, &self.config.cwd)),
         });
-        if let Some(modes) = modes {
-            self.emit(Change::Modes {
-                modes: Some(project::modes(modes)),
-            });
+        // The session's answer replaces whatever the chat showed while it
+        // started, the agent's known settings included, even when it
+        // offers none.
+        let modes = modes.map(project::modes);
+        if self.transcript.modes != modes {
+            self.emit(Change::Modes { modes });
         }
-        if !options.is_empty() {
+        if self.transcript.options != options {
             self.emit(Change::Options { options });
         }
         self.learn(loaded);
-        self.apply_deferred();
+        // A pick the agent could not be sent failed the session.
+        if !self.apply_deferred() {
+            return;
+        }
         self.projector.close();
         self.hand_over(loaded);
         self.status(Status::Idle);

@@ -2,9 +2,10 @@
 //! waiting for their parents, and the state they compute.
 
 use super::{
-    Admit, Body, Bundle, Error, FleetId, HostId, MAX_MEMBERSHIP_OPS, MAX_OPS, MAX_PARENTS,
-    MAX_PENDING, MAX_REMOVALS, MAX_REMOVALS_PER_SIGNER, MAX_SKEW_MS, MemberId, Op, OpId,
-    PENDING_TTL_MS, Result, State, Unsigned,
+    Admit, Body, Bundle, Error, FleetId, MAX_CHECKPOINTS_PER_SIGNER, MAX_MEMBERSHIP_OPS, MAX_OPS,
+    MAX_PARENTS, MAX_PENDING, MAX_REMOVALS, MAX_REMOVALS_PER_SIGNER, MAX_SKEW_MS, MemberId, Op,
+    OpId, PENDING_TTL_MS, Result, State, Unsigned,
+    body::RawSignature,
     fold::fold,
     graph::{Bits, Graph},
     membership::Folder,
@@ -35,11 +36,16 @@ pub struct Log {
     root_seq: u64,
     ops: BTreeMap<OpId, Op>,
     /// Operations waiting for parents, with when each arrived.
-    pending: BTreeMap<OpId, (Op, u64)>,
+    /// Keyed by signature as well as id, which does not cover it: a copy
+    /// with a damaged signature cannot stand in for the genuine one.
+    pending: BTreeMap<(OpId, RawSignature), (Op, u64)>,
     state: State,
     heads: Vec<OpId>,
     /// Operations whose check passed, which never changes.
     checked: HashSet<OpId>,
+    /// Operations just added whose signature `forged` checked, while they
+    /// settle.
+    signed: HashSet<OpId>,
 }
 
 impl Log {
@@ -58,9 +64,10 @@ impl Log {
             state: State::default(),
             heads: Vec::new(),
             checked: HashSet::new(),
+            signed: HashSet::new(),
         };
         let graph = Graph::new(&log.ops, None)?;
-        let folder = Folder::new(&graph, &log.base, log.fleet, &HashSet::new())?;
+        let folder = Folder::new(&graph, &log.base, log.fleet, &HashSet::new(), &log.signed)?;
         folder.check(0).clone()?;
         log.state = fold(&folder, &Bits::full(graph.len()), &log.base);
         log.heads = graph.heads();
@@ -101,6 +108,7 @@ impl Log {
             ops: BTreeMap::new(),
             pending: BTreeMap::new(),
             checked: HashSet::new(),
+            signed: HashSet::new(),
         })
     }
 
@@ -180,9 +188,7 @@ impl Log {
             .collect();
         parents.sort_unstable();
         if let Body::Access(access) = &mut body {
-            access.rev = self
-                .access_floor(&parents, access.host, access.member)
-                .saturating_add(1);
+            access.rev = self.access_floor(&parents).saturating_add(1);
         }
         let seq = self
             .ops
@@ -204,24 +210,17 @@ impl Log {
         }
     }
 
-    /// The highest `rev` of an `Access` for `host` and `member` that
-    /// `parents` and their ancestors hold, or the base's.
-    fn access_floor(&self, parents: &[OpId], host: HostId, member: MemberId) -> u64 {
-        let mut floor = self
-            .base
-            .access
-            .get(&(host, member))
-            .map_or(0, |register| register.rev);
+    /// The highest `rev` of any `Access` that `parents` and their
+    /// ancestors hold, or the base's.
+    fn access_floor(&self, parents: &[OpId]) -> u64 {
+        let mut floor = self.base.access_rev;
         let mut seen: HashSet<OpId> = parents.iter().copied().collect();
         let mut queue = parents.to_vec();
         while let Some(id) = queue.pop() {
             let Some(op) = self.ops.get(&id) else {
                 continue;
             };
-            if let Body::Access(access) = op.body()
-                && access.host == host
-                && access.member == member
-            {
+            if let Body::Access(access) = op.body() {
                 floor = floor.max(access.rev);
             }
             queue.extend(op.parents().iter().filter(|parent| seen.insert(**parent)));
@@ -280,7 +279,9 @@ impl Log {
             let result = self.admissible(&op, now_ms);
             match result {
                 Ok(Inserted::Pending) => {
-                    self.pending.entry(id).or_insert((op, now_ms));
+                    self.pending
+                        .entry((id, *op.signature()))
+                        .or_insert((op, now_ms));
                     fresh.push(id);
                 }
                 other => results.push((id, other)),
@@ -291,17 +292,13 @@ impl Log {
         self.expire(now_ms);
         let mut added = Vec::new();
         loop {
-            let ready: Vec<OpId> = self
-                .pending
-                .iter()
-                .filter(|(_, (op, _))| op.parents().iter().all(|parent| self.present(parent)))
-                .map(|(id, _)| *id)
-                .collect();
+            let ready = self.ready();
             if ready.is_empty() {
                 break;
             }
-            for id in ready {
-                if let Some((op, _)) = self.pending.remove(&id) {
+            for (id, key) in ready {
+                if let Some((op, _)) = self.pending.remove(&key) {
+                    self.pending.retain(|(other, _), _| *other != id);
                     self.ops.insert(id, op);
                     added.push(id);
                 }
@@ -323,7 +320,7 @@ impl Log {
             let result = match refused.get(&id) {
                 Some(error) => Err(error.clone()),
                 None if self.ops.contains_key(&id) => Ok(Inserted::Applied),
-                None if self.pending.contains_key(&id) => Ok(Inserted::Pending),
+                None if self.waiting(&id) => Ok(Inserted::Pending),
                 // Dropped to keep the pool for missing parents bounded.
                 None => Err(Error::Full),
             };
@@ -378,7 +375,7 @@ impl Log {
     }
 
     fn admissible(&self, op: &Op, now_ms: u64) -> Result<Inserted> {
-        if self.present(&op.id()) || self.pending.contains_key(&op.id()) {
+        if self.present(&op.id()) || self.pending.contains_key(&(op.id(), *op.signature())) {
             return Ok(Inserted::Known);
         }
         if matches!(op.body(), Body::Found(_)) || op.unsigned().fleet != self.fleet {
@@ -388,6 +385,70 @@ impl Log {
             return Err(Error::Future);
         }
         Ok(Inserted::Pending)
+    }
+
+    /// Whether a copy of `id` waits for its parents.
+    fn waiting(&self, id: &OpId) -> bool {
+        self.pending
+            .range((*id, [0; 64])..=(*id, [0xff; 64]))
+            .next()
+            .is_some()
+    }
+
+    /// The operations waiting whose parents are all present, one copy of
+    /// each: the first whose signature checks out with its signer's key,
+    /// or the first when none does (it is refused then, as it should be).
+    fn ready(&self) -> Vec<(OpId, (OpId, RawSignature))> {
+        let mut ready: BTreeMap<OpId, Vec<(OpId, RawSignature)>> = BTreeMap::new();
+        for (key, (op, _)) in &self.pending {
+            if op.parents().iter().all(|parent| self.present(parent)) {
+                ready.entry(key.0).or_default().push(*key);
+            }
+        }
+        // Signatures are checked here only to pick between copies; every
+        // operation's is checked when it settles.
+        let keys = self.keys();
+        let signed = |key: &(OpId, RawSignature)| {
+            self.pending.get(key).is_some_and(|(op, _)| {
+                keys.get(&op.signer())
+                    .and_then(|bundle| bundle.verifying_key().ok())
+                    .is_some_and(|verifying| op.verify(&verifying).is_ok())
+            })
+        };
+        ready
+            .into_iter()
+            .filter_map(|(id, copies)| {
+                let pick = match copies.as_slice() {
+                    [only] => *only,
+                    _ => copies
+                        .iter()
+                        .find(|key| signed(key))
+                        .or(copies.first())
+                        .copied()?,
+                };
+                Some((id, pick))
+            })
+            .collect()
+    }
+
+    /// The bundle held for each member, by id. A member's id is the hash of
+    /// its key, so any bundle held for it gives the key, whatever
+    /// operation carries it.
+    fn keys(&self) -> HashMap<MemberId, &Bundle> {
+        let mut keys: HashMap<MemberId, &Bundle> = self
+            .base
+            .members
+            .iter()
+            .map(|(id, member)| (*id, &member.bundle))
+            .collect();
+        for op in self.ops.values() {
+            if let Body::Found(bundle) | Body::Rotate(bundle) | Body::Admit(Admit { bundle, .. }) =
+                op.body()
+            {
+                keys.entry(bundle.id()).or_insert(bundle);
+            }
+        }
+        keys
     }
 
     fn present(&self, id: &OpId) -> bool {
@@ -406,10 +467,10 @@ impl Log {
             let oldest = self
                 .pending
                 .iter()
-                .min_by_key(|(id, (op, since))| {
-                    (matches!(op.body(), Body::Remove(_)), *since, **id)
+                .min_by_key(|(key, (op, since))| {
+                    (matches!(op.body(), Body::Remove(_)), *since, **key)
                 })
-                .map(|(id, _)| *id);
+                .map(|(key, _)| *key);
             if let Some(oldest) = oldest {
                 self.pending.remove(&oldest);
             }
@@ -420,6 +481,11 @@ impl Log {
     /// descendants, and folds. Says why each was refused.
     fn settle(&mut self, added: &[OpId]) -> Result<BTreeMap<OpId, Error>> {
         let mut refused = self.forged(added);
+        self.signed = added
+            .iter()
+            .filter(|id| !refused.contains_key(*id))
+            .copied()
+            .collect();
         self.orphans(added, &mut refused);
         let over = self.over_caps(added, &refused);
         refused.extend(over);
@@ -457,34 +523,18 @@ impl Log {
             self.ops.remove(id);
         }
         self.checked = self.ops.keys().copied().collect();
+        self.signed.clear();
         self.recompute()?;
         Ok(refused)
     }
 
-    /// The operations just `added` that would take the log past a bound.
-    /// A removal never counts against the others' bounds, so filling the
-    /// log cannot stop its signer's removal. Removals have their own: per
-    /// signer, so no member can use up a live member's share, and one
-    /// shared by members no longer live.
     /// The operations just `added` that no key of the member they name
     /// signed. Checked before any bound is charged to that member, so
     /// forgeries in its name cannot use up its share. A member's id is the
     /// hash of its key, so any bundle held for it gives the key, whatever
-    /// operation carries it.
+    /// operation carries it ([`Log::keys`]).
     fn forged(&self, added: &[OpId]) -> BTreeMap<OpId, Error> {
-        let mut keys: HashMap<MemberId, &Bundle> = self
-            .base
-            .members
-            .iter()
-            .map(|(id, member)| (*id, &member.bundle))
-            .collect();
-        for op in self.ops.values() {
-            if let Body::Found(bundle) | Body::Rotate(bundle) | Body::Admit(Admit { bundle, .. }) =
-                op.body()
-            {
-                keys.entry(bundle.id()).or_insert(bundle);
-            }
-        }
+        let keys = self.keys();
         added
             .iter()
             .filter_map(|id| self.ops.get(id))
@@ -499,10 +549,18 @@ impl Log {
             .collect()
     }
 
+    /// The operations just `added` that would take the log past a bound.
+    /// A removal never counts against the others' bounds, so filling the
+    /// log cannot stop its signer's removal. Removals have their own: per
+    /// signer, so no member can use up a live member's share, and one
+    /// shared by members no longer live. A checkpoint is the way out of a
+    /// full log, so it counts against no other bound either, only a few
+    /// of its own per signer.
     /// Operations already `refused` (forgeries and what builds on them)
     /// are not counted, so they take no share.
     fn over_caps(&self, added: &[OpId], refused: &BTreeMap<OpId, Error>) -> BTreeMap<OpId, Error> {
         let removal = |op: &Op| matches!(op.body(), Body::Remove(_));
+        let checkpoint = |op: &Op| matches!(op.body(), Body::Checkpoint(_));
         let costly = |op: &Op| op.body().membership() && !removal(op);
         let gone = |op: &Op| removal(op) && !self.state.members.contains_key(&op.signer());
         let held = || {
@@ -510,13 +568,18 @@ impl Log {
                 .values()
                 .filter(|op| !refused.contains_key(&op.id()))
         };
-        let mut ops = held().filter(|op| !removal(op)).count();
+        let mut ops = held().filter(|op| !removal(op) && !checkpoint(op)).count();
         let mut membership = held().filter(|op| costly(op)).count();
         let mut removals = held().filter(|op| gone(op)).count();
         let mut by_signer: BTreeMap<MemberId, usize> = BTreeMap::new();
+        let mut checkpoints: BTreeMap<MemberId, usize> = BTreeMap::new();
         let fresh: HashSet<&OpId> = added.iter().collect();
-        for op in held().filter(|op| removal(op) && !fresh.contains(&op.id())) {
-            *by_signer.entry(op.signer()).or_default() += 1;
+        for op in held().filter(|op| !fresh.contains(&op.id())) {
+            if removal(op) {
+                *by_signer.entry(op.signer()).or_default() += 1;
+            } else if checkpoint(op) {
+                *checkpoints.entry(op.signer()).or_default() += 1;
+            }
         }
         let mut over = BTreeMap::new();
         // Newest last: the batch is in id order, which every member shares.
@@ -536,6 +599,13 @@ impl Log {
                     if gone(op) {
                         removals -= 1;
                     }
+                }
+            } else if checkpoint(op) {
+                let mine = checkpoints.entry(op.signer()).or_default();
+                *mine += 1;
+                if *mine > MAX_CHECKPOINTS_PER_SIGNER {
+                    over.insert(op.id(), Error::Full);
+                    *mine -= 1;
                 }
             } else if ops > MAX_OPS || (costly(op) && membership > MAX_MEMBERSHIP_OPS) {
                 over.insert(op.id(), Error::Full);
@@ -593,7 +663,7 @@ impl Log {
     }
 
     fn folder<'g, 'a>(&'g self, graph: &'g Graph<'a>) -> Result<Folder<'g, 'a>> {
-        Folder::new(graph, &self.base, self.fleet, &self.checked)
+        Folder::new(graph, &self.base, self.fleet, &self.checked, &self.signed)
     }
 }
 

@@ -41,6 +41,11 @@ pub(super) struct Members {
     /// rotation that keeps the host keeps the claim where it was. A member
     /// from the base has none.
     pub(super) origins: BTreeMap<MemberId, usize>,
+    /// Every operation that named the host each member's bundle names, in
+    /// graph order, since it first named it: its `Found` or `Admit`, and
+    /// each `Rotate` after. The last set the bundle it has now. A member
+    /// from the base has none until it rotates.
+    pub(super) claims: BTreeMap<MemberId, Vec<usize>>,
 }
 
 impl Members {
@@ -61,18 +66,24 @@ pub(super) struct Folder<'g, 'a> {
     mask: Bits,
     checks: Vec<Result<()>>,
     cache: RefCell<HashMap<Bits, Rc<Members>>>,
+    /// Operations whose signature was checked against their signer's key
+    /// already ([`Folder::new`]).
+    signed: &'g HashSet<OpId>,
 }
 
 impl<'g, 'a> Folder<'g, 'a> {
     /// Checks every operation of `graph`, in order. `base` is the state of
     /// the checkpoint the log was pruned to, or empty.
     /// Operations in `known` passed their check before, and are not
-    /// checked again.
+    /// checked again; those in `signed` had their signature checked with
+    /// their signer's key, the one a member's id hashes, and only the rest
+    /// of the check is left.
     pub(super) fn new(
         graph: &'g Graph<'a>,
         base: &'g State,
         fleet: FleetId,
         known: &HashSet<OpId>,
+        signed: &'g HashSet<OpId>,
     ) -> Result<Self> {
         let mut mask = Bits::new(graph.len());
         for (position, op) in graph.order.iter().enumerate() {
@@ -94,6 +105,7 @@ impl<'g, 'a> Folder<'g, 'a> {
             mask,
             checks: Vec::with_capacity(graph.len()),
             cache: RefCell::default(),
+            signed,
         };
         for position in 0..graph.len() {
             let check = if known.contains(&graph.order[position].id()) {
@@ -158,43 +170,36 @@ impl<'g, 'a> Folder<'g, 'a> {
                 (member.bundle.verifying_key()?, member.bundle.kind)
             }
         };
-        op.verify(&key)?;
+        if !self.signed.contains(&op.id()) {
+            op.verify(&key)?;
+        }
         if op.unsigned().seq <= self.last_seq(position, op.signer()) {
             return Err(Error::Sequence);
         }
         self.permitted(op, kind, &members)?;
         if let Body::Access(access) = op.body()
-            && Some(access.rev)
-                != self
-                    .access_floor(position, access.host, access.member)
-                    .checked_add(1)
+            && Some(access.rev) != self.access_floor(position).checked_add(1)
         {
             return Err(Error::Rev);
         }
         Ok(())
     }
 
-    /// The highest `rev` of an `Access` for `host` and `member` in the
-    /// history of `position`, or the base's: the one an `Access` there
-    /// must be one above. Every `Access` held passed this check, so none
-    /// can put the register out of reach of a later deny, and whether one
-    /// follows depends on its own history alone.
-    fn access_floor(&self, position: usize, host: super::HostId, member: MemberId) -> u64 {
-        let floor = self
-            .base
-            .access
-            .get(&(host, member))
-            .map_or(0, |register| register.rev);
+    /// The highest `rev` of any `Access` in the history of `position`, or
+    /// the base's: the one an `Access` there must be one above. Every
+    /// `Access` held passed this check, so none can put a register out of
+    /// reach of a later deny. One floor for every host and member keeps it
+    /// a matter of the operation's own history, which a checkpoint keeps
+    /// whole in one number, whatever hosts and members came and went.
+    fn access_floor(&self, position: usize) -> u64 {
         self.graph.ancestors[position]
             .iter()
             .filter(|&ancestor| self.checks.get(ancestor).is_some_and(Result::is_ok))
             .filter_map(|ancestor| match self.graph.order[ancestor].body() {
-                Body::Access(other) if other.host == host && other.member == member => {
-                    Some(other.rev)
-                }
+                Body::Access(other) => Some(other.rev),
                 _ => None,
             })
-            .fold(floor, u64::max)
+            .fold(self.base.access_rev, u64::max)
     }
 
     /// The highest sequence number the signer used before `position`.
@@ -290,6 +295,7 @@ impl<'g, 'a> Folder<'g, 'a> {
             tombstones: self.base.tombstones.clone(),
             removals: BTreeMap::new(),
             origins: BTreeMap::new(),
+            claims: BTreeMap::new(),
         };
         let removed: BTreeSet<MemberId> = removals.values().flatten().copied().collect();
         let partial = Members {
@@ -301,6 +307,7 @@ impl<'g, 'a> Folder<'g, 'a> {
             match op.body() {
                 Body::Found(bundle) => {
                     members.origins.insert(bundle.id(), position);
+                    members.claims.insert(bundle.id(), vec![position]);
                     members.live.insert(
                         bundle.id(),
                         Member {
@@ -324,6 +331,7 @@ impl<'g, 'a> Folder<'g, 'a> {
                         && members.kind_count(admit.bundle.kind) < limit
                     {
                         members.origins.insert(id, position);
+                        members.claims.insert(id, vec![position]);
                         members.live.entry(id).or_insert(Member {
                             bundle: admit.bundle.clone(),
                             admitted_by: Some(op.signer()),
@@ -333,9 +341,12 @@ impl<'g, 'a> Folder<'g, 'a> {
                 }
                 Body::Rotate(bundle) if !self.voided(&partial, position) => {
                     if let Some(member) = members.live.get_mut(&op.signer()) {
+                        let claims = members.claims.entry(op.signer()).or_default();
                         if host_id(&member.bundle) != host_id(bundle) {
                             members.origins.insert(op.signer(), position);
+                            claims.clear();
                         }
+                        claims.push(position);
                         member.bundle = bundle.clone();
                     }
                 }

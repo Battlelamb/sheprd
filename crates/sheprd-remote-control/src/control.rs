@@ -229,6 +229,10 @@ pub enum Request {
     /// relay the daemon listens on now. Sheprd never sends it to its own
     /// daemon, which follows `[remote] relays`.
     ShareRelays(relays::Offer),
+    /// This computer's listen tokens changed (`app::relay_tokens`): read
+    /// them again and reconnect the relays whose token changed. Answered
+    /// with [`Response::Done`].
+    RelayTokens,
     /// On a host: adds a phone another computer's user allowed, as
     /// `herdr-remote-control enroll` asks. Sheprd never sends it to its
     /// own daemon.
@@ -441,6 +445,10 @@ pub struct RelayStatus {
     pub label: crate::relay_label::RelayLabel,
     #[serde(flatten)]
     pub state: RelayState,
+    /// Whether the daemon listens there with a listen token, its own or
+    /// one shared with it. An older daemon leaves it out.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub token: bool,
 }
 
 impl From<RelayState> for RelayStatus {
@@ -448,6 +456,7 @@ impl From<RelayState> for RelayStatus {
         Self {
             label: crate::relay_label::RelayLabel::default(),
             state,
+            token: false,
         }
     }
 }

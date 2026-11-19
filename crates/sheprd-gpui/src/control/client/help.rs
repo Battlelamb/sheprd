@@ -155,7 +155,7 @@ fn family(name: &str) -> &'static str {
             "sheprd font [list]\n    The installed font families.\nsheprd font set NAME...\nsheprd font reset\n    The font of every face; reset goes back to the default.\nThese need Sheprd running, which knows the installed fonts."
         }
         "language" => {
-            "sheprd language [status]\n    The language set, and the locale Sheprd shows: the best match for\n    the setting among the languages there are, else en-US.\nsheprd language list\n    The languages there are, each named in itself, and the en-XA and en-XB\n    pseudo-locales.\nsheprd language set system|TAG\n    Save the language setting: system follows the OS's languages; TAG is\n    a BCP 47 tag such as fr-CA. A running Sheprd switches at once.\nOnly status asks Sheprd; without it, status reports what it would show."
+            "sheprd language [status]\n    The language set, and the locale Sheprd shows: the best match for\n    the setting, else en-US.\nsheprd language list\n    The languages available for direct selection, each named in itself,\n    and the en-XA and en-XB pseudo-locales.\nsheprd language set system|TAG\n    Save the language setting: system follows the OS's languages; TAG is\n    a BCP 47 tag such as fr-CA. A running Sheprd switches at once.\nOnly status asks Sheprd; without it, status reports what it would show."
         }
         "keybinds" => {
             "sheprd keybinds [list]\n    The window's shortcuts.\nsheprd keybinds check\n    Herdr's custom commands this client cannot reach; exits 1 if any."

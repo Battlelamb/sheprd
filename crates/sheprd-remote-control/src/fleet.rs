@@ -90,6 +90,10 @@ pub(crate) struct Fleet {
     pub(crate) inbound: tokio::sync::Semaphore,
     /// The fleet folder's lock, which the daemon holds for its life.
     _lock: Option<lock::Lock>,
+    /// The last write of the fleet's files failed: what is held is ahead
+    /// of them, and the next change, even one that moves nothing, writes
+    /// again.
+    unsaved: std::sync::atomic::AtomicBool,
 }
 
 /// What removals are passed to: a member's daemon, or a plain host's
@@ -167,6 +171,7 @@ impl Fleet {
             changed: watch::Sender::new(0),
             inbound: tokio::sync::Semaphore::new(removals::CONCURRENT),
             _lock: lock,
+            unsaved: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -236,9 +241,12 @@ impl Fleet {
             Inserted::Applied | Inserted::Known => {}
             Inserted::Pending => return Err(Error::NotApplied),
         }
-        self.save(&inner)?;
+        // Held at once even if the write fails: a removal cuts off now,
+        // and the next change writes it.
+        let saved = self.save(&inner);
         drop(inner);
         self.bump();
+        saved?;
         Ok(op)
     }
 
@@ -334,13 +342,17 @@ impl Fleet {
         settle_unconfirmed(&mut inner, now_ms);
         let after = inner.log.as_ref().map(|log| log.heads().to_vec());
         // A suspension lifted is a change too: its target's grants return.
-        if after != before
-            || !inner.unconfirmed.is_empty()
-            || !suspensions.iter().eq(inner.unconfirmed.keys())
-        {
-            self.save(&inner)?;
+        let changed = after != before || !suspensions.iter().eq(inner.unconfirmed.keys());
+        if changed || !inner.unconfirmed.is_empty() || self.is_unsaved() {
+            // What changed takes effect even if the write fails, which the
+            // caller hears: a removal it does not see saved, it must not
+            // count as held.
+            let saved = self.save(&inner);
             drop(inner);
-            self.bump();
+            if changed {
+                self.bump();
+            }
+            saved?;
         }
         Ok(refused)
     }
@@ -432,7 +444,15 @@ impl Fleet {
     }
 
     fn save(&self, inner: &Inner) -> Result<()> {
-        store::save(&self.state_dir, inner)
+        let saved = store::save(&self.state_dir, inner);
+        self.unsaved
+            .store(saved.is_err(), std::sync::atomic::Ordering::SeqCst);
+        saved
+    }
+
+    /// Whether the last write of the fleet's files failed.
+    pub(crate) fn is_unsaved(&self) -> bool {
+        self.unsaved.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -600,6 +620,21 @@ fn standing(log: &Log, kept: &Unconfirmed) -> bool {
             .removers(&kept.signer)
             .iter()
             .any(|remover| kept.targets.contains(remover))
+}
+
+/// The first bytes of a fleet session this computer opens with
+/// `purpose`: the purpose byte, then the proof that the device in the
+/// session whose handshake hash is `hash` holds this computer's fleet key
+/// (`control::fleet::removal`). Blocking: it reads the fleet key.
+pub(crate) fn opening(
+    state_dir: &Path,
+    purpose: u8,
+    hash: &[u8; 32],
+) -> crate::desktop::Result<Vec<u8>> {
+    let key = store::load_or_create_key(state_dir)?;
+    let mut bytes = vec![purpose];
+    bytes.extend_from_slice(&crate::control::fleet::removal::prove(&key, hash));
+    Ok(bytes)
 }
 
 fn member_id(key: &SigningKey) -> MemberId {

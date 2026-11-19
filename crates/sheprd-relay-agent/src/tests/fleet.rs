@@ -8,16 +8,24 @@ use crate::{
     access::{Access, Id, Member},
     authorized_keys,
     fleet::Held,
-    removal::{self, Message, PURPOSE_REMOVAL, PURPOSE_SSH, tests::remove_op},
+    removal::{self, Message, PROOF_LEN, PURPOSE_REMOVAL, PURPOSE_SSH, tests::remove_op},
 };
 
 const FLEET: [u8; 32] = [0xf1; 32];
+
+/// The fleet key of the member whose device is `desktop`.
+fn fleet_key(desktop: &Desktop) -> SigningKey {
+    let mut secret = desktop.tunnel.identity().x25519();
+    secret[0] &= 0x7f;
+    SigningKey::from_slice(&secret).unwrap()
+}
 
 /// `desktop` as fleet member `seed`.
 fn member(desktop: &Desktop, seed: u8, allow: bool, rev: u64) -> (Id, Member) {
     let member = Member {
         allow,
         dial: client::public(&desktop.dial),
+        fleet_key: client::public(&fleet_key(desktop)),
         name: format!("computer{seed}"),
         rev,
         ssh: authorized_keys::tests::key(seed),
@@ -60,8 +68,15 @@ fn lines(dir: &Path) -> Vec<String> {
 
 /// Dials as `desktop` and says what for.
 async fn open(running: &Running, desktop: &Desktop, purpose: u8) -> Session {
+    open_as(running, desktop, purpose, &fleet_key(desktop)).await
+}
+
+/// Dials as `desktop`, says what for, and proves it with fleet key `key`.
+async fn open_as(running: &Running, desktop: &Desktop, purpose: u8, key: &SigningKey) -> Session {
     let mut session = dial(running, desktop).await.unwrap();
-    session.io.write_all(&[purpose]).await.unwrap();
+    let mut opening = vec![purpose];
+    opening.extend_from_slice(&removal::prove(key, &session.hash));
+    session.io.write_all(&opening).await.unwrap();
     session
 }
 
@@ -242,4 +257,47 @@ async fn a_member_cannot_suspend_itself_and_a_stranger_passes_nothing() {
     let mut session = open(&running, &a, PURPOSE_SSH).await;
     assert_eq!(greeting(&mut session.io).await, b"SSH-2.0-test\r\n");
     until_offline(&running, &Desktop::new(0x53)).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_with_another_keys_proof_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let running = start(dir.path()).await;
+    let (a, b) = (Desktop::new(0x51), Desktop::new(0x52));
+    apply(
+        &running,
+        dir.path(),
+        vec![member(&a, 1, true, 0), member(&b, 2, true, 0)],
+        &[],
+        &[],
+    );
+    // a's device, proving with b's fleet key: no SSH.
+    let mut wrong = open_as(&running, &a, PURPOSE_SSH, &fleet_key(&b)).await;
+    assert!(closes(&mut wrong.io).await, "a wrong proof reached SSH");
+    // Nor a removal: nothing is answered and no one is suspended.
+    let mut wrong = open_as(&running, &a, PURPOSE_REMOVAL, &fleet_key(&b)).await;
+    let op = remove_op(FLEET, [1; 32], &[[2; 32]]);
+    let frame = Message::<[u8; 32]>::Removal(vec![op]).frame().unwrap();
+    let _ = wrong.io.write_all(&frame).await;
+    assert!(closes(&mut wrong.io).await, "a wrong proof was answered");
+    assert!(Held::load(dir.path()).unwrap().suspended.is_empty());
+    // With its own key, the same member reaches SSH.
+    let mut right = open(&running, &a, PURPOSE_SSH).await;
+    assert_eq!(greeting(&mut right.io).await, b"SSH-2.0-test\r\n");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_that_sends_no_proof_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let running = start(dir.path()).await;
+    let a = Desktop::new(0x51);
+    apply(&running, dir.path(), vec![member(&a, 1, true, 0)], &[], &[]);
+    let mut session = dial(&running, &a).await.unwrap();
+    // The purpose byte, then an SSH greeting where the proof belongs.
+    session.io.write_all(&[PURPOSE_SSH]).await.unwrap();
+    session.io.write_all(&[b'S'; PROOF_LEN]).await.unwrap();
+    assert!(
+        closes(&mut session.io).await,
+        "an unproven session reached SSH"
+    );
 }

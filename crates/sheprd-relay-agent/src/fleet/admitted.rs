@@ -156,6 +156,20 @@ impl Admitted {
         }
     }
 
+    /// Whether `proof` is admitted member `member`'s fleet key signing the
+    /// session's handshake `hash`.
+    #[must_use]
+    pub fn proves(
+        &self,
+        member: &Id,
+        hash: &[u8; 32],
+        proof: &[u8; crate::removal::PROOF_LEN],
+    ) -> bool {
+        self.members()
+            .find(|(id, _)| *id == member)
+            .is_some_and(|(_, entry)| crate::removal::verify(&entry.fleet_key, hash, proof))
+    }
+
     /// Whether `member` may still pass removals.
     #[must_use]
     pub fn admits_member(&self, member: &Id) -> bool {

@@ -3,7 +3,10 @@
 //! (`sheprd_remote_control::control::fleet::removal`) and this agent.
 //!
 //! A fleet member's session starts with one purpose byte: SSH to splice to
-//! the host's SSH server, or a removal exchange. The dialer then sends
+//! the host's SSH server, or a removal exchange. A proof follows it
+//! ([`prove`], [`PROOF_LEN`] bytes): the member's fleet key signing the
+//! session's handshake hash, so the session is the member's own and not a
+//! device whose keys a member's bundle merely names. The dialer then sends
 //! [`Message::Removal`]; a daemon answers [`Message::Want`] for parents it
 //! lacks, at most [`MAX_ROUNDS`] times, then [`Message::Held`] with the
 //! removals it now holds. An agent wants nothing: it answers `Held` at
@@ -15,6 +18,9 @@
 //! removes. The daemon's tests check that reading against the log's own
 //! encoding.
 
+use p256::ecdsa::{
+    Signature, SigningKey, VerifyingKey, signature::Signer as _, signature::Verifier as _,
+};
 use sha2::{Digest, Sha256};
 use std::time::Duration;
 
@@ -22,6 +28,10 @@ use std::time::Duration;
 pub const PURPOSE_SSH: u8 = 1;
 /// The session carries one removal exchange.
 pub const PURPOSE_REMOVAL: u8 = 2;
+/// A session proof's length: a P-256 signature, `r` then `s`.
+pub const PROOF_LEN: usize = 64;
+/// What a session proof signs, after [`DOMAIN`] and before the hash.
+const SESSION_PROOF: &[u8] = b"session";
 /// The largest operation, encoded; the fleet log's own bound.
 pub const MAX_OP: usize = 16 * 1024;
 /// Operations one message carries.
@@ -147,6 +157,29 @@ impl<Id: Copy + Into<[u8; ID_LEN]> + From<[u8; ID_LEN]>> Message<Id> {
     }
 }
 
+fn proof_message(hash: &[u8; 32]) -> Vec<u8> {
+    [DOMAIN, SESSION_PROOF, hash].concat()
+}
+
+/// The proof a member sends after the purpose byte: its fleet `key`
+/// signing the session's handshake `hash`.
+#[must_use]
+pub fn prove(key: &SigningKey, hash: &[u8; 32]) -> [u8; PROOF_LEN] {
+    let signature: Signature = key.sign(&proof_message(hash));
+    signature.to_bytes().into()
+}
+
+/// Whether `proof` is the fleet key `key` (SEC1) signing the session's
+/// handshake `hash`.
+#[must_use]
+pub fn verify(key: &[u8], hash: &[u8; 32], proof: &[u8; PROOF_LEN]) -> bool {
+    let Ok(key) = VerifyingKey::from_sec1_bytes(key) else {
+        return false;
+    };
+    Signature::from_slice(proof)
+        .is_ok_and(|signature| key.verify(&proof_message(hash), &signature).is_ok())
+}
+
 /// The length a frame's first four bytes give, refused past [`MAX_FRAME`].
 pub fn frame_length(prefix: [u8; 4]) -> Result<usize> {
     let length = usize::try_from(u32::from_be_bytes(prefix)).map_err(|_| Error::Bounds)?;
@@ -170,8 +203,8 @@ fn take_length(bytes: &[u8]) -> Result<(usize, &[u8])> {
     ))
 }
 
-/// What every fleet operation starts with, then its version.
-const DOMAIN: &[u8] = b"sheprd-fleet-v1";
+/// What every fleet operation and session proof starts with.
+pub const DOMAIN: &[u8] = b"sheprd-fleet-v1";
 const VERSION: u8 = 1;
 const SIGNATURE_LEN: usize = 64;
 const MAX_PARENTS: usize = 16;

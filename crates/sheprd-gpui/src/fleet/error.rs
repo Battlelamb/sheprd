@@ -25,10 +25,10 @@ pub enum Error {
     NoProgram,
     #[error("This computer listens on no relay; turn one on in Remote Control first")]
     NoRelays,
-    #[error("Could not read the account's name on the host")]
-    NoUser,
     #[error("The relay agent's service did not start on the host")]
     NotRunning,
+    #[error("Could not read the account's name on the host")]
+    NoUser,
     #[error("Could not reach the remote control daemon")]
     Request(#[source] sheprd_remote_control::control::Error),
     #[error("Could not run sheprd-remote-control on the host")]

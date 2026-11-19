@@ -171,6 +171,7 @@ async fn a_refusal_outlives_a_suspension() {
             signer: a.fleet.me(),
             targets: vec![phone.bundle.id()],
             since_ms: now_ms(),
+            op: None,
         },
     );
     assert_eq!(a.fleet.suspended(), vec![phone.bundle.id()]);
@@ -197,6 +198,7 @@ async fn a_suspension_lifted_restores_a_device_not_refused() {
             signer: a.fleet.me(),
             targets: vec![phone.bundle.id()],
             since_ms: now_ms(),
+            op: None,
         },
     );
     assert!(apply(&a));

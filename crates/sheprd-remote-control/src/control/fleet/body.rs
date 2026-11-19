@@ -264,7 +264,7 @@ impl HostIntro {
     /// Whether `record` is this host's word: signed by its CA when it has
     /// one. A plain host's record is vouched for by the member that read
     /// it, so `signature` must be absent.
-    pub(super) fn vouches(&self, record: &SelfRecord, signature: Option<&RawSignature>) -> bool {
+    pub fn vouches(&self, record: &SelfRecord, signature: Option<&RawSignature>) -> bool {
         match (&self.ca, signature) {
             (Some(ca), Some(signature)) => {
                 let (Ok(key), Ok(signature), Some(message)) = (

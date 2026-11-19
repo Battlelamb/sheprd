@@ -86,16 +86,20 @@ pub fn proof_message(nonce: &str, fleet: &str, heads: &[String]) -> Vec<u8> {
 /// heads. A machine that only echoes a fleet id proves nothing.
 #[must_use]
 pub fn proven(applied: &Applied, nonce: &str, hosts: &[String]) -> bool {
+    proven_host(applied, nonce, hosts).is_some()
+}
+
+/// Which of `hosts` proved `applied`, as [`proven`] checks it.
+#[must_use]
+pub fn proven_host(applied: &Applied, nonce: &str, hosts: &[String]) -> Option<String> {
     use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
-    let Some(proof) = &applied.proof else {
-        return false;
-    };
+    let proof = applied.proof.as_ref()?;
     let (Ok(certificate), Ok(key), Ok(signature)) = (
         bytes(&proof.certificate),
         bytes(&proof.key),
         bytes(&proof.signature),
     ) else {
-        return false;
+        return None;
     };
     let host = HostId(super::sha256(&[&certificate])).to_string();
     // As `host_relay` checks a carried answer: the key must be the
@@ -107,16 +111,16 @@ pub fn proven(applied: &Applied, nonce: &str, hosts: &[String]) -> bool {
             .windows(key.len())
             .any(|window| window == key.as_slice())
     {
-        return false;
+        return None;
     }
     let (Ok(key), Ok(signature)) = (
         VerifyingKey::from_sec1_bytes(&key),
         Signature::from_slice(&signature),
     ) else {
-        return false;
+        return None;
     };
     let message = proof_message(nonce, &applied.fleet, &applied.heads);
-    key.verify(&message, &signature).is_ok()
+    key.verify(&message, &signature).is_ok().then_some(host)
 }
 
 impl Apply {
@@ -222,6 +226,11 @@ pub enum Ask {
     /// This computer as a Sheprd host, its record signed by its own
     /// certificate authority, for a member about to share it.
     Intro,
+    /// A shared Sheprd host's current `fleet intro`, read over SSH by a
+    /// member syncing it: the member carries its record into the log as a
+    /// `HostSeen` when it moved, as a host that is no member cannot sign
+    /// one. Its certificate authority's signature is what counts.
+    Seen { intro: String },
 }
 
 /// What the daemon answers.

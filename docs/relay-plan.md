@@ -1916,8 +1916,15 @@ manual multi-machine and phone steps left unticked in its QA list.
      the log handed over: a Sheprd host that is not a member takes a log
      that shares it, by its certificate authority's host id, and lets in
      the computers allowed there). A log larger than one answer is handed
-     over in parts marked `more`, which the joining daemon keeps in
-     memory until the last. A compromised member's removal names at most
+     over in parts marked `more`, naming the fleet, which the joining
+     daemon keeps in memory per fleet until the last, so two handovers
+     at once never take each other's parts. A shared Sheprd host is no
+     member and cannot sign its own record, so a member syncing it reads
+     its `fleet intro` and carries a newer CA-signed record into the log
+     as a `HostSeen` (`Ask::Seen`). A computer that left, or was removed,
+     keeps the log until a live computer member holds its removal (or
+     none is left), then forgets the fleet and may found or join
+     another. A compromised member's removal names at most
      16 members beside it; the members it admitted past those are removed
      by further removals in the same confirmation.
      Members cut off by an unconfirmed removal, and members that signed

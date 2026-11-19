@@ -30,6 +30,8 @@ mod handover;
 #[cfg(unix)]
 mod joining;
 #[cfg(unix)]
+mod leaving;
+#[cfg(unix)]
 mod offline;
 #[cfg(unix)]
 mod records;
@@ -39,6 +41,8 @@ mod rejected;
 mod restore;
 #[cfg(unix)]
 mod sessions;
+#[cfg(unix)]
+mod shared_records;
 #[cfg(unix)]
 mod store;
 

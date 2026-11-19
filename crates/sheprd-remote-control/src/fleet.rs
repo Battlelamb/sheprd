@@ -368,6 +368,7 @@ fn member_id(key: &SigningKey) -> MemberId {
     MemberId(Sha256::digest(point.as_bytes()).into())
 }
 
-#[cfg(test)]
+// Every test here runs members on loopback with a `USER`: Unix only.
+#[cfg(all(test, unix))]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests;

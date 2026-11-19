@@ -74,8 +74,12 @@ async fn session(
     wait: &mut Duration,
 ) -> Result<()> {
     let state = &served.state;
+    let token = relays.token(endpoint);
+    let token = token
+        .as_ref()
+        .map_or(&[][..], |token| token.expose().as_bytes());
     let connection = client::reach(endpoint).await?;
-    let mut listener = Listener::listen(connection, &relays.keys.route, b"").await?;
+    let mut listener = Listener::listen(connection, &relays.keys.route, token).await?;
     let mut changed = relays.changed.subscribe();
     let mut pairing = relays.pairing_changed.subscribe();
     let mut revoked = state.auth().watch_revocations();

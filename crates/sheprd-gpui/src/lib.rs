@@ -165,6 +165,7 @@ mod text_shortcuts;
 mod theme_picker;
 mod titlebar;
 mod toggles;
+mod traces;
 mod truncate;
 mod update_panel;
 mod upload_chips;

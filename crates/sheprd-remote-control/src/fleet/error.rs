@@ -13,10 +13,10 @@ pub enum Error {
     Desktop(#[from] crate::desktop::Error),
     #[error("this computer is in a fleet already; leave it first")]
     InFleet,
-    #[error("the log handed over is larger than this computer keeps")]
-    JoinTooLarge,
     #[error(transparent)]
     Joins(#[from] super::joins::Error),
+    #[error("the log handed over is larger than this computer keeps")]
+    JoinTooLarge,
     #[error(transparent)]
     Links(#[from] super::links::Error),
     #[error(transparent)]

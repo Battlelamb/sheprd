@@ -211,7 +211,14 @@ async fn fleet_session(
     use crate::control::fleet::removal::{PURPOSE_REMOVAL, PURPOSE_SSH};
     // The handshake proved this device holds the member's tunnel key.
     let (proving, remote_key, member) = (fleet.clone(), *remote, peer.member);
-    let _ = tokio::task::spawn_blocking(move || proving.proved(member, remote_key)).await;
+    let kept = tokio::task::spawn_blocking(move || proving.proved(member, remote_key))
+        .await
+        .is_ok_and(|kept| matches!(kept, Ok(true)));
+    if !kept {
+        // Not remembered: its pairing cannot be left to outlive the
+        // member's removal, so it goes now.
+        supersede(state, remote).await;
+    }
     let mut first = [0];
     tokio::io::AsyncReadExt::read_exact(&mut tunnel, &mut first)
         .await

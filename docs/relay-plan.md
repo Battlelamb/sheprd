@@ -1134,7 +1134,7 @@ Three options were weighed.
 
 **Fleet keys.** Every member makes a P-256 signing key when it joins.
 
-- **Computers:** the daemon keeps it in `STATE_DIR/fleet/key.pem` (0600),
+- **Computers:** the daemon keeps it in `STATE_DIR/fleet/key` (0600),
   beside the certificate authority's key.
 - **Phones:** it lives in the Secure Enclave with `userPresence`, so every
   signature asks for Face ID or the passcode. P-256 is what the Secure
@@ -1681,7 +1681,7 @@ all of them. It needs no fleet key, because it only removes access.
 
 ### Storage and logs
 
-- **Computers:** `STATE_DIR/fleet/key.pem` holds the key,
+- **Computers:** `STATE_DIR/fleet/key` holds the key,
   `STATE_DIR/fleet/log.bin` the operations (written atomically), and
   `STATE_DIR/fleet/peers.json` each peer's last heads and backoff. All
   three are 0600.
@@ -1853,23 +1853,37 @@ manual multi-machine and phone steps left unticked in its QA list.
    - **Pure tests:** replay, reorder, forged signer, removed signer,
      backdating, concurrent removal and counter-removal, deny over
      allow, equivocation, checkpoints, and every bound.
-2. **Daemons, members, and sync:**
-   - **The daemon:** the fleet key and store, `fleet apply` and
-     `POST /api/v2/fleet/sync`, members as hosts of each other through
-     `ssh_access` with `sheprd-fleet:` lines, and direct tunnels on the
-     existing listener.
-   - **Joining:** creating a fleet, and joining over SSH and over
-     Bluetooth (the claim carries the joiner's bundle and signature).
-   - **Sheprd:** `relay_sharing` running `fleet apply`, and owed
-     delivery.
+2. **Daemons, members, and sync** (built):
+   - **The daemon** (`crate::fleet`): the fleet key and store
+     (`fleet/key`, `fleet/log.bin`, `fleet/peers.json`), the control
+     socket's `Request::Fleet`, `sheprd-remote-control fleet apply` and
+     `fleet bundle` over SSH (apply writes the log itself when no daemon
+     runs), and members as hosts of each other through `ssh_access`
+     with `sheprd-fleet:FLEET:MEMBER` lines, their dial keys on the
+     relays, and their tunnel keys admitted. `relay-connect` sends a
+     purpose byte to a fleet host; a desktop paired over Bluetooth that
+     is also a member keeps its record and its session as before.
+   - **Joining over SSH:** creating a fleet, `fleet bundle` on the
+     joiner, `Admit` on the member, and the log handed over; a daemon
+     with no fleet takes a log only when it admits this computer.
+   - **Own record:** every 10 minutes the daemon signs a `HostSeen` with
+     its certificate authority when its relays, route, tunnel identity,
+     or SSH host keys moved.
    - **Removals between daemons:** the `removal` tunnel purpose, the
-     flood with `Held`, suspend-then-confirm, and its bounds and
+     flood with `Held`, suspend-then-confirm (`fleet/peers.json` keeps
+     suspensions whose history has not arrived), and its bounds and
      retries.
-   - **End-to-end tests on loopback relays:** spreading to N members, a
-     member joining late, a member away during an update, a removal
-     reaching every daemon with no Sheprd running, a removal whose
-     history arrives late, replay, a forged operation, and a member
-     excluded from a host.
+   - **End-to-end tests on loopback relays** (`fleet/tests`): three
+     members reaching one another over SSH, a member excluded from a
+     host, a removal ending a live session, a removal reaching every
+     daemon with no Sheprd running, a member away during a removal, a
+     removal whose history arrives late, replay, and a forged
+     operation.
+   - **Moved:** joining over Bluetooth needs the join dialog, so it
+     comes with phase 3; `relay_sharing` running `fleet apply` is
+     Sheprd's side, phase 3; `POST /api/v2/fleet/sync` comes with the
+     phones, phase 5; direct tunnels on the daemon's listener come with
+     `relay-connect`'s race, phase 3.
 3. **Sheprd's side:**
    - **Interface:** Settings > Fleet; the join, share, and remove
      dialogs; Fleet hosts in the worktree listing and Devices.

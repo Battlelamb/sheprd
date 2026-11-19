@@ -146,8 +146,24 @@ pub enum Invocation {
         state_dir: Option<PathBuf>,
         host: String,
     },
+    /// The fleet's halves Sheprd runs over SSH (`crate::fleet`).
+    Fleet {
+        state_dir: Option<PathBuf>,
+        action: FleetAction,
+    },
     Help,
     Version,
+}
+
+/// What `fleet` does.
+#[derive(Debug, Eq, PartialEq)]
+pub enum FleetAction {
+    /// Takes `control::fleet::sync::Apply` on standard input and prints
+    /// what came of it, with what the caller lacks.
+    Apply,
+    /// Prints this computer's bundle signed for the fleet with this id, for
+    /// the member about to admit it.
+    Bundle { fleet: String },
 }
 
 pub const USAGE: &str = "\
@@ -158,6 +174,8 @@ Usage: sheprd-remote-control serve --state-dir DIR [options]
        sheprd-remote-control tags [--offer] [--state-dir DIR] [< TAGS.json]
        sheprd-remote-control shortcuts [--offer] [--state-dir DIR] [< SHORTCUTS.json]
        sheprd-remote-control relays [--offer] [--state-dir DIR] [< RELAYS.json]
+       sheprd-remote-control fleet apply [--state-dir DIR] < APPLY.json
+       sheprd-remote-control fleet bundle --fleet ID [--state-dir DIR]
        sheprd-remote-control desktop-pair --name NAME [--state-dir DIR]
        sheprd-remote-control relay-connect [--state-dir DIR] HOST
 
@@ -212,6 +230,10 @@ desktop-pair adds a nearby Sheprd that is on another network: Sheprd
 runs it and carries its Bluetooth frames as JSON lines on stdio. The
 other computer is then reached through its relays, and relay-connect is
 the ProxyCommand ssh runs for it.
+fleet apply and fleet bundle are the fleet's halves Sheprd on another
+computer runs here over SSH: apply takes signed fleet operations and
+prints what this computer holds that the caller lacks; bundle prints this
+computer's keys, signed, for the member about to admit it.
 Their state directory defaults to the one Sheprd on this computer uses.
 ";
 
@@ -245,6 +267,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
                 offer,
             });
         }
+        Some("fleet") => return parse_fleet(args),
         Some(verb @ ("desktop-pair" | "relay-connect")) => {
             return parse_desktop(verb == "desktop-pair", args);
         }
@@ -497,6 +520,47 @@ fn parse_desktop(
         state_dir,
         host: host.ok_or(ParseError::Missing("HOST"))?,
     })
+}
+
+/// `fleet apply|bundle [--fleet ID] [--state-dir DIR]`.
+fn parse_fleet(mut args: impl Iterator<Item = OsString>) -> Result<Invocation, ParseError> {
+    let verb = args
+        .next()
+        .and_then(|verb| verb.to_str().map(str::to_owned))
+        .ok_or(ParseError::Missing("apply or bundle"))?;
+    let (mut state_dir, mut fleet) = (None, None);
+    while let Some(arg) = args.next() {
+        let name = arg.to_str().unwrap_or_default().to_owned();
+        match name.as_str() {
+            "--state-dir" => {
+                state_dir = Some(PathBuf::from(
+                    args.next().ok_or(ParseError::Missing("--state-dir"))?,
+                ));
+            }
+            "--fleet" => {
+                let id = args.next().ok_or(ParseError::Missing("--fleet"))?;
+                fleet = Some(
+                    id.to_str()
+                        .filter(|id| {
+                            id.len() == 64 && id.bytes().all(|byte| byte.is_ascii_hexdigit())
+                        })
+                        .ok_or(ParseError::Value { option: "--fleet" })?
+                        .to_owned(),
+                );
+            }
+            "-h" | "--help" => return Ok(Invocation::Help),
+            _ => return Err(ParseError::Unknown(name)),
+        }
+    }
+    let action = match verb.as_str() {
+        "apply" if fleet.is_none() => FleetAction::Apply,
+        "bundle" => FleetAction::Bundle {
+            fleet: fleet.ok_or(ParseError::Missing("--fleet"))?,
+        },
+        "-h" | "--help" => return Ok(Invocation::Help),
+        _ => return Err(ParseError::Unknown(verb)),
+    };
+    Ok(Invocation::Fleet { state_dir, action })
 }
 
 /// `tags`, `shortcuts`, or `relays`, then `[--offer] [--state-dir DIR]`, as `made`.

@@ -301,7 +301,19 @@ every member whatever order they arrived in. A removal voids what the
 removed member signed without having seen it, and every conflict
 resolves to the safer side. The iOS app's Swift copy
 (`SheprdRemoteCore/Fleet`) is checked against the vectors its tests
-write. Nothing stores, syncs, or acts on the log yet.
+write.
+
+The daemon's part is `crate::fleet`: its fleet key and copy of the log
+in `STATE_DIR/fleet`, what Sheprd asks over the control socket
+(`Request::Fleet`), and what the log grants. As a host, this computer
+gives each computer member allowed on it an `authorized_keys` line
+tagged `sheprd-fleet:FLEET:MEMBER`, restricted to loopback, names its
+dial key on the relays, and splices its tunnel to SSH; as a member, it
+keeps a relay record for each fleet host it may reach. `fleet apply`
+and `fleet bundle` are the halves Sheprd on another computer runs here
+over SSH. Removals pass from daemon to daemon inside the relay tunnel,
+so they land while every Sheprd window is shut; a removal whose history
+has not arrived cuts its target off at once.
 
 ## Workspace pull requests and titles
 

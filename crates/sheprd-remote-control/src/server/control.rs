@@ -241,6 +241,7 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
             .host_relayed(&device, &relay, *outcome, now)
             .map(|()| Response::Done),
         Request::RelayEnroll(request) => return relay_enroll(state, &request, now),
+        Request::Fleet(ask) => return fleet(state, *ask, now),
         Request::Revoke { device } => match state.auth().revoke(&device) {
             Ok(true) => Ok(Response::Done),
             Ok(false) => {
@@ -357,6 +358,24 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
 /// Keeps a phone's relay keys carried here from another computer, and
 /// answers with this computer's relays, signed with its CA's key so the
 /// phone knows the answer is this computer's.
+/// Answers what Sheprd asks about the fleet; a failure is the fleet's
+/// own error text, which names the rule and nothing it carried.
+fn fleet(state: &State, ask: control::fleet::sync::Ask, now: u64) -> Response {
+    let Some(fleet) = &state.fleet else {
+        return Response::Error {
+            code: ErrorCode::Unsupported,
+            message: "this computer could not load its fleet key".into(), // i18n: data
+        };
+    };
+    match crate::fleet::ask::answer(state, fleet, ask, now) {
+        Ok(answer) => Response::Fleet(Box::new(answer)),
+        Err(error) => Response::Error {
+            code: ErrorCode::Other,
+            message: error.to_string(),
+        },
+    }
+}
+
 fn relay_enroll(state: &State, request: &control::host_relay::Request, now: u64) -> Response {
     use control::host_relay::{Info, Outcome, Proof};
     let failed = |reason: &str| {

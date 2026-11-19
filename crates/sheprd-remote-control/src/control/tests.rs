@@ -3,6 +3,7 @@ use serde_json::json;
 
 mod addresses;
 mod changes;
+mod fleet;
 mod github;
 mod host_relay;
 mod layout;

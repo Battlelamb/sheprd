@@ -29,6 +29,8 @@ pub(crate) const SERVER: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::LOCALHOST), 22);
 /// What precedes the device id in the line's comment.
 const MARKER: &str = "sheprd-desktop:";
+/// What precedes the fleet and member ids in a fleet member's line.
+const FLEET_MARKER: &str = "sheprd-fleet:";
 /// Only loopback, which only the daemon's relay sessions reach from afar.
 /// Port forwarding stays allowed: Sheprd forwards the ports a remote
 /// program listens on.
@@ -217,6 +219,24 @@ impl AuthorizedKeys {
         Ok(removed)
     }
 
+    /// Makes the fleet's lines exactly `members`: one per member, tagged
+    /// `sheprd-fleet:TAG`, restricted as a paired desktop's line is. Lines
+    /// the user wrote, and paired desktops' lines, stay as they are. A
+    /// missing file with nothing to add stays missing. Blocking.
+    pub(crate) fn set_fleet(&self, members: &[(String, SshKey)]) -> Result<()> {
+        if members.is_empty() && !self.path.exists() {
+            return Ok(());
+        }
+        let wanted: Vec<String> = members
+            .iter()
+            .map(|(tag, key)| format!("{OPTIONS} {} {FLEET_MARKER}{tag}", key.as_str()))
+            .collect();
+        self.rewrite(|lines| {
+            lines.retain(|line| fleet_tag(line).is_none());
+            lines.extend(wanted);
+        })
+    }
+
     /// Removes every line Sheprd wrote for a device `keep` does not keep:
     /// one whose removal failed when it was revoked, or that a restored
     /// device list no longer has. The user's own lines stay. Returns how
@@ -278,6 +298,17 @@ impl AuthorizedKeys {
 /// Whether `line` is the one Sheprd wrote for `device`.
 fn ours(line: &str, device: &DeviceId) -> bool {
     device_of(line).is_some_and(|id| id == device.0)
+}
+
+/// The fleet member a line the fleet wrote names; a line the user wrote,
+/// even one ending in the marker, names none.
+fn fleet_tag(line: &str) -> Option<&str> {
+    if !line.starts_with(OPTIONS) {
+        return None;
+    }
+    line.split_ascii_whitespace()
+        .last()?
+        .strip_prefix(FLEET_MARKER)
 }
 
 /// The device a line Sheprd wrote names, restricted as Sheprd writes it; a

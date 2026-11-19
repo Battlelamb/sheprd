@@ -8,6 +8,7 @@ mod bonjour;
 mod control_socket;
 mod desktop;
 mod enroll;
+mod fleet;
 mod github;
 mod idle;
 mod relay_enroll;

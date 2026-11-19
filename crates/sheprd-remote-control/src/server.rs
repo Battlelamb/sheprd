@@ -12,7 +12,7 @@ mod notifier;
 mod options;
 
 pub use crate::push::Privacy;
-pub use options::{Certificate, Invocation, Options, ParseError, Relay, USAGE, parse};
+pub use options::{Certificate, FleetAction, Invocation, Options, ParseError, Relay, USAGE, parse};
 
 use crate::{
     Result,
@@ -123,6 +123,13 @@ pub async fn run(options: Options) -> Result<()> {
         }
         Err(error) => return Err(error.into()),
     };
+    let fleet = match crate::fleet::Fleet::load(&options.state_dir, web::now_ms()) {
+        Ok(fleet) => Some(Arc::new(fleet)),
+        Err(error) => {
+            tracing::warn!(%error, "Could not load the fleet; it stays off until the daemon restarts");
+            None
+        }
+    };
     let state = Arc::new(State {
         apns,
         apps,
@@ -132,6 +139,7 @@ pub async fn run(options: Options) -> Result<()> {
         computer: options::computer_name(),
         connected: Mutex::new(HashMap::new()),
         fingerprint,
+        fleet,
         github: crate::native::changes::github::Reader::new(options.github_cli),
         hub,
         lending: crate::native::github::Lending::new(
@@ -173,6 +181,10 @@ pub async fn run(options: Options) -> Result<()> {
     // pictures.
     state.uploads.remove_leftovers();
     tokio::spawn(notifier::run(state.clone()));
+    tokio::spawn(crate::fleet::grants::follow(state.clone()));
+    if let Some(fleet) = state.fleet.clone() {
+        tokio::spawn(crate::fleet::removals::flood(fleet));
+    }
     tokio::spawn(crate::native::github::checkouts::follow(state.clone()));
     tokio::spawn(crate::native::github::follow_gh_hosts(state.clone()));
     if state.github.enabled() {

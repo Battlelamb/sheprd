@@ -88,6 +88,7 @@ pub(crate) fn state_lending(
         computer: "Studio".into(),
         connected: Mutex::new(HashMap::new()),
         fingerprint: authority.fingerprint().to_owned(),
+        fleet: None,
         github: Default::default(),
         authority: Some(authority),
         hub,

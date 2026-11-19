@@ -47,7 +47,14 @@ async fn serve(relays: &Relays, incoming: Incoming, route: RouteId, served: Serv
         None => Responder::session(tunnel_keys, route.as_bytes())?,
     };
     let io = join(incoming.recv, incoming.send);
-    let paired = |remote: &[u8; 32]| pairing.is_some() || paired(state, remote);
+    let paired = |remote: &[u8; 32]| {
+        pairing.is_some()
+            || paired(state, remote)
+            || state
+                .fleet
+                .as_ref()
+                .is_some_and(|fleet| crate::fleet::grants::peer(fleet, remote).is_some())
+    };
     let accepted = tokio::time::timeout(
         HANDSHAKE,
         stream::accept(io, tunnel_keys, responder, paired),
@@ -55,9 +62,15 @@ async fn serve(relays: &Relays, incoming: Incoming, route: RouteId, served: Serv
     .await
     .map_err(|_| sheprd_tunnel::Error::Closed)??;
     if pairing.is_none()
+        && let Some(fleet) = &state.fleet
+        && let Some(peer) = crate::fleet::grants::peer(fleet, &accepted.remote)
+    {
+        return fleet_session(state, fleet, peer, &accepted.remote, accepted.io).await;
+    }
+    if pairing.is_none()
         && let Some((device, server)) = desktop(state, &accepted.remote)
     {
-        return ssh(state, device, server, accepted.io).await;
+        return ssh(state, device, server, None, accepted.io).await;
     }
     // Rate limits and logs key callers by address; each device gets its own
     // private one, derived from its tunnel key, so one cannot spend
@@ -125,6 +138,7 @@ async fn ssh(
     state: &Shared,
     device: DeviceId,
     server: SocketAddr,
+    first: Option<u8>,
     mut tunnel: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 ) -> Result<()> {
     let mut revoked = state.auth().watch_revocations();
@@ -140,6 +154,11 @@ async fn ssh(
     let mut server = tokio::net::TcpStream::connect(server)
         .await
         .map_err(super::Error::Ssh)?;
+    if let Some(first) = first {
+        tokio::io::AsyncWriteExt::write_all(&mut server, &[first])
+            .await
+            .map_err(super::Error::Ssh)?;
+    }
     let gone = async {
         loop {
             if state.auth().devices().get(&device).is_none() {
@@ -156,6 +175,73 @@ async fn ssh(
             copied.map_err(super::Error::Ssh)?;
         }
         () = gone => tracing::info!("ended the SSH session of a desktop no longer paired"),
+    }
+    Ok(())
+}
+
+/// A fleet member's session: its first byte says what for. A removal
+/// exchange is served whether or not the member may reach SSH here; SSH
+/// only when it may. A desktop paired here over Bluetooth that is also a
+/// member sends no purpose byte: its session is spliced as before, that
+/// byte included.
+async fn fleet_session(
+    state: &Shared,
+    fleet: &Arc<crate::fleet::Fleet>,
+    peer: crate::fleet::grants::Peer,
+    remote: &[u8; 32],
+    mut tunnel: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+) -> Result<()> {
+    use crate::control::fleet::removal::{PURPOSE_REMOVAL, PURPOSE_SSH};
+    let mut first = [0];
+    tokio::io::AsyncReadExt::read_exact(&mut tunnel, &mut first)
+        .await
+        .map_err(super::Error::Ssh)?;
+    match first[0] {
+        PURPOSE_REMOVAL => {
+            crate::fleet::removals::serve(fleet.clone(), &fleet.inbound, &mut tunnel).await;
+            Ok(())
+        }
+        PURPOSE_SSH if peer.ssh => fleet_ssh(state, fleet, peer.member, tunnel).await,
+        PURPOSE_SSH => Ok(()),
+        byte => match desktop(state, remote) {
+            Some((device, server)) => ssh(state, device, server, Some(byte), tunnel).await,
+            None => Ok(()),
+        },
+    }
+}
+
+/// Splices a fleet member's tunnel to the SSH server on loopback, until
+/// either side closes or the fleet no longer allows the member here.
+async fn fleet_ssh(
+    state: &Shared,
+    fleet: &crate::fleet::Fleet,
+    member: crate::control::fleet::MemberId,
+    mut tunnel: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+) -> Result<()> {
+    let server = state
+        .auth()
+        .ssh_access()
+        .map(|access| access.server)
+        .map_err(|_| super::Error::Ssh(std::io::ErrorKind::Unsupported.into()))?;
+    let mut changed = fleet.watch();
+    let mut server = tokio::net::TcpStream::connect(server)
+        .await
+        .map_err(super::Error::Ssh)?;
+    let gone = async {
+        loop {
+            if !crate::fleet::grants::still_allowed(fleet, &member) {
+                return;
+            }
+            if changed.changed().await.is_err() {
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    tokio::select! {
+        copied = tokio::io::copy_bidirectional(&mut tunnel, &mut server) => {
+            copied.map_err(super::Error::Ssh)?;
+        }
+        () = gone => tracing::info!("ended the SSH session of a fleet member no longer allowed here"),
     }
     Ok(())
 }

@@ -139,6 +139,80 @@ impl Log {
         self.pending.len()
     }
 
+    /// The checkpoint the log was pruned to and the state it names, as
+    /// the log is saved.
+    #[must_use]
+    pub fn base(&self) -> Option<(&Op, &State)> {
+        self.root.as_ref().map(|root| (root, &self.base))
+    }
+
+    /// What a peer whose heads are `heads` lacks: every operation held
+    /// that is neither one of them nor an ancestor of one, in graph order,
+    /// so the peer can apply them as they come. Heads this log does not
+    /// know are passed over, so the peer may get what it already has.
+    #[must_use]
+    pub fn missing_for(&self, heads: &[OpId]) -> Vec<&Op> {
+        let Ok(graph) = self.graph() else {
+            return self.ops.values().collect();
+        };
+        let mut known = Bits::new(graph.len());
+        for head in heads {
+            if let Some(&position) = graph.index.get(head) {
+                known.union(&graph.ancestors[position]);
+                known.insert(position);
+            }
+        }
+        (0..graph.len())
+            .filter(|position| !known.contains(*position))
+            .map(|position| graph.order[position])
+            .collect()
+    }
+
+    /// Removals waiting for their parents whose signature already checks
+    /// out against a live member's key: what a daemon suspends at once,
+    /// before their history arrives (`docs/relay-plan.md`, Removals
+    /// between daemons). Their ids, signers, and targets.
+    #[must_use]
+    pub fn pending_removals(&self) -> Vec<(OpId, MemberId, Vec<MemberId>)> {
+        self.pending
+            .values()
+            .filter_map(|(op, _)| {
+                let Body::Remove(remove) = op.body() else {
+                    return None;
+                };
+                let signer = self.state.members.get(&op.signer())?;
+                op.verify(&signer.bundle.verifying_key().ok()?).ok()?;
+                let targets = remove
+                    .targets()
+                    .filter(|target| self.state.members.contains_key(target))
+                    .copied()
+                    .collect::<Vec<_>>();
+                (!targets.is_empty()).then(|| (op.id(), op.signer(), targets))
+            })
+            .collect()
+    }
+
+    /// The parents operations waiting in the pending pool need, that
+    /// neither the log nor the pool holds: what to ask a peer for.
+    #[must_use]
+    pub fn wanted(&self) -> Vec<OpId> {
+        let mut wanted: Vec<OpId> = self
+            .pending
+            .values()
+            .flat_map(|(op, _)| op.parents().iter().copied())
+            .filter(|parent| !self.present(parent) && !self.pending.contains_key(parent))
+            .collect();
+        wanted.sort_unstable();
+        wanted.dedup();
+        wanted
+    }
+
+    /// Whether `member` is live in this log.
+    #[must_use]
+    pub fn is_member(&self, member: &MemberId) -> bool {
+        self.state.members.contains_key(member)
+    }
+
     /// An operation for `signer` to sign next: on the heads, with the
     /// next sequence number.
     ///

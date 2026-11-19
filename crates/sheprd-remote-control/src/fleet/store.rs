@@ -1,0 +1,121 @@
+//! The fleet's files, in the state directory's `fleet` folder, private to
+//! this user: `key` (the fleet key's 32-byte secret), `log.bin` (the log,
+//! `control::fleet::saved`), and `peers.json` (which removals each peer
+//! holds, and which suspensions wait for their history).
+
+use super::{Error, Inner, Result};
+use crate::control::fleet::{MemberId, OpId, saved};
+use crate::desktop::files::{read_bounded, write_private};
+use p256::ecdsa::SigningKey;
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::{Path, PathBuf},
+};
+
+const DIRECTORY: &str = "fleet";
+const KEY: &str = "key";
+const LOG: &str = "log.bin";
+const PEERS: &str = "peers.json";
+const MAX_PEERS: u64 = 1024 * 1024;
+
+fn path(state_dir: &Path, name: &str) -> PathBuf {
+    state_dir.join(DIRECTORY).join(name)
+}
+
+/// The fleet key, made and kept the first time.
+pub(super) fn load_or_create_key(state_dir: &Path) -> Result<SigningKey> {
+    let file = path(state_dir, KEY);
+    if let Some(bytes) = read_bounded(&file, 32)? {
+        return SigningKey::from_slice(&bytes)
+            .map_err(|_| Error::Desktop(crate::desktop::Error::RecordFormat));
+    }
+    let mut secret = [0; 32];
+    // A scalar out of range is drawn again; vanishingly rare.
+    let key = loop {
+        getrandom::fill(&mut secret).map_err(|_| crate::desktop::Error::RecordFormat)?;
+        if let Ok(key) = SigningKey::from_slice(&secret) {
+            break key;
+        }
+    };
+    write_private(&file, &secret)?;
+    Ok(key)
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct Peers {
+    #[serde(default)]
+    held: BTreeMap<String, BTreeSet<String>>,
+    #[serde(default)]
+    unconfirmed: BTreeMap<String, Vec<String>>,
+}
+
+/// What the fleet folder keeps, read at `now_ms`. A log that no longer
+/// reads is an error rather than an empty fleet, so a damaged file never
+/// looks like having left.
+pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
+    let log = read_bounded(&path(state_dir, LOG), saved::MAX_SAVED as u64)?
+        .map(|bytes| saved::decode(&bytes, now_ms))
+        .transpose()?;
+    let peers: Peers = read_bounded(&path(state_dir, PEERS), MAX_PEERS)?
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    Ok(Inner {
+        log,
+        held: peers
+            .held
+            .iter()
+            .filter_map(|(peer, ids)| {
+                Some((
+                    MemberId::from_hex(peer)?,
+                    ids.iter().filter_map(|id| OpId::from_hex(id)).collect(),
+                ))
+            })
+            .collect(),
+        unconfirmed: peers
+            .unconfirmed
+            .iter()
+            .filter_map(|(id, members)| {
+                Some((
+                    OpId::from_hex(id)?,
+                    members
+                        .iter()
+                        .filter_map(|member| MemberId::from_hex(member))
+                        .collect(),
+                ))
+            })
+            .collect(),
+    })
+}
+
+/// Writes the log and the peers' state. Blocking.
+pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
+    if let Some(log) = &inner.log {
+        write_private(&path(state_dir, LOG), &saved::encode(log)?)?;
+    }
+    let peers = Peers {
+        held: inner
+            .held
+            .iter()
+            .map(|(peer, ids)| {
+                (
+                    peer.to_string(),
+                    ids.iter().map(ToString::to_string).collect(),
+                )
+            })
+            .collect(),
+        unconfirmed: inner
+            .unconfirmed
+            .iter()
+            .map(|(id, members)| {
+                (
+                    id.to_string(),
+                    members.iter().map(ToString::to_string).collect(),
+                )
+            })
+            .collect(),
+    };
+    let json = serde_json::to_vec(&peers).map_err(|_| crate::desktop::Error::RecordFormat)?;
+    write_private(&path(state_dir, PEERS), &json)?;
+    Ok(())
+}

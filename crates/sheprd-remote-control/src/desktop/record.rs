@@ -23,6 +23,11 @@ pub(crate) struct Record {
     pub(crate) relays: Vec<String>,
     /// Its route, base64url.
     pub(crate) route: String,
+    /// Written from the fleet's signed records (`crate::fleet`), not by
+    /// pairing here: `relay-connect` opens such a session with a purpose
+    /// byte, and the fleet removes the record when access ends.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) fleet: bool,
 }
 
 impl Record {
@@ -66,6 +71,27 @@ impl Record {
         let lines = known_hosts(&host, host_keys);
         files::write_private(&relay_host::known_hosts(state_dir, &host), lines.as_bytes())?;
         Ok(id)
+    }
+
+    /// Removes the machine with `id` and its known hosts. Blocking.
+    pub(crate) fn remove(state_dir: &Path, id: &str) -> Result<()> {
+        for file in [
+            path(state_dir, id),
+            relay_host::known_hosts(state_dir, &host_name(id)),
+        ] {
+            match std::fs::remove_file(&file) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(source) => {
+                    return Err(Error::File {
+                        operation: "remove",
+                        path: file,
+                        source,
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The tunnel identity, decoded.

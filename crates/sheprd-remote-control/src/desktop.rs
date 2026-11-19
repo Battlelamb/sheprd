@@ -15,13 +15,13 @@
 //! - [`files`]: the private files they and the records live in.
 
 mod claim;
-mod connect;
+pub(crate) mod connect;
 mod error;
 mod exchange;
-mod files;
-mod keys;
+pub(crate) mod files;
+pub(crate) mod keys;
 mod pair;
-mod record;
+pub(crate) mod record;
 
 pub use error::{Error, Result};
 

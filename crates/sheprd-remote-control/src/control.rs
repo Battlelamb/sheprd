@@ -233,6 +233,10 @@ pub enum Request {
     /// `herdr-remote-control enroll` asks. Sheprd never sends it to its
     /// own daemon.
     Enroll(hosts::Enroll),
+    /// The fleet (`fleet::sync::Ask`): its state, founding it, admitting
+    /// and removing members, sharing hosts, and operations carried from
+    /// another member.
+    Fleet(Box<fleet::sync::Ask>),
     /// Where the app's updater stands, sent with each poll while a window
     /// runs it. Answered with whether a phone asked to update. `instance`
     /// names this run of the app: a request is only for the run a phone saw.
@@ -326,6 +330,7 @@ pub enum Response {
         revokes: Vec<hosts::HostRevoke>,
     },
     Enrolled(hosts::Enrolled),
+    Fleet(Box<fleet::sync::Answer>),
     Tags(tags::ComputerTags),
     Shortcuts(shortcuts::TextShortcuts),
     /// The relays the daemon listens on, its own and those shared with it.

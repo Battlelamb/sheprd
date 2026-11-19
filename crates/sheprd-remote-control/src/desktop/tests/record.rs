@@ -17,6 +17,7 @@ fn record(route: String, identity: &str) -> Record {
         identity: identity.into(),
         relays: vec!["https://relay.example.org".into()],
         route,
+        fleet: false,
     }
 }
 

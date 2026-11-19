@@ -88,6 +88,8 @@ pub(crate) struct State {
     /// Streams open per device.
     pub(crate) connected: Mutex<HashMap<DeviceId, usize>>,
     pub(crate) fingerprint: String,
+    /// The fleet, when its key could be read or made.
+    pub(crate) fleet: Option<Arc<crate::fleet::Fleet>>,
     pub(crate) github: crate::native::changes::github::Reader,
     pub(crate) hub: Arc<Hub>,
     /// Lending this computer's GitHub sign-ins to phones, and which

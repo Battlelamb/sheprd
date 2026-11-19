@@ -126,11 +126,22 @@ async fn add_pairing(relays: &Relays, listener: &mut Listener) {
 
 /// The dial keys of every paired device that gave one.
 fn dial_keys(state: &Shared) -> Vec<Key> {
-    state
+    let mut keys: Vec<Key> = state
         .auth()
         .devices()
         .records()
         .iter()
         .filter_map(|record| record.relay.as_ref()?.dial_key())
-        .collect()
+        .collect();
+    // The fleet's other computers, which reach SSH here or pass removals
+    // (`crate::fleet`).
+    if let Some(fleet) = &state.fleet {
+        for key in crate::fleet::grants::dial_keys(fleet) {
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
+        }
+    }
+    keys.truncate(sheprd_relay::wire::MAX_DIAL_KEYS);
+    keys
 }

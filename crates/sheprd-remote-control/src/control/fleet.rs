@@ -31,7 +31,11 @@ mod graph;
 mod log;
 mod membership;
 mod op;
+pub mod removal;
+pub mod saved;
 mod state;
+pub mod sync;
+mod view;
 mod wire;
 
 pub use body::{
@@ -42,6 +46,7 @@ pub use error::{Error, Result};
 pub use log::{Inserted, Log};
 pub use op::{Op, Unsigned};
 pub use state::{AccessRegister, Host, Member, State};
+pub use view::{HostView, MemberView, View};
 
 use sha2::{Digest, Sha256};
 
@@ -92,6 +97,12 @@ macro_rules! ids {
             pub fn short(&self) -> String {
                 hex(&self.0[..8])
             }
+
+            /// Reads 64 hex digits, in either case.
+            #[must_use]
+            pub fn from_hex(text: &str) -> Option<Self> {
+                from_hex(text).map(Self)
+            }
         }
 
         impl std::fmt::Debug for $name {
@@ -119,6 +130,17 @@ ids! {
     /// An operation: the SHA-256 of its signed bytes, without the
     /// signature, so a re-encoded signature names the same operation.
     OpId;
+}
+
+fn from_hex(text: &str) -> Option<[u8; 32]> {
+    if text.len() != 64 || !text.is_ascii() {
+        return None;
+    }
+    let mut bytes = [0; 32];
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&text[index * 2..index * 2 + 2], 16).ok()?;
+    }
+    Some(bytes)
 }
 
 fn hex(bytes: &[u8]) -> String {

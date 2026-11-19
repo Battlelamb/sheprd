@@ -26,6 +26,8 @@ mod flood;
 #[cfg(unix)]
 mod joining;
 #[cfg(unix)]
+mod scrub;
+#[cfg(unix)]
 mod sessions;
 #[cfg(unix)]
 mod store;

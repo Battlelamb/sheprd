@@ -261,14 +261,7 @@ pub(crate) fn scrub(
             Fleet::set_acting(cx, &id, false);
             Fleet::set_link(cx, &id, |link| *link = super::Link::default());
             Fleet::refresh(cx);
-            done(
-                match outcome {
-                    Ok(true) => None,
-                    Ok(false) => Some(Error::NoProgram.to_string()),
-                    Err(error) => Some(error.to_string()),
-                },
-                cx,
-            );
+            done(outcome.err().map(|error| error.to_string()), cx);
         });
     })
     .detach();

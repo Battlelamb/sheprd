@@ -217,9 +217,24 @@ fn records(state: &Log, me: &MemberId, suspended: &[MemberId]) -> Vec<(Record, V
         .collect()
 }
 
-/// Removes every relay record the fleet wrote. Blocking.
+/// Removes every relay record the fleet wrote: those it listed, and any
+/// record marked as the fleet's, so a damaged list still lets them go.
+/// Blocking.
 pub(crate) fn forget_records(state_dir: &Path) -> Result<()> {
-    write_records(state_dir, &[])
+    let file = state_dir.join(RECORDS);
+    let mut gone: BTreeSet<String> = files::read_bounded(&file, 64 * 1024)
+        .ok()
+        .flatten()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    // A machine paired here over Bluetooth since keeps its record.
+    gone.retain(|id| !Record::load(state_dir, id).is_ok_and(|kept| !kept.fleet));
+    gone.extend(Record::fleet_ids(state_dir)?);
+    for id in &gone {
+        Record::remove(state_dir, id)?;
+    }
+    files::write_private(&file, b"[]")?;
+    Ok(())
 }
 
 /// Writes `records`, and removes those the fleet wrote before and no

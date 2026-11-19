@@ -94,6 +94,40 @@ impl Record {
         Ok(())
     }
 
+    /// The ids of every record the fleet wrote, read from the records
+    /// themselves: what removes them when the fleet's own list of them is
+    /// damaged. A record that does not read is not counted. Blocking.
+    pub(crate) fn fleet_ids(state_dir: &Path) -> Result<Vec<String>> {
+        let folder = directory(state_dir).join("hosts");
+        let entries = match std::fs::read_dir(&folder) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => {
+                return Err(Error::File {
+                    operation: "read",
+                    path: folder,
+                    source,
+                });
+            }
+        };
+        let mut ids = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|source| Error::File {
+                operation: "read",
+                path: folder.clone(),
+                source,
+            })?;
+            let name = entry.file_name();
+            let Some(id) = name.to_str().and_then(|name| name.strip_suffix(".json")) else {
+                continue;
+            };
+            if Self::load(state_dir, id).is_ok_and(|record| record.fleet) {
+                ids.push(id.to_owned());
+            }
+        }
+        Ok(ids)
+    }
+
     /// The tunnel identity, decoded.
     pub(crate) fn tunnel_identity(&self) -> Result<sheprd_tunnel::Identity> {
         let bytes = URL_SAFE_NO_PAD

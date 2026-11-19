@@ -10,6 +10,7 @@
 //!   reach.
 //! - [`removals`]: removals passed between daemons inside the relay
 //!   tunnel, so they land while every Sheprd window is shut.
+//! - [`scrub`]: forgetting the fleet, with every way it let someone in.
 //!
 //! Every change bumps [`Fleet::changed`]; `follow` then rewrites what the
 //! log grants, off the control thread.
@@ -19,6 +20,7 @@ mod error;
 pub(crate) mod grants;
 mod me;
 pub(crate) mod removals;
+pub(crate) mod scrub;
 mod store;
 
 pub use error::{Error, Result};
@@ -253,14 +255,23 @@ impl Fleet {
     /// suspensions waiting for history, and the keys members proved. The
     /// key stays: a fleet founded or joined later is another one, where it
     /// was never removed. Callers revoke the proven keys' pairings first
-    /// ([`Fleet::proven_keys`]). Blocking.
+    /// ([`Fleet::proven_keys`]), and remove what the fleet wrote after
+    /// ([`scrub::live`]). Blocking.
+    ///
+    /// What is held goes only once its file is gone: a log left on disk is
+    /// the fleet the daemon reads at its next start, so it stays the fleet
+    /// here too, and a peers file that stays keeps the keys to revoke.
     pub(crate) fn scrub(&self) -> Result<()> {
         let mut inner = self.inner();
-        *inner = Inner::default();
-        store::scrub(&self.state_dir)?;
+        store::remove_log(&self.state_dir)?;
+        inner.log = None;
+        let removed = store::remove_peers(&self.state_dir);
+        if removed.is_ok() {
+            *inner = Inner::default();
+        }
         drop(inner);
         self.bump();
-        Ok(())
+        removed
     }
 
     /// Records that `peer` holds the removals `ids`. Blocking.
@@ -321,28 +332,17 @@ pub fn run_ask(state_dir: &Path, ask: sync::Ask) -> Result<sync::Answer> {
 
 /// `fleet scrub`, run over SSH or by hand: asks the running daemon to
 /// forget its fleet, or, with none running, forgets it here and removes
-/// the fleet's `authorized_keys` lines and relay records itself. Blocking.
+/// the fleet's `authorized_keys` lines and relay records itself
+/// ([`scrub`]). Succeeds only once they are gone. Blocking.
 pub fn run_scrub(state_dir: &Path) -> Result<()> {
     use crate::control::{Request, Response};
     let request = Request::Fleet(Box::new(sync::Ask::Scrub));
     match crate::control::request(&crate::control::address(state_dir), &request) {
-        Ok(Response::Fleet(_)) => Ok(()),
+        Ok(Response::Fleet(answer)) if *answer == sync::Answer::Done => Ok(()),
         Ok(Response::Error { message, .. }) => Err(Error::Daemon(message)),
         Ok(_) => Err(Error::Daemon("an unexpected answer".to_owned())), // i18n: data
-        Err(crate::control::Error::Connect(_)) => {
-            let fleet = Fleet::load(state_dir, crate::web::now_ms())?;
-            // As if every member were removed: pairings with keys they
-            // proved here go first.
-            let mut auth = crate::auth::Auth::load(state_dir, crate::auth::Limits::default())?;
-            for tunnel in fleet.proven_keys() {
-                grants::revoke_paired(&mut auth, &tunnel)?;
-            }
-            fleet.scrub()?;
-            if let Ok(keys) = crate::ssh_access::AuthorizedKeys::of_user() {
-                keys.set_fleet(&[])?;
-            }
-            grants::forget_records(state_dir)
-        }
+        // No daemon: nothing holds the fleet but its files.
+        Err(crate::control::Error::Connect(_)) => scrub::offline(state_dir),
         Err(error) => Err(error.into()),
     }
 }

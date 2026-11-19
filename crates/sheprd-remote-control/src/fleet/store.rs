@@ -86,11 +86,7 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
         .transpose()?;
     // A file that no longer reads is an error, never an empty one: it may
     // hold suspensions, and dropping them would let their targets back in.
-    let peers: Peers = read_bounded(&path(state_dir, PEERS), MAX_PEERS)?
-        .map(|bytes| serde_json::from_slice(&bytes))
-        .transpose()
-        .map_err(|_| Error::Peers)?
-        .unwrap_or_default();
+    let peers = read_peers(state_dir)?;
     Ok(Inner {
         log,
         held: peers
@@ -103,17 +99,7 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
                 ))
             })
             .collect(),
-        proven: peers
-            .proven
-            .iter()
-            .filter_map(|(member, keys)| {
-                let keys = keys
-                    .keys()
-                    .filter_map(|key| crate::control::fleet::HostId::from_hex(key).map(|key| key.0))
-                    .collect();
-                Some((MemberId::from_hex(member)?, keys))
-            })
-            .collect(),
+        proven: proven(&peers),
         unconfirmed: peers
             .unconfirmed
             .iter()
@@ -133,6 +119,38 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
             })
             .collect(),
     })
+}
+
+fn read_peers(state_dir: &Path) -> Result<Peers> {
+    Ok(read_bounded(&path(state_dir, PEERS), MAX_PEERS)?
+        .map(|bytes| serde_json::from_slice(&bytes))
+        .transpose()
+        .map_err(|_| Error::Peers)?
+        .unwrap_or_default())
+}
+
+fn proven(peers: &Peers) -> BTreeMap<MemberId, BTreeSet<[u8; 32]>> {
+    peers
+        .proven
+        .iter()
+        .filter_map(|(member, keys)| {
+            let keys = keys
+                .keys()
+                .filter_map(|key| crate::control::fleet::HostId::from_hex(key).map(|key| key.0))
+                .collect();
+            Some((MemberId::from_hex(member)?, keys))
+        })
+        .collect()
+}
+
+/// Every tunnel key a member proved, read from the peers' state alone, so
+/// a damaged log does not stop a scrub from revoking their pairings.
+/// Blocking.
+pub(super) fn proven_keys(state_dir: &Path) -> Result<Vec<[u8; 32]>> {
+    Ok(proven(&read_peers(state_dir)?)
+        .into_values()
+        .flatten()
+        .collect())
 }
 
 /// Writes the log and the peers' state. Blocking.
@@ -185,21 +203,25 @@ pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
     Ok(())
 }
 
-/// Removes the log and the peers' state. Blocking.
-pub(super) fn scrub(state_dir: &Path) -> Result<()> {
-    for name in [LOG, PEERS] {
-        let file = path(state_dir, name);
-        match std::fs::remove_file(&file) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(source) => {
-                return Err(Error::Desktop(crate::desktop::Error::File {
-                    operation: "remove",
-                    path: file,
-                    source,
-                }));
-            }
-        }
+/// Removes the log. Blocking.
+pub(super) fn remove_log(state_dir: &Path) -> Result<()> {
+    remove(state_dir, LOG)
+}
+
+/// Removes the peers' state. Blocking.
+pub(super) fn remove_peers(state_dir: &Path) -> Result<()> {
+    remove(state_dir, PEERS)
+}
+
+fn remove(state_dir: &Path, name: &str) -> Result<()> {
+    let file = path(state_dir, name);
+    match std::fs::remove_file(&file) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(Error::Desktop(crate::desktop::Error::File {
+            operation: "remove",
+            path: file,
+            source,
+        })),
     }
-    Ok(())
 }

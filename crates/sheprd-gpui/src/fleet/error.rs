@@ -15,6 +15,8 @@ pub enum Error {
     Request(#[source] sheprd_remote_control::control::Error),
     #[error("Could not run sheprd-remote-control on the host")]
     Run(#[source] sheprd_client::Error),
+    #[error("Could not remove all fleet access on the host; some may remain")]
+    Unscrubbed,
     #[error("The fleet cannot reach this kind of device")]
     Unsupported,
     // keep-sorted end

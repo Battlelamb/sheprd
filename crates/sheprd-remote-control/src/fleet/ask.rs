@@ -114,12 +114,7 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             })
         }
         Ask::Scrub => {
-            // As if every member were removed: pairings with keys they
-            // proved here go first.
-            for tunnel in fleet.proven_keys() {
-                super::grants::supersede(state, &tunnel)?;
-            }
-            fleet.scrub()?;
+            super::scrub::live(state, fleet)?;
             Ok(Answer::Done)
         }
         Ask::Apply(apply) => {

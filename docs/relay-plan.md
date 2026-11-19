@@ -1940,8 +1940,13 @@ manual multi-machine and phone steps left unticked in its QA list.
      records it wrote, whether its daemon runs or not;
      `sheprd-relay-agent fleet scrub` does the same for an agent. Sheprd
      runs both over SSH from Settings > Fleet's Remove fleet access, and
-     `sheprd fleet scrub MACHINE` opens that confirmation. Neither signs
-     anything: they only take access away.
+     `sheprd fleet scrub MACHINE` opens that confirmation, which
+     Settings > Fleet shows whether or not this computer is in a fleet.
+     Neither signs anything: they only take access away. A scrub fails
+     closed: it answers only once the lines and records are gone, a
+     damaged log or record list does not stop it, and a peers file it
+     cannot read stays and is reported, as does a failure on either
+     program, so asking again finishes the job.
    - **Removed computers:** Settings > Fleet says so, and Forget the
      fleet scrubs it here.
    - **Desktops paired one by one:** once a member's device opens SSH

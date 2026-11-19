@@ -248,18 +248,25 @@ fn records(state: &Log, me: &MemberId, suspended: &[MemberId]) -> Vec<(Record, V
 }
 
 /// Which live host each route belongs to, `None` when that is unclear.
-/// The log gives a route to the host that claimed it first and holds or
-/// flags any later claimant, so only hosts not held count here; should two
-/// still name one route, it belongs to neither, and the record kept for it
-/// stays as it was ([`write_records`]), so no claim can take a route over
-/// or take it away.
+/// The log keeps each route's owner (`State::routes`): the host that
+/// claimed it first, later claimants being held or flagged. A host's record
+/// counts here only when the log names it the owner of the route it names;
+/// a route some host names that the log gives to no one is unclear, and
+/// the record kept for it stays as it was ([`write_records`]), so no claim
+/// can take a route over or take it away.
 fn route_owners(state: &Log) -> BTreeMap<&str, Option<HostId>> {
     let mut owners: BTreeMap<&str, Option<HostId>> = BTreeMap::new();
     for (id, host) in state.hosts.iter().filter(|(_, host)| !host.held) {
-        owners
-            .entry(host.record.route.as_str())
-            .and_modify(|owner| *owner = None)
-            .or_insert(Some(*id));
+        let route = host.record.route.as_str();
+        match state.routes.get(route) {
+            Some(owner) if owner == id => {
+                owners.insert(route, Some(*id));
+            }
+            Some(_) => {}
+            None => {
+                owners.entry(route).or_insert(None);
+            }
+        }
     }
     owners
 }

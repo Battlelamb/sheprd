@@ -6,6 +6,7 @@ use super::{
     Body, HostId, HostIntro, Kind, MAX_HOSTS, MemberId, Op,
     graph::Bits,
     membership::{Folder, Members},
+    routes,
     state::{AccessRegister, Host, Member, State},
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -264,68 +265,7 @@ fn hosts(
         }
         host.flagged |= kept.flagged;
     }
-    let mut routes = owners(&claimed, state);
-    for &(_, op) in effective {
-        let Body::HostSeen(seen) = op.body() else {
-            continue;
-        };
-        let Some(host) = state.hosts.get_mut(&seen.record.host) else {
-            continue;
-        };
-        // A plain host's keys only change through a member that checked
-        // them strictly, and a changed key cannot be checked that way.
-        let keys_kept =
-            host.intro.ca.is_some() || seen.record.ssh_host_keys == host.intro.record.ssh_host_keys;
-        if !keys_kept || !host.intro.vouches(&seen.record, seen.signature.as_ref()) {
-            continue;
-        }
-        // A record naming a route another host owns does not count, and
-        // flags its host, as a second record with one `rev` does.
-        if routes
-            .get(&seen.record.route)
-            .is_some_and(|owner| *owner != seen.record.host)
-        {
-            host.flagged = true;
-            continue;
-        }
-        if seen.record.rev > host.record.rev {
-            host.record = seen.record.clone();
-            host.record_signature = seen.signature;
-            routes
-                .entry(seen.record.route.clone())
-                .or_insert(seen.record.host);
-        } else if seen.record.rev == host.record.rev && seen.record != host.record {
-            host.flagged = true;
-        }
-    }
-}
-
-/// Each relay route's owner: the host that claimed it first, in graph
-/// order (`claimed`), with hosts the base held after the others it ties
-/// with, so pruning gives a route to the host it went to before. A host
-/// whose intro names a route an earlier host owns is held, as other
-/// conflicts are; a host keeps its own routes whatever its record changes.
-fn owners(claimed: &BTreeMap<HostId, usize>, state: &mut State) -> BTreeMap<String, HostId> {
-    let mut order: Vec<(usize, bool, HostId)> = state
-        .hosts
-        .iter()
-        .map(|(id, host)| (claimed.get(id).copied().unwrap_or(0), host.held, *id))
-        .collect();
-    order.sort_unstable();
-    let mut routes: BTreeMap<String, HostId> = BTreeMap::new();
-    for (_, _, id) in order {
-        let Some(host) = state.hosts.get_mut(&id) else {
-            continue;
-        };
-        let intro = &host.intro.record.route;
-        if routes.get(intro).is_some_and(|owner| *owner != id) {
-            host.held = true;
-        }
-        for route in [intro, &host.record.route] {
-            routes.entry(route.clone()).or_insert(id);
-        }
-    }
-    routes
+    routes::records(&claimed, effective, base, state);
 }
 
 /// One `Access` operation: its place, what it says, and whether it counts

@@ -34,6 +34,7 @@ mod log;
 mod membership;
 mod op;
 pub mod removal;
+mod routes;
 pub mod saved;
 mod state;
 pub mod sync;

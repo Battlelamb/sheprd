@@ -15,6 +15,8 @@ const STATE: &[u8] = b"/state";
 const MAX_LIVE: usize = MAX_COMPUTERS + MAX_PHONES;
 const MAX_ALL_HOSTS: usize = MAX_HOSTS + MAX_COMPUTERS;
 const MAX_DEVICE_KEY: usize = 65;
+/// As `body.rs` bounds a record's route.
+const MAX_ROUTE: usize = 2048;
 
 /// A live member.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -67,6 +69,9 @@ pub struct State {
     /// Members that signed two operations neither had seen: their key is
     /// in use in two places. Their `HostAdd` and `Access` are held.
     pub equivocating: BTreeSet<MemberId>,
+    /// Each relay route a live host names, and the host that owns it: the
+    /// first to claim it (`routes`).
+    pub routes: BTreeMap<String, HostId>,
 }
 
 impl State {
@@ -147,6 +152,11 @@ impl State {
         }
         writer.count(self.equivocating.len())?;
         self.equivocating.iter().for_each(|id| writer.raw(&id.0));
+        writer.count(self.routes.len())?;
+        for (route, owner) in &self.routes {
+            writer.text(route)?;
+            writer.raw(&owner.0);
+        }
         let bytes = writer.into_bytes();
         if bytes.len() > MAX_STATE {
             return Err(Error::Bounds);
@@ -214,6 +224,11 @@ impl State {
         }
         for _ in 0..reader.count(MAX_LIVE + MAX_TOMBSTONES)? {
             state.equivocating.insert(MemberId(reader.array()?));
+        }
+        // A host's intro and its record name one route each.
+        for _ in 0..reader.count(MAX_ALL_HOSTS * 2)? {
+            let route = reader.text(MAX_ROUTE)?;
+            state.routes.insert(route, HostId(reader.array()?));
         }
         reader.finish()?;
         // Maps drop duplicates and sort; the bytes must already have been

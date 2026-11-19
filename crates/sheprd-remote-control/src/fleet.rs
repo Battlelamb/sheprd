@@ -32,8 +32,8 @@ use std::{
 };
 use tokio::sync::watch;
 
-/// Tunnel keys remembered per member: a member rotating more often than
-/// this keeps its first ones, which still go with it.
+/// Tunnel keys remembered per member. A member that proves more has the
+/// pairing with each further key revoked at once rather than remembered.
 pub(crate) const MAX_PROVEN: usize = 8;
 
 /// How long a removal whose history never arrives keeps its targets cut
@@ -216,14 +216,21 @@ impl Fleet {
 
     /// Records that `member` proved `tunnel` by finishing the tunnel's
     /// handshake here. Blocking.
-    pub(crate) fn proved(&self, member: MemberId, tunnel: [u8; 32]) -> Result<()> {
+    /// Whether the key is kept: past [`MAX_PROVEN`] it is not, and the
+    /// caller revokes its pairing at once instead, so no key a member
+    /// proved is ever forgotten while a pairing with it stands.
+    pub(crate) fn proved(&self, member: MemberId, tunnel: [u8; 32]) -> Result<bool> {
         let mut inner = self.inner();
         let keys = inner.proven.entry(member).or_default();
-        if keys.contains(&tunnel) || keys.len() >= MAX_PROVEN {
-            return Ok(());
+        if keys.contains(&tunnel) {
+            return Ok(true);
+        }
+        if keys.len() >= MAX_PROVEN {
+            return Ok(false);
         }
         keys.insert(tunnel);
-        self.save(&inner)
+        self.save(&inner)?;
+        Ok(true)
     }
 
     /// Forgets what `member` proved, once its desktops are revoked.

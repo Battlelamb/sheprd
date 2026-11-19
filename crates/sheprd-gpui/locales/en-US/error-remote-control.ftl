@@ -24,6 +24,8 @@ error-remote-control-program-missing = sheprd-remote-control was not found besid
 error-remote-control-relay = remote.relays has { $relay }, which is not a relay address
 # $relay is an entry of remote.relays; $reason is one of the
 # error-remote-control-relay-label-* messages below.
+# $max is a count of relays.
+error-remote-control-relay-tokens = Sheprd keeps listen tokens for at most { $max } relays
 error-remote-control-relay-label = remote.relays gives { $relay } a label it cannot use: { $reason }
 # $field is the label's key in the config file: name, description, or tag.
 error-remote-control-relay-label-blank = its { $field } is blank

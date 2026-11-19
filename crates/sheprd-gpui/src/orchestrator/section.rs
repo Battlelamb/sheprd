@@ -199,6 +199,7 @@ pub(crate) fn list_of(section: ActivityPanel) -> Option<List> {
         | ActivityPanel::Automations
         | ActivityPanel::Ports
         | ActivityPanel::Workspaces
-        | ActivityPanel::Usage => None,
+        | ActivityPanel::Usage
+        | ActivityPanel::Traces => None,
     }
 }

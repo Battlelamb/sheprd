@@ -176,6 +176,8 @@ pub enum Error {
     LinkOnAnotherHost { host: String },
     #[error(transparent)]
     ListeningPorts(#[from] crate::listening_ports::Error),
+    #[error(transparent)]
+    ListenToken(#[from] crate::control::listen_token::Error),
     #[error("Could not list this machine's network addresses: {0}")]
     LocalAddresses(#[source] io::Error),
     #[error("Git could not run")]

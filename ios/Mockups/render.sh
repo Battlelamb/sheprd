@@ -39,6 +39,8 @@ case "$round" in
      ipad="" ;;
   agentpr) phone="agentpr-A-0 agentpr-B-0 agentpr-C-0"
      ipad="" ;;
+  effects) phone="effects-Sizes-0 effects-Bubbles-0 effects-Bubbles-1 effects-Screen-0 effects-Screen-1 effects-Screen-2 effects-Screen-3"
+     ipad="" ;;
   *) echo "unknown round $round" >&2; exit 2 ;;
 esac
 

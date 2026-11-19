@@ -104,3 +104,57 @@ fn a_rotation_after_pruning_claims_its_new_route() {
     both(&mut pruned, &mut whole, &b, Body::HostAdd(other.clone()));
     assert!(pruned.state().hosts[&other.id().unwrap()].held);
 }
+
+#[test]
+fn a_deny_on_either_concurrent_addition_counts() {
+    let (log, a, b, c) = three();
+    let host = plain_host(40).id().unwrap();
+    let before = log.heads().to_vec();
+    let next = |member: &Device| log.state().members[&member.id()].seq + 1;
+    let by_a = sign_on(&log, &a, &before, next(&a), Body::HostAdd(plain_host(40)));
+    let by_b = sign_on(&log, &b, &before, next(&b), Body::HostAdd(plain_host(40)));
+    for (on, by) in [(&by_a, &a), (&by_b, &b)] {
+        let mut log = copy(&log);
+        apply(&mut log, by_a.clone());
+        apply(&mut log, by_b.clone());
+        // Signed having seen only one of the two additions.
+        let rev = log.state().access_rev + 1;
+        let deny = sign_on(
+            &log,
+            by,
+            &[on.id()],
+            next(by) + 1,
+            Body::Access(Access {
+                host,
+                member: c.id(),
+                allow: false,
+                rev,
+            }),
+        );
+        apply(&mut log, deny);
+        assert!(!log.state().allowed(&host, &c.id()));
+    }
+}
+
+#[test]
+fn a_rotation_keeps_the_route_decisions_before_it() {
+    let (mut log, a, b, c) = three();
+    let own = c.bundle.host.as_ref().unwrap();
+    // Another host on c's route, added after c named it: held.
+    let (mut other, other_ca) = ca_host(41, HostKind::Sheprd);
+    other.record.route = own.record.route.clone();
+    other.record_signature = Some(raw_signature(&other_ca, &other.record.message().unwrap()));
+    act(&mut log, &b, Body::HostAdd(other.clone()));
+    let other_id = other.id().unwrap();
+    let own_id = own.id().unwrap();
+    assert!(log.state().hosts[&other_id].held);
+    assert!(!log.state().hosts[&own_id].held);
+    let (mut pruned, mut whole) = split(&mut log, &a);
+    let mut rotated = c.bundle.clone();
+    rotated.name = "renamed".into();
+    both(&mut pruned, &mut whole, &c, Body::Rotate(rotated));
+    let state = pruned.state();
+    assert!(state.hosts[&other_id].held);
+    assert!(!state.hosts[&own_id].held);
+    assert_eq!(state.routes[&own.record.route], own_id);
+}

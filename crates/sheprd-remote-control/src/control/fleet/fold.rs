@@ -5,7 +5,7 @@
 use super::{
     Body, HostId, Kind, MemberId, Op,
     graph::Bits,
-    hosts::{self, Anchors},
+    hosts::{self, Lifetime},
     membership::Folder,
     routes,
     state::{AccessRegister, Member, State},
@@ -40,7 +40,16 @@ pub(super) fn fold(folder: &Folder<'_, '_>, set: &Bits, base: &State) -> State {
         }
     }
     let anchors = hosts::hosts(graph, &members, &effective, base, &mut state);
-    routes::records(graph, &anchors, &effective, base, &mut state);
+    // The bundles that count: a voided `Admit` or `Rotate` names no host.
+    let bundles: BTreeSet<usize> = effective
+        .iter()
+        .filter(|(position, op)| {
+            matches!(op.body(), Body::Found(_) | Body::Admit(_) | Body::Rotate(_))
+                && !folder.voided(&members, *position)
+        })
+        .map(|(position, _)| *position)
+        .collect();
+    routes::records(graph, &members, &bundles, &effective, base, &mut state);
     access(folder, &positions, &anchors, &effective, base, &mut state);
     links(folder, &anchors, &effective, base, &mut state);
     state
@@ -74,14 +83,14 @@ type Grant = (usize, bool, u64);
 
 /// Sets the access registers. An `Access` counts when it is not void, its
 /// signer is not equivocating, and it came after the host was added
-/// (`Anchors::since`): a host added again starts without the exclusions
+/// (any addition in its [`Lifetime`]): a host added again starts without the exclusions
 /// it had, as a pruned log, which dropped them with the host, does.
 /// Concurrent allow and deny: deny. `state.access_rev` is the highest
 /// `rev` any `Access` reached, voided or not: the floor the next signs on.
 fn access(
     folder: &Folder<'_, '_>,
     positions: &[usize],
-    anchors: &BTreeMap<HostId, Anchors>,
+    anchors: &BTreeMap<HostId, Lifetime>,
     effective: &[(usize, &Op)],
     base: &State,
     state: &mut State,
@@ -108,7 +117,7 @@ fn access(
         };
         let after = anchors
             .get(&access.host)
-            .is_some_and(|anchor| Anchors::after(graph, anchor.since, position));
+            .is_some_and(|lifetime| lifetime.covers(graph, position));
         if after && !state.equivocating.contains(&op.signer()) {
             by_pair
                 .entry((access.host, access.member))
@@ -120,10 +129,7 @@ fn access(
         .access
         .iter()
         .filter(|((host, member), _)| {
-            live(host, member)
-                && anchors
-                    .get(host)
-                    .is_some_and(|anchor| anchor.since.is_none())
+            live(host, member) && anchors.get(host).is_some_and(Lifetime::in_base)
         })
         .map(|(pair, register)| (*pair, *register))
         .collect();
@@ -155,10 +161,10 @@ fn access(
 }
 
 /// Sets each phone's device key per host: the latest it signed after the
-/// host was added (`Anchors::since`).
+/// host was added (its [`Lifetime`]).
 fn links(
     folder: &Folder<'_, '_>,
-    anchors: &BTreeMap<HostId, Anchors>,
+    anchors: &BTreeMap<HostId, Lifetime>,
     effective: &[(usize, &Op)],
     base: &State,
     state: &mut State,
@@ -174,10 +180,7 @@ fn links(
         .links
         .iter()
         .filter(|((member, host), _)| {
-            phone(member)
-                && anchors
-                    .get(host)
-                    .is_some_and(|anchor| anchor.since.is_none())
+            phone(member) && anchors.get(host).is_some_and(Lifetime::in_base)
         })
         .map(|(key, device)| (*key, device.clone()))
         .collect();
@@ -188,7 +191,7 @@ fn links(
         };
         let after = anchors
             .get(&link.host)
-            .is_some_and(|anchor| Anchors::after(graph, anchor.since, position));
+            .is_some_and(|lifetime| lifetime.covers(graph, position));
         if !after || !phone(&op.signer()) {
             continue;
         }

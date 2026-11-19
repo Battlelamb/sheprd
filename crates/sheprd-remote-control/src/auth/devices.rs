@@ -301,6 +301,31 @@ impl Devices {
         Ok(true)
     }
 
+    /// Replaces the device's relay keys with `keys`, or drops them with
+    /// `None`, set at `now_ms`; whether it is paired. Blocking.
+    pub(crate) fn replace_relay(
+        &mut self,
+        id: &DeviceId,
+        keys: Option<RelayKeys>,
+        now_ms: u64,
+    ) -> Result<bool> {
+        let Some(index) = self.records.iter().position(|record| &record.id == id) else {
+            return Ok(false);
+        };
+        let record = &mut self.records[index];
+        let set_ms = keys.is_some().then_some(now_ms);
+        let before = (
+            std::mem::replace(&mut record.relay, keys),
+            std::mem::replace(&mut record.relay_ms, set_ms),
+        );
+        self.save_or_undo(|devices| {
+            if let Some(record) = devices.records.get_mut(index) {
+                (record.relay, record.relay_ms) = before;
+            }
+        })?;
+        Ok(true)
+    }
+
     pub(crate) fn rekey(&mut self, id: &DeviceId, public_key: PublicKey) -> Result<()> {
         let record = self.record_mut(id)?;
         let old = (

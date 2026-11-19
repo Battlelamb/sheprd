@@ -220,6 +220,8 @@ async fn a_phones_link_and_removal_go_through_sync() {
     // The phone builds its operation from what the computer answered.
     let path = format!("/api/v2/fleet?member={}", phone.bundle.id());
     let (_, body) = call(&state, &token, get(&path)).await;
+    // Nothing linked yet: no routes.
+    assert!(body.get("routes").is_none());
     let next = &body["next"];
     let link = Unsigned {
         fleet: sync::fleet(next["fleet"].as_str().unwrap()).unwrap(),
@@ -251,6 +253,18 @@ async fn a_phones_link_and_removal_go_through_sync() {
     assert_eq!(answer["ops"], json!(sync::encode_ops([&link])));
     let (_, body) = call(&state, &token, get(&path)).await;
     assert_eq!(body["links"], json!([own.to_string()]));
+    // The linked host's relays, from its signed record, pinned by its CA.
+    let record = fleet.inner().log.as_ref().unwrap().state().hosts[&own]
+        .record
+        .clone();
+    assert_eq!(
+        body["routes"],
+        json!([{
+            "host": own.to_string(),
+            "fingerprint": own.to_string(),
+            "relay": {"identity": record.identity, "relays": record.relays, "route": record.route},
+        }])
+    );
     // A phone may not grant access, and its removal of the computer that
     // founded the fleet is a removal like any member's.
     let log = fleet.inner().log.as_ref().map(|log| {

@@ -3,7 +3,9 @@
 //!
 //! - `GET /api/v2/fleet?member=ID`: the fleet as this computer sees it,
 //!   and what the phone needs to sign its next operation when `ID` is a
-//!   live member: the fleet, its sequence number, and the parents. The
+//!   live member: the fleet, its sequence number, and the parents, and for
+//!   each Sheprd host it linked, the route, relays, and tunnel identity
+//!   from that host's CA-signed record, with the CA's fingerprint. The
 //!   phone keeps no log in this version; a removal it signs counts once
 //!   any member holds it, whatever parents it names.
 //! - `POST /api/v2/fleet/sync`: operations the phone signed or carries,
@@ -68,6 +70,11 @@ pub(super) struct Status {
     /// connections, by host: what a phone tries before its relays.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     reach: Vec<Reach>,
+    /// How to reach each Sheprd host the member linked through its relays,
+    /// from the host's latest record, which its certificate authority
+    /// signed: what the phone pins and dials with its bundle's keys.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    routes: Vec<Route>,
 }
 
 /// What a member signs its next operation on.
@@ -76,6 +83,16 @@ pub(super) struct Next {
     fleet: String,
     seq: u64,
     parents: Vec<String>,
+}
+
+/// A linked host's relays, as `GET /api/relay` would answer on it.
+#[derive(Debug, Serialize)]
+pub(super) struct Route {
+    host: String,
+    /// The SHA-256 of the host's certificate authority, which its record
+    /// is signed by: the host's id.
+    fingerprint: String,
+    relay: crate::control::host_relay::Info,
 }
 
 #[derive(Debug, Serialize)]
@@ -126,16 +143,36 @@ fn read(fleet: &Fleet, member: Option<&MemberId>, now_ms: u64) -> Status {
             parents: draft.parents.iter().map(ToString::to_string).collect(),
         }
     });
-    let links = live
+    let linked: Vec<HostId> = live
         .map(|member| {
             state
                 .links
                 .keys()
                 .filter(|(phone, _)| phone == member)
-                .map(|(_, host)| host.to_string())
+                .map(|(_, host)| *host)
                 .collect()
         })
         .unwrap_or_default();
+    let routes = linked
+        .iter()
+        .filter_map(|id| {
+            let host = state.hosts.get(id)?;
+            // A plain host has no certificate authority to pin, and no API.
+            let ca = host.intro.ca.as_ref()?;
+            Some(Route {
+                host: id.to_string(),
+                fingerprint: HostId(ca.fingerprint()).to_string(),
+                relay: crate::control::host_relay::Info {
+                    identity: host.record.identity.clone(),
+                    labels: Default::default(),
+                    relays: host.record.relays.clone(),
+                    route: host.record.route.clone(),
+                    rtt_ms: Default::default(),
+                },
+            })
+        })
+        .collect();
+    let links = linked.iter().map(ToString::to_string).collect();
     let reach = state
         .hosts
         .iter()
@@ -152,6 +189,7 @@ fn read(fleet: &Fleet, member: Option<&MemberId>, now_ms: u64) -> Status {
         join: live.map_or(join, |_| Some(Standing::Member)),
         links,
         reach,
+        routes,
     }
 }
 

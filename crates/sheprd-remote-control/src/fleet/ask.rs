@@ -185,31 +185,7 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             Ok(Answer::Applied(sync::removal_for(log, &host, &heads)))
         }
         Ask::Apply(apply) => {
-            // A caller naming another fleet learns nothing of this one.
-            if let Some(named) = &apply.fleet
-                && let Some(log) = &fleet.inner().log
-                && *named != log.fleet().to_string()
-            {
-                return Err(Error::OtherFleet);
-            }
-            let heads = apply.heads()?;
-            let ops = apply.ops()?;
-            // A log handed over in parts, by the fleet its caller names.
-            let handover = apply.fleet.as_deref().unwrap_or_default();
-            let refused = if fleet.inner().log.is_some() {
-                fleet.receive(ops, now_ms)?
-            } else if apply.more {
-                // Nothing to answer until the last part.
-                fleet.stage(handover, &ops, now_ms)?;
-                return Ok(Answer::Applied(sync::Applied::default()));
-            } else {
-                fleet.receive_last(handover, ops, now_ms)?
-            };
-            let mut applied = {
-                let inner = fleet.inner();
-                let log = inner.log.as_ref().ok_or(Error::NoFleet)?;
-                sync::answer(log, &heads, refused)
-            };
+            let mut applied = fleet.apply(&apply, now_ms)?;
             if let (Some(nonce), Some(authority)) = (&apply.nonce, &state.authority) {
                 let message = sync::proof_message(nonce, &applied.fleet, &applied.heads);
                 if let (Some(key), Some(signature)) =

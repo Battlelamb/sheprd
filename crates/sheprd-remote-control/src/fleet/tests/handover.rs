@@ -3,58 +3,20 @@
 //! Sheprd host the fleet shares, which is no member.
 
 use super::*;
-use crate::control::fleet::sync::{Applied, Apply};
+use crate::control::fleet::sync::Apply;
 
-fn apply(node: &Node, ops: &[Op], more: bool) -> Answer {
+fn apply(node: &Node, ops: &[Op]) -> Answer {
     node.ask(Ask::Apply(Apply {
         ops: sync::encode_ops(ops),
-        more,
         ..Apply::default()
     }))
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_log_handed_over_in_parts_joins_with_the_last() {
-    let (http, _, _) = relay().await;
-    let (a, b) = (Node::new(http, 1).await, Node::new(http, 2).await);
-    assert_eq!(a.ask(Ask::Found), Answer::Done);
-    let fleet = a.view().fleet;
-    let Answer::Bundle { bundle, signature } = b.ask(Ask::Bundle {
-        fleet: fleet.clone(),
-    }) else {
-        panic!("no bundle");
-    };
-    a.ask(Ask::Admit {
-        bundle,
-        signature,
-        method: crate::control::fleet::Method::Ssh,
-    });
-    let ops = a.ops();
-    // The first part does not admit b: it is kept, not refused.
-    let (first, rest) = ops.split_at(1);
-    assert_eq!(apply(&b, first, true), Answer::Applied(Applied::default()));
-    assert!(b.fleet.inner().log.is_none());
-    let Answer::Applied(applied) = apply(&b, rest, false) else {
-        panic!("not applied");
-    };
-    assert_eq!(applied.fleet, fleet);
-    assert!(b.view().members.iter().any(|member| member.id == b.me()));
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn parts_that_do_not_admit_this_computer_never_join() {
-    let (http, _, _) = relay().await;
-    let (a, b) = (Node::new(http, 1).await, Node::new(http, 2).await);
-    assert_eq!(a.ask(Ask::Found), Answer::Done);
-    // a's log, which does not admit b, as a part, then an empty last
-    // part: b stays in no fleet.
-    apply(&b, &a.ops(), true);
-    assert!(b.fleet.inner().log.is_none());
-    assert!(matches!(
-        ask::answer(&b.state, &b.fleet, Ask::Apply(Apply::default()), now_ms()),
-        Err(Error::NotAdmitted)
-    ));
-    assert!(b.fleet.inner().log.is_none());
+/// `node`'s log in graph order, as a member hands it over.
+fn in_order(node: &Node) -> Vec<Op> {
+    let inner = node.fleet.inner();
+    let log = inner.log.as_ref().unwrap();
+    log.missing_for(&[]).into_iter().cloned().collect()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -77,7 +39,7 @@ async fn a_shared_sheprd_host_takes_the_log_and_lets_allowed_members_in() {
         }),
         Answer::Done
     );
-    let Answer::Applied(applied) = apply(&host, &a.ops(), false) else {
+    let Answer::Applied(applied) = apply(&host, &a.ops()) else {
         panic!("not applied");
     };
     assert_eq!(applied.fleet, a.view().fleet);
@@ -133,7 +95,7 @@ async fn a_removed_member_never_acts_as_a_shared_host() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn two_fleets_handing_over_at_once_keep_their_own_parts() {
+async fn two_fleets_handing_over_at_once_keep_their_own_history() {
     let (http, _, _) = relay().await;
     let (a, c, b) = (
         Node::new(http, 1).await,
@@ -155,55 +117,62 @@ async fn two_fleets_handing_over_at_once_keep_their_own_parts() {
             method: crate::control::fleet::Method::Ssh,
         });
     }
-    let named = |fleet: &str, ops: &[Op], more| {
-        b.ask(Ask::Apply(Apply {
-            fleet: Some(fleet.to_owned()),
-            ops: sync::encode_ops(ops),
-            more,
-            ..Apply::default()
-        }))
+    let named = |fleet: &str, ops: &[Op], heads: Vec<String>| {
+        b.fleet
+            .apply(
+                &Apply {
+                    fleet: Some(fleet.to_owned()),
+                    heads,
+                    ops: sync::encode_ops(ops),
+                    ..Apply::default()
+                },
+                now_ms(),
+            )
+            .unwrap()
     };
-    let (a_ops, c_ops) = (a.ops(), c.ops());
-    // Both first parts arrive, then a's last: c's parts never mix in.
-    named(&first, &a_ops[..1], true);
-    named(&second, &c_ops[..1], true);
-    let Answer::Applied(applied) = named(&first, &a_ops[1..], false) else {
-        panic!("not applied");
-    };
-    assert_eq!(applied.fleet, first);
-    assert_eq!(applied.refused, 0);
+    let (a_ops, c_ops) = (in_order(&a), in_order(&c));
+    // Both founding operations arrive, each answered from its own fleet's
+    // history; then the rest of a's: c's history never mixes in.
+    let from_a = named(&first, &a_ops[..1], Vec::new());
+    let from_c = named(&second, &c_ops[..1], Vec::new());
+    assert_eq!(from_a.fleet, first);
+    assert_eq!(from_c.fleet, second);
+    assert_eq!(b.fleet.inner().joining.len(), 2);
+    let joined = named(&first, &a_ops[1..], from_a.heads);
+    assert_eq!(joined.fleet, first);
+    assert_eq!(joined.refused, 0);
+    assert!(b.fleet.inner().joining.is_empty());
+    assert_eq!(b.view().fleet, first);
 }
 
-#[test]
-fn parts_of_one_fleet_kept_at_once_are_all_kept() {
-    let key = SigningKey::from_slice(&[3; 32]).unwrap();
-    let ops: Vec<Op> = (1..=32)
-        .map(|seq| {
-            Unsigned {
-                fleet: crate::control::fleet::FleetId([1; 32]),
-                signer: MemberId([2; 32]),
-                seq,
-                issued_ms: 1,
-                parents: vec![OpId([5; 32])],
-                body: Body::HostRemove(HostId([4; 32])),
-            }
-            .sign(&key)
-            .unwrap()
-        })
-        .collect();
-    let handovers = super::super::joining::Handovers::default();
-    std::thread::scope(|scope| {
-        for chunk in ops.chunks(4) {
-            let handovers = &handovers;
-            scope.spawn(move || {
-                for op in chunk {
-                    handovers.keep("f", std::slice::from_ref(op), 1).unwrap();
-                    // The same part twice adds nothing.
-                    handovers.keep("f", std::slice::from_ref(op), 1).unwrap();
-                }
-            });
-        }
-    });
-    assert_eq!(handovers.take("f", 1).len(), ops.len());
-    assert!(handovers.take("f", 1).is_empty());
+#[tokio::test(flavor = "multi_thread")]
+async fn histories_of_too_many_fleets_drop_the_oldest() {
+    let (http, _, _) = relay().await;
+    let b = Node::new(http, 2).await;
+    let mut fleets = Vec::new();
+    for seed in 10..10 + crate::fleet::joining::MAX_FLEETS as u8 + 1 {
+        let founder = Node::new(http, seed).await;
+        assert_eq!(founder.ask(Ask::Found), Answer::Done);
+        let fleet = founder.fleet.inner().log.as_ref().unwrap().fleet();
+        // Each arrives later than the one before.
+        b.fleet
+            .receive(founder.ops(), now_ms() + u64::from(seed))
+            .unwrap_err();
+        fleets.push(fleet);
+    }
+    let inner = b.fleet.inner();
+    assert_eq!(inner.joining.len(), crate::fleet::joining::MAX_FLEETS);
+    assert!(!inner.joining.contains_key(&fleets[0]));
+    assert!(
+        fleets[1..]
+            .iter()
+            .all(|fleet| inner.joining.contains_key(fleet))
+    );
+    drop(inner);
+    // Kept apart on disk, each in its own file, across a restart.
+    let again = Fleet::load(b.dir.path(), now_ms()).unwrap();
+    assert_eq!(
+        again.inner().joining.len(),
+        crate::fleet::joining::MAX_FLEETS
+    );
 }

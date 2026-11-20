@@ -1,78 +1,139 @@
-//! The parts of a log handed over to this computer while it is in no
-//! fleet ([`sync::Apply::more`]), kept in memory until the last part
-//! arrives: the operation that admits this computer, or shares it as a
-//! host, comes last. Kept per fleet the caller names, so two members
-//! handing over at once never take each other's parts, and two handing
-//! over the same fleet add to one set, as both send the same log.
+//! Joining a fleet whose history is too large for one `fleet apply`: with
+//! no fleet yet, the history of each fleet being handed over is kept as
+//! far as it arrived, saved in `fleet/joining/` (`store`), and answered
+//! from (`Fleet::apply`) so the member sends the rest. Kept per fleet, so
+//! two members handing over different fleets at once never take or
+//! overwrite each other's history, and at most [`MAX_FLEETS`] at once.
+//! None grants anything until it admits this computer, or shares it as a
+//! host the fleet holds; then it becomes the log and the rest are dropped.
 
-use super::{Error, Result};
-use crate::control::fleet::{Op, OpId};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::{Mutex, PoisonError},
-};
+use super::{Error, Fleet, Inner, Result, store};
+use crate::control::fleet::{Body, FleetId, Log, Op, sync};
+use std::{collections::BTreeMap, sync::atomic::Ordering};
 
-/// How long parts wait for the rest.
-const TTL_MS: u64 = 10 * 60 * 1000;
-/// The most operation bytes all parts may hold: the largest log this
-/// daemon keeps.
-const MAX_BYTES: usize = crate::control::fleet::saved::MAX_SAVED;
-/// Handovers kept at once.
-const MAX_FLEETS: usize = 4;
+/// Histories kept at once; past it, the one touched longest ago goes.
+pub(crate) const MAX_FLEETS: usize = 4;
 
+/// The history of one fleet being joined.
 #[derive(Debug)]
-struct Parts {
-    ops: Vec<Op>,
-    ids: BTreeSet<OpId>,
-    bytes: usize,
-    since_ms: u64,
+pub(crate) struct Joining {
+    pub(crate) log: Log,
+    /// When an operation last arrived for it, or the daemon loaded it.
+    pub(crate) touched_ms: u64,
 }
 
-/// Every handover in progress, by the fleet its caller named.
-#[derive(Debug, Default)]
-pub(crate) struct Handovers(Mutex<BTreeMap<String, Parts>>);
+/// The fleet `op` belongs to: the one it founds, or the one it names.
+pub(crate) fn fleet_of(op: &Op) -> FleetId {
+    match op.body() {
+        Body::Found(_) => FleetId(op.id().0),
+        _ => op.unsigned().fleet,
+    }
+}
 
-impl Handovers {
-    /// Keeps `ops`, a part of `fleet`'s log, under one lock from reading
-    /// what was kept to writing it back. Parts past the bound are refused,
-    /// and that fleet's parts all dropped.
-    pub(crate) fn keep(&self, fleet: &str, ops: &[Op], now_ms: u64) -> Result<()> {
-        let mut all = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        all.retain(|_, parts| now_ms.saturating_sub(parts.since_ms) <= TTL_MS);
-        if !all.contains_key(fleet) && all.len() >= MAX_FLEETS {
-            return Err(Error::JoinTooLarge);
-        }
-        let others: usize = all
-            .iter()
-            .filter(|(named, _)| *named != fleet)
-            .map(|(_, parts)| parts.bytes)
-            .sum();
-        let parts = all.entry(fleet.to_owned()).or_insert_with(|| Parts {
-            ops: Vec::new(),
-            ids: BTreeSet::new(),
-            bytes: 0,
-            since_ms: now_ms,
-        });
+impl Fleet {
+    /// Adds `ops` to the histories `inner` keeps of the fleets they belong
+    /// to, with no log yet. The first history that admits this computer,
+    /// or shares it as a host, is the log, returned with how many of its
+    /// operations were refused; the others are dropped. `None` while none
+    /// does. A history taken because it shares this computer is recorded
+    /// (`fleet/hosted`), so only such a computer ever acts as a host
+    /// without being a member. Blocking.
+    pub(super) fn join_parts(
+        &self,
+        inner: &mut Inner,
+        ops: Vec<Op>,
+        now_ms: u64,
+    ) -> Result<Option<(Log, usize)>> {
+        let mut by_fleet: BTreeMap<FleetId, Vec<Op>> = BTreeMap::new();
         for op in ops {
-            if parts.ids.insert(op.id()) {
-                parts.bytes = parts.bytes.saturating_add(op.encode().len());
-                parts.ops.push(op.clone());
+            by_fleet.entry(fleet_of(&op)).or_default().push(op);
+        }
+        let mut refused = BTreeMap::new();
+        for (fleet, ops) in by_fleet {
+            let count = ops.len();
+            let kept = inner.joining.remove(&fleet).map(|joining| joining.log);
+            match join(kept, ops, now_ms) {
+                Ok((log, failed)) => {
+                    refused.insert(fleet, failed);
+                    inner.joining.insert(
+                        fleet,
+                        Joining {
+                            log,
+                            touched_ms: now_ms,
+                        },
+                    );
+                }
+                // Nothing that founds it, here or kept: dropped.
+                Err(Error::NotAdmitted) => {
+                    refused.insert(fleet, count);
+                }
+                Err(error) => return Err(error),
             }
         }
-        if others.saturating_add(parts.bytes) > MAX_BYTES {
-            all.remove(fleet);
-            return Err(Error::JoinTooLarge);
+        while inner.joining.len() > MAX_FLEETS {
+            let Some(oldest) = inner
+                .joining
+                .iter()
+                .min_by_key(|(_, joining)| joining.touched_ms)
+                .map(|(fleet, _)| *fleet)
+            else {
+                break;
+            };
+            inner.joining.remove(&oldest);
         }
-        Ok(())
+        let admitted = inner
+            .joining
+            .iter()
+            .find(|(_, joining)| sync::admits(&joining.log, &self.me))
+            .map(|(fleet, _)| (*fleet, false));
+        let shared = || {
+            inner
+                .joining
+                .iter()
+                .find(|(_, joining)| {
+                    self.host
+                        .is_some_and(|host| sync::shares(&joining.log, &host))
+                })
+                .map(|(fleet, _)| (*fleet, true))
+        };
+        let Some((fleet, hosted)) = admitted.or_else(shared) else {
+            return Ok(None);
+        };
+        let Some(joining) = inner.joining.remove(&fleet) else {
+            return Ok(None);
+        };
+        inner.joining.clear();
+        if hosted {
+            store::save_hosted(&self.state_dir, &fleet.to_string())?;
+            self.hosted.store(true, Ordering::SeqCst);
+        }
+        Ok(Some((
+            joining.log,
+            refused.get(&fleet).copied().unwrap_or(0),
+        )))
     }
+}
 
-    /// Takes the parts kept for `fleet`, unless they waited too long.
-    pub(crate) fn take(&self, fleet: &str, now_ms: u64) -> Vec<Op> {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(fleet)
-            .filter(|parts| now_ms.saturating_sub(parts.since_ms) <= TTL_MS)
-            .map_or_else(Vec::new, |parts| parts.ops)
-    }
+/// The history of a fleet being joined, `joining` so far with `ops` added:
+/// a founding operation starts it anew unless it founded `joining`, and
+/// with neither there is nothing to join (`Error::NotAdmitted`).
+fn join(joining: Option<Log>, mut ops: Vec<Op>, now_ms: u64) -> Result<(Log, usize)> {
+    let found = ops
+        .iter()
+        .position(|op| matches!(op.body(), Body::Found(_)));
+    let mut log = match (joining, found) {
+        (Some(log), Some(found)) if log.fleet().0 == ops[found].id().0 => {
+            ops.swap_remove(found);
+            log
+        }
+        (_, Some(found)) => Log::found(ops.swap_remove(found))?,
+        (Some(log), None) => log,
+        (None, None) => return Err(Error::NotAdmitted),
+    };
+    let refused = log
+        .insert_all(ops, now_ms)
+        .iter()
+        .filter(|(_, result)| result.is_err())
+        .count();
+    Ok((log, refused))
 }

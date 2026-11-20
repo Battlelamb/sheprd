@@ -26,7 +26,9 @@ mod store;
 
 pub use error::{Error, Result};
 
-use crate::control::fleet::{Body, HostId, Inserted, Log, MemberId, Op, OpId, Unsigned, sync};
+use crate::control::fleet::{
+    Body, FleetId, HostId, Inserted, Log, MemberId, Op, OpId, Unsigned, sync,
+};
 use p256::ecdsa::SigningKey;
 use sha2::{Digest as _, Sha256};
 use std::{
@@ -79,8 +81,6 @@ pub(crate) struct Fleet {
     /// without being a member. A member that was removed never does.
     hosted: AtomicBool,
     inner: Mutex<Inner>,
-    /// Parts of logs handed over while this computer is in no fleet.
-    joining: joining::Handovers,
     changed: watch::Sender<u64>,
     /// Removal exchanges other members dialed in for, at most
     /// `removals::CONCURRENT` at once.
@@ -108,6 +108,11 @@ pub(crate) struct Inner {
     /// removed, a desktop paired here one by one with any of them goes
     /// with it, keys it rotated away from included.
     pub(crate) proven: BTreeMap<MemberId, BTreeSet<[u8; 32]>>,
+    /// With no fleet yet, the history of each fleet this computer is
+    /// joining, as far as it arrived (`joining`): a history too large for
+    /// one `fleet apply` comes over several. It grants nothing; it becomes
+    /// the log once it admits this computer or shares it as a host.
+    pub(crate) joining: BTreeMap<FleetId, joining::Joining>,
 }
 
 impl Fleet {
@@ -152,7 +157,6 @@ impl Fleet {
             host,
             hosted: AtomicBool::new(hosted),
             inner: Mutex::new(inner),
-            joining: joining::Handovers::default(),
             changed: watch::Sender::new(0),
             inbound: tokio::sync::Semaphore::new(removals::CONCURRENT),
             _lock: lock,
@@ -281,7 +285,7 @@ impl Fleet {
             return Err(Error::NotMine);
         }
         let op = Unsigned {
-            fleet: crate::control::fleet::FleetId([0; 32]),
+            fleet: FleetId([0; 32]),
             signer: self.me,
             seq: 1,
             issued_ms: now_ms,
@@ -312,14 +316,13 @@ impl Fleet {
                 .filter(|(_, result)| result.is_err())
                 .count(),
             None => {
-                let (log, refused) = join(ops, self.me, self.host, now_ms)?;
-                // Taken because it shares this computer, not because it
-                // admits it: remembered, so only such a computer ever acts
-                // as a host without being a member.
-                if !sync::admits(&log, &self.me) {
-                    store::save_hosted(&self.state_dir, &log.fleet().to_string())?;
-                    self.hosted.store(true, Ordering::SeqCst);
-                }
+                let Some((log, refused)) = self.join_parts(&mut inner, ops, now_ms)? else {
+                    // Kept, granting nothing, for the rest to arrive.
+                    let saved = self.save(&inner);
+                    drop(inner);
+                    saved?;
+                    return Err(Error::NotAdmitted);
+                };
                 inner.log = Some(log);
                 refused
             }
@@ -342,20 +345,70 @@ impl Fleet {
         Ok(refused)
     }
 
-    /// Keeps `ops`, one part of `fleet`'s log handed over to this
-    /// computer while it is in no fleet, until the last part arrives
-    /// ([`Fleet::receive_last`]). Kept in memory: a handover needs the
-    /// running daemon. Blocking.
-    pub(crate) fn stage(&self, fleet: &str, ops: &[Op], now_ms: u64) -> Result<()> {
-        self.joining.keep(fleet, ops, now_ms)
+    /// Takes what `fleet apply` carried and answers it from the log, or,
+    /// while joining, from the history so far, so the member sends the
+    /// rest. Blocking.
+    /// A caller naming another fleet learns nothing of this one; while
+    /// joining, the answer comes from the history of the fleet the caller
+    /// names, or that its operations belong to. Every way the log arrives
+    /// goes through here: sync, invitations, shares, and `fleet apply`
+    /// with no daemon.
+    pub(crate) fn apply(&self, apply: &sync::Apply, now_ms: u64) -> Result<sync::Applied> {
+        if let Some(named) = &apply.fleet
+            && let Some(log) = &self.inner().log
+            && *named != log.fleet().to_string()
+        {
+            return Err(Error::OtherFleet);
+        }
+        let heads = apply.heads()?;
+        let ops = apply.ops()?;
+        let named = match &apply.fleet {
+            Some(named) => Some(sync::fleet(named)?),
+            None => ops.first().map(joining::fleet_of),
+        };
+        let refused = match self.receive(ops, now_ms) {
+            Ok(refused) => refused,
+            Err(Error::NotAdmitted)
+                if named.is_some_and(|named| self.inner().joining.contains_key(&named)) =>
+            {
+                0
+            }
+            Err(error) => return Err(error),
+        };
+        let inner = self.inner();
+        let log = match &inner.log {
+            Some(log) => log,
+            None => named
+                .and_then(|named| inner.joining.get(&named))
+                .map(|joining| &joining.log)
+                .ok_or(Error::NoFleet)?,
+        };
+        Ok(sync::answer(log, &heads, refused))
     }
 
-    /// Takes `ops`, the last part of `fleet`'s log handed over, with every
-    /// part kept before it, as [`Fleet::receive`] does.
-    pub(crate) fn receive_last(&self, fleet: &str, ops: Vec<Op>, now_ms: u64) -> Result<usize> {
-        let mut all = self.joining.take(fleet, now_ms);
-        all.extend(ops);
-        self.receive(all, now_ms)
+    /// Ages what waits on time alone, at `now_ms`: removals waiting for
+    /// their history leave the pending pool, and suspensions past
+    /// [`UNCONFIRMED_TTL_MS`] end, so their targets' grants return on an
+    /// idle daemon too. Blocking.
+    pub(crate) fn tick(&self, now_ms: u64) -> Result<()> {
+        let before = self.suspended();
+        let mut inner = self.inner();
+        let Some(log) = inner.log.as_mut() else {
+            return Ok(());
+        };
+        let _ = log.insert_all(Vec::new(), now_ms);
+        let kept: Vec<OpId> = inner.unconfirmed.keys().copied().collect();
+        settle_unconfirmed(&mut inner, now_ms);
+        let saved = if kept.iter().eq(inner.unconfirmed.keys()) {
+            Ok(())
+        } else {
+            self.save(&inner)
+        };
+        drop(inner);
+        if self.suspended() != before {
+            self.bump();
+        }
+        saved
     }
 
     /// Records that `member` proved `tunnel` by finishing the tunnel's
@@ -436,11 +489,7 @@ pub fn run_apply(state_dir: &Path, apply: sync::Apply) -> Result<sync::Applied> 
         if let Some(_lock) = lock::Lock::try_acquire(state_dir)? {
             let now = crate::web::now_ms();
             let fleet = Fleet::load(state_dir, now)?;
-            let heads = apply.heads()?;
-            let refused = fleet.receive(apply.ops()?, now)?;
-            let inner = fleet.inner();
-            let log = inner.log.as_ref().ok_or(Error::NoFleet)?;
-            return Ok(sync::answer(log, &heads, refused));
+            return fleet.apply(&apply, now);
         }
         if std::time::Instant::now() >= deadline {
             return Err(Error::Busy);
@@ -460,29 +509,6 @@ pub fn run_ask(state_dir: &Path, ask: sync::Ask) -> Result<sync::Answer> {
         Response::Error { message, .. } => Err(Error::Daemon(message)),
         _ => Err(Error::Daemon("an unexpected answer".to_owned())), // i18n: data
     }
-}
-
-/// A log from operations that found a fleet, or `Error::NotAdmitted` when
-/// they neither admit `me` nor share `host`, this computer as a host. A
-/// host's record is signed by its own certificate authority, so only a
-/// member that read it from this computer (over SSH, as `fleet intro`)
-/// can share it, and only a caller that can run `fleet apply` here can
-/// hand the log over: someone who controls this account already.
-fn join(mut ops: Vec<Op>, me: MemberId, host: Option<HostId>, now_ms: u64) -> Result<(Log, usize)> {
-    let found = ops
-        .iter()
-        .position(|op| matches!(op.body(), Body::Found(_)))
-        .ok_or(Error::NotAdmitted)?;
-    let mut log = Log::found(ops.swap_remove(found))?;
-    let refused = log
-        .insert_all(ops, now_ms)
-        .iter()
-        .filter(|(_, result)| result.is_err())
-        .count();
-    if !sync::admits(&log, &me) && !host.is_some_and(|host| sync::shares(&log, &host)) {
-        return Err(Error::NotAdmitted);
-    }
-    Ok((log, refused))
 }
 
 /// Moves the log's pending removals into `unconfirmed`, and drops those

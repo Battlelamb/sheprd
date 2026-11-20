@@ -1,11 +1,16 @@
 //! The fleet's files, in the state directory's `fleet` folder, private to
 //! this user: `key` (the fleet key's 32-byte secret), `log.bin` (the log,
 //! `control::fleet::saved`), and `peers.json` (which removals each peer
-//! holds, and which suspensions wait for their history); `lock` is
-//! `super::lock`'s.
+//! holds, and which suspensions wait for their history); `joining/` (the
+//! history of each fleet being joined, `FLEET.bin` in `log.bin`'s format,
+//! until one admits this computer or shares it as a host); `hosted` (the
+//! fleet it joined as a shared host); `lock` is `super::lock`'s.
 
-use super::{Error, Inner, Result};
-use crate::control::fleet::{MemberId, Op, OpId, saved, sync};
+use super::{
+    Error, Inner, Result,
+    joining::{Joining, MAX_FLEETS},
+};
+use crate::control::fleet::{FleetId, MemberId, Op, OpId, saved, sync};
 use crate::desktop::files::{read_bounded, write_private};
 use p256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
@@ -17,6 +22,8 @@ use std::{
 pub(super) const DIRECTORY: &str = "fleet";
 const KEY: &str = "key";
 const LOG: &str = "log.bin";
+/// The history of each fleet being joined, until one admits this computer.
+const JOINING: &str = "joining";
 const PEERS: &str = "peers.json";
 /// The fleet id this computer joined as a host the fleet shares, not as a
 /// member.
@@ -110,7 +117,12 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
         .transpose()
         .map_err(|_| Error::Peers)?
         .unwrap_or_default();
+    let joining = match log {
+        Some(_) => BTreeMap::new(),
+        None => load_joining(state_dir, now_ms)?,
+    };
     Ok(Inner {
+        joining,
         log,
         held: peers
             .held
@@ -178,6 +190,7 @@ pub(super) fn save_hosted(state_dir: &Path, fleet: &str) -> Result<()> {
 /// Removes the log and how this computer joined it, once it left the
 /// fleet for good; `save` then writes the peers' state empty. Blocking.
 pub(super) fn forget(state_dir: &Path) -> Result<()> {
+    remove_joining(state_dir)?;
     for name in [LOG, HOSTED] {
         let file = path(state_dir, name);
         match std::fs::remove_file(&file) {
@@ -198,9 +211,6 @@ pub(super) fn forget(state_dir: &Path) -> Result<()> {
 
 /// Writes the log and the peers' state. Blocking.
 pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
-    if let Some(log) = &inner.log {
-        write_private(&path(state_dir, LOG), &saved::encode(log)?)?;
-    }
     let peers = Peers {
         held: inner
             .held
@@ -245,5 +255,118 @@ pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
     };
     let json = serde_json::to_vec(&peers).map_err(|_| crate::desktop::Error::RecordFormat)?;
     write_private(&path(state_dir, PEERS), &json)?;
+    // The log goes last, each file replaced whole: a save that fails
+    // leaves the log on disk as it was, so a caller that rolls back what
+    // it holds matches the file again.
+    if let Some(log) = &inner.log {
+        write_private(&path(state_dir, LOG), &saved::encode(log)?)?;
+        remove_joining(state_dir)?;
+    } else {
+        save_joining(state_dir, &inner.joining)?;
+    }
     Ok(())
+}
+
+/// Each history kept in `joining/`, at most [`MAX_FLEETS`]; one that no
+/// longer reads, or names another fleet than its file, is passed over.
+/// Blocking.
+fn load_joining(state_dir: &Path, now_ms: u64) -> Result<BTreeMap<FleetId, Joining>> {
+    let dir = path(state_dir, JOINING);
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(source) => {
+            return Err(crate::desktop::Error::File {
+                operation: "read",
+                path: dir,
+                source,
+            }
+            .into());
+        }
+    };
+    let mut joining = BTreeMap::new();
+    for entry in entries.flatten().take(MAX_FLEETS * 4) {
+        let file = entry.path();
+        let Some(fleet) = file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_suffix(".bin"))
+            .and_then(FleetId::from_hex)
+        else {
+            continue;
+        };
+        let Some(log) = read_bounded(&file, saved::MAX_SAVED as u64)?
+            .and_then(|bytes| saved::decode(&bytes, now_ms).ok())
+            .filter(|log| log.fleet() == fleet)
+        else {
+            continue;
+        };
+        if joining.len() < MAX_FLEETS {
+            joining.insert(
+                fleet,
+                Joining {
+                    log,
+                    touched_ms: now_ms,
+                },
+            );
+        }
+    }
+    Ok(joining)
+}
+
+/// Writes each history in `joining`, and removes those no longer kept.
+/// Blocking.
+fn save_joining(state_dir: &Path, joining: &BTreeMap<FleetId, Joining>) -> Result<()> {
+    let dir = path(state_dir, JOINING);
+    for (fleet, kept) in joining {
+        write_private(
+            &dir.join(format!("{fleet}.bin")),
+            &saved::encode(&kept.log)?,
+        )?;
+    }
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let file = entry.path();
+        let kept = file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_suffix(".bin"))
+            .and_then(FleetId::from_hex)
+            .is_some_and(|fleet| joining.contains_key(&fleet));
+        if !kept {
+            remove(&file)?;
+        }
+    }
+    Ok(())
+}
+
+/// Removes every history kept of fleets being joined. Blocking.
+fn remove_joining(state_dir: &Path) -> Result<()> {
+    let dir = path(state_dir, JOINING);
+    match std::fs::remove_dir_all(&dir) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(crate::desktop::Error::File {
+            operation: "remove",
+            path: dir,
+            source,
+        }
+        .into()),
+    }
+}
+
+/// Removes `file`, which may not exist.
+fn remove(file: &Path) -> Result<()> {
+    match std::fs::remove_file(file) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(crate::desktop::Error::File {
+            operation: "remove",
+            path: file.to_owned(),
+            source,
+        }
+        .into()),
+    }
 }

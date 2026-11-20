@@ -102,30 +102,6 @@ fn an_older_read_never_replaces_a_newer_view() {
     assert!(!fleet.asking);
 }
 
-#[test]
-fn a_log_handed_over_asks_again_from_the_tips_of_what_it_sent() {
-    let op = |id: &str, parents: &[&str]| {
-        (
-            id.to_owned(),
-            parents.iter().map(|parent| (*parent).to_owned()).collect(),
-        )
-    };
-    // A first part with the root and two concurrent children: both are
-    // tips, the root is not.
-    let first = flows::heads_after(&[], [op("r", &[]), op("x", &["r"]), op("y", &["r"])]);
-    assert_eq!(first, vec!["x".to_owned(), "y".to_owned()]);
-    // The next part merges them, and one more leaves a tip of the first.
-    assert_eq!(
-        flows::heads_after(&first, [op("m", &["x"])]),
-        vec!["m".to_owned(), "y".to_owned()]
-    );
-    assert_eq!(flows::tips(&first, &[]).unwrap(), first);
-    assert!(matches!(
-        flows::tips(&[], &["not base64!".into()]),
-        Err(Error::Log(_))
-    ));
-}
-
 fn host(id: &str, target: &str) -> sheprd_client::SavedHost {
     sheprd_client::SavedHost {
         id: id.into(),

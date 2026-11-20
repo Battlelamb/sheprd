@@ -417,8 +417,17 @@ pub(crate) async fn follow(state: Shared) {
             }
             () = tokio::time::sleep(RETRY), if failed => {}
             _ = check.tick() => {
+                // Removals whose history never came age out here too: a
+                // suspension that ends bumps the fleet, which rewrites the
+                // grants on the next turn.
                 let (state, fleet) = (state.clone(), fleet.clone());
-                let _ = tokio::task::spawn_blocking(move || publish_record(&state, &fleet)).await;
+                let _ = tokio::task::spawn_blocking(move || {
+                    if let Err(error) = fleet.tick(crate::web::now_ms()) {
+                        tracing::warn!(error = %error, "could not age the fleet's suspensions");
+                    }
+                    publish_record(&state, &fleet);
+                })
+                .await;
                 continue;
             }
         }

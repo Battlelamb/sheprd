@@ -831,3 +831,30 @@ fn a_crowded_member_suspends_only_members_denied_or_crowded_too() {
         Some(Peer::Member { ssh: false, .. })
     ));
 }
+
+#[test]
+fn a_member_waiting_for_room_never_takes_another_members_place_on_the_relays() {
+    let mut desktops = Authorized::default();
+    for seed in 0..u8::try_from(MAX_DIAL_KEYS - 1).unwrap() {
+        desktops
+            .insert(Entry {
+                dial: dial(seed.wrapping_add(100)),
+                tunnel: [seed.wrapping_add(100); 32],
+                label: format!("desk{seed}"),
+            })
+            .unwrap();
+    }
+    // Member 1 sorts first and waits for room; member 2 only passes
+    // removals. One slot is left.
+    let held = Held {
+        access: Some(file(&[(1, true, 0), (2, false, 1)], &[], &[])),
+        crowded: [id(1)].into_iter().collect(),
+        ..Held::default()
+    };
+    let report = held.report(&desktops).unwrap().unwrap();
+    assert_eq!(report.crowded.iter().collect::<Vec<_>>(), [&id(1)]);
+    let keys = Admitted::new(desktops, held).dial_keys();
+    assert_eq!(keys.len(), MAX_DIAL_KEYS);
+    assert!(keys.contains(&dial(2)));
+    assert!(!keys.contains(&dial(1)));
+}

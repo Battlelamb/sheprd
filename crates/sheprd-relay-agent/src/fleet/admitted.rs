@@ -110,10 +110,16 @@ impl Admitted {
             .map(|(_, member)| member.dial);
         let denied = self
             .members()
-            .filter(|(id, _)| !self.held.reaches_ssh(id))
+            .filter(|(id, _)| !self.held.reaches_ssh(id) && !self.held.crowded.contains(id))
+            .map(|(_, member)| member.dial);
+        // Members whose new keys wait for room come last, so one never
+        // takes another member's place.
+        let crowded = self
+            .members()
+            .filter(|(id, _)| self.held.crowded.contains(id))
             .map(|(_, member)| member.dial);
         let mut keys: Vec<Key> = Vec::new();
-        for key in desktops.chain(allowed).chain(denied) {
+        for key in desktops.chain(allowed).chain(denied).chain(crowded) {
             if !keys.contains(&key) {
                 keys.push(key);
             }

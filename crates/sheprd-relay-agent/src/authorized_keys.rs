@@ -87,11 +87,18 @@ pub fn of_user() -> Result<PathBuf> {
 
 /// Makes the lines of fleet `fleet` (its short id) in `path` exactly
 /// `members`, each `(MEMBER, KEY)`. Lines the user wrote, and other
-/// fleets' lines, stay as they are. A missing file with nothing to add
-/// stays missing; an unchanged one is not written. Blocking.
+/// fleets' lines, stay as they are, byte for byte, whatever their
+/// encoding. A missing file with nothing to add stays missing; an
+/// unchanged one is not written. Blocking.
 pub fn set_fleet(path: &Path, fleet: &str, members: &[(String, String)]) -> Result<()> {
     let prefix = format!("{fleet}:");
-    let ours = |line: &str| fleet_tag(line).is_some_and(|tag| tag.starts_with(&prefix));
+    // Only a line in UTF-8 can be one the fleet wrote; any other is the
+    // user's and is kept as it is.
+    let ours = |line: &[u8]| {
+        std::str::from_utf8(line).is_ok_and(|line| {
+            fleet_tag(line.trim_end_matches('\r')).is_some_and(|tag| tag.starts_with(&prefix))
+        })
+    };
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
             return Err(Error::Linked {
@@ -111,25 +118,24 @@ pub fn set_fleet(path: &Path, fleet: &str, members: &[(String, String)]) -> Resu
             });
         }
     }
-    let text = files::read_bounded(path, MAX_FILE)?.unwrap_or_default();
-    let text = String::from_utf8_lossy(&text);
-    let before: Vec<&str> = text.lines().collect();
-    let mut lines: Vec<String> = before
+    let bytes = files::read_bounded(path, MAX_FILE)?.unwrap_or_default();
+    let mut before: Vec<&[u8]> = bytes.split(|byte| *byte == b'\n').collect();
+    // The newline that ends the last line starts no line of its own.
+    if before.last().is_some_and(|last| last.is_empty()) {
+        before.pop();
+    }
+    let added: Vec<Vec<u8>> = members
         .iter()
-        .filter(|line| !ours(line))
-        .map(|line| (*line).to_owned())
+        .map(|(member, key)| fleet_line(&format!("{fleet}:{member}"), key).into_bytes())
         .collect();
-    lines.extend(
-        members
-            .iter()
-            .map(|(member, key)| fleet_line(&format!("{fleet}:{member}"), key)),
-    );
+    let mut lines: Vec<&[u8]> = before.iter().copied().filter(|line| !ours(line)).collect();
+    lines.extend(added.iter().map(Vec::as_slice));
     if lines == before {
         return Ok(());
     }
-    let mut content = lines.join("\n");
-    content.push('\n');
-    files::write_private(path, content.as_bytes())
+    let mut content = lines.join(&b'\n');
+    content.push(b'\n');
+    files::write_private(path, &content)
 }
 
 #[cfg(test)]

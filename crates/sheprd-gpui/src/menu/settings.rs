@@ -328,6 +328,7 @@ impl SheprdWindow {
                 | Command::NewWorktree
                 | Command::OpenWorktree
                 | Command::RemoveWorktree
+                | Command::RemoveMergedWorktrees
                 | Command::EditWorktreeNote
                 | Command::Tab
                 | Command::SplitRight

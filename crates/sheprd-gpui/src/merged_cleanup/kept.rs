@@ -29,6 +29,27 @@ pub(crate) struct Kept {
     probe: Option<Probe>,
     ledger: Ledger,
     next_scan: Option<Instant>,
+    /// The last scan found nothing to check.
+    pub(super) idle: bool,
+}
+
+impl Kept {
+    /// Forgets earlier refusals, so a sweep checks every candidate again.
+    pub(super) fn reset_for_sweep(&mut self) {
+        self.ledger = Ledger::default();
+        self.next_scan = None;
+        self.idle = false;
+    }
+
+    /// The kept checkout being checked now.
+    pub(super) fn current(&self) -> Option<&Candidate> {
+        self.probe.as_ref().map(|probe| &probe.candidate)
+    }
+
+    /// Nothing left to check and no check running.
+    pub(super) fn settled(&self) -> bool {
+        self.idle && self.probe.is_none()
+    }
 }
 
 /// The kept linked checkouts among `workspaces` whose cached pull request is
@@ -41,7 +62,7 @@ pub(crate) fn kept_candidates<'a, R: std::ops::Deref<Target = PullRequest>>(
     kept_candidates_on(workspaces, false, pull_request)
 }
 
-fn kept_candidates_on<'a, R: std::ops::Deref<Target = PullRequest>>(
+pub(super) fn kept_candidates_on<'a, R: std::ops::Deref<Target = PullRequest>>(
     workspaces: &'a [Workspace],
     remote: bool,
     pull_request: impl Fn(&Input) -> Option<R> + 'a,
@@ -108,17 +129,25 @@ impl SheprdWindow {
         {
             return;
         }
-        self.merged_cleanup.kept.next_scan = Some(now + SCAN);
+        let interval = if self.merged_cleanup.sweep.is_some() {
+            std::time::Duration::ZERO
+        } else {
+            SCAN
+        };
+        self.merged_cleanup.kept.next_scan = Some(now + interval);
         let workspaces = self.kept_workspaces();
         let Some(view) = self.endpoint_pr_view(self.selected_endpoint) else {
+            self.merged_cleanup.kept.idle = true;
             return;
         };
         let cache = &self.menu.pr_cache;
         let ledger = &self.merged_cleanup.kept.ledger;
-        let Some(candidate) = kept_candidates_on(&workspaces, self.selected_is_remote(), |input| {
+        let found = kept_candidates_on(&workspaces, self.selected_is_remote(), |input| {
             cache.peek_input(&view, input)
         })
-        .find(|candidate| !ledger.waiting(candidate, now)) else {
+        .find(|candidate| !ledger.waiting(candidate, now));
+        self.merged_cleanup.kept.idle = found.is_none();
+        let Some(candidate) = found else {
             return;
         };
         let (sender, receiver) = mpsc::sync_channel(1);
@@ -174,6 +203,7 @@ impl SheprdWindow {
         let Ok(report) = result else {
             // Git's diagnostics may name private paths; log the category only.
             tracing::debug!(category = "check_failed", "Merged kept worktree kept");
+            self.merged_cleanup.skipped();
             self.merged_cleanup.kept.ledger.settle(candidate, retry);
             return;
         };
@@ -181,10 +211,13 @@ impl SheprdWindow {
             self.merged_cleanup.kept.next_scan = Some(now + ASK_DEFER);
             return;
         }
-        let focused = self.kept_in_front() == Some(candidate.workspace.as_str());
+        // A sweep was confirmed already, so even the one in front goes.
+        let focused = self.kept_in_front() == Some(candidate.workspace.as_str())
+            && self.merged_cleanup.sweep.is_none();
         match decide_status(&candidate, &report, workspace.status, focused) {
             Err(skip) => {
                 tracing::debug!(?skip, "Merged kept worktree kept");
+                self.merged_cleanup.skipped();
                 self.merged_cleanup.kept.ledger.settle(candidate, retry);
             }
             Ok(Action::Ask) => {
@@ -204,6 +237,7 @@ impl SheprdWindow {
                     .kept
                     .ledger
                     .settle(candidate.clone(), retry);
+                self.merged_cleanup.removed();
                 self.remove_merged_kept_checkout(id, path, candidate, cx);
             }
         }

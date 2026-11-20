@@ -108,6 +108,8 @@ pub(crate) enum Page {
     /// Confirming Sheprd on another machine should update itself.
     RemoteUpdate,
     RemoveDevice,
+    /// Confirming every merged worktree should be removed.
+    RemoveMerged,
     /// Confirming a saved WSL distribution should be forgotten.
     RemoveWsl,
     /// Naming a herdr-core tab or pane from its menu.

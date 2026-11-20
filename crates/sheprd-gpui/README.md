@@ -1199,6 +1199,20 @@ commit, and has no agent working or waiting on a prompt. A repository with an
 archive script is left for the delete dialog. The focused workspace opens that
 dialog instead of being removed. The branch is not deleted, and a checkout
 the daemon finds dirty is never force removed.
+To clean up once without turning that on, click the sparkles button beside the
+sidebar's Spaces heading, shown while the selected device has merged
+worktrees, or run **Remove Merged Worktrees** (`remove_merged_worktrees`) from
+the palette or `sheprd run`. One dialog lists them; confirming runs the same
+checks over each, removes the focused one too, and reports how many stayed.
+Herdr answers `worktree.remove` only once Git has removed the checkout, and
+other workspace actions wait behind it, so the delete dialog stays open with a
+sliding bar and the seconds waited, and the merged sweep's dialog shows how
+many of them are done and which one is in hand. Dismissing either leaves the
+removal running; the sparkles button shows a running sweep again.
+When the workspace in front is removed or closed, from this window or
+anywhere else, the sidebar row above it comes to the front (the row below
+when it was first), so a long list stays where it was rather than jumping to
+the daemon's or Herdr 2's first workspace.
 The pane dialog's **Do not ask again** checkbox (click it or press Space) saves
 `confirm_close_pane = false` to `config-gpui.local.toml` once the close is sent. Saved edits apply automatically. The
 **Show agents** control in **Settings > Sidebar** saves

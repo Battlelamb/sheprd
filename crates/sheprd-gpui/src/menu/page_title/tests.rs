@@ -72,6 +72,7 @@ fn every_page_title_is_a_message_under_en_xa() {
             Page::RemoteControl,
             Page::RemoteDevices,
             Page::RemoveDevice,
+            Page::RemoveMerged,
             Page::RemoveWsl,
             Page::RenameDevice,
             Page::RenamePane,

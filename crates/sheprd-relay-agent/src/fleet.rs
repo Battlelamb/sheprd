@@ -242,10 +242,13 @@ impl Held {
         if !access.members.contains_key(&sender) || held.suspended.contains_key(&sender) {
             return Ok(Vec::new());
         }
-        let sender_allowed = access
+        let sender_allowed = held.reaches_ssh(&sender);
+        let reaching: BTreeSet<Id> = access
             .members
-            .get(&sender)
-            .is_some_and(|member| member.allow);
+            .keys()
+            .filter(|id| held.reaches_ssh(id))
+            .copied()
+            .collect();
         let mut taken = Vec::new();
         let mut changed = false;
         for removal in removals
@@ -264,10 +267,8 @@ impl Held {
                 .map(|target| Id(*target))
                 .filter(|target| *target != sender)
                 .filter(|target| {
-                    access
-                        .members
-                        .get(target)
-                        .is_some_and(|member| sender_allowed || !member.allow)
+                    access.members.contains_key(target)
+                        && (sender_allowed || !reaching.contains(target))
                 });
             let cause = Cause {
                 signer: sender,
@@ -320,13 +321,26 @@ impl Held {
             && !self.suspended.contains_key(member)
     }
 
-    /// The members that may reach SSH here now: allowed, not suspended,
-    /// and not waiting for room for their keys.
+    /// Whether member `id` may reach SSH here as far as the fleet and room
+    /// go: allowed by the access file (not removed, sharing no key with
+    /// another), and not waiting for room for its keys. Suspension is
+    /// apart. What `suspend`, `Admitted`, and `report` all ask.
+    #[must_use]
+    pub fn reaches_ssh(&self, id: &Id) -> bool {
+        !self.crowded.contains(id)
+            && self
+                .access
+                .as_ref()
+                .is_some_and(|access| access.allowed().any(|(member, _)| member == id))
+    }
+
+    /// The members that may reach SSH here now: [`Held::reaches_ssh`],
+    /// and not suspended.
     pub fn ssh_members(&self) -> impl Iterator<Item = (&Id, &Member)> {
         self.access
             .iter()
-            .flat_map(Access::allowed)
-            .filter(|(id, _)| !self.suspended.contains_key(id) && !self.crowded.contains(id))
+            .flat_map(|access| &access.members)
+            .filter(|(id, _)| self.reaches_ssh(id) && !self.suspended.contains_key(id))
     }
 
     fn write_keys(&self, keys: Option<&Path>) -> Result<()> {
@@ -346,7 +360,11 @@ impl Held {
         let Some(access) = &self.access else {
             return Ok(None);
         };
-        let allowed = access.allowed().count();
+        let allowed = access
+            .members
+            .keys()
+            .filter(|id| self.reaches_ssh(id))
+            .count();
         let revoked = desktops
             .entries()
             .iter()

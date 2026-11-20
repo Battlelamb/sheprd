@@ -106,11 +106,11 @@ impl Admitted {
             .map(|entry| entry.dial);
         let allowed = self
             .members()
-            .filter(|(id, member)| self.reaches_ssh(id, member))
+            .filter(|(id, _)| self.held.reaches_ssh(id))
             .map(|(_, member)| member.dial);
         let denied = self
             .members()
-            .filter(|(id, member)| !self.reaches_ssh(id, member))
+            .filter(|(id, _)| !self.held.reaches_ssh(id))
             .map(|(_, member)| member.dial);
         let mut keys: Vec<Key> = Vec::new();
         for key in desktops.chain(allowed).chain(denied) {
@@ -142,9 +142,9 @@ impl Admitted {
             .members()
             .find(|(_, member)| member.dial == *dial && member.tunnel == *tunnel);
         match member {
-            Some((id, member)) => Some(Peer::Member {
+            Some((id, _)) => Some(Peer::Member {
                 id: *id,
-                ssh: self.reaches_ssh(id, member),
+                ssh: self.held.reaches_ssh(id),
                 desktop,
             }),
             None => desktop.then_some(Peer::Desktop),
@@ -162,7 +162,7 @@ impl Admitted {
             Peer::Desktop => self.desktop(dial, tunnel),
             Peer::Member { id, .. } => self.members().any(|(member, entry)| {
                 member == id
-                    && self.reaches_ssh(member, entry)
+                    && self.held.reaches_ssh(member)
                     && entry.dial == *dial
                     && entry.tunnel == *tunnel
             }),
@@ -181,12 +181,6 @@ impl Admitted {
         self.members()
             .find(|(id, _)| *id == member)
             .is_some_and(|(_, entry)| crate::removal::verify(&entry.fleet_key, hash, proof))
-    }
-
-    /// Whether member `id` may reach SSH: the fleet allows it, and its
-    /// keys are not waiting for room on the relays.
-    fn reaches_ssh(&self, id: &Id, member: &Member) -> bool {
-        member.allow && !self.held.crowded.contains(id)
     }
 
     /// Whether `member` may still pass removals.

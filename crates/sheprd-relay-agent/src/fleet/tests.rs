@@ -804,3 +804,30 @@ fn a_rotation_at_capacity_takes_the_old_keys_away_and_waits_denied() {
         Some(Peer::Member { ssh: true, .. })
     ));
 }
+
+#[test]
+fn a_crowded_member_suspends_only_members_denied_or_crowded_too() {
+    let host = Host::new();
+    host.apply(file(
+        &[(1, true, 0), (2, true, 0), (3, false, 1), (4, true, 0)],
+        &[],
+        &[],
+    ))
+    .unwrap();
+    // Members 1 and 4 wait for room for their keys.
+    let mut held = Held::load(host.state()).unwrap();
+    held.crowded.extend([id(1), id(4)]);
+    held.save(host.state()).unwrap();
+    host.suspend(1, &[removal(0x51, &[2, 3, 4])]);
+    let held = Held::load(host.state()).unwrap();
+    assert!(!held.suspended.contains_key(&id(2)), "an allowed member");
+    assert!(held.suspended.contains_key(&id(3)), "a denied member");
+    assert!(held.suspended.contains_key(&id(4)), "a crowded member");
+    // The report counts it as unable to reach SSH, as admission does.
+    let report = held.report(&Authorized::default()).unwrap().unwrap();
+    assert_eq!((report.allowed, report.denied), (1, 3));
+    assert!(matches!(
+        host.admitted().peer(&dial(1), &[1; 32]),
+        Some(Peer::Member { ssh: false, .. })
+    ));
+}

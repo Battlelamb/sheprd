@@ -65,7 +65,7 @@ pub(crate) fn valid_key(key: &str) -> bool {
 }
 
 /// The terminal pane `pane` names in `layout`, or not found.
-fn known(layout: &Layout, pane: &str) -> Result<(), ApiError> {
+pub(super) fn known(layout: &Layout, pane: &str) -> Result<(), ApiError> {
     layout.terminal(pane).map(|_| ()).ok_or(ApiError::NotFound)
 }
 
@@ -545,7 +545,7 @@ pub(super) async fn rename_workspace(
             name: name.to_owned(),
         };
         let keeper = crate::hub::Keeper::Saved {
-            tab: 0,
+            tab: crate::hub::TabRef::File(0),
             terminal: String::new(),
         };
         crate::native::changes::arrange(&state, keeper, op).await?;

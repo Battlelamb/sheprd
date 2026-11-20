@@ -9,6 +9,9 @@ mod chat;
 mod exec;
 mod fleet;
 mod hosts;
+mod machine_agent;
+#[cfg(feature = "mcp")]
+mod mcp;
 mod memory;
 mod mods;
 mod remote;
@@ -18,16 +21,21 @@ mod work;
 
 use super::CliError;
 pub(crate) use super::args::Args;
-pub use crate::control::{Cursor, EventKind, FontSize, Script, Size, Sound, Switch, ZoomChange};
+pub use crate::control::{
+    Cursor, EventKind, FontSize, MachineButton, MachineModifier, Script, Size, Sound, Switch,
+    ZoomChange,
+};
 pub use app::{AppCommand, UiCommand, WindowCommand};
 pub use batch::BatchCommand;
 pub use browser::{BrowserCommand, Placement};
-pub use chat::ChatCommand;
+pub use chat::{ChatCommand, ChatPrCommand};
 pub use exec::ExecCommand;
 pub use fleet::FleetCommand;
 pub use hosts::{
     AutomationCommand, CloudCommand, HostCommand, PortsCommand, PrCommand, SecurityCommand,
 };
+#[cfg(feature = "mcp")]
+pub use mcp::{McpClient, McpCommand};
 pub use memory::{MemoryAdd, MemoryCommand};
 pub use mods::ModCommand;
 pub use remote::RemoteCommand;
@@ -36,7 +44,7 @@ pub use settings::{
     SoundCommand, ThemeCommand, UpdateCommand,
 };
 use std::ffi::OsString;
-pub use tabs::{CodeCommand, FileAt, Items, OrchestratorCommand, TabCommand};
+pub use tabs::{CodeCommand, FileAt, Items, MachineCommand, OrchestratorCommand, TabCommand};
 pub use work::{CheckpointCommand, FanOut, NotesCommand, WaitFor, WorktreeCommand};
 
 /// What to do, and how the answer is printed.
@@ -68,12 +76,16 @@ pub enum ControlCommand {
     Tab(TabCommand),
     Code(CodeCommand),
     Devices,
+    Machine(MachineCommand),
     Orchestrator(OrchestratorCommand),
     Review,
     Chat(ChatCommand),
     Px0,
     Notes(NotesCommand),
     Memory(MemoryCommand),
+    /// `sheprd mcp`: an MCP server on stdio, or a client's configuration.
+    #[cfg(feature = "mcp")]
+    Mcp(McpCommand),
     Worktree(WorktreeCommand),
     /// Every kind of note the user sent this pane: page, review, terminal.
     Feedback {
@@ -177,6 +189,10 @@ pub const FAMILIES: &[(&str, &str)] = &[
     ),
     ("devices", "Open the Devices overview"),
     (
+        "machine",
+        "Virtual Macs: show, list, set up, suspend, or delete one",
+    ),
+    (
         "orchestrator",
         "A repository's issues, pull requests, and runs",
     ),
@@ -190,6 +206,11 @@ pub const FAMILIES: &[(&str, &str)] = &[
     (
         "memory",
         "What agents learned about a repository, shared by its worktrees",
+    ),
+    #[cfg(feature = "mcp")]
+    (
+        "mcp",
+        "Serve Sheprd's tools to MCP clients, or print a client's setup",
     ),
     (
         "worktree",
@@ -365,6 +386,7 @@ fn command(family: &'static str, args: &mut Args) -> Result<ControlCommand, CliE
             tabs::open_only(args)?;
             ControlCommand::Devices
         }
+        "machine" => ControlCommand::Machine(tabs::machine(args)?),
         "orchestrator" => ControlCommand::Orchestrator(tabs::orchestrator(args)?),
         "review" => {
             tabs::open_only(args)?;
@@ -377,6 +399,8 @@ fn command(family: &'static str, args: &mut Args) -> Result<ControlCommand, CliE
         }
         "notes" => ControlCommand::Notes(work::notes(args)?),
         "memory" => ControlCommand::Memory(memory::memory(args)?),
+        #[cfg(feature = "mcp")]
+        "mcp" => ControlCommand::Mcp(mcp::mcp(args)?),
         "worktree" => ControlCommand::Worktree(work::worktree(args)?),
         "feedback" => ControlCommand::Feedback {
             wait: wait_option(args, "--wait")?,

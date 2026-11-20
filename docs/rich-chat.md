@@ -477,9 +477,15 @@ the **Plan** section; an assistant's Markdown checklist does not. Child tasks
 remain separate from the parent's plan. Sheprd does not enable agent tools
 or change OpenCode configuration automatically.
 
-Every rail section folds to one line. While anything runs, **Plan** and
-**Changed** fold on their own to leave room, showing the current step and the
-change totals; once nothing runs they open again. Clicking a section's header
+**Pull requests** lists each pull request the agent created, pushed to,
+commented on, reviewed, merged, or closed in this chat, newest first; a click
+opens it in Sheprd's Pull requests section when that lists it, else on GitHub.
+See [Pull requests in a chat's rail](cli.md#pull-requests-in-a-chats-rail)
+for what is picked up and `sheprd chat pr add` for the rest.
+
+Every rail section folds to one line. While anything runs, **Plan**,
+**Changed**, and **Pull requests** fold on their own to leave room, showing
+the current step and the change totals; once nothing runs they open again. Clicking a section's header
 overrides that for as long as the chat is open.
 
 Drag the rail's left edge to resize it, up to half the chat's width; a
@@ -628,6 +634,11 @@ All 214 tests pass.
   down, each bursting into pixels. Effects stay in the chat's pane, never over
   the terminals, tabs, or sidebar, and never take the pointer. A message plays its first; another
   arriving while one plays is dropped, not queued.
+- A line `::wizz` asks for the person's attention, as MSN Messenger's nudge
+  did: the chat shakes for a second and, on a phone, buzzes. A turn whose
+  last reply holds it sends a time-sensitive push that plays the same buzz,
+  whatever the push privacy, so a locked phone buzzes too. The excerpt a
+  push shows leaves every directive line out.
 
 Only an agent's replies play effects; a user's message shows its effect
 directives as text, though its size spans still apply. Each effect plays once,
@@ -652,6 +663,12 @@ differences:
   at rest.
 - A list row strips the directives from the computer's one-line excerpt of
   the latest reply.
+- Each effect also has a sound and, on an iPhone, haptic taps timed to its
+  animation (`Chat/Effects/Cue.swift`): a slam's landing, each firework's
+  burst, each letter zap shoots down. The sounds are synthesized
+  (`Synth.swift`), not shipped as files. They play in the ambient category,
+  so the Ring/Silent switch mutes them, and never while dictation or voice
+  holds the audio session. Settings > Sounds & Haptics turns each off.
 
 The phone web app draws neither, so `phone.md` does not mention them and only
 `phone-app.md`, which follows it for the iPhone and iPad app, does.
@@ -743,7 +760,11 @@ terminal. Goal status stays in the original CLI interface; it is not inferred
 from conversation text.
 
 Observation requires a Linux agent host, its Herdr CLI metadata API, and a
-matching `sheprd-acp` helper. Local helpers are paired with the GUI; SSH observers
+matching `sheprd-acp` helper. The observer itself also runs on macOS, where the
+iPhone app uses it (`docs/ios-app-plan.md`): it reads the process's birth from
+the kernel and finds the log by its exact name, and since macOS shows no other
+process's environment, it reads the default config directory, never a
+`CLAUDE_CONFIG_DIR` or `CODEX_HOME` override. Local helpers are paired with the GUI; SSH observers
 run on the agent's host through the existing encrypted connection. Remote helper
 installation is explicit. Observation creates no listening port or persistent
 service. Closing the GUI stops its observer children and leaves agents running.

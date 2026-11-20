@@ -1467,7 +1467,10 @@ sequenceDiagram
    still suspends only denied ones; daemons still pass it removals, but
    no member reaches SSH until a person picks the keys. A suspension
    keeps its member's key pairs in `suspended`, so a desktop with them
-   stays cut off whatever becomes of the access file. Members are admitted from that file:
+   stays cut off whatever becomes of the access file: up to 18 of them,
+   past which the suspension lasts until the member's removal and the
+   pairs an enrolled desktop has go to `revoked`, at most one per
+   desktop. No file is written past what loading reads back. Members are admitted from that file:
    denied ones only to pass removals, allowed ones to SSH too. The agent
    writes the `authorized_keys` lines the way `ssh_access` does, with the
    same shared code: atomically, refusing a linked file, and touching

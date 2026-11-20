@@ -13,6 +13,7 @@ mod crowded_save;
 mod paused;
 mod refused;
 mod report_size;
+mod stored_size;
 mod suspended_keys;
 
 const FLEET: u8 = 0xf1;

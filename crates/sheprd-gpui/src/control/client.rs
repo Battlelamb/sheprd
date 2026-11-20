@@ -517,6 +517,7 @@ pub(crate) fn dispatch(command: ControlCommand, context: &Context) -> crate::Res
         ControlCommand::Tab(command) => tabs::tab(command, context),
         ControlCommand::Code(command) => tabs::code(command, context),
         ControlCommand::Devices => tabs::devices(context),
+        ControlCommand::Machine(command) => tabs::machine(command, context),
         ControlCommand::Orchestrator(command) => tabs::orchestrator(command, context),
         ControlCommand::Review => tabs::review(context),
         ControlCommand::Chat(command) => chat::chat(command, context),

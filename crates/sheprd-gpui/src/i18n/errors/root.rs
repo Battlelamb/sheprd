@@ -123,6 +123,7 @@ impl Localize for Error {
                 path = path(file),
                 error = source.to_string()
             ),
+            Self::Machine(error) => error.localize(),
             Self::MalformedLink => fl!("error-malformed-link"),
             #[cfg(feature = "mcp")]
             Self::Mcp(error) => error.localize(),

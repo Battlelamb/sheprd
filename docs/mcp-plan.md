@@ -107,7 +107,7 @@ cannot depend on `sheprd-gpui`.
 - Protocol: add `Caller.via: Option<Via>` with
   `Via::Mcp { client: String }`, where `client` is the `clientInfo.name`
   from `initialize`, printable and at most 64 bytes. It is skipped on the
-  wire when absent, and `PROTOCOL_VERSION` goes up to 14. An older app
+  wire when absent, and `PROTOCOL_VERSION` goes up to 16. An older app
   refuses the field (`deny_unknown_fields`), so MCP fails closed against it.
 - The app's control server (`control/server.rs`) refuses any request with
   `via: Some(Mcp)` while `[features] mcp` is off. The app is the authority.
@@ -214,7 +214,7 @@ until there is more to configure, such as per-tool allow lists or HTTP.
    loop, and tests.
 2. The gate: the Cargo feature, the `[features] mcp` flag with
    `#[cfg]` support in `features!`, Fluent messages, `Caller.via` with
-   protocol 14, and the server's refusal.
+   protocol 16, and the server's refusal.
 3. `sheprd mcp` with the read-only tools, the `dispatch`/`finish` split,
    and `sheprd mcp config`.
 4. Acting tools, with dialogs naming the MCP client.

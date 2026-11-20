@@ -147,6 +147,23 @@ Sheprd** entry, which both Windows installers add, runs this command through
 | `code open FILE[:LINE]` | A read-only code tab at a line |
 | `code edit FILE[:LINE]` | Your terminal editor, in a new pane beside yours |
 | `devices` | The Devices overview |
+| `machine [open [NAME]]` | The virtual Mac called NAME (default `default`) in a tab, started or resumed if it is not running. Closing the tab leaves it running; quitting Sheprd saves it (Apple silicon Macs) |
+| `machine list` | Each machine's state, CPUs, memory, display, and disk use, which counts blocks shared with its image. Exits 4 when there are none |
+| `machine set NAME [--cpus N] [--memory GB] [--display fit\|WxH]` | What it boots with next, after it next shuts down |
+| `machine suspend NAME` | Save it and stop it; it resumes where it was when next shown |
+| `machine delete NAME` | Ask in Settings to delete it and free its disk; the user confirms there |
+| `machine new NAME --from IMAGE` | Make a machine from an image: an APFS clone that takes no real space until it changes, with its own identity, so several can run at once (macOS allows 2) |
+| `machine new [NAME]` | Open Settings > Virtual Macs, where the user confirms downloading Apple's newest macOS for this Mac (over 20 GB) and installing it on a new machine, `NAME` or `default`; it then opens with its setup guide. Exits 2 when `NAME` exists |
+| `machine image [list]` | The images machines can start from. Exits 4 when there are none |
+| `machine image save MACHINE IMAGE` | Keep a shut down machine as an image. Exits 6 while it runs or is suspended |
+| `machine image delete IMAGE` | Ask in Settings to delete it; the user confirms there. Machines made from it stay |
+| `machine setup [NAME]` | Shows the machine with its setup guide docked beside it: sign in, install Sheprd Agent, allow its two permissions, and save an image, each checked by Sheprd before the next. A machine made from an image opens with it already |
+| `machine agent NAME` | Whether Sheprd Agent answers inside the running machine: its screen size in pixels and whether macOS lets it post input and take screenshots (see [Working inside a virtual Mac](#working-inside-a-virtual-mac)). Exits 1 when it does not answer |
+| `machine exec NAME [--timeout S] [--cwd DIR] -- COMMAND...` | Run a command as the machine's logged-in user and print its output, as `cloud exec` does |
+| `machine screenshot NAME PATH` | Write a PNG of the machine's screen to PATH |
+| `machine click NAME X Y [--right] [--double]` | Click at a point of the machine's screen, in the screenshot's pixels |
+| `machine type NAME TEXT` | Type text in the machine as from a keyboard, at most 4096 characters at once |
+| `machine key NAME KEY` | Press a key in the machine, with modifiers: `return`, `escape`, `tab`, `cmd+q`, `cmd+shift+4` |
 | `orchestrator [--repo PATH]` | Show the Issues section narrowed to your checkout's project, or PATH's |
 | `orchestrator restart RUN [--repo PATH]` | Open the user's confirmation to restart a loaded, owned Herdr 2 run in this project with its saved prompt/model and existing checkout; requires the running app |
 | `orchestrator adopt RUN [--repo PATH]` | Read the current process of a loaded legacy run and prepare the user's adoption confirmation; grants no authority until confirmed and revalidated |
@@ -220,7 +237,7 @@ not take it either.
 | `host mute\|unmute [HOST]` | Silence a host's notifications as a whole, or let them through again, by ID or label; absent, your host. Works while it is offline |
 | `host tag ID [TAG...]` | Replace the tags that group a host in the sidebar and on paired phones; with no tags, clear them. Each computer's daemon keeps its own tags, so a host away gets the edit once it is back |
 | `host update [HOST]` | Ask in the app to update the Sheprd app running on an SSH or cloud host, by ID or label (default: your workspace's host), as its header's Update pill does; the user confirms there (see [Updating Sheprd on other machines](#updating-sheprd-on-other-machines)). Exits 4 with the reason when it offers no newer release, 5 when no connected host has that name, 6 while a dialog is open, 8 for this computer, which `update` covers |
-| `pr [status]\|checks\|comments\|open` | Your branch's pull request, on the window's selected host. `comments` needs your workspace focused |
+| `pr [status]\|checks\|comments\|open` | Your branch's pull request, on the window's selected host. `comments` needs your workspace focused. `status` also says where it sits in a GitHub stack and what merging there would do (`stack` in `--json`: its layers bottom first with a status word each, a `verdict` of `merged`, `ready`, `blocked`, or `unread` when a layer below it was not read, and for `blocked` the lowest layer read in the way and why), and its place in the merge queue (`queue`: `position`, `state`, `eta_seconds`); both are `null` when it is in none |
 | `pr quota` | Last reported GraphQL points used, limit, and remaining, plus rate-limit retry delays for the window's GitHub accounts. `--json` returns records merged by login: known observations are preferred, then the latest reset window and greatest usage within it; retry delays retain the longest pause. Usage is never summed across credentials. Unavailable quotas are `null`. No network request is made. |
 | `ports [list]` | Ports your workspace listens on, and forwards |
 | `ports forward\|unforward PORT` | Forward a port of the SSH host to this machine |
@@ -258,7 +275,7 @@ not take it either.
 | `config reload` | Reread Herdr's config and this app's |
 | `theme [list]`, `theme set NAME` | The app theme. A device's terminal theme is `config set devices.ID.theme NAME`, with the ID from `host list` minus its `ssh:` prefix |
 | `font [list]`, `font set NAME`, `font reset` | |
-| `language [status]`, `language list`, `language set system\|TAG` | The language set and the locale Sheprd shows, the languages there are, each with its name in itself as Settings > General lists it, or save the `language` setting (a BCP 47 tag; `en-XA` and `en-XB` are pseudo-locales). Only `status` asks the app, and without it reports what it would show |
+| `language [status]`, `language list`, `language set system\|TAG` | The language set and the locale Sheprd shows, the languages available for direct selection plus pseudo-locales, or save the `language` setting (a BCP 47 tag; `en-XA` and `en-XB` are pseudo-locales). `system` also uses Simplified Chinese when it matches the OS's preferred languages. Only `status` asks the app, and without it reports what it would show |
 | `keybinds [list]`, `keybinds check` | Shortcuts; custom Herdr commands this client cannot reach |
 | `caffeine [status]`, `caffeine on\|off\|toggle [--for 30m]` | Keep the machine awake |
 | `sound [list]`, `sound play [done\|request]`, `bell` | Sounds play at `sound.volume` percent (`config set sound.volume 30`) |
@@ -365,6 +382,44 @@ The change applies live; `config get focus_follows_mouse` reads it back.
 An unnamed tab shows its number. To show its agent's terminal title instead,
 run `sheprd config set tab_labels.agent_title true`.
 
+### Working inside a virtual Mac
+
+`machine agent`, `exec`, `screenshot`, `click`, `type`, and `key` work
+inside a running virtual Mac through Sheprd Agent, a small app in the guest
+that answers the app over the machine's vsock device: no network, and
+nothing outside the machine can reach it. A new machine's tab shows a
+setup guide beside it that walks through what follows and checks each
+step through the agent; `machine setup NAME` or Settings > Virtual Macs >
+Set up for agents shows it again. Every machine boots with a
+read-only disk from the app, Sheprd Agent, which shows on its desktop.
+Install the agent once by double-clicking Install Sheprd Agent.pkg there:
+it puts `Sheprd Agent.app` in `/Applications` and starts it at each login.
+Allow it when macOS asks about Accessibility (for input), and switch it on
+in the Screen & System Audio Recording pane the installer opens (for
+screenshots: macOS shows no prompt for it), then shut the machine down and
+keep it as an image, so every machine made from it has the agent and its
+permissions. It needs the user logged in, so turn on automatic login before
+saving the image. The disk comes with builds made by `just bundle`; release
+builds do not carry it yet.
+
+`machine exec` runs a command as that user, with a Terminal's `PATH`, in
+`--cwd` when given (`~/` being their home). Its output comes back as
+`cloud exec`'s does, and it exits 0 when the command did. At its `--timeout`, the agent stops the command and everything it started, and the command exits 7. Points for
+`machine click` are in the screenshot's pixels, top-left first, so an agent
+reads `machine screenshot` and clicks what it sees. Like `cloud exec`, none
+of these asks first: they act only inside a machine the user made, as the
+agent's own shell does on this one. macOS ignores synthetic input in
+password fields and some of its own prompts, and signing in to an Apple
+Account still needs the user.
+
+```sh
+sheprd machine exec test-1 -- xcodebuild -scheme App test
+sheprd machine screenshot test-1 /tmp/screen.png
+sheprd machine click test-1 1280 812
+sheprd machine type test-1 "hello"
+sheprd machine key test-1 cmd+s
+```
+
 ### Remote control
 
 | Command | What it does |
@@ -469,7 +524,7 @@ act on the repository of the directory the client starts `sheprd mcp` in.
 | `wait` | |
 
 Requests `sheprd mcp` sends are marked as relayed for the client, by the name
-it gave (control protocol 14). The app refuses them while the switch is off,
+it gave (control protocol 16). The app refuses them while the switch is off,
 and when one opens a dialog the window says which client asked. Nothing that
 removes or moves work happens until the user confirms in that dialog. Quitting
 the app, running any palette command, stopping processes on ports, `cloud
@@ -588,7 +643,7 @@ requests keep their original flat form (`browser.open`, `browser.reload`,
 `browser.feedback`, `notes.send`). A request `sheprd mcp` relays also carries
 `"via": {"mcp": {"client": NAME}}`, in its `caller` or, for
 `browser.feedback`, beside `pane_id`. `status` reports the protocol version,
-currently 14. Requests and responses are bounded to 256 KiB, a request that
+currently 16. Requests and responses are bounded to 256 KiB, a request that
 waits says for how long (at most 600 seconds), and the app answers at most a
 few requests at a time.
 

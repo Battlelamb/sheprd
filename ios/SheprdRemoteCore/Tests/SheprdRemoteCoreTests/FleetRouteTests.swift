@@ -124,6 +124,34 @@ struct FleetRouteTests {
         #expect(decoded.signedRev == 6 && decoded.signedMs == 1)
     }
 
+    @Test func aDirectRefreshKeepsTheCheckedRevFloor() throws {
+        let host = Host()
+        let id = host.id.hexString
+        let keys = RelayKeyPair()
+        let checked = try #require(Self.status([try host.route(host.record(rev: 5))]).relayRecord(for: id, keys: keys))
+        // A direct connection saves a fresh record, which carries no rev.
+        var direct = checked
+        direct.signedRev = nil
+        direct.signedMs = nil
+        let saved = direct.keepingSignedRev(of: checked)
+        #expect(saved.signedRev == 5)
+        // So an older record a lagging computer serves is still refused.
+        let older = Self.status([try host.route(host.record(rev: 4))])
+        #expect(older.relayRecord(for: id, keys: keys, replacing: saved) == nil)
+        // A newer floor wins, and a record with none keeps none.
+        var newer = checked
+        newer.signedRev = 7
+        #expect(newer.keepingSignedRev(of: checked).signedRev == 7)
+        #expect(direct.keepingSignedRev(of: nil).signedRev == nil)
+    }
+
+    @Test func linkKeysDecode() throws {
+        let key = Data(repeating: 4, count: 65)
+        let json = #"{"heads":[],"links":["AA"],"link_keys":{"AA":"\#(Base64URL.encode(key))","bb":"!"}}"#
+        let status = try JSONDecoder().decode(API.FleetStatus.self, from: Data(json.utf8))
+        #expect(status.linkedKeys == ["aa": key])
+    }
+
     @Test func routesDecode() throws {
         let json = #"{"heads":[],"routes":[{"host":"h","certificate":"c","key":"k","record":"r","signature":"s"}]}"#
         let status = try JSONDecoder().decode(API.FleetStatus.self, from: Data(json.utf8))

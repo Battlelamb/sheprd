@@ -109,6 +109,18 @@ public struct RelayRecord: Codable, Hashable, Sendable {
         return moved ? record : nil
     }
 
+    /// This record keeping the highest fleet record `rev` `old` was checked
+    /// at: a record a computer gives directly carries none, and dropping the
+    /// floor would let an older signed record, served by a computer that
+    /// lags, replace it.
+    public func keepingSignedRev(of old: RelayRecord?) -> RelayRecord {
+        guard let floor = old?.signedRev, floor > (signedRev ?? 0) else { return self }
+        var kept = self
+        kept.signedRev = floor
+        kept.signedMs = old?.signedMs
+        return kept
+    }
+
     /// What `POST /api/relay` sends: the public halves, base64url.
     public var enrollment: API.RelayKeys? {
         RelayKeyPair(dialKey: dialKey, tunnelKey: tunnelKey).enrollment

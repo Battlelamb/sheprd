@@ -30,7 +30,7 @@ use axum::{
     extract::{Query, State},
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 /// Operations one sync may carry.
 pub(super) const MAX_SYNC_OPS: usize = 64;
@@ -66,6 +66,11 @@ pub(super) struct Status {
     /// The hosts the member linked a device key for.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     links: Vec<String>,
+    /// The device key each of those links names, base64url, by host: what
+    /// the phone checks against the key it made before keeping a host, as
+    /// a link the fleet holds may be an earlier one.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    link_keys: BTreeMap<String, String>,
     /// Where each Sheprd host and computer member says it takes direct
     /// connections, by host: what a phone tries before its relays.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -174,6 +179,16 @@ fn read(fleet: &Fleet, member: Option<&MemberId>, now_ms: u64) -> Status {
         })
         .collect();
     let links = linked.iter().map(ToString::to_string).collect();
+    let link_keys = live
+        .map(|member| {
+            state
+                .links
+                .iter()
+                .filter(|((phone, _), _)| phone == member)
+                .map(|((_, host), key)| (host.to_string(), sync::text(key)))
+                .collect()
+        })
+        .unwrap_or_default();
     let reach = state
         .hosts
         .iter()
@@ -189,6 +204,7 @@ fn read(fleet: &Fleet, member: Option<&MemberId>, now_ms: u64) -> Status {
         next,
         join: live.map_or(join, |_| Some(Standing::Member)),
         links,
+        link_keys,
         reach,
         routes,
     }

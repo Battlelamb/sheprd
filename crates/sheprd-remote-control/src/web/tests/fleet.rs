@@ -256,6 +256,11 @@ async fn a_phones_link_and_removal_go_through_sync() {
     assert_eq!(answer["ops"], json!(sync::encode_ops([&link])));
     let (_, body) = call(&state, &token, get(&path)).await;
     assert_eq!(body["links"], json!([own.to_string()]));
+    // With the device key each link names, for the phone to check its own.
+    assert_eq!(
+        body["link_keys"],
+        json!({ own.to_string(): sync::text(&device_key(9)) })
+    );
     // The linked host's record as its CA signed it, which the phone checks
     // against the fingerprint it pins: the certificate hashes to the host
     // id, and its key signed the record.

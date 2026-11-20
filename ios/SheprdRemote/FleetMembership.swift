@@ -235,9 +235,19 @@ final class FleetMembership {
         guard var record, record.admitted else { return }
         let reason = hosts.count == 1 ? "Add \(hosts[0].name)" : "Add \(hosts.count) computers"
         var made: [FleetPendingLink] = []
+        // Hosts whose key was made just now: only theirs may go on a
+        // refusal. A key reused from an earlier post waits for that post.
+        var fresh: [String] = []
         do {
             for host in hosts where FleetLog.data(hex: host.id) != nil {
+                // A key still waiting for its link is used again: its first
+                // post may yet land, and a new key would orphan it.
+                if let waiting = FleetPendingLink.waiting(for: host.id, in: record.pendingLinks ?? []) {
+                    made.append(waiting)
+                    continue
+                }
                 let key = try DeviceKey.create()
+                fresh.append(host.id)
                 made.append(FleetPendingLink(
                     host: host.id, name: host.name, keyKind: key.kind, keyData: key.data,
                     publicKey: DeviceKeyEncoding.publicKey(key.publicKey), point: key.publicKey.x963Representation
@@ -261,7 +271,7 @@ final class FleetMembership {
         // may only mean that computer has not caught up.
         switch posted {
         case .nothing, .refused(fresh: true):
-            settleLinks(status, refused: made.map(\.host))
+            settleLinks(status, refused: fresh)
         case .taken, .refused(fresh: false), .unknown:
             settleLinks(status)
         }
@@ -273,7 +283,7 @@ final class FleetMembership {
         guard var record, let pending = record.pendingLinks, !pending.isEmpty,
               let through = through
         else { return }
-        let (done, waiting) = FleetPendingLink.settle(pending, linked: status.links, refused: refused)
+        let (done, waiting) = FleetPendingLink.settle(pending, linked: status.linkedKeys, refused: refused)
         for link in done {
             guard let device = FleetLog.linkDevice(key: link.point), let fingerprint = Fingerprint(link.host) else { continue }
             let enrolled = HostState.Enrolled(

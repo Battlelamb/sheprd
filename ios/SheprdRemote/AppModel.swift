@@ -386,7 +386,9 @@ final class AppModel {
         guard let index = computers.firstIndex(where: { $0.device == device }),
               computers[index].relay != record
         else { return }
-        computers[index].relay = record
+        // The highest fleet record checked for it stays, so a lagging
+        // computer cannot roll it back to an older one.
+        computers[index].relay = record?.keepingSignedRev(of: computers[index].relay)
         save()
         learnRelays(of: record)
     }

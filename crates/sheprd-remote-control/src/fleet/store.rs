@@ -22,9 +22,11 @@ const LOG: &str = "log.bin";
 /// The history of a fleet being joined, until it admits this computer.
 const JOINING: &str = "joining.bin";
 const PEERS: &str = "peers.json";
-/// At worst, suspensions take about 22 MB of it, the removals kept to
-/// check again about 6 MB, and what each peer holds about 2 MB:
-/// `tests/folding.rs` checks the sum stays under it.
+/// At worst, suspensions take about 23.5 MB of it (a save's first write
+/// keeping what the file held beside what is held, each folded target
+/// still within its bound), the removals kept to check again about 6 MB,
+/// and what each peer holds about 2 MB: `tests/folding.rs` checks the sum
+/// stays under it.
 pub(super) const MAX_PEERS: u64 = 32 * 1024 * 1024;
 
 fn path(state_dir: &Path, name: &str) -> PathBuf {
@@ -289,6 +291,30 @@ pub(super) fn save(state_dir: &Path, inner: &Inner, on_disk: &mut Suspensions) -
         unconfirmed: inner.unconfirmed.clone(),
         folded: inner.folded.clone(),
     };
+    let first = merged(&now, on_disk);
+    write_peers(state_dir, inner, &first)?;
+    *on_disk = first;
+    if let Some(log) = &inner.log {
+        write_private(&path(state_dir, LOG), &saved::encode(log)?)?;
+        remove(&path(state_dir, JOINING))?;
+    } else if let Some(joining) = &inner.joining {
+        write_private(&path(state_dir, JOINING), &saved::encode(joining)?)?;
+    }
+    if *on_disk != now {
+        match write_peers(state_dir, inner, &now) {
+            Ok(()) => *on_disk = now,
+            Err(error) => {
+                tracing::warn!(error = %error, "could not drop settled suspensions; kept until the next save");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The suspensions held `now` with those `on_disk` beside them, as the
+/// first write of a save keeps them: none dropped, and each folded target
+/// still within its bound of ids, the rest in its overflow.
+pub(super) fn merged(now: &Suspensions, on_disk: &Suspensions) -> Suspensions {
     let mut first = now.clone();
     for (id, kept) in &on_disk.unconfirmed {
         first.unconfirmed.entry(*id).or_insert_with(|| kept.clone());
@@ -309,25 +335,10 @@ pub(super) fn save(state_dir: &Path, inner: &Inner, on_disk: &mut Suspensions) -
                 }
                 overflow.pinned = overflow.pinned.max(kept.pinned);
             }
+            entry.cap();
         }
     }
-    write_peers(state_dir, inner, &first)?;
-    *on_disk = first;
-    if let Some(log) = &inner.log {
-        write_private(&path(state_dir, LOG), &saved::encode(log)?)?;
-        remove(&path(state_dir, JOINING))?;
-    } else if let Some(joining) = &inner.joining {
-        write_private(&path(state_dir, JOINING), &saved::encode(joining)?)?;
-    }
-    if *on_disk != now {
-        match write_peers(state_dir, inner, &now) {
-            Ok(()) => *on_disk = now,
-            Err(error) => {
-                tracing::warn!(error = %error, "could not drop settled suspensions; kept until the next save");
-            }
-        }
-    }
-    Ok(())
+    first
 }
 
 /// Writes `peers.json` from `inner`, with `unconfirmed` as its

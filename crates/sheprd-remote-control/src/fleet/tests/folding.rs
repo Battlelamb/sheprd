@@ -325,17 +325,16 @@ async fn acknowledgments_keep_only_removals_sent_and_held() {
     assert!(!inner.held.contains_key(&MemberId([0x77; 32])));
 }
 
-#[test]
-fn the_most_suspensions_kept_fit_in_the_peers_file() {
-    let dir = tempfile::tempdir().unwrap();
+/// The most suspensions held: every live signer's removals kept apart and
+/// folded, naming every live member, and every member no longer live
+/// with each live member folded and pinned. `variant` sets their ids
+/// apart, so two such sets share none.
+fn full(variant: u8) -> Suspensions {
     let live = MAX_COMPUTERS + MAX_PHONES;
     let targets: Vec<MemberId> = (0..live)
         .map(|seed| MemberId([u8::try_from(seed).unwrap(); 32]))
         .collect();
-    // Every live signer's removals kept apart and folded, naming every
-    // live member, and every member no longer live with each live member
-    // folded and pinned.
-    let mut inner = Inner::default();
+    let mut inner = Suspensions::default();
     for seed in 0..live + MAX_TOMBSTONES {
         let mut signer = [0xee; 32];
         signer[..8].copy_from_slice(&u64::try_from(seed).unwrap().to_be_bytes());
@@ -344,6 +343,7 @@ fn the_most_suspensions_kept_fit_in_the_peers_file() {
         if live {
             for turn in 0..MAX_UNCONFIRMED_PER_SIGNER {
                 let mut id = signer.0;
+                id[29] = variant;
                 id[31] = u8::try_from(turn).unwrap();
                 inner.unconfirmed.insert(
                     OpId(id),
@@ -365,6 +365,7 @@ fn the_most_suspensions_kept_fit_in_the_peers_file() {
                     ids: (0..ids)
                         .map(|turn| {
                             let mut id = signer.0;
+                            id[29] = variant;
                             id[30] = 1;
                             id[31] = u8::try_from(turn).unwrap();
                             let removal = FoldedRemoval {
@@ -392,6 +393,27 @@ fn the_most_suspensions_kept_fit_in_the_peers_file() {
             );
         }
     }
+    inner
+}
+
+#[test]
+fn the_most_suspensions_kept_fit_in_the_peers_file() {
+    let dir = tempfile::tempdir().unwrap();
+    // A save's first write keeps what is held beside what the file held:
+    // both full, sharing nothing.
+    let merged = crate::fleet::store::merged(&full(1), &full(2));
+    for targets in merged.folded.values() {
+        assert!(
+            targets
+                .values()
+                .all(|folded| folded.ids.len() <= MAX_FOLDED_IDS)
+        );
+    }
+    let inner = Inner {
+        unconfirmed: merged.unconfirmed,
+        folded: merged.folded,
+        ..Inner::default()
+    };
     crate::fleet::store::save(dir.path(), &inner, &mut Default::default()).unwrap();
     let written = std::fs::metadata(dir.path().join("fleet/peers.json"))
         .unwrap()
@@ -507,4 +529,41 @@ async fn an_overflowed_target_ends_at_its_time() {
             .get(&signer)
             .is_none_or(|folded| !folded.contains_key(&target))
     );
+}
+
+#[test]
+fn a_saves_merge_keeps_the_newest_ids_and_folds_the_rest() {
+    let (signer, target) = (MemberId([1; 32]), MemberId([2; 32]));
+    let folded = |first: u8, since_ms: u64| Suspensions {
+        folded: BTreeMap::from([(
+            signer,
+            BTreeMap::from([(
+                target,
+                FoldedTarget {
+                    ids: (0..MAX_FOLDED_IDS)
+                        .map(|turn| {
+                            let turn = u8::try_from(turn).unwrap();
+                            let removal = FoldedRemoval {
+                                since_ms: since_ms + u64::from(turn),
+                                named: BTreeSet::from([target, MemberId([first; 32])]),
+                                pinned: false,
+                            };
+                            (OpId([first + turn; 32]), removal)
+                        })
+                        .collect(),
+                    overflow: None,
+                },
+            )]),
+        )]),
+        ..Suspensions::default()
+    };
+    // Held now: newer; on disk: older, sharing no id.
+    let merged = crate::fleet::store::merged(&folded(10, 2_000), &folded(50, 1_000));
+    let kept = &merged.folded[&signer][&target];
+    assert_eq!(kept.ids.len(), MAX_FOLDED_IDS);
+    assert!(kept.ids.values().all(|removal| removal.since_ms >= 2_000));
+    let overflow = kept.overflow.as_ref().unwrap();
+    let latest = 1_000 + u64::try_from(MAX_FOLDED_IDS).unwrap() - 1;
+    assert_eq!(overflow.since_ms, latest);
+    assert_eq!(overflow.named[&MemberId([50; 32])], latest);
 }

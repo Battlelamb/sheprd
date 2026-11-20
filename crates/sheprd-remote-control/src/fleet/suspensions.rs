@@ -95,6 +95,39 @@ impl FoldedTarget {
             .is_some_and(|overflow| overflow.holds(log, signer, now_ms))
     }
 
+    /// Keeps at most [`MAX_FOLDED_IDS`] removals by id, one once they are
+    /// pinned (the signer no longer a member), the newest: the rest go to
+    /// the overflow, which keeps their latest arrival and what they named.
+    pub(super) fn cap(&mut self) {
+        let cap = if self.ids.values().any(|removal| removal.pinned) {
+            1
+        } else {
+            MAX_FOLDED_IDS
+        };
+        while self.ids.len() > cap {
+            let Some(oldest) = self
+                .ids
+                .iter()
+                .min_by_key(|(id, removal)| (removal.since_ms, **id))
+                .map(|(id, _)| *id)
+            else {
+                break;
+            };
+            let Some(removal) = self.ids.remove(&oldest) else {
+                break;
+            };
+            let overflow = self.overflow.get_or_insert_with(Overflow::default);
+            overflow.since_ms = overflow.since_ms.max(removal.since_ms);
+            for name in &removal.named {
+                let at = overflow.named.entry(*name).or_insert(removal.since_ms);
+                *at = (*at).max(removal.since_ms);
+            }
+            if removal.pinned {
+                overflow.pinned = overflow.pinned.max(Some(removal.since_ms));
+            }
+        }
+    }
+
     /// Adds a removal that arrived at `since_ms` naming `named`, by a
     /// signer `live` or not: by id while there is room, else to the
     /// overflow.
@@ -265,13 +298,7 @@ pub(super) fn settle(inner: &mut Inner, now_ms: u64, mut refused: BTreeSet<OpId>
                 removal.pinned = true;
                 removal.named.clear();
             }
-            while kept.ids.len() > 1 {
-                if let Some((_, removal)) = kept.ids.pop_first() {
-                    let overflow = kept.overflow.get_or_insert_with(Overflow::default);
-                    overflow.since_ms = overflow.since_ms.max(removal.since_ms);
-                    overflow.pinned = overflow.pinned.max(Some(removal.since_ms));
-                }
-            }
+            kept.cap();
             if let Some(overflow) = &mut kept.overflow {
                 let stood = overflow
                     .named

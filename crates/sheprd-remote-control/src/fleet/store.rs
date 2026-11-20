@@ -54,7 +54,19 @@ struct Peers {
     unconfirmed: BTreeMap<String, Kept>,
     #[serde(default)]
     proven: BTreeMap<String, Proven>,
+    /// What recorded `proven`: [`PROVEN_VERSION`] once keys are recorded
+    /// only for a session that proved the member's fleet key. Absent, as
+    /// from earlier builds, a tunnel handshake alone recorded them.
+    #[serde(default)]
+    proven_version: u32,
 }
+
+/// `proven` holds only keys a session proved with the member's fleet key
+/// (`control::fleet::removal`). Earlier builds recorded a key on the
+/// tunnel handshake alone, which any member's bundle could name, so their
+/// entries are dropped on load: a key counts as a member's only once a
+/// proven session records it again.
+const PROVEN_VERSION: u32 = 2;
 
 /// A member's proven keys: one, as an earlier build kept it, or several.
 #[derive(Serialize, Deserialize)]
@@ -106,7 +118,13 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
                 ))
             })
             .collect(),
-        proven: proven(&peers),
+        // Keys an earlier build recorded on a handshake alone do not count;
+        // a scrub still revokes them all (`proven_keys`).
+        proven: if peers.proven_version == PROVEN_VERSION {
+            proven(&peers)
+        } else {
+            BTreeMap::new()
+        },
         unconfirmed: peers
             .unconfirmed
             .iter()
@@ -246,6 +264,7 @@ pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
                 )
             })
             .collect(),
+        proven_version: PROVEN_VERSION,
     };
     let json = serde_json::to_vec(&peers).map_err(|_| crate::desktop::Error::RecordFormat)?;
     write_private(&path(state_dir, PEERS), &json)?;

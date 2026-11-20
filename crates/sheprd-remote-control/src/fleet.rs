@@ -471,8 +471,7 @@ impl Fleet {
 
     fn save(&self, inner: &Inner) -> Result<()> {
         let saved = store::save(&self.state_dir, inner);
-        self.unsaved
-            .store(saved.is_err(), Ordering::SeqCst);
+        self.unsaved.store(saved.is_err(), Ordering::SeqCst);
         saved
     }
 

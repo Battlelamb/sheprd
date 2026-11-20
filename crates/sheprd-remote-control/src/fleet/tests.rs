@@ -60,6 +60,8 @@ mod sessions;
 #[cfg(unix)]
 mod settling;
 #[cfg(unix)]
+mod startup;
+#[cfg(unix)]
 mod store;
 #[cfg(unix)]
 mod unsaved;

@@ -377,9 +377,11 @@ impl SheprdWindow {
         cx.spawn_in(window, async move |this, cx| {
             let outcome = saved.await;
             let _ = this.update_in(cx, |this, window, cx| {
-                // Paired and saved: the fleet finishes over the SSH the
-                // pairing opened, whatever this page does next.
-                if let (Outcome::Saved, Some(fleet)) = (&outcome, fleet) {
+                // Paired: the fleet finishes over the SSH the pairing opened,
+                // whatever this page does next. The other computer already
+                // acted on its Allow, so a Herdr check or a device save that
+                // failed here never drops it; `paired` retries its own SSH.
+                if let Some(fleet) = fleet {
                     crate::fleet::bluetooth::paired(cx, target, fleet);
                 }
                 let Some(setup) = &mut this.menu.nearby_setup else {

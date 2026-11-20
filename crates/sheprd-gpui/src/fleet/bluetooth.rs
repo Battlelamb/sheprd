@@ -93,7 +93,7 @@ pub(crate) fn found(cx: &mut App, done: impl FnOnce(Result<Hint, Error>, &mut Ap
 /// failure shows in Settings > Fleet; the two stay paired either way.
 pub(crate) fn paired(cx: &mut App, target: String, fleet: ApprovedFleet) {
     let Some(client) = Supervisor::client(cx) else {
-        Fleet::fail(cx, Error::NoDaemon.to_string());
+        Fleet::pairing_done(cx, Some(Error::NoDaemon.to_string()));
         return;
     };
     let ours = Fleet::member_of(cx);
@@ -116,9 +116,7 @@ pub(crate) fn paired(cx: &mut App, target: String, fleet: ApprovedFleet) {
             }
         }
         cx.update(|cx| {
-            if let Err(error) = outcome {
-                Fleet::fail(cx, error.to_string());
-            }
+            Fleet::pairing_done(cx, outcome.err().map(|error| error.to_string()));
             Fleet::refresh(cx);
         });
     })

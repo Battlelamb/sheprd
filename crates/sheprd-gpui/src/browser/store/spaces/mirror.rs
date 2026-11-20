@@ -70,10 +70,19 @@ impl TabFields {
             }
         }
         for (at, axis, new) in &self.splits {
-            if !panes.contains(new) && panes.contains(at) {
-                // A split the layout refuses is left to the document.
-                let _ = panes.split(at, *axis, new.clone());
+            if panes.contains(new) {
+                continue;
             }
+            // Beside the pane it was opened beside, or, when that one closed
+            // since (here or elsewhere), beside one still there: the pane
+            // itself is what must stay.
+            let at = if panes.contains(at) {
+                at.clone()
+            } else {
+                panes.first().clone()
+            };
+            // A split the layout refuses is left to the document.
+            let _ = panes.split(&at, *axis, new.clone());
         }
         for terminal in last {
             if panes.count() > 1 {

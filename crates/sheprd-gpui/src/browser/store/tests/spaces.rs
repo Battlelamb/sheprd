@@ -154,3 +154,29 @@ fn a_long_shared_title_is_bounded_as_the_store_keeps_titles() {
     .unwrap();
     assert!(parse(&bytes).is_ok(), "the saved tabs still read");
 }
+
+#[test]
+fn a_tab_whose_panes_all_change_keeps_the_new_one_in_a_merge() {
+    let mut panes = Panes::single(id("t2"));
+    panes
+        .split(&id("t2"), crate::core_terminals::panes::Axis::Row, id("t1"))
+        .unwrap();
+    let (mut store, scope, mut document, tab) = shared(panes);
+    // Both panes replaced by one here; the tab named elsewhere.
+    store.visited(
+        tab,
+        Some(Location::core_terminal(Panes::single(id("t3")), false)),
+        None,
+    );
+    let before = document.clone();
+    document.tabs[0].name = Some("api".into());
+    let local = store.shared_view(&scope);
+    let edits = crate::core_terminals::spaces_edits_for_test(&before, &local);
+    let pending = spaces::Pending::of(&edits);
+    store.mirror_shared(&scope, &document, &pending, |_| false);
+    assert_eq!(panes_of(&store, tab), Panes::single(id("t3")));
+    let Some(Location::CoreTerminal { name, .. }) = &store.get(tab).unwrap().location else {
+        panic!("a terminal tab");
+    };
+    assert_eq!(name.as_deref(), Some("api"));
+}

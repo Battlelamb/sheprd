@@ -341,11 +341,14 @@ final class FleetMembership {
     }
 
     /// Keeps `ops` as unconfirmed, or forgets them all with none.
-    private func remember(_ ops: [FleetLog.Op]) {
-        guard var record else { return }
+    /// Whether they were kept.
+    @discardableResult
+    private func remember(_ ops: [FleetLog.Op]) -> Bool {
+        guard var record else { return false }
         let encoded = ops.compactMap { try? $0.encode() }.map(Base64URL.encode)
+        guard encoded.count == ops.count else { return false }
         record.unconfirmed = encoded.isEmpty ? nil : encoded
-        if record != self.record { save(record) }
+        return record == self.record || save(record)
     }
 
     /// Settles unconfirmed operations against a fresh read from `computer`:
@@ -408,17 +411,17 @@ final class FleetMembership {
         let after = unconfirmedOps
         let attempt = await FleetAttempt.first(candidates) { computer in
             let client = client(computer)
-            let ops: FleetClient.Signed
             if let signed {
-                ops = signed
-            } else {
-                ops = try await client.prepare(bodies, as: key.signer, at: .now, after: after)
-                signed = ops
-                // Kept before it is posted: until a computer confirms it
-                // applied, it is sent again, and new ones follow it.
-                remember(ops.ops)
+                try await client.post(signed)
+                return
             }
-            try await client.post(ops)
+            let ops = try await client.prepare(bodies, as: key.signer, at: .now, after: after)
+            // Kept before it is posted: until a computer confirms it
+            // applied, it is sent again, and new ones follow it. Not kept
+            // (a Keychain write failed), it is not posted at all.
+            let kept = remember(ops.ops)
+            if kept { signed = ops }
+            try await client.post(ops, kept: kept)
         } failed: { computer, error in
             log.error("fleet: \(computer.name, privacy: .public) did not take it: \(error.localizedDescription, privacy: .public)")
         }
@@ -489,12 +492,17 @@ final class FleetMembership {
         })
     }
 
-    private func save(_ record: Record) {
+    /// Saves `record` to the Keychain; whether that landed. Only a saved
+    /// record replaces the one in memory.
+    @discardableResult
+    private func save(_ record: Record) -> Bool {
         do {
             try Keychain.write(JSONEncoder().encode(record), account: Self.account)
             self.record = record
+            return true
         } catch {
             problem = error.localizedDescription
+            return false
         }
     }
 
@@ -516,6 +524,8 @@ final class FleetMembership {
         case FleetClientError.noFleet: "That computer is no longer in a fleet."
         case FleetClientError.notMember: "This \(UIDevice.current.model) is not a member of that fleet yet."
         case let FleetClientError.refused(count): "The fleet refused \(count == 1 ? "it" : "\(count) of them")."
+        case FleetClientError.unapplied: "Your computers have not applied it yet. This \(UIDevice.current.model) sends it again until one does."
+        case FleetClientError.notKept: "This \(UIDevice.current.model) could not save it, so nothing was sent."
         case RemoteError.status(429, _): "Too many devices are waiting to join. Try again in a few minutes."
         case RemoteError.status(404, _): "That computer's Sheprd does not know fleets yet. Update it first."
         default: error.localizedDescription

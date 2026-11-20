@@ -7,6 +7,9 @@
 //! <instructions>
 //! the user's chat system prompt
 //! </instructions>
+//! <chat>
+//! what the agent runs as, and how to start another like it
+//! </chat>
 //! <memory>
 //! how to keep and search Sheprd's repository memory, and what it holds
 //! </memory>
@@ -29,6 +32,8 @@ const OPEN: &str = "<sheprd";
 const CLOSE: &str = "</sheprd>";
 const INSTRUCTIONS: &str = "<instructions>\n";
 const INSTRUCTIONS_END: &str = "\n</instructions>";
+const CHAT: &str = "<chat>\n";
+const CHAT_END: &str = "</chat>\n";
 const MEMORY: &str = "<memory>\n";
 const MEMORY_END: &str = "</memory>\n";
 const RECALLED: &str = "<recalled>\n";
@@ -59,6 +64,8 @@ pub(crate) struct Told {
     pub(crate) place: Option<Place>,
     /// The instructions as the note wrote them, see [`escape`].
     pub(crate) instructions: Option<String>,
+    /// What the agent was told it runs as, see [`escape`].
+    pub(crate) chat: Option<String>,
     /// Whether a note explained Sheprd's repository memory.
     pub(crate) memory: bool,
 }
@@ -70,6 +77,9 @@ impl Told {
         }
         if let Some(instructions) = instructions_of(note) {
             self.instructions = Some(instructions.to_owned());
+        }
+        if let Some(chat) = chat_of(note) {
+            self.chat = Some(chat.to_owned());
         }
         self.memory |= note.contains(MEMORY);
     }
@@ -96,6 +106,11 @@ pub(super) fn instructions(instructions: &str) -> String {
     format!("{INSTRUCTIONS}{instructions}{INSTRUCTIONS_END}\n")
 }
 
+/// The block saying what the agent runs as, already [`escape`]d.
+pub(super) fn chat(guide: &str) -> String {
+    format!("{CHAT}{guide}{CHAT_END}")
+}
+
 /// The memory block for `guide`, which Sheprd writes itself.
 pub(super) fn memory(guide: &str) -> String {
     format!("{MEMORY}{guide}{MEMORY_END}")
@@ -112,10 +127,12 @@ pub(super) fn recalled(lines: &str) -> String {
 }
 
 /// `text` with nothing in it that would end the note early or read as
-/// the instructions, memory, or recalled block: only Sheprd writes those
-/// tags.
+/// the instructions, chat, memory, or recalled block: only Sheprd writes
+/// those tags.
 pub(super) fn escape(text: &str) -> String {
     text.replace(CLOSE, "</ sheprd>")
+        .replace("</chat>", "</ chat>")
+        .replace(CHAT.trim_end(), "< chat>")
         .replace("</instructions>", "</ instructions>")
         .replace("<instructions>", "< instructions>")
         .replace("</memory>", "</ memory>")
@@ -186,6 +203,11 @@ fn place_of(note: &str) -> Option<Place> {
         device,
         opens_paths,
     })
+}
+
+fn chat_of(note: &str) -> Option<&str> {
+    let (_, rest) = note.split_once(CHAT)?;
+    Some(rest.split_once(CHAT_END)?.0)
 }
 
 fn instructions_of(note: &str) -> Option<&str> {

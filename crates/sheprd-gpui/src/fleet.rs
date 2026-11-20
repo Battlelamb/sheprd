@@ -343,6 +343,8 @@ impl Fleet {
             // The first answer counts as a change even when it says no
             // fleet: devices of a fleet left while Sheprd was closed go.
             Ok(view) => {
+                // The daemon answered: an earlier failure no longer holds.
+                self.error = None;
                 let changed = !self.answered || self.view != view;
                 self.answered = true;
                 self.forget_stale_links(view.as_ref());

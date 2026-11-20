@@ -245,6 +245,10 @@ pub(crate) fn router(state: Shared) -> Router {
             "/api/term/{pane}/upload",
             post(terminal::upload).layer(DefaultBodyLimit::max(uploads::MAX_UPLOAD + 1024)),
         )
+        .route(
+            "/api/term/{pane}/file",
+            post(terminal::file).layer(DefaultBodyLimit::max(uploads::MAX_FILE + 1024)),
+        )
         .route("/api/term/{pane}/action", post(terminal::action))
         .route("/api/term/{pane}/rename", post(terminal::rename))
         .route("/api/stream", get(stream::stream))
@@ -583,6 +587,7 @@ impl IntoResponse for ApiError {
                 | crate::hub::ConvertError::Refused(_),
             ))
             | Self::Hub(crate::hub::Error::SessionOnHerdr2) => StatusCode::CONFLICT,
+            Self::Hub(error) if error.worktree_kept() => StatusCode::CONFLICT,
             Self::Hub(_) | Self::NoPush => StatusCode::SERVICE_UNAVAILABLE,
         };
         // The request line only has the status. A computer without push

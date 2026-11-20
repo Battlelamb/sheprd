@@ -28,3 +28,16 @@ public enum BrowserNavigation: Equatable, Sendable {
         return .refuse
     }
 }
+
+extension BrowserNavigation {
+    /// Whether a load's failure is worth telling the reader. A load cut
+    /// short on purpose is not: another one replaced it (a tapped link, a
+    /// new window loaded here) or the decider refused it.
+    public static func reports(_ error: NSError) -> Bool {
+        let cancelled = error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled
+        // WebKitErrorFrameLoadInterruptedByPolicyChange, which WebKit's
+        // headers declare but Foundation does not.
+        let interrupted = error.domain == "WebKitErrorDomain" && error.code == 102
+        return !cancelled && !interrupted
+    }
+}

@@ -31,3 +31,15 @@ struct BrowserNavigationTests {
         #expect(BrowserNavigation.decide(nil, mainFrame: true, newWindow: false) == .refuse)
     }
 }
+
+struct BrowserFailureTests {
+    @Test func aLoadThatCouldNotReachItsHostIsReported() {
+        #expect(BrowserNavigation.reports(NSError(domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet)))
+        #expect(BrowserNavigation.reports(NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotFindHost)))
+    }
+
+    @Test func aLoadReplacedOrRefusedOnPurposeIsNot() {
+        #expect(!BrowserNavigation.reports(NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)))
+        #expect(!BrowserNavigation.reports(NSError(domain: "WebKitErrorDomain", code: 102)))
+    }
+}

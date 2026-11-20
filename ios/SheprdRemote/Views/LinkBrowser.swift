@@ -41,6 +41,8 @@ struct LinkBrowser: View {
     let url: URL
     @Environment(\.dismiss) private var dismiss
     @State private var page: WebPage
+    /// Why the last load the sheet started failed, until another starts.
+    @State private var failure: Error?
 
     init(url: URL) {
         self.url = url
@@ -60,13 +62,44 @@ struct LinkBrowser: View {
                         .opacity(page.isLoading ? 1 : 0)
                         .animation(.easeOut, value: page.isLoading)
                 }
+                .overlay {
+                    if let failure {
+                        ContentUnavailableView {
+                            Label("Can't Open This Page", systemImage: "wifi.exclamationmark")
+                        } description: {
+                            Text(failure.localizedDescription)
+                        } actions: {
+                            Button("Try Again", action: retry).buttonStyle(.borderedProminent)
+                        }
+                        .background(.background)
+                    }
+                }
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbar }
         }
         .task {
             guard page.url == nil else { return }
-            _ = page.load(url)
+            follow(page.load(url))
         }
+    }
+
+    /// Watches a load the sheet started, so a page that cannot be reached
+    /// says why instead of staying blank.
+    private func follow(_ events: some AsyncSequence<WebPage.NavigationEvent, any Error>) {
+        failure = nil
+        Task {
+            do {
+                for try await _ in events {}
+            } catch {
+                let cause = if case let WebPage.NavigationError.failedProvisionalNavigation(inner) = error { inner } else { error }
+                if BrowserNavigation.reports(cause as NSError) { failure = cause }
+            }
+        }
+    }
+
+    /// Loads the link again when nothing ever showed, else the page.
+    private func retry() {
+        if page.url == nil { follow(page.load(url)) } else { follow(page.reload()) }
     }
 
     /// The page shown now, or the link while it is still loading.
@@ -100,7 +133,7 @@ struct LinkBrowser: View {
             if page.isLoading {
                 Button("Stop", systemImage: "xmark") { page.stopLoading() }
             } else {
-                Button("Reload", systemImage: "arrow.clockwise") { _ = page.reload() }
+                Button("Reload", systemImage: "arrow.clockwise") { follow(page.reload()) }
             }
             ShareLink(item: current)
         }
@@ -111,12 +144,12 @@ struct LinkBrowser: View {
     private func history(_ items: [WebPage.BackForwardList.Item], label: String, symbol: String) -> some View {
         Menu {
             ForEach(items) { item in
-                Button(item.title.flatMap { $0.isEmpty ? nil : $0 } ?? item.url.absoluteString) { _ = page.load(item) }
+                Button(item.title.flatMap { $0.isEmpty ? nil : $0 } ?? item.url.absoluteString) { follow(page.load(item)) }
             }
         } label: {
             Label(label, systemImage: symbol)
         } primaryAction: {
-            if let item = items.first { _ = page.load(item) }
+            if let item = items.first { follow(page.load(item)) }
         }
         .disabled(items.isEmpty)
     }

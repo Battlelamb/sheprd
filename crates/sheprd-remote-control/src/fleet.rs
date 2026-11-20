@@ -416,10 +416,14 @@ impl Fleet {
             }
             Err(error) => return Err(error),
         };
+        // Checked again under the lock the answer is read under: another
+        // fleet's history may have become the log since the check above,
+        // and a caller handing over one fleet learns nothing of another.
         let inner = self.inner();
-        let log = match &inner.log {
-            Some(log) => log,
-            None => named
+        let log = match (&inner.log, named) {
+            (Some(log), Some(named)) if log.fleet() != named => return Err(Error::OtherFleet),
+            (Some(log), _) => log,
+            (None, named) => named
                 .and_then(|named| inner.joining.get(&named))
                 .map(|joining| &joining.log)
                 .ok_or(Error::NoFleet)?,

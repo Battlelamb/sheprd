@@ -294,7 +294,7 @@ final class AppModel {
         hostLinks.computers = { [weak self] in self?.computers ?? [] }
         hostLinks.onPaired = { [weak self] in self?.add($0) }
         fleetMembership.computers = { [weak self] in self?.computers ?? [] }
-        fleetMembership.onLinked = { [weak self] in self?.add($0) }
+        fleetMembership.onLinked = { [weak self] in self?.add($0) ?? false }
         fleet.onOnline = { [weak self] computer in
             self?.hostLinks.check(computer)
             self?.fleetMembership.online(computer)
@@ -327,20 +327,23 @@ final class AppModel {
         paths.start(queue: .main)
     }
 
-    func add(_ computer: Computer) {
+    /// Keeps `computer`; whether it was saved.
+    @discardableResult
+    func add(_ computer: Computer) -> Bool {
         var computer = computer
         computer.carryTags(from: computers)
         // A computer is its CA: pairing the same CA (or the same device id)
         // again replaces the old record. Names are display only.
         computers.removeAll { $0.fingerprint == computer.fingerprint || $0.device == computer.device }
         computers.append(computer)
-        save()
+        let saved = save()
         learnRelays(of: computer.relay)
         Task { await AppDelegate.enableAlerts() }
         Task { await tokens.sync(only: computer.fingerprint) }
         hostLinks.check(computer, force: true)
         // A computer in a fleet offers joining it.
         if computer.via == nil { Task { await fleetMembership.check(computer) } }
+        return saved
     }
 
     /// Turns Bluetooth presence on or off for one computer.
@@ -459,12 +462,16 @@ final class AppModel {
         Task { await GitHubReads.reader.tokens.forget(lender: computer.device) }
     }
 
-    private func save() {
+    /// Saves the paired computers; whether that landed.
+    @discardableResult
+    private func save() -> Bool {
         do {
             try ComputerStore.save(computers)
+            return true
         } catch {
             log.error("Could not save the paired computers: \(error.localizedDescription, privacy: .public)")
             message = error.localizedDescription
+            return false
         }
     }
 

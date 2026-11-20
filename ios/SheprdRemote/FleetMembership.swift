@@ -38,6 +38,10 @@ final class FleetMembership {
         var relayTunnel: Data
         /// Device keys made for hosts whose `Link` may not have landed yet.
         var pendingLinks: [FleetPendingLink]?
+        /// Operations this phone signed that no computer confirmed it
+        /// applied (base64url): sent again until one does, and followed by
+        /// any new ones, so none shares a sequence number with another.
+        var unconfirmed: [String]?
     }
 
     private(set) var record: Record?
@@ -134,6 +138,7 @@ final class FleetMembership {
             self.status = status
             route(status)
             settleLinks(status)
+            confirm(status, through: computer)
             notMember = record.admitted && status.lacks(member: record.member, in: record.fleet)
             if !record.admitted, status.join == .member {
                 var admitted = record
@@ -330,6 +335,42 @@ final class FleetMembership {
 
     // MARK: Private
 
+    /// The operations no computer confirmed applied yet.
+    private var unconfirmedOps: [FleetLog.Op] {
+        (record?.unconfirmed ?? []).compactMap { Base64URL.decode($0).flatMap { try? FleetLog.Op.decode($0) } }
+    }
+
+    /// Keeps `ops` as unconfirmed, or forgets them all with none.
+    private func remember(_ ops: [FleetLog.Op]) {
+        guard var record else { return }
+        let encoded = ops.compactMap { try? $0.encode() }.map(Base64URL.encode)
+        record.unconfirmed = encoded.isEmpty ? nil : encoded
+        if record != self.record { save(record) }
+    }
+
+    /// Settles unconfirmed operations against a fresh read from `computer`:
+    /// forgotten once the fleet applied them there, else sent to it again,
+    /// as the same bytes, until it applies or refuses them.
+    private func confirm(_ status: API.FleetStatus, through computer: Computer) {
+        let ops = unconfirmedOps
+        guard let last = ops.last, let next = status.next else { return }
+        if next.seq > last.seq {
+            remember([])
+            return
+        }
+        let client = client(computer)
+        Task {
+            do {
+                try await client.post(FleetClient.Signed(ops: ops, heads: status.heads))
+                if self.unconfirmedOps == ops { remember([]) }
+            } catch FleetClientError.refused {
+                if self.unconfirmedOps == ops { remember([]) }
+            } catch {
+                log.info("fleet: \(computer.name, privacy: .public) has not applied this phone's operations yet")
+            }
+        }
+    }
+
     /// How signing and posting ended.
     private enum Posted {
         /// Nothing reached a computer.
@@ -364,14 +405,18 @@ final class FleetMembership {
         // Signed once, by the first computer that answers its fleet: a post
         // whose answer is lost goes to the next computer as the same bytes.
         var signed: FleetClient.Signed?
+        let after = unconfirmedOps
         let attempt = await FleetAttempt.first(candidates) { computer in
             let client = client(computer)
             let ops: FleetClient.Signed
             if let signed {
                 ops = signed
             } else {
-                ops = try await client.prepare(bodies, as: key.signer, at: .now)
+                ops = try await client.prepare(bodies, as: key.signer, at: .now, after: after)
                 signed = ops
+                // Kept before it is posted: until a computer confirms it
+                // applied, it is sent again, and new ones follow it.
+                remember(ops.ops)
             }
             try await client.post(ops)
         } failed: { computer, error in
@@ -379,6 +424,7 @@ final class FleetMembership {
         }
         switch attempt {
         case let .done(computer):
+            remember([])
             // A computer before it may have failed: that no longer matters.
             problem = nil
             if computer.device != record.through, var moved = self.record {
@@ -388,6 +434,9 @@ final class FleetMembership {
             await check(computer)
             return .taken
         case let .refused(computer, count):
+            // Refused by the fleet: carrying them would only block what
+            // follows.
+            remember([])
             problem = Self.describe(FleetClientError.refused(count))
             return .refused(fresh: await check(computer))
         case let .failed(error):

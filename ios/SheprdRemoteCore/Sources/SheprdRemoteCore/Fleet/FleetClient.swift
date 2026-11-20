@@ -105,6 +105,9 @@ public enum FleetClientError: Error, Equatable, Sendable {
     case notMember
     /// The computer refused operations this phone signed.
     case refused(Int)
+    /// The computer took them without applying them: it waits for history
+    /// it lacks. Another computer, or this one later, may apply them.
+    case unapplied
 }
 
 /// The fleet calls of one member computer, over a transport the app
@@ -155,20 +158,40 @@ public struct FleetClient: Sendable {
     public struct Signed: Equatable, Sendable {
         public let ops: [Fleet.Op]
         public let heads: [String]
+
+        public init(ops: [Fleet.Op], heads: [String]) {
+            self.ops = ops
+            self.heads = heads
+        }
     }
+
+    /// Heads one sync may name: the daemon refuses more. They only say
+    /// what the phone knows, so fewer only make the answer longer.
+    public static let maxSyncHeads = 64
 
     /// Signs one operation per body, each on the one before, on what this
     /// computer answers. Nothing is posted: a post whose answer is lost is
     /// sent again as these same bytes, to this computer or another, never
     /// signed afresh, as two different operations with one sequence number
     /// would look like this phone's key in use in two places.
-    public func prepare(_ bodies: [Fleet.Body], as signer: Fleet.Signer, at now: Date) async throws -> Signed {
+    ///
+    /// `unconfirmed` are operations this phone signed before whose
+    /// application no computer confirmed yet. While this computer has not
+    /// applied them, the new ones follow them (and travel with them), so
+    /// they never share a sequence number.
+    public func prepare(
+        _ bodies: [Fleet.Body], as signer: Fleet.Signer, at now: Date, after unconfirmed: [Fleet.Op] = []
+    ) async throws -> Signed {
         let status = try await status(member: signer.member)
         guard status.view != nil else { throw FleetClientError.noFleet }
         guard let next = status.next else { throw FleetClientError.notMember }
         let issued = UInt64(max(0, now.timeIntervalSince1970 * 1000))
         var on = next
         var ops: [Fleet.Op] = []
+        if let last = unconfirmed.last, next.seq <= last.seq {
+            ops = unconfirmed
+            on = API.FleetNext(fleet: next.fleet, seq: last.seq + 1, parents: [try last.id().hexString])
+        }
         for body in bodies {
             var op = try Fleet.draft(on: on, signer: signer.member, issuedMs: issued, body: body)
             try op.sign(using: signer.sign)
@@ -180,7 +203,10 @@ public struct FleetClient: Sendable {
     }
 
     /// Posts `signed` at most `maxSyncOps` at a time, each batch on the
-    /// heads the last one left. Throws when the computer refused any;
+    /// heads the last one left (at most `maxSyncHeads`), then reads the
+    /// fleet back to confirm they applied: a computer that lacks their
+    /// history takes them without a refusal and only holds them waiting,
+    /// which `unapplied` reports. Throws when the computer refused any;
     /// batches before it stand. Posting the same operations again is
     /// harmless: a computer that holds one already takes it as known.
     @discardableResult
@@ -189,12 +215,16 @@ public struct FleetClient: Sendable {
         var applied: API.FleetApplied?
         for start in stride(from: 0, to: signed.ops.count, by: Self.maxSyncOps) {
             let batch = Array(signed.ops[start..<min(start + Self.maxSyncOps, signed.ops.count)])
-            let answer = try await sync(batch, heads: heads)
+            let answer = try await sync(batch, heads: Array(heads.prefix(Self.maxSyncHeads)))
             if answer.refused > 0 { throw FleetClientError.refused(answer.refused) }
             heads = answer.heads
             applied = answer
         }
-        guard let applied else { throw FleetError.invalid }
+        guard let applied, let last = signed.ops.last else { throw FleetError.invalid }
+        // The member's next sequence number moves past an operation only
+        // once it applies (the daemon drafts on what it applied).
+        let after = try await status(member: last.signer)
+        guard let next = after.next, next.seq > last.seq else { throw FleetClientError.unapplied }
         return applied
     }
 

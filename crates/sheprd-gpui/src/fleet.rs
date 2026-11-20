@@ -100,6 +100,27 @@ pub(crate) enum Standing {
 }
 
 impl Link {
+    /// Keeps what a sync found: the machine's `standing`, its `heads` and
+    /// this computer's `synced` heads, and the host it proved to be, or
+    /// whose agent it runs, when it said. A host is never forgotten for a
+    /// sync that could not tell, so a removed host the fleet shares again
+    /// is recognized ([`Fleet::forget_stale_links`]).
+    pub(super) fn settle(
+        &mut self,
+        standing: Standing,
+        heads: Vec<String>,
+        synced: Vec<String>,
+        host: Option<String>,
+    ) {
+        self.running = false;
+        self.standing = standing;
+        self.heads = heads;
+        self.synced = synced;
+        if host.is_some() {
+            self.host = host;
+        }
+    }
+
     /// Starts over, as for a machine never asked; a sync running for it
     /// still finishes.
     pub(super) fn restart(&mut self) {

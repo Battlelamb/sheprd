@@ -3,6 +3,7 @@ use crate::hub::{ChatRow, Hub, Layout, TerminalPane, Workspace};
 use sheprd_chat_protocol::{EndpointId, PermissionId};
 use sheprd_client::protocol::AgentStatus;
 
+mod activity_fixture;
 mod agent_name;
 mod chat_title;
 mod create;

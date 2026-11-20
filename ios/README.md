@@ -143,6 +143,10 @@ and nothing goes through your phone.
      opens one with text sizes and message effects at rest; `-samplePlay NAME`
      then asks for the screen effect NAME (`confetti`, `zap`, …) in its last
      reply and plays it and every bubble a second after it opens.
+   - `-sampleChat activity` opens a made-up running chat with sub-agents,
+     shells, a monitor, a plan, and changed files. In any chat,
+     `-agentPanel YES` opens its activity panel (`-agentPanel large` at full
+     height), and `-agentPanelScroll plan|changed` scrolls it to a section.
    - With `-openLink`, `-session YES` opens the chat's session sheet and
      `-draft TEXT` types into its composer (`-draft /` lists the slash
      commands).

@@ -134,3 +134,45 @@ fn claude_codes_recap_hint_is_dropped() {
         Some("recap: The release is out.")
     );
 }
+
+#[test]
+fn a_codex_approval_shows_its_question_not_its_choices() {
+    let text = screen(&[
+        "• I'll run the tests before pushing.",
+        "",
+        "  Would you like to run the following command?",
+        "",
+        "  $ cargo test",
+        "",
+        "› 1. Yes, proceed (y)",
+        "  2. Yes, and don't ask again for this command (a)",
+        "  3. No, and tell Codex what to do differently (esc)",
+    ]);
+    assert_eq!(
+        preview(&text).as_deref(),
+        Some(
+            "• I'll run the tests before pushing.\n\
+             Would you like to run the following command?\n$ cargo test"
+        )
+    );
+}
+
+#[test]
+fn a_claude_code_permission_shows_its_question_with_the_choice_moved() {
+    let text = screen(&[
+        "╭──────────────────────────────────────────╮",
+        "│ Bash command                             │",
+        "│                                          │",
+        "│   rm -rf build                           │",
+        "│                                          │",
+        "│ Do you want to proceed?                  │",
+        "│   1. Yes                                 │",
+        "│ ❯ 2. Yes, and don't ask again for rm     │",
+        "│   3. No, and tell Claude what to do (esc)│",
+        "╰──────────────────────────────────────────╯",
+    ]);
+    assert_eq!(
+        preview(&text).as_deref(),
+        Some("Bash command\nrm -rf build\nDo you want to proceed?")
+    );
+}

@@ -177,7 +177,9 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
 - A terminal agent's `preview` is what it last said, read off its visible
   screen (`native/previews`): the last paragraph above the agent's own
   input box, prompt, status, and footer, one list item to a line, at most
-  280 characters. The daemon reads only while a phone is connected: when
+  280 characters. When it waits on a numbered menu (a question, a
+  permission, an approval), it is what the menu asks, as
+  `sheprd_client::herdr::prompt` reads it, never the choices. The daemon reads only while a phone is connected: when
   an agent first shows up, when it changes state, every 10 seconds while
   it works, and 10 seconds after a failed read, at most 8 screens a pass;
   a phone that comes back after none was connected has every screen read

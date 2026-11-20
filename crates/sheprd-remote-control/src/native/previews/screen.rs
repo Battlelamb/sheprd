@@ -1,10 +1,13 @@
 //! What a terminal agent last said, read off its visible screen. An agent's
 //! own interface sits below its words: an input box, a prompt, a status or
 //! spinner line, and a footer of hints. Those are skipped from the bottom
-//! up, and the paragraph above them is the preview. The rules are a best
-//! guess at Claude Code, Codex, and OpenCode's screens, not a parser of any.
+//! up, and the paragraph above them is the preview. An agent waiting on a
+//! numbered menu (a question, a permission, an approval) shows what it
+//! asks instead, never its choices. The rules are a best guess at Claude
+//! Code, Codex, and OpenCode's screens, not a parser of any.
 
 use crate::ansi;
+use sheprd_client::herdr::prompt;
 
 /// The longest preview, in characters; a phone's row shows a few lines.
 pub(super) const MAX_CHARS: usize = 280;
@@ -34,15 +37,14 @@ const HINTS: &[&str] = &[
 const TRAILING_HINTS: &[&str] = &["(disable recaps in /config)"];
 
 /// The last paragraph above the agent's own interface on `screen` (text
-/// with SGR colors, as `pane.read` gives it), one item to a line; `None`
-/// when the screen shows nothing else.
+/// with SGR colors, as `pane.read` gives it), one item to a line, or the
+/// question of a menu it waits on; `None` when the screen shows nothing
+/// else.
 pub(super) fn preview(screen: &str) -> Option<String> {
     let screen = ansi::parse(ansi::tail(screen));
-    let lines: Vec<String> = screen
-        .lines
+    let skip = screen.lines.len().saturating_sub(MAX_LINES);
+    let lines: Vec<String> = screen.lines[skip..]
         .iter()
-        .rev()
-        .take(MAX_LINES)
         .map(|runs| {
             runs.iter()
                 .filter(|(style, _)| !style.hidden)
@@ -52,8 +54,12 @@ pub(super) fn preview(screen: &str) -> Option<String> {
                 .to_owned()
         })
         .collect();
+    if let Some(menu) = prompt::read(&lines.join("\n")) {
+        let text = menu.question.join("\n");
+        return (!text.is_empty()).then(|| bounded(&text));
+    }
     let mut paragraph = Vec::new();
-    for line in &lines {
+    for line in lines.iter().rev() {
         match (kind(line), paragraph.is_empty()) {
             (Kind::Text, _) if paragraph.len() < MAX_PARAGRAPH => paragraph.push(line.trim()),
             (Kind::Text, _) => break,

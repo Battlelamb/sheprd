@@ -78,7 +78,7 @@ ANTHROPIC_BASE_URL = "https://llm.example.com"
 
 - **From a group's menu.** A group's **…** menu lists **New Chat** with one row per agent. A row opens a tab named after the agent in the focused workspace, in the focused pane's folder.
 - **With one click.** Each tab strip offers a button per installed agent that starts its chat in a new tab; **+** still opens a terminal tab. `[chat] launcher` places the buttons: `plus` (the default, sliding out from under **+**), `beside`, `leading`, `trailing`, `button` (one button for the agent last started), or `off`.
-- **From the command line.** `sheprd chat new AGENT` does the same from a pane, and `sheprd-acp claude` starts a chat by hand in any pane.
+- **From the command line.** `sheprd chat new AGENT` does the same from a pane, and `sheprd-acp claude` starts a chat by hand in any pane. Run by a chat's agent, `sheprd chat new` with no agent starts one like that chat: the same agent, model, thinking level, and permission mode. The chat tells its agent so, so asking it to start an agent in a new workspace gets a chat rather than a terminal agent.
 
 The rows and buttons show once the app has found `sheprd-acp`, first beside its own executable and then on the login shell's `PATH`.
 

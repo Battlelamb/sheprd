@@ -50,6 +50,12 @@ impl HubError {
     pub(crate) fn desktop_owns_layout(&self) -> bool {
         matches!(self, Self::Core(super::Error::Arrange(Error::SheprdOpen)))
     }
+
+    /// Git kept a worktree it was asked to delete: a conflict the phone
+    /// may resolve by discarding its changes, as with Sheprd's refusal.
+    pub(crate) fn worktree_kept(&self) -> bool {
+        matches!(self, Self::Core(super::Error::Arrange(Error::WorktreeKept)))
+    }
 }
 
 /// Who changes a Herdr 2 tab's layout.

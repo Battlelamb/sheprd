@@ -5,3 +5,4 @@ mod saved_edit;
 mod saved_remap;
 mod session;
 mod spaces;
+mod spaces_tabs;

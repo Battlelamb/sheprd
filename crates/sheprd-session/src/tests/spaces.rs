@@ -1,13 +1,13 @@
-use crate::panes::{Axis, Panes};
+use crate::panes::Panes;
 use crate::spaces::{Edit, Error, FORMAT, MAX_BYTES, MAX_ENTRIES, Spaces, Tab, Workspace};
 use serde_json::{Value, json};
 use sheprd_backend::TerminalId;
 
-fn terminal(name: &str) -> TerminalId {
+pub(super) fn terminal(name: &str) -> TerminalId {
     TerminalId::new(name).unwrap()
 }
 
-fn workspace(id: &str, cwd: &str) -> Workspace {
+pub(super) fn workspace(id: &str, cwd: &str) -> Workspace {
     Workspace {
         id: id.to_owned(),
         label: id.to_owned(),
@@ -16,7 +16,7 @@ fn workspace(id: &str, cwd: &str) -> Workspace {
     }
 }
 
-fn tab(id: &str, workspace: &str, terminal_name: &str) -> Tab {
+pub(super) fn tab(id: &str, workspace: &str, terminal_name: &str) -> Tab {
     Tab {
         id: id.to_owned(),
         workspace_id: workspace.to_owned(),
@@ -28,7 +28,7 @@ fn tab(id: &str, workspace: &str, terminal_name: &str) -> Tab {
     }
 }
 
-fn with(edits: impl IntoIterator<Item = Edit>) -> Spaces {
+pub(super) fn with(edits: impl IntoIterator<Item = Edit>) -> Spaces {
     let mut spaces = Spaces::default();
     for edit in edits {
         spaces.apply(edit).unwrap();
@@ -37,7 +37,7 @@ fn with(edits: impl IntoIterator<Item = Edit>) -> Spaces {
 }
 
 /// A generator handing out `new-1`, `new-2`, …
-fn counter() -> impl FnMut() -> String {
+pub(super) fn counter() -> impl FnMut() -> String {
     let mut next = 0;
     move || {
         next += 1;
@@ -56,7 +56,7 @@ fn a_document_never_written_holds_nothing() {
 fn what_is_written_reads_back_the_same() {
     let spaces = with([
         Edit::KeepWorkspace(workspace("space-a", "/code/app")),
-        Edit::PutTab(tab("tab-1", "space-a", "t1")),
+        Edit::OpenTab(tab("tab-1", "space-a", "t1")),
     ]);
     let value = spaces.to_value().unwrap();
     assert_eq!(value["format"], FORMAT);
@@ -120,8 +120,8 @@ fn forgetting_a_workspace_closes_its_tabs() {
     let mut spaces = with([
         Edit::KeepWorkspace(workspace("space-a", "/code/a")),
         Edit::KeepWorkspace(workspace("space-b", "/code/b")),
-        Edit::PutTab(tab("tab-1", "space-a", "t1")),
-        Edit::PutTab(tab("tab-2", "space-b", "t2")),
+        Edit::OpenTab(tab("tab-1", "space-a", "t1")),
+        Edit::OpenTab(tab("tab-2", "space-b", "t2")),
     ]);
     spaces
         .apply(Edit::ForgetWorkspace {
@@ -159,6 +159,12 @@ fn a_workspace_moves_before_another_or_to_the_end() {
     assert_eq!(order(&spaces), ["a", "b", "c"]);
     spaces.apply(move_to("a", Some("gone"))).unwrap();
     assert_eq!(order(&spaces), ["b", "c", "a"]);
+    spaces.apply(move_to("c", Some("c"))).unwrap();
+    assert_eq!(
+        order(&spaces),
+        ["b", "c", "a"],
+        "before itself is where it is"
+    );
     assert!(matches!(
         spaces.apply(move_to("gone", None)),
         Err(Error::Missing(_))
@@ -180,38 +186,16 @@ fn renaming_names_the_workspace_as_the_user_did() {
 }
 
 #[test]
-fn putting_a_tab_replaces_the_one_of_its_id() {
-    let mut spaces = with([
-        Edit::KeepWorkspace(workspace("space-a", "")),
-        Edit::PutTab(tab("tab-1", "space-a", "t1")),
-    ]);
-    let mut split = tab("tab-1", "space-a", "t1");
-    split
-        .panes
-        .split(&terminal("t1"), Axis::Row, terminal("t2"))
-        .unwrap();
-    split.zoomed = Some(terminal("t2"));
-    spaces.apply(Edit::PutTab(split.clone())).unwrap();
-    assert_eq!(spaces.tabs(), [split]);
-    assert_eq!(
-        spaces
-            .tab_holding(&terminal("t2"))
-            .map(|tab| tab.id.as_str()),
-        Some("tab-1")
-    );
-}
-
-#[test]
 fn a_tab_needs_its_workspace_and_a_zoomed_pane_of_its_own() {
     let mut spaces = with([Edit::KeepWorkspace(workspace("space-a", ""))]);
     assert!(matches!(
-        spaces.apply(Edit::PutTab(tab("tab-1", "gone", "t1"))),
+        spaces.apply(Edit::OpenTab(tab("tab-1", "gone", "t1"))),
         Err(Error::Missing(_))
     ));
     let mut zoomed = tab("tab-1", "space-a", "t1");
     zoomed.zoomed = Some(terminal("elsewhere"));
     assert!(matches!(
-        spaces.apply(Edit::PutTab(zoomed)),
+        spaces.apply(Edit::OpenTab(zoomed)),
         Err(Error::Invalid)
     ));
 }
@@ -238,7 +222,7 @@ fn keeping_refuses_a_taken_id_and_past_the_bound() {
 fn adopting_joins_a_folder_already_kept_and_renames_a_taken_id() {
     let mut spaces = with([
         Edit::KeepWorkspace(workspace("space-1", "/code/app")),
-        Edit::PutTab(tab("tab-1", "space-1", "t1")),
+        Edit::OpenTab(tab("tab-1", "space-1", "t1")),
     ]);
     let adopted = spaces
         .adopt(

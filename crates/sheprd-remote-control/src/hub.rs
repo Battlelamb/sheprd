@@ -12,6 +12,7 @@ mod convert;
 mod core;
 mod daemon;
 mod layout;
+mod new_workspace;
 mod recency;
 pub(crate) mod row_summary;
 mod sessions;
@@ -25,6 +26,7 @@ pub(crate) use core::{Keeper, arrangeable};
 #[cfg(test)]
 pub(crate) use layout::TerminalAgent;
 pub(crate) use layout::{Chat as ChatRow, Job, Layout, Terminal, TerminalPane, Workspace};
+pub(crate) use new_workspace::NewWorkspace;
 pub(crate) use row_summary::RowSummary;
 
 use serde_json::{Value, json};
@@ -357,96 +359,6 @@ impl Hub {
         .is_ok()
     }
 
-    /// A new workspace in `cwd`, on a new worktree when `branch` is given,
-    /// with a chat running `agent` in it, in the Herdr 1 `session` this
-    /// daemon follows by that name (the primary otherwise). While a core answers the chat
-    /// starts there, in its unlisted group: the core has no workspaces or
-    /// worktrees, so a branch's checkout is made here, never by Herdr 1.
-    pub(crate) async fn create_workspace(
-        &self,
-        cwd: &str,
-        branch: Option<&str>,
-        agent: Agent,
-        session: Option<&str>,
-    ) -> Result<CreatedWorkspace> {
-        // As in [`Hub::start_chat`]: the program here cannot run in a
-        // distribution, and a core would open the chat on this computer.
-        if session.is_some_and(sessions::is_wsl) {
-            return Err(Error::WslChat);
-        }
-        let program = self.program().ok_or(Error::ProgramMissing)?;
-        let program = program.as_path();
-        if let Some(core) = self.core_for_work().await? {
-            // Herdr 2 keeps no Herdr 1 session: asked for a named one, the
-            // workspace could not be where it was asked for.
-            if session.is_some_and(|name| self.sessions.get(name).is_some()) {
-                return Err(Error::SessionOnHerdr2);
-            }
-            let (cwd, program) = (cwd.to_owned(), program.to_owned());
-            let (branch, root) = (branch.map(str::to_owned), self.worktrees.clone());
-            let (pane, folder) = on_core(move || match branch {
-                Some(branch) => {
-                    core.open_worktree_chat(agent, &program, &cwd, &branch, root.as_deref())
-                }
-                // Sheprd keeps a workspace for it, in this folder.
-                None => core
-                    .open_chat(agent, &program, &cwd, Some(core::Place::New(&cwd)))
-                    .map(|pane| (pane, cwd)),
-            })
-            .await?;
-            // Listed apart until Sheprd keeps its workspace.
-            return Ok(CreatedWorkspace {
-                workspace: core::new_workspace_id(&folder),
-                pane,
-            });
-        }
-        let opened = self
-            .call_in(
-                session,
-                ApiMethod::WorkspaceCreate,
-                json!({"cwd": cwd, "focus": false}),
-            )
-            .await?;
-        let workspace = opened["workspace"]["workspace_id"]
-            .as_str()
-            .filter(|id| !id.is_empty())
-            .ok_or(Error::Response)?
-            .to_owned();
-        let Some(branch) = branch else {
-            let response = self
-                .call(
-                    ApiMethod::TabCreate,
-                    tab_params(&workspace, cwd, agent, program),
-                )
-                .await?;
-            let (_, pane) = created_tab(&response).ok_or(Error::Response)?;
-            self.run_line(&pane, &command_line(agent)).await?;
-            return Ok(CreatedWorkspace { workspace, pane });
-        };
-        let created = self
-            .call(
-                ApiMethod::WorktreeCreate,
-                json!({"workspace_id": workspace, "branch": branch, "focus": false}),
-            )
-            .await?;
-        let pane = created["root_pane"]["pane_id"]
-            .as_str()
-            .ok_or(Error::Response)?
-            .to_owned();
-        let worktree = created["workspace"]["workspace_id"]
-            .as_str()
-            .ok_or(Error::Response)?
-            .to_owned();
-        // The worktree's first pane is a shell in its folder; the program
-        // path rides in this line because the pane was not made with it.
-        self.run_line(&pane, &direct_command_line(program, agent))
-            .await?;
-        Ok(CreatedWorkspace {
-            workspace: worktree,
-            pane,
-        })
-    }
-
     /// Types `line` and Enter into `pane`, as Sheprd starts a chat.
     async fn run_line(&self, pane: &str, line: &str) -> Result<()> {
         self.call(
@@ -713,7 +625,10 @@ fn program_dirs(
 /// work there joins the workspace Sheprd keeps for it.
 fn place<'a>(workspace: &'a str, folder: &'a str) -> core::Place<'a> {
     if core::is_new_workspace(workspace) {
-        return core::Place::New(folder);
+        return core::Place::New {
+            cwd: folder,
+            title: None,
+        };
     }
     let (session, id) = sessions::split_id(workspace);
     core::Place::Workspace(sheprd_session::Labelled { id, session })

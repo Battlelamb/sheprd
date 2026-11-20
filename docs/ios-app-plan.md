@@ -315,10 +315,14 @@ app learns the pane it should open:
   this computer (all of them if it finds none or cannot run); `id` is
   what a request names.
 - `POST /api/v2/workspaces` takes `{"cwd", "agent", "branch"?, "prompt"?,
-  "start"?, "session"?}` and answers `{"workspace": "w3", "pane": "p7", "prompted":
+  "start"?, "session"?, "title"?}` and answers `{"workspace": "w3", "pane": "p7", "prompted":
   true, "started": true}`. The
   folder must be one `new` offers, and `branch`, when not blank, opens a
-  worktree. `session`, as home names it, opens it in that Herdr 1
+  worktree. A worktree of a folder that is a Herdr 1 repository workspace
+  is made by Herdr 1 from that workspace, so it joins the repository's
+  group, with its chat on herdr-core while one answers. `title`, when not
+  blank, names the new workspace (at most 200 characters, no control
+  characters). `session`, as home names it, opens it in that Herdr 1
   session; absent, or naming none the daemon follows, it opens where new
   workspaces go.
 - `POST /api/v2/workspaces/{workspace}/chats` takes `{"agent", "prompt"?,

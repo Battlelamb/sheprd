@@ -37,8 +37,9 @@ const SAVE_CHECKS: u32 = 20;
 enum Workspace {
     /// A workspace that exists, by its id.
     Known(String),
-    /// A new one in this folder, as a phone's new workspace asks.
-    New(String),
+    /// A new one in this folder, as a phone's new workspace asks, named
+    /// as the phone asked, else for its folder.
+    New { cwd: String, title: Option<String> },
 }
 
 impl SheprdWindow {
@@ -80,7 +81,11 @@ impl SheprdWindow {
                 // can open there.
                 if let Some(cwd) = sheprd_session::new_workspace(&info.labels) {
                     let scope = local.clone()?;
-                    return Some((info.id.clone(), scope, Workspace::New(cwd.to_owned())));
+                    let workspace = Workspace::New {
+                        cwd: cwd.to_owned(),
+                        title: sheprd_session::new_workspace_title(&info.labels).map(str::to_owned),
+                    };
+                    return Some((info.id.clone(), scope, workspace));
                 }
                 let labelled = sheprd_session::labelled_workspace(&info.labels)?;
                 let index = self.endpoint_of_session(labelled.session)?;
@@ -140,9 +145,9 @@ impl SheprdWindow {
         workspace: Workspace,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        let cwd = match workspace {
+        let (cwd, title) = match workspace {
             Workspace::Known(id) => return Some(id),
-            Workspace::New(cwd) => cwd,
+            Workspace::New { cwd, title } => (cwd, title),
         };
         // In `scope`, not the shown host's: the desktop may show another.
         let kept = cx
@@ -156,11 +161,16 @@ impl SheprdWindow {
         if kept.is_some() {
             return kept;
         }
-        let label = std::path::Path::new(&cwd)
-            .file_name()
-            .map_or_else(|| cwd.clone(), |name| name.to_string_lossy().into_owned());
-        // Named for its folder, not by the user.
-        let id = Store::update(cx, |store| store.keep_workspace(scope, &label, &cwd, false));
+        // Named as the phone asked, else for its folder.
+        let custom = title.is_some();
+        let label = title.unwrap_or_else(|| {
+            std::path::Path::new(&cwd)
+                .file_name()
+                .map_or_else(|| cwd.clone(), |name| name.to_string_lossy().into_owned())
+        });
+        let id = Store::update(cx, |store| {
+            store.keep_workspace(scope, &label, &cwd, custom)
+        });
         if id.is_some() {
             self.refresh_core_session(cx);
         }
@@ -251,6 +261,7 @@ pub(super) fn saved_holds(bytes: &[u8], scope: &str, terminal: &TerminalId) -> b
 pub(super) fn released_labels() -> std::collections::BTreeMap<&'static str, &'static str> {
     [
         sheprd_session::NEW_WORKSPACE_LABEL,
+        sheprd_session::NEW_WORKSPACE_TITLE_LABEL,
         sheprd_session::SESSION_LABEL,
         sheprd_session::WORKSPACE_LABEL,
     ]

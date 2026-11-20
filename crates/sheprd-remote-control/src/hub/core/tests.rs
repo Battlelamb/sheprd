@@ -124,6 +124,7 @@ mod socket {
     mod arrange;
     mod chat_recovery;
     mod convert;
+    mod herdr_1_worktree;
     mod holds;
     mod new_work;
     mod recovery;

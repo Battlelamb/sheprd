@@ -7,6 +7,7 @@ mod agent_name;
 mod chat_title;
 mod create;
 mod create_start;
+mod create_title;
 mod fixtures;
 mod hosts;
 mod installed_agents;

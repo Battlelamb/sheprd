@@ -1,3 +1,4 @@
+mod new_workspace_title;
 mod panes;
 mod recovery;
 mod saved;

@@ -10,6 +10,7 @@ use crate::{
 };
 
 mod crowded_save;
+mod paused;
 mod refused;
 
 const FLEET: u8 = 0xf1;

@@ -5,31 +5,23 @@
 //! the access file (`fleet apply`). Everything here blocks: run it on the
 //! background executor.
 //!
-//! The build comes from what this app ships: its own `sheprd-relay-agent`
-//! when the host is this kind of computer, else `relay-agent/TRIPLE/`
-//! beside the executable. It lands in
+//! The build is the release's own for the host's platform, checked against
+//! its signed manifest, or a development build's (`build`). It lands in
 //! `~/.local/share/sheprd-relay-agent/bin/VERSION/`, linked from
-//! `~/.local/bin`, and is copied only when the host holds other bytes.
+//! `~/.local/bin`, and is copied only when the host holds other bytes; the
+//! host checks the copy's SHA-256 before it is put in place.
+
+pub(crate) mod build;
 
 use super::Error;
-use crate::{
-    host_build::{self, Platform},
-    remote::relay_token::ListenToken,
-    teleport::Host,
-};
+use crate::{host_build, remote::relay_token::ListenToken, teleport::Host};
 use sheprd_client::{ScriptLimits, shell_quote};
 use sheprd_relay_agent::status::{RelayState, Report};
 use sheprd_remote_control::control::fleet::{HostId, HostIntro, HostKind, SelfRecord, Verified};
-use std::{
-    path::{Path, PathBuf},
-    sync::atomic::AtomicBool,
-    time::Duration,
-};
+use std::{sync::atomic::AtomicBool, time::Duration};
 
 /// The agent's program name on the host.
 pub(crate) const PROGRAM: &str = "sheprd-relay-agent";
-/// Where builds for other platforms ship, beside the app's executable.
-const BUILDS: &str = "relay-agent";
 /// The service's name: a systemd user unit, or a launchd agent's label.
 const UNIT: &str = "sheprd-relay-agent.service";
 const LABEL: &str = "org.sheprd.relay-agent";
@@ -44,15 +36,6 @@ const SERVICE_IDLE: Duration = Duration::from_secs(60);
 const MAX_RELAYS: usize = 16;
 /// The most SSH host keys a record carries.
 const MAX_HOST_KEYS: usize = 4;
-
-/// The build of the agent for `platform` this app ships.
-pub(crate) fn build_for(
-    platform: &Platform,
-    beside: &Path,
-    bundled: Option<PathBuf>,
-) -> Option<PathBuf> {
-    host_build::build_for(platform, beside, BUILDS, PROGRAM, bundled)
-}
 
 /// A relay endpoint safe to write into a unit, a property list, and a
 /// command line as it is: an `http(s)://` URL of plain characters.
@@ -270,15 +253,9 @@ pub(super) fn install(
     cancelled: &AtomicBool,
 ) -> Result<Report, Error> {
     let uname = host.capture("uname -sm\n", cancelled).map_err(Error::Run)?;
-    let platform = Platform::parse(&String::from_utf8_lossy(&uname))?;
-    let source = build_for(
-        &platform,
-        &host_build::beside_app(),
-        crate::bundled::locate(PROGRAM),
-    )
-    .ok_or_else(|| Error::NoBuild {
-        platform: platform.to_string(),
-    })?;
+    // Refused before anything is copied: a platform with no agent.
+    let platform = build::platform(&String::from_utf8_lossy(&uname))?;
+    let source = build::locate(&platform, cancelled)?;
     let (_, sha256) = host_build::digest(PROGRAM, &source)?;
     let installed = host
         .capture(&probe_script(crate::APP_VERSION), cancelled)

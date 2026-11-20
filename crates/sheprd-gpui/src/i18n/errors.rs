@@ -30,6 +30,7 @@ mod dispatch;
 mod editor;
 mod fan_out;
 mod file_drop;
+mod fleet_agent_build;
 mod github;
 mod host_build;
 mod keymap;

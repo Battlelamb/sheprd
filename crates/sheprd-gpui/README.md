@@ -2626,8 +2626,8 @@ window at once, and `sheprd ui panel NAME` shows a section.
   an hour fold into one **+N idle** row that opens on click. Hovering a row
   offers **Reply**, **Snooze** (until a preset time), **Settle**, **Pin**, and
   **Open**; snoozed and settled rows fold away at the bottom and come back once
-  their time comes or the agent works or asks again. These marks are this
-  client's own. Shift or Cmd/Ctrl click selects rows, and a bar over the list
+  their time comes or the agent works or asks again, and leave the Dock or
+  taskbar badge until then. These marks are this client's own. Shift or Cmd/Ctrl click selects rows, and a bar over the list
   then settles, snoozes, or replies to all of them.
 
   A blocked agent's row shows the last lines of its pane, so you can read what
@@ -2651,9 +2651,11 @@ window at once, and `sheprd ui panel NAME` shows a section.
   hours or with delivery off; clicking one goes to its pane.
   **Notification History** in the palette opens it, and `sheprd window alerts`
   prints it. An alert about the tab you are looking at is not kept.
-  **Clear** on the shelf, or **Clear All Notifications** in the palette (no
-  default shortcut; bind `clear_all_notifications` under `[keybindings]`, or
-  run `sheprd run clear_all_notifications`), empties it in every window,
+  **Clear all** at the top of the page, shown while there is an alert or a
+  toast to clear, **Clear** on the shelf, or **Clear All Notifications** in
+  the palette (no default shortcut; bind `clear_all_notifications` under
+  `[keybindings]`, or run `sheprd run clear_all_notifications`), empties it
+  in every window,
   dismisses every toast, shown or waiting, and withdraws the app's OS
   notifications (see [System notifications](#system-notifications)). Agents
   keep their status: a finished agent's Done dot and the Dock badge clear as
@@ -4042,8 +4044,12 @@ notification from before the app last started stays until you dismiss it.
 The Dock icon shows the number of agents reporting `Done` (finished) or `Blocked`
 (waiting for input), and clears at zero. It covers all connected hosts and
 main windows, including minimized windows, without counting the same agent twice.
-Sidebar visibility, muted sounds, dismissed toasts, and the notification
-delivery setting (including off) do not affect the badge.
+Agents in a muted workspace or tab are not counted, nor agents whose Overview
+row you settled or snoozed: a snoozed agent counts again when its time comes,
+and a settled or snoozed one as soon as it asks for input or works and finishes
+again, as its row comes back. Sidebar visibility, muted sounds, dismissed
+toasts, and the notification delivery setting (including off) do not affect
+the badge.
 Existing attention is counted from each host's first snapshot at startup; no
 new completion or notification is needed. The first positive focus report waits
 until the terminal surface is ready so loading cannot acknowledge unseen work.

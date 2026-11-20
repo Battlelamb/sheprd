@@ -57,6 +57,7 @@ fn a_merge_sends_one_mutation_naming_the_seen_head_and_is_not_retried() {
             sent.push((context, query.to_owned(), variables));
             Err(crate::Error::Rejected("Head branch was modified".into()))
         },
+        |_| unreachable!("a merge is a mutation"),
     );
     assert!(
         matches!(result, Err(crate::Error::Rejected(reason)) if reason == "Head branch was modified")
@@ -111,6 +112,7 @@ fn a_posted_comment_is_a_success_even_when_its_link_is_unexpected() {
             );
             Ok(reply(&format!("{}#issuecomment-42", target.url)))
         },
+        |_| unreachable!("a comment is a mutation"),
     )
     .unwrap();
     assert_eq!(sends, 1);

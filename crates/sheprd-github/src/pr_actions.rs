@@ -1,5 +1,6 @@
 //! Explicit actions on the focused branch's pull request: reading its review
-//! conversation, commenting, and merging.
+//! conversation, commenting, merging, merging a stack, and adding it to or
+//! removing it from the merge queue (`landing`).
 //!
 //! One worker thread owns every request, so the UI thread only queues work and
 //! reads the answer on a later tick. Reading the conversation is cancelled by
@@ -22,10 +23,11 @@ use std::{
 };
 
 mod error;
+mod landing;
 #[cfg(test)]
 mod tests;
 
-pub use error::Error;
+pub use {error::Error, landing::Landing};
 
 const API_TIMEOUT: Duration = Duration::from_secs(30);
 /// GitHub accepts far longer bodies; the dialog field is one line, so this is
@@ -53,6 +55,9 @@ const CONVERSATION_QUERY: &str = r#"query($owner: String!, $repo: String!, $numb
 const COMMENT_MUTATION: &str = r#"mutation($subject: ID!, $body: String!) {
   addComment(input: {subjectId: $subject, body: $body}) { commentEdge { node { url } } }
 }"#;
+const DEQUEUE_MUTATION: &str = r#"mutation($id: ID!) {
+  dequeuePullRequest(input: {id: $id}) { mergeQueueEntry { pullRequest { url } } }
+}"#;
 const MERGE_MUTATION: &str = r#"mutation($id: ID!, $method: PullRequestMergeMethod!, $head: GitObjectID!) {
   mergePullRequest(input: {pullRequestId: $id, mergeMethod: $method, expectedHeadOid: $head}) {
     pullRequest { state url }
@@ -73,6 +78,9 @@ pub struct Target {
     /// Whether comments and merges may be sent: only an open pull request's
     /// target allows them. A closed one's is for reading its conversation.
     writable: bool,
+    /// Whether it is a layer of a GitHub stack, which only the asynchronous
+    /// merge API merges.
+    stacked: bool,
 }
 
 impl Target {
@@ -137,6 +145,7 @@ impl Target {
             id: pr.id.clone(),
             head: pr.head_ref_oid.clone(),
             writable,
+            stacked: pr.stack().is_some(),
         })
     }
 }
@@ -145,6 +154,11 @@ impl Target {
 pub enum Action {
     Comment(String),
     Merge(MergeMethod),
+    /// Merge it with the open layers of its stack below it, or add it to the
+    /// merge queue, through GitHub's asynchronous merge API.
+    Land(Landing),
+    /// Take it out of the merge queue.
+    Dequeue,
 }
 
 impl Action {
@@ -152,6 +166,9 @@ impl Action {
         match self {
             Self::Comment(_) => "Posting comment...",
             Self::Merge(_) => "Merging...",
+            Self::Land(Landing::Stack(_)) => "Merging the stack...",
+            Self::Land(Landing::Queue) => "Adding to the merge queue...",
+            Self::Dequeue => "Removing from the merge queue...",
         }
     }
 }
@@ -381,10 +398,12 @@ impl Actions {
                 }
                 Action::Comment(body.to_owned())
             }
-            Action::Merge(method) if !allowed.contains(&method) => {
+            Action::Merge(method) | Action::Land(Landing::Stack(method))
+                if !allowed.contains(&method) =>
+            {
                 return Err(Error::MergeMethod.into());
             }
-            action @ Action::Merge(_) => action,
+            action @ (Action::Merge(_) | Action::Land(_) | Action::Dequeue) => action,
         };
         // A queued read yields to the user's action; it can be reopened.
         if matches!(self.waiting, Some((_, Job::Conversation, _))) {
@@ -494,11 +513,25 @@ fn spawn(current: Arc<AtomicU64>) -> crate::Result<Worker> {
                     Job::Conversation => {
                         Completion::Conversation(conversation(&target, &token, cancelled))
                     }
-                    Job::Run(action) => {
-                        Completion::Action(perform(&target, action, |context, query, variables| {
+                    Job::Run(action) => Completion::Action(perform(
+                        &target,
+                        action,
+                        |context, query, variables| {
                             crate::mutation(context, &token, query, variables, API_TIMEOUT)
-                        }))
-                    }
+                        },
+                        |step| match step {
+                            landing::Step::Put { path, body } => {
+                                crate::rest_put("pr_land", &token, &path, &body, API_TIMEOUT)
+                            }
+                            landing::Step::Get { path } => {
+                                crate::rest("pr_land", &token, &path, API_TIMEOUT, || false)
+                            }
+                            landing::Step::Pause(pause) => {
+                                thread::sleep(pause);
+                                Ok(Value::Null)
+                            }
+                        },
+                    )),
                 };
                 if outgoing.send((generation, target, completion)).is_err() {
                     break;
@@ -526,12 +559,14 @@ fn conversation(
     parse_conversation(&response, target)
 }
 
-/// Run one mutation through `send`, exactly once. The transport is injected
-/// so tests can prove what is sent and that a failure is not retried.
+/// Run one action exactly once: a mutation through `send`, or a landing
+/// through `land`'s REST steps. The transports are injected so tests can
+/// prove what is sent and that a failure is not retried.
 pub(super) fn perform(
     target: &Target,
     action: Action,
     mut send: impl FnMut(&'static str, &str, Value) -> crate::Result<Value>,
+    land: impl FnMut(landing::Step) -> crate::Result<Value>,
 ) -> crate::Result<Outcome> {
     match action {
         Action::Comment(body) => {
@@ -542,6 +577,11 @@ pub(super) fn perform(
             )?;
             Ok(commented(&response, target))
         }
+        // GitHub merges a layer with the open ones below it, and only
+        // through the asynchronous API.
+        Action::Merge(method) if target.stacked => {
+            landing::land(target, Landing::Stack(method), land)
+        }
         Action::Merge(method) => {
             let response = send(
                 "pr_merge",
@@ -549,6 +589,18 @@ pub(super) fn perform(
                 serde_json::json!({"id": target.id, "method": method.graphql(), "head": target.head}),
             )?;
             merged(&response, target)
+        }
+        Action::Land(landing) => landing::land(target, landing, land),
+        Action::Dequeue => {
+            send(
+                "pr_dequeue",
+                DEQUEUE_MUTATION,
+                serde_json::json!({"id": target.id}),
+            )?;
+            Ok(Outcome {
+                message: format!("Removed #{} from the merge queue", target.number),
+                url: Some(target.url.clone()),
+            })
         }
     }
 }

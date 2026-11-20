@@ -29,7 +29,7 @@ pub(super) fn agent(timeout: Duration) -> ureq::Agent {
 
 pub(super) fn response<T: DeserializeOwned>(
     context: &'static str,
-    mut response: ureq::http::Response<ureq::Body>,
+    response: ureq::http::Response<ureq::Body>,
 ) -> Result<T> {
     let status = response.status().as_u16();
     if !(200..=299).contains(&status) {
@@ -44,6 +44,15 @@ pub(super) fn response<T: DeserializeOwned>(
             status => Error::Status(status),
         });
     }
+    body(context, status, response)
+}
+
+/// A response's bounded JSON body, whatever its status.
+fn body<T: DeserializeOwned>(
+    context: &'static str,
+    status: u16,
+    mut response: ureq::http::Response<ureq::Body>,
+) -> Result<T> {
     // Allocate the bounded capacity up front: no reallocations leave old body
     // fragments behind, and partial reads are wiped even on I/O errors.
     let mut bytes = Zeroizing::new(Vec::with_capacity(LIMIT as usize + 1));
@@ -275,6 +284,42 @@ pub fn rest<T: DeserializeOwned>(
         return Err(crate::pull_request::Error::Cancelled.into());
     }
     response(context, reply)
+}
+
+/// A REST write the user asked for, such as a merge: `body` sent with `PUT`
+/// to `path` under `https://api.github.com`. Like [`mutation`] it is sent
+/// once, never retried, and never redirected, and a refusal GitHub explains
+/// (400, 409, 422) carries its message, cleaned and bounded, because "not
+/// ready to merge" is the answer the user needs. Callers build `path` from
+/// names they have validated.
+pub fn rest_put(
+    context: &'static str,
+    token: &SecretString,
+    path: &str,
+    body: &Value,
+    timeout: Duration,
+) -> Result<Value> {
+    let reply = agent(timeout)
+        .put(format!("{API}{path}"))
+        .header("User-Agent", "Sheprd")
+        .header("Accept", "application/vnd.github+json")
+        .header("Content-Type", "application/json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .header("Authorization", authorization(token)?)
+        .send(body.to_string().as_bytes())
+        .map_err(log::network(context))?;
+    let status = reply.status().as_u16();
+    if matches!(status, 400 | 409 | 422) {
+        log::http(context, status, reply.headers());
+        let answer: Value = self::body(context, status, reply)?;
+        return Err(refusal(&answer).map_or(Error::Status(status), Error::Rejected));
+    }
+    response(context, reply)
+}
+
+/// The message a REST refusal gives, as display text.
+pub(super) fn refusal(answer: &Value) -> Option<String> {
+    rejection(&serde_json::json!([{"message": answer.get("message")?}]))
 }
 
 /// Where GitHub says a moved repository's read continues. A transferred or

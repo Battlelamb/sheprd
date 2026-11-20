@@ -49,6 +49,7 @@ fn delivery_follows_the_notification() {
         tag: "chat-p".to_owned(),
         title: String::new(),
         urgency: Urgency::High,
+        wizz: false,
     };
     let delivery = Delivery::for_notification(&question);
     assert_eq!(delivery.urgency.header(), "high");

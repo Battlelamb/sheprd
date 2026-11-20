@@ -19,8 +19,8 @@ mod wire;
 pub use agents::{Agent, UnknownAgent};
 pub use change::Change;
 pub use endpoint::{
-    ENDPOINT_ENV, EndpointId, TOKEN, endpoint_address, endpoint_dir, endpoint_dir_with,
-    endpoint_path,
+    AGENT_CHAT_ENV, ENDPOINT_ENV, EndpointId, TOKEN, endpoint_address, endpoint_dir,
+    endpoint_dir_with, endpoint_path,
 };
 pub use error::{Error, Result};
 pub use frame::{MAX_FRAME_SIZE, encode_frame, read_frame, write_frame};

@@ -17,6 +17,8 @@ extension API {
         public let join: FleetStanding?
         /// The hosts this phone linked a device key for, by id.
         public let links: [String]
+        /// The device key each of those links names, base64url, by host.
+        public let linkKeys: [String: String]
         /// Where hosts take direct connections, by host id.
         public let reach: [FleetReach]
         /// How to reach each Sheprd host this phone linked through its
@@ -25,19 +27,22 @@ extension API {
 
         public init(
             view: FleetView?, heads: [String] = [], next: FleetNext? = nil,
-            join: FleetStanding? = nil, links: [String] = [], reach: [FleetReach] = [],
-            routes: [FleetRoute] = []
+            join: FleetStanding? = nil, links: [String] = [], linkKeys: [String: String] = [:],
+            reach: [FleetReach] = [], routes: [FleetRoute] = []
         ) {
             self.view = view
             self.heads = heads
             self.next = next
             self.join = join
             self.links = links
+            self.linkKeys = linkKeys
             self.reach = reach
             self.routes = routes
         }
 
-        enum CodingKeys: String, CodingKey { case view, heads, next, join, links, reach, routes }
+        enum CodingKeys: String, CodingKey { case view, heads, next, join, links, reach, routes
+            case linkKeys = "link_keys"
+        }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -46,6 +51,7 @@ extension API {
             next = try c.decodeIfPresent(FleetNext.self, forKey: .next)
             join = try c.decodeIfPresent(FleetStanding.self, forKey: .join)
             links = try c.decodeIfPresent([String].self, forKey: .links) ?? []
+            linkKeys = try c.decodeIfPresent([String: String].self, forKey: .linkKeys) ?? [:]
             reach = try c.decodeIfPresent([FleetReach].self, forKey: .reach) ?? []
             routes = try c.decodeIfPresent([FleetRoute].self, forKey: .routes) ?? []
         }
@@ -84,6 +90,14 @@ extension API {
             guard let view, view.fleet.lowercased() == fleet.lowercased() else { return false }
             return join == nil && next == nil
                 && !view.members.contains { $0.id.lowercased() == member.lowercased() }
+        }
+
+        /// The device key this phone's link names for each host it linked,
+        /// by host id in lowercase.
+        public var linkedKeys: [String: Data] {
+            Dictionary(linkKeys.compactMap { host, key in
+                Base64URL.decode(key).map { (host.lowercased(), $0) }
+            }, uniquingKeysWith: { first, _ in first })
         }
 
         /// The direct addresses `host` publishes, as `https://` origins.

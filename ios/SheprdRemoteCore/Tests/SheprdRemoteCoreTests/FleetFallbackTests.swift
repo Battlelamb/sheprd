@@ -100,10 +100,10 @@ struct FleetFallbackTests {
         // parents) is missing from that computer's read, and from any
         // other that has not caught up: absence alone drops nothing.
         let pending = [FleetRecoveryTests.pending("aa"), FleetRecoveryTests.pending("bb")]
-        let lagging = FleetPendingLink.settle(pending, linked: [])
+        let lagging = FleetPendingLink.settle(pending, linked: [:])
         #expect(lagging.done.isEmpty && lagging.waiting == pending)
         // Only an explicit refusal of a link drops it, and only that one.
-        let refused = FleetPendingLink.settle(pending, linked: [], refused: ["bb"])
+        let refused = FleetPendingLink.settle(pending, linked: [:], refused: ["bb"])
         #expect(refused.waiting == [pending[0]])
     }
 

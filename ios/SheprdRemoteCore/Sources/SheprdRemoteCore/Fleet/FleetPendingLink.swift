@@ -26,23 +26,30 @@ public struct FleetPendingLink: Codable, Equatable, Sendable {
 
     public var key: HostKey { HostKey(publicKey: publicKey, kind: keyKind, data: keyData) }
 
-    /// Splits `pending` against the hosts the fleet says this phone linked:
-    /// those linked are done, to keep as computers. Of the rest, only those
-    /// in `refused` go: hosts whose links were never posted, or that the
-    /// computer that took the post refused, with a fresh read from that
-    /// same computer not showing them. A link missing from any other read
-    /// may only not have arrived there yet (a computer that lags holds it
-    /// waiting for its parents), so its key stays.
+    /// Splits `pending` against the links the fleet says this phone holds,
+    /// by host, with the device key each names: a link is done, to keep as
+    /// a computer, only when it names the very key made for it here; a link
+    /// to the same host with another key is an earlier one, and this one
+    /// may still land. Of the rest, only those in `refused` go: hosts whose
+    /// links were never posted, or that the computer that took the post
+    /// refused, with a fresh read from that same computer not showing them.
+    /// A link missing from any other read may only not have arrived there
+    /// yet (a computer that lags holds it waiting for its parents), so its
+    /// key stays.
     public static func settle(
-        _ pending: [FleetPendingLink], linked: [String], refused: [String] = []
+        _ pending: [FleetPendingLink], linked: [String: Data], refused: [String] = []
     ) -> (done: [FleetPendingLink], waiting: [FleetPendingLink]) {
-        let linked = Set(linked.map { $0.lowercased() })
         let refused = Set(refused.map { $0.lowercased() })
-        let done = pending.filter { linked.contains($0.host.lowercased()) }
-        let waiting = pending.filter {
-            !linked.contains($0.host.lowercased()) && !refused.contains($0.host.lowercased())
-        }
+        let landed = { (link: FleetPendingLink) in linked[link.host.lowercased()] == link.point }
+        let done = pending.filter(landed)
+        let waiting = pending.filter { !landed($0) && !refused.contains($0.host.lowercased()) }
         return (done, waiting)
+    }
+
+    /// The pending link for `host`, when one waits: a key made for it
+    /// before, whose link may yet land, is used again rather than replaced.
+    public static func waiting(for host: String, in pending: [FleetPendingLink]) -> FleetPendingLink? {
+        pending.first { $0.host.lowercased() == host.lowercased() }
     }
 
     /// `pending` with `fresh` in place of any for the same hosts: a key made

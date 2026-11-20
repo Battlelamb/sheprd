@@ -62,16 +62,34 @@ struct FleetRecoveryTests {
     @Test func aLinkWithNoReplyKeepsItsKeyUntilTheFleetSays() {
         let pending = [Self.pending("aa"), Self.pending("bb")]
         // No answer: nothing is known yet, so both wait.
-        let unknown = FleetPendingLink.settle(pending, linked: [])
+        let unknown = FleetPendingLink.settle(pending, linked: [:])
         #expect(unknown.done.isEmpty && unknown.waiting == pending)
         // The fleet later shows one linked: its key becomes a computer, the
         // other still waits.
-        let later = FleetPendingLink.settle(pending, linked: ["AA"])
+        let later = FleetPendingLink.settle(pending, linked: ["aa": pending[0].point])
         #expect(later.done == [pending[0]] && later.waiting == [pending[1]])
         // Refused by the computer that took it, and missing from its own
         // read: that one goes, the other stays.
-        let refused = FleetPendingLink.settle(pending, linked: ["aa"], refused: ["aa", "BB"])
+        let refused = FleetPendingLink.settle(pending, linked: ["aa": pending[0].point], refused: ["aa", "BB"])
         #expect(refused.done == [pending[0]] && refused.waiting.isEmpty)
+    }
+
+    @Test func aHostLinkedWithAnotherKeyIsNotThisKeysLink() {
+        // A first post's answer was lost; its key waits. The fleet shows the
+        // host linked, but with another key: an earlier link, not this one.
+        let first = Self.pending("aa", seed: 1)
+        let other = Self.pending("aa", seed: 9)
+        let earlier = FleetPendingLink.settle([first], linked: ["aa": other.point])
+        #expect(earlier.done.isEmpty && earlier.waiting == [first])
+        // Only the key made for it here makes it done.
+        let landed = FleetPendingLink.settle([first], linked: ["aa": first.point])
+        #expect(landed.done == [first] && landed.waiting.isEmpty)
+    }
+
+    @Test func addingAgainReusesTheKeyStillWaiting() {
+        let waiting = [Self.pending("aa", seed: 1), Self.pending("bb", seed: 2)]
+        #expect(FleetPendingLink.waiting(for: "AA", in: waiting) == waiting[0])
+        #expect(FleetPendingLink.waiting(for: "cc", in: waiting) == nil)
     }
 
     @Test func aKeyMadeAgainReplacesTheOneWaiting() throws {

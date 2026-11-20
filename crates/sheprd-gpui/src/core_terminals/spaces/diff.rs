@@ -60,19 +60,14 @@ pub(crate) fn edits(base: &View, local: &View) -> Vec<Edit> {
             landing.push(Edit::OpenTab(tab.clone()));
             continue;
         };
-        for edit in tab_edits(was, tab) {
-            let edit = Edit::Tab {
-                id: tab.id.clone(),
-                edit,
-            };
-            match &edit {
-                Edit::Tab {
-                    edit: TabEdit::RemovePane { .. },
-                    ..
-                } => edits.push(edit),
-                _ => landing.push(edit),
-            }
-        }
+        let (early, late) = tab_edits(was, tab);
+        let id = &tab.id;
+        let edit = |edit| Edit::Tab {
+            id: id.clone(),
+            edit,
+        };
+        edits.extend(early.into_iter().map(edit));
+        landing.extend(late.into_iter().map(edit));
     }
     edits.extend(landing);
     for workspace in &base.workspaces {
@@ -86,16 +81,18 @@ pub(crate) fn edits(base: &View, local: &View) -> Vec<Edit> {
 }
 
 /// The changes from `was` to `now` of one tab, each touching only its own
-/// fields, so a change another client made to the same tab stays. Its
-/// program's title changes as it runs and is not written.
-fn tab_edits(was: &Tab, now: &Tab) -> Vec<TabEdit> {
+/// fields, so a change another client made to the same tab stays, split as
+/// [`pane_edits`] splits them. Its program's title changes as it runs and
+/// is not written.
+fn tab_edits(was: &Tab, now: &Tab) -> (Vec<TabEdit>, Vec<TabEdit>) {
     let mut edits = Vec::new();
     if was.workspace_id != now.workspace_id {
         edits.push(TabEdit::Move {
             workspace_id: now.workspace_id.clone(),
         });
     }
-    edits.extend(pane_edits(&was.panes, &now.panes));
+    let (early, late) = pane_edits(&was.panes, &now.panes);
+    edits.extend(late);
     if was.name != now.name {
         edits.push(TabEdit::Rename {
             name: now.name.clone(),
@@ -122,50 +119,79 @@ fn tab_edits(was: &Tab, now: &Tab) -> Vec<TabEdit> {
             zoomed: now.zoomed.clone(),
         });
     }
-    edits
+    (early, edits)
 }
 
-/// The pane changes from `was` to `now`: each pane closed, then a pane
-/// opened by a split, so another client's split of the same tab stays. A
-/// layout no such steps reach, as from a resize or a swap, is written
-/// whole.
-fn pane_edits(was: &Panes, now: &Panes) -> Vec<TabEdit> {
+/// The pane changes from `was` to `now`, as the edits that keep another
+/// client's change to the same tab: each pane closed and each pane opened
+/// (a split), then the layout over the same terminals for what moved
+/// (resizing, swapping). Answers what goes before other tabs land panes,
+/// so a pane moved away is free, and what goes after: a last pane closes
+/// only once its replacement is there.
+pub(crate) fn pane_edits(was: &Panes, now: &Panes) -> (Vec<TabEdit>, Vec<TabEdit>) {
+    let (mut early, mut late) = (Vec::new(), Vec::new());
     if was == now {
-        return Vec::new();
+        return (early, late);
     }
-    let mut edits = Vec::new();
     let mut panes = was.clone();
+    let mut last = Vec::new();
     for terminal in was.terminals() {
-        if !now.contains(terminal) && panes.count() > 1 && panes.remove(terminal) {
-            edits.push(TabEdit::RemovePane {
+        if now.contains(terminal) {
+            continue;
+        }
+        if panes.count() > 1 && panes.remove(terminal) {
+            early.push(TabEdit::RemovePane {
                 terminal: terminal.clone(),
             });
+        } else {
+            last.push(terminal.clone());
         }
     }
-    // One pane opened here is a split of one already there; anything
-    // more is written whole.
     let opened: Vec<&TerminalId> = (now.terminals().into_iter())
         .filter(|terminal| !panes.contains(terminal))
         .collect();
-    if let [new] = opened[..] {
-        let split = panes.terminals().into_iter().find_map(|at| {
-            [Axis::Row, Axis::Column].into_iter().find_map(|axis| {
-                let mut tried = panes.clone();
-                tried.split(at, axis, new.clone()).ok()?;
-                (tried == *now).then(|| (at.clone(), axis, tried))
+    for (at_end, new) in opened
+        .iter()
+        .enumerate()
+        .map(|(n, new)| (n + 1 == opened.len(), *new))
+    {
+        // Where the layout has it when that is one split away; else beside
+        // the pane before it, and the layout below puts it in place.
+        let exact = (at_end && last.is_empty())
+            .then(|| {
+                panes.terminals().into_iter().find_map(|at| {
+                    [Axis::Row, Axis::Column].into_iter().find_map(|axis| {
+                        let mut tried = panes.clone();
+                        tried.split(at, axis, new.clone()).ok()?;
+                        (tried == *now).then(|| (at.clone(), axis))
+                    })
+                })
             })
+            .flatten();
+        let (at, axis) = exact.unwrap_or_else(|| {
+            let before = (now.terminals().into_iter())
+                .take_while(|terminal| *terminal != new)
+                .filter(|terminal| panes.contains(terminal))
+                .last()
+                .unwrap_or_else(|| panes.first())
+                .clone();
+            (before, Axis::Row)
         });
-        if let Some((at, axis, tried)) = split {
-            panes = tried;
-            edits.push(TabEdit::Split {
+        if panes.split(&at, axis, new.clone()).is_ok() {
+            late.push(TabEdit::Split {
                 at,
                 axis,
                 new: new.clone(),
             });
         }
     }
-    if panes != *now {
-        edits.push(TabEdit::SetPanes { panes: now.clone() });
+    for terminal in last {
+        if panes.remove(&terminal) {
+            late.push(TabEdit::RemovePane { terminal });
+        }
     }
-    edits
+    if panes != *now {
+        late.push(TabEdit::SetPanes { panes: now.clone() });
+    }
+    (early, late)
 }

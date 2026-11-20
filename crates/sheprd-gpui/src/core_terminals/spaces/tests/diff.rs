@@ -249,3 +249,47 @@ fn a_pane_moved_to_another_tab_is_let_go_before_it_lands() {
     assert_eq!(spaces.tab("one").unwrap().panes, Panes::single(id("t1")));
     assert_eq!(spaces.tab("three").unwrap().panes, Panes::single(id("t2")));
 }
+
+#[test]
+fn panes_opened_and_closed_are_splits_and_removals_never_a_new_set() {
+    let base = view(&["a"], vec![shared_tab("t", "a", "t1")]);
+    // The only pane replaced: it closes once its replacement is there.
+    let mut local = base.clone();
+    local.tabs[0].panes = Panes::single(id("t2"));
+    assert_eq!(
+        edits(&base, &local),
+        [
+            tab_edit(
+                "t",
+                TabEdit::Split {
+                    at: id("t1"),
+                    axis: Axis::Row,
+                    new: id("t2"),
+                }
+            ),
+            tab_edit("t", TabEdit::RemovePane { terminal: id("t1") }),
+        ]
+    );
+    // Two panes at once, the second placed by a layout over the same
+    // terminals.
+    let mut local = base.clone();
+    let panes = &mut local.tabs[0].panes;
+    panes.split(&id("t1"), Axis::Column, id("t2")).unwrap();
+    panes.split(&id("t1"), Axis::Row, id("t3")).unwrap();
+    for local in [local, {
+        let mut swapped = base.clone();
+        swapped.tabs[0].panes = Panes::single(id("t9"));
+        swapped
+    }] {
+        let mut spaces = document(&base);
+        for edit in edits(&base, &local) {
+            assert!(
+                !matches!(&edit, Edit::Tab { edit: TabEdit::SetPanes { panes }, .. }
+                    if panes.count() != local.tabs[0].panes.count()),
+                "{edit:?}"
+            );
+            spaces.apply(edit).unwrap();
+        }
+        assert_eq!(spaces.tab("t").unwrap().panes, local.tabs[0].panes);
+    }
+}

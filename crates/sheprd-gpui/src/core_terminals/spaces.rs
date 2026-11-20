@@ -94,6 +94,9 @@ pub(crate) struct CoreSync {
     read: Option<Instant>,
     /// Why the core refused a change, to show once.
     refused: Option<String>,
+    /// A layout written over a tab another client changed: the document
+    /// is read before the change is made again.
+    reread: bool,
     /// A refused change: the next read is taken over what changed here.
     revert: bool,
     sent: Option<Sent>,
@@ -115,6 +118,7 @@ impl CoreSync {
             looked: None,
             read: None,
             refused: None,
+            reread: false,
             revert: false,
             sent: None,
             version: 0,
@@ -143,6 +147,7 @@ impl CoreSync {
         self.sent.is_none()
             && since(self.failed, RETRY)
             && (self.base.is_none()
+                || self.reread
                 || since(self.looked, LOOK_EVERY)
                 || since(self.read, READ_EVERY))
     }
@@ -159,6 +164,11 @@ impl CoreSync {
             self.sent = Some(Sent::Migrate(view.clone()));
             return Some(Job::Migrate(Offer { synced, view }));
         };
+        if std::mem::take(&mut self.reread) {
+            self.read = Some(now);
+            self.sent = Some(Sent::Read);
+            return Some(Job::Read);
+        }
         if (self.looked).is_none_or(|looked| now.saturating_duration_since(looked) >= LOOK_EVERY) {
             self.looked = Some(now);
             let local = store.shared_view(&self.scope);
@@ -225,6 +235,17 @@ impl CoreSync {
         self.answered = true;
         let answer = match outcome {
             Ok(answer) => answer,
+            Err(sheprd_core_client::Error::Spaces(sheprd_session::spaces::Error::Stale(tab))) => {
+                // Another client opened or closed a pane of the tab since
+                // it was read: read it again, and the change is made again
+                // to what that client left.
+                tracing::debug!(%tab, "A shared tab changed under a layout edit; redoing it");
+                if let Sent::Update(from) = sent {
+                    self.base = Some(from);
+                }
+                self.reread = true;
+                return false;
+            }
             Err(error) if refused(&error) => {
                 tracing::warn!(%error, "herdr-core refused a shared workspace change");
                 self.refused = Some(error.to_string());

@@ -134,3 +134,118 @@ fn a_zoom_here_and_a_rename_elsewhere_of_one_tab_both_stay() {
     assert_eq!(name.as_deref(), Some("api"));
     assert_eq!(*zoomed, Some(id("t2")));
 }
+
+#[test]
+fn a_resize_over_another_clients_split_is_read_again_not_refused() {
+    let mut core = FakeCore::default();
+    let mut desk = Client::new();
+    let api = desk.keep("api", "/src/api");
+    let shown = desk.open(&api, "t1");
+    let mut panes = Panes::single(id("t1"));
+    panes
+        .split(&id("t1"), crate::core_terminals::panes::Axis::Row, id("t2"))
+        .unwrap();
+    desk.store.visited(
+        shown,
+        Some(Location::core_terminal(panes.clone(), false)),
+        None,
+    );
+    desk.settle(&mut core);
+    let mut laptop = Client::new();
+    laptop.settle(&mut core);
+
+    // The desk swaps its panes while the laptop opens a third.
+    let mut swapped = panes.clone();
+    assert!(swapped.swap(&id("t1"), &id("t2")));
+    desk.store
+        .visited(shown, Some(Location::core_terminal(swapped, false)), None);
+    let resize = desk.send().unwrap();
+    let theirs = laptop.store.in_scope(&scope()).next().unwrap().id;
+    let mut split = panes.clone();
+    split
+        .split(
+            &id("t2"),
+            crate::core_terminals::panes::Axis::Column,
+            id("t3"),
+        )
+        .unwrap();
+    laptop
+        .store
+        .visited(theirs, Some(Location::core_terminal(split, false)), None);
+    laptop.settle(&mut core);
+    let stale = core.run(resize);
+    assert!(matches!(
+        stale,
+        Err(sheprd_core_client::Error::Spaces(
+            sheprd_session::spaces::Error::Stale(_)
+        ))
+    ));
+    desk.finish(stale);
+    assert!(desk.sync.take_refused().is_none(), "no warning for a race");
+    let read = desk.send();
+    assert_eq!(read, Some(Job::Read), "read again first");
+    let answered = core.run(read.unwrap());
+    desk.finish(answered);
+    desk.settle(&mut core);
+    let terminals = |panes: &Panes| {
+        let mut held: Vec<String> = (panes.terminals().iter())
+            .map(|t| t.as_str().to_owned())
+            .collect();
+        held.sort();
+        held
+    };
+    let document = core.spaces().tabs()[0].panes.clone();
+    assert_eq!(terminals(&document), ["t1", "t2", "t3"], "the split stays");
+    assert_eq!(desk.tabs(), [tab("api", &["t1", "t2", "t3"])]);
+}
+
+#[test]
+fn a_resize_redone_after_a_read_lands_when_the_panes_still_match() {
+    let mut core = FakeCore::default();
+    let mut desk = Client::new();
+    let api = desk.keep("api", "/src/api");
+    let shown = desk.open(&api, "t1");
+    let mut panes = Panes::single(id("t1"));
+    panes
+        .split(&id("t1"), crate::core_terminals::panes::Axis::Row, id("t2"))
+        .unwrap();
+    desk.store.visited(
+        shown,
+        Some(Location::core_terminal(panes.clone(), false)),
+        None,
+    );
+    desk.settle(&mut core);
+    let mut laptop = Client::new();
+    laptop.settle(&mut core);
+
+    // The laptop splits and closes again, so the terminals match once more
+    // but the desk's swap was read before.
+    let mut swapped = panes.clone();
+    assert!(swapped.swap(&id("t1"), &id("t2")));
+    desk.store.visited(
+        shown,
+        Some(Location::core_terminal(swapped.clone(), false)),
+        None,
+    );
+    let resize = desk.send().unwrap();
+    let theirs = laptop.store.in_scope(&scope()).next().unwrap().id;
+    laptop.store.visited(
+        theirs,
+        Some(Location::core_terminal(Panes::single(id("t1")), false)),
+        None,
+    );
+    laptop.settle(&mut core);
+    laptop
+        .store
+        .visited(theirs, Some(Location::core_terminal(panes, false)), None);
+    laptop.settle(&mut core);
+    let answered = core.run(resize);
+    desk.finish(answered);
+    desk.settle(&mut core);
+    assert!(desk.sync.take_refused().is_none());
+    assert_eq!(
+        core.spaces().tabs()[0].panes,
+        swapped,
+        "the swap was redone"
+    );
+}

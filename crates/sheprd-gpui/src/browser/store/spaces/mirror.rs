@@ -5,6 +5,8 @@
 
 use super::{Record, View, location_of, shared_tab};
 use crate::browser::store::{MAX_TABS, Place, Scope, Store, Tab, TabId, Zoom, kept};
+use crate::core_terminals::panes::{Axis, Panes};
+use sheprd_backend::TerminalId;
 use sheprd_session::{
     SavedWorkspace,
     spaces::{self, Edit, TabEdit},
@@ -41,11 +43,44 @@ pub(crate) struct TabFields {
     pub(crate) name: bool,
     /// Panes whose names changed, by terminal address.
     pub(crate) names: BTreeSet<String>,
-    pub(crate) panes: bool,
+    /// Whether panes were resized or swapped here.
+    pub(crate) layout: bool,
+    /// Panes closed here.
+    pub(crate) removed: BTreeSet<TerminalId>,
+    /// Panes opened here: each `new` beside `at`.
+    pub(crate) splits: Vec<(TerminalId, Axis, TerminalId)>,
     pub(crate) zoom: bool,
 }
 
 impl TabFields {
+    /// The panes changed here made again to `theirs`, the document's: the
+    /// panes closed and opened, and the layout when the tab then holds the
+    /// same terminals as `mine`, so another client's split or closed pane
+    /// stays.
+    fn panes(&self, theirs: &Panes, mine: &Panes) -> Panes {
+        let mut panes = theirs.clone();
+        for (at, axis, new) in &self.splits {
+            if !panes.contains(new) && panes.contains(at) {
+                // A split the layout refuses is left to the document.
+                let _ = panes.split(at, *axis, new.clone());
+            }
+        }
+        for terminal in &self.removed {
+            if panes.count() > 1 {
+                panes.remove(terminal);
+            }
+        }
+        let mut held = panes.terminals();
+        let mut laid_out = mine.terminals();
+        held.sort_unstable();
+        laid_out.sort_unstable();
+        if self.layout && held == laid_out {
+            mine.clone()
+        } else {
+            panes
+        }
+    }
+
     fn take(&mut self, edit: &TabEdit) {
         match edit {
             TabEdit::Move { .. } => self.moved = true,
@@ -53,9 +88,11 @@ impl TabFields {
             TabEdit::RenamePane { terminal, .. } => {
                 self.names.insert(terminal.as_str().to_owned());
             }
-            TabEdit::RemovePane { .. } | TabEdit::SetPanes { .. } | TabEdit::Split { .. } => {
-                self.panes = true;
+            TabEdit::RemovePane { terminal } => {
+                self.removed.insert(terminal.clone());
             }
+            TabEdit::SetPanes { .. } => self.layout = true,
+            TabEdit::Split { at, axis, new } => self.splits.push((at.clone(), *axis, new.clone())),
             // Titles are not written.
             TabEdit::Retitle { .. } => {}
             TabEdit::Zoom { .. } => self.zoom = true,
@@ -69,9 +106,7 @@ impl TabFields {
         if self.moved {
             tab.workspace_id.clone_from(&mine.workspace_id);
         }
-        if self.panes {
-            tab.panes = mine.panes.clone();
-        }
+        tab.panes = self.panes(&theirs.panes, &mine.panes);
         if self.name {
             tab.name.clone_from(&mine.name);
         }

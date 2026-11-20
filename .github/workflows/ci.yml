@@ -164,11 +164,13 @@ jobs:
         # smallest runner limit; the merge queue and main run both.
         exclude: ${{ fromJSON(needs.commits.outputs.full != 'true' && '[{"runner":"macos-15"},{"runner":"ubuntu-24.04-arm"}]' || github.event_name == 'pull_request' && '[{"runner":"macos-15","features":"all"}]' || '[]') }}
     # The repository variable CI_MACOS_RUNNER, a JSON label list such as
-    # '["self-hosted", "macOS", "ARM64"]', moves the macOS legs of the merge
-    # queue and main to our own Macs, past the account's five hosted macOS
-    # jobs. Pull requests always stay on hosted runners: a fork's code runs
-    # on our machines only once a maintainer has queued it.
-    runs-on: ${{ fromJSON(matrix.runner == 'macos-15' && github.event_name != 'pull_request' && vars.CI_MACOS_RUNNER || toJSON(matrix.runner)) }}
+    # '["self-hosted", "macOS", "ARM64"]', moves the merge queue's macOS legs
+    # to our own Macs, past the account's five hosted macOS jobs. Pull
+    # requests stay hosted, so a fork's code runs on our machines only once a
+    # maintainer has queued it; main stays hosted too, so a queued change
+    # cannot leave a build behind that main's run, which releases require,
+    # would reuse.
+    runs-on: ${{ fromJSON(matrix.runner == 'macos-15' && github.event_name == 'merge_group' && vars.CI_MACOS_RUNNER || toJSON(matrix.runner)) }}
     timeout-minutes: 60
     permissions:
       contents: read

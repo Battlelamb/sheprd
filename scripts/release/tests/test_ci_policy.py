@@ -296,11 +296,12 @@ class CiPolicy(unittest.TestCase):
                 if "Swatinem/rust-cache@" in job:
                     self.assertIn("save-if: ${{ github.ref == 'refs/heads/main' }}", job)
         # Keep runners a fixed hosted set; never accept a PR-controlled label.
-        # The macOS jobs may move to our own Macs through CI_MACOS_RUNNER, a
-        # repository variable only admins set, and never for a pull request.
+        # The merge queue's macOS jobs may move to our own Macs through
+        # CI_MACOS_RUNNER, a repository variable only admins set; pull
+        # requests and main never do, so main reuses no queued build.
         self.assertEqual(re.findall(r"^    runs-on: (.+)$", WORKFLOW, re.M), [
             "ubuntu-latest", "ubuntu-24.04",
-            "${{ fromJSON(matrix.runner == 'macos-15' && github.event_name != 'pull_request' "
+            "${{ fromJSON(matrix.runner == 'macos-15' && github.event_name == 'merge_group' "
             "&& vars.CI_MACOS_RUNNER || toJSON(matrix.runner)) }}",
             "${{ matrix.runner }}", "${{ matrix.runner }}", "windows-2025",
             "ubuntu-24.04", "ubuntu-24.04", "${{ matrix.runner }}",

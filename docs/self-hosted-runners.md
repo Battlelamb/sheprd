@@ -18,15 +18,32 @@ Actions > Variables) holding a JSON list of runner labels:
 When it is set, `.github/workflows/ci.yml` sends these jobs to runners with
 every label in it:
 
-- `checks` macOS legs in the merge queue and on `main`
+- `checks` macOS legs in the merge queue
 - `build-macos` in the merge queue
 
 Pull requests, including one labeled `macos` or `full-ci`, always use hosted
 `macos-15`. A fork's code reaches our machines only after a maintainer queues
-it. The release workflow, Nix, and the iOS workflow stay hosted.
+it. `main`, the release workflow, Nix, and the iOS workflow stay hosted.
 
 Unset or empty, every job uses hosted runners, so deleting the variable is
 the way back.
+
+## Trust
+
+A runner that outlives its job is shared by every change queued on it. A
+queued change's build scripts and tests run as the runner's user and can
+leave things behind: a doctored `target/`, a binary in `~/.cargo/bin`, a
+LaunchAgent. The next queued change's run may then pass or fail wrongly.
+Two choices bound that:
+
+- `main` never runs on these runners, so a release, which requires `main`
+  to pass on hosted runners, never trusts a build a queued change touched.
+- Queue only changes you have read. Queuing a contributor's pull request
+  runs it on your Mac.
+
+For stronger isolation, run each job in a fresh macOS VM (Tart, Anka) or
+register runners with `--ephemeral` and recreate them, at the cost of the
+warm `target/`.
 
 ## Preparing a Mac
 

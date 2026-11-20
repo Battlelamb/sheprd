@@ -56,8 +56,8 @@ pub const REFUSED: &str = "refused";
 /// one no access file lifts.
 pub const MAX_CAUSES: usize = 8;
 /// Key pairs kept per suspended member: its keys now and before as one
-/// file names them, twice over for rotations between files. Past it the
-/// agent refuses rather than forget one.
+/// file names them, twice over for rotations between files. Past it that
+/// member alone is held to the keys it had ([`Suspension::keep_pairs`]).
 pub const MAX_SUSPENDED_PAIRS: usize = 2 * (access::MAX_FORMER + 1);
 /// The most read of each of the fleet's small files: suspensions carry
 /// each member's key pairs as well as its removals.
@@ -90,16 +90,19 @@ pub struct Suspension {
 
 impl Suspension {
     /// Adds `pairs` to those kept: never replaced, so a pair a rotation
-    /// left behind stays cut off. Refuses past [`MAX_SUSPENDED_PAIRS`]
-    /// rather than forget one, changing nothing.
-    fn keep_pairs(&mut self, pairs: impl IntoIterator<Item = Pair>) -> Result<()> {
+    /// left behind stays cut off. Past [`MAX_SUSPENDED_PAIRS`] nothing is
+    /// added or forgotten: the suspension overflows, so only the member's
+    /// removal ends it, and `false` tells the caller to keep the member on
+    /// the keys it had. Only that member pays for its rotations.
+    fn keep_pairs(&mut self, pairs: impl IntoIterator<Item = Pair>) -> bool {
         let mut kept = self.pairs.clone();
         kept.extend(pairs);
         if kept.len() > MAX_SUSPENDED_PAIRS {
-            return Err(Error::SuspendedKeys);
+            self.overflow = true;
+            return false;
         }
         self.pairs = kept;
-        Ok(())
+        true
     }
 }
 
@@ -312,15 +315,26 @@ impl Held {
         });
         // Each suspended member's keys as the merged file has them, added
         // to those kept: a rotation while suspended cuts the new pair off
-        // and leaves the old one cut off. One that cannot be kept shuts
-        // the fleet out rather than forget it.
+        // and leaves the old one cut off. A member past the bound keeps
+        // the keys it had, its rotation refused, and stays suspended until
+        // removed; the rest of the file applies.
         for (member, suspension) in &mut held.suspended {
-            let Some(entry) = merged.members.get(member) else {
+            let Some(entry) = merged.members.get_mut(member) else {
                 continue;
             };
-            if let Err(error) = suspension.keep_pairs(entry.pairs()) {
-                Self::refuse_locked(state_dir, keys)?;
-                return Err(error);
+            if suspension.keep_pairs(entry.pairs()) {
+                continue;
+            }
+            let had = held
+                .access
+                .as_ref()
+                .and_then(|access| access.members.get(member));
+            if let Some(had) = had {
+                *entry = Member {
+                    allow: entry.allow,
+                    rev: entry.rev,
+                    ..had.clone()
+                };
             }
         }
         held.access = Some(merged);
@@ -416,11 +430,8 @@ impl Held {
             };
             for target in targets {
                 let suspension = held.suspended.entry(target).or_default();
-                if let Some(member) = access.members.get(&target)
-                    && let Err(error) = suspension.keep_pairs(member.pairs())
-                {
-                    Self::refuse_locked(state_dir, keys)?;
-                    return Err(error);
+                if let Some(member) = access.members.get(&target) {
+                    suspension.keep_pairs(member.pairs());
                 }
                 let id = Id(removal.id);
                 if suspension.removals.contains_key(&id) {

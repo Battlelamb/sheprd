@@ -53,20 +53,39 @@ fn a_suspended_member_that_rotates_leaves_its_old_desktop_cut_off() {
 }
 
 #[test]
-fn past_the_bound_the_agent_refuses_rather_than_forget_a_pair() {
+fn past_the_bound_only_that_member_is_held_to_the_keys_it_had() {
     let host = suspended();
-    let rounds = u8::try_from(MAX_SUSPENDED_PAIRS).unwrap();
-    let mut refused = None;
+    let rounds = u8::try_from(MAX_SUSPENDED_PAIRS + 2).unwrap();
     for round in 1..=rounds {
-        if let Err(error) = host.apply(rotated(round)) {
-            refused = Some(error);
-            break;
-        }
+        host.apply(rotated(round)).unwrap();
     }
-    assert!(matches!(refused, Some(Error::SuspendedKeys)), "{refused:?}");
     let held = Held::load(host.state()).unwrap();
-    assert!(held.refused);
-    assert!(held.suspended[&id(2)].pairs.len() <= MAX_SUSPENDED_PAIRS);
-    assert!(host.lines().is_empty());
-    assert_eq!(host.admitted().peer(&dial(2), &[2; 32]), None);
+    assert!(!held.refused);
+    let suspension = &held.suspended[&id(2)];
+    assert!(suspension.overflow, "only its removal ends it now");
+    assert!(suspension.pairs.len() <= MAX_SUSPENDED_PAIRS);
+    // Its rotation past the bound was refused: the file keeps the keys it
+    // had, every one of them kept and cut off.
+    let member = held.access.as_ref().unwrap().members[&id(2)].clone();
+    assert!(member.pairs().all(|pair| suspension.pairs.contains(&pair)));
+    let admitted = host.admitted();
+    for pair in suspension.pairs.iter().chain(
+        [Pair {
+            dial: dial(100 + rounds),
+            tunnel: [100 + rounds; 32],
+        }]
+        .iter(),
+    ) {
+        assert_eq!(admitted.peer(&pair.dial, &pair.tunnel), None);
+    }
+    assert!(!admitted.admits_member(&id(2)));
+    // A settling file does not lift it.
+    let mut settling = rotated(rounds);
+    settling.settled.insert(id(0x51));
+    let held = host.apply(settling).unwrap();
+    assert!(held.suspended.contains_key(&id(2)));
+    // Member 1 is untouched.
+    assert!(held.reaches_ssh(&id(1)));
+    assert_eq!(host.lines(), [id(1).short()]);
+    assert!(host.admitted().admits_member(&id(1)));
 }

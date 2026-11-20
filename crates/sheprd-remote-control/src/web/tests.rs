@@ -32,6 +32,7 @@ mod origins;
 mod pace;
 mod pairing;
 mod presence;
+mod prompt;
 mod pull_requests;
 mod rename;
 mod routes;
@@ -41,6 +42,7 @@ mod stream;
 #[cfg(unix)]
 mod streaming;
 mod tags;
+mod term_files;
 #[cfg(unix)]
 mod term_history;
 mod terminal;
@@ -99,6 +101,7 @@ pub(crate) fn state_lending(
         near: Mutex::default(),
         opened: crate::web::attention::Opened::default(),
         port: 7443,
+        previews: Default::default(),
         privacy: Privacy::Generic,
         pull_requests,
         push: None,

@@ -41,9 +41,15 @@ final class TermTyping {
         modifiers = modifiers.afterKey
     }
 
+    /// Pastes `text` whole, over as many requests as it takes; text past
+    /// what one paste may send is refused rather than cut off.
     func paste(_ text: String) {
         guard !text.isEmpty else { return }
-        enqueue([.paste(String(text.prefix(64 * 1024)))])
+        guard text.utf8.count <= TermInput.maxPasted else {
+            problem = "That text is too long to paste; the limit is 1 MB."
+            return
+        }
+        enqueue(TermInput.pastes(for: text))
     }
 
     private func enqueue(_ sends: [TermInput.Send]) {
@@ -152,7 +158,7 @@ struct TermKeyRows: View {
         // Under the keyboard too: its rounded top corners would otherwise
         // show the window's light background beside the dark rows.
         .background { Rectangle().fill(.bar).ignoresSafeArea() }
-        .sensoryFeedback(.selection, trigger: typing.modifiers)
+        .haptic(.selection, trigger: typing.modifiers)
     }
 
     /// The keyboard's own mic cannot reach a terminal, which has no text
@@ -192,7 +198,12 @@ struct TermKeyRows: View {
     }
 
     private func keyButton(_ label: String, tint: Color? = nil, repeats: Bool = true, action: @escaping () -> Void) -> some View {
-        Button(action: action) { TermKeyCap(label: label, tint: tint) }
+        Button {
+            Feedback.shared.touch(.tap)
+            action()
+        } label: {
+            TermKeyCap(label: label, tint: tint)
+        }
             .buttonStyle(.plain)
             .buttonRepeatBehavior(repeats ? .enabled : .disabled)
     }

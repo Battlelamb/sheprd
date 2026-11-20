@@ -48,11 +48,16 @@ public struct Cursor: Codable, Hashable, Sendable {
 }
 
 public struct Transcript: Codable, Hashable, Sendable {
+    /// Sub-agents, background shells, and monitors, running or ended,
+    /// oldest first.
+    public var activities: [AgentActivity] = []
     public var agent: String
     public var autoAccept = false
     public var clients: UInt32 = 0
     public var commands: [SlashCommand] = []
     public var entries: [Entry] = []
+    /// The agents the chat may still switch to.
+    public var harnesses: Harnesses?
     public var modes: Modes?
     public var options: [ConfigOption] = []
     /// Waiting for an answer, oldest first.
@@ -69,7 +74,7 @@ public struct Transcript: Codable, Hashable, Sendable {
     public init(agent: String) { self.agent = agent }
 
     enum CodingKeys: String, CodingKey {
-        case agent, clients, commands, entries, modes, options, permissions, plan, queued, session, status
+        case activities, agent, clients, commands, entries, harnesses, modes, options, permissions, plan, queued, session, status
         case truncated, turn, usage
         case autoAccept = "auto_accept"
         case readOnly = "read_only"
@@ -77,11 +82,13 @@ public struct Transcript: Codable, Hashable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        activities = try c.decodeIfPresent([AgentActivity].self, forKey: .activities) ?? []
         agent = try c.decode(String.self, forKey: .agent)
         autoAccept = try c.decodeIfPresent(Bool.self, forKey: .autoAccept) ?? false
         clients = try c.decodeIfPresent(UInt32.self, forKey: .clients) ?? 0
         commands = try c.decodeIfPresent([SlashCommand].self, forKey: .commands) ?? []
         entries = try c.decodeIfPresent([Entry].self, forKey: .entries) ?? []
+        harnesses = try c.decodeIfPresent(Harnesses.self, forKey: .harnesses)
         modes = try c.decodeIfPresent(Modes.self, forKey: .modes)
         options = try c.decodeIfPresent([ConfigOption].self, forKey: .options) ?? []
         permissions = try c.decodeIfPresent([Permission].self, forKey: .permissions) ?? []

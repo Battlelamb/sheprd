@@ -21,6 +21,7 @@ mod log;
 mod nearby;
 mod origins;
 mod pace;
+pub(crate) mod prompt;
 mod relay;
 mod render;
 mod shortcuts;
@@ -106,6 +107,8 @@ pub(crate) struct State {
     /// What phones have looked at, for the badge.
     pub(crate) opened: attention::Opened,
     pub(crate) port: u16,
+    /// What each terminal agent last said, for its row.
+    pub(crate) previews: crate::native::previews::Previews,
     pub(crate) privacy: Privacy,
     pub(crate) pull_requests:
         tokio::sync::watch::Sender<Arc<crate::control::pull_requests::PullRequests>>,
@@ -232,8 +235,16 @@ pub(crate) fn router(state: Shared) -> Router {
         .route("/api/term/{pane}/keys", post(terminal::keys))
         .route("/api/term/{pane}/paste", post(terminal::paste))
         .route(
+            "/api/term/{pane}/prompt",
+            get(prompt::get).post(prompt::choose),
+        )
+        .route(
             "/api/term/{pane}/upload",
             post(terminal::upload).layer(DefaultBodyLimit::max(uploads::MAX_UPLOAD + 1024)),
+        )
+        .route(
+            "/api/term/{pane}/file",
+            post(terminal::file).layer(DefaultBodyLimit::max(uploads::MAX_FILE + 1024)),
         )
         .route("/api/term/{pane}/action", post(terminal::action))
         .route("/api/term/{pane}/rename", post(terminal::rename))
@@ -544,6 +555,7 @@ impl IntoResponse for ApiError {
                 | crate::hub::ConvertError::Refused(_),
             ))
             | Self::Hub(crate::hub::Error::SessionOnHerdr2) => StatusCode::CONFLICT,
+            Self::Hub(error) if error.worktree_kept() => StatusCode::CONFLICT,
             Self::Hub(_) | Self::NoPush => StatusCode::SERVICE_UNAVAILABLE,
         };
         // The request line only has the status. A computer without push

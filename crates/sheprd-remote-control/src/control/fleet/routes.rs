@@ -16,7 +16,7 @@
 
 use super::{
     Body, Bundle, HostId, HostIntro, HostKind, HostSeen, MemberId, Op, SelfRecord, State,
-    body::RawSignature, graph::Graph, membership::Members,
+    body::RawSignature, graph::Graph, hosts::named_first, membership::Members,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -51,8 +51,21 @@ struct Pass<'a> {
     routes: BTreeMap<String, HostId>,
     /// The removals of each host so far, by place in the graph.
     removed: BTreeMap<HostId, Vec<usize>>,
-    /// The host each computer names.
-    own: BTreeMap<MemberId, HostId>,
+    /// The host each computer names, as membership has it.
+    own: BTreeMap<MemberId, Named<'a>>,
+    /// The intro the base kept for each host.
+    kept: BTreeMap<HostId, &'a HostIntro>,
+}
+
+/// A computer's claim on the host its bundle names.
+struct Named<'a> {
+    host: HostId,
+    intro: &'a HostIntro,
+    /// Its first operation naming this host since it last named another;
+    /// none from the base (`Members::origins`).
+    origin: Option<usize>,
+    /// One of its claims saw every removal of the host so far.
+    live: bool,
 }
 
 impl<'a> Pass<'a> {
@@ -75,74 +88,112 @@ impl<'a> Pass<'a> {
         let own = base
             .members
             .iter()
-            .filter_map(|(member, entry)| host_id(&entry.bundle).map(|host| (*member, host)))
+            .filter_map(|(member, entry)| {
+                let intro = entry.bundle.host.as_ref()?;
+                let host = intro.id().ok()?;
+                let named = Named {
+                    host,
+                    intro,
+                    origin: None,
+                    live: base.hosts.contains_key(&host),
+                };
+                Some((*member, named))
+            })
             .collect();
         Self {
             hosts,
             routes: base.routes.clone(),
             removed: BTreeMap::new(),
             own,
+            kept: base
+                .hosts
+                .iter()
+                .map(|(id, host)| (*id, &host.intro))
+                .collect(),
         }
     }
 
-    /// An addition of `id` at `position`. A computer's own (`member`)
-    /// gives the host the intro it names, as its bundle does; another
-    /// addition of a live host changes nothing.
-    fn add(
+    /// Whether an addition of `id` at `position` saw every removal of it
+    /// so far: one concurrent with a removal before it is void, as `hosts`
+    /// has it.
+    fn survives(&self, graph: &Graph<'_>, position: usize, id: HostId) -> bool {
+        self.removed
+            .get(&id)
+            .is_none_or(|removals| removals.iter().all(|&at| graph.sees(position, at)))
+    }
+
+    /// A computer's bundle naming `id` at `position`.
+    fn claim(
         &mut self,
         graph: &Graph<'_>,
         position: usize,
+        member: MemberId,
         id: HostId,
         intro: &'a HostIntro,
-        member: Option<MemberId>,
     ) {
-        // An addition concurrent with a removal of the host before it is
-        // void, as `hosts` has it.
-        let survives = self
-            .removed
-            .get(&id)
-            .is_none_or(|removals| removals.iter().all(|&at| graph.sees(position, at)));
-        if !survives {
-            return;
-        }
-        if let Some(member) = member {
-            // Another live computer named this host first: this one's
-            // intro is a copy, held (`hosts`), and changes nothing here.
-            let copied = self
+        let survives = self.survives(graph, position, id);
+        let named = match self.own.get(&member) {
+            Some(named) if named.host == id => Named {
+                host: id,
+                intro,
+                origin: named.origin,
+                live: named.live || survives,
+            },
+            _ => Named {
+                host: id,
+                intro,
+                origin: Some(position),
+                live: survives,
+            },
+        };
+        self.own.insert(member, named);
+        self.settle(id);
+    }
+
+    /// A removal of `id` at `position`.
+    fn removal(&mut self, position: usize, id: HostId) {
+        self.removed.entry(id).or_default().push(position);
+        self.remove(id);
+    }
+
+    /// Gives a computer's own host the intro of the computer that named it
+    /// first ([`named_first`]), or drops it when none does now.
+    fn settle(&mut self, id: HostId) {
+        let kept = self.kept.get(&id).copied();
+        let chosen = self
+            .own
+            .iter()
+            .filter(|(_, named)| named.host == id && named.live)
+            .min_by_key(|(member, named)| {
+                named_first(named.origin, kept == Some(named.intro), **member)
+            })
+            .map(|(member, named)| (*member, named.intro));
+        let Some((member, intro)) = chosen else {
+            if self
                 .hosts
                 .get(&id)
-                .and_then(|tracked| tracked.by)
-                .is_some_and(|by| by != member && self.own.get(&by) == Some(&id));
-            let old = if copied {
-                self.own.remove(&member)
-            } else {
-                self.own.insert(member, id)
-            };
-            if let Some(old) = old
-                && old != id
+                .is_some_and(|tracked| tracked.by.is_some())
             {
-                self.remove(old);
+                self.remove(id);
             }
-            if copied {
-                return;
-            }
-        }
-        let tracked = match self.hosts.get_mut(&id) {
-            Some(_) if member.is_none() => return,
-            Some(tracked) => {
-                if tracked.intro != intro {
-                    *tracked = Tracked {
-                        held: tracked.held,
-                        ..Tracked::new(intro)
-                    };
-                }
-                tracked.by = member;
-                tracked
-            }
-            None => self.hosts.entry(id).or_insert(Tracked {
-                by: member,
+            return;
+        };
+        let tracked = self.hosts.entry(id).or_insert(Tracked::new(intro));
+        if tracked.intro != intro {
+            *tracked = Tracked {
+                held: tracked.held,
                 ..Tracked::new(intro)
-            }),
+            };
+        }
+        tracked.by = Some(member);
+        self.claim_route(id);
+    }
+
+    /// The host gives up the routes its intro and record no longer name,
+    /// and claims its intro's: held when another host owns it.
+    fn claim_route(&mut self, id: HostId) {
+        let Some(tracked) = self.hosts.get_mut(&id) else {
+            return;
         };
         let route = &tracked.intro.record.route;
         let record = &tracked.record.route;
@@ -157,11 +208,26 @@ impl<'a> Pass<'a> {
         }
     }
 
+    /// A `HostAdd` of `id` at `position`: it makes the host live when it
+    /// was not; another addition of a live host changes nothing.
+    fn add(&mut self, graph: &Graph<'_>, position: usize, id: HostId, intro: &'a HostIntro) {
+        if !self.survives(graph, position, id) || self.hosts.contains_key(&id) {
+            return;
+        }
+        self.hosts.insert(id, Tracked::new(intro));
+        self.claim_route(id);
+    }
+
     /// A removal of `id`: it frees the host's routes, and the host starts
     /// over when added again.
     fn remove(&mut self, id: HostId) {
         self.hosts.remove(&id);
         self.routes.retain(|_, owner| *owner != id);
+        for named in self.own.values_mut() {
+            if named.host == id {
+                named.live = false;
+            }
+        }
     }
 
     /// A carried record, if it is its host's word and its route is the
@@ -215,11 +281,19 @@ pub(super) fn records(
     state: &mut State,
 ) {
     let mut pass = Pass::new(base);
+    // Where a computer's own host went with it (`Members::dropped`).
+    let mut dropped: BTreeMap<usize, Vec<HostId>> = BTreeMap::new();
+    for &(position, host) in &members.dropped {
+        dropped.entry(position).or_default().push(host);
+    }
     for &(position, op) in effective {
+        for &host in dropped.get(&position).into_iter().flatten() {
+            pass.removal(position, host);
+        }
         match op.body() {
             Body::HostAdd(intro) if intro.kind != HostKind::Member && !held.contains(&position) => {
                 if let Ok(id) = intro.id() {
-                    pass.add(graph, position, id, intro, None);
+                    pass.add(graph, position, id, intro);
                 }
             }
             Body::Found(bundle) | Body::Rotate(bundle) if members.bundles.contains(&position) => {
@@ -228,22 +302,16 @@ pub(super) fn records(
             Body::Admit(admit) if members.bundles.contains(&position) => {
                 own(&mut pass, graph, position, &admit.bundle, admit.bundle.id());
             }
-            Body::HostRemove(id) => {
-                pass.removed.entry(*id).or_default().push(position);
-                pass.remove(*id);
-            }
+            Body::HostRemove(id) => pass.removal(position, *id),
             Body::Remove(remove) => {
                 let Some(reach) = members.removals.get(&position) else {
                     continue;
                 };
-                let hosts = remove
-                    .also_hosts
-                    .iter()
-                    .copied()
-                    .chain(reach.iter().filter_map(|member| pass.own.remove(member)));
-                for id in hosts.collect::<Vec<_>>() {
-                    pass.removed.entry(id).or_default().push(position);
-                    pass.remove(id);
+                for member in reach {
+                    pass.own.remove(member);
+                }
+                for id in &remove.also_hosts {
+                    pass.removal(position, *id);
                 }
             }
             Body::HostSeen(seen) => pass.seen(seen),
@@ -281,14 +349,10 @@ fn own<'a>(
     bundle: &'a Bundle,
     member: MemberId,
 ) {
-    if let Some(intro) = bundle.host.as_ref()
-        && let Ok(id) = intro.id()
-    {
-        pass.add(graph, position, id, intro, Some(member));
+    match bundle.host.as_ref().map(|intro| (intro, intro.id())) {
+        Some((intro, Ok(id))) => pass.claim(graph, position, member, id, intro),
+        _ => {
+            pass.own.remove(&member);
+        }
     }
-}
-
-/// The host a bundle names as its own.
-fn host_id(bundle: &Bundle) -> Option<HostId> {
-    bundle.host.as_ref().and_then(|intro| intro.id().ok())
 }

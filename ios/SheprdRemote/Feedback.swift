@@ -46,6 +46,14 @@ final class Feedback {
     private static let maxSounds = 32
     /// Kept until they finish: a player let go stops.
     private var players: [AVAudioPlayer] = []
+    /// What the screen effect playing still has to play, stopped when
+    /// another replaces it: a replayed fireworks must not keep bursting
+    /// under the wizz after it.
+    private var screenPlayers: [AVAudioPlayer] = []
+    private var screenTaps: [CHHapticPatternPlayer] = []
+    /// Counts screen effects, so a sound rendered for one that was since
+    /// replaced does not start.
+    private var screenRun = 0
     private var engine: CHHapticEngine?
     /// What holds the audio session for the microphone or speech now.
     private var holders: Set<ObjectIdentifier> = []
@@ -54,8 +62,9 @@ final class Feedback {
     /// effect sounds until it lets go.
     func holdAudio(_ owner: AnyObject) {
         holders.insert(ObjectIdentifier(owner))
-        for player in players { player.stop() }
+        for player in players + screenPlayers { player.stop() }
         players.removeAll()
+        screenPlayers.removeAll()
     }
 
     func releaseAudio(_ owner: AnyObject) {
@@ -64,12 +73,25 @@ final class Feedback {
 
     /// Plays the sound and taps of effects that just began.
     func play(_ began: [ChatEffects.Began]) {
-        for effect in began { play(effect.cue) }
+        for effect in began {
+            if effect.lane == .newScreen { stopScreen() }
+            play(effect.cue, screen: effect.lane != .bubble)
+        }
     }
 
-    func play(_ cue: Cue) {
-        if FeedbackSettings.haptics { tap(cue.taps) }
-        if FeedbackSettings.sounds, holders.isEmpty { sound(cue.sound) }
+    /// Plays `cue`, as the screen effect's when `screen`.
+    func play(_ cue: Cue, screen: Bool = false) {
+        if FeedbackSettings.haptics, let player = tap(cue.taps), screen { screenTaps.append(player) }
+        if FeedbackSettings.sounds, holders.isEmpty { sound(cue.sound, run: screen ? screenRun : nil) }
+    }
+
+    /// Stops what the last screen effect still had to play.
+    private func stopScreen() {
+        screenRun += 1
+        for player in screenPlayers { player.stop() }
+        screenPlayers.removeAll()
+        for player in screenTaps { try? player.stop(atTime: CHHapticTimeImmediate) }
+        screenTaps.removeAll()
     }
 
     /// Answers a touch with a haptic.
@@ -83,10 +105,11 @@ final class Feedback {
         }
     }
 
-    private func sound(_ synth: Synth) {
+    /// Plays `synth`, as part of screen effect `run` if it is one.
+    private func sound(_ synth: Synth, run: Int?) {
         guard !synth.voices.isEmpty else { return }
         if let data = sounds[synth] {
-            start(data)
+            start(data, run: run)
             return
         }
         Task {
@@ -94,27 +117,31 @@ final class Feedback {
             let data = await Task.detached(priority: .userInitiated) { synth.wav() }.value
             if sounds.count >= Self.maxSounds { sounds.removeAll() }
             sounds[synth] = data
-            start(data)
+            start(data, run: run)
         }
     }
 
-    private func start(_ data: Data) {
-        guard holders.isEmpty else { return }
+    private func start(_ data: Data, run: Int?) {
+        // A screen effect replaced while its sound rendered stays quiet.
+        guard holders.isEmpty, run == nil || run == screenRun else { return }
         let session = AVAudioSession.sharedInstance()
         do {
             if session.category != .ambient { try session.setCategory(.ambient) }
             try session.setActive(true)
             let player = try AVAudioPlayer(data: data)
             players.removeAll { !$0.isPlaying }
-            players.append(player)
+            screenPlayers.removeAll { !$0.isPlaying }
+            if run == nil { players.append(player) } else { screenPlayers.append(player) }
             player.play()
         } catch {
             // A sound is a garnish: the effect still shows without it.
         }
     }
 
-    private func tap(_ taps: [Cue.Tap]) {
-        guard FeedbackSettings.canTap, !taps.isEmpty else { return }
+    /// Plays `taps`, returning their player so a screen effect's can be
+    /// stopped.
+    private func tap(_ taps: [Cue.Tap]) -> CHHapticPatternPlayer? {
+        guard FeedbackSettings.canTap, !taps.isEmpty else { return nil }
         do {
             let engine = try self.engine ?? makeEngine()
             let events = taps.map { tap in
@@ -128,9 +155,12 @@ final class Feedback {
                 )
             }
             try engine.start()
-            try engine.makePlayer(with: CHHapticPattern(events: events, parameters: [])).start(atTime: CHHapticTimeImmediate)
+            let player = try engine.makePlayer(with: CHHapticPattern(events: events, parameters: []))
+            try player.start(atTime: CHHapticTimeImmediate)
+            return player
         } catch {
             engine = nil
+            return nil
         }
     }
 

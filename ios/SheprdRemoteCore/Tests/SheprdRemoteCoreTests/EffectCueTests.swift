@@ -139,6 +139,12 @@ import Testing
         #expect(cue.after(0) == cue)
     }
 
+    @Test func aScreenEffectReplacesTheLastOnesSoundAndZapsLettersAddToIt() {
+        #expect(ChatEffects.Began.bubble(.slam).lane == .bubble)
+        #expect(ChatEffects.Began.screen(.fireworks, text: "").lane == .newScreen)
+        #expect(ChatEffects.Began.letters(0..<3, at: 0.2).lane == .screen)
+    }
+
     @Test func aReplayedScreenEffectBegins() {
         var effects = ChatEffects()
         let entry = Entry(id: EntryId(1), kind: .agent(text: "::echo\nhello"))

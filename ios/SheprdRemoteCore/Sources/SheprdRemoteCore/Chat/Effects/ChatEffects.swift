@@ -52,6 +52,25 @@ public struct ChatEffects: Hashable, Sendable {
         /// after it began: their shots are still to come.
         case letters(Range<Int>, at: Double)
 
+        /// Where its sound and taps play: a bubble's beside anything else,
+        /// a screen effect's in place of the one before.
+        public enum Lane: Hashable, Sendable {
+            case bubble
+            /// The screen effect's, stopping whatever the last one still
+            /// had to play.
+            case newScreen
+            /// More of the screen effect playing.
+            case screen
+        }
+
+        public var lane: Lane {
+            switch self {
+            case .bubble: .bubble
+            case .screen: .newScreen
+            case .letters: .screen
+            }
+        }
+
         public var cue: Cue {
             switch self {
             case let .bubble(effect): effect.cue

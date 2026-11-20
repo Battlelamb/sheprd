@@ -40,7 +40,7 @@ final class ChatEffectsModel {
     func replayScreen(_ entry: Entry) {
         var began: ChatEffects.Began?
         update { began = $0.replayScreen(entry, now: .now) }
-        if let began { Feedback.shared.play(began.cue) }
+        if let began { Feedback.shared.play([began]) }
     }
 
     /// Where the message a playing screen effect belongs to was last drawn.

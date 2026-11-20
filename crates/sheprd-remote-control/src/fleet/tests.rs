@@ -58,6 +58,8 @@ mod records;
 #[cfg(unix)]
 mod rejected;
 #[cfg(unix)]
+mod removed_peer;
+#[cfg(unix)]
 mod restore;
 #[cfg(unix)]
 mod retry;
@@ -75,6 +77,8 @@ mod sessions;
 mod settling;
 #[cfg(unix)]
 mod shared_records;
+#[cfg(unix)]
+mod startup;
 #[cfg(unix)]
 mod store;
 #[cfg(unix)]

@@ -14,7 +14,7 @@
 
 use super::Fleet;
 use crate::control::fleet::{
-    Body, MemberId, Op, OpId,
+    Body, Log, MemberId, Op, OpId,
     removal::{MAX_FRAME, MAX_OPS, MAX_ROUNDS, Message, PURPOSE_REMOVAL},
 };
 use crate::desktop::record::Record;
@@ -54,6 +54,11 @@ pub(crate) async fn serve(
 }
 
 async fn exchange_in(fleet: &Arc<Fleet>, io: &mut (impl AsyncRead + AsyncWrite + Unpin)) {
+    // The fleet this exchange serves: what it passes goes into that one
+    // only, never into a fleet joined since, or none after a scrub.
+    let Some(serving) = fleet.inner().log.as_ref().map(Log::fleet) else {
+        return;
+    };
     let mut received: Vec<OpId> = Vec::new();
     for round in 0..=MAX_ROUNDS {
         let Ok(Message::Removal(ops)) = read(io).await else {
@@ -75,7 +80,7 @@ async fn exchange_in(fleet: &Arc<Fleet>, io: &mut (impl AsyncRead + AsyncWrite +
         // A removal not saved is not acknowledged: the dialer keeps it and
         // sends it again, and that later exchange saves it.
         let Ok(Some(wanted)) = tokio::task::spawn_blocking(move || {
-            if let Err(error) = taken.receive(ops, crate::web::now_ms()) {
+            if let Err(error) = taken.receive_in(serving, ops, crate::web::now_ms()) {
                 tracing::warn!(error = %error, "could not keep removals another member passed");
                 return None;
             }

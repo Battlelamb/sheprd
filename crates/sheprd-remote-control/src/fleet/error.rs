@@ -11,6 +11,8 @@ pub enum Error {
     Daemon(String),
     #[error(transparent)]
     Desktop(#[from] crate::desktop::Error),
+    #[error("the fleet no longer holds that host")]
+    HostRemoved,
     #[error("this computer is in a fleet already; leave it first")]
     InFleet,
     #[error(transparent)]

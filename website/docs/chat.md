@@ -107,6 +107,8 @@ For Herdr 1, Herdr must know the agent's session, which takes its integration: r
 
 Only an idle agent moves. The agent is stopped with Ctrl+C alone, so nothing in its input is submitted, but text in its input is lost and whatever it ran in the background stops with it. If it has not stopped after 30 seconds, the move gives up and the agent keeps running.
 
+The move continues the same session: nothing is sent to the agent as a new prompt. The chat opens at the agent's last prompt and reply, under a **Continued from …'s earlier session** line. On the desktop, **Show N earlier turns** above that prompt opens the rest of the conversation. A context compaction shows as **Context compacted**, with Claude's summary in its details, and slash commands typed in the terminal show as short notes.
+
 Limits:
 
 - Herdr 1 conversion supports this machine or an SSH host, not Windows. Herdr 2 conversion is local; remote native chat attachment is not supported.

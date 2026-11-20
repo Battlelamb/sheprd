@@ -2,6 +2,8 @@ use super::*;
 
 #[cfg(unix)]
 mod installed;
+#[cfg(unix)]
+mod ssh_port;
 mod tokens;
 
 fn public(url: &str) -> Relay {
@@ -82,7 +84,7 @@ fn the_service_runs_the_agent_on_each_relay_on_both_systems() {
         public("https://nyc1.relay.sheprd.org"),
     ]);
     assert!(script.contains(
-        "\\\" --relay https://fra1.relay.sheprd.org --relay https://nyc1.relay.sheprd.org"
+        "--forward $port --relay https://fra1.relay.sheprd.org --relay https://nyc1.relay.sheprd.org"
     ));
     assert!(
         script.contains("<string>--relay</string><string>https://nyc1.relay.sheprd.org</string>")
@@ -100,7 +102,7 @@ fn the_service_runs_the_agent_on_each_relay_on_both_systems() {
             .ends_with("\"$agent\" status --json --state-dir \"$state\"")
     );
     // The service runs on the state directory the SSH commands use.
-    assert!(script.contains("run --state-dir \\\"$state\\\" --relay"));
+    assert!(script.contains("run --state-dir \\\"$state\\\" --forward $port --relay"));
     assert!(script.contains("<string>--state-dir</string><string>$state</string>"));
     assert!(script.contains("state=\"$XDG_STATE_HOME/sheprd-relay-agent\""));
 }

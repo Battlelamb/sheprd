@@ -1432,7 +1432,9 @@ sequenceDiagram
    writes its `ssh_access` lines and admits the members' tunnel keys.
 3. **H is a plain SSH machine.** The dialog also says "Installs
    sheprd-relay-agent on H". A installs or updates it over its working
-   SSH session (Enrolling), on A's relays: a private relay's listen token
+   SSH session (Enrolling), on A's relays, forwarding to the port the
+   host's SSH server took that session on (`SSH_CONNECTION`, 22 when it
+   does not say): a private relay's listen token
    goes over the session's input into a file in the agent's state
    directory readable by that account alone, passed with `--token-file`,
    and the share waits until a relay lets the agent listen. A then runs

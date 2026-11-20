@@ -91,6 +91,19 @@ pub(crate) fn service_input(relays: &[Relay]) -> Vec<u8> {
         .collect()
 }
 
+/// Sets `port` to the port the host's SSH server took this session on,
+/// the last field of `SSH_CONNECTION`, which the server sets from its own
+/// end of the connection: where the agent forwards sessions to. 22 when
+/// the session does not say, as for a login that is not over SSH.
+pub(crate) const SSH_PORT: &str = r#"port=22
+case "${SSH_CONNECTION:-}" in
+*' '*)
+  said=${SSH_CONNECTION##* }
+  case "$said" in ''|*[!0-9]*) ;; *) [ "$said" -ge 1 ] && [ "$said" -le 65535 ] && port=$said ;; esac
+  ;;
+esac
+"#;
+
 /// The host script that keeps the agent running as a user service on
 /// `relays`: each private relay's token in a private file it passes with
 /// `--token-file`, then a systemd user unit on Linux, a launchd agent on
@@ -131,7 +144,8 @@ pub(crate) fn service_script(relays: &[Relay]) -> String {
     format!(
         // i18n: data
         r#"agent="$HOME/.local/bin/{PROGRAM}"
-# The state directory every SSH command of this account uses, as the agent
+# The port this host's SSH server listens on, which the agent forwards to.
+{SSH_PORT}# The state directory every SSH command of this account uses, as the agent
 # picks it by default, given to the service explicitly: its manager may not
 # share this login's environment (`XDG_STATE_HOME`).
 if [ "$(uname -s)" = Darwin ]; then
@@ -160,7 +174,7 @@ Darwin)
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
     '<plist version="1.0"><dict>' \
     '<key>Label</key><string>{LABEL}</string>' \
-    "<key>ProgramArguments</key><array><string>$agent</string><string>run</string><string>--state-dir</string><string>$state</string>{plist_args}</array>" \
+    "<key>ProgramArguments</key><array><string>$agent</string><string>run</string><string>--state-dir</string><string>$state</string><string>--forward</string><string>$port</string>{plist_args}</array>" \
     '<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>' \
     '</dict></plist>' > "$plist.part"
   job="gui/$(id -u)/{LABEL}"
@@ -187,7 +201,7 @@ Darwin)
   dir="${{XDG_CONFIG_HOME:-$HOME/.config}}/systemd/user"
   mkdir -p "$dir"
   printf '%s\n' '[Unit]' 'Description=sheprd-relay-agent: Sheprd reaches this SSH server through relays' \
-    '' '[Service]' "ExecStart=\"$agent\" run --state-dir \"$state\"{args}" 'Restart=on-failure' 'RestartSec=10' \
+    '' '[Service]' "ExecStart=\"$agent\" run --state-dir \"$state\" --forward $port{args}" 'Restart=on-failure' 'RestartSec=10' \
     '' '[Install]' 'WantedBy=default.target' > "$dir/{UNIT}.part"
   mv -f "$dir/{UNIT}.part" "$dir/{UNIT}"
   # Without lingering a user unit stops at logout; allowed for oneself on

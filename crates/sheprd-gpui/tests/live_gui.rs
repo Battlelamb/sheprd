@@ -93,56 +93,41 @@ fn native_notifications() {
 #[test]
 #[ignore = "requires active native desktop; a page in the window, no daemon"]
 fn native_pages() {
-    // TEMPORARY: watch WebView2's processes during the cold first run.
     #[cfg(windows)]
-    {
-        let defender = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                "Get-MpComputerStatus | Format-List RealTimeProtectionEnabled,AMRunningMode",
-            ])
-            .output();
-        if let Ok(out) = defender {
-            eprintln!(
-                "PAGES diag: defender {}",
-                String::from_utf8_lossy(&out.stdout).trim()
-            );
-        }
-        let started = Instant::now();
-        thread::spawn(move || {
-            loop {
-                if let Ok(out) = Command::new("tasklist")
-                    .args([
-                        "/FI",
-                        "IMAGENAME eq msedgewebview2.exe",
-                        "/FO",
-                        "CSV",
-                        "/NH",
-                    ])
-                    .output()
-                {
-                    let text = String::from_utf8_lossy(&out.stdout);
-                    let count = text
-                        .lines()
-                        .filter(|line| line.contains("msedgewebview2"))
-                        .count();
-                    eprintln!(
-                        "PAGES diag: {:?} msedgewebview2 processes={count}",
-                        started.elapsed()
-                    );
-                }
-                thread::sleep(Duration::from_secs(5));
+    warm_webview2();
+    native_fixture(Fixture::Pages);
+}
+
+/// Reads every file of the installed WebView2 runtime once, so the pages
+/// check times the app rather than the runner's disk. A fresh Windows runner
+/// reads its image's files slowly the first time: the runtime, about 950 MB,
+/// takes over a minute, and the first page WebView2 starts there took from 5
+/// to over 60 seconds to build, while every later one took about a second.
+/// Read beforehand, the first page builds in about a second too.
+#[cfg(windows)]
+fn warm_webview2() {
+    let Some(root) = std::env::var_os("ProgramFiles(x86)") else {
+        return;
+    };
+    let started = Instant::now();
+    let mut pending = vec![Path::new(&root).join(r"Microsoft\EdgeWebView\Application")];
+    let mut bytes = 0;
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for path in entries.flatten().map(|entry| entry.path()) {
+            if path.is_dir() {
+                pending.push(path);
+            } else if let Ok(mut file) = fs::File::open(&path) {
+                bytes += std::io::copy(&mut file, &mut std::io::sink()).unwrap_or(0);
             }
-        });
+        }
     }
-    let mut failures = 0;
-    for run in 0..2 {
-        let result = std::panic::catch_unwind(|| native_fixture(Fixture::Pages));
-        eprintln!("PAGES diag: run {run} ok={}", result.is_ok());
-        failures += usize::from(result.is_err());
-    }
-    assert_eq!(failures, 0, "native pages failed {failures} of 2 runs");
+    eprintln!(
+        "PAGES read {bytes} bytes of the WebView2 runtime in {:?}",
+        started.elapsed()
+    );
 }
 
 #[cfg(target_os = "linux")]
@@ -306,15 +291,8 @@ fn run_fixture(fixture: &Fixture) -> Option<(ExitStatus, String)> {
     let gui = isolated.gui.as_mut().unwrap();
     // A bound on a hung fixture, not a performance budget (`just test-perf`
     // measures that): the debug build's startup, catalog loading, and every
-    // layout already take about 17 seconds on a shared Windows runner. The
-    // pages fixture also waits for a cold WebView2, which alone can take
-    // about 20 seconds there (`smoke_pages_windows::SETTLE` allows 60).
-    #[cfg(any(target_os = "macos", windows))]
-    let pages = matches!(fixture, Fixture::Pages);
-    #[cfg(not(any(target_os = "macos", windows)))]
-    let pages = false;
-    let bound = if pages { 300 } else { 40 };
-    let deadline = Instant::now() + Duration::from_secs(bound);
+    // layout already take about 17 seconds on a shared Windows runner.
+    let deadline = Instant::now() + Duration::from_secs(40);
     while gui.try_wait().unwrap().is_none() {
         if Instant::now() >= deadline {
             let _ = gui.kill();

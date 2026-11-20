@@ -22,6 +22,7 @@ mod me;
 mod plain;
 pub(crate) mod removals;
 mod store;
+pub(crate) mod suspensions;
 
 pub use error::{Error, Result};
 
@@ -44,6 +45,9 @@ pub(crate) const MAX_PROVEN: usize = 8;
 /// removal whose history does not exist outlives it.
 pub(crate) const UNCONFIRMED_TTL_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 
+/// Removals remembered as held by one peer; past it, some are sent again.
+pub(crate) const MAX_HELD_PER_PEER: usize = 2048;
+
 /// A suspension waiting for its removal's history.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Unconfirmed {
@@ -59,6 +63,22 @@ pub(crate) struct Unconfirmed {
 
 /// Suspensions that keep their removal to check again.
 pub(crate) const MAX_KEPT_REMOVALS: usize = crate::control::fleet::MAX_PENDING;
+
+/// The suspensions held, as `peers.json` keeps them.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct Suspensions {
+    pub(crate) unconfirmed: BTreeMap<OpId, Unconfirmed>,
+    pub(crate) folded: suspensions::FoldedMap,
+}
+
+impl Suspensions {
+    fn of(inner: &Inner) -> Self {
+        Self {
+            unconfirmed: inner.unconfirmed.clone(),
+            folded: inner.folded.clone(),
+        }
+    }
+}
 
 /// The daemon's fleet: its key, and its log once it founded or joined one.
 #[derive(Debug)]
@@ -78,7 +98,7 @@ pub(crate) struct Fleet {
     /// again.
     unsaved: AtomicBool,
     /// The suspensions `peers.json` holds (`store::save`).
-    on_disk: Mutex<BTreeMap<OpId, Unconfirmed>>,
+    on_disk: Mutex<Suspensions>,
 }
 
 /// What removals are passed to: a member's daemon, or a plain host's
@@ -99,6 +119,12 @@ pub(crate) struct Inner {
     /// until its history arrives and settles it, its signer is no longer a
     /// member, or [`UNCONFIRMED_TTL_MS`] passes.
     pub(crate) unconfirmed: BTreeMap<OpId, Unconfirmed>,
+    /// Older suspensions past what `unconfirmed` keeps per signer, folded
+    /// per signer and target (`suspensions`).
+    pub(crate) folded: suspensions::FoldedMap,
+    /// Removals folded while they still wait in the pending pool, so they
+    /// are not kept apart again; never saved, as the pool is not.
+    pub(crate) folded_pending: BTreeSet<OpId>,
     /// Every tunnel key each computer member proved by finishing the
     /// tunnel's handshake here, at most [`MAX_PROVEN`] each: once it is
     /// removed, a desktop paired here one by one with any of them goes
@@ -159,10 +185,10 @@ impl Fleet {
         let key = store::load_or_create_key(state_dir)?;
         let me = member_id(&key);
         let mut inner = store::load(state_dir, now_ms)?;
-        let on_disk = Mutex::new(inner.unconfirmed.clone());
+        let on_disk = Mutex::new(Suspensions::of(&inner));
         // A history `fleet apply` brought while the daemon was stopped may
         // settle a suspension.
-        settle_unconfirmed(&mut inner, now_ms);
+        suspensions::settle(&mut inner, now_ms, BTreeSet::new());
         Ok(Self {
             state_dir: state_dir.to_owned(),
             key,
@@ -205,21 +231,10 @@ impl Fleet {
         let Some(log) = &inner.log else {
             return Vec::new();
         };
-        let now = crate::web::now_ms();
         // Only while the removal's signer is still a member, and never this
         // computer: a removal that cannot be checked yet only takes others'
         // access away here.
-        let mut members: BTreeSet<MemberId> = inner
-            .unconfirmed
-            .values()
-            .filter(|kept| {
-                standing(log, kept) && now.saturating_sub(kept.since_ms) <= UNCONFIRMED_TTL_MS
-            })
-            .flat_map(|kept| kept.targets.iter().copied())
-            .collect();
-        for (_, targets) in log.pending_removals() {
-            members.extend(targets);
-        }
+        let mut members = suspensions::suspended(&inner, log, crate::web::now_ms());
         members.retain(|member| *member != self.me && log.is_member(member));
         members.into_iter().collect()
     }
@@ -310,7 +325,14 @@ impl Fleet {
     pub(crate) fn receive(&self, ops: Vec<Op>, now_ms: u64) -> Result<usize> {
         let mut inner = self.inner();
         let before = inner.log.as_ref().map(|log| log.heads().to_vec());
-        let suspensions: Vec<OpId> = inner.unconfirmed.keys().copied().collect();
+        let kept = Suspensions::of(&inner);
+        // The removals waiting now, to tell which this batch's history
+        // refuses.
+        let waiting = inner
+            .log
+            .as_mut()
+            .map(|log| suspensions::waiting(log, now_ms))
+            .unwrap_or_default();
         let refused = match &mut inner.log {
             Some(log) => log
                 .insert_all(ops, now_ms)
@@ -331,11 +353,17 @@ impl Fleet {
                 refused
             }
         };
-        settle_unconfirmed(&mut inner, now_ms);
+        let gone = inner
+            .log
+            .as_mut()
+            .map(|log| suspensions::refused(log, waiting, now_ms))
+            .unwrap_or_default();
+        suspensions::settle(&mut inner, now_ms, gone);
         let after = inner.log.as_ref().map(|log| log.heads().to_vec());
         // A suspension lifted is a change too: its target's grants return.
-        let changed = after != before || !suspensions.iter().eq(inner.unconfirmed.keys());
-        if changed || !inner.unconfirmed.is_empty() || self.is_unsaved() {
+        let changed = after != before || kept != Suspensions::of(&inner);
+        if changed || !inner.unconfirmed.is_empty() || !inner.folded.is_empty() || self.is_unsaved()
+        {
             // What changed takes effect even if the write fails, which the
             // caller hears: a removal it does not see saved, it must not
             // count as held.
@@ -379,9 +407,9 @@ impl Fleet {
             return Ok(());
         };
         let _ = log.insert_all(Vec::new(), now_ms);
-        let kept: Vec<OpId> = inner.unconfirmed.keys().copied().collect();
-        settle_unconfirmed(&mut inner, now_ms);
-        let saved = if kept.iter().eq(inner.unconfirmed.keys()) {
+        let kept = Suspensions::of(&inner);
+        suspensions::settle(&mut inner, now_ms, BTreeSet::new());
+        let saved = if kept == Suspensions::of(&inner) {
             Ok(())
         } else {
             self.save(&inner)
@@ -422,10 +450,32 @@ impl Fleet {
         self.save(&inner)
     }
 
-    /// Records that `peer` holds the removals `ids`. Blocking.
+    /// Records that `peer`, a member's daemon or a plain host's agent,
+    /// holds the removals `ids`, of those the log holds, and forgets what
+    /// no longer matters: members no longer members, plain hosts no longer
+    /// in the fleet, and removals the log no longer holds. At most
+    /// [`MAX_HELD_PER_PEER`] per peer; one forgotten is only sent again.
+    /// Blocking.
     pub(crate) fn held(&self, peer: Holder, ids: impl IntoIterator<Item = OpId>) -> Result<()> {
         let mut inner = self.inner();
-        inner.held.entry(peer).or_default().extend(ids);
+        let Inner { log, held, .. } = &mut *inner;
+        let Some(log) = log.as_ref() else {
+            return Ok(());
+        };
+        held.entry(peer)
+            .or_default()
+            .extend(ids.into_iter().filter(|id| log.get(id).is_some()));
+        held.retain(|peer, ids| {
+            ids.retain(|id| log.get(id).is_some());
+            while ids.len() > MAX_HELD_PER_PEER {
+                ids.pop_last();
+            }
+            let current = match peer {
+                Holder::Member(member) => log.is_member(member),
+                Holder::Host(host) => log.state().hosts.contains_key(host),
+            };
+            current && !ids.is_empty()
+        });
         self.save(&inner)
     }
 
@@ -516,81 +566,6 @@ fn join(joining: Option<Log>, mut ops: Vec<Op>, now_ms: u64) -> Result<(Log, usi
         .filter(|(_, result)| result.is_err())
         .count();
     Ok((log, refused))
-}
-
-/// Moves the log's pending removals into `unconfirmed`, and drops those
-/// the log settled: taken in, or refused once their history arrived.
-fn settle_unconfirmed(inner: &mut Inner, now_ms: u64) {
-    let Some(log) = &mut inner.log else {
-        return;
-    };
-    for (op, targets) in log.pending_removals() {
-        inner.unconfirmed.entry(op.id()).or_insert(Unconfirmed {
-            signer: op.signer(),
-            targets,
-            since_ms: now_ms,
-            op: Some(op.clone()),
-        });
-    }
-    // A removal whose history is now held, and that the log does not
-    // hold, either expired from the pending pool before its history came
-    // or was refused with it: put it to the log again. Only a refusal the
-    // history proves ends the suspension; a full log keeps it.
-    let ready: Vec<Op> = inner
-        .unconfirmed
-        .iter()
-        .filter_map(|(id, kept)| kept.op.as_ref().filter(|_| log.get(id).is_none()))
-        .filter(|op| op.parents().iter().all(|parent| log.get(parent).is_some()))
-        .cloned()
-        .collect();
-    let mut refused = BTreeSet::new();
-    for op in ready {
-        let id = op.id();
-        match log.insert(op, now_ms) {
-            Err(
-                crate::control::fleet::Error::Full
-                | crate::control::fleet::Error::Bounds
-                | crate::control::fleet::Error::ParentMissing,
-            )
-            | Ok(_) => {}
-            Err(_) => {
-                refused.insert(id);
-            }
-        }
-    }
-    inner.unconfirmed.retain(|id, kept| {
-        log.get(id).is_none()
-            && !refused.contains(id)
-            && standing(log, kept)
-            && now_ms.saturating_sub(kept.since_ms) <= UNCONFIRMED_TTL_MS
-    });
-    // Bounded: the oldest give up their removal, never their suspension.
-    let mut kept: Vec<(u64, OpId)> = inner
-        .unconfirmed
-        .iter()
-        .filter(|(_, kept)| kept.op.is_some())
-        .map(|(id, kept)| (kept.since_ms, *id))
-        .collect();
-    if kept.len() > MAX_KEPT_REMOVALS {
-        kept.sort_unstable();
-        for (_, id) in &kept[..kept.len() - MAX_KEPT_REMOVALS] {
-            if let Some(entry) = inner.unconfirmed.get_mut(id) {
-                entry.op = None;
-            }
-        }
-    }
-}
-
-/// Whether a suspension still stands: its signer is a member, or was
-/// removed by one of the members it suspends. A suspended member cannot
-/// lift its own suspension by removing whoever signed it; the history,
-/// once it arrives, settles both removals.
-fn standing(log: &Log, kept: &Unconfirmed) -> bool {
-    log.is_member(&kept.signer)
-        || log
-            .removers(&kept.signer)
-            .iter()
-            .any(|remover| kept.targets.contains(remover))
 }
 
 /// The first bytes of a fleet session this computer opens with

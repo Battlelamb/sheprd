@@ -262,7 +262,7 @@ pub(super) fn with_organizations(
     let mut cooldown = None;
     let memberships = match super::graphql(
         "organizations",
-        &profile.token,
+        &super::ServerToken::github(profile.token.clone()),
         ORGANIZATIONS,
         serde_json::json!({}),
         Duration::from_secs(15),

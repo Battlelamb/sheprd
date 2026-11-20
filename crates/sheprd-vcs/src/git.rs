@@ -15,7 +15,6 @@ mod identity;
 pub use ahead::Ahead;
 pub use error::Error;
 pub use identity::{Identity, identity};
-use secrecy::SecretString;
 use sheprd_github::{
     Tokens,
     pull_request::{Input, base_repository, clean, local_checkout, run, run_bytes},
@@ -805,7 +804,14 @@ fn create_pull_request(
     // that owner's account sends the mutation.
     let base = base_repository(checkout, deadline, cancelled)?;
     let head = base.head(branch)?;
-    let token: &SecretString = tokens.for_owner(base.fork_owner.as_deref().unwrap_or(&base.owner));
+    let token = tokens
+        .for_owner(
+            &base.server,
+            base.fork_owner.as_deref().unwrap_or(&base.owner),
+        )
+        .ok_or(sheprd_github::Error::from(
+            sheprd_github::pull_request::Error::Origin,
+        ))?;
     let title = clean(&git(
         checkout,
         &["log", "-1", "--pretty=format:%s"],
@@ -863,14 +869,20 @@ fn create_pull_request(
         cancelled,
         &mut cooldown,
     )?;
-    parse_created(&created, &base.owner, &base.repo)
+    parse_created(&created, &token.server, &base.owner, &base.repo)
 }
 
-fn parse_created(response: &serde_json::Value, owner: &str, repo: &str) -> crate::Result<Outcome> {
+fn parse_created(
+    response: &serde_json::Value,
+    server: &sheprd_github::Server,
+    owner: &str,
+    repo: &str,
+) -> crate::Result<Outcome> {
     let pr = &response["data"]["createPullRequest"]["pullRequest"];
     let number = pr["number"].as_u64().filter(|number| *number > 0);
     let url = pr["url"].as_str().unwrap_or_default();
-    let expected = number.map(|number| format!("https://github.com/{owner}/{repo}/pull/{number}"));
+    let expected =
+        number.map(|number| format!("{}/{owner}/{repo}/pull/{number}", server.web_url()));
     if expected.as_deref() != Some(url) {
         return Err(
             sheprd_github::Error::from(sheprd_github::pull_request::Error::Identity).into(),

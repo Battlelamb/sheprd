@@ -164,11 +164,16 @@ impl<'a> Found<'a> {
         let Some((owner, _)) = self.name.split_once('/') else {
             return;
         };
-        let token = account.1.for_owner(owner).expose_secret();
+        let read = |tokens: &Tokens| {
+            tokens
+                .for_owner(&crate::github::Server::GitHub, owner)
+                .map(|token| token.token.expose_secret().to_owned())
+        };
+        let token = read(account.1);
         if self
             .accounts
             .iter()
-            .all(|(_, tokens)| tokens.for_owner(owner).expose_secret() != token)
+            .all(|(_, tokens)| read(tokens) != token)
         {
             self.accounts.push(account);
         }
@@ -203,9 +208,10 @@ fn alerts(name: &str, tokens: &Tokens, cancelled: &AtomicBool) -> Result<Alerts,
     // repository's alerts must not pause the others, as the shared cooldown
     // would. An exhausted quota stops the round through `limited` instead.
     let mut cooldown = None;
+    let token = super::github_token(tokens, owner)?;
     let response = crate::github::graphql(
         "security",
-        tokens.for_owner(owner),
+        token,
         QUERY,
         serde_json::json!({"owner": owner, "repo": repo}),
         TIMEOUT,
@@ -219,7 +225,7 @@ fn alerts(name: &str, tokens: &Tokens, cancelled: &AtomicBool) -> Result<Alerts,
     }
     let check = crate::github::rest::<serde_json::Value>(
         "security",
-        tokens.for_owner(owner),
+        token,
         &format!("/repos/{name}/dependabot/alerts?state=open&per_page=1"),
         TIMEOUT,
         || cancelled.load(Ordering::Relaxed),

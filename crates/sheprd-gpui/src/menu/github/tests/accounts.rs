@@ -37,7 +37,11 @@ fn repositories_an_additional_account_owns_are_read_with_it(cx: &mut TestAppCont
             let tokens = view.pr_tokens().unwrap();
             assert_eq!(tokens.key(), "fixture-user");
             assert_eq!(
-                tokens.for_owner("fabien_microsoft").expose_secret(),
+                tokens
+                    .for_owner(&crate::github::Server::GitHub, "fabien_microsoft")
+                    .unwrap()
+                    .token
+                    .expose_secret(),
                 "fixture-token"
             );
 
@@ -48,10 +52,21 @@ fn repositories_an_additional_account_owns_are_read_with_it(cx: &mut TestAppCont
                 "fixture-user,fabien_microsoft(fabien_microsoft emu-org listed-owner)"
             );
             for owner in ["fabien_microsoft", "emu-org", "listed-owner"] {
-                assert_eq!(tokens.for_owner(owner).expose_secret(), "emu-token");
+                assert_eq!(
+                    tokens
+                        .for_owner(&crate::github::Server::GitHub, owner)
+                        .unwrap()
+                        .token
+                        .expose_secret(),
+                    "emu-token"
+                );
             }
             assert_eq!(
-                tokens.for_owner("rust-lang").expose_secret(),
+                tokens
+                    .for_owner(&crate::github::Server::GitHub, "rust-lang")
+                    .unwrap()
+                    .token
+                    .expose_secret(),
                 "fixture-token"
             );
             assert_eq!(

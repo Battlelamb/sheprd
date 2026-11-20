@@ -35,12 +35,12 @@ impl SheprdWindow {
     }
 
     /// The token that reads the followed pull request's repository.
-    pub(crate) fn pr_token(&self) -> Option<std::sync::Arc<secrecy::SecretString>> {
+    pub(crate) fn pr_token(&self) -> Option<crate::github::ServerToken> {
         let tokens = self.pr_tokens()?;
-        Some(match self.pr_actions.target() {
-            Some(target) => tokens.for_owner(&target.owner).clone(),
-            None => tokens.main().clone(),
-        })
+        match self.pr_actions.target() {
+            Some(target) => tokens.for_owner(&target.server, &target.owner).cloned(),
+            None => Some(tokens.main().clone()),
+        }
     }
 
     pub(super) fn open_pr_review(&mut self) {

@@ -20,6 +20,7 @@ fn target(owner: &str, branch: &str) -> (Input, Target) {
             branch: branch.into(),
         },
         Target {
+            server: crate::Server::GitHub,
             owner: owner.into(),
             repo: "project".into(),
             ask: Ask::Number(1),
@@ -33,7 +34,7 @@ fn each_account_asks_only_for_the_repositories_it_reads() {
     let emu: Arc<SecretString> = Arc::new("emu".into());
     let (main_profile, emu_profile) = (profile("penso", &main), profile("fabien_microsoft", &emu));
     let tokens = Tokens::new(&main_profile, [(&emu_profile, &[][..])]);
-    let groups = by_token(
+    let (groups, _) = by_token(
         vec![
             target("rust-lang", "a"),
             target("fabien_microsoft", "b"),
@@ -46,7 +47,7 @@ fn each_account_asks_only_for_the_repositories_it_reads() {
         .iter()
         .map(|(_, token, targets)| {
             (
-                Arc::ptr_eq(token, &main),
+                Arc::ptr_eq(&token.token, &main),
                 targets
                     .iter()
                     .map(|(input, _)| input.branch.as_str())
@@ -56,7 +57,7 @@ fn each_account_asks_only_for_the_repositories_it_reads() {
         .collect();
     // In the order each account's first repository came.
     assert_eq!(shape, [(true, vec!["a", "c"]), (false, vec!["b", "d"])]);
-    assert!(Arc::ptr_eq(&groups[1].1, &emu));
+    assert!(Arc::ptr_eq(&groups[1].1.token, &emu));
     // Each group names the account it is, which a pause is kept under.
     assert_eq!(groups[0].0, "penso");
     assert_eq!(groups[1].0, "fabien_microsoft");
@@ -65,7 +66,7 @@ fn each_account_asks_only_for_the_repositories_it_reads() {
 #[test]
 fn a_lone_token_asks_for_everything_in_one_group() {
     let token: Arc<SecretString> = Arc::new("lone".into());
-    let groups = by_token(
+    let (groups, _) = by_token(
         vec![target("one", "a"), target("two", "b")],
         &Tokens::from(token.clone()),
     );

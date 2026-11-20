@@ -1,17 +1,36 @@
-//! Which signed-in account reads a repository: an additional account when the
-//! repository's owner is its login, one of its organizations, or an owner its
-//! config lists; otherwise the main sign-in. Workers learn a checkout's owner
-//! from its remote, so they carry every token and choose once they know it.
+//! Which signed-in account reads a repository: on the repository's server
+//! only, an additional account when the owner is its login, one of its
+//! organizations, or an owner its config lists; otherwise the main sign-in.
+//! Workers learn a checkout's repository from its remote, so they carry
+//! every token and choose once they know it.
 
-use super::Profile;
+use super::{Profile, Server};
 use secrecy::SecretString;
 use std::sync::Arc;
 
+/// A token and the server its account signed in to. Requests made with it
+/// go to that server's API only.
+#[derive(Clone)]
+pub struct ServerToken {
+    pub server: Server,
+    pub token: Arc<SecretString>,
+}
+
+impl ServerToken {
+    /// A GitHub.com token.
+    pub fn github(token: Arc<SecretString>) -> Self {
+        Self {
+            server: Server::GitHub,
+            token,
+        }
+    }
+}
+
 /// One account's token and the owners it reads; the main account's list is
-/// empty because it reads every owner no other account claims.
+/// empty because it reads every owner on its server no other account claims.
 struct Route {
     login: String,
-    token: Arc<SecretString>,
+    token: ServerToken,
     owners: Vec<String>,
 }
 
@@ -38,14 +57,14 @@ impl Tokens {
     ) -> Self {
         let main = Route {
             login: main.login.clone(),
-            token: main.token.clone(),
+            token: ServerToken::github(main.token.clone()),
             owners: Vec::new(),
         };
         let routes =
             std::iter::once(main).chain(additional.into_iter().map(|(profile, owners)| {
                 Route {
                     login: profile.login.clone(),
-                    token: profile.token.clone(),
+                    token: ServerToken::github(profile.token.clone()),
                     owners: std::iter::once(&profile.login)
                         .chain(profile.organizations.iter().flatten())
                         .chain(owners)
@@ -56,27 +75,31 @@ impl Tokens {
         Self(routes.collect())
     }
 
-    fn route(&self, owner: &str) -> &Route {
+    fn route(&self, server: &Server, owner: &str) -> Option<&Route> {
+        let serves = |route: &&Route| route.token.server.serves(server);
         self.0
             .iter()
             .skip(1)
+            .filter(serves)
             .find(|route| route.covers(owner))
-            .unwrap_or(&self.0[0])
+            .or_else(|| self.0.first().filter(serves))
     }
 
-    /// The token that reads repositories owned by `owner`.
-    pub fn for_owner(&self, owner: &str) -> &Arc<SecretString> {
-        &self.route(owner).token
+    /// The token that reads repositories owned by `owner` on `server`, the
+    /// server a remote names, when an account there does.
+    pub fn for_owner(&self, server: &Server, owner: &str) -> Option<&ServerToken> {
+        self.route(server, owner).map(|route| &route.token)
     }
 
     /// The main sign-in's token.
-    pub fn main(&self) -> &Arc<SecretString> {
+    pub fn main(&self) -> &ServerToken {
         &self.0[0].token
     }
 
-    /// The login of the account that reads repositories owned by `owner`.
-    pub fn login_for(&self, owner: &str) -> &str {
-        &self.route(owner).login
+    /// The login of the account that reads repositories owned by `owner` on
+    /// `server`.
+    pub fn login_for(&self, server: &Server, owner: &str) -> Option<&str> {
+        self.route(server, owner).map(|route| route.login.as_str())
     }
 
     /// The same accounts, owners, and token allocations. A renewed token is a
@@ -84,7 +107,8 @@ impl Tokens {
     pub fn same(&self, other: &Self) -> bool {
         self.0.len() == other.0.len()
             && self.0.iter().zip(other.0.iter()).all(|(this, that)| {
-                Arc::ptr_eq(&this.token, &that.token)
+                Arc::ptr_eq(&this.token.token, &that.token.token)
+                    && this.token.server == that.token.server
                     && this.login == that.login
                     && this.owners == that.owners
             })
@@ -112,12 +136,12 @@ impl Tokens {
     }
 }
 
-/// One token read as every owner, as before additional accounts.
+/// One GitHub.com token read as every owner, as before additional accounts.
 impl From<Arc<SecretString>> for Tokens {
     fn from(token: Arc<SecretString>) -> Self {
         Self(Arc::new([Route {
             login: String::new(),
-            token,
+            token: ServerToken::github(token),
             owners: Vec::new(),
         }]))
     }

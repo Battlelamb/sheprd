@@ -542,12 +542,15 @@ impl Worker {
         let Some((owner, repo)) = remote.source.repository.split_once('/') else {
             return;
         };
+        let Some(token) = token.for_owner(&sheprd_github::Server::GitHub, owner) else {
+            return;
+        };
         let cancelled = self.cancelled.clone();
         let result = sheprd_github::pull_request::by_number(
             owner,
             repo,
             number,
-            token.for_owner(owner),
+            token,
             || cancelled.load(Ordering::Relaxed),
             &mut self.cooldown,
         );

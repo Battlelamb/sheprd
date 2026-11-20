@@ -112,12 +112,15 @@ pub(super) fn hosts(
             at.is_some_and(|at| removed_by.iter().all(|&removal| graph.sees(at, removal)))
         })
     };
+    let void = bounded(graph, base, &adds, &removals);
     let mut anchors = BTreeMap::new();
     let mut live: Vec<(usize, HostId, Host)> = Vec::new();
     // Where each surviving addition was made; `None` for the base.
     let mut preceding: BTreeMap<HostId, Vec<(Option<usize>, &HostIntro)>> = BTreeMap::new();
     for (id, mut candidates) in adds {
-        candidates.retain(|add| survives(&id, add.position));
+        candidates.retain(|add| {
+            survives(&id, add.position) && add.position.is_none_or(|at| !void.contains(&at))
+        });
         // The first added gives the host its intro: the base's before any
         // other, so a pruned log picks the same one.
         candidates.sort_by_key(|add| (add.position.map_or(0, |at| at + 1), add.order));
@@ -153,17 +156,17 @@ pub(super) fn hosts(
             },
         ));
     }
-    // Concurrent additions can pass the bound each on its own; the first
-    // added are kept.
+    // Concurrent additions can each pass the bound with the other removed
+    // in between: the first added are kept, and the rest's additions in
+    // their current lifetime count for nothing either.
     live.sort_by_key(|(earliest, id, _)| (*earliest, *id));
-    // The additions of the hosts the bound leaves out, in their current
-    // lifetime: earlier lifetimes' additions still happened.
-    let excluded: BTreeSet<usize> = live
-        .iter()
-        .skip(MAX_HOSTS)
-        .filter_map(|(_, id, _)| anchors.get(id))
-        .flat_map(|lifetime: &Lifetime| lifetime.0.iter().flatten().copied())
-        .collect();
+    let mut excluded = void;
+    excluded.extend(
+        live.iter()
+            .skip(MAX_HOSTS)
+            .filter_map(|(_, id, _)| anchors.get(id))
+            .flat_map(|lifetime: &Lifetime| lifetime.0.iter().flatten().copied()),
+    );
     live.truncate(MAX_HOSTS);
     state.hosts = live.into_iter().map(|(_, id, host)| (id, host)).collect();
     anchors.retain(|id, _| state.hosts.contains_key(id));
@@ -177,6 +180,59 @@ pub(super) fn hosts(
         &mut anchors,
     );
     (anchors, excluded)
+}
+
+/// The `HostAdd`s that found [`MAX_HOSTS`] hosts live when they were made,
+/// in graph order from the base: they never count, whatever is removed
+/// later, so removing a host never brings back what its bound kept out.
+/// The route pass skips them too.
+fn bounded(
+    graph: &Graph<'_>,
+    base: &State,
+    adds: &BTreeMap<HostId, Vec<Add<'_>>>,
+    removals: &BTreeMap<HostId, Vec<usize>>,
+) -> BTreeSet<usize> {
+    // Additions and removals, in graph order; a removal at a place sorts
+    // before an addition there (they are never one operation).
+    let mut events: Vec<(usize, bool, HostId)> = Vec::new();
+    for (id, candidates) in adds {
+        events.extend(
+            candidates
+                .iter()
+                .filter_map(|add| add.position.map(|at| (at, true, *id))),
+        );
+    }
+    for (id, removed_by) in removals {
+        events.extend(removed_by.iter().map(|&at| (at, false, *id)));
+    }
+    events.sort_unstable();
+    let mut live: BTreeSet<HostId> = base
+        .hosts
+        .iter()
+        .filter(|(_, host)| host.intro.kind != HostKind::Member)
+        .map(|(id, _)| *id)
+        .collect();
+    let mut removed: BTreeMap<HostId, Vec<usize>> = BTreeMap::new();
+    let mut void = BTreeSet::new();
+    for (at, addition, id) in events {
+        if !addition {
+            live.remove(&id);
+            removed.entry(id).or_default().push(at);
+            continue;
+        }
+        let survives = removed
+            .get(&id)
+            .is_none_or(|removals| removals.iter().all(|&removal| graph.sees(at, removal)));
+        if !survives || live.contains(&id) {
+            continue;
+        }
+        if live.len() >= MAX_HOSTS {
+            void.insert(at);
+        } else {
+            live.insert(id);
+        }
+    }
+    void
 }
 
 /// A computer naming a host: its intro, its id, where it first named the

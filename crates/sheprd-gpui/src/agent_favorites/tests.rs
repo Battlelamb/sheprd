@@ -94,3 +94,21 @@ fn a_star_shows_at_once_and_waits_for_its_daemon(cx: &mut gpui::TestAppContext) 
         );
     });
 }
+
+#[test]
+fn a_failed_exchange_waits_for_the_interval_but_a_new_change_goes_at_once() {
+    let interval = Duration::from_secs(15);
+    let mut link = Link {
+        last: Some(Instant::now()),
+        ..Link::default()
+    };
+    assert!(!link.due(interval), "read just now");
+    link.pending.push_back(change("p1", true));
+    assert!(link.due(interval), "a change waiting goes at once");
+    link.failed = true;
+    assert!(!link.due(interval), "after a failure, not on the next poll");
+    link.last = Instant::now().checked_sub(interval);
+    assert!(link.due(interval), "but once the interval passed");
+    link.running = true;
+    assert!(!link.due(interval), "never twice at once");
+}

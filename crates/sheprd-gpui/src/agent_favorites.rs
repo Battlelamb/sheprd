@@ -112,6 +112,22 @@ struct Link {
     /// Stars and unstars made here that the daemon has not answered, the
     /// oldest first; the front one is on its way while `running`.
     pending: VecDeque<Change>,
+    /// The last exchange failed: what waits goes again after the interval,
+    /// not on the next poll, until a new change is made.
+    failed: bool,
+}
+
+impl Link {
+    /// Whether an exchange is due: a change waiting goes at once unless the
+    /// last exchange failed, and otherwise the daemon is read once each
+    /// `interval`.
+    fn due(&self, interval: Duration) -> bool {
+        if self.running {
+            return false;
+        }
+        let stale = self.last.is_none_or(|last| last.elapsed() >= interval);
+        stale || (!self.failed && !self.pending.is_empty())
+    }
 }
 
 /// The favorites shown, and each device's link to its daemon.
@@ -155,6 +171,8 @@ impl AgentFavorites {
                 link.pending.pop_front();
             }
             link.pending.push_back(change);
+            // A new change goes at once, even after a failure.
+            link.failed = false;
             let mut sets = (*this.sets).clone();
             sets.replace(device, Some(next));
             this.sets = Arc::new(sets);
@@ -188,19 +206,16 @@ impl AgentFavorites {
             .daemons
             .iter()
             .filter_map(|(id, daemon)| {
-                let link = this.links.get(id);
-                if link.is_some_and(|link| link.running) {
-                    return None;
-                }
-                let change = link.and_then(|link| link.pending.front().cloned());
                 let interval = match daemon {
                     Daemon::Local => LOCAL_INTERVAL,
                     Daemon::Remote(_) => REMOTE_INTERVAL,
                 };
-                let stale = link
-                    .and_then(|link| link.last)
-                    .is_none_or(|last| last.elapsed() >= interval);
-                (change.is_some() || stale).then(|| (id.clone(), daemon.clone(), change))
+                let link = this.links.get(id);
+                if !link.is_none_or(|link| link.due(interval)) {
+                    return None;
+                }
+                let change = link.and_then(|link| link.pending.front().cloned());
+                Some((id.clone(), daemon.clone(), change))
             })
             .collect();
         for (id, daemon, change) in due {
@@ -231,6 +246,7 @@ impl AgentFavorites {
         let (changed, more) = cx.update_global::<Self, _>(|this, _| {
             let link = this.links.entry(id.to_owned()).or_default();
             link.running = false;
+            link.failed = answer.is_err();
             let shown = match answer {
                 // A failed exchange tries again after the interval, the
                 // changes still waiting.

@@ -96,9 +96,11 @@ pub(super) fn serve(call: Call<ChatOp>, cx: &mut App) -> Response {
             }
         }),
         ChatOp::Favorite { switch, pane } => in_window(&caller, cx, |view, window, cx| {
+            // A focused herdr-core terminal counts without a chat view: it
+            // is nobody's Herdr pane.
             let pane = pane
                 .or_else(|| callers_pane(&caller))
-                .or_else(|| view.focused_core_chat_key(window, cx))
+                .or_else(|| view.focused_core_key(window, cx))
                 .or_else(|| {
                     view.live
                         .snapshot

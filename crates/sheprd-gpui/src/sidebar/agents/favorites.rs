@@ -69,12 +69,12 @@ impl SheprdWindow {
     }
 
     /// The agent in `pane`, as `chat` keys panes: a Herdr 1 pane of the
-    /// selected host, or a herdr-core terminal of this computer
-    /// (`core:t7`). `None` when no agent runs there, or its core does not
-    /// answer.
+    /// selected host, or a herdr-core terminal of this computer (`core:t7`)
+    /// or another host (`core@…`). `None` when no agent runs there, or its
+    /// core does not answer.
     pub(crate) fn starred_pane(&self, pane: &str) -> Option<Starred> {
-        if let Some(terminal) = crate::chat::core_pane::terminal_of(pane) {
-            let tab = self.core_terminals.tab_of(&terminal)?;
+        if pane.starts_with("core:") || pane.starts_with("core@") {
+            let (tab, terminal) = self.core_terminals.terminal_keyed(pane)?;
             return self.core_pane_favorite(tab, &terminal);
         }
         let favorite = self.pane_favorite(pane)?;

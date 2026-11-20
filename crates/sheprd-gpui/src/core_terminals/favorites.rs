@@ -11,7 +11,34 @@ use crate::{
 use sheprd_backend::TerminalId;
 use sheprd_remote_control::control::favorites::core_pane;
 
+impl super::CoreTerminals {
+    /// The tab and terminal a chat key names: `core:t7` on this computer's
+    /// core, `core@…` on another host's (`chat::core_pane::key_on`).
+    pub(crate) fn terminal_keyed(&self, key: &str) -> Option<(TabId, TerminalId)> {
+        if !key.starts_with("core:") && !key.starts_with("core@") {
+            return None;
+        }
+        self.tabs.iter().find_map(|(tab, shown)| {
+            shown
+                .panes
+                .terminals()
+                .into_iter()
+                .find(|terminal| crate::chat::core_pane::key_on(&shown.host, terminal) == key)
+                .map(|terminal| (*tab, terminal.clone()))
+        })
+    }
+}
+
 impl SheprdWindow {
+    /// The key of the herdr-core pane holding the keyboard, its chat's or
+    /// its terminal's, whether or not a chat view shows it.
+    pub(crate) fn focused_core_key(&self, window: &gpui::Window, cx: &gpui::App) -> Option<String> {
+        let (tab, terminal) = self
+            .focused_core_chat(window, cx)
+            .or_else(|| self.core_terminals.focused_pane(window, cx))?;
+        Some(self.core_chat_key(tab, &terminal))
+    }
+
     /// The agent in `terminal` of `tab` as favorites know it, or `None`
     /// when no agent runs there or its core does not answer, as then there
     /// is no core id to name it by.

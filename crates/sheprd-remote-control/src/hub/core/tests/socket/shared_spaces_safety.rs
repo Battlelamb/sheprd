@@ -45,11 +45,14 @@ fn a_recovered_chats_pane_is_changed_by_its_replacements_id() {
         .arrange_saved(&tab, "t7", &Op::RenamePane(Some("server".into())))
         .unwrap();
     source.arrange_saved(&tab, "t7", &Op::Zoom).unwrap();
+    // Only the fields changed: the document keeps naming the pane by the
+    // terminal it held, and readers show the replacement in its place
+    // (`kept::remap`).
     let spaces = shared(&fake);
     let kept = spaces.tab("tab-a").unwrap();
-    assert_eq!(kept.panes.terminals()[0].as_str(), "t7");
-    assert_eq!(kept.names.get("t7").map(String::as_str), Some("server"));
-    assert_eq!(kept.zoomed.as_ref().map(TerminalId::as_str), Some("t7"));
+    assert_eq!(kept.panes.terminals()[0].as_str(), "t1");
+    assert_eq!(kept.names.get("t1").map(String::as_str), Some("server"));
+    assert_eq!(kept.zoomed.as_ref().map(TerminalId::as_str), Some("t1"));
     drop(source);
     fake.server.join().unwrap();
 }

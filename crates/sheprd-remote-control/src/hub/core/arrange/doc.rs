@@ -4,7 +4,6 @@
 //! then reads. Each is made again over what another client wrote first.
 
 use super::{Error, axis};
-use crate::hub::core::kept;
 use crate::{
     control::layout::Op,
     hub::core::{HubError, Result, Source, TabRef, checkouts, lock},
@@ -13,7 +12,7 @@ use sheprd_backend::TerminalId;
 use sheprd_core_client::{Core, spaces};
 use sheprd_session::{
     WORKSPACE_LABEL,
-    spaces::{Edit, Error as SpacesError, Spaces, Tab},
+    spaces::{Edit, Error as SpacesError, Spaces, Tab, TabEdit},
 };
 use std::{
     collections::{BTreeMap, HashSet},
@@ -61,7 +60,8 @@ impl Source {
         };
         let at = TerminalId::new(address).map_err(Error::from)?;
         // The phone names a recovered chat's replacement, which a document
-        // written before the recovery does not: rebind it within the edit.
+        // written before the recovery may not: the edit then names the pane
+        // as the document does.
         let replacements = lock(&self.poller).replacements.clone();
         if let Some(axis) = axis(op) {
             let record = self.record(address)?;
@@ -80,10 +80,16 @@ impl Source {
             let split = TerminalId::new(new.address.as_str())
                 .map_err(|error| HubError::from(Error::from(error)))
                 .and_then(|new| {
-                    edit_tab(&core, id, &replacements, |tab| {
-                        tab.panes.split(&at, axis, new.clone())?;
-                        tab.zoomed = None;
-                        Ok(())
+                    // The split shows again, as the app's does.
+                    edit_tab(&core, id, &at, &replacements, |_, pane| {
+                        vec![
+                            TabEdit::Split {
+                                at: pane,
+                                axis,
+                                new: new.clone(),
+                            },
+                            TabEdit::Zoom { zoomed: None },
+                        ]
                     })
                 });
             if let Err(error) = split {
@@ -92,32 +98,21 @@ impl Source {
             }
             return Ok(Some(new.address));
         }
-        let present = |tab: &Tab| {
-            tab.panes
-                .contains(&at)
-                .then_some(())
-                .ok_or_else(|| sheprd_session::panes::Error::Missing(at.clone()))
-        };
         match op {
-            Op::Zoom => edit_tab(&core, id, &replacements, |tab| {
-                present(tab)?;
-                tab.zoomed = match tab.zoomed {
-                    Some(_) => None,
-                    None => Some(at.clone()),
-                };
-                Ok(())
+            Op::Zoom => edit_tab(&core, id, &at, &replacements, |tab, pane| {
+                let zoomed = tab.zoomed.is_none().then_some(pane);
+                vec![TabEdit::Zoom { zoomed }]
             })?,
-            Op::RenameTab(name) => edit_tab(&core, id, &replacements, |tab| {
-                tab.name = named(name.as_deref());
-                Ok(())
+            Op::RenameTab(name) => edit_tab(&core, id, &at, &replacements, |_, _| {
+                vec![TabEdit::Rename {
+                    name: named(name.as_deref()),
+                }]
             })?,
-            Op::RenamePane(name) => edit_tab(&core, id, &replacements, |tab| {
-                present(tab)?;
-                match named(name.as_deref()) {
-                    Some(name) => tab.names.insert(at.as_str().to_owned(), name),
-                    None => tab.names.remove(at.as_str()),
-                };
-                Ok(())
+            Op::RenamePane(name) => edit_tab(&core, id, &at, &replacements, |_, pane| {
+                vec![TabEdit::RenamePane {
+                    terminal: pane,
+                    name: named(name.as_deref()),
+                }]
             })?,
             Op::Close => {
                 spaces::update(&core, &[Edit::CloseTab { id: id.clone() }])?;
@@ -219,33 +214,58 @@ impl Source {
     }
 }
 
-/// Makes `change` to the document's tab `id`, over whatever another client
-/// wrote first. A change the tab refuses leaves the document as it was.
+/// Makes the edits `change` answers to the document's tab `id`, at the
+/// pane the phone names `at`, over whatever another client wrote first.
+/// `change` sees the tab as last read, and the pane as the document names
+/// it: a recovered chat's pane may still be named for the terminal it
+/// replaced. A tab gone, or a pane it no longer holds, is refused and
+/// leaves the document as it was.
 fn edit_tab(
     core: &Core,
     id: &str,
+    at: &TerminalId,
     replacements: &BTreeMap<TerminalId, TerminalId>,
-    mut change: impl FnMut(&mut Tab) -> std::result::Result<(), sheprd_session::panes::Error>,
+    mut change: impl FnMut(&Tab, TerminalId) -> Vec<TabEdit>,
 ) -> Result<()> {
-    let mut refused = None;
+    let mut gone = false;
     spaces::change(core, |spaces| {
-        refused = None;
-        let mut tab = spaces
-            .tab(id)
-            .cloned()
-            .ok_or_else(|| sheprd_session::spaces::Error::Missing(id.to_owned()))?;
-        kept::remap(&mut tab, replacements);
-        if let Err(error) = change(&mut tab) {
-            refused = Some(error);
+        gone = false;
+        let Some(tab) = spaces.tab(id) else {
+            return Err(SpacesError::Missing(id.to_owned()).into());
+        };
+        let Some(pane) = pane_named(tab, at, replacements) else {
+            gone = true;
             return Ok(());
+        };
+        for edit in change(tab, pane) {
+            spaces.apply(Edit::Tab {
+                id: id.to_owned(),
+                edit,
+            })?;
         }
-        spaces.apply(Edit::PutTab(tab))?;
         Ok(())
     })?;
-    match refused {
-        Some(error) => Err(Error::from(error).into()),
-        None => Ok(()),
+    if gone {
+        return Err(Error::from(sheprd_session::panes::Error::Missing(at.clone())).into());
     }
+    Ok(())
+}
+
+/// The pane of `tab` the phone names `at`: that terminal, or the one a
+/// recovered chat replaced, as a document written before the recovery
+/// still names it.
+fn pane_named(
+    tab: &Tab,
+    at: &TerminalId,
+    replacements: &BTreeMap<TerminalId, TerminalId>,
+) -> Option<TerminalId> {
+    if tab.panes.contains(at) {
+        return Some(at.clone());
+    }
+    replacements
+        .iter()
+        .find(|(old, new)| *new == at && tab.panes.contains(old))
+        .map(|(old, _)| old.clone())
 }
 
 /// Refuses a workspace the document does not keep, or a document this

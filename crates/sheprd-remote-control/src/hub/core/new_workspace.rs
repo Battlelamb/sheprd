@@ -60,7 +60,7 @@ impl Source {
                 }
             };
             if spaces.tab_holding(&address).is_none() {
-                spaces.apply(Edit::PutTab(Tab {
+                spaces.apply(Edit::OpenTab(Tab {
                     id: tab_id.clone(),
                     workspace_id: id.clone(),
                     title: title.to_owned(),

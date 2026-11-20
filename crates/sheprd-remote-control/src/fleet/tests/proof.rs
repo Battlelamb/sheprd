@@ -11,7 +11,7 @@ use std::path::Path;
 
 /// Pairs the desktop whose keys are in `dir` with `on` one by one, as
 /// over Bluetooth.
-fn pair(on: &Node, dir: &Path) -> crate::control::DeviceId {
+pub(super) fn pair(on: &Node, dir: &Path) -> crate::control::DeviceId {
     let keys = Keys::load_or_create(dir).unwrap();
     let ssh = crate::desktop::keys::ssh_public_key(dir).unwrap();
     let point = SigningKey::from_slice(&[9; 32])
@@ -54,6 +54,7 @@ async fn dial(dir: &Path, to: &Node) -> sheprd_tunnel::stream::Tunnel {
         route: info.route,
         fleet: false,
         host: None,
+        opening: false,
     };
     let keys = Keys::load_or_create(dir).unwrap();
     for _ in 0..100 {

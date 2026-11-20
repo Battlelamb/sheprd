@@ -1968,7 +1968,8 @@ manual multi-machine and phone steps left unticked in its QA list.
      operations), and members as hosts of each other through `ssh_access`
      with `sheprd-fleet:FLEET:MEMBER` lines, their dial keys on the
      relays, and their tunnel keys admitted. `relay-connect` sends a
-     purpose byte and the fleet-key proof to a fleet host; a desktop
+     purpose byte and the fleet-key proof to a member's own host, and
+     nothing before SSH to any other host the fleet shares; a desktop
      paired over Bluetooth that is also a member keeps its record and its
      session as before, as the member once a proven session showed its
      key is the member's.

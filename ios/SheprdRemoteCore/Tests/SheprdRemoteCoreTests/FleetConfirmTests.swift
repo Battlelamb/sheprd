@@ -42,11 +42,67 @@ struct FleetConfirmTests {
         #expect(chained.ops.count == 2)
         #expect(chained.ops[0] == first.ops[0])
         #expect(chained.ops[1].seq == 4)
-        #expect(chained.ops[1].parents == [try first.ops[0].id()])
+        #expect(chained.ops[1].parents.contains(try first.ops[0].id()))
         // A computer that applied it drafts past it: nothing to carry.
         let ahead = FleetClientTests.applying(Self.next(4)).client
         let fresh = try await ahead.prepare([.hostRemove(Data(repeating: 5, count: 32))], as: signer, at: .now, after: first.ops)
         #expect(fresh.ops.count == 1 && fresh.ops[0].seq == 4)
+    }
+
+    @Test func leavingIsConfirmedByThePhoneNoLongerCounting() async throws {
+        let signer = FleetClientTests.signer()
+        let posted = Mutex(false)
+        // Once its removal applies, the phone has no next operation there.
+        let computer = Computer { method, _, _ in
+            if method == "POST" {
+                posted.withLock { $0 = true }
+                return FleetClientTests.applied
+            }
+            return FleetClientTests.status(next: posted.withLock { $0 } ? nil : Self.next(3))
+        }
+        let leave: Fleet.Body = .remove(member: signer.member, alsoMembers: [], alsoHosts: [], reason: .left)
+        try await computer.client.sign([leave], as: signer, at: .now)
+        // Removing another member gives no such proof: the phone is still
+        // counted, so a missing next sequence number is not taken for it.
+        posted.withLock { $0 = false }
+        let other: Fleet.Body = .remove(member: Data(repeating: 6, count: 32), alsoMembers: [], alsoHosts: [], reason: .lost)
+        await #expect(throws: FleetClientError.unapplied) {
+            try await computer.client.sign([other], as: signer, at: .now)
+        }
+    }
+
+    @Test func aNewOperationSeesBothTheUnconfirmedAndTheComputersHistory() async throws {
+        let signer = FleetClientTests.signer()
+        let first = try await FleetClientTests.applying(Self.next(3)).client
+            .prepare([.hostRemove(Data(repeating: 4, count: 32))], as: signer, at: .now)
+        // The computer has not applied it, but knows newer history (another
+        // member's admission, say): a removal must name both.
+        let newer = String(repeating: "0a", count: 32)
+        let behind = FleetClientTests.applying(API.FleetNext(fleet: Self.fleet, seq: 3, parents: [newer])).client
+        let chained = try await behind.prepare(
+            [.remove(member: Data(repeating: 6, count: 32), alsoMembers: [], alsoHosts: [], reason: .lost)],
+            as: signer, at: .now, after: first.ops
+        )
+        let parents = Set(chained.ops[1].parents)
+        #expect(parents == [try first.ops[0].id(), try #require(Fleet.data(hex: newer))])
+        // Within the limit, the unconfirmed one always kept.
+        let many = (0..<20).map { String(format: "%064x", $0 + 100) }
+        let kept = FleetClient.parents(keeping: String(repeating: "ff", count: 32), and: many)
+        #expect(kept.count == Fleet.maxParents)
+        #expect(kept.contains(String(repeating: "ff", count: 32)))
+        #expect(kept == kept.sorted())
+    }
+
+    @Test func nothingIsPostedUnlessItWasKept() async throws {
+        let computer = FleetClientTests.applying(Self.next(3))
+        let signed = try await computer.client.prepare([.hostRemove(Data(repeating: 4, count: 32))], as: FleetClientTests.signer(), at: .now)
+        let before = computer.requests.withLock { $0.count }
+        await #expect(throws: FleetClientError.notKept) {
+            try await computer.client.post(signed, kept: false)
+        }
+        #expect(computer.requests.withLock { $0.count } == before)
+        try await computer.client.post(signed, kept: true)
+        #expect(computer.requests.withLock { $0 }.contains { $0.method == "POST" })
     }
 
     @Test func aPostNamesABoundedNumberOfHeads() async throws {

@@ -46,14 +46,21 @@ final class Feedback {
     private static let maxSounds = 32
     /// Kept until they finish: a player let go stops.
     private var players: [AVAudioPlayer] = []
-    /// What the screen effect playing still has to play, stopped when
-    /// another replaces it: a replayed fireworks must not keep bursting
-    /// under the wizz after it.
-    private var screenPlayers: [AVAudioPlayer] = []
-    private var screenTaps: [CHHapticPatternPlayer] = []
-    /// Counts screen effects, so a sound rendered for one that was since
-    /// replaced does not start.
-    private var screenRun = 0
+    /// What each chat's screen effect still has to play, stopped when
+    /// another in the same chat replaces it: a replayed fireworks must not
+    /// keep bursting under the wizz after it. Kept per chat, as an iPad's
+    /// windows each show their own.
+    private var screens: [ObjectIdentifier: Screen] = [:]
+    /// Counts screen effects across chats, so a sound rendered for one
+    /// since replaced does not start.
+    private var runs = 0
+
+    private struct Screen {
+        var run: Int
+        var since = Date.now
+        var players: [AVAudioPlayer] = []
+        var taps: [CHHapticPatternPlayer] = []
+    }
     private var engine: CHHapticEngine?
     /// What holds the audio session for the microphone or speech now.
     private var holders: Set<ObjectIdentifier> = []
@@ -62,36 +69,48 @@ final class Feedback {
     /// effect sounds until it lets go.
     func holdAudio(_ owner: AnyObject) {
         holders.insert(ObjectIdentifier(owner))
-        for player in players + screenPlayers { player.stop() }
+        for player in players + screens.values.flatMap(\.players) { player.stop() }
         players.removeAll()
-        screenPlayers.removeAll()
+        for chat in screens.keys { screens[chat]?.players.removeAll() }
     }
 
     func releaseAudio(_ owner: AnyObject) {
         holders.remove(ObjectIdentifier(owner))
     }
 
-    /// Plays the sound and taps of effects that just began.
-    func play(_ began: [ChatEffects.Began]) {
+    /// Plays the sound and taps of effects that just began in `chat`, whose
+    /// screen effects replace one another.
+    func play(_ began: [ChatEffects.Began], in chat: AnyObject) {
+        let chat = ObjectIdentifier(chat)
         for effect in began {
-            if effect.lane == .newScreen { stopScreen() }
-            play(effect.cue, screen: effect.lane != .bubble)
+            switch effect.lane {
+            case .bubble: play(effect.cue)
+            case .newScreen:
+                stopScreen(of: chat)
+                play(effect.cue, screen: chat)
+            case .screen: play(effect.cue, screen: chat)
+            }
         }
     }
 
-    /// Plays `cue`, as the screen effect's when `screen`.
-    func play(_ cue: Cue, screen: Bool = false) {
-        if FeedbackSettings.haptics, let player = tap(cue.taps), screen { screenTaps.append(player) }
-        if FeedbackSettings.sounds, holders.isEmpty { sound(cue.sound, run: screen ? screenRun : nil) }
+    /// Plays `cue`, as part of `screen`'s screen effect if given.
+    func play(_ cue: Cue, screen chat: ObjectIdentifier? = nil) {
+        if FeedbackSettings.haptics, let player = tap(cue.taps), let chat { screens[chat]?.taps.append(player) }
+        if FeedbackSettings.sounds, holders.isEmpty { sound(cue.sound, screen: chat.flatMap { chat in screens[chat].map { (chat, $0.run) } }) }
     }
 
-    /// Stops what the last screen effect still had to play.
-    private func stopScreen() {
-        screenRun += 1
-        for player in screenPlayers { player.stop() }
-        screenPlayers.removeAll()
-        for player in screenTaps { try? player.stop(atTime: CHHapticTimeImmediate) }
-        screenTaps.removeAll()
+    /// Stops what `chat`'s last screen effect still had to play, and starts
+    /// its next.
+    private func stopScreen(of chat: ObjectIdentifier) {
+        if let last = screens[chat] {
+            for player in last.players { player.stop() }
+            for player in last.taps { try? player.stop(atTime: CHHapticTimeImmediate) }
+        }
+        // Chats whose effects are over need nothing kept.
+        let longest = ScreenEffect.allCases.map(\.length).max() ?? 0
+        screens = screens.filter { Date.now.timeIntervalSince($0.value.since) < longest }
+        runs += 1
+        screens[chat] = Screen(run: runs)
     }
 
     /// Answers a touch with a haptic.
@@ -105,11 +124,11 @@ final class Feedback {
         }
     }
 
-    /// Plays `synth`, as part of screen effect `run` if it is one.
-    private func sound(_ synth: Synth, run: Int?) {
+    /// Plays `synth`, as part of a chat's screen effect `run` if given.
+    private func sound(_ synth: Synth, screen: (chat: ObjectIdentifier, run: Int)?) {
         guard !synth.voices.isEmpty else { return }
         if let data = sounds[synth] {
-            start(data, run: run)
+            start(data, screen: screen)
             return
         }
         Task {
@@ -117,21 +136,20 @@ final class Feedback {
             let data = await Task.detached(priority: .userInitiated) { synth.wav() }.value
             if sounds.count >= Self.maxSounds { sounds.removeAll() }
             sounds[synth] = data
-            start(data, run: run)
+            start(data, screen: screen)
         }
     }
 
-    private func start(_ data: Data, run: Int?) {
+    private func start(_ data: Data, screen: (chat: ObjectIdentifier, run: Int)?) {
         // A screen effect replaced while its sound rendered stays quiet.
-        guard holders.isEmpty, run == nil || run == screenRun else { return }
+        guard holders.isEmpty, screen.map({ screens[$0.chat]?.run == $0.run }) ?? true else { return }
         let session = AVAudioSession.sharedInstance()
         do {
             if session.category != .ambient { try session.setCategory(.ambient) }
             try session.setActive(true)
             let player = try AVAudioPlayer(data: data)
             players.removeAll { !$0.isPlaying }
-            screenPlayers.removeAll { !$0.isPlaying }
-            if run == nil { players.append(player) } else { screenPlayers.append(player) }
+            if let chat = screen?.chat { screens[chat]?.players.append(player) } else { players.append(player) }
             player.play()
         } catch {
             // A sound is a garnish: the effect still shows without it.

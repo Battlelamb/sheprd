@@ -29,7 +29,7 @@ final class ChatEffectsModel {
         guard !changed.isEmpty else { return }
         var began: [ChatEffects.Began] = []
         update { began = $0.live(transcript, changed: changed, now: .now) }
-        Feedback.shared.play(began)
+        Feedback.shared.play(began, in: self)
     }
 
     func replayBubble(_ key: ChatEffects.BubbleKey, effect: BubbleEffect) {
@@ -40,7 +40,7 @@ final class ChatEffectsModel {
     func replayScreen(_ entry: Entry) {
         var began: ChatEffects.Began?
         update { began = $0.replayScreen(entry, now: .now) }
-        if let began { Feedback.shared.play([began]) }
+        if let began { Feedback.shared.play([began], in: self) }
     }
 
     /// Where the message a playing screen effect belongs to was last drawn.

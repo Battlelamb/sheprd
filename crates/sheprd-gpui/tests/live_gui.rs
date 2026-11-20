@@ -93,7 +93,14 @@ fn native_notifications() {
 #[test]
 #[ignore = "requires active native desktop; a page in the window, no daemon"]
 fn native_pages() {
-    native_fixture(Fixture::Pages);
+    // TEMPORARY: repeat to catch the intermittent failure in one job.
+    let mut failures = 0;
+    for run in 0..8 {
+        let result = std::panic::catch_unwind(|| native_fixture(Fixture::Pages));
+        eprintln!("PAGES diag: run {run} ok={}", result.is_ok());
+        failures += usize::from(result.is_err());
+    }
+    assert_eq!(failures, 0, "native pages failed {failures} of 8 runs");
 }
 
 #[cfg(target_os = "linux")]

@@ -52,6 +52,10 @@ pub const CROWDED: &str = "crowded";
 /// Present while the last access file handed over could not be read or
 /// checked: the fleet reaches nothing here until a good one arrives.
 pub const REFUSED: &str = "refused";
+/// The fleet whose `authorized_keys` lines the agent may have written,
+/// in the state directory: kept before any line is, so a scrub or a
+/// refusal finds them even when no access file was saved after.
+pub const LINES: &str = "lines";
 /// Removals remembered per suspended member; past that, its suspension is
 /// one no access file lifts.
 pub const MAX_CAUSES: usize = 8;
@@ -211,21 +215,7 @@ impl Held {
     /// fleet's files after this shuts the fleet out (`Agent::reload`).
     fn refuse_locked(state_dir: &Path, keys: Option<&Path>) -> Result<()> {
         files::write_private(&state_dir.join(REFUSED), b"1\n")?;
-        let Some(path) = keys else {
-            return Ok(());
-        };
-        let stored = files::read_bounded(
-            &state_dir.join(access::FILE),
-            access::MAX_STORED_BYTES as u64,
-        )?;
-        // No fleet held yet: none of its lines were written.
-        let Some(stored) = stored else {
-            return Ok(());
-        };
-        match access::fleet_of(&stored) {
-            Some(fleet) => authorized_keys::set_fleet(path, &fleet.short(), &[]),
-            None => authorized_keys::clear_fleets(path),
-        }
+        remove_lines(state_dir, keys)
     }
 
     /// Writes each file whole, in the order [`Held::files`] gives, from
@@ -360,7 +350,7 @@ impl Held {
         // The SSH lines first: a write that fails leaves the file it was
         // computed from unsaved, so the digest still shows the host behind
         // and Sheprd applies it again.
-        held.write_keys(keys)?;
+        held.write_keys(state_dir, keys)?;
         held.save(state_dir, &before)?;
         // Last: until the good file is kept, members stay out.
         files::remove(&state_dir.join(REFUSED))?;
@@ -376,11 +366,10 @@ impl Held {
     /// stay. Blocking.
     pub fn scrub(state_dir: &Path, keys: Option<&Path>) -> Result<()> {
         let _lock = files::Lock::acquire(state_dir)?;
-        let held = Self::load(state_dir)?;
-        if let (Some(path), Some(access)) = (keys, &held.access) {
-            authorized_keys::set_fleet(path, &access.fleet.short(), &[])?;
-        }
-        for name in [access::FILE, SUSPENDED, REVOKED, CROWDED, REFUSED] {
+        // The lines first, needing nothing else to read; their record goes
+        // last, once nothing is left that it names.
+        remove_lines(state_dir, keys)?;
+        for name in [access::FILE, SUSPENDED, REVOKED, CROWDED, REFUSED, LINES] {
             let path = state_dir.join(name);
             match std::fs::remove_file(&path) {
                 Ok(()) => {}
@@ -472,7 +461,7 @@ impl Held {
         // whose `authorized_keys` write failed is finished before the
         // removal is acknowledged. Rewriting is a no-op when it is current.
         if !taken.is_empty() {
-            held.write_keys(keys)?;
+            held.write_keys(state_dir, keys)?;
         }
         Ok(taken)
     }
@@ -531,7 +520,7 @@ impl Held {
             .filter(|(id, _)| self.reaches_ssh(id) && !self.suspended.contains_key(id))
     }
 
-    fn write_keys(&self, keys: Option<&Path>) -> Result<()> {
+    fn write_keys(&self, state_dir: &Path, keys: Option<&Path>) -> Result<()> {
         let (Some(path), Some(access)) = (keys, &self.access) else {
             return Ok(());
         };
@@ -539,7 +528,12 @@ impl Held {
             .ssh_members()
             .filter_map(|(id, member)| Some((id.short(), member.ssh.clone()?)))
             .collect();
-        authorized_keys::set_fleet(path, &access.fleet.short(), &lines)
+        let fleet = access.fleet.short();
+        // Which fleet's lines these are, kept before any is written.
+        if !lines.is_empty() && written_by(state_dir)?.as_deref() != Some(fleet.as_str()) {
+            files::write_private(&state_dir.join(LINES), fleet.as_bytes())?;
+        }
+        authorized_keys::set_fleet(path, &fleet, &lines)
     }
 
     /// What `status` reports of the fleet, with `desktops`' entries a
@@ -701,6 +695,57 @@ fn read_json<T: serde::de::DeserializeOwned + Default>(state_dir: &Path, name: &
         }
         None => Ok(T::default()),
     }
+}
+
+/// The fleet, its short id, whose lines [`LINES`] says the agent may have
+/// written; none when it wrote none. Blocking.
+fn written_by(state_dir: &Path) -> Result<Option<String>> {
+    Ok(files::read_bounded(&state_dir.join(LINES), 64)?
+        .map(|bytes| String::from_utf8_lossy(&bytes).trim().to_owned()))
+}
+
+/// Removes every `authorized_keys` line the agent may have written in
+/// `keys`, needing nothing else here to read: the fleet the held access
+/// file names, and the one [`LINES`] recorded before any line was
+/// written. A record that does not read, or an access file whose fleet
+/// does not, takes every fleet line: failing closed, since the account
+/// holds one fleet's lines at most. With neither file, none was written.
+/// Blocking.
+fn remove_lines(state_dir: &Path, keys: Option<&Path>) -> Result<()> {
+    let Some(path) = keys else {
+        return Ok(());
+    };
+    let stored = files::read_bounded(
+        &state_dir.join(access::FILE),
+        access::MAX_STORED_BYTES as u64,
+    )?;
+    let recorded = written_by(state_dir)?;
+    let valid =
+        |fleet: &str| fleet.len() == 16 && fleet.bytes().all(|byte| byte.is_ascii_hexdigit());
+    let mut fleets = BTreeSet::new();
+    let mut unknown = false;
+    if let Some(stored) = &stored {
+        match access::fleet_of(stored) {
+            Some(fleet) => {
+                fleets.insert(fleet.short());
+            }
+            None => unknown = true,
+        }
+    }
+    match recorded {
+        Some(fleet) if valid(&fleet) => {
+            fleets.insert(fleet);
+        }
+        Some(_) => unknown = true,
+        None => {}
+    }
+    if unknown {
+        return authorized_keys::clear_fleets(path);
+    }
+    for fleet in fleets {
+        authorized_keys::set_fleet(path, &fleet, &[])?;
+    }
+    Ok(())
 }
 
 /// `value` as its file keeps it, refused past what [`read_json`] reads

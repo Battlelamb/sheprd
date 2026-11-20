@@ -11,7 +11,7 @@ use crate::{
     removal::{self, Message, PROOF_LEN, PURPOSE_REMOVAL, PURPOSE_SSH, tests::remove_op},
 };
 
-const FLEET: [u8; 32] = [0xf1; 32];
+pub(super) const FLEET: [u8; 32] = [0xf1; 32];
 
 /// The fleet key of the member whose device is `desktop`.
 fn fleet_key(desktop: &Desktop) -> SigningKey {
@@ -21,7 +21,7 @@ fn fleet_key(desktop: &Desktop) -> SigningKey {
 }
 
 /// `desktop` as fleet member `seed`.
-fn member(desktop: &Desktop, seed: u8, allow: bool, rev: u64) -> (Id, Member) {
+pub(super) fn member(desktop: &Desktop, seed: u8, allow: bool, rev: u64) -> (Id, Member) {
     let member = Member {
         allow,
         dial: client::public(&desktop.dial),
@@ -39,7 +39,7 @@ fn member(desktop: &Desktop, seed: u8, allow: bool, rev: u64) -> (Id, Member) {
 
 /// Applies an access file to `dir`, as `fleet apply` does, and has the
 /// running agent read it at once rather than at its next poll.
-fn apply(
+pub(super) fn apply(
     running: &Running,
     dir: &Path,
     members: Vec<(Id, Member)>,
@@ -50,6 +50,7 @@ fn apply(
         fleet: Id(FLEET),
         members: members.into_iter().collect(),
         removed: removed.iter().map(|seed| Id([*seed; 32])).collect(),
+        paused: false,
         settled: settled.iter().copied().map(Id).collect(),
     };
     let held = Held::apply(dir, Some(&dir.join("authorized_keys")), access).unwrap();
@@ -58,7 +59,7 @@ fn apply(
 }
 
 /// The members with a line in `dir`'s `authorized_keys`, by short id.
-fn lines(dir: &Path) -> Vec<String> {
+pub(super) fn lines(dir: &Path) -> Vec<String> {
     std::fs::read_to_string(dir.join("authorized_keys"))
         .unwrap_or_default()
         .lines()
@@ -68,7 +69,7 @@ fn lines(dir: &Path) -> Vec<String> {
 }
 
 /// Dials as `desktop` and says what for.
-async fn open(running: &Running, desktop: &Desktop, purpose: u8) -> Session {
+pub(super) async fn open(running: &Running, desktop: &Desktop, purpose: u8) -> Session {
     open_as(running, desktop, purpose, &fleet_key(desktop)).await
 }
 
@@ -97,7 +98,7 @@ async fn pass(running: &Running, desktop: &Desktop, ops: Vec<Vec<u8>>) -> Messag
 }
 
 /// Whether the session ends without a word, within five seconds.
-async fn closes(io: &mut tokio::io::DuplexStream) -> bool {
+pub(super) async fn closes(io: &mut tokio::io::DuplexStream) -> bool {
     let mut rest = Vec::new();
     tokio::time::timeout(Duration::from_secs(5), io.read_to_end(&mut rest))
         .await

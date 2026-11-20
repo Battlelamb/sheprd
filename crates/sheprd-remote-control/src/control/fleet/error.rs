@@ -17,8 +17,6 @@ pub enum Error {
     Full,
     #[error("a fleet operation was signed too far in the future")]
     Future,
-    #[error("a host two members added with different keys waits for a person to pick one")]
-    HostHeld,
     #[error("a fleet operation's fields are not valid")]
     Invalid,
     #[error("a joining member did not sign its own admission")]

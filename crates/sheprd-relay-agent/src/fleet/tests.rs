@@ -9,6 +9,7 @@ use crate::{
     authorized::Entry,
 };
 
+mod crowded_save;
 mod refused;
 
 const FLEET: u8 = 0xf1;
@@ -21,6 +22,7 @@ fn file(members: &[(u8, bool, u64)], removed: &[u8], settled: &[u8]) -> Access {
             .map(|&(seed, allow, rev)| (id(seed), member(seed, allow, rev)))
             .collect(),
         removed: removed.iter().map(|&seed| id(seed)).collect(),
+        paused: false,
         settled: settled.iter().map(|&seed| id(seed)).collect(),
     }
 }
@@ -619,7 +621,7 @@ fn a_removal_whose_save_stops_part_way_still_revokes_the_desktop_on_retry() {
         std::fs::copy(host.state().join(name), copy.state().join(name)).unwrap();
     }
     let next = copy.apply(removed.clone()).unwrap();
-    let files = next.files().unwrap();
+    let files = next.files(&next.crowded).unwrap();
     // The revoked pairs go first, before the file that drops member 2.
     let names: Vec<&str> = files.iter().map(|(name, _)| *name).collect();
     assert_eq!(names, [REVOKED, CROWDED, access::FILE, SUSPENDED]);
@@ -659,7 +661,7 @@ fn stale_revoked_pairs_never_crowd_out_a_new_revocation() {
             tunnel: [seed.wrapping_add(120); 32],
         });
     }
-    held.save(host.state()).unwrap();
+    held.save(host.state(), &held.crowded).unwrap();
     host.enroll(2);
     host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[]))
         .unwrap();
@@ -819,7 +821,7 @@ fn a_crowded_member_suspends_only_members_denied_or_crowded_too() {
     // Members 1 and 4 wait for room for their keys.
     let mut held = Held::load(host.state()).unwrap();
     held.crowded.extend([id(1), id(4)]);
-    held.save(host.state()).unwrap();
+    held.save(host.state(), &held.crowded).unwrap();
     host.suspend(1, &[removal(0x51, &[2, 3, 4])]);
     let held = Held::load(host.state()).unwrap();
     assert!(!held.suspended.contains_key(&id(2)), "an allowed member");

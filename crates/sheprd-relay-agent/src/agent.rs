@@ -104,10 +104,21 @@ impl Agent {
     }
 
     /// Reads the `authorized` and fleet files again; listeners and live
-    /// sessions follow when they changed. A file that does not parse
-    /// leaves everyone as they were. Blocking.
+    /// sessions follow when they changed. A file that does not parse shuts
+    /// the fleet's members out, keeping the desktops and the cut-offs last
+    /// read, and the error is returned. Blocking.
     pub fn reload(&self) -> Result<()> {
-        let admitted = Admitted::load(&self.state_dir)?;
+        let admitted = match Admitted::load(&self.state_dir) {
+            Ok(admitted) => admitted,
+            Err(error) => {
+                self.admitted.send_if_modified(|current| {
+                    let changed = !current.held().refused;
+                    current.refuse();
+                    changed
+                });
+                return Err(error);
+            }
+        };
         self.admitted.send_if_modified(|current| {
             let changed = *current != admitted;
             *current = admitted;

@@ -64,7 +64,7 @@ pub(super) async fn plain_host(
 /// What Sheprd runs over SSH: `fleet apply` with the file `node`'s daemon
 /// computes (`Ask::AgentAccess`), settling what the agent reported
 /// suspending.
-fn fleet_apply(node: &Node, host: &HostId, dir: &Path, agent: &Agent) -> Held {
+pub(super) fn fleet_apply(node: &Node, host: &HostId, dir: &Path, agent: &Agent) -> Held {
     let file = access_file(node, host, dir);
     let held = Held::apply(dir, Some(&dir.join("authorized_keys")), file).unwrap();
     agent.reload().unwrap();
@@ -73,7 +73,7 @@ fn fleet_apply(node: &Node, host: &HostId, dir: &Path, agent: &Agent) -> Held {
 
 /// The access file `node`'s daemon answers for `host`, with what the agent
 /// in `dir` reports suspending.
-fn access_file(node: &Node, host: &HostId, dir: &Path) -> Access {
+pub(super) fn access_file(node: &Node, host: &HostId, dir: &Path) -> Access {
     let suspended = Held::load(dir).unwrap().suspended;
     let Answer::AgentAccess { access } = node.ask(Ask::AgentAccess {
         host: host.to_string(),

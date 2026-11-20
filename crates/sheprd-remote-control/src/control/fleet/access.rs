@@ -107,7 +107,9 @@ fn key_version(member: &crate::control::fleet::Member) -> (u64, Id) {
 /// once it no longer stands ([`settles`], with `graced` for one the log
 /// has not heard of), so the agent lifts a suspension the log voided and
 /// no member can keep another suspended by naming removals that do not
-/// exist. Refuses a host that is not a plain host, or that is held.
+/// exist. A held host's file is `paused`: its agent lets no member reach
+/// SSH until the fleet picks the host's keys, while removals, denials, and
+/// rotations still reach it. Refuses a host that is not a plain host.
 pub fn compute(
     log: &Log,
     host: &HostId,
@@ -118,9 +120,6 @@ pub fn compute(
     let entry = state.hosts.get(host).ok_or(Error::Unknown)?;
     if entry.intro.kind != HostKind::Agent {
         return Err(Error::Invalid);
-    }
-    if entry.held {
-        return Err(Error::HostHeld);
     }
     let members = state
         .members
@@ -165,6 +164,7 @@ pub fn compute(
     let access = Access {
         fleet: Id(log.fleet().0),
         members,
+        paused: entry.held,
         removed: state.tombstones.iter().map(|id| Id(id.0)).collect(),
         settled,
     };

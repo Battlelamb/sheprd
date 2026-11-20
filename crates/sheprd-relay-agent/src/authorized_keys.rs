@@ -92,12 +92,27 @@ pub fn of_user() -> Result<PathBuf> {
 /// unchanged one is not written. Blocking.
 pub fn set_fleet(path: &Path, fleet: &str, members: &[(String, String)]) -> Result<()> {
     let prefix = format!("{fleet}:");
+    let added: Vec<Vec<u8>> = members
+        .iter()
+        .map(|(member, key)| fleet_line(&format!("{fleet}:{member}"), key).into_bytes())
+        .collect();
+    rewrite(path, |tag| tag.starts_with(&prefix), &added)
+}
+
+/// Removes every fleet's lines from `path`: for an agent that must shut
+/// its fleet out and can no longer tell which fleet that is. Blocking.
+pub fn clear_fleets(path: &Path) -> Result<()> {
+    rewrite(path, |_| true, &[])
+}
+
+/// Rewrites `path` without the fleet lines whose tag is `ours`, then with
+/// `added`. Lines the user wrote stay byte for byte.
+fn rewrite(path: &Path, ours: impl Fn(&str) -> bool, added: &[Vec<u8>]) -> Result<()> {
     // Only a line in UTF-8 can be one the fleet wrote; any other is the
     // user's and is kept as it is.
     let ours = |line: &[u8]| {
-        std::str::from_utf8(line).is_ok_and(|line| {
-            fleet_tag(line.trim_end_matches('\r')).is_some_and(|tag| tag.starts_with(&prefix))
-        })
+        std::str::from_utf8(line)
+            .is_ok_and(|line| fleet_tag(line.trim_end_matches('\r')).is_some_and(&ours))
     };
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
@@ -107,7 +122,7 @@ pub fn set_fleet(path: &Path, fleet: &str, members: &[(String, String)]) -> Resu
         }
         Ok(_) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            if members.is_empty() {
+            if added.is_empty() {
                 return Ok(());
             }
         }
@@ -124,10 +139,6 @@ pub fn set_fleet(path: &Path, fleet: &str, members: &[(String, String)]) -> Resu
     if before.last().is_some_and(|last| last.is_empty()) {
         before.pop();
     }
-    let added: Vec<Vec<u8>> = members
-        .iter()
-        .map(|(member, key)| fleet_line(&format!("{fleet}:{member}"), key).into_bytes())
-        .collect();
     let mut lines: Vec<&[u8]> = before.iter().copied().filter(|line| !ours(line)).collect();
     lines.extend(added.iter().map(Vec::as_slice));
     if lines == before {

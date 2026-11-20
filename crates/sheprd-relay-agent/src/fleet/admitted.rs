@@ -46,6 +46,12 @@ impl Admitted {
         ))
     }
 
+    /// Shuts the fleet out, keeping what was last read of who is cut off:
+    /// what the running agent holds when the fleet's files stop reading.
+    pub fn refuse(&mut self) {
+        self.held.refused = true;
+    }
+
     #[must_use]
     pub fn desktops(&self) -> &Authorized {
         &self.desktops

@@ -24,7 +24,7 @@ pub enum Inserted {
 }
 
 /// The fleet log.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Log {
     fleet: FleetId,
     /// The checkpoint the log was pruned to, which every kept operation

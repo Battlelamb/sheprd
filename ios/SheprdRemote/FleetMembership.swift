@@ -131,7 +131,7 @@ final class FleetMembership {
             }
             self.status = status
             route(status)
-            settleLinks(status, outcome: .unknown)
+            settleLinks(status)
             notMember = record.admitted && status.lacks(member: record.member, in: record.fleet)
             if !record.admitted, status.join == .member {
                 var admitted = record
@@ -213,11 +213,11 @@ final class FleetMembership {
     func remove(member: String, reason: FleetLog.Reason) async {
         guard let id = FleetLog.data(hex: member) else { return }
         let leaving = member == record?.member
-        let outcome = await sign("Remove this member from your fleet", [
+        let posted = await sign("Remove this member from your fleet", [
             .remove(member: id, alsoMembers: [], alsoHosts: [], reason: leaving ? .left : reason),
         ])
         // Left once a computer took it, whatever failed before it.
-        if leaving, outcome != nil, problem == nil { forget() }
+        if leaving, case .taken = posted { forget() }
     }
 
     /// Removes a host from the whole fleet.
@@ -253,17 +253,27 @@ final class FleetMembership {
         let bodies: [FleetLog.Body] = made.compactMap { pending in
             FleetLog.data(hex: pending.host).map { .link(host: $0, deviceKey: pending.point) }
         }
-        let outcome = await sign(reason, bodies)
-        if let status, let outcome { settleLinks(status, outcome: outcome) }
+        let posted = await sign(reason, bodies)
+        guard let status else { return }
+        // A link's key goes only when the link surely never landed: nothing
+        // was posted, or the computer that took the post refused it and
+        // its own fresh read does not show it. Missing from any other read
+        // may only mean that computer has not caught up.
+        switch posted {
+        case .nothing, .refused(fresh: true):
+            settleLinks(status, refused: made.map(\.host))
+        case .taken, .refused(fresh: false), .unknown:
+            settleLinks(status)
+        }
     }
 
     /// Keeps as computers the pending links the fleet now holds, and drops
-    /// those that never landed once a computer answered.
-    private func settleLinks(_ status: API.FleetStatus, outcome: FleetPendingLink.Outcome) {
+    /// those of `refused` hosts it does not (`FleetPendingLink.settle`).
+    private func settleLinks(_ status: API.FleetStatus, refused: [String] = []) {
         guard var record, let pending = record.pendingLinks, !pending.isEmpty,
               let through = through
         else { return }
-        let (done, waiting) = FleetPendingLink.settle(pending, linked: status.links, outcome: outcome)
+        let (done, waiting) = FleetPendingLink.settle(pending, linked: status.links, refused: refused)
         for link in done {
             guard let device = FleetLog.linkDevice(key: link.point), let fingerprint = Fingerprint(link.host) else { continue }
             let enrolled = HostState.Enrolled(
@@ -304,14 +314,27 @@ final class FleetMembership {
 
     // MARK: Private
 
+    /// How signing and posting ended.
+    private enum Posted {
+        /// Nothing reached a computer.
+        case nothing
+        /// A computer took every operation.
+        case taken
+        /// The computer that took the post refused some; `fresh` says
+        /// whether that same computer could be read after it.
+        case refused(fresh: Bool)
+        /// No computer answered after it was posted: it may have landed.
+        case unknown
+    }
+
     /// Signs `bodies` and posts them through the first computer of the
     /// fleet that answers. Answers how it ended for links that may have
     /// landed: `nil` when nothing was posted (Face ID refused, say).
     @discardableResult
-    private func sign(_ reason: String, _ bodies: [FleetLog.Body]) async -> FleetPendingLink.Outcome? {
-        guard let record, record.admitted, !bodies.isEmpty else { return nil }
+    private func sign(_ reason: String, _ bodies: [FleetLog.Body]) async -> Posted {
+        guard let record, record.admitted, !bodies.isEmpty else { return .nothing }
         let candidates = candidates
-        guard !candidates.isEmpty else { return nil }
+        guard !candidates.isEmpty else { return .nothing }
         busy = true
         problem = nil
         defer { busy = false }
@@ -320,7 +343,7 @@ final class FleetMembership {
             key = try await Self.open(record, reason: reason)
         } catch {
             problem = Self.describe(error)
-            return .answered
+            return .nothing
         }
         // Signed once, by the first computer that answers its fleet: a post
         // whose answer is lost goes to the next computer as the same bytes.
@@ -346,16 +369,16 @@ final class FleetMembership {
                 moved.through = computer.device
                 save(moved)
             }
-            // Only a fresh read says which links landed; with none, the
-            // keys of what was posted are kept.
-            return FleetPendingLink.outcome(freshRead: await check(computer))
+            await check(computer)
+            return .taken
         case let .refused(computer, count):
             problem = Self.describe(FleetClientError.refused(count))
-            return FleetPendingLink.outcome(freshRead: await check(computer))
+            return .refused(fresh: await check(computer))
         case let .failed(error):
             problem = error.map(Self.describe)
-            // No computer answered: what was posted may have landed.
-            return .unknown
+            // Nothing signed means nothing posted; otherwise what was
+            // posted may have landed.
+            return signed == nil ? .nothing : .unknown
         }
     }
 

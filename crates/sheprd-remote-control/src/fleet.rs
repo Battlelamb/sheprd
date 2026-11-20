@@ -324,7 +324,23 @@ impl Fleet {
     /// at `now_ms`; says how many were refused. With no fleet yet, it joins
     /// one only when the operations found it and admit this computer: a
     /// member admitted it, after a person's approval there. Blocking.
+    // Phones' syncs on later branches call it; here only tests do.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn receive(&self, ops: Vec<Op>, now_ms: u64) -> Result<usize> {
+        self.receive_from(ops, &[], now_ms)
+    }
+
+    /// [`Fleet::receive`] into the fleet `fleet` only: what a removal
+    /// exchange passes, which began while this computer was in that fleet.
+    /// After a scrub, or in another fleet, it is refused: an exchange
+    /// never joins this computer to a fleet, so access a scrub took away
+    /// cannot return through one still open. Blocking.
+    pub(crate) fn receive_in(&self, fleet: FleetId, ops: Vec<Op>, now_ms: u64) -> Result<usize> {
+        // Held across the check and the insert: a scrub waits for both.
+        let _writing = self.writing();
+        if self.inner().log.as_ref().map(Log::fleet) != Some(fleet) {
+            return Err(Error::NoFleet);
+        }
         self.receive_from(ops, &[], now_ms)
     }
 

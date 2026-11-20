@@ -173,3 +173,23 @@ fn a_scrub_that_cannot_find_the_ssh_keys_fails() {
             .is_some()
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removal_exchange_open_across_a_scrub_cannot_restore_the_fleet() {
+    let (http, _, _) = relay().await;
+    let (a, b) = (Node::new(http, 1).await, Node::new(http, 2).await);
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    join(&a, &b);
+    // The exchange began while b was in a's fleet.
+    let serving = b.fleet.inner().log.as_ref().unwrap().fleet();
+    b.fleet.receive_in(serving, a.ops(), now_ms()).unwrap();
+    assert_eq!(b.ask(Ask::Scrub { session: None }), Answer::Done);
+    // Its history, which admits b's key, joins nothing now.
+    assert!(matches!(
+        b.fleet.receive_in(serving, a.ops(), now_ms()),
+        Err(Error::NoFleet)
+    ));
+    assert!(b.fleet.inner().log.is_none());
+    assert!(ask::view(&b.fleet).is_none());
+    assert!(b.lines().is_empty());
+}

@@ -525,8 +525,12 @@ act on the repository of the directory the client starts `sheprd mcp` in.
 
 Requests `sheprd mcp` sends are marked as relayed for the client, by the name
 it gave (control protocol 16). The app refuses them while the switch is off,
-and when one opens a dialog the window says which client asked. Nothing that
-removes or moves work happens until the user confirms in that dialog. Quitting
+and when one opens a dialog the window says which client asked. Restoring a
+checkpoint, creating a worktree, fanning out, and teleporting happen only once
+the user confirms in that dialog. Like the `sheprd` commands, the other tools
+act at once: `memory_add`, `memory_pin`, `memory_forget` (which removes an
+entry), `notes_set`, `checkpoint_create`, and opening pages, files, and
+ports. Quitting
 the app, running any palette command, stopping processes on ports, `cloud
 exec`, settings changes, pairing, updates, and mods have no tool. The plan and
 its later steps are in [MCP plan](mcp-plan.md).

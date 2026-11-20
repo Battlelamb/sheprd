@@ -71,3 +71,18 @@ fn refuses_what_is_not_one_json_rpc_message() {
         (Some(Id::Number(1)), INVALID_PARAMS)
     );
 }
+
+#[test]
+fn a_string_id_longer_than_the_bound_is_refused_without_echoing_it() {
+    use crate::jsonrpc::MAX_ID;
+    let fits = format!(
+        r#"{{"jsonrpc":"2.0","id":"{}","method":"ping"}}"#,
+        "i".repeat(MAX_ID)
+    );
+    assert!(decode(fits.as_bytes()).is_ok());
+    let long = format!(
+        r#"{{"jsonrpc":"2.0","id":"{}","method":"ping"}}"#,
+        "i".repeat(MAX_ID + 1)
+    );
+    assert_eq!(refused(&long), (None, INVALID_REQUEST));
+}

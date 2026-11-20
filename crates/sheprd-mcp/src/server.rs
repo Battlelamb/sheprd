@@ -53,14 +53,16 @@ where
     let mut session = Session::new(info);
     for request in queue {
         let id = request.id.clone();
+        // A request cancelled while it waited never runs: a tool that
+        // changes something must not act for a call its client gave up on.
+        if lock(&pending).cancelled.contains(&id) {
+            finish(&pending, &id);
+            continue;
+        }
         let response = session.answer(request, &mut handler);
-        let cancelled = {
-            let mut pending = lock(&pending);
-            pending.ids.remove(&id);
-            pending.cancelled.remove(&id)
-        };
-        // A cancelled request gets no answer, as the protocol asks.
-        if !cancelled {
+        // One cancelled while it ran finishes, but gets no answer, as the
+        // protocol asks.
+        if !finish(&pending, &id) {
             write(&output, &response)?;
         }
     }
@@ -128,6 +130,13 @@ fn read<W: Write>(
             Ok(Incoming::Response) => {}
         }
     }
+}
+
+/// Forgets a request that ran or was skipped; whether it was cancelled.
+fn finish(pending: &Mutex<Pending>, id: &Id) -> bool {
+    let mut pending = lock(pending);
+    pending.ids.remove(id);
+    pending.cancelled.remove(id)
 }
 
 /// Marks a queued or running request so its answer is dropped. An unknown

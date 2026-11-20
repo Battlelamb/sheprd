@@ -27,7 +27,7 @@ const _: () = assert!(sheprd_mcp::MAX_CLIENT_NAME <= crate::control::protocol::M
 /// The longest error text a tool returns, as the CLI prints at most.
 const MAX_ERROR: usize = 4096;
 
-const ON: &str = "Sheprd is the app this agent's terminals run in. These tools read and drive what only Sheprd shows or keeps: its windows and tabs, browser pages and the user's notes on them, worktrees, pull requests, repository memory, and checkpoints. Search memory before a task and add what the next agent would otherwise have to find out again. Anything that removes or moves work only opens Sheprd's own dialog, where the user decides.";
+const ON: &str = "Sheprd is the app this agent's terminals run in. These tools read and drive what only Sheprd shows or keeps: its windows and tabs, browser pages and the user's notes on them, worktrees, pull requests, repository memory, and checkpoints. Search memory before a task and add what the next agent would otherwise have to find out again. checkpoint_restore, worktree_create, fan_out, and teleport only open Sheprd's own dialog, where the user decides; memory_forget removes an entry at once, so use it only for entries that are wrong.";
 const OFF: &str = "Sheprd's MCP server is off, so it offers no tools. The user turns it on in Sheprd's Settings > General (MCP server); reconnect afterwards to see the tools.";
 
 /// Serves MCP on standard input and output until the client closes them.

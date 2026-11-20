@@ -15,7 +15,7 @@ agents that can run shell commands and have loaded the skill use it. Read
 | Gate | Both. A Cargo feature `mcp` on `sheprd-gpui`, in its `default` set so release builds include it, and a runtime switch `[features] mcp = false`, shown in Settings > General. A build without the Cargo feature has no MCP code, subcommand, or Settings row. |
 | Default | Off. With the switch off, `sheprd mcp` still starts and answers `initialize`, but lists no tools and refuses every call. Its `instructions` say how to turn it on. |
 | Transport | stdio only. The client starts `sheprd mcp`, which runs without GPUI, as every other `sheprd` command does, and turns each tool call into the control-socket request the matching CLI command sends. There is no new listener, port, token, or runtime. Streamable HTTP is out of scope (see Later). |
-| Tools | A curated set with typed input schemas (below), not every CLI command. Destructive or outward actions open the app's own dialog, just as the CLI does, and the user confirms there. |
+| Tools | A curated set with typed input schemas (below), not every CLI command. Each acts as its CLI command does: checkpoint restore, worktree create, fan-out, and teleport open the app's own dialog for the user to confirm; memory, notes, checkpoints taken, pages, and port forwards change at once. |
 | Runtime | Blocking threads, no Tokio (`AGENTS.md`: no runtime around the blocking socket worker). MCP over stdio is newline-delimited JSON-RPC, which takes very little code to write by hand, so we add no `rmcp` (it requires Tokio). |
 
 ## Shape

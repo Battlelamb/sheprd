@@ -24,13 +24,22 @@ impl Session {
         Self { info, client: None }
     }
 
-    /// The response to `request`, encoded within [`MAX_MESSAGE`].
+    /// The response to `request`, encoded within [`MAX_MESSAGE`]: checked
+    /// whole, ID and envelope included, whatever produced it.
     pub(crate) fn answer(&mut self, request: Request, handler: &mut impl Handler) -> Value {
         let id = request.id.clone();
-        match self.result(request, handler) {
+        let response = match self.result(request, handler) {
             Ok(result) => jsonrpc::result(&id, result),
             Err(failure) => jsonrpc::error(Some(&id), &failure),
+        };
+        if encoded_len(&response) <= MAX_MESSAGE {
+            return response;
         }
+        let failure = Failure::new(
+            INTERNAL_ERROR,
+            format!("The answer exceeds {MAX_MESSAGE} bytes"),
+        );
+        jsonrpc::error(Some(&id), &failure)
     }
 
     fn result(&mut self, request: Request, handler: &mut impl Handler) -> Result<Value, Failure> {

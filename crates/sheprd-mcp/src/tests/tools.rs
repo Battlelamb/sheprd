@@ -62,3 +62,19 @@ fn an_answer_over_the_bound_becomes_a_tool_error() {
     assert!(text.contains("exceeds"), "{text}");
     server.finish().unwrap();
 }
+
+#[test]
+fn every_answer_fits_the_bound_with_its_id() {
+    use crate::jsonrpc::MAX_ID;
+    let server = Running::start();
+    server.initialize();
+    // The longest ID with escapes, which grow it sixfold on the wire.
+    let id = "\u{1}".repeat(MAX_ID);
+    for name in ["huge", "echo"] {
+        server.send(json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": name } }));
+        let answer = server.receive();
+        assert_eq!(answer["id"], json!(id));
+        assert!(serde_json::to_vec(&answer).unwrap().len() <= crate::MAX_MESSAGE);
+    }
+    server.finish().unwrap();
+}

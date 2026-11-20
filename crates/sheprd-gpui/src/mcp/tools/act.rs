@@ -1,6 +1,8 @@
-//! Tools that show, keep, or start something. Whatever removes or moves
-//! work only opens Sheprd's own dialog, where the person decides, exactly
-//! as the `sheprd` command does.
+//! Tools that show, keep, or start something, each as its `sheprd`
+//! command does: restoring a checkpoint, creating a worktree, fanning out,
+//! and teleporting only open Sheprd's own dialog, where the person decides;
+//! memory entries and pins, worktree notes, checkpoints taken, pages, and
+//! port forwards change at once.
 
 use super::{Effect, Spec, integer, string};
 use crate::cli::control::{
@@ -259,19 +261,18 @@ pub(super) const TOOLS: &[Spec] = &[
     Spec {
         name: "teleport",
         title: "Move a worktree",
-        description: "Open Sheprd's teleport dialog to move the caller's linked worktree, with its tabs and agents, to another host. The user confirms there.",
+        description: "Open Sheprd's teleport dialog to move the caller's own linked worktree, with its tabs and agents, to another host. Only the worktree of the Herdr pane the MCP client runs in can move. The user confirms there.",
         effect: Effect::Removes,
         properties: || {
             json!({
                 "host": string("The host to move to, by id or label as the window lists it.", SHORT_TEXT),
-                "worktree": string("The worktree; absent, the caller's.", SHORT_TEXT),
             })
         },
         required: &["host"],
         build: |arguments| {
             Ok(ControlCommand::Teleport {
                 host: arguments.required_text("host", SHORT_TEXT)?,
-                worktree: arguments.text("worktree", SHORT_TEXT)?,
+                worktree: None,
             })
         },
     },

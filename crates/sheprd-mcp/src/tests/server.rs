@@ -131,3 +131,24 @@ fn a_failed_write_stops_the_server_with_its_cause() {
     };
     assert_eq!(source.kind(), io::ErrorKind::BrokenPipe);
 }
+
+#[test]
+fn a_call_cancelled_while_it_waits_never_runs() {
+    let server = Running::start();
+    server.initialize();
+    server.request(1, "tools/call", json!({ "name": "block" }));
+    server.started.recv_timeout(WAIT).unwrap();
+    assert_eq!(server.calls.recv_timeout(WAIT).unwrap().name, "block");
+    server.request(2, "tools/call", json!({ "name": "echo" }));
+    server.send(json!({ "jsonrpc": "2.0", "method": "notifications/cancelled", "params": { "requestId": 2 } }));
+    // In order on the reader: the cancellation is recorded once this answers.
+    server.ask(3, "ping", json!({}));
+    server.go.send(()).unwrap();
+    assert_eq!(server.receive()["id"], json!(1));
+    // The next call's answer comes straight after: 2 was skipped, unanswered.
+    let next = server.ask(4, "tools/call", json!({ "name": "echo" }));
+    assert!(next.get("result").is_some(), "{next}");
+    let ran: Vec<String> = server.calls.try_iter().map(|call| call.name).collect();
+    assert_eq!(ran, ["echo"], "only call 4 reached the handler");
+    server.finish().unwrap();
+}

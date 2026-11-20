@@ -15,6 +15,10 @@ pub(crate) const PARSE_ERROR: i64 = -32700;
 pub(crate) const SERVER_BUSY: i64 = -32000;
 // keep-sorted end
 
+/// The longest string ID, in bytes. Every answer echoes its ID, so a
+/// bounded one keeps answers within [`crate::MAX_MESSAGE`].
+pub(crate) const MAX_ID: usize = 128;
+
 /// A request ID, echoed in its response.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -97,6 +101,9 @@ pub(crate) fn decode(line: &[u8]) -> Result<Incoming, Refusal> {
             )
         })?),
     };
+    if matches!(&id, Some(Id::String(id)) if id.len() > MAX_ID) {
+        return Err(Refusal::new(None, INVALID_REQUEST, "The id is too long"));
+    }
     if object.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
         return Err(Refusal::new(id, INVALID_REQUEST, "jsonrpc must be \"2.0\""));
     }

@@ -132,7 +132,7 @@ impl SettingsWindow {
                 None,
             ))
             .children(self.feature_rows(cx))
-            .children(self.mcp_rows())
+            .children(self.mcp_rows(cx))
             .children(self.render_chat_env_controls(cx))
             .child(ui::section(
                 theme,
@@ -289,24 +289,22 @@ impl SettingsWindow {
     }
 
     /// A button copying what MCP clients such as Claude Desktop and
-    /// Cursor read to start the MCP server, usable while it is on.
+    /// Cursor read to start the MCP server, usable while it is on. The
+    /// text names this executable, which is looked up off the UI thread when
+    /// the button is pressed, never while drawing.
     #[cfg(feature = "mcp")]
-    fn mcp_rows(&self) -> Option<ui::Row> {
+    fn mcp_rows(&self, cx: &mut Context<Self>) -> Option<ui::Row> {
         let id = "general-mcp-config";
         let on = self.config.features.mcp;
-        let config = crate::mcp::client_config();
-        let enabled = on && config.is_some();
-        let button = ui::button(
+        let mut button = ui::button(
             &self.theme,
             format!("{id}-button"),
             fl!("mcp-settings-copy-button"),
-            enabled,
-        )
-        .when_some(config.filter(|_| enabled), |button, config| {
-            button.on_click(move |_, _, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(config.clone()));
-            })
-        });
+            on,
+        );
+        if on {
+            button = button.on_click(cx.listener(|_, _, _, cx| copy_mcp_config(cx)));
+        }
         let row = ui::row(&self.theme, id, fl!("mcp-settings-copy"))
             .description(fl!("mcp-settings-copy-description"))
             .control(button);
@@ -318,7 +316,7 @@ impl SettingsWindow {
     }
 
     #[cfg(not(feature = "mcp"))]
-    fn mcp_rows(&self) -> Option<ui::Row> {
+    fn mcp_rows(&self, _: &mut Context<Self>) -> Option<ui::Row> {
         None
     }
 
@@ -363,4 +361,18 @@ impl SettingsWindow {
             cx,
         );
     }
+}
+
+/// Puts the MCP client setup on the pasteboard once it is built.
+#[cfg(feature = "mcp")]
+fn copy_mcp_config(cx: &mut Context<SettingsWindow>) {
+    let work = cx
+        .background_executor()
+        .spawn(async { crate::mcp::client_config() });
+    cx.spawn(async move |_, cx| {
+        if let Some(config) = work.await {
+            cx.update(|cx| cx.write_to_clipboard(ClipboardItem::new_string(config)));
+        }
+    })
+    .detach();
 }

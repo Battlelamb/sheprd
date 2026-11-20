@@ -14,6 +14,7 @@ fn share(a: &Node, host: &Node) {
         deny: Vec::new(),
     });
     host.ask(Ask::Apply(Apply {
+        heads: a.view().heads,
         ops: sync::encode_ops(&a.ops()),
         ..Apply::default()
     }));

@@ -68,6 +68,8 @@ mod scrub_races;
 #[cfg(unix)]
 mod sessions;
 #[cfg(unix)]
+mod settling;
+#[cfg(unix)]
 mod shared_records;
 #[cfg(unix)]
 mod store;

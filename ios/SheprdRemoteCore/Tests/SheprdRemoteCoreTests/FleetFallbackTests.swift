@@ -63,9 +63,7 @@ struct FleetFallbackTests {
             throw Offline(name: "laptop")
         }
         let stale = API.FleetNext(fleet: next.fleet, seq: 1, parents: [String(repeating: "02", count: 32)])
-        let studio = Computer { method, _, _ in
-            method == "GET" ? FleetClientTests.status(next: stale) : FleetClientTests.applied
-        }
+        let studio = FleetClientTests.applying(stale)
         let signer = FleetClientTests.signer()
         var signed: FleetClient.Signed?
         let attempt = await FleetAttempt.first([laptop, studio]) { computer in
@@ -85,8 +83,9 @@ struct FleetFallbackTests {
         }
         let first = try #require(laptop.requests.withLock { $0.last?.body })
         let second = studio.requests.withLock { $0 }
-        // Never signed again: no read, and the very bytes the first got.
-        #expect(second.map(\.method) == ["POST"])
+        // Never signed again: posted at once, the very bytes the first got,
+        // then read back to confirm.
+        #expect(second.map(\.method) == ["POST", "GET"])
         let sent = try JSONDecoder().decode(FleetClientTests.Posted.self, from: first)
         let secondBody = try #require(second.first?.body)
         let resent = try JSONDecoder().decode(FleetClientTests.Posted.self, from: secondBody)

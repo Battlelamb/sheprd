@@ -20,13 +20,7 @@ struct FleetRecoveryTests {
         let key = P256.Signing.PrivateKey()
         let signer = FleetClientTests.signer(key)
         let next = API.FleetNext(fleet: String(repeating: "09", count: 32), seq: 1, parents: [String(repeating: "01", count: 32)])
-        let computer = Computer { method, _, body in
-            guard method == "POST" else { return FleetClientTests.status(next: next) }
-            let posted = try JSONDecoder().decode(FleetClientTests.Posted.self, from: body ?? Data())
-            let text = try #require(posted.ops.last)
-            let last = try Fleet.Op.decode(try #require(Base64URL.decode(text)))
-            return Data(#"{"fleet":"09","heads":["\#(try last.id().hexString)"],"refused":0}"#.utf8)
-        }
+        let computer = FleetClientTests.applying(next)
         let count = FleetClient.maxSyncOps + 1
         let device = P256.Signing.PrivateKey().publicKey.x963Representation
         let bodies: [Fleet.Body] = (0..<count).map { index in

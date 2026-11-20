@@ -57,6 +57,21 @@ struct FleetClientTests {
 
     static let applied = Data(#"{"fleet":"09","heads":[],"ops":[],"refused":0}"#.utf8)
 
+    /// A computer that applies what it is posted: reads answer `next` until
+    /// a post, then the next sequence number after the last operation.
+    static func applying(_ next: API.FleetNext) -> Computer {
+        let current = Mutex(next)
+        return Computer { method, _, body in
+            guard method == "POST" else { return status(next: current.withLock { $0 }) }
+            let posted = try JSONDecoder().decode(Posted.self, from: body ?? Data())
+            let text = try #require(posted.ops.last)
+            let last = try Fleet.Op.decode(try #require(Base64URL.decode(text)))
+            let id = try last.id().hexString
+            current.withLock { $0 = API.FleetNext(fleet: next.fleet, seq: last.seq + 1, parents: [id]) }
+            return Data(#"{"fleet":"09","heads":["\#(id)"],"refused":0}"#.utf8)
+        }
+    }
+
     @Test func aLinkBuiltFromTheStatusIsTheDaemons() throws {
         let fixture = try FleetTests.fixture("phone")
         let next = try #require(fixture["next"] as? [String: Any])
@@ -101,12 +116,14 @@ struct FleetClientTests {
         let key = P256.Signing.PrivateKey()
         let signer = Self.signer(key)
         let next = API.FleetNext(fleet: String(repeating: "09", count: 32), seq: 4, parents: [String(repeating: "01", count: 32)])
-        let computer = Computer { method, _, _ in method == "GET" ? Self.status(next: next) : Self.applied }
+        let computer = Self.applying(next)
         let hosts = [Data(repeating: 4, count: 32), Data(repeating: 5, count: 32)]
         let device = P256.Signing.PrivateKey().publicKey.x963Representation
         try await computer.client.sign(hosts.map { .link(host: $0, deviceKey: device) }, as: signer, at: .now)
         let requests = computer.requests.withLock { $0 }
-        #expect(requests.map(\.path) == ["/api/v2/fleet?member=\(signer.member.hexString)", "/api/v2/fleet/sync"])
+        // Read, post, then read back to confirm they applied.
+        let read = "/api/v2/fleet?member=\(signer.member.hexString)"
+        #expect(requests.map(\.path) == [read, "/api/v2/fleet/sync", read])
         let posted = try JSONDecoder().decode(Posted.self, from: try #require(requests[1].body))
         #expect(posted.heads == [String(repeating: "01", count: 32)])
         let ops = try posted.ops.map { try Fleet.Op.decode(try #require(Base64URL.decode($0))) }

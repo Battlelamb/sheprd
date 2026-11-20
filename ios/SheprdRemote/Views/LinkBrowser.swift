@@ -78,12 +78,15 @@ struct LinkBrowser: View {
             Button("Done", systemImage: "xmark") { dismiss() }
         }
         ToolbarItem(placement: .principal) {
+            // The host leads: the page writes its own title, so a title
+            // could name another site.
             VStack(spacing: 1) {
-                Text(page.title.isEmpty ? (current.host() ?? current.absoluteString) : page.title)
-                    .font(.subheadline.weight(.semibold)).lineLimit(1)
                 Label(current.host() ?? current.absoluteString,
                       systemImage: current.scheme?.lowercased() == "https" ? "lock.fill" : "exclamationmark.triangle.fill")
-                    .labelStyle(.titleAndIcon).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    .labelStyle(.titleAndIcon).font(.subheadline.weight(.semibold)).lineLimit(1).truncationMode(.head)
+                if !page.title.isEmpty {
+                    Text(page.title).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
             .accessibilityElement(children: .combine)
         }

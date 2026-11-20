@@ -133,7 +133,11 @@ impl Agent {
         self.status.borrow().clone()
     }
 
-    pub(crate) fn set_state(&self, endpoint: &Endpoint, state: RelayState) {
+    pub(crate) fn set_state(&self, endpoint: &Endpoint, mut state: RelayState) {
+        // A failure's text is bounded, so the status Sheprd reads is.
+        if let RelayState::Failed { error } = &mut state {
+            status::bound_error(error);
+        }
         self.status.send_modify(|status| {
             status.insert(endpoint.to_string(), state);
         });

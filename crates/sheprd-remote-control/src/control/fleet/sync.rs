@@ -28,6 +28,13 @@ pub struct Apply {
     /// the fleet holds before sending it anything.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nonce: Option<String>,
+    /// The host the machine on the other end proved it is, hex, when Sheprd
+    /// asks its own daemon on that machine's behalf: the daemon exports
+    /// nothing to a host the fleet no longer holds, checked under the lock
+    /// the export is read under, as the host may be removed while its
+    /// answer was on its way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer: Option<String>,
 }
 
 /// An answering computer's proof that it is the host its certificate

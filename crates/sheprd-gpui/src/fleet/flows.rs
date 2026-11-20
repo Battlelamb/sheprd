@@ -219,12 +219,15 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
             let mut ours;
             let mut parts = 1;
             loop {
+                // Named, so the daemon exports nothing should the host be
+                // removed meanwhile.
                 ours = applied(
                     &client,
                     Apply {
                         fleet: Some(fleet.clone()),
                         heads: theirs.heads.clone(),
                         ops: std::mem::take(&mut theirs.ops),
+                        peer: Some(proven.clone()),
                         ..Apply::default()
                     },
                 )
@@ -268,6 +271,7 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
                     Apply {
                         fleet: Some(fleet.clone()),
                         heads: heads.clone(),
+                        peer: Some(proven.clone()),
                         ..Apply::default()
                     },
                 )

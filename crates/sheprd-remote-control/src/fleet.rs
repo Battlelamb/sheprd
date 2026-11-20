@@ -147,6 +147,30 @@ impl Fleet {
         Self::load_with(state_dir, now_ms, Some(lock))
     }
 
+    /// The fleet as the daemon starts it. A fleet that does not load stays
+    /// off until the daemon restarts, and what it let in over SSH goes
+    /// (`keys`), failing closed. A fleet another process holds is not
+    /// that: another daemon runs on this state directory, whose lines must
+    /// stay, so this one does not start (`Error::Busy`) and changes
+    /// nothing. Blocking.
+    pub(crate) fn for_daemon(
+        state_dir: &Path,
+        now_ms: u64,
+        keys: Option<&crate::ssh_access::AuthorizedKeys>,
+    ) -> Result<Option<Self>> {
+        match Self::load_exclusive(state_dir, now_ms) {
+            Ok(fleet) => Ok(Some(fleet)),
+            Err(Error::Busy) => Err(Error::Busy),
+            Err(error) => {
+                tracing::warn!(%error, "Could not load the fleet; it stays off until the daemon restarts");
+                if let Some(keys) = keys {
+                    let _ = keys.set_fleet(&[]);
+                }
+                Ok(None)
+            }
+        }
+    }
+
     fn load_with(state_dir: &Path, now_ms: u64, lock: Option<lock::Lock>) -> Result<Self> {
         let key = store::load_or_create_key(state_dir)?;
         let me = member_id(&key);
@@ -406,6 +430,7 @@ impl Fleet {
         }
         let heads = apply.heads()?;
         let ops = apply.ops()?;
+        let peer = apply.peer.as_deref().map(sync::host).transpose()?;
         let named = match &apply.fleet {
             Some(named) => Some(sync::fleet(named)?),
             None => ops.first().map(joining::fleet_of),
@@ -425,6 +450,11 @@ impl Fleet {
         let inner = self.inner();
         let log = match (&inner.log, named) {
             (Some(log), Some(named)) if log.fleet() != named => return Err(Error::OtherFleet),
+            // Removed while its answer was on its way: it gets its removal
+            // alone (`sync::removal_for`), never what came after.
+            (Some(log), _) if peer.is_some_and(|peer| !log.state().hosts.contains_key(&peer)) => {
+                return Err(Error::HostRemoved);
+            }
             (Some(log), _) => log,
             (None, named) => named
                 .and_then(|named| inner.joining.get(&named))

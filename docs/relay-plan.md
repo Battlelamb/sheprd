@@ -1674,7 +1674,7 @@ all of them. It needs no fleet key, because it only removes access.
 | Thing | Bound |
 | --- | --- |
 | Live members | 16 computers and 16 phones, so a host names at most 32 fleet dial keys and keeps room in a relay's 64 for its own paired devices |
-| Hosts | 256 |
+| Hosts | 256. A `HostAdd` made while 256 hosts are live counts for nothing, even after one of them is removed: add the host again once there is room. |
 | Member tombstones | 1,024, kept forever. Past that, create a new fleet. |
 | Membership operations between checkpoints | 256 (`Found`, `Admit`, `Rotate`): the costly ones to fold |
 | Removals between checkpoints | 32 per signer, a share no one else can use up, and 1,024 in all from members no longer live. They count against no other bound, so a member that fills the log cannot keep out its own removal. |

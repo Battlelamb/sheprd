@@ -176,3 +176,31 @@ async fn histories_of_too_many_fleets_drop_the_oldest() {
         crate::fleet::joining::MAX_FLEETS
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_invitation_cut_off_after_admission_resumes() {
+    let (http, _, _) = relay().await;
+    let (a, b) = (Node::new(http, 1).await, Node::new(http, 2).await);
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    let Answer::Bundle { bundle, signature } = b.ask(Ask::Bundle {
+        fleet: a.view().fleet,
+    }) else {
+        panic!("no bundle");
+    };
+    let admit = || Ask::Admit {
+        bundle: bundle.clone(),
+        signature: signature.clone(),
+        method: crate::control::fleet::Method::Ssh,
+    };
+    assert_eq!(a.ask(admit()), Answer::Done);
+    // The log never reached b. Invite again: admitting the same bundle
+    // signs nothing more, and the handover goes on.
+    let heads = a.view().heads;
+    assert_eq!(a.ask(admit()), Answer::Done);
+    assert_eq!(a.view().heads, heads);
+    let Answer::Applied(applied) = apply(&b, &in_order(&a)) else {
+        panic!("not applied");
+    };
+    assert_eq!(applied.fleet, a.view().fleet);
+    assert!(b.view().members.iter().any(|member| member.id == b.me()));
+}

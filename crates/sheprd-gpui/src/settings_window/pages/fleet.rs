@@ -134,6 +134,17 @@ impl SettingsWindow {
             return page.child(row);
         };
         page = page.children(self.fleet_notices(&view));
+        if let Some(unsaved) = Fleet::unsaved(cx) {
+            page = page.child(
+                ui::row(
+                    theme,
+                    "fleet-unsaved",
+                    fl!("settings-fleet-unsaved", count = unsaved.count),
+                )
+                .description(crate::notifications::safe_text(&unsaved.reason, 300))
+                .dot(theme.ink(theme.palette[1])),
+            );
+        }
         page = page
             .child(ui::section(theme, &fl!("settings-fleet-members"), None))
             .children(self.fleet_members(&view, cx))

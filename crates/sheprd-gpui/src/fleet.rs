@@ -137,6 +137,8 @@ pub(crate) struct Fleet {
     answered: bool,
     /// Orders the saved devices' updates ([`saved::keep`]).
     saving: saved::Saving,
+    /// Fleet hosts the last update could not save as devices.
+    unsaved: Option<saved::Unsaved>,
     error: Option<String>,
     windows: HashMap<EntityId, Reached>,
     links: HashMap<String, Link>,
@@ -159,6 +161,17 @@ impl Fleet {
     /// Whether the daemon has answered at least once.
     pub(crate) fn read(cx: &App) -> bool {
         cx.try_global::<Self>().is_some_and(|fleet| fleet.read)
+    }
+
+    /// Fleet hosts that could not be saved as devices, if any.
+    pub(crate) fn unsaved(cx: &App) -> Option<saved::Unsaved> {
+        cx.try_global::<Self>()?.unsaved.clone()
+    }
+
+    /// Records which fleet hosts could not be saved as devices.
+    pub(crate) fn set_unsaved(cx: &mut App, unsaved: Option<saved::Unsaved>) {
+        cx.update_global::<Self, _>(|fleet, _| fleet.unsaved = unsaved);
+        cx.refresh_windows();
     }
 
     /// The last failure to show, if any.

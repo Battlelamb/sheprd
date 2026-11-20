@@ -64,3 +64,7 @@ settings-fleet-invite = Invite
 settings-fleet-invite-ask = Invite this computer? It will open terminals on your hosts, and your computers on it.
 settings-fleet-share = Share
 settings-fleet-share-ask = Share this host with the computers allowed below:
+settings-fleet-unsaved = { $count ->
+    [one] One fleet host could not be added to Devices
+   *[other] { $count } fleet hosts could not be added to Devices
+}

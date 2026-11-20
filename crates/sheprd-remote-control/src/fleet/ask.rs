@@ -44,6 +44,18 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             method,
         } => {
             let bundle = Bundle::from_bytes(&sync::bytes(&bundle)?)?;
+            // Admitted already with this very bundle, as when an invitation
+            // was cut off before the log was handed over: nothing to sign,
+            // so the handover can resume.
+            let admitted = fleet.inner().log.as_ref().is_some_and(|log| {
+                log.state()
+                    .members
+                    .get(&bundle.id())
+                    .is_some_and(|member| member.bundle == bundle)
+            });
+            if admitted {
+                return Ok(Answer::Done);
+            }
             let joiner_signature = sync::bytes(&signature)?
                 .try_into()
                 .map_err(|_| crate::control::fleet::Error::JoinSignature)?;

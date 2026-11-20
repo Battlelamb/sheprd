@@ -12,6 +12,7 @@ mod config_watch;
 mod en_xa;
 mod fleet;
 mod fleet_removal;
+mod fleet_unsaved;
 mod gpu_settings;
 mod language_picker;
 mod language_reload;

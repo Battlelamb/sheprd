@@ -117,6 +117,8 @@ impl<R: FnMut(Update)> Session<R> {
         let prompt = self.projector.prompt(&shown, attachments.len());
         self.emit(prompt);
         let mut blocks = Vec::with_capacity(prepared.len() + 3);
+        self.context
+            .running(crate::context::Running::of(&self.transcript));
         if let Some(note) = self.context.before_prompt(origin, text) {
             blocks.push(wire::ContentBlock::Text(wire::TextContent::new(note)));
         }
@@ -238,7 +240,7 @@ impl<R: FnMut(Update)> Session<R> {
         Ok(())
     }
 
-    fn set_mode(&mut self, mode: String) -> Result<(), Rejection> {
+    pub(super) fn set_mode(&mut self, mode: String) -> Result<(), Rejection> {
         let session = self.acp_session.clone().ok_or(Rejection::NotReady)?;
         let known = self
             .transcript
@@ -255,7 +257,7 @@ impl<R: FnMut(Update)> Session<R> {
         Ok(())
     }
 
-    fn set_option(&mut self, id: String, value: &OptionValue) -> Result<(), Rejection> {
+    pub(super) fn set_option(&mut self, id: String, value: &OptionValue) -> Result<(), Rejection> {
         let session = self.acp_session.clone().ok_or(Rejection::NotReady)?;
         let known = self
             .transcript
@@ -278,7 +280,7 @@ impl<R: FnMut(Update)> Session<R> {
 
     /// Turns auto-accepting on or off; turning it on also answers the
     /// requests already waiting.
-    fn set_auto_accept(&mut self, on: bool) {
+    pub(super) fn set_auto_accept(&mut self, on: bool) {
         if self.transcript.auto_accept != on {
             self.emit(Change::AutoAccept { on });
         }

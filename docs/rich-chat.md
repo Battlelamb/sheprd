@@ -743,7 +743,11 @@ terminal. Goal status stays in the original CLI interface; it is not inferred
 from conversation text.
 
 Observation requires a Linux agent host, its Herdr CLI metadata API, and a
-matching `sheprd-acp` helper. Local helpers are paired with the GUI; SSH observers
+matching `sheprd-acp` helper. The observer itself also runs on macOS, where the
+iPhone app uses it (`docs/ios-app-plan.md`): it reads the process's birth from
+the kernel and finds the log by its exact name, and since macOS shows no other
+process's environment, it reads the default config directory, never a
+`CLAUDE_CONFIG_DIR` or `CODEX_HOME` override. Local helpers are paired with the GUI; SSH observers
 run on the agent's host through the existing encrypted connection. Remote helper
 installation is explicit. Observation creates no listening port or persistent
 service. Closing the GUI stops its observer children and leaves agents running.

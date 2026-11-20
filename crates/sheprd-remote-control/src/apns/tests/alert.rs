@@ -88,6 +88,7 @@ fn question() -> Notification {
         tag: "chat-w1:p2".to_owned(),
         title: "Claude needs an answer".to_owned(),
         urgency: Urgency::High,
+        wizz: false,
     }
 }
 
@@ -268,4 +269,29 @@ fn the_alert_fixture_opens_to_its_plaintext() {
     // The sealed bytes open to exactly the plaintext as serialized.
     let opened = open(expected["apns"]["sealed"].as_str().unwrap());
     assert_eq!(opened, serde_json::to_vec(&sealed).unwrap());
+}
+
+#[test]
+fn a_wizz_interrupts_and_tells_the_phone_to_buzz() {
+    let wizz = Notification {
+        kind: Kind::TurnEnded,
+        permission: None,
+        title: "Claude finished".to_owned(),
+        wizz: true,
+        ..question()
+    };
+    let push = push(
+        Sealed::new(&wizz, COMPUTER.to_owned(), 0),
+        &wizz.tag,
+        fixed_seal,
+    )
+    .unwrap();
+    assert_eq!(push.priority, Priority::High);
+    let payload = json(&push.body);
+    assert_eq!(payload["aps"]["interruption-level"], "time-sensitive");
+    let opened = json(&open(payload["sealed"].as_str().unwrap()));
+    assert_eq!(opened["wizz"], true);
+    // Any other push leaves the key out, as phones before it expect.
+    let plain = Sealed::new(&question(), COMPUTER.to_owned(), 0);
+    assert!(serde_json::to_value(&plain).unwrap().get("wizz").is_none());
 }

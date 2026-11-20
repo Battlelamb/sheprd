@@ -42,6 +42,7 @@ mod stream;
 #[cfg(unix)]
 mod streaming;
 mod tags;
+mod term_files;
 #[cfg(unix)]
 mod term_history;
 mod terminal;

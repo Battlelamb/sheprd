@@ -194,6 +194,28 @@ fn stop_later(process: process::AgentProcess) -> Option<thread::JoinHandle<()>> 
     }
 }
 
+/// The settings the client that started this chat copied from another,
+/// for `harness` when it is the agent they were read from. A continued
+/// session keeps its own; a value that cannot be read says so in the chat.
+fn carried_settings(
+    harness: Option<crate::agents::Agent>,
+    continues: bool,
+    notices: &mut Vec<(NoticeLevel, String)>,
+) -> Option<sheprd_chat_protocol::Settings> {
+    let text = std::env::var(sheprd_chat_protocol::SETTINGS_ENV).ok()?;
+    let harness = harness.filter(|_| !continues)?;
+    match sheprd_chat_protocol::Settings::decode(&text) {
+        Ok(settings) => Some(settings).filter(|settings| settings.is_for(harness)),
+        Err(error) => {
+            notices.push((
+                NoticeLevel::Warning,
+                format!("This chat starts with its agent's own settings: {error}"),
+            ));
+            None
+        }
+    }
+}
+
 /// Whether the chat reaches a built-in agent through its ACP adapter.
 fn adapter(options: &Options) -> bool {
     options.adapter || std::env::var_os(ADAPTER_VARIABLE).is_some_and(|value| value == "1")
@@ -358,6 +380,7 @@ pub(crate) fn run_owned(
         }
         None => crate::context::Prompts::default(),
     };
+    let settings = carried_settings(harness, options.load.is_some(), &mut notices);
     let config = Config {
         agent: agent.display,
         choices: harness.filter(|_| options.choose).map(choices),
@@ -371,6 +394,7 @@ pub(crate) fn run_owned(
         pane: target.map(|target| target.pane),
         prompts,
         require_load: options.require_load,
+        settings,
         sheprd: crate::context::sheprd_executable(),
     };
     let launcher = inputs.clone();

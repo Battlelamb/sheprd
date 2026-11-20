@@ -95,6 +95,7 @@ impl Page {
             Self::RemoteHostAsk => fl!("menu-page-pair-another-machine"),
             Self::RemoteUpdate => fl!("menu-page-update-remote-sheprd"),
             Self::RemoveDevice => fl!("menu-page-remove-device"),
+            Self::RemoveMerged => fl!("menu-page-remove-merged"),
             Self::RemoveWsl => fl!("menu-page-remove-wsl-distribution"),
             Self::RenameCore => fl!("menu-page-rename-tab"),
             Self::RenameDevice => fl!("menu-page-rename-device"),

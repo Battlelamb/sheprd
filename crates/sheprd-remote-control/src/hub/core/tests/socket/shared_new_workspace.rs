@@ -153,7 +153,7 @@ async fn a_phones_new_worktree_is_kept_in_its_new_checkout() {
 }
 
 #[test]
-fn deleting_a_kept_worktree_keeps_one_with_changes_and_forgets_a_clean_one() {
+fn deleting_a_kept_worktree_keeps_one_with_changes_until_the_phone_discards_them() {
     let dir = tempfile::tempdir().unwrap();
     let repository = dir.path().join("project");
     std::fs::create_dir(&repository).unwrap();
@@ -174,6 +174,7 @@ fn deleting_a_kept_worktree_keeps_one_with_changes_and_forgets_a_clean_one() {
     source.poll().unwrap();
     let remove = crate::control::layout::Op::RemoveWorktree {
         workspace: "space-a".into(),
+        discard: false,
     };
     std::fs::write(checkout.join("work.txt"), "unsaved").unwrap();
     let error = source
@@ -183,11 +184,20 @@ fn deleting_a_kept_worktree_keeps_one_with_changes_and_forgets_a_clean_one() {
         error,
         HubError::Core(Error::Arrange(super::super::arrange::Error::WorktreeKept))
     ));
+    // The phone hears a conflict it may resolve by discarding the changes.
+    let response = axum::response::IntoResponse::into_response(crate::web::ApiError::from(error));
+    assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
     assert!(checkout.join("work.txt").exists());
     assert!(shared(&fake).workspace("space-a").is_some());
 
-    std::fs::remove_file(checkout.join("work.txt")).unwrap();
-    source.arrange_saved(&TabRef::File(0), "", &remove).unwrap();
+    // Confirmed on the phone: Git discards the change with the checkout.
+    let discard = crate::control::layout::Op::RemoveWorktree {
+        workspace: "space-a".into(),
+        discard: true,
+    };
+    source
+        .arrange_saved(&TabRef::File(0), "", &discard)
+        .unwrap();
     assert!(!checkout.exists());
     let killed: Value =
         serde_json::from_slice(&fake.inputs.recv_timeout(Duration::from_secs(2)).unwrap()).unwrap();

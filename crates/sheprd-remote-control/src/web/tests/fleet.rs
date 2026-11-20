@@ -313,6 +313,41 @@ async fn a_phones_link_and_removal_go_through_sync() {
     assert!(!fleet.inner().log.as_ref().unwrap().is_member(&fleet.me()));
 }
 
+/// What the phone confirms a post by: an operation that waits for its
+/// parents here is taken without a refusal, but the member's next
+/// sequence number moves only once it applies.
+#[tokio::test]
+async fn a_waiting_operation_does_not_move_the_next_sequence_number() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = founded(dir.path());
+    let (_, token) = signed_in(&state, 1);
+    let phone = Phone::new(7);
+    admit(&state, &phone);
+    let path = format!("/api/v2/fleet?member={}", phone.bundle.id());
+    let (_, body) = call(&state, &token, get(&path)).await;
+    let seq = body["next"]["seq"].as_u64().unwrap();
+    // On a parent this computer has not seen.
+    let waiting = Unsigned {
+        fleet: fleet_id(&state),
+        signer: phone.bundle.id(),
+        seq,
+        issued_ms: now_ms(),
+        parents: vec![OpId([5; 32])],
+        body: Body::HostRemove(crate::control::fleet::HostId([4; 32])),
+    }
+    .sign(&phone.key)
+    .unwrap();
+    let request = post(
+        "/api/v2/fleet/sync",
+        json!({ "ops": sync::encode_ops([&waiting]) }),
+    );
+    let (status, answer) = call(&state, &token, request).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(answer["refused"], 0);
+    let (_, body) = call(&state, &token, get(&path)).await;
+    assert_eq!(body["next"]["seq"].as_u64().unwrap(), seq);
+}
+
 #[tokio::test]
 async fn a_sync_over_its_bounds_is_refused() {
     let dir = tempfile::tempdir().unwrap();

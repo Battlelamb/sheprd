@@ -74,6 +74,12 @@ extension Fleet {
 }
 
 extension Fleet.Op {
+    /// Whether it removes `member`.
+    func removes(_ member: Data) -> Bool {
+        guard case let .remove(target, alsoMembers, _, _) = body else { return false }
+        return target == member || alsoMembers.contains(member)
+    }
+
     /// Signs it with `sign`, which must be the signer's key.
     public mutating func sign(using sign: (Data) throws -> Data) throws {
         signature = try sign(signedBytes())
@@ -108,6 +114,9 @@ public enum FleetClientError: Error, Equatable, Sendable {
     /// The computer took them without applying them: it waits for history
     /// it lacks. Another computer, or this one later, may apply them.
     case unapplied
+    /// The signed operations could not be kept before posting, so nothing
+    /// was posted.
+    case notKept
 }
 
 /// The fleet calls of one member computer, over a transport the app
@@ -190,7 +199,10 @@ public struct FleetClient: Sendable {
         var ops: [Fleet.Op] = []
         if let last = unconfirmed.last, next.seq <= last.seq {
             ops = unconfirmed
-            on = API.FleetNext(fleet: next.fleet, seq: last.seq + 1, parents: [try last.id().hexString])
+            // On the unconfirmed ones and on all the computer knows: a
+            // removal must see the admission of whom it removes.
+            let parents = try Self.parents(keeping: last.id().hexString, and: next.parents)
+            on = API.FleetNext(fleet: next.fleet, seq: last.seq + 1, parents: parents)
         }
         for body in bodies {
             var op = try Fleet.draft(on: on, signer: signer.member, issuedMs: issued, body: body)
@@ -224,8 +236,32 @@ public struct FleetClient: Sendable {
         // The member's next sequence number moves past an operation only
         // once it applies (the daemon drafts on what it applied).
         let after = try await status(member: last.signer)
-        guard let next = after.next, next.seq > last.seq else { throw FleetClientError.unapplied }
-        return applied
+        if let next = after.next, next.seq > last.seq { return applied }
+        // A phone that removed itself has no next operation there: its
+        // removal applied once the fleet no longer counts it.
+        if last.removes(last.signer), after.lacks(member: last.signer.hexString, in: last.fleet.hexString) {
+            return applied
+        }
+        throw FleetClientError.unapplied
+    }
+
+    /// Posts `signed` only when `kept` says it was saved first: a post whose
+    /// answer is lost must be sent again as the same bytes, which only a
+    /// kept copy can. Throws `notKept`, posting nothing, otherwise.
+    @discardableResult
+    public func post(_ signed: Signed, kept: Bool) async throws -> API.FleetApplied {
+        guard kept else { throw FleetClientError.notKept }
+        return try await post(signed)
+    }
+
+    /// `parent`, then as many of `others` as the limit leaves room for,
+    /// sorted and without repeats, as a draft names its parents.
+    static func parents(keeping parent: String, and others: [String]) -> [String] {
+        var chosen = [parent.lowercased()]
+        for other in others.map({ $0.lowercased() }) where !chosen.contains(other) && chosen.count < Fleet.maxParents {
+            chosen.append(other)
+        }
+        return chosen.sorted()
     }
 
     /// Signs one operation per body and posts them (`prepare`, then

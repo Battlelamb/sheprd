@@ -129,6 +129,7 @@ impl Observer {
             .context("the running agent's transcript is unavailable")?;
         identity.check()?;
         let session = SessionInfo {
+            continued: None,
             id: options.session,
             cwd: identity.cwd.clone(),
             title: None,

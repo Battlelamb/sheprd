@@ -41,7 +41,7 @@ pub(crate) async fn open(
     .await
     .map_err(|_| Error::Cancelled)??;
     let (connection, mut tunnel) = open_record(&record, &keys).await?;
-    if record.fleet {
+    if record.opening {
         use tokio::io::AsyncWriteExt as _;
         let (state, hash) = (state_dir.to_owned(), tunnel.hash);
         let opening = tokio::task::spawn_blocking(move || {

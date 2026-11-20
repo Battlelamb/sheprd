@@ -11,7 +11,7 @@
 //! is left out of all of it at once.
 
 use super::{Fleet, Result, me};
-use crate::control::fleet::{Body, HostId, Kind, MemberId, State as Log};
+use crate::control::fleet::{Body, HostId, HostKind, Kind, MemberId, State as Log};
 use crate::desktop::{files, record::Record};
 use crate::ssh_access::SshKey;
 use crate::web::{Shared, State};
@@ -228,6 +228,7 @@ fn records(state: &Log, me: &MemberId, suspended: &[MemberId]) -> Vec<(Record, V
                     route: host.record.route.clone(),
                     fleet: true,
                     host: Some(id.to_string()),
+                    opening: host.intro.kind == HostKind::Member,
                 },
                 host.record.ssh_host_keys.clone(),
             )

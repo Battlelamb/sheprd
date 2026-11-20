@@ -16,6 +16,7 @@ fn kept(node: &Node, route: &str) -> Record {
         route: route.to_owned(),
         fleet: true,
         host: None,
+        opening: false,
     };
     Record::load(node.dir.path(), &probe.id().unwrap()).unwrap()
 }
@@ -69,6 +70,7 @@ fn keys_saved_for_a_host_that_still_names_the_route_stay() {
         route: route.clone(),
         fleet: true,
         host: Some(host.into()),
+        opening: false,
     };
     let keys = vec!["ssh-ed25519 AAAA".to_owned()];
     let id = record("a", "identity-a").id().unwrap();

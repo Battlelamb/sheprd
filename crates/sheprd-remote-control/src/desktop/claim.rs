@@ -121,6 +121,7 @@ pub(crate) async fn claim(
             route: info.route.clone(),
             fleet: false,
             host: None,
+            opening: false,
         },
         login,
     })

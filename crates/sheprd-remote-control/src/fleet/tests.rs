@@ -34,6 +34,8 @@ mod joining;
 #[cfg(unix)]
 mod offline;
 #[cfg(unix)]
+mod opening;
+#[cfg(unix)]
 mod partial_join;
 #[cfg(unix)]
 mod proof;

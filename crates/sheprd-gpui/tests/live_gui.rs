@@ -98,8 +98,7 @@ fn native_pages() {
     for run in 0..8 {
         // Cold WebView2 each time: its default user data folder sits beside
         // the executable.
-        let data =
-            std::path::Path::new(env!("CARGO_BIN_EXE_sheprd")).with_extension("exe.WebView2");
+        let data = Path::new(env!("CARGO_BIN_EXE_sheprd")).with_extension("exe.WebView2");
         eprintln!(
             "PAGES diag: removing {} (exists={})",
             data.display(),

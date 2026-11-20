@@ -39,7 +39,7 @@ use std::{
 /// The file the merged access lives in, in the state directory.
 pub const FILE: &str = "fleet";
 /// The largest access file Sheprd hands an agent.
-pub const MAX_BYTES: usize = 64 * 1024;
+pub const MAX_BYTES: usize = 72 * 1024;
 /// What one remembered key pair takes in the stored file, at most.
 const MAX_PAIR_BYTES: usize = 128;
 /// Members one file names, allowed or not: a host names at most 32 fleet
@@ -72,7 +72,7 @@ pub enum Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// A fleet, member, or removal id: 32 bytes, base64url in the file.
-#[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Id(pub [u8; 32]);
 
 impl Id {
@@ -166,17 +166,17 @@ pub struct Member {
     /// What its end-to-end handshake must show.
     #[serde(with = "b64")]
     pub tunnel: [u8; 32],
-    /// How new its keys are: its highest sequence number in the log that
-    /// computed the file, which only climbs. Keys from a file computed
-    /// before a rotation never replace newer ones.
+    /// How new its keys are: its own highest sequence number in the log
+    /// that computed the file, which only climbs, and which a log pruned to
+    /// a checkpoint keeps. A rotation raises it, so keys from a file
+    /// computed before a rotation never replace newer ones.
     #[serde(default)]
     pub keys: u64,
-    /// How many rotations at `keys` the computing log held: two that
-    /// compete at one sequence number (a key restored from a backup) tie on
-    /// `keys`, and the log that holds both picks the one it keeps, so its
-    /// file outranks one computed from either alone.
+    /// The SHA-256 of the member's bundle as the log keeps it: what breaks
+    /// a tie on `keys` between two views of a member whose key signed in
+    /// two places, the same way in every log, pruned or not.
     #[serde(default)]
-    pub seen: u32,
+    pub tiebreak: Id,
     /// The keys it rotated away from, as the agent saw them replaced, so a
     /// desktop enrolled one by one with an old pair goes with the member.
     /// Kept by the agent alone; never in a file Sheprd computes.
@@ -222,7 +222,7 @@ impl Member {
         };
         let rev = self.rev.max(held.rev);
         let mut former = held.former.clone();
-        let mut merged = if (self.keys, self.seen) > (held.keys, held.seen) {
+        let mut merged = if (self.keys, self.tiebreak) > (held.keys, held.tiebreak) {
             let replaced = held.pair();
             if replaced != self.pair() && !former.contains(&replaced) {
                 former.push(replaced);

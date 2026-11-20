@@ -1443,7 +1443,7 @@ sequenceDiagram
      the log holds.
 
    The file is JSON with ids and keys in base64url, so 32 members and
-   1,024 removed ids fit its 64 KiB (`sheprd_relay_agent::access`;
+   1,024 removed ids fit its 72 KiB (`sheprd_relay_agent::access`;
    `control::fleet::access::compute` makes it from the log). The agent
    keeps what it was given and merges each new file into it: removed ids
    are kept forever and never readmitted, and per member the higher `rev`
@@ -1610,8 +1610,10 @@ accepted on this purpose.
   state from the host's record, and sends it the removals it signed
   itself that removed every member they name (a voided removal may name
   a member another removal took, beside one still live). Each member's
-  keys carry the sequence number of its own latest rotation, so an
-  agent never prefers keys a rotation replaced. Every member session to
+  keys carry its own highest sequence number, which a rotation raises
+  and a pruned log keeps, so an agent never prefers keys a rotation
+  replaced; two views tied by a key in two places break the tie on the
+  hash of the bundle the log keeps. Every member session to
   an agent, SSH or removal, carries the member's fleet key signing the
   tunnel handshake hash after the purpose byte, checked against the fleet
   key in the access file; a session whose proof is missing or wrong ends.
@@ -1754,7 +1756,7 @@ all of them. It needs no fleet key, because it only removes access.
 | One `fleet apply` or sync message | 256 KiB and 64 operations. More takes several rounds. |
 | Operations waiting for parents | 256 per peer, dropped after 1 hour. Copies of one operation with different signatures wait side by side, and the one whose signature checks out is kept, so a damaged copy cannot keep out the genuine one. |
 | Pending joins | 8 at once, each valid for 10 minutes |
-| Agent access file | 64 KiB: 32 members, 1,024 removed ids, and 64 settled removals; the copy the agent keeps adds 32 KiB for 8 former key pairs per member; 8 removals remembered per suspended member, past which only its removal settles it; enrolled desktops and fleet members together within a relay's 64 dial keys, an update or `authorize` that would crowd one out refused |
+| Agent access file | 72 KiB: 32 members, 1,024 removed ids, and 64 settled removals; the copy the agent keeps adds 32 KiB for 8 former key pairs per member; 8 removals remembered per suspended member, past which only its removal settles it; enrolled desktops and fleet members together within a relay's 64 dial keys, what would crowd one out waits: a file applies its removals and denials and refuses only its additions, and `authorize` refuses |
 | `removal` sessions | 8 out and 8 in at once, 30 seconds each; 64 operations and 256 KiB per message; 4 `Want` rounds; retries from 5 seconds to 10 minutes |
 
 ### Storage and logs

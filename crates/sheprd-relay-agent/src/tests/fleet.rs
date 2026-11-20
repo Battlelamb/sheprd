@@ -31,7 +31,7 @@ fn member(desktop: &Desktop, seed: u8, allow: bool, rev: u64) -> (Id, Member) {
         ssh: authorized_keys::tests::key(seed),
         tunnel: desktop.tunnel.identity().x25519(),
         keys: 0,
-        seen: 0,
+        tiebreak: Id::default(),
         former: Vec::new(),
     };
     (Id([seed; 32]), member)

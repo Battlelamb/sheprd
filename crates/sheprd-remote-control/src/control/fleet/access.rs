@@ -8,8 +8,7 @@
 //! crate brings no Tokio to the app.
 
 use super::{
-    Body, Bundle, Error, HostId, HostKind, Kind, Log, MAX_TOMBSTONES, MemberId, Op, OpId, Result,
-    State,
+    Body, Error, HostId, HostKind, Kind, Log, MAX_TOMBSTONES, MemberId, Op, OpId, Result, State,
 };
 use sheprd_relay_agent::fleet::Suspension;
 use std::collections::{BTreeMap, BTreeSet};
@@ -87,37 +86,19 @@ fn settles(log: &Log, asked: &Asked, graced: &impl Fn(&OpId) -> bool) -> bool {
 const _: () = assert!(sheprd_relay_agent::access::MAX_REMOVED == MAX_TOMBSTONES);
 
 /// How new `member`'s keys (`bundle`) are, as the agent orders key
-/// updates: the sequence number of its own latest `Rotate` that put them
-/// in place. A member's operations form one chain, so a later rotation
-/// always has a higher number, whatever else it signed in between; the
-/// number of operations it signed says nothing about its keys. Keys from
-/// its admission are 0; keys rotated before the checkpoint the log was
-/// pruned to take the member's sequence number there, which no rotation
-/// pruned away exceeds and every later one does.
-/// With it, how many of the member's rotations the log holds at that
-/// number: rotations that compete there, signed in two places with one
-/// key, tie on the number, and a log that holds them all and picked one
-/// outranks a log that holds only one.
-fn key_version(log: &Log, member: &MemberId, bundle: &Bundle) -> (u64, u32) {
-    let rotated = log
-        .ops()
-        .filter(|op| op.signer() == *member)
-        .filter(|op| matches!(op.body(), Body::Rotate(rotated) if rotated == bundle))
-        .map(|op| op.unsigned().seq)
-        .max();
-    let Some(seq) = rotated else {
-        let base = log.base().and_then(|(_, base)| {
-            let kept = base.members.get(member)?;
-            (kept.bundle == *bundle).then_some(kept.seq)
-        });
-        return (base.unwrap_or(0), 0);
-    };
-    let competing = log
-        .ops()
-        .filter(|op| op.signer() == *member && op.unsigned().seq == seq)
-        .filter(|op| matches!(op.body(), Body::Rotate(_)))
-        .count();
-    (seq, u32::try_from(competing).unwrap_or(u32::MAX))
+/// updates: its own highest sequence number, which every rotation raises
+/// and which a log pruned to a checkpoint keeps in its base, so a pruned
+/// log and a whole one give the same; then the SHA-256 of the bundle the
+/// log keeps, the same in every log, for two views that tie because the
+/// member's key signed in two places. A later operation of that member
+/// raises the number again, and every agent then takes the log's bundle.
+fn key_version(member: &crate::control::fleet::Member) -> (u64, Id) {
+    let bundle = member
+        .bundle
+        .to_bytes()
+        .map(|bytes| super::sha256(&[&bytes]))
+        .unwrap_or_default();
+    (member.seq, Id(bundle))
 }
 
 /// The access file for plain host `host` as `log` has it: every live
@@ -152,7 +133,7 @@ pub fn compute(
                 .access
                 .get(&(*host, *id))
                 .map_or(0, |register| register.rev);
-            let version = key_version(log, id, &member.bundle);
+            let version = key_version(member);
             let member = Member {
                 allow: state.allowed(host, id),
                 dial: member.bundle.dial,
@@ -162,7 +143,7 @@ pub fn compute(
                 ssh,
                 tunnel: member.bundle.tunnel,
                 keys: version.0,
-                seen: version.1,
+                tiebreak: version.1,
                 former: Vec::new(),
             };
             Some((Id(id.0), member))

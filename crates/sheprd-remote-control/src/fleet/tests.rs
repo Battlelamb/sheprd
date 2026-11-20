@@ -22,6 +22,8 @@ use tokio::{
 };
 
 #[cfg(unix)]
+mod aging;
+#[cfg(unix)]
 mod atomic;
 #[cfg(unix)]
 mod catch_up;
@@ -35,6 +37,8 @@ mod link_intents;
 mod link_recovery;
 #[cfg(unix)]
 mod offline;
+#[cfg(unix)]
+mod partial_join;
 #[cfg(unix)]
 mod phone_relays;
 #[cfg(unix)]

@@ -85,7 +85,7 @@ impl Log {
             return Err(Error::Invalid);
         };
         let base = State::decode(state)?;
-        if !base.named_by(hash)? {
+        if base.hash()? != *hash {
             return Err(Error::Checkpoint);
         }
         let signer = base
@@ -774,7 +774,7 @@ fn checkpoint_matches(folder: &Folder<'_, '_>, position: usize, base: &State) ->
         return Ok(());
     };
     let state = fold(folder, &graph.ancestors[position], base);
-    if state.named_by(hash)? {
+    if state.hash()? == *hash {
         Ok(())
     } else {
         Err(Error::Checkpoint)

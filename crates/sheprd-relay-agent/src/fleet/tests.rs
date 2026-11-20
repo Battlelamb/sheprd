@@ -620,7 +620,7 @@ fn a_removal_whose_save_stops_part_way_still_revokes_the_desktop_on_retry() {
     let files = next.files().unwrap();
     // The revoked pairs go first, before the file that drops member 2.
     let names: Vec<&str> = files.iter().map(|(name, _)| *name).collect();
-    assert_eq!(names, [REVOKED, access::FILE, SUSPENDED]);
+    assert_eq!(names, [REVOKED, CROWDED, access::FILE, SUSPENDED]);
     // Stopped after the first write: the retry still revokes the desktop.
     let (name, bytes) = &files[0];
     files::write_private(&host.state().join(name), bytes).unwrap();
@@ -771,6 +771,7 @@ fn a_rotation_at_capacity_takes_the_old_keys_away_and_waits_denied() {
     two.dial = dial(12);
     two.tunnel = [12; 32];
     two.keys = 1;
+    let again = rotated.clone();
     let outcome = host.apply(rotated);
     assert!(
         matches!(outcome, Err(Error::DialKeys { .. })),
@@ -781,7 +782,25 @@ fn a_rotation_at_capacity_takes_the_old_keys_away_and_waits_denied() {
     assert_eq!(admitted.peer(&dial(2), &[2; 32]), None);
     let held = Held::load(host.state()).unwrap();
     let member = &held.access.as_ref().unwrap().members[&id(2)];
-    assert_eq!((member.dial, member.allow), (dial(12), false));
+    // The fleet still allows it: only room is missing.
+    assert_eq!((member.dial, member.allow), (dial(12), true));
+    assert!(held.crowded.contains(&id(2)));
+    assert!(matches!(
+        admitted.peer(&dial(12), &[12; 32]),
+        Some(Peer::Member { ssh: false, .. })
+    ));
     assert_eq!(host.lines(), [id(1).short()]);
     assert!(admitted.dial_keys().len() <= MAX_DIAL_KEYS);
+    // Once a desktop goes, the same file applied again lets it in.
+    let mut desktops = Authorized::load(host.state()).unwrap();
+    assert!(desktops.remove(&dial(100)));
+    desktops.save(host.state()).unwrap();
+    host.apply(again).unwrap();
+    let held = Held::load(host.state()).unwrap();
+    assert!(held.crowded.is_empty());
+    assert_eq!(host.lines(), [id(1).short(), id(2).short()]);
+    assert!(matches!(
+        host.admitted().peer(&dial(12), &[12; 32]),
+        Some(Peer::Member { ssh: true, .. })
+    ));
 }

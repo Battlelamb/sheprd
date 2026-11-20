@@ -269,6 +269,11 @@ mod socket {
                         channel += 1;
                         json!({"channel": channel, "seq": 0, "terminals": []})
                     }
+                    "terminal.read" => json!({
+                        "text": format!("screen of {}", request["params"]["terminal"].as_str().unwrap()),
+                        "complete": true,
+                        "how": "screen",
+                    }),
                     method => panic!("unexpected method {method}"),
                 };
                 // A cwd ending in `/refused`, or an attach 13 columns wide,

@@ -107,6 +107,8 @@ pub(crate) struct State {
     /// What phones have looked at, for the badge.
     pub(crate) opened: attention::Opened,
     pub(crate) port: u16,
+    /// What each terminal agent last said, for its row.
+    pub(crate) previews: crate::native::previews::Previews,
     pub(crate) privacy: Privacy,
     pub(crate) pull_requests:
         tokio::sync::watch::Sender<Arc<crate::control::pull_requests::PullRequests>>,

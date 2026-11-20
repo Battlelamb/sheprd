@@ -18,6 +18,12 @@ pub enum ChatCommand {
     },
     /// The person's text shortcuts, which every chat's composer offers.
     Shortcuts,
+    /// Star or unstar a pane's agent.
+    Favorite {
+        switch: Switch,
+        /// The pane, else the caller's own.
+        pane: Option<String>,
+    },
     /// Show the chat view over a pane (`On`), or its terminal (`Off`).
     View {
         switch: Switch,
@@ -40,6 +46,20 @@ pub(super) fn chat(args: &mut Args) -> Result<ChatCommand, CliError> {
                 .parse()
                 .map_err(|_| CliError::InvalidValue("AGENT"))?;
             return Ok(ChatCommand::New { agent, pane });
+        }
+        Some("favorite") => {
+            // The pane first, as it may come before the switch.
+            let pane = args.text_option("--pane")?;
+            let switch = match args.verb() {
+                None => Switch::Toggle,
+                Some(word) => match word.to_str() {
+                    Some("on") => Switch::On,
+                    Some("off") => Switch::Off,
+                    Some("toggle") => Switch::Toggle,
+                    _ => return Err(unknown("chat favorite", word)),
+                },
+            };
+            return Ok(ChatCommand::Favorite { switch, pane });
         }
         Some("convert") => {
             return Ok(ChatCommand::Convert {

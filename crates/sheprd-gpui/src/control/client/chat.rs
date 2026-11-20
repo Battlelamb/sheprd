@@ -48,6 +48,7 @@ pub(super) fn chat(command: ChatCommand, context: &Context) -> crate::Result<Out
         ChatCommand::Convert { pane } => ChatOp::Convert { pane },
         ChatCommand::View { switch, pane } => ChatOp::View { switch, pane },
         ChatCommand::Shortcuts => ChatOp::Shortcuts,
+        ChatCommand::Favorite { switch, pane } => ChatOp::Favorite { switch, pane },
     };
     match context.call(Request::Chat, op)? {
         Response::Chat {
@@ -69,6 +70,16 @@ pub(super) fn chat(command: ChatCommand, context: &Context) -> crate::Result<Out
                 format!("{pane_id} shows its terminal")
             },
             &serde_json::json!({ "pane_id": pane_id, "shown": shown }),
+        ),
+        Response::Chat {
+            reply: Reply::Favorite { pane_id, favorite },
+        } => Output::data(
+            if favorite {
+                format!("{pane_id} is a favorite")
+            } else {
+                format!("{pane_id} is not a favorite")
+            },
+            &serde_json::json!({ "pane_id": pane_id, "favorite": favorite }),
         ),
         Response::Chat {
             reply: Reply::Started { agent },

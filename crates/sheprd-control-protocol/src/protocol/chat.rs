@@ -23,6 +23,14 @@ pub enum ChatOp {
     },
     /// The person's text shortcuts, which every chat's composer offers.
     Shortcuts,
+    /// Stars (`on`) or unstars (`off`) a pane's agent, which the agents
+    /// panel and phones then list first. Any agent, not only a chat's.
+    Favorite {
+        switch: Switch,
+        /// The pane, else the caller's own, else the focused one.
+        #[serde(default)]
+        pane: Option<String>,
+    },
     /// Shows the chat view over a pane (`on`), or its terminal (`off`).
     View {
         switch: Switch,
@@ -79,6 +87,11 @@ pub enum Reply {
     View {
         pane_id: String,
         shown: bool,
+    },
+    /// Whether the pane's agent is a favorite now.
+    Favorite {
+        pane_id: String,
+        favorite: bool,
     },
     /// The chat's tab was asked for; it attaches once its program reports.
     Started {

@@ -1465,9 +1465,13 @@ sequenceDiagram
    read, and a running agent whose fleet files stop reading shuts the
    fleet's members out, keeping the cut-offs it last read. A held host
    (two members added it with keys that disagree) gets a `paused` file:
-   every member is still named, so removals, denials, and rotations
-   land, and daemons still pass it removals, but no member reaches SSH
-   until a person picks the keys. Members are admitted from that file:
+   every member is still named with the allow its `Access` register
+   gives, so removals, denials, and rotations land, a hold never reads
+   as a deny the agent would keep after it lifts, and a denied member
+   still suspends only denied ones; daemons still pass it removals, but
+   no member reaches SSH until a person picks the keys. A suspension
+   keeps its member's key pairs in `suspended`, so a desktop with them
+   stays cut off whatever becomes of the access file. Members are admitted from that file:
    denied ones only to pass removals, allowed ones to SSH too. The agent
    writes the `authorized_keys` lines the way `ssh_access` does, with the
    same shared code: atomically, refusing a linked file, and touching

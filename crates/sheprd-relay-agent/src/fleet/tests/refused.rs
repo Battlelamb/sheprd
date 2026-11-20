@@ -69,3 +69,32 @@ fn scrubbing_forgets_a_refusal_too() {
     Held::scrub(host.state(), Some(&host.keys())).unwrap();
     assert!(!host.state().join(REFUSED).exists());
 }
+
+#[test]
+fn a_suspended_members_desktop_stays_cut_off_when_the_held_file_is_set_aside() {
+    let host = Host::new();
+    host.enroll(2);
+    host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[]))
+        .unwrap();
+    host.suspend(1, &[removal(0x51, &[2])]);
+    assert_eq!(host.admitted().peer(&dial(2), &[2; 32]), None);
+    // The held file is damaged, then a bad file is handed over: the file
+    // is set aside, and the desktop with member 2's keys stays cut off.
+    let stored = host.state().join(access::FILE);
+    std::fs::write(&stored, b"{\"fleet\": ").unwrap();
+    assert!(Held::apply_bytes(host.state(), Some(&host.keys()), b"nope").is_err());
+    let held = Held::load(host.state()).unwrap();
+    assert!(held.refused && held.access.is_none());
+    let admitted = host.admitted();
+    assert_eq!(admitted.peer(&dial(2), &[2; 32]), None);
+    assert!(!admitted.keeps_ssh(&Peer::Desktop, &dial(2), &[2; 32]));
+    // A good file removing member 2 revokes the desktop for good, from
+    // the pairs the suspension kept.
+    host.apply(file(&[(1, true, 0)], &[2], &[])).unwrap();
+    let held = Held::load(host.state()).unwrap();
+    assert!(held.revoked.contains(&Pair {
+        dial: dial(2),
+        tunnel: [2; 32],
+    }));
+    assert_eq!(host.admitted().peer(&dial(2), &[2; 32]), None);
+}

@@ -139,7 +139,9 @@ pub fn compute(
                 .map_or(0, |register| register.rev);
             let version = key_version(member);
             let member = Member {
-                allow: state.allowed(host, id),
+                // The register alone: a hold is `paused`, never a deny
+                // the agent would keep once the hold lifts.
+                allow: state.granted(host, id),
                 dial: member.bundle.dial,
                 fleet_key: member.bundle.key,
                 name: member.bundle.name.clone(),

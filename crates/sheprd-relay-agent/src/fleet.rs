@@ -56,8 +56,8 @@ pub const REFUSED: &str = "refused";
 /// one no access file lifts.
 pub const MAX_CAUSES: usize = 8;
 /// Key pairs kept per suspended member: its keys now and before as one
-/// file names them, twice over for rotations between files. Past it that
-/// member alone is held to the keys it had ([`Suspension::keep_pairs`]).
+/// file names them, twice over for rotations between files. Past it only
+/// the pairs enrolled desktops have are added ([`Suspension::keep_pairs`]).
 pub const MAX_SUSPENDED_PAIRS: usize = 2 * (access::MAX_FORMER + 1);
 /// The most read of each of the fleet's small files: suspensions carry
 /// each member's key pairs as well as its removals.
@@ -89,20 +89,29 @@ pub struct Suspension {
 }
 
 impl Suspension {
-    /// Adds `pairs` to those kept: never replaced, so a pair a rotation
-    /// left behind stays cut off. Past [`MAX_SUSPENDED_PAIRS`] nothing is
-    /// added or forgotten: the suspension overflows, so only the member's
-    /// removal ends it, and `false` tells the caller to keep the member on
-    /// the keys it had. Only that member pays for its rotations.
-    fn keep_pairs(&mut self, pairs: impl IntoIterator<Item = Pair>) -> bool {
+    /// Adds `pairs`, the member's keys as a file names them, to those
+    /// kept: never replaced, so a pair a rotation left behind stays cut
+    /// off. Past [`MAX_SUSPENDED_PAIRS`] the suspension overflows, so only
+    /// the member's removal ends it, and from then on only the pairs an
+    /// enrolled desktop has (`enrolled`) are added: those are the ones a
+    /// session could come back with, at most one per desktop. The member's
+    /// keys the access file names stay cut off with it besides
+    /// (`Admitted::cut_off`). Only that member pays for its rotations.
+    fn keep_pairs(
+        &mut self,
+        pairs: impl IntoIterator<Item = Pair>,
+        enrolled: impl Fn(&Pair) -> bool,
+    ) {
+        let pairs: Vec<Pair> = pairs.into_iter().collect();
         let mut kept = self.pairs.clone();
-        kept.extend(pairs);
-        if kept.len() > MAX_SUSPENDED_PAIRS {
-            self.overflow = true;
-            return false;
+        kept.extend(pairs.iter().copied());
+        if kept.len() <= MAX_SUSPENDED_PAIRS && !self.overflow {
+            self.pairs = kept;
+            return;
         }
-        self.pairs = kept;
-        true
+        self.overflow = true;
+        self.pairs
+            .extend(pairs.into_iter().filter(|pair| enrolled(pair)));
     }
 }
 
@@ -315,26 +324,12 @@ impl Held {
         });
         // Each suspended member's keys as the merged file has them, added
         // to those kept: a rotation while suspended cuts the new pair off
-        // and leaves the old one cut off. A member past the bound keeps
-        // the keys it had, its rotation refused, and stays suspended until
-        // removed; the rest of the file applies.
+        // and leaves the old one cut off. Past the bound the member stays
+        // suspended until removed and the pairs desktops have stay cut
+        // off; the rest of the file applies.
         for (member, suspension) in &mut held.suspended {
-            let Some(entry) = merged.members.get_mut(member) else {
-                continue;
-            };
-            if suspension.keep_pairs(entry.pairs()) {
-                continue;
-            }
-            let had = held
-                .access
-                .as_ref()
-                .and_then(|access| access.members.get(member));
-            if let Some(had) = had {
-                *entry = Member {
-                    allow: entry.allow,
-                    rev: entry.rev,
-                    ..had.clone()
-                };
+            if let Some(entry) = merged.members.get(member) {
+                suspension.keep_pairs(entry.pairs(), enrolled);
             }
         }
         held.access = Some(merged);
@@ -387,6 +382,13 @@ impl Held {
     ) -> Result<Vec<[u8; 32]>> {
         let _lock = files::Lock::acquire(state_dir)?;
         let mut held = Self::load(state_dir)?;
+        let desktops = Authorized::load(state_dir)?;
+        let enrolled = |pair: &Pair| {
+            desktops
+                .entries()
+                .iter()
+                .any(|entry| entry.dial == pair.dial && entry.tunnel == pair.tunnel)
+        };
         let Some(access) = held.access.as_ref().filter(|_| !held.refused) else {
             return Ok(Vec::new());
         };
@@ -431,7 +433,7 @@ impl Held {
             for target in targets {
                 let suspension = held.suspended.entry(target).or_default();
                 if let Some(member) = access.members.get(&target) {
-                    suspension.keep_pairs(member.pairs());
+                    suspension.keep_pairs(member.pairs(), enrolled);
                 }
                 let id = Id(removal.id);
                 if suspension.removals.contains_key(&id) {
@@ -557,7 +559,20 @@ impl Held {
             revoked,
             crowded: self.crowded.clone(),
             refused: self.refused,
-            suspended: self.suspended.clone(),
+            // The pairs each suspension keeps are the agent's own memory:
+            // Sheprd needs only the removals to settle, and a report must
+            // stay small enough for it to read.
+            suspended: self
+                .suspended
+                .iter()
+                .map(|(id, suspension)| {
+                    let reported = Suspension {
+                        pairs: BTreeSet::new(),
+                        ..suspension.clone()
+                    };
+                    (*id, reported)
+                })
+                .collect(),
         }))
     }
 }

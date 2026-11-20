@@ -34,6 +34,33 @@ const HOST_KEYS: [&str; 3] = [
 /// The longest host key file read.
 const MAX_HOST_KEY: u64 = 16 * 1024;
 
+/// The most of `status --json` Sheprd reads over SSH: twice what the
+/// largest report the agent's bounds allow takes, printed.
+pub const MAX_REPORT_BYTES: usize = 256 * 1024;
+
+/// The longest relay failure reported, in bytes.
+pub const MAX_RELAY_ERROR: usize = 512;
+
+/// Cuts `error` to [`MAX_RELAY_ERROR`] bytes, on a character boundary,
+/// with control characters, which JSON would spell out six bytes each,
+/// as spaces.
+pub fn bound_error(error: &mut String) {
+    if error.chars().any(char::is_control) {
+        *error = error
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect();
+    }
+    if error.len() <= MAX_RELAY_ERROR {
+        return;
+    }
+    let mut end = MAX_RELAY_ERROR;
+    while !error.is_char_boundary(end) {
+        end -= 1;
+    }
+    error.truncate(end);
+}
+
 /// One relay's state.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "state")]

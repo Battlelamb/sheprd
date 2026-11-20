@@ -46,6 +46,14 @@ public struct FleetPendingLink: Codable, Equatable, Sendable {
         return (done, waiting)
     }
 
+    /// The links of `done` whose computer could not be kept: `keep` saves
+    /// one and answers whether that landed. Those stay pending, private key
+    /// and all, so a failed save never loses the only key a landed link
+    /// names; the next settle tries again.
+    public static func unsaved(_ done: [FleetPendingLink], keep: (FleetPendingLink) -> Bool) -> [FleetPendingLink] {
+        done.filter { !keep($0) }
+    }
+
     /// The pending link for `host`, when one waits: a key made for it
     /// before, whose link may yet land, is used again rather than replaced.
     public static func waiting(for host: String, in pending: [FleetPendingLink]) -> FleetPendingLink? {

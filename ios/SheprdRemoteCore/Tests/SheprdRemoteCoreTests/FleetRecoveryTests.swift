@@ -86,6 +86,21 @@ struct FleetRecoveryTests {
         #expect(landed.done == [first] && landed.waiting.isEmpty)
     }
 
+    @Test func aLinkWhoseComputerWasNotSavedKeepsItsKey() {
+        let done = [Self.pending("aa", seed: 1), Self.pending("bb", seed: 2)]
+        // The phone could not save the computer for "bb" (a Keychain write
+        // failed): its key stays pending for the next settle.
+        var kept: [String] = []
+        let unsaved = FleetPendingLink.unsaved(done) { link in
+            kept.append(link.host)
+            return link.host != "bb"
+        }
+        #expect(kept == ["aa", "bb"])
+        #expect(unsaved == [done[1]])
+        // Every save landed: nothing stays.
+        #expect(FleetPendingLink.unsaved(done) { _ in true }.isEmpty)
+    }
+
     @Test func addingAgainReusesTheKeyStillWaiting() {
         let waiting = [Self.pending("aa", seed: 1), Self.pending("bb", seed: 2)]
         #expect(FleetPendingLink.waiting(for: "AA", in: waiting) == waiting[0])

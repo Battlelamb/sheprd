@@ -56,8 +56,8 @@ final class FleetMembership {
     private(set) var notMember = false
     /// The computers on this phone.
     @ObservationIgnored var computers: () -> [Computer] = { [] }
-    /// Keeps a host the phone linked itself to.
-    @ObservationIgnored var onLinked: (Computer) -> Void = { _ in }
+    /// Keeps a host the phone linked itself to; whether it was saved.
+    @ObservationIgnored var onLinked: (Computer) -> Bool = { _ in false }
     @ObservationIgnored private var asked: [String: Date] = [:]
     @ObservationIgnored private var waiting: Task<Void, Never>?
     private let sessions: Sessions
@@ -283,17 +283,21 @@ final class FleetMembership {
         guard var record, let pending = record.pendingLinks, !pending.isEmpty,
               let through = through
         else { return }
-        let (done, waiting) = FleetPendingLink.settle(pending, linked: status.linkedKeys, refused: refused)
-        for link in done {
-            guard let device = FleetLog.linkDevice(key: link.point), let fingerprint = Fingerprint(link.host) else { continue }
+        let (done, settled) = FleetPendingLink.settle(pending, linked: status.linkedKeys, refused: refused)
+        // A link whose computer could not be saved keeps its key pending.
+        let unsaved = FleetPendingLink.unsaved(done) { link in
+            guard let device = FleetLog.linkDevice(key: link.point), let fingerprint = Fingerprint(link.host) else {
+                return true
+            }
             let enrolled = HostState.Enrolled(
                 device: device, computer: link.name, fingerprint: fingerprint,
                 origins: status.origins(of: link.host)
             )
             var computer = Computer(host: enrolled, key: link.key, via: through.fingerprint)
             computer.relay = relayKeys.flatMap { status.relayRecord(for: link.host, keys: $0) }
-            onLinked(computer)
+            return onLinked(computer)
         }
+        let waiting = settled + unsaved
         record.pendingLinks = waiting.isEmpty ? nil : waiting
         if record != self.record { save(record) }
     }
@@ -318,7 +322,7 @@ final class FleetMembership {
             else { continue }
             var routed = computer
             routed.relay = relay
-            onLinked(routed)
+            _ = onLinked(routed)
         }
     }
 

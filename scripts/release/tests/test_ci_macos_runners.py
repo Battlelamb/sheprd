@@ -1,0 +1,127 @@
+"""Which macOS legs each run gets, and whether our own Macs run them.
+
+Members' code (branches of this repository, main, the merge queue) runs on
+the self-hosted Macs CI_MACOS_RUNNER names; a fork's or Dependabot's pull
+request never does. These evaluate the workflow's own expressions with
+GitHub's semantics, where `a && b || c` yields a value rather than a boolean.
+"""
+
+import ast
+import json
+from pathlib import Path
+import re
+import unittest
+
+ROOT = Path(__file__).resolve().parents[3]
+WORKFLOW = (ROOT / ".github/workflows/ci.yml").read_text()
+SECTIONS = re.split(r"^  ([a-z0-9-]+):\n", WORKFLOW.split("\njobs:\n", 1)[1], flags=re.M)
+JOBS = dict(zip(SECTIONS[1::2], SECTIONS[2::2]))
+LABELS = '["self-hosted", "macOS", "ARM64", "tart"]'
+HOSTED = "macos-15"
+
+
+def evaluate(text, context):
+    """A GitHub expression, `${{ ... }}`, over `context`. Only the subset the
+    workflow uses is understood; anything else fails the test."""
+    body = re.fullmatch(r"\$\{\{ (.+) \}\}", text)[1]
+    body = body.replace("&&", " and ").replace("||", " or ").replace("!=", " != ")
+
+    def value(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.Attribute):
+            return context.get(ast.unparse(node), "")
+        if isinstance(node, ast.BoolOp):
+            result = None
+            for operand in node.values:
+                result = value(operand)
+                if isinstance(node.op, ast.And) and not result:
+                    return result
+                if isinstance(node.op, ast.Or) and result:
+                    return result
+            return result
+        if isinstance(node, ast.Compare) and len(node.ops) == 1:
+            left, right = value(node.left), value(node.comparators[0])
+            if isinstance(node.ops[0], ast.Eq):
+                return left == right
+            if isinstance(node.ops[0], ast.NotEq):
+                return left != right
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in ("fromJSON", "toJSON") and len(node.args) == 1):
+            argument = value(node.args[0])
+            return json.loads(argument) if node.func.id == "fromJSON" else json.dumps(argument)
+        raise AssertionError(f"Unsupported CI expression: {ast.dump(node)}")
+
+    return value(ast.parse(body, mode="eval").body)
+
+
+def context(event, fork=False, author="penso", full="true", labels=LABELS):
+    return {
+        "github.event_name": event,
+        "github.repository": "sheprd-labs/sheprd",
+        "github.event.pull_request.head.repo.full_name":
+            ("contributor/sheprd" if fork else "sheprd-labs/sheprd") if event == "pull_request" else "",
+        "github.event.pull_request.user.login": author if event == "pull_request" else "",
+        "needs.commits.outputs.full": full,
+        "vars.CI_MACOS_RUNNER": labels,
+    }
+
+
+def runs_on(job, values, runner=HOSTED):
+    text = re.search(r"^    runs-on: (.+)$", JOBS[job], re.M)[1]
+    return evaluate(text, {**values, "matrix.runner": runner})
+
+
+def macos_legs(values):
+    """The macOS feature sets the checks job runs."""
+    text = re.search(r"^        exclude: (.+)$", JOBS["checks"], re.M)[1]
+    excluded = evaluate(text, values)
+    return sorted(features for features in ("default", "all")
+                  if not any(rule.get("runner") == HOSTED and rule.get("features", features) == features
+                             for rule in excluded))
+
+
+class MacosRunners(unittest.TestCase):
+    def test_members_code_runs_on_our_macs(self):
+        for event in ("pull_request", "push", "merge_group", "workflow_dispatch"):
+            with self.subTest(event=event):
+                values = context(event)
+                self.assertEqual(runs_on("checks", values), json.loads(LABELS))
+                self.assertEqual(runs_on("build-macos", values), json.loads(LABELS))
+
+    def test_forks_and_dependabot_stay_hosted(self):
+        for values in (context("pull_request", fork=True),
+                       context("pull_request", author="dependabot[bot]")):
+            with self.subTest(values=values):
+                self.assertEqual(runs_on("checks", values), HOSTED)
+                self.assertEqual(runs_on("build-macos", values), HOSTED)
+
+    def test_an_unset_variable_keeps_every_run_hosted(self):
+        for event in ("pull_request", "push", "merge_group"):
+            with self.subTest(event=event):
+                values = context(event, labels="")
+                self.assertEqual(runs_on("checks", values), HOSTED)
+                self.assertEqual(runs_on("build-macos", values), HOSTED)
+
+    def test_linux_legs_never_move(self):
+        for runner in ("ubuntu-24.04", "ubuntu-24.04-arm"):
+            self.assertEqual(runs_on("checks", context("push"), runner), runner)
+
+    def test_every_pull_request_checks_macos(self):
+        self.assertEqual(macos_legs(context("pull_request", full="false")), ["default"])
+        self.assertEqual(macos_legs(context("pull_request", fork=True, full="false")), ["default"])
+        # Every platform: our Macs add the all-features leg; a fork's hosted
+        # run, on the account's few hosted macOS runners, does not.
+        self.assertEqual(macos_legs(context("pull_request")), ["all", "default"])
+        self.assertEqual(macos_legs(context("pull_request", fork=True)), ["default"])
+        for event in ("push", "merge_group"):
+            self.assertEqual(macos_legs(context(event)), ["all", "default"])
+
+    def test_arm64_linux_waits_for_every_platform(self):
+        text = re.search(r"^        exclude: (.+)$", JOBS["checks"], re.M)[1]
+        self.assertIn({"runner": "ubuntu-24.04-arm"}, evaluate(text, context("pull_request", full="false")))
+        self.assertNotIn({"runner": "ubuntu-24.04-arm"}, evaluate(text, context("pull_request")))
+
+
+if __name__ == "__main__":
+    unittest.main()

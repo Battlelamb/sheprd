@@ -38,8 +38,8 @@ class CiScopeTest(unittest.TestCase):
                 (root / path).write_text(text)
             cls.members, cls.dependents = SCOPE.workspace(root)
 
-    def plan(self, changed, event="pull_request", labels=()):
-        return SCOPE.plan(event, labels, changed, self.members, self.dependents)
+    def plan(self, changed, event="pull_request", labels=(), lines=()):
+        return SCOPE.plan(event, labels, changed, lines, self.members, self.dependents)
 
     def assert_full(self, outputs):
         self.assertEqual(outputs, {"full": "true", "cargo_scope": "--workspace", "gpui": "true"})
@@ -94,23 +94,34 @@ class CiScopeTest(unittest.TestCase):
                 self.assert_full(self.plan(["crates/relay/src/main.rs"], labels=["bug", label]))
         self.assertEqual(self.plan(["crates/relay/src/main.rs"], labels=["linux"])["full"], "false")
 
-    def test_dependencies_and_toolchain_run_the_workspace_on_linux_only(self):
-        # Every platform checks them in the merge queue, which every change passes.
-        for path in ("Cargo.lock", "Cargo.toml", "rust-toolchain.toml", ".cargo/config.toml"):
+    def test_dependencies_and_toolchain_run_everything(self):
+        # A target table, or a crate only one platform compiles, changes what
+        # that platform builds; the lockfile carries both.
+        for path in ("Cargo.lock", "Cargo.toml", "crates/client/Cargo.toml",
+                     "rust-toolchain.toml", ".cargo/config.toml"):
             with self.subTest(path=path):
-                outputs = self.plan([path])
-                self.assertEqual(outputs["full"], "false")
-                self.assertEqual(outputs["cargo_scope"], "--workspace")
-        self.assertEqual(self.plan(["crates/client/Cargo.toml"]),
-                         {"full": "false", "cargo_scope": "-p client -p sheprd-gpui", "gpui": "true"})
+                self.assert_full(self.plan([path]))
 
-    def test_platform_code_runs_on_linux_only(self):
+    def test_platform_paths_run_everything(self):
         for path in ("crates/sheprd-gpui/src/avatars/cache/windows.rs", "macos/sheprd-nearby/main.swift",
                      "crates/sheprd-gpui/windows.manifest", "crates/client/src/macos_keychain.rs",
                      ".github/workflows/ci.yml", "scripts/ci-scope.py", "scripts/ci-changes.sh",
                      "scripts/set-display-resolution.ps1"):
             with self.subTest(path=path):
+                self.assert_full(self.plan([path]))
+        for path in ("crates/client/src/window.rs", "crates/client/src/windowing.rs"):
+            with self.subTest(path=path):
                 self.assertEqual(self.plan([path])["full"], "false")
+
+    def test_platform_cfg_lines_run_everything(self):
+        for line in ('+#[cfg(windows)]', '-#[cfg(target_os = "macos")]', '+    if cfg!(unix) {',
+                     '+#[cfg(all(test, not(windows)))]', '+#[cfg_attr(windows, allow(dead_code))]',
+                     '-    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {'):
+            with self.subTest(line=line):
+                self.assert_full(self.plan(["crates/client/src/lib.rs"], lines=[line]))
+        self.assertEqual(self.plan(["crates/client/src/lib.rs"],
+                                   lines=['+#[cfg(test)]', '+// a window opens'])["full"], "false")
+
 
 if __name__ == "__main__":
     unittest.main()

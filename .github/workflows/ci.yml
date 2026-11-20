@@ -158,19 +158,20 @@ jobs:
         # side, each with one of the lints; the script checks ride with the
         # default-features pass.
         features: [default, all]
-        # Pull requests run ubuntu-24.04 alone unless they need every
-        # platform (scripts/ci-scope.py); the runner set stays fixed here.
-        # When they do, they run one macOS leg, as macOS jobs have the
-        # smallest runner limit; the merge queue and main run both.
-        exclude: ${{ fromJSON(needs.commits.outputs.full != 'true' && '[{"runner":"macos-15"},{"runner":"ubuntu-24.04-arm"}]' || github.event_name == 'pull_request' && '[{"runner":"macos-15","features":"all"}]' || '[]') }}
+        # Every pull request runs the macOS default-features leg, as nothing
+        # checks macOS between it and main. One that needs every platform
+        # (scripts/ci-scope.py) adds ARM64 Linux, and, from a branch of this
+        # repository, the macOS all-features leg, which our own Macs make
+        # cheap; a fork's runs on the account's few hosted macOS runners and
+        # skips it. Main and the merge queue run every leg.
+        exclude: ${{ fromJSON(github.event_name != 'pull_request' && '[]' || needs.commits.outputs.full != 'true' && '[{"runner":"macos-15","features":"all"},{"runner":"ubuntu-24.04-arm"}]' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]') && '[]' || '[{"runner":"macos-15","features":"all"}]') }}
     # The repository variable CI_MACOS_RUNNER, a JSON label list such as
-    # '["self-hosted", "macOS", "ARM64"]', moves the merge queue's macOS legs
-    # to our own Macs, past the account's five hosted macOS jobs. Pull
-    # requests stay hosted, so a fork's code runs on our machines only once a
-    # maintainer has queued it; main stays hosted too, so a queued change
-    # cannot leave a build behind that main's run, which releases require,
-    # would reuse.
-    runs-on: ${{ fromJSON(matrix.runner == 'macos-15' && github.event_name == 'merge_group' && vars.CI_MACOS_RUNNER || toJSON(matrix.runner)) }}
+    # '["self-hosted", "macOS", "ARM64", "tart"]', moves the macOS legs to our
+    # own Macs, past the account's five hosted macOS jobs, for code only
+    # members wrote: branches of this repository, main, and the merge queue.
+    # A fork's pull request, or Dependabot's, which brings in new
+    # dependencies' build scripts, stays on hosted runners.
+    runs-on: ${{ fromJSON(matrix.runner == 'macos-15' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && vars.CI_MACOS_RUNNER || toJSON(matrix.runner)) }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -642,9 +643,9 @@ jobs:
         # x86_64 macOS cross-compiles on Apple Silicon and runs under Rosetta,
         # as the release workflow builds it; Intel runners are scarce.
         target: [aarch64-apple-darwin, x86_64-apple-darwin]
-    # Our own Macs in the merge queue when CI_MACOS_RUNNER names them, as in
-    # the checks job; pull requests stay on hosted runners.
-    runs-on: ${{ fromJSON(github.event_name == 'merge_group' && vars.CI_MACOS_RUNNER || '"macos-15"') }}
+    # Our own Macs when CI_MACOS_RUNNER names them, for members' code only,
+    # as in the checks job.
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && vars.CI_MACOS_RUNNER || '"macos-15"') }}
     timeout-minutes: 60
     permissions:
       contents: read

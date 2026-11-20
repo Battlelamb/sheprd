@@ -19,6 +19,11 @@ PR_JOBS = ("zizmor", "commits", "checks", "windows", "windows-native", "build-ma
 PR_ONLY_JOBS = ("build-macos",)
 
 
+# The macOS jobs' runners, kept here so a change to them is deliberate.
+MACOS_CHECKS = "${{ fromJSON(matrix.runner == 'macos-15' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && vars.CI_MACOS_RUNNER || toJSON(matrix.runner)) }}"
+MACOS_RELEASE = "${{ fromJSON((github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && vars.CI_MACOS_RUNNER || '\"macos-15\"') }}"
+
+
 def condition_matches(job, context, jobs=JOBS):
     # Interpret only the boolean/equality subset used by these job conditions.
     # Unsupported syntax fails rather than executing workflow text as Python.
@@ -296,21 +301,14 @@ class CiPolicy(unittest.TestCase):
                 if "Swatinem/rust-cache@" in job:
                     self.assertIn("save-if: ${{ github.ref == 'refs/heads/main' }}", job)
         # Keep runners a fixed hosted set; never accept a PR-controlled label.
-        # The merge queue's macOS jobs may move to our own Macs through
-        # CI_MACOS_RUNNER, a repository variable only admins set; pull
-        # requests and main never do, so main reuses no queued build.
+        # Members' macOS jobs may move to our own Macs through
+        # CI_MACOS_RUNNER, a repository variable only admins set; which runs
+        # do is checked in test_ci_macos_runners.py.
         self.assertEqual(re.findall(r"^    runs-on: (.+)$", WORKFLOW, re.M), [
-            "ubuntu-latest", "ubuntu-24.04",
-            "${{ fromJSON(matrix.runner == 'macos-15' && github.event_name == 'merge_group' "
-            "&& vars.CI_MACOS_RUNNER || toJSON(matrix.runner)) }}",
+            "ubuntu-latest", "ubuntu-24.04", MACOS_CHECKS,
             "${{ matrix.runner }}", "${{ matrix.runner }}", "windows-2025",
-            "ubuntu-24.04", "ubuntu-24.04", "${{ matrix.runner }}",
-            "${{ fromJSON(github.event_name == 'merge_group' && vars.CI_MACOS_RUNNER || '\"macos-15\"') }}",
+            "ubuntu-24.04", "ubuntu-24.04", "${{ matrix.runner }}", MACOS_RELEASE,
         ])
-        # build-macos runs only for pull requests and the merge queue, so its
-        # self-hosted branch can only ever be the merge queue's.
-        self.assertIn("(github.event_name == 'pull_request' || github.event_name == 'merge_group')",
-                      JOBS["build-macos"])
         for name in ("checks", "build-macos"):
             with self.subTest(job=name):
                 # A self-hosted runner keeps target/ but nothing else, and

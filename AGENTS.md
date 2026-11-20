@@ -256,32 +256,33 @@ what was deferred to CI.
   equivalents) against a pinned `herdr.exe` on both Windows runners, with
   every platform, when what the app is built from changes
   (`scripts/ci-changes.sh`), except the live-daemon test on ARM64, where the
-  emulated daemon ignores Enter; its release-mode performance budget runs in
-  the merge queue and on main only. The optimized Windows build and its
+  emulated daemon ignores Enter; its release-mode performance budget runs
+  on main and in the merge queue only. The optimized Windows build and its
   installer run in `windows-package` when their inputs change, with every
   platform, and in
   the release workflow, which only smoke-tests the CLI of the bytes it ships
   and requires CI to have passed on the commit. Keep the `cfg(unix)`/`cfg(windows)`
   split honest and say plainly what a platform cannot do instead of stubbing
   behavior that appears to work.
-- Pull requests run CI on `ubuntu-24.04` alone and lint and test only the
-  crates their changes reach (`scripts/ci-scope.py`); a dependency or
-  toolchain change reaches the whole workspace, still on Linux. The merge
-  queue, which every change passes, `main`, and a pull request carrying the
-  `windows`, `macos`, or `full-ci` label run every platform over the whole
+- Pull requests run CI on `ubuntu-24.04` and the macOS default-features
+  leg, and lint and test only the crates their changes reach
+  (`scripts/ci-scope.py`). `main`, the merge queue, and a pull request that
+  changes a platform `cfg` line or file, a dependency (any `Cargo.toml`,
+  `Cargo.lock`) or the toolchain, or the CI selection itself, or carries the
+  `windows`, `macos`, or `full-ci` label, run every platform over the whole
   workspace. The Nix flake builds on pull requests only when the flake or
   the toolchain pin changes, and on `main` and every release otherwise.
-- The merge queue's macOS jobs run on our own Macs when the repository
-  variable `CI_MACOS_RUNNER` names their labels
-  (`docs/self-hosted-runners.md`); pull requests and `main` always use
-  hosted runners.
-  Such a runner keeps `target/` between runs (`scripts/ci-clean-self-hosted.sh`).
+- macOS jobs run on our own Macs when the repository variable
+  `CI_MACOS_RUNNER` names their labels (`docs/self-hosted-runners.md`), for
+  members' code only: branches of this repository, `main`, and the merge
+  queue. A fork's or Dependabot's pull request always uses hosted runners.
+  A runner that outlives its job keeps `target/` between runs
+  (`scripts/ci-clean-self-hosted.sh`).
 - A `cfg` gate is only proven on the platform it names. For changes that touch
   one, rely on the corresponding platform CI jobs: a macOS run cannot see a
-  Linux-only gate, and neither can the Windows cross-check. A pull request
-  runs Linux alone, so label one that touches platform code `windows` or
-  `macos` to see those platforms before queueing it. `just lint-linux` and
-  `just lint-windows` are
+  Linux-only gate, and neither can the Windows cross-check. Code inside an
+  existing gate changes no `cfg` line, so label such a pull request
+  `windows` or `macos`. `just lint-linux` and `just lint-windows` are
   available for local investigation when needed.
 - Documentation-only changes need command/path/link review and `git diff --check`; do not claim a code test run that did not happen.
 - Add deterministic tests for invariants: ordering, cancellation, fragmentation, revision fencing, error paths, geometry, and cleanup. Prefer explicit coordination and bounded waits over timing guesses.

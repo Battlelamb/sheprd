@@ -81,12 +81,8 @@ class ReleaseTargets(unittest.TestCase):
         self.assertIn("          fetch-depth: 0\n", jobs["commits"])
         self.assertIn("python3 scripts/release/check-commit-messages.py range", jobs["commits"])
         self.assertIn("runner: [macos-15, ubuntu-24.04, ubuntu-24.04-arm]\n", jobs["checks"])
-        # Pull requests drop the other runners unless they need every platform.
-        self.assertIn("        exclude: ${{ fromJSON(needs.commits.outputs.full != 'true' && "
-                      "'[{\"runner\":\"macos-15\"},{\"runner\":\"ubuntu-24.04-arm\"}]' || "
-                      "github.event_name == 'pull_request' && "
-                      "'[{\"runner\":\"macos-15\",\"features\":\"all\"}]' || '[]') }}\n",
-                      jobs["checks"])
+        # Which legs each pull request runs: test_ci_macos_runners.py.
+        self.assertIn("        exclude: ${{ fromJSON(github.event_name != 'pull_request' && '[]' || ", jobs["checks"])
         self.assertIn("    name: Format, lint, and test\n", jobs["checks-passed"])
         self.assertIn("always()", jobs["checks-passed"])
         self.assertIn('test "$RESULT" = success', jobs["checks-passed"])

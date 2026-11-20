@@ -10,8 +10,12 @@ use crate::control::fleet::{
 #[tokio::test(flavor = "multi_thread")]
 async fn a_members_many_removals_fold_into_one_suspension() {
     let (a, b, c) = idle().await;
-    let host =
-        grants::own_host(a.fleet.inner().log.as_ref().unwrap().state(), &a.fleet.me()).unwrap();
+    let host = grants::own_host(
+        a.fleet.inner().log.as_ref().unwrap().state(),
+        &a.fleet.me(),
+        None,
+    )
+    .unwrap();
     for turn in 0..3 * MAX_UNCONFIRMED_PER_SIGNER {
         // Each removal on a parent b has not heard of, signed apart from
         // a's own log.

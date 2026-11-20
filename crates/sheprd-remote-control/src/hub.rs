@@ -21,7 +21,7 @@ pub(crate) use api::ApiMethod;
 pub(crate) use attach::TermHold;
 pub(crate) use chat::{Chat, Event, Summary, View};
 pub(crate) use convert::Error as ConvertError;
-pub(crate) use core::{Keeper, arrangeable};
+pub(crate) use core::{Keeper, TabRef, arrangeable};
 #[cfg(test)]
 pub(crate) use layout::TerminalAgent;
 pub(crate) use layout::{Chat as ChatRow, Job, Layout, Terminal, TerminalPane, Workspace};
@@ -384,19 +384,30 @@ impl Hub {
             }
             let (cwd, program) = (cwd.to_owned(), program.to_owned());
             let (branch, root) = (branch.map(str::to_owned), self.worktrees.clone());
-            let (pane, folder) = on_core(move || match branch {
-                Some(branch) => {
-                    core.open_worktree_chat(agent, &program, &cwd, &branch, root.as_deref())
-                }
-                // Sheprd keeps a workspace for it, in this folder.
-                None => core
-                    .open_chat(agent, &program, &cwd, Some(core::Place::New(&cwd)))
-                    .map(|pane| (pane, cwd)),
+            let (pane, folder, kept) = on_core(move || {
+                let (pane, folder) = match branch {
+                    Some(branch) => {
+                        core.open_worktree_chat(agent, &program, &cwd, &branch, root.as_deref())
+                    }
+                    // Sheprd keeps a workspace for it, in this folder.
+                    None => core
+                        .open_chat(agent, &program, &cwd, Some(core::Place::New(&cwd)))
+                        .map(|pane| (pane, cwd)),
+                }?;
+                // Kept in the core's shared document at once, titled as the
+                // phone shows it; its label still asks a desktop to keep it.
+                let kept = core
+                    .share_new_workspace(&folder, &pane, agent.display_name())
+                    .unwrap_or_else(|error| {
+                        tracing::warn!(%error, "A phone's new workspace waits for Sheprd to keep it");
+                        None
+                    });
+                Ok((pane, folder, kept))
             })
             .await?;
-            // Listed apart until Sheprd keeps its workspace.
+            // Otherwise listed apart until Sheprd keeps its workspace.
             return Ok(CreatedWorkspace {
-                workspace: core::new_workspace_id(&folder),
+                workspace: kept.unwrap_or_else(|| core::new_workspace_id(&folder)),
                 pane,
             });
         }

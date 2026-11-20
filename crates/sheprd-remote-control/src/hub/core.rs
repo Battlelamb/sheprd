@@ -8,10 +8,13 @@ mod checkouts;
 mod convert;
 mod create;
 pub(super) use create::Place;
+pub(crate) use saved::TabRef;
 mod error;
 mod hold;
 mod job;
+mod kept;
 mod lines;
+mod new_workspace;
 mod own;
 mod poller;
 mod projection;
@@ -177,6 +180,7 @@ impl Source {
         let next = {
             let mut poller = lock(&self.poller);
             poller.read_spaces(&boot, core.doc_get("herdr-app"))?;
+            poller.read_shared(core.doc_get(sheprd_session::spaces::DOC))?;
             let mut next = poller.project(
                 &boot,
                 &terminals,

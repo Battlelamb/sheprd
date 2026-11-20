@@ -10,7 +10,8 @@ the owner and `native::changes::arrange` routes the intent:
 
 | Owner | Split, zoom and names | Persistence |
 | --- | --- | --- |
-| Sheprd saved tab | Daemon edits while the saved-tabs lock is free; otherwise the desktop answers through `control::layout` | `browser-tabs.json`, read under the same lock when desktop opens |
+| Shared document tab (`sheprd.spaces`, once written) | Daemon writes `spaces::Edit`s while the saved-tabs lock is free; otherwise the desktop answers through `control::layout`, asked by the saved tab holding the pane's terminal, or the daemon writes the document when no saved tab holds it | The core's `sheprd.spaces` document, which every client reads |
+| Sheprd saved tab (while the document is at version 0) | Daemon edits while the saved-tabs lock is free; otherwise the desktop answers through `control::layout` | `browser-tabs.json`, read under the same lock when desktop opens |
 | Daemon-owned tab | Daemon edits directly, including on a directly paired SSH/cloud host | `core-tabs.json`, scoped to the core boot identity |
 | External Herdr desktop `herdr-app` tab | Explicitly refused; split/zoom/rename capabilities are omitted | Owned by the unrelated app; there is no supported mutation contract |
 

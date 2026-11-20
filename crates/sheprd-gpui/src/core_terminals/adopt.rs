@@ -5,7 +5,9 @@
 //! its own there, once, as if it had started it. A terminal some tab on
 //! this computer already holds is left where it is. Once in a tab, those
 //! labels are removed from the terminal, so a tab the user closes while
-//! the terminal runs on is not opened again after a restart.
+//! the terminal runs on is not opened again after a restart. A terminal a
+//! tab of the core's shared document holds is never adopted: that tab
+//! shows it, and a workspace adoption keeps is written to the document.
 
 use super::hosts::Host;
 use crate::{
@@ -74,6 +76,10 @@ impl SheprdWindow {
                 !held.contains(&info.id)
                     && !self.core_terminals.adopted.contains(&info.id)
                     && !retired.contains_key(&info.id)
+                    // A tab of the core's shared document holds it, whoever
+                    // put it there, and it shows here once that tab is read;
+                    // until the document is read, any tab may.
+                    && !super::spaces::Shared::may_hold(cx, &Host::Local, &info.id)
             })
             .filter_map(|info| {
                 // A phone's new workspace: kept in its folder, once a tab

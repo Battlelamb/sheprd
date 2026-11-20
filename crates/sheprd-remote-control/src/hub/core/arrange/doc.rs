@@ -49,8 +49,8 @@ impl Source {
                 self.close_workspace(&core, workspace)?;
                 return Ok(None);
             }
-            Op::RemoveWorktree { workspace } => {
-                self.remove_worktree(&core, workspace)?;
+            Op::RemoveWorktree { workspace, discard } => {
+                self.remove_worktree(&core, workspace, *discard)?;
                 return Ok(None);
             }
             _ => {}
@@ -201,9 +201,10 @@ impl Source {
         Err(Error::Changed.into())
     }
 
-    /// Deletes `workspace`'s linked worktree, never forced, so a checkout
-    /// with changes stays, then closes the workspace. The branch stays.
-    fn remove_worktree(&self, core: &Core, workspace: &str) -> Result<()> {
+    /// Deletes `workspace`'s linked worktree, then closes the workspace.
+    /// A checkout with changes stays unless the person confirmed `discard`
+    /// on the phone. The branch stays.
+    fn remove_worktree(&self, core: &Core, workspace: &str, discard: bool) -> Result<()> {
         let (spaces, _) = spaces::read(core)?;
         // Nothing is deleted for a workspace the document would not forget.
         editable(&spaces, workspace)?;
@@ -222,7 +223,7 @@ impl Source {
         let status = sheprd_client::new_command("git")
             .arg("--git-dir")
             .arg(&checkout.worktree.key)
-            .args(["worktree", "remove", "--"])
+            .args(remove_args(discard))
             .arg(&root)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -233,6 +234,16 @@ impl Source {
             return Err(Error::WorktreeKept.into());
         }
         self.close_workspace(core, workspace)
+    }
+}
+
+/// Git's arguments before the checkout's root; `--force` discards its
+/// uncommitted changes.
+fn remove_args(discard: bool) -> &'static [&'static str] {
+    if discard {
+        &["worktree", "remove", "--force", "--"]
+    } else {
+        &["worktree", "remove", "--"]
     }
 }
 

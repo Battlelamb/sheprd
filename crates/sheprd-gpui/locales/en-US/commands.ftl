@@ -74,6 +74,7 @@ commands-recent-pane = Recent Pane
 commands-recent-pane-reverse = Recent Pane Reverse
 commands-reload-config = Reload Config
 commands-remote-pair = Remote Control: Pair Device
+commands-remove-merged-worktrees = Remove Merged Worktrees
 commands-remove-worktree = Delete Worktree Checkout
 commands-rename-pane = Rename Pane
 commands-rename-tab = Rename Tab

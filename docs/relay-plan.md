@@ -1681,6 +1681,7 @@ all of them. It needs no fleet key, because it only removes access.
 | Parents | 16 per operation. With more heads, a member names those of members not flagged for equivocation first, so a member forking its key cannot crowd out everyone's operations, removals included. |
 | Checkpoints between prunes | 8 per signer. They count against no other bound, so a full log can always checkpoint and prune. |
 | Operations between checkpoints | 2,048. A computer signs a `Checkpoint` after 512 operations or 30 days, and earlier operations are pruned once every live member's heads descend from it. A Sheprd host never trusts a checkpoint it cannot recompute from what it holds. |
+| Settled checkpoints | A checkpoint that every other operation held has seen, or was seen by, settles what came before it: the state is computed from the state it names, whether the log was pruned to it or not, so nothing signed after it (a removal, a fork, a later checkpoint) changes what was decided before it. A fork it did not see leaves it unsettled. |
 | One operation | 16 KiB. A bundle with ML-KEM-768 is about 2 KiB. |
 | One `fleet apply` or sync message | 256 KiB and 64 operations. More takes several rounds. |
 | Operations waiting for parents | 256 per peer, dropped after 1 hour. Copies of one operation with different signatures wait side by side, and the one whose signature checks out is kept, so a damaged copy cannot keep out the genuine one. |
@@ -1763,12 +1764,9 @@ all of them. It needs no fleet key, because it only removes access.
 from the other mean its key is in use in two places: a cloned disk, a
 restored backup, or theft. Both are kept, because they may be honest.
 The member is flagged everywhere, and its `HostAdd` and `Access`
-operations that no checkpoint had seen count for nothing (only a
-checkpoint that counts and whose signer is not equivocating itself) until a person
-removes it or picks Keep (an operation that clears the flag, which comes
-with Settings > Fleet in phase 3). A checkpoint settles what it saw, as
-the state it names keeps it, so a member that pruned to it holds the same
-operations as one that kept the whole log.
+operations after the last settled checkpoint count for nothing until a
+person removes it or picks Keep (an operation that clears the flag,
+which comes with Settings > Fleet in phase 3).
 
 ### Migration
 

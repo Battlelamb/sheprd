@@ -14,8 +14,26 @@ fn a_file_keeps_its_name_made_safe() {
     assert_eq!(file_name("$(rm -rf ~);.sh"), "__rm_-rf____.sh");
     let long = format!("{}.tar.gz", "a".repeat(300));
     let kept = file_name(&long);
-    assert_eq!(kept.chars().count(), 100);
+    assert_eq!(kept.len(), 100);
     assert!(kept.ends_with(".gz"), "{kept}");
+}
+
+#[test]
+fn a_name_in_letters_of_several_bytes_is_cut_by_bytes_at_a_letter() {
+    // 80 letters of 3 bytes each: few characters, but 244 bytes.
+    let long = format!("{}.pdf", "报".repeat(80));
+    let kept = file_name(&long);
+    assert!(kept.len() <= 100, "{} bytes", kept.len());
+    assert!(kept.ends_with(".pdf"), "{kept}");
+    assert_eq!(kept, format!("{}.pdf", "报".repeat(32)));
+    // With the id and `-` before it, the stored name fits a file system.
+    assert!(format!("{}-{kept}", "a".repeat(22)).len() <= 255);
+    let dir = tempfile::tempdir().unwrap();
+    let uploads = Uploads::new(dir.path());
+    let id = uploads
+        .store_file("abcdefghijklmnopqrstuv".into(), &long, b"x", 1_000)
+        .unwrap();
+    assert!(uploads.path(&id, 1_000).unwrap().exists());
 }
 
 #[test]

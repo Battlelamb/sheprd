@@ -226,8 +226,9 @@ struct WorkspaceScreen: View {
 
     /// The failure of closing the workspace or deleting its worktree; apart
     /// from the screen's other modifiers, which together are more than the
-    /// type checker takes in one expression. A deletion refused for changes
-    /// the phone had not counted offers to discard them.
+    /// type checker takes in one expression. A deletion the computer refused
+    /// as a conflict, with changes the phone had not counted, offers to
+    /// discard them; the computer's reason always shows.
     private func endingDialogs(_ content: some View) -> some View {
         content
             .alert(endProblem?.action.failure ?? "", isPresented: Binding(get: { endProblem != nil }, set: { if !$0 { endProblem = nil } }),
@@ -237,7 +238,7 @@ struct WorkspaceScreen: View {
                     Button("Cancel", role: .cancel) {}
                 }
             } message: { problem in
-                Text(problem.changes > 0 ? Ending.discardWarning(problem.changes) : problem.reason)
+                Text(problem.changes > 0 ? problem.reason + "\n\n" + Ending.discardWarning(problem.changes) : problem.reason)
             }
     }
 
@@ -292,8 +293,11 @@ struct WorkspaceScreen: View {
                 // Gone from the computer: its lists drop it on the next home.
                 if opener == nil { dismiss() }
             } catch {
-                // A refusal for changes made since the phone counted them.
-                let changes = action == .removeWorktree && !discard ? await uncommitted() : 0
+                // Changes made since the phone counted them are a conflict
+                // (409); an archive script or a main checkout is not, and
+                // discarding would not get past it.
+                let conflict = if case RemoteError.status(409, _) = error { true } else { false }
+                let changes = action == .removeWorktree && !discard && conflict ? await uncommitted() : 0
                 endProblem = EndProblem(action: action, reason: error.localizedDescription, changes: changes)
             }
         }

@@ -26,6 +26,21 @@ import Testing
         #expect(joined == text)
     }
 
+    @Test func aCharacterLongerThanTheLimitSplitsBetweenScalarsAndArrivesWhole() {
+        // One character: "e" and twenty combining acute accents, 41 bytes.
+        let huge = "e" + String(repeating: "\u{301}", count: 20)
+        let text = "a" + huge + "b"
+        #expect(huge.count == 1)
+        let sends = TermInput.pastes(for: text, limit: 9)
+        #expect(sends.count > 1)
+        var joined = ""
+        for case let .paste(part) in sends {
+            #expect(part.utf8.count <= 9)
+            joined += part
+        }
+        #expect(joined.unicodeScalars.elementsEqual(text.unicodeScalars))
+    }
+
     @Test func everyPasteFitsTheDaemonsLimit() {
         let text = String(repeating: "a line of text\n", count: 20_000)
         let sends = TermInput.pastes(for: text)

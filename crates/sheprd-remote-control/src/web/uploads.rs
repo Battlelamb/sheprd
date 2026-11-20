@@ -21,7 +21,8 @@ pub(crate) const MAX_UPLOAD: usize = 3_500_000;
 /// The largest file a phone may drop on a terminal; kept modest, as up to
 /// [`MAX_UPLOADS`] of them stay on disk for a day.
 pub(crate) const MAX_FILE: usize = 16 * 1024 * 1024;
-/// The most characters of a file's name kept in its stored name.
+/// The most UTF-8 bytes of a file's name kept in its stored name. File
+/// systems limit a name's bytes, often to 255, and the id and `-` go first.
 const MAX_NAME: usize = 100;
 /// Uploads kept at once.
 const MAX_UPLOADS: usize = 64;
@@ -31,10 +32,10 @@ const LIFETIME_MS: u64 = 24 * 60 * 60 * 1000;
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
     // keep-sorted start
-    #[error("that is not a PNG, JPEG, GIF, or WebP picture")]
-    NotAnImage,
     #[error("the file is larger than {MAX_FILE} bytes")]
     FileTooLarge,
+    #[error("that is not a PNG, JPEG, GIF, or WebP picture")]
+    NotAnImage,
     #[error("the picture is larger than {MAX_UPLOAD} bytes")]
     TooLarge,
     #[error("that attachment is no longer available; attach it again")]
@@ -204,8 +205,8 @@ impl Uploads {
 }
 
 /// The last part of a name a phone sent, kept to letters, digits, `.`,
-/// `-`, and `_`, never hidden or empty, and at most [`MAX_NAME`]
-/// characters, keeping its extension.
+/// `-`, and `_`, never hidden or empty, and at most [`MAX_NAME`] bytes,
+/// keeping its extension and whole characters.
 pub(crate) fn file_name(name: &str) -> String {
     let last = name.rsplit(['/', '\\']).next().unwrap_or_default();
     let safe: String = last
@@ -222,18 +223,23 @@ pub(crate) fn file_name(name: &str) -> String {
     if safe.is_empty() {
         return "file".to_owned();
     }
-    let count = safe.chars().count();
-    if count <= MAX_NAME {
+    if safe.len() <= MAX_NAME {
         return safe.to_owned();
     }
     // Over the limit: the start and the extension, which says the kind.
     let extension = safe
         .rfind('.')
         .map(|dot| &safe[dot..])
-        .filter(|extension| extension.chars().count() <= 16)
+        .filter(|extension| extension.len() <= 16)
         .unwrap_or_default();
-    let keep = MAX_NAME - extension.chars().count();
-    safe.chars().take(keep).chain(extension.chars()).collect()
+    let room = MAX_NAME - extension.len();
+    let end = safe
+        .char_indices()
+        .map(|(at, c)| at + c.len_utf8())
+        .take_while(|&end| end <= room)
+        .last()
+        .unwrap_or(0);
+    format!("{}{extension}", &safe[..end])
 }
 
 fn private_dir(dir: &Path) -> std::io::Result<()> {

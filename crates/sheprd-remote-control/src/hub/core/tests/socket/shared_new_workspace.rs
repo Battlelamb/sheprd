@@ -184,6 +184,9 @@ fn deleting_a_kept_worktree_keeps_one_with_changes_until_the_phone_discards_them
         error,
         HubError::Core(Error::Arrange(super::super::arrange::Error::WorktreeKept))
     ));
+    // The phone hears a conflict it may resolve by discarding the changes.
+    let response = axum::response::IntoResponse::into_response(crate::web::ApiError::from(error));
+    assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
     assert!(checkout.join("work.txt").exists());
     assert!(shared(&fake).workspace("space-a").is_some());
 

@@ -72,3 +72,36 @@ fn an_agent_whose_fleet_access_was_removed_is_not_brought_back_by_a_sync() {
         None
     );
 }
+
+#[test]
+fn an_agent_of_a_host_removed_everywhere_is_told_to_forget_the_fleet() {
+    use crate::fleet::plain::{Next, next};
+    use sheprd_remote_control::control::fleet::{HostKind, HostView, View};
+    let host = |id: &str| HostView {
+        id: id.into(),
+        name: "build-01".into(),
+        kind: HostKind::Agent,
+        user: "deploy".into(),
+        added_by: "a".into(),
+        grants: Vec::new(),
+        relays: Vec::new(),
+        target: None,
+        rev: 1,
+        held: false,
+        flagged: false,
+    };
+    let view = View {
+        fleet: "f".repeat(64),
+        me: "a".into(),
+        members: Vec::new(),
+        hosts: vec![host("live")],
+        removed: 0,
+        equivocating: Vec::new(),
+        suspended: Vec::new(),
+        pending: 0,
+        heads: Vec::new(),
+    };
+    assert_eq!(next(&view, "live", &[]), Next::Keep);
+    assert_eq!(next(&view, "gone", &["gone".to_owned()]), Next::Forget);
+    assert_eq!(next(&view, "other", &["gone".to_owned()]), Next::Leave);
+}

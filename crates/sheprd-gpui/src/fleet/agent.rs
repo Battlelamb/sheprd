@@ -192,6 +192,14 @@ pub(super) fn apply(host: &Host, access: &str, cancelled: &AtomicBool) -> Result
     parse_status(&output)?.ok_or(Error::NoProgram)
 }
 
+/// Has the agent forget its fleet (`fleet scrub`): its access file and
+/// the fleet's `authorized_keys` lines go, so no member reaches the host
+/// through it any more.
+pub(super) fn scrub(host: &Host, cancelled: &AtomicBool) -> Result<(), Error> {
+    run(host, "fleet scrub", b"", cancelled)?;
+    Ok(())
+}
+
 /// Puts this app's build of the agent on `host` unless the same bytes are
 /// there, keeps it running on `relays`, and reads its status. Blocks.
 pub(super) fn install(

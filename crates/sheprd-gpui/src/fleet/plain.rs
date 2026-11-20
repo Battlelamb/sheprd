@@ -158,18 +158,66 @@ pub(super) async fn sync(
     }
     let reported = report.ssh_host_keys.clone();
     let known = executor.spawn(async move { known_keys(&target) }).await?;
-    let host = agent::host_id(&reported, &known);
-    let shared = host.filter(|host| {
-        let host = host.to_string();
-        view.hosts
-            .iter()
-            .any(|entry| entry.id == host && entry.kind == HostKind::Agent)
-    });
-    let Some(host) = shared else {
+    let Some(host) = agent::host_id(&reported, &known) else {
         return Ok(Standing::NoDaemon);
     };
-    keep(client, executor, machine, &host.to_string(), &report).await?;
-    Ok(Standing::Agent)
+    let host = host.to_string();
+    // A host removed everywhere is gone from the view, but its agent still
+    // holds this fleet's access until it is told to forget it.
+    let removed = if live(view, &host) {
+        Vec::new()
+    } else {
+        match daemon(client, Ask::RemovedHosts).await? {
+            Answer::Hosts { hosts } => hosts,
+            _ => Vec::new(),
+        }
+    };
+    match next(view, &host, &removed) {
+        Next::Keep => {
+            keep(client, executor, machine, &host, &report).await?;
+            Ok(Standing::Agent)
+        }
+        Next::Forget => {
+            let connect = machine.target.clone();
+            executor
+                .spawn(async move {
+                    let host = Host::new(&connect).map_err(|_| Error::Unsupported)?;
+                    agent::scrub(&host, &AtomicBool::new(false))
+                })
+                .await?;
+            Ok(Standing::Removed)
+        }
+        Next::Leave => Ok(Standing::NoDaemon),
+    }
+}
+
+/// What the sync does with an agent of this fleet on host `host`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Next {
+    /// A plain host of the fleet: keep its access file current.
+    Keep,
+    /// A host the fleet removed: have its agent forget the fleet.
+    Forget,
+    /// Neither: left for a person.
+    Leave,
+}
+
+fn live(view: &View, host: &str) -> bool {
+    view.hosts
+        .iter()
+        .any(|entry| entry.id == host && entry.kind == HostKind::Agent)
+}
+
+/// What to do with an agent of this fleet on `host`, given the hosts the
+/// fleet removed (`removed`, hex).
+pub(crate) fn next(view: &View, host: &str, removed: &[String]) -> Next {
+    if live(view, host) {
+        Next::Keep
+    } else if removed.iter().any(|gone| gone == host) {
+        Next::Forget
+    } else {
+        Next::Leave
+    }
 }
 
 /// Hands the agent on `machine` the access file the daemon computes for

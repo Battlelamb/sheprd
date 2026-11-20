@@ -45,8 +45,21 @@ for that workspace alone (`close_group: false`) and `worktree.remove` without
 force. A workspace Sheprd keeps for Herdr 2 gets `Op::CloseWorkspace` or
 `Op::RemoveWorktree` through `control::layout`, which the desktop makes as its
 workspace menu does: closing ends the workspace's tabs, and deleting removes the
-linked checkout with Git, never forced, then closes the workspace. With the
-desktop closed the daemon makes neither and says to open Sheprd.
+linked checkout with Git, never forced, then closes the workspace.
+
+With the desktop closed, it depends on where the workspace is kept:
+
+- In the core's written `sheprd.spaces` document, the daemon makes both
+  itself. It first refuses a document whose format this version cannot
+  write, or a workspace it no longer keeps, so nothing ends or is deleted
+  for a change that would not land. Closing ends the terminals of the
+  workspace's tabs and of terminals labelled for it, and forgets it only
+  once every tab still in it has had its terminals ended, so a tab another
+  client adds meanwhile is not dropped while still running. Deleting runs
+  `git worktree remove` on the checkout's root without `--force`, keeps the
+  branch, then closes the workspace.
+- In the saved-tabs file (the document never written), the daemon makes
+  neither and says to open Sheprd.
 
 Deleting is refused before it reaches either keeper for a main checkout, and
 for a checkout whose `.herdr/worktree.toml` has an archive script or cannot be

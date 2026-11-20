@@ -130,6 +130,7 @@ mod socket {
     mod screens;
     mod shared_new_workspace;
     mod shared_spaces;
+    mod shared_spaces_safety;
     mod spaces;
     mod wake;
 

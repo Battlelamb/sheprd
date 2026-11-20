@@ -2,7 +2,7 @@
 //! GitHub.com, or a GitHub Enterprise Server host. A token is sent only to
 //! the API of the server its account signed in to.
 
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 /// A bound above the longest DNS name, with room for a port.
 const MAX_HOST: usize = 260;
@@ -49,6 +49,13 @@ impl Server {
         }
     }
 
+    /// An Enterprise Server as an account's config names it, by
+    /// [`Server::of_host`]'s rules. GitHub.com is refused, because its
+    /// accounts sign in on their own.
+    pub fn enterprise(host: &str) -> Option<Self> {
+        Self::of_host(host).filter(Self::is_enterprise)
+    }
+
     /// The host and HTTPS port the server's web pages and API are on.
     pub fn host(&self) -> &str {
         match self {
@@ -90,12 +97,27 @@ impl Server {
         }
     }
 
+    /// The name an account on this server goes by in logs, pauses, and
+    /// caches: its login on GitHub.com, `login@host` elsewhere.
+    pub fn account_name(&self, login: &str) -> String {
+        match self {
+            Self::GitHub => login.to_owned(),
+            Self::Enterprise(host) => format!("{login}@{host}"),
+        }
+    }
+
     /// The root REST paths are appended to, without a trailing slash.
     pub(crate) fn rest_root(&self) -> String {
         match self {
             Self::GitHub => "https://api.github.com".to_owned(),
             Self::Enterprise(host) => format!("https://{host}/api/v3"),
         }
+    }
+}
+
+impl fmt::Display for Server {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.host())
     }
 }
 

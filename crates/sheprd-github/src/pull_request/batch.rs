@@ -132,10 +132,7 @@ pub(super) fn by_token(targets: Vec<(Input, Target)>, tokens: &Tokens) -> (Vec<G
     let mut groups: Vec<Group> = Vec::new();
     let mut unread = Vec::new();
     for (input, target) in targets {
-        let (Some(token), Some(login)) = (
-            tokens.for_owner(&target.server, &target.owner),
-            tokens.login_for(&target.server, &target.owner),
-        ) else {
+        let Some((token, login)) = tokens.reader(&target.server, &target.owner) else {
             unread.push(input);
             continue;
         };

@@ -17,11 +17,19 @@ use zeroize::Zeroizing;
 
 pub(super) const LIMIT: u64 = 2 * 1024 * 1024;
 
-pub(super) fn agent(timeout: Duration) -> ureq::Agent {
+/// An agent for requests to `server`. An Enterprise Server is verified
+/// against the system's certificates, because an organization often issues
+/// its certificate from its own authority.
+pub(super) fn agent(server: &Server, timeout: Duration) -> ureq::Agent {
+    let roots = match server {
+        Server::GitHub => ureq::tls::RootCerts::WebPki,
+        Server::Enterprise(_) => ureq::tls::RootCerts::PlatformVerifier,
+    };
     ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
         .max_redirects(0)
         .http_status_as_error(false)
+        .tls_config(ureq::tls::TlsConfig::builder().root_certs(roots).build())
         .build()
         .into()
 }
@@ -253,7 +261,7 @@ pub fn rest<T: DeserializeOwned>(
     if cancelled() {
         return Err(crate::pull_request::Error::Cancelled.into());
     }
-    let agent = agent(timeout);
+    let agent = agent(&token.server, timeout);
     let read = |url: &str| {
         agent
             .get(url)
@@ -433,7 +441,7 @@ fn post(
         .checked_duration_since(Instant::now())
         .ok_or(crate::pull_request::Error::Timeout)?;
     let started = Instant::now();
-    let reply = agent(timeout)
+    let reply = agent(&token.server, timeout)
         .post(graphql_url(token))
         .header("User-Agent", "Sheprd")
         .header("Accept", "application/vnd.github+json")
@@ -537,7 +545,7 @@ pub(super) fn oauth<T: DeserializeOwned>(
     // zeroized by this module. Never log request fields or response bodies.
     response(
         path,
-        agent(timeout)
+        agent(&Server::GitHub, timeout)
             .post(format!("https://github.com/login/{path}"))
             .header("User-Agent", "Sheprd")
             .header("Accept", "application/json")

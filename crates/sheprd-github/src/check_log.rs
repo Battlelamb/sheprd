@@ -33,7 +33,7 @@ const ERROR_MARK: &str = "##[error]";
 /// The end of job `job`'s log in `owner/repo`, which the caller took from a
 /// verified pull request. Blocking.
 pub fn job_log(token: &ServerToken, owner: &str, repo: &str, job: u64) -> crate::Result<String> {
-    let agent = agent(TIMEOUT);
+    let agent = agent(&token.server, TIMEOUT);
     let context = "check log"; // i18n: data
     let reply = agent
         .get(format!(

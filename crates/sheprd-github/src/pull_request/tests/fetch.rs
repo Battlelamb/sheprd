@@ -141,7 +141,7 @@ fn local_git_verification_rejects_wrong_checkout_branch_and_remote_before_gh() {
         fetch(&input, &"fixture".into(), || false)
             .unwrap_err()
             .to_string()
-            .contains("GitHub.com origins only")
+            .contains("GitHub Enterprise Server origins only")
     );
     let mut registry_input = input.clone();
     registry_input.checkout = None;
@@ -149,7 +149,7 @@ fn local_git_verification_rejects_wrong_checkout_branch_and_remote_before_gh() {
         fetch(&registry_input, &"fixture".into(), || false)
             .unwrap_err()
             .to_string()
-            .contains("GitHub.com origins only")
+            .contains("GitHub Enterprise Server origins only")
     );
     git(&[
         "config",

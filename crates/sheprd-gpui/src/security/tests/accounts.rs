@@ -5,7 +5,10 @@ use crate::security::fetch::{FULLY_READ, Found, readable};
 use secrecy::ExposeSecret;
 
 fn tokens(login: &str, token: &str) -> Tokens {
-    Tokens::new(&Profile::fixture(login, Arc::new(token.into()), &[]), [])
+    Tokens::new(
+        Some(&Profile::fixture(login, Arc::new(token.into()), &[])),
+        [],
+    )
 }
 
 #[test]

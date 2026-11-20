@@ -65,7 +65,7 @@ impl SheprdWindow {
         self.git.set_counted(
             self.config.sidebar_style.change_counts == crate::config::ChangeCounts::Local,
         );
-        self.git.set_read_ahead(self.menu.github.connected());
+        self.git.set_read_ahead(self.main_signed_in());
         self.git
             .track_listed(self.listed_git_inputs(), self.active, now);
         changed |= self.git.poll(now);
@@ -169,7 +169,7 @@ impl SheprdWindow {
         self.menu.reset();
         self.menu.anchor = anchor;
         self.menu.page = Some(Page::Git);
-        if self.menu.github.connected()
+        if self.main_signed_in()
             && let Some(input) = self.git_input()
         {
             self.sync_pr_scope();
@@ -204,9 +204,10 @@ impl SheprdWindow {
             origin: crate::pull_request::Origin::Local,
             login: self.main_tokens()?.key(),
         };
-        (self.menu.github.connected()
-            && self.menu.pr_cache.unopened_input(&view, input, &ahead.head))
-        .then_some(ahead.commits)
+        self.menu
+            .pr_cache
+            .unopened_input(&view, input, &ahead.head)
+            .then_some(ahead.commits)
     }
 
     /// The pull request already prefetched for the focused branch, in whatever
@@ -221,16 +222,12 @@ impl SheprdWindow {
             origin: crate::pull_request::Origin::Local,
             login: self.main_tokens()?.key(),
         };
-        self.menu
-            .github
-            .connected()
-            .then(|| self.menu.pr_cache.peek_input(&view, input))
-            .flatten()
+        self.menu.pr_cache.peek_input(&view, input)
     }
 
     /// A GitHub lookup for the focused branch is in flight or about to be.
     fn git_pull_request_loading(&self) -> bool {
-        self.menu.github.connected()
+        self.main_signed_in()
             && self
                 .git
                 .tracked()

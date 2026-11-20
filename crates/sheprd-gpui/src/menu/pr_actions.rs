@@ -23,7 +23,7 @@ impl SheprdWindow {
         self.pr_actions.track(target);
         let mut changed = self.pr_actions.poll();
         if self.pr_actions.take_settled() {
-            if self.menu.github.connected()
+            if self.main_signed_in()
                 && let Some(input) = self.git_input()
             {
                 self.sync_pr_scope();
@@ -39,7 +39,7 @@ impl SheprdWindow {
         let tokens = self.pr_tokens()?;
         match self.pr_actions.target() {
             Some(target) => tokens.for_owner(&target.server, &target.owner).cloned(),
-            None => Some(tokens.main().clone()),
+            None => tokens.main().cloned(),
         }
     }
 

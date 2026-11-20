@@ -98,7 +98,7 @@ fn github(
         .for_owner(&base.server, &base.owner)
         .ok_or(sheprd_github::pull_request::Error::Origin)?
         .clone();
-    let origin = Origin::from(base);
+    let origin = Origin::read_on(base, token.server.clone());
     let timeout = deadline
         .checked_duration_since(Instant::now())
         .ok_or(sheprd_github::pull_request::Error::Timeout)?;

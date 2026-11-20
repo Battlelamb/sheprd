@@ -22,7 +22,7 @@ impl OrchestratorView {
         let tokens = self.request()?.token.as_ref()?;
         match self.pr.target() {
             Some(target) => tokens.for_owner(&target.server, &target.owner).cloned(),
-            None => Some(tokens.main().clone()),
+            None => tokens.main().cloned(),
         }
     }
 

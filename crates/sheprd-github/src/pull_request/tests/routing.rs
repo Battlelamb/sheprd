@@ -33,7 +33,7 @@ fn each_account_asks_only_for_the_repositories_it_reads() {
     let main: Arc<SecretString> = Arc::new("main".into());
     let emu: Arc<SecretString> = Arc::new("emu".into());
     let (main_profile, emu_profile) = (profile("penso", &main), profile("fabien_microsoft", &emu));
-    let tokens = Tokens::new(&main_profile, [(&emu_profile, &[][..])]);
+    let tokens = Tokens::new(Some(&main_profile), [(&emu_profile, &[][..])]);
     let (groups, _) = by_token(
         vec![
             target("rust-lang", "a"),
@@ -80,11 +80,11 @@ fn adding_an_account_rescopes_the_cache_and_keeps_its_answers_apart() {
     let emu: Arc<SecretString> = Arc::new("emu".into());
     let (main_profile, emu_profile) = (profile("penso", &main), profile("emu", &emu));
     let mut cache = Cache::default();
-    let alone = Tokens::new(&main_profile, []);
+    let alone = Tokens::new(Some(&main_profile), []);
     let key = alone.key();
     cache.scope((0, 1, "boot".into()), alone, &key, Origin::Local);
     assert_eq!(cache.view.login, "penso");
-    let both = Tokens::new(&main_profile, [(&emu_profile, &[][..])]);
+    let both = Tokens::new(Some(&main_profile), [(&emu_profile, &[][..])]);
     let key = both.key();
     cache.scope((0, 1, "boot".into()), both.clone(), &key, Origin::Local);
     assert_eq!(cache.view.login, "penso,emu(emu)");

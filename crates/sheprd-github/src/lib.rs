@@ -47,7 +47,7 @@ pub use {
     store::{Account, Note, Store, note as store_note, select as select_store},
 };
 
-use device::{Device, Reply, SETUP_MESSAGE, profile, profile_from, token_reply};
+use device::{Device, Reply, SETUP_MESSAGE, profile, profile_from, profile_on, token_reply};
 use store::{save, valid_token};
 
 /// Delete one account's saved credential, as signing it out does, for an

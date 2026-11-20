@@ -9,7 +9,7 @@ use super::{
 };
 use crate::Checkpoint;
 use chrono::Utc;
-use sheprd_github::{Server, ServerToken, Tokens};
+use sheprd_github::{ServerToken, Tokens};
 use std::{
     sync::{Arc, atomic::Ordering},
     time::Instant,
@@ -34,8 +34,8 @@ impl Worker {
             .repository
             .split_once('/')
             .map_or(key.repository.as_str(), |(owner, _)| owner);
-        let Some(token) = tokens.for_owner(&Server::GitHub, owner) else {
-            return Ok(SyncState::Unsupported);
+        let Some(token) = tokens.for_host(&key.host, owner) else {
+            return Ok(SyncState::SignIn);
         };
         // A listing shown from memory continues from its own checkpoint;
         // else what the last complete sync stored, which a read-only store

@@ -164,20 +164,22 @@ impl<'a> Found<'a> {
         let Some((owner, _)) = self.name.split_once('/') else {
             return;
         };
-        let read = |tokens: &Tokens| {
-            tokens
-                .for_owner(&crate::github::Server::GitHub, owner)
-                .map(|token| token.token.expose_secret().to_owned())
-        };
-        let token = read(account.1);
+        let token = github_secret(account.1, owner);
         if self
             .accounts
             .iter()
-            .all(|(_, tokens)| read(tokens) != token)
+            .all(|(_, tokens)| github_secret(tokens, owner) != token)
         {
             self.accounts.push(account);
         }
     }
+}
+
+/// The GitHub.com token `tokens` reads `owner`'s repositories with.
+fn github_secret<'a>(tokens: &'a Tokens, owner: &str) -> Option<&'a str> {
+    tokens
+        .for_owner(&crate::github::Server::GitHub, owner)
+        .map(|token| token.token.expose_secret())
 }
 
 /// A read whose alerts and reports both came back.

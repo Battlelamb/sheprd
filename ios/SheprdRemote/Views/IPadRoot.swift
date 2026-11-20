@@ -74,6 +74,7 @@ struct IPadRoot: View {
         .sheet(item: $workspaceSheet) { key in
             NavigationStack {
                 WorkspaceScreen(key: key)
+                    .makesRoomForConnectionToast()
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Done") { workspaceSheet = nil }
@@ -151,20 +152,20 @@ struct IPadRoot: View {
     private var sidebar: some View {
         TabView(selection: $tab) {
             Tab("Chats", systemImage: "bubble.left.and.bubble.right", value: SidebarTab.chats) {
-                NavigationStack { chats }
+                NavigationStack { chats.makesRoomForConnectionToast() }
                     .connectionToast(pairing: $pairing)
             }
             .badge(model.fleet.waiting)
             Tab("Workspaces", systemImage: "square.stack.3d.up", value: SidebarTab.workspaces) {
-                NavigationStack(path: $workspacesPath) { WorkspacesTab(query: $query).toolbar { hideSidebar } }
+                NavigationStack(path: $workspacesPath) { WorkspacesTab(query: $query).toolbar { hideSidebar }.makesRoomForConnectionToast() }
                     .connectionToast(pairing: $pairing)
             }
             Tab("Pull Requests", systemImage: "arrow.triangle.pull", value: SidebarTab.pullRequests) {
-                NavigationStack { PullRequestsList().toolbar { hideSidebar } }
+                NavigationStack { PullRequestsList().toolbar { hideSidebar }.makesRoomForConnectionToast() }
                     .connectionToast(pairing: $pairing)
             }
             Tab("Settings", systemImage: "gearshape", value: SidebarTab.settings) {
-                NavigationStack { SettingsView().toolbar { hideSidebar } }
+                NavigationStack { SettingsView().toolbar { hideSidebar }.makesRoomForConnectionToast() }
                     .connectionToast(pairing: $pairing)
             }
         }
@@ -186,7 +187,7 @@ struct IPadRoot: View {
             if query.isEmpty { AttentionList(selection: $selection) } else { SearchResults(query: query) }
         }
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Workspaces, chats, terminals")
-        .navigationDestination(for: WorkspaceKey.self) { WorkspaceScreen(key: $0) }
+        .navigationDestination(for: WorkspaceKey.self) { WorkspaceScreen(key: $0).makesRoomForConnectionToast() }
         .nearbyBanner()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

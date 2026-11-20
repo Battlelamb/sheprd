@@ -83,7 +83,7 @@ use std::collections::{HashMap, VecDeque};
 
 /// The workspace of a window with no Herdr 1 installed. herdr-core has no
 /// workspaces of its own, so its tabs gather here until the app keeps them.
-pub(crate) const WORKSPACE: &str = "herdr-2";
+pub(crate) const WORKSPACE: &str = sheprd_session::DEFAULT_WORKSPACE;
 
 /// The tab the shell shown in place of Herdr 1 counts as in a session: no
 /// store tab, whose IDs count up from zero, ever reaches it.

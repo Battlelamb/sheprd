@@ -8,10 +8,13 @@ use crate::{
     browser::WebUrl,
     control::protocol::{
         Caller, ErrorCode, Response,
-        hosts::{AccountQuota, COMMENTS_WAIT_SECONDS, CheckInfo, CommentInfo, PrInfo, Reply},
+        hosts::{
+            AccountQuota, COMMENTS_WAIT_SECONDS, CheckInfo, CommentInfo, LayerInfo, PrInfo,
+            QueueInfo, Reply, StackInfo,
+        },
     },
     pr_actions::{Comment, Target},
-    pull_request::{MergeState, PullRequest, ReviewDecision, workspace_input},
+    pull_request::{MergeState, PullRequest, ReviewDecision, Verdict, workspace_input},
 };
 use gpui::{App, Context, Window};
 use std::time::Duration;
@@ -188,7 +191,43 @@ pub(super) fn pr_info(pr: &PullRequest) -> PrInfo {
                 outcome: outcome.to_string(),
             })
             .collect(),
+        stack: stack_info(pr),
+        queue: pr.queue.map(|queue| QueueInfo {
+            position: queue.position,
+            state: queue.state.key().to_owned(),
+            eta_seconds: queue.eta,
+        }),
     }
+}
+
+fn stack_info(pr: &PullRequest) -> Option<StackInfo> {
+    let (stack, position) = pr.stack()?;
+    let (verdict, ready, blocked) = match stack.verdict(position) {
+        Verdict::Merged => ("merged", None, None),
+        Verdict::Ready { count } => ("ready", Some(count), None),
+        Verdict::Unread => ("unread", None, None),
+        Verdict::Blocked { number, blocker } => ("blocked", None, Some((number, blocker))),
+    };
+    Some(StackInfo {
+        number: stack.number,
+        base: stack.base.clone(),
+        size: stack.size,
+        position,
+        verdict: verdict.to_owned(),
+        ready,
+        blocked_by: blocked.map(|(number, _)| number),
+        reason: blocked.map(|(_, blocker)| blocker.key().to_owned()),
+        layers: stack
+            .layers
+            .iter()
+            .map(|layer| LayerInfo {
+                position: layer.position,
+                number: layer.number,
+                title: layer.title.clone(),
+                status: layer.status_key().to_owned(),
+            })
+            .collect(),
+    })
 }
 
 pub(super) fn comment_info(comment: &Comment) -> CommentInfo {

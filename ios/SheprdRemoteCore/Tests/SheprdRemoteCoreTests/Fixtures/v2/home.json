@@ -100,7 +100,8 @@
               "favorite": true,
               "pane": "p2",
               "title": "Fix the build",
-              "changed_ms": 1770000000000
+              "changed_ms": 1770000000000,
+              "transcript": true
             },
             "convert": {
               "agent": "claude",

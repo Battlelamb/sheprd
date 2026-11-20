@@ -22,6 +22,7 @@ mod log;
 mod nearby;
 mod origins;
 mod pace;
+pub(crate) mod prompt;
 mod relay;
 mod render;
 mod shortcuts;
@@ -235,6 +236,10 @@ pub(crate) fn router(state: Shared) -> Router {
         )
         .route("/api/term/{pane}/keys", post(terminal::keys))
         .route("/api/term/{pane}/paste", post(terminal::paste))
+        .route(
+            "/api/term/{pane}/prompt",
+            get(prompt::get).post(prompt::choose),
+        )
         .route(
             "/api/term/{pane}/upload",
             post(terminal::upload).layer(DefaultBodyLimit::max(uploads::MAX_UPLOAD + 1024)),

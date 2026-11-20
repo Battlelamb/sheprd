@@ -211,6 +211,9 @@ bundle profile="release" features="":
     # it the app pairs over the network only.
     xcrun swiftc -O -swift-version 6 macos/sheprd-nearby/main.swift macos/sheprd-nearby/Framing.swift \
         macos/sheprd-nearby/Bonjour.swift macos/sheprd-nearby/Central.swift -o "$app/Contents/MacOS/sheprd-nearby"
+    # Every virtual Mac mounts this disk: the installer of Sheprd Agent,
+    # which lets agents work inside it.
+    bash scripts/build-machine-agent.sh "$app/Contents/Resources/MachineAgent.img"
     # Herdr 2 terminals run in the pinned herdr-core beside it, as releases
     # bundle it. Fetched once per profile; an offline build goes on without.
     core=target/{{profile}}/herdr-core
@@ -241,8 +244,9 @@ bundle profile="release" features="":
     # The linker's ad-hoc signature names the bare executable and binds no
     # Info.plist, so services that trust the bundle ID refuse the app:
     # notification authorization fails without a prompt. Ad-hoc sign the
-    # assembled bundle so its identity is so.pen.herdr-gpui.dev.
-    codesign --force --sign - "$app"
+    # assembled bundle so its identity is so.pen.herdr-gpui.dev. Machine tabs
+    # need the entitlements: Virtualization refuses a process without its own.
+    codesign --force --sign - --entitlements assets/macos/Sheprd.entitlements "$app"
 
 # Link the actual optimized application and exercise its CLI without a desktop.
 test-build: build-release

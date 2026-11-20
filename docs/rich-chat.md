@@ -687,7 +687,13 @@ again only when they differ from the last ones sent, and the origin only on
 another device or a change between this machine and SSH. Where the person cannot open paths on the
 agent's machine, the note asks the agent to link pictures as Markdown images,
 which [linked pictures](#messages-and-controls) attach to the chat, and to
-render HTML mockups to screenshots. The transcript shows only the person's
+render HTML mockups to screenshots. It also says the person cannot touch
+the agent's computer, so a hardware key, Touch ID, or an on-screen prompt
+is out of their reach: the agent pushes and fetches over HTTPS with the
+GitHub CLI's credentials rather than SSH, and stops rather than turning
+off signing when a commit needs a key (`phone.md` and `remote.md`; the
+iPhone and iPad app's `phone-app.md` follows `phone.md`, so says it once
+through it). The transcript shows only the person's
 words. An older program ignores the field, and an older client sends none.
 
 The note's texts are templates (`context/prompts.rs`): the built-in ones in
@@ -737,7 +743,11 @@ terminal. Goal status stays in the original CLI interface; it is not inferred
 from conversation text.
 
 Observation requires a Linux agent host, its Herdr CLI metadata API, and a
-matching `sheprd-acp` helper. Local helpers are paired with the GUI; SSH observers
+matching `sheprd-acp` helper. The observer itself also runs on macOS, where the
+iPhone app uses it (`docs/ios-app-plan.md`): it reads the process's birth from
+the kernel and finds the log by its exact name, and since macOS shows no other
+process's environment, it reads the default config directory, never a
+`CLAUDE_CONFIG_DIR` or `CODEX_HOME` override. Local helpers are paired with the GUI; SSH observers
 run on the agent's host through the existing encrypted connection. Remote helper
 installation is explicit. Observation creates no listening port or persistent
 service. Closing the GUI stops its observer children and leaves agents running.

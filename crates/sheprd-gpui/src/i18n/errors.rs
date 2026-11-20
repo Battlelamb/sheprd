@@ -39,6 +39,7 @@ mod link_handlers;
 mod listen_token;
 mod listening_ports;
 mod local_ports;
+mod machine;
 mod mods;
 mod nearby;
 mod notification_mutes;

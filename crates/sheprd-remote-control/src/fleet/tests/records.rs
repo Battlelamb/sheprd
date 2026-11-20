@@ -20,6 +20,7 @@ fn hosted(identity: &str, fleet: bool, host: Option<&str>) -> Record {
         route: URL_SAFE_NO_PAD.encode([7; 32]),
         fleet,
         host: host.map(str::to_owned),
+        opening: false,
     }
 }
 
@@ -160,6 +161,7 @@ async fn a_host_claiming_another_hosts_route_changes_nothing() {
             route: route.clone(),
             fleet: true,
             host: None,
+            opening: false,
         };
         Record::load(node.dir.path(), &a_record.id().unwrap()).unwrap()
     };

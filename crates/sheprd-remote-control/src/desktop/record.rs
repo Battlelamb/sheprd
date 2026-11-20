@@ -32,6 +32,13 @@ pub(crate) struct Record {
     /// that host's own signed records may change its tunnel identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) host: Option<String>,
+    /// The machine reads a fleet session's opening, the purpose byte and
+    /// the proof of this computer's fleet key, before SSH: a member's own
+    /// host. Who owns the record (`fleet`) says nothing of it: a Sheprd
+    /// host that is no member, or an agent, splices what it gets straight
+    /// to SSH.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) opening: bool,
 }
 
 impl Record {

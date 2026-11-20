@@ -140,7 +140,7 @@ fn another_fleet_host_cannot_replace_a_records_identity() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_host_claiming_another_hosts_route_changes_nothing() {
-    let (a, b, c) = three().await;
+    let (a, b, c) = idle().await;
     let route = a.relays.info().unwrap().route;
     // c signs, with its own authority, a record naming a's route.
     let (mut claim, _) = me::record(&c.state, now_ms() + 1).unwrap();

@@ -162,3 +162,44 @@ fn an_agents_access_file_names_each_members_fleet_key() {
     let file = host_access::compute(&log, &host, [], |_| false).unwrap();
     assert_eq!(file.members[&Id(b.id().0)].fleet_key, b.bundle.key);
 }
+
+#[test]
+fn competing_rotations_at_one_sequence_number_count_what_the_log_held() {
+    let (a, b) = (computer(1), computer(2));
+    let mut log = found(&a);
+    admit(&mut log, &a, &b);
+    let intro = plain_host(40);
+    let host = intro.id().unwrap();
+    act(&mut log, &a, Body::HostAdd(intro));
+    // b's key in two places rotates on each, at the same number.
+    let before = log.heads().to_vec();
+    let seq = log.state().members[&b.id()].seq + 1;
+    let rotation = |tunnel: u8| {
+        let mut rotated = b.bundle.clone();
+        rotated.tunnel = [tunnel; 32];
+        sign_on(&log, &b, &before, seq, Body::Rotate(rotated))
+    };
+    let (first, second) = (rotation(0x61), rotation(0x62));
+    let mut one = copy(&log);
+    apply(&mut one, first.clone());
+    let alone = host_access::compute(&one, &host, [], |_| false).unwrap();
+    apply(&mut log, first);
+    apply(&mut log, second);
+    let both = host_access::compute(&log, &host, [], |_| false).unwrap();
+    let (alone, both) = (&alone.members[&Id(b.id().0)], &both.members[&Id(b.id().0)]);
+    assert_eq!((alone.keys, alone.seen), (seq, 1));
+    assert_eq!((both.keys, both.seen), (seq, 2));
+    // An agent that held the first takes whichever the full log kept.
+    let kept = log.state().members[&b.id()].bundle.tunnel;
+    let held = host_access::Access::merge(
+        None,
+        host_access::compute(&one, &host, [], |_| false).unwrap(),
+    )
+    .unwrap();
+    let after = host_access::Access::merge(
+        Some(&held),
+        host_access::compute(&log, &host, [], |_| false).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(after.members[&Id(b.id().0)].tunnel, kept);
+}

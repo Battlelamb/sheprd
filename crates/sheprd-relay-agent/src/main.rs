@@ -94,6 +94,10 @@ fn execute(command: Command, state_dir: &Path) -> Result<()> {
                 authorized
                     .insert(entry)
                     .map_err(|_| Error::AuthorizedFull { path })?;
+                // The fleet's members dial too: a desktop that would crowd
+                // one out is refused.
+                let held = fleet::Held::load(state_dir)?;
+                fleet::fits(authorized, held.access.as_ref())?;
                 Ok(true)
             })?;
             // A person enrolled it again: a removed member's having named

@@ -94,20 +94,30 @@ const _: () = assert!(sheprd_relay_agent::access::MAX_REMOVED == MAX_TOMBSTONES)
 /// its admission are 0; keys rotated before the checkpoint the log was
 /// pruned to take the member's sequence number there, which no rotation
 /// pruned away exceeds and every later one does.
-fn key_version(log: &Log, member: &MemberId, bundle: &Bundle) -> u64 {
+/// With it, how many of the member's rotations the log holds at that
+/// number: rotations that compete there, signed in two places with one
+/// key, tie on the number, and a log that holds them all and picked one
+/// outranks a log that holds only one.
+fn key_version(log: &Log, member: &MemberId, bundle: &Bundle) -> (u64, u32) {
     let rotated = log
         .ops()
         .filter(|op| op.signer() == *member)
         .filter(|op| matches!(op.body(), Body::Rotate(rotated) if rotated == bundle))
         .map(|op| op.unsigned().seq)
         .max();
-    rotated
-        .or_else(|| {
-            let (_, base) = log.base()?;
+    let Some(seq) = rotated else {
+        let base = log.base().and_then(|(_, base)| {
             let kept = base.members.get(member)?;
             (kept.bundle == *bundle).then_some(kept.seq)
-        })
-        .unwrap_or(0)
+        });
+        return (base.unwrap_or(0), 0);
+    };
+    let competing = log
+        .ops()
+        .filter(|op| op.signer() == *member && op.unsigned().seq == seq)
+        .filter(|op| matches!(op.body(), Body::Rotate(_)))
+        .count();
+    (seq, u32::try_from(competing).unwrap_or(u32::MAX))
 }
 
 /// The access file for plain host `host` as `log` has it: every live
@@ -142,6 +152,7 @@ pub fn compute(
                 .access
                 .get(&(*host, *id))
                 .map_or(0, |register| register.rev);
+            let version = key_version(log, id, &member.bundle);
             let member = Member {
                 allow: state.allowed(host, id),
                 dial: member.bundle.dial,
@@ -150,7 +161,8 @@ pub fn compute(
                 rev,
                 ssh,
                 tunnel: member.bundle.tunnel,
-                keys: key_version(log, id, &member.bundle),
+                keys: version.0,
+                seen: version.1,
                 former: Vec::new(),
             };
             Some((Id(id.0), member))

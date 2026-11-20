@@ -3,10 +3,13 @@
 //! request, `gh api` writes to one, and `git push`. Commands that only read,
 //! such as `gh pr view` or `gh pr list`, name none.
 //!
-//! The command is split the way a shell would only as far as quotes and
-//! command separators go; anything subtler is left unread, as a missed pull
-//! request costs less than a wrong one. Only GitHub addresses are kept,
-//! through [`PullRequest::new`].
+//! The command is read whole from the call's input when the session kept
+//! it, else from its title, and split the way a shell would only as far as
+//! quotes and command separators go; anything subtler is left unread, as a
+//! missed pull request costs less than a wrong one. Each pull request a
+//! command names gets that command's actions alone. Only github.com
+//! addresses are kept, through [`PullRequest::new`]; a command aimed at
+//! another host names none.
 
 use sheprd_chat_protocol::{
     PullRequest, PullRequestAction as Action, Tool, ToolContent, ToolKind, ToolStatus,
@@ -19,75 +22,113 @@ const MAX_COMMAND: usize = 16 * 1024;
 const MAX_OUTPUT: usize = 64 * 1024;
 const HOST: &str = "https://github.com/";
 
-/// What one command of a call did, and the pull requests its arguments name.
-#[derive(Debug, Default)]
+/// What one command of a call did, and the pull request its arguments
+/// name, if they name one.
+#[derive(Debug)]
 struct Work {
-    actions: Vec<Action>,
-    named: Vec<PullRequest>,
+    action: Action,
+    named: Option<PullRequest>,
     /// A `gh pr` command, whose messages name what it changed.
     gh_pr: bool,
 }
 
 /// The pull requests `tool` worked on, each once with what was done to it.
-pub(crate) fn found(tool: &Tool) -> Vec<PullRequest> {
+/// `command` is the whole command the call ran, when the session kept it
+/// from the call's input; the title shows only its first line.
+pub(crate) fn found(tool: &Tool, command: Option<&str>) -> Vec<PullRequest> {
     if tool.status != ToolStatus::Completed
         || !matches!(tool.kind, ToolKind::Execute | ToolKind::Other)
     {
         return Vec::new();
     }
-    let mut work = Work::default();
-    for command in commands(&words(command_text(&tool.title))) {
-        let Some(found) = gh_pr(&command)
-            .or_else(|| gh_api(&command))
-            .or_else(|| git_push(&command))
-        else {
-            continue;
-        };
-        for action in found.actions {
-            if !work.actions.contains(&action) {
-                work.actions.push(action);
-            }
-        }
-        work.named.extend(found.named);
-        work.gh_pr |= found.gh_pr;
-    }
-    if work.actions.is_empty() {
-        return Vec::new();
-    }
+    let text = command.map_or_else(
+        || command_text(&tool.title),
+        |command| head(command, MAX_COMMAND).to_owned(),
+    );
+    let work: Vec<Work> = commands(&words(text))
+        .filter(|command| !elsewhere(command))
+        .filter_map(|command| {
+            gh_pr(&command)
+                .or_else(|| gh_api(&command))
+                .or_else(|| git_push(&command))
+        })
+        .collect();
     let mut pulls: Vec<PullRequest> = Vec::new();
+    let mut record = |mut pull: PullRequest, actions: &[Action]| {
+        if let Some(known) = pulls.iter_mut().find(|known| known.is(&pull)) {
+            known.record(actions);
+        } else if pulls.len() < MAX_FOUND {
+            pull.record(actions);
+            pulls.push(pull);
+        }
+    };
+    for command in &work {
+        if let Some(pull) = &command.named {
+            record(pull.clone(), &[command.action]);
+        }
+    }
+    // What the call printed names the pull requests of the commands that
+    // named none, such as `gh pr create`; those commands' actions are
+    // theirs. A pull request a command named keeps only its own.
+    let unnamed: Vec<Action> = work
+        .iter()
+        .filter(|command| command.named.is_none())
+        .map(|command| command.action)
+        .collect();
+    if unnamed.is_empty() {
+        return pulls;
+    }
+    let gh_pr = work
+        .iter()
+        .any(|command| command.gh_pr && command.named.is_none());
     let printed = tool.content.iter().filter_map(|content| match content {
         ToolContent::Text { text } => Some(head(text, MAX_OUTPUT)),
         _ => None,
     });
-    let mut seen = work.named;
     for text in printed {
-        seen.extend(addresses(text));
-        if work.gh_pr {
-            seen.extend(messages(text));
+        let messages = gh_pr.then(|| messages(text)).into_iter().flatten();
+        for pull in addresses(text).chain(messages) {
+            let named = work
+                .iter()
+                .any(|command| command.named.as_ref().is_some_and(|known| known.is(&pull)));
+            if !named {
+                record(pull, &unnamed);
+            }
         }
-    }
-    for mut pull in seen {
-        if pulls.len() == MAX_FOUND {
-            break;
-        }
-        if pulls.iter().any(|known| known.is(&pull)) {
-            continue;
-        }
-        pull.actions.clone_from(&work.actions);
-        pulls.push(pull);
     }
     pulls
 }
 
 /// The command a call's title shows: agents such as Claude Code put it in
-/// backticks, escaping those inside.
+/// backticks, escaping those inside, and a command of several lines shows
+/// its first, followed by how many more there are.
 fn command_text(title: &str) -> String {
     let title = head(title.trim(), MAX_COMMAND);
     let inner = title
         .strip_prefix('`')
-        .and_then(|rest| rest.strip_suffix('`'))
+        .and_then(|rest| {
+            rest.strip_suffix('`').or_else(|| {
+                let (first, more) = rest.rsplit_once("` (+")?;
+                more.ends_with(" more line)")
+                    .then_some(first)
+                    .or_else(|| more.ends_with(" more lines)").then_some(first))
+            })
+        })
         .unwrap_or(title);
     inner.replace("\\`", "`")
+}
+
+/// Whether `command` sets `GH_HOST` to a host other than github.com, so
+/// what `gh` changes is not a pull request this can name.
+fn elsewhere(command: &[&str]) -> bool {
+    command.iter().any(|word| {
+        word.strip_prefix("GH_HOST=")
+            .is_some_and(|host| !is_github(host))
+    })
+}
+
+fn is_github(host: &str) -> bool {
+    host.eq_ignore_ascii_case("github.com")
 }
 
 /// At most `limit` bytes of `text`, cut at a character.
@@ -186,6 +227,61 @@ fn gh<'a>(command: &'a [&'a str], subcommand: &str) -> Option<&'a [&'a str]> {
     Some(&command[at + 2..])
 }
 
+/// `gh pr` options that take a value as the next word, for every verb
+/// read; `merge` and `review` have their own, where `-r`, `-m`, and `-c`
+/// are switches.
+const PR_VALUES: &[&str] = &[
+    "--add-assignee",
+    "--add-label",
+    "--add-project",
+    "--add-reviewer",
+    "--assignee",
+    "--base",
+    "--body",
+    "--body-file",
+    "--comment",
+    "--head",
+    "--label",
+    "--milestone",
+    "--project",
+    "--recover",
+    "--remove-assignee",
+    "--remove-label",
+    "--remove-project",
+    "--remove-reviewer",
+    "--repo",
+    "--reviewer",
+    "--template",
+    "--title",
+    "-B",
+    "-F",
+    "-H",
+    "-R",
+    "-T",
+    "-a",
+    "-b",
+    "-c",
+    "-l",
+    "-m",
+    "-p",
+    "-r",
+    "-t",
+];
+const REVIEW_VALUES: &[&str] = &["--body", "--body-file", "--repo", "-F", "-R", "-b"];
+const MERGE_VALUES: &[&str] = &[
+    "--author-email",
+    "--body",
+    "--body-file",
+    "--match-head-commit",
+    "--repo",
+    "--subject",
+    "-A",
+    "-F",
+    "-R",
+    "-b",
+    "-t",
+];
+
 /// A `gh pr` command that changes a pull request.
 fn gh_pr(command: &[&str]) -> Option<Work> {
     let (verb, args) = gh(command, "pr")?.split_first()?;
@@ -203,28 +299,40 @@ fn gh_pr(command: &[&str]) -> Option<Work> {
         "reopen" => Action::Reopened,
         _ => return None,
     };
+    let values = match *verb {
+        "merge" => MERGE_VALUES,
+        "review" => REVIEW_VALUES,
+        _ => PR_VALUES,
+    };
     let mut repo = None;
-    let mut named = None;
+    let mut target = None;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
-        match *arg {
-            "-R" | "--repo" => repo = args.next().copied(),
-            arg if arg.starts_with("--repo=") => repo = arg.strip_prefix("--repo="),
-            arg if named.is_none() && !arg.starts_with('-') => named = Some(arg),
-            _ => {}
+        if let Some(value) = arg.strip_prefix("--repo=") {
+            repo = Some(value);
+        } else if values.contains(arg) {
+            let value = args.next().copied();
+            if matches!(*arg, "-R" | "--repo") {
+                repo = value;
+            }
+        } else if target.is_none() && !arg.starts_with('-') {
+            target = Some(*arg);
         }
     }
     // The pull request a command names: its address, or its number with
-    // `--repo`. Without either, its own messages name it.
-    let named = named.and_then(|arg| {
-        PullRequest::parse(arg).or_else(|| {
-            let number = arg.strip_prefix('#').unwrap_or(arg).parse().ok()?;
-            PullRequest::new(repo?, number, Vec::new())
-        })
-    });
+    // `--repo`. Without either, its own messages name it. `create` takes
+    // none: what it makes is in what it prints.
+    let named = target
+        .filter(|_| action != Action::Created)
+        .and_then(|arg| {
+            PullRequest::parse(arg).or_else(|| {
+                let number = arg.strip_prefix('#').unwrap_or(arg).parse().ok()?;
+                PullRequest::new(repo?, number, Vec::new())
+            })
+        });
     Some(Work {
-        actions: vec![action],
-        named: named.into_iter().collect(),
+        action,
+        named,
         gh_pr: true,
     })
 }
@@ -272,6 +380,7 @@ fn gh_api(command: &[&str]) -> Option<Work> {
         }
         let value = inline.or_else(|| args.next().copied());
         match name {
+            "--hostname" if !value.is_some_and(is_github) => return None,
             "-X" | "--method" => method = value,
             "-f" | "-F" | "--field" | "--raw-field" => fields.extend(value),
             "--input" => fields.push(""),
@@ -307,8 +416,8 @@ fn gh_api(command: &[&str]) -> Option<Work> {
         None => Action::Edited,
     };
     Some(Work {
-        actions: vec![action],
-        named: vec![pull],
+        action,
+        named: Some(pull),
         gh_pr: false,
     })
 }
@@ -326,8 +435,9 @@ fn git_push(command: &[&str]) -> Option<Work> {
             arg if arg.starts_with('-') => {}
             "push" => {
                 return Some(Work {
-                    actions: vec![Action::Pushed],
-                    ..Work::default()
+                    action: Action::Pushed,
+                    named: None,
+                    gh_pr: false,
                 });
             }
             _ => return None,

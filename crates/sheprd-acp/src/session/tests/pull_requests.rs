@@ -98,3 +98,39 @@ fn a_full_list_refuses_a_new_pull_request() {
         [PullRequestAction::Merged]
     );
 }
+
+#[test]
+fn switching_agents_keeps_the_listed_pull_requests() {
+    let mut harness = harnesses::choosing();
+    harness.command(
+        1,
+        Command::AddPullRequest {
+            url: "https://github.com/o/r/pull/7".to_owned(),
+        },
+    );
+    let client = harness.subscribe(2, false, None);
+    drain(&client);
+    harnesses::set_agent(&mut harness, Agent::Codex);
+    let Some(ServerMessage::Snapshot { transcript, .. }) = drain(&client).into_iter().next() else {
+        panic!("the client starts over from a snapshot");
+    };
+    assert_eq!(transcript.pull_requests.len(), 1);
+    assert_eq!(harness.transcript().pull_requests, transcript.pull_requests);
+}
+
+#[test]
+fn a_command_of_several_lines_is_read_from_the_calls_input() {
+    let mut harness = ready();
+    let command = "cd repo\ngit status\ngh pr merge 7 --repo o/r";
+    harness.update(json!({
+        "sessionUpdate": "tool_call", "toolCallId": "merge",
+        "title": crate::harness::out::command_title(command), "kind": "execute",
+        "status": "in_progress", "rawInput": {"command": command},
+    }));
+    harness.update(json!({
+        "sessionUpdate": "tool_call_update", "toolCallId": "merge", "status": "completed",
+    }));
+    let pulls = &harness.transcript().pull_requests;
+    assert_eq!(pulls.len(), 1, "the title shows only `cd repo`");
+    assert_eq!(pulls[0].actions, [PullRequestAction::Merged]);
+}

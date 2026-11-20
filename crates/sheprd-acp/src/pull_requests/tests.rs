@@ -19,7 +19,7 @@ fn call(title: &str, output: &str) -> Tool {
 
 /// What `found` read, as `(OWNER/REPO#NUMBER, actions)`.
 fn read(title: &str, output: &str) -> Vec<(String, Vec<Action>)> {
-    found(&call(title, output))
+    found(&call(title, output), None)
         .into_iter()
         .map(|pull| (format!("{}#{}", pull.repo, pull.number), pull.actions))
         .collect()
@@ -111,13 +111,13 @@ fn commands_that_only_read_name_no_pull_request() {
 fn a_call_that_failed_or_did_not_run_a_command_names_none() {
     let mut failed = call("gh pr merge 7 -R o/r", "");
     failed.status = ToolStatus::Failed;
-    assert!(found(&failed).is_empty());
+    assert!(found(&failed, None).is_empty());
     let mut running = call("gh pr merge 7 -R o/r", "");
     running.status = ToolStatus::InProgress;
-    assert!(found(&running).is_empty());
+    assert!(found(&running, None).is_empty());
     let mut edit = call("gh pr merge 7 -R o/r", "");
     edit.kind = ToolKind::Edit;
-    assert!(found(&edit).is_empty());
+    assert!(found(&edit, None).is_empty());
 }
 
 #[test]
@@ -227,4 +227,91 @@ fn quotes_and_separators_split_words_as_a_shell_would() {
     assert!(runs("/opt/homebrew/bin/gh", "gh"));
     assert!(runs(r"C:\bin\gh.exe", "gh"));
     assert!(!runs("ghq", "gh"));
+}
+
+#[test]
+fn a_command_of_several_lines_is_read_from_its_title_or_whole() {
+    // The title native Claude and Codex give a command of several lines.
+    let title = crate::harness::out::command_title(
+        "gh pr create --title \"feat: rail\" --body \"$(cat <<'EOF'\nSummary\nEOF\n)\"",
+    );
+    assert!(title.ends_with("more lines)"), "{title}");
+    let output = "https://github.com/o/r/pull/7";
+    assert_eq!(read(&title, output), one("o/r#7", Action::Created));
+    // A command whose `gh` is past the first line is read from the whole
+    // command the session kept.
+    let whole = "cd repo\ngit status\ngh pr merge 7 --repo o/r";
+    let tool = call(&crate::harness::out::command_title(whole), "");
+    assert!(found(&tool, None).is_empty(), "the title alone misses it");
+    let pulls = found(&tool, Some(whole));
+    assert_eq!(pulls.len(), 1);
+    assert_eq!(pulls[0].actions, [Action::Merged]);
+}
+
+#[test]
+fn each_pull_request_gets_only_what_its_own_command_did() {
+    let pulls = read(
+        "gh pr merge 1 -R o/r && gh pr close 2 -R o/r",
+        "✓ Merged pull request o/r#1 (One)\n✓ Closed pull request o/r#2 (Two)",
+    );
+    assert_eq!(
+        pulls,
+        vec![
+            ("o/r#1".to_owned(), vec![Action::Merged]),
+            ("o/r#2".to_owned(), vec![Action::Closed]),
+        ]
+    );
+    // What a command that named its pull request printed adds no other.
+    assert_eq!(
+        read(
+            "gh pr comment 7 -R o/r --body hi",
+            "see https://github.com/o/r/pull/8"
+        ),
+        one("o/r#7", Action::Commented)
+    );
+}
+
+#[test]
+fn option_values_are_never_taken_for_the_pull_request() {
+    assert_eq!(
+        read(
+            "gh pr comment --body https://github.com/o/r/pull/99 7 -R o/r",
+            "https://github.com/o/r/pull/7#issuecomment-1",
+        ),
+        one("o/r#7", Action::Commented)
+    );
+    assert_eq!(
+        read(
+            "gh pr create --title 5 --body https://github.com/o/r/pull/99 -R o/r",
+            "https://github.com/o/r/pull/12",
+        ),
+        one("o/r#12", Action::Created)
+    );
+    // `-c` is a switch for `review` and `-r` one for `merge`.
+    assert_eq!(
+        read("gh pr review -c -b looks-good 7 -R o/r", ""),
+        one("o/r#7", Action::Reviewed)
+    );
+    assert_eq!(
+        read("gh pr merge -r 7 -R o/r", ""),
+        one("o/r#7", Action::Merged)
+    );
+}
+
+#[test]
+fn a_command_aimed_at_another_host_names_nothing() {
+    for command in [
+        "gh api --hostname github.example.com -X PUT repos/o/r/pulls/7/merge",
+        "gh api --hostname=github.example.com -X PUT repos/o/r/pulls/7/merge",
+        "GH_HOST=github.example.com gh pr merge 7 -R o/r",
+    ] {
+        assert_eq!(read(command, ""), [], "{command}");
+    }
+    assert_eq!(
+        read(
+            "gh api --hostname github.com -X PUT repos/o/r/pulls/7/merge",
+            ""
+        ),
+        one("o/r#7", Action::Merged)
+    );
 }

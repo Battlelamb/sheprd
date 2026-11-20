@@ -179,6 +179,8 @@ pub(crate) struct Session<R: FnMut(Update)> {
     acp_session: Option<wire::SessionId>,
     activity: Option<Activity>,
     asked: HashMap<PermissionId, Asked>,
+    /// The whole commands of shell calls, which their titles cut short.
+    commands: pull_requests::Commands,
     config: Config,
     /// What the agent has been told besides the person's words.
     context: Context,
@@ -248,6 +250,7 @@ impl<R: FnMut(Update)> Session<R> {
             acp_session: None,
             activity: None,
             asked: HashMap::new(),
+            commands: pull_requests::Commands::default(),
             config,
             context,
             epoch: Uuid::new_v4(),

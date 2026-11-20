@@ -200,6 +200,26 @@ async fn until(seconds: u64, mut check: impl FnMut() -> bool) {
     panic!("never happened");
 }
 
+/// a, b, and c in one fleet, none started: no daemon task rewrites
+/// grants or publishes a record behind a test that applies them itself.
+/// Started, b's follower runs `grants::apply` on every change at the same
+/// time as the test's own call, and the two rewrite the same records.
+async fn idle() -> (Node, Node, Node) {
+    let (http, _, _) = relay().await;
+    let (a, b, c) = (
+        Node::new(http, 1).await,
+        Node::new(http, 2).await,
+        Node::new(http, 3).await,
+    );
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    join(&a, &b);
+    join(&a, &c);
+    for node in [&b, &c] {
+        node.fleet.receive(a.ops(), now_ms()).unwrap();
+    }
+    (a, b, c)
+}
+
 /// `node` with three computers in one fleet, founded by the first, all
 /// listening on one relay.
 async fn three() -> (Node, Node, Node) {

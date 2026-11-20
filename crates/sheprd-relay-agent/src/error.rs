@@ -47,8 +47,6 @@ pub enum Error {
     Removal(#[from] crate::removal::Error),
     #[error("more desktops would be cut off than the agent can keep track of")]
     Revoked,
-    #[error("a suspended member has had more keys than the agent can keep track of")]
-    SuspendedKeys,
     #[error("could not start the async runtime")]
     Runtime(#[source] std::io::Error),
     #[error("a session's stream broke")]
@@ -61,6 +59,8 @@ pub enum Error {
     },
     #[error("{} is not the agent's keys", path.display())]
     StoredKey { path: PathBuf },
+    #[error("a suspended member has had more keys than the agent can keep track of")]
+    SuspendedKeys,
     #[error("{} is larger than {limit} bytes", path.display())]
     TooLarge { limit: u64, path: PathBuf },
     #[cfg(feature = "runtime")]

@@ -95,13 +95,16 @@ struct FleetFallbackTests {
         #expect(op.seq == 3)
     }
 
-    @Test func withoutAFreshReadTheKeysOfWhatWasPostedStay() {
-        #expect(FleetPendingLink.outcome(freshRead: true) == .answered)
-        #expect(FleetPendingLink.outcome(freshRead: false) == .unknown)
-        // A read that failed after a post settles nothing it could drop.
-        let pending = [FleetRecoveryTests.pending("aa")]
-        let settled = FleetPendingLink.settle(pending, linked: [], outcome: FleetPendingLink.outcome(freshRead: false))
-        #expect(settled.waiting == pending)
+    @Test func aLaggingComputersReadDropsNoKeys() {
+        // A link taken by a computer that lags (it holds it waiting for its
+        // parents) is missing from that computer's read, and from any
+        // other that has not caught up: absence alone drops nothing.
+        let pending = [FleetRecoveryTests.pending("aa"), FleetRecoveryTests.pending("bb")]
+        let lagging = FleetPendingLink.settle(pending, linked: [])
+        #expect(lagging.done.isEmpty && lagging.waiting == pending)
+        // Only an explicit refusal of a link drops it, and only that one.
+        let refused = FleetPendingLink.settle(pending, linked: [], refused: ["bb"])
+        #expect(refused.waiting == [pending[0]])
     }
 
     @Test func aLostOrFailedAnswerKeepsWhatTheRequestCarried() {

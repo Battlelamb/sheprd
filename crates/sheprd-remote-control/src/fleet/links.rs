@@ -98,53 +98,89 @@ pub(crate) fn apply(state: &State, fleet: &Fleet, now_ms: u64) -> Result<bool> {
     // A device this module admitted that is gone from `devices.json` was
     // revoked here by hand: a local refusal, kept while its link stands,
     // suspended or not, so a suspension lifted later never brings it back.
+    // One this module set out to revoke itself (`revoking`, written before
+    // the revocation) is not a refusal, whichever write a stop cut short.
     kept.refused = before
         .admitted
         .keys()
-        .filter(|id| auth.devices().get(&DeviceId((*id).clone())).is_none())
+        .filter(|id| {
+            !before.revoking.contains(*id) && auth.devices().get(&DeviceId((*id).clone())).is_none()
+        })
         .chain(&before.refused)
         .filter(|id| linked.contains(*id))
         .cloned()
         .collect();
-    for gone in before
+    let gone: Vec<String> = before
         .admitted
         .keys()
         .filter(|id| !wanted.contains_key(*id))
-    {
-        changed |= auth.revoke(&DeviceId(gone.clone()))?;
-    }
+        .cloned()
+        .collect();
+    // The relay keys each kept device moves to: those of its bundle, while
+    // the keys it holds are ones this module set (`admitted`), or was
+    // setting when a stop cut it short (`setting`); keys the phone sent
+    // itself (`POST /api/relay`) stay.
+    let mut moves: BTreeMap<String, Option<RelayKeys>> = BTreeMap::new();
     for (id, device) in &wanted {
-        let id = DeviceId(id.clone());
-        if kept.refused.contains(&id.0) {
+        let key = DeviceId(id.clone());
+        let (Some(record), Some(set)) = (auth.devices().get(&key), before.admitted.get(id)) else {
+            continue;
+        };
+        if kept.refused.contains(id) {
             continue;
         }
         let relay = device
             .relay
             .clone()
-            .filter(|keys| !auth.devices().relay_taken(&id, keys));
-        if let Some(record) = auth.devices().get(&id) {
-            let Some(set) = before.admitted.get(&id.0) else {
+            .filter(|keys| !auth.devices().relay_taken(&key, keys));
+        let ours = record.relay == *set || before.setting.get(id) == Some(&record.relay);
+        if ours && record.relay != relay {
+            moves.insert(id.clone(), relay);
+        }
+    }
+    // What is about to change is written first, so a stop between this
+    // file and `devices.json` leaves both readable as this module's work.
+    if !gone.is_empty() || !moves.is_empty() {
+        let mut intent = stored.clone();
+        intent.revoking.extend(gone.iter().cloned());
+        intent.setting.extend(moves.clone());
+        write(&file, &intent)?;
+    }
+    for id in &gone {
+        changed |= auth.revoke(&DeviceId(id.clone()))?;
+    }
+    for (id, device) in &wanted {
+        if kept.refused.contains(id) {
+            continue;
+        }
+        let key = DeviceId(id.clone());
+        if auth.devices().get(&key).is_some() {
+            let Some(set) = before.admitted.get(id) else {
                 // A device this module did not admit is not its own.
                 continue;
             };
-            // Its relay keys follow the bundle while they are the ones
-            // this module set; keys the phone sent itself
-            // (`POST /api/relay`) stay.
-            if record.relay == *set && record.relay != relay {
-                changed |= auth
-                    .devices_mut()
-                    .replace_relay(&id, relay.clone(), now_ms)?;
-                kept.admitted.insert(id.0, relay);
-            } else {
-                kept.admitted.insert(id.0, set.clone());
+            match moves.get(id) {
+                Some(relay) => {
+                    changed |= auth
+                        .devices_mut()
+                        .replace_relay(&key, relay.clone(), now_ms)?;
+                    kept.admitted.insert(id.clone(), relay.clone());
+                }
+                None => {
+                    kept.admitted.insert(id.clone(), set.clone());
+                }
             }
             continue;
         }
-        kept.admitted.insert(id.0.clone(), relay.clone());
+        let relay = device
+            .relay
+            .clone()
+            .filter(|keys| !auth.devices().relay_taken(&key, keys));
+        kept.admitted.insert(id.clone(), relay.clone());
         auth.devices_mut().add_with(
             NewDevice {
                 app: None,
-                id,
+                id: key,
                 name: device.name.clone(),
                 public_key: device.public_key.clone(),
                 relay,
@@ -161,8 +197,7 @@ pub(crate) fn apply(state: &State, fleet: &Fleet, now_ms: u64) -> Result<bool> {
     }
     drop(auth);
     if kept != stored {
-        let json = serde_json::to_vec(&kept).map_err(|_| crate::desktop::Error::RecordFormat)?;
-        files::write_private(&file, &json)?;
+        write(&file, &kept)?;
     }
     if changed {
         tracing::info!(
@@ -171,6 +206,12 @@ pub(crate) fn apply(state: &State, fleet: &Fleet, now_ms: u64) -> Result<bool> {
         );
     }
     Ok(changed)
+}
+
+fn write(file: &std::path::Path, kept: &Kept) -> Result<()> {
+    let json = serde_json::to_vec(kept).map_err(|_| crate::desktop::Error::RecordFormat)?;
+    files::write_private(file, &json)?;
+    Ok(())
 }
 
 /// What `fleet/links.json` keeps.
@@ -183,6 +224,14 @@ struct Kept {
     /// again while it stands, whatever suspensions come and go.
     #[serde(default)]
     refused: BTreeSet<String>,
+    /// Devices this module is revoking itself, written before the
+    /// revocation, so one a stop cut short is not taken for a refusal.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    revoking: BTreeSet<String>,
+    /// Relay keys this module is moving devices to, written before the
+    /// move, so keys a stop left on a device still read as its own.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    setting: BTreeMap<String, Option<RelayKeys>>,
 }
 
 /// What this module kept. Older files read too: a map of admitted ids to
@@ -197,13 +246,13 @@ fn read(file: &std::path::Path) -> Result<Kept> {
     if let Ok(admitted) = serde_json::from_slice(&bytes) {
         return Ok(Kept {
             admitted,
-            refused: BTreeSet::new(),
+            ..Kept::default()
         });
     }
     let ids: BTreeSet<String> = serde_json::from_slice(&bytes).unwrap_or_default();
     Ok(Kept {
         admitted: ids.into_iter().map(|id| (id, None)).collect(),
-        refused: BTreeSet::new(),
+        ..Kept::default()
     })
 }
 

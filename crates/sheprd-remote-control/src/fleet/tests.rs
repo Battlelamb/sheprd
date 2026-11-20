@@ -34,6 +34,8 @@ mod joining;
 #[cfg(unix)]
 mod leaving;
 #[cfg(unix)]
+mod link_intents;
+#[cfg(unix)]
 mod link_recovery;
 #[cfg(unix)]
 mod offline;

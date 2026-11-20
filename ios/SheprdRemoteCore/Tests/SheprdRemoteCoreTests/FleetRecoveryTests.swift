@@ -62,15 +62,16 @@ struct FleetRecoveryTests {
     @Test func aLinkWithNoReplyKeepsItsKeyUntilTheFleetSays() {
         let pending = [Self.pending("aa"), Self.pending("bb")]
         // No answer: nothing is known yet, so both wait.
-        let unknown = FleetPendingLink.settle(pending, linked: [], outcome: .unknown)
+        let unknown = FleetPendingLink.settle(pending, linked: [])
         #expect(unknown.done.isEmpty && unknown.waiting == pending)
         // The fleet later shows one linked: its key becomes a computer, the
         // other still waits.
-        let later = FleetPendingLink.settle(pending, linked: ["AA"], outcome: .unknown)
+        let later = FleetPendingLink.settle(pending, linked: ["AA"])
         #expect(later.done == [pending[0]] && later.waiting == [pending[1]])
-        // A computer answered: what it does not hold never landed.
-        let answered = FleetPendingLink.settle(pending, linked: ["aa"], outcome: .answered)
-        #expect(answered.done == [pending[0]] && answered.waiting.isEmpty)
+        // Refused by the computer that took it, and missing from its own
+        // read: that one goes, the other stays.
+        let refused = FleetPendingLink.settle(pending, linked: ["aa"], refused: ["aa", "BB"])
+        #expect(refused.done == [pending[0]] && refused.waiting.isEmpty)
     }
 
     @Test func aKeyMadeAgainReplacesTheOneWaiting() throws {

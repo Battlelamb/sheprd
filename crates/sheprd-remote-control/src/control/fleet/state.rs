@@ -11,7 +11,19 @@ use super::{
 use std::collections::{BTreeMap, BTreeSet};
 
 /// What a state's bytes start with, after [`DOMAIN`].
-const STATE: &[u8] = b"/state";
+const STATE: &[u8] = b"/state2";
+/// What a state's bytes started with before members carried `rotated`:
+/// checkpoints signed then still name such bytes, and still load.
+const STATE_V1: &[u8] = b"/state";
+
+/// Which layout a state's bytes have.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Layout {
+    /// Before members carried `rotated`.
+    V1,
+    /// With each member's `rotated`.
+    V2,
+}
 const MAX_LIVE: usize = MAX_COMPUTERS + MAX_PHONES;
 const MAX_ALL_HOSTS: usize = MAX_HOSTS + MAX_COMPUTERS;
 const MAX_DEVICE_KEY: usize = 65;
@@ -116,9 +128,18 @@ impl State {
 
     /// The canonical bytes a checkpoint hashes.
     pub fn encode(&self) -> Result<Vec<u8>> {
+        self.write(Layout::V2)
+    }
+
+    /// The bytes in `layout`. [`Layout::V1`] leaves each member's
+    /// `rotated` out, as the builds that signed older checkpoints did.
+    pub(super) fn write(&self, layout: Layout) -> Result<Vec<u8>> {
         let mut writer = Writer::new();
         writer.raw(DOMAIN);
-        writer.raw(STATE);
+        writer.raw(match layout {
+            Layout::V1 => STATE_V1,
+            Layout::V2 => STATE,
+        });
         writer.count(self.members.len())?;
         for (id, member) in &self.members {
             writer.raw(&id.0);
@@ -128,7 +149,9 @@ impl State {
                 Ok(())
             })?;
             writer.u64(member.seq);
-            writer.u64(member.rotated);
+            if layout == Layout::V2 {
+                writer.u64(member.rotated);
+            }
         }
         writer.count(self.tombstones.len())?;
         self.tombstones.iter().for_each(|id| writer.raw(&id.0));
@@ -178,6 +201,17 @@ impl State {
         Ok(sha256(&[&self.encode()?]))
     }
 
+    /// Whether a checkpoint naming `hash` names this state: in today's
+    /// layout, or, for one signed before members carried `rotated`, in
+    /// that one, which leaves `rotated` out. A state read from such bytes
+    /// has every `rotated` at 0: keys rotated before it rank as admitted.
+    pub fn named_by(&self, hash: &[u8; 32]) -> Result<bool> {
+        if self.hash()? == *hash {
+            return Ok(true);
+        }
+        Ok(sha256(&[&self.write(Layout::V1)?]) == *hash)
+    }
+
     /// Reads a state, refusing anything out of order, out of bounds, or
     /// that would encode differently.
     pub fn decode(bytes: &[u8]) -> Result<Self> {
@@ -185,9 +219,18 @@ impl State {
             return Err(Error::Bounds);
         }
         let mut reader = Reader::new(bytes);
-        if reader.raw(DOMAIN.len())? != DOMAIN || reader.raw(STATE.len())? != STATE {
+        if reader.raw(DOMAIN.len())? != DOMAIN {
             return Err(Error::Encoding);
         }
+        // The longer prefix first: today's starts with the older one.
+        let layout = if bytes[DOMAIN.len()..].starts_with(STATE) {
+            reader.raw(STATE.len())?;
+            Layout::V2
+        } else if reader.raw(STATE_V1.len())? == STATE_V1 {
+            Layout::V1
+        } else {
+            return Err(Error::Encoding);
+        };
         let mut state = Self::default();
         for _ in 0..reader.count(MAX_LIVE)? {
             let id = MemberId(reader.array()?);
@@ -195,7 +238,10 @@ impl State {
                 bundle: Bundle::read(&mut reader)?,
                 admitted_by: reader.option(|reader| reader.array().map(MemberId))?,
                 seq: reader.u64()?,
-                rotated: reader.u64()?,
+                rotated: match layout {
+                    Layout::V1 => 0,
+                    Layout::V2 => reader.u64()?,
+                },
             };
             if member.bundle.id() != id {
                 return Err(Error::Invalid);
@@ -244,7 +290,7 @@ impl State {
         reader.finish()?;
         // Maps drop duplicates and sort; the bytes must already have been
         // that way.
-        if state.encode()? != bytes {
+        if state.write(layout)? != bytes {
             return Err(Error::Encoding);
         }
         Ok(state)

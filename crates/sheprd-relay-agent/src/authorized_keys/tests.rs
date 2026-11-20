@@ -107,3 +107,18 @@ fn a_users_line_ending_in_the_marker_is_not_the_fleets() {
     assert_eq!(fleet_tag(&format!("{} sheprd-fleet:aaaa:m1", key(1))), None);
     assert_eq!(fleet_tag(&fleet_line("aaaa:m1", &key(1))), Some("aaaa:m1"));
 }
+
+#[test]
+fn lines_in_another_encoding_are_kept_byte_for_byte() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("authorized_keys");
+    // Latin-1 in a comment and in a forced command, and a CRLF line.
+    let user =
+        b"command=\"echo caf\xe9\" ssh-ed25519 AAAA ren\xe9@desk\nssh-rsa BBBB me\r\n".to_vec();
+    fs::write(&path, &user).unwrap();
+    set_fleet(&path, "aaaa", &[member("m1", 1)]).unwrap();
+    let written = fs::read(&path).unwrap();
+    assert!(written.starts_with(&user), "{written:?}");
+    set_fleet(&path, "aaaa", &[]).unwrap();
+    assert_eq!(fs::read(&path).unwrap(), user);
+}

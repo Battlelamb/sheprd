@@ -387,6 +387,7 @@ impl Held {
             fleet: access.fleet,
             removed: access.removed.len(),
             revoked,
+            crowded: self.crowded.clone(),
             suspended: self.suspended.clone(),
         }))
     }
@@ -465,6 +466,11 @@ pub struct Report {
     pub fleet: Id,
     /// Members removed for good.
     pub removed: usize,
+    /// Members whose new keys wait for room on the relays: Sheprd applies
+    /// the access file again while any do, as room may have freed with
+    /// the digest unchanged.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub crowded: BTreeSet<Id>,
     /// Enrolled desktops cut off because a member removed for good named
     /// their keys: `authorize` enrolls one again.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

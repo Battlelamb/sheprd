@@ -92,8 +92,8 @@ struct Composer: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             clipboardHasImage = UIPasteboard.general.hasImages
         }
-        .sensoryFeedback(.start, trigger: dictation.phase == .listening) { _, now in now }
-        .sensoryFeedback(.impact(weight: .light), trigger: sends)
+        .haptic(.start, trigger: dictation.phase == .listening) { _, now in now }
+        .haptic(.impact(weight: .light), trigger: sends)
         .onAppear {
             model.fleet.composerOpened(id, in: key)
             // Memory first, which keeps uploads already under way; the
@@ -188,7 +188,10 @@ struct Composer: View {
             Button {
                 if !stopping {
                     sendPrompt()
-                } else if destination == .terminal {
+                    return
+                }
+                Feedback.shared.touch(.stop)
+                if destination == .terminal {
                     toTerminal(keys: ["esc"])
                 } else {
                     send(.cancel)

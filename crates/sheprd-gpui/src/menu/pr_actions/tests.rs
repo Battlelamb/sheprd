@@ -4,6 +4,7 @@ use crate::{pr_actions::Action, pull_request::MergeMethod, sidebar::layout_tests
 use gpui::{Entity, TestAppContext, VisualTestContext, point, px, size};
 
 mod en_xa;
+mod queue;
 mod stacked;
 
 fn input() -> crate::pull_request::Input {

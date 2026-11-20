@@ -27,6 +27,7 @@ impl Localize for Error {
             ),
             Self::Caffeine(error) => error.localize(),
             Self::Chat(error) => error.localize(),
+            Self::ChatPullRequests(error) => error.localize(),
             Self::Cleanup {
                 source,
                 path: file,

@@ -545,7 +545,7 @@ pub(super) async fn rename_workspace(
             name: name.to_owned(),
         };
         let keeper = crate::hub::Keeper::Saved {
-            tab: 0,
+            tab: crate::hub::TabRef::File(0),
             terminal: String::new(),
         };
         crate::native::changes::arrange(&state, keeper, op).await?;

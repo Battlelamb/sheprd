@@ -6,6 +6,7 @@
 //! merge queue (`actions`), each after the view's confirmation.
 
 mod actions;
+mod inferred;
 
 use super::{Event, OrchestratorView};
 use crate::{
@@ -17,8 +18,19 @@ use crate::{
     },
 };
 use gpui::{prelude::*, *};
+use std::borrow::Cow;
 
 pub(super) use actions::{Change, confirm_text};
+pub(super) use inferred::infer;
+
+/// Where a stack came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Source {
+    /// GitHub keeps it: it can be merged and queued as one.
+    Github,
+    /// Inferred from branch bases: each layer still merges on its own.
+    Inferred,
+}
 
 /// The stack popover's state on the view.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -54,7 +66,7 @@ impl OrchestratorView {
         let pr = self.open_pull_request()?;
         let look = &self.look;
         let theme = &look.theme;
-        let Some((stack, position)) = pr.stack() else {
+        let Some((stack, position, source)) = self.open_stack(pr) else {
             let queue = pr.queue?;
             return Some(
                 look.tag(
@@ -94,7 +106,7 @@ impl OrchestratorView {
             }))
             .cursor_pointer()
             .text_size(look.small())
-            .child(look.dot(summary_color(pr, stack, position, theme), 6.))
+            .child(look.dot(summary_color(pr, &stack, position, theme), 6.))
             .child(fl!("pr-stack-chip", position = position, size = stack.size))
             .child(look.icon("icons/chevron-down.svg", 10., theme.muted))
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -129,7 +141,7 @@ impl OrchestratorView {
         .with_priority(1);
         let popover = deferred(anchored().snap_to_window_with_margin(px(8.)).child(
             crate::motion::pop_in(
-                self.stack_popover(pr, stack, position, cx),
+                self.stack_popover(pr, &stack, position, source, cx),
                 "orchestrator-stack-popover",
             ),
         ))
@@ -144,11 +156,25 @@ impl OrchestratorView {
         )
     }
 
+    /// The stack the open pull request is a layer of: GitHub's own, else one
+    /// inferred from the list's branch bases.
+    fn open_stack<'a>(&'a self, pr: &'a PullRequest) -> Option<(Cow<'a, Stack>, u64, Source)> {
+        if let Some((stack, position)) = pr.stack() {
+            return Some((Cow::Borrowed(stack), position, Source::Github));
+        }
+        let key = &self.detail.as_ref()?.key;
+        let current = self.item(key)?;
+        let snapshot = &self.repos[self.repo_of(key)?].snapshot;
+        let (stack, position) = infer(&snapshot.items, &snapshot.pr_status, current)?;
+        Some((Cow::Owned(stack), position, Source::Inferred))
+    }
+
     fn stack_popover(
         &self,
         pr: &PullRequest,
         stack: &Stack,
         position: u64,
+        source: Source,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let look = &self.look;
@@ -169,9 +195,13 @@ impl OrchestratorView {
             .border_color(rgb(theme.active))
             .shadow_lg()
             .overflow_hidden()
-            .child(self.stack_verdict(pr, stack, position, cx))
-            .child(self.stack_layers(stack, position, cx))
-            .children(self.stack_actions(pr, stack, position, cx))
+            .child(self.stack_verdict(pr, stack, position, source, cx))
+            .child(self.stack_layers(stack, position, source, cx))
+            .children(
+                (source == Source::Github)
+                    .then(|| self.stack_actions(pr, stack, position, cx))
+                    .flatten(),
+            )
     }
 
     /// The panel leading the popover: the merge queue entry while there is
@@ -181,6 +211,7 @@ impl OrchestratorView {
         pr: &PullRequest,
         stack: &Stack,
         position: u64,
+        source: Source,
         cx: &mut Context<Self>,
     ) -> Div {
         let look = &self.look;
@@ -204,7 +235,10 @@ impl OrchestratorView {
             }
             (None, Verdict::Ready { count }) => (
                 fl!("pr-stack-ready", count = count),
-                fl!("pr-stack-ready-detail", count = count),
+                match source {
+                    Source::Github => fl!("pr-stack-ready-detail", count = count),
+                    Source::Inferred => fl!("pr-stack-inferred-ready-detail", count = count),
+                },
                 None,
             ),
             (None, Verdict::Unread) => {
@@ -250,7 +284,13 @@ impl OrchestratorView {
     }
 
     /// Each layer as a step, bottom first, under a line naming the base.
-    fn stack_layers(&self, stack: &Stack, position: u64, cx: &mut Context<Self>) -> Div {
+    fn stack_layers(
+        &self,
+        stack: &Stack,
+        position: u64,
+        source: Source,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let look = &self.look;
         let theme = &look.theme;
         let steps = stack.layers.iter().enumerate().map(|(index, layer)| {
@@ -308,6 +348,12 @@ impl OrchestratorView {
                 size = stack.size,
                 base = stack.base.as_str()
             )))
+            .when(source == Source::Inferred, |el| {
+                el.child(
+                    look.muted(fl!("pr-stack-inferred"))
+                        .debug_selector(|| "orchestrator-stack-inferred".into()),
+                )
+            })
             .child(div().flex().flex_wrap().gap_1().children(steps))
             .when(stack.truncated(), |el| {
                 el.child(look.muted(fl!(

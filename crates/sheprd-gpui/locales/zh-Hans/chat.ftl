@@ -149,6 +149,7 @@ chat-summary-hide = 隐藏
 
 chat-rail-plan = 计划
 chat-rail-changed = 更改
+chat-rail-pull-requests = 拉取请求
 chat-rail-subagents = 子智能体
 chat-rail-shells = Shell
 chat-rail-monitors = 监视器

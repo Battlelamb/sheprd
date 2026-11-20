@@ -46,6 +46,10 @@ pub struct PullRequest {
     pub merge_state_status: MergeState,
     #[serde(default)]
     pub review_decision: ReviewDecision,
+    /// Waiting in the repository's merge queue, which GitHub merges on its
+    /// own once the queue's checks pass.
+    #[serde(default)]
+    pub is_in_merge_queue: bool,
     #[serde(skip)]
     pub checks_summary: String,
     #[serde(default)]
@@ -389,6 +393,8 @@ pub enum Tone {
     Held,
     /// Merged.
     Merged,
+    /// In the merge queue, so GitHub will merge it without anyone acting.
+    Queued,
     /// Ready to merge.
     Ready,
     /// Checks are running, a review is required, or GitHub has not decided.
@@ -451,7 +457,13 @@ impl PullRequest {
     /// Lifecycle takes precedence over the [`Standing`]. Shared by sidebar
     /// and titlebar badges and the workspace menu.
     pub fn tone(&self) -> Tone {
-        lifecycle_tone(self.state, self.is_draft, || self.standing_tone())
+        lifecycle_tone(self.state, self.is_draft, || {
+            if self.is_in_merge_queue {
+                Tone::Queued
+            } else {
+                self.standing_tone()
+            }
+        })
     }
 
     fn standing_tone(&self) -> Tone {

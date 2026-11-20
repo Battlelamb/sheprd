@@ -24,11 +24,24 @@ pub enum ChatCommand {
         /// The pane, else the caller's own.
         pane: Option<String>,
     },
+    /// The pull requests the caller's chat lists in its rail, as the agent
+    /// of that chat.
+    PullRequests(ChatPrCommand),
     /// Show the chat view over a pane (`On`), or its terminal (`Off`).
     View {
         switch: Switch,
         /// The pane, else the caller's own.
         pane: Option<String>,
+    },
+}
+
+/// `chat pr`: read or add to the pull requests the caller's chat lists.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ChatPrCommand {
+    List,
+    /// Add the pull request at `url`, one the chat did not see `gh` change.
+    Add {
+        url: String,
     },
 }
 
@@ -39,6 +52,7 @@ pub(super) fn chat(args: &mut Args) -> Result<ChatCommand, CliError> {
     let switch = match verb.to_str() {
         Some("status" | "list") => return Ok(ChatCommand::Status),
         Some("shortcuts") => return Ok(ChatCommand::Shortcuts),
+        Some("pr") => return pull_requests(args).map(ChatCommand::PullRequests),
         Some("new") => {
             let pane = args.text_option("--pane")?;
             let agent = args
@@ -75,4 +89,21 @@ pub(super) fn chat(args: &mut Args) -> Result<ChatCommand, CliError> {
         switch,
         pane: args.text_option("--pane")?,
     })
+}
+
+fn pull_requests(args: &mut Args) -> Result<ChatPrCommand, CliError> {
+    let Some(verb) = args.verb() else {
+        return Ok(ChatPrCommand::List);
+    };
+    match verb.to_str() {
+        Some("list") => Ok(ChatPrCommand::List),
+        Some("add") => {
+            let url = args.required_text("a pull request URL")?;
+            // Refused here, before anything reaches the chat.
+            sheprd_chat_protocol::PullRequest::parse(url.trim())
+                .ok_or(CliError::InvalidValue("URL"))?;
+            Ok(ChatPrCommand::Add { url })
+        }
+        _ => Err(unknown("chat pr", verb)),
+    }
 }

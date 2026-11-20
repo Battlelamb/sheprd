@@ -157,7 +157,8 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
     "terminals": [{
       "tab": "t2", "label": "zsh", "cwd": "/Users/me/code/sheprd", "zoomed": false,
       "panes": [{"pane": "p2", "label": null, "cwd": "/Users/me/code/sheprd", "focused": true}],
-      "agent": {"name": "claude", "status": "done", "pane": "p2", "title": "Fix the build", "transcript": true},
+      "agent": {"name": "claude", "status": "done", "pane": "p2", "title": "Fix the build",
+                "transcript": true, "preview": "Fixed the build.\nPushed it."},
       "convert": {"agent": "claude", "pane": "p2"}
     }]
   }]
@@ -171,7 +172,22 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
 - A terminal's `agent` is the agent Herdr detects in the tab, such as
   `claude` run in a shell: `pane` is the pane it runs in and `title` its
   terminal title, both absent from older daemons. Home lists these tabs
-  with the chats, by status, and opens the agent's pane.
+  with the chats, by status, and opens the agent's pane, marking each row
+  with a terminal glyph so it reads apart from a chat.
+- A terminal agent's `preview` is what it last said, read off its visible
+  screen (`native/previews`): the last paragraph above the agent's own
+  input box, prompt, status, and footer, one list item to a line, at most
+  280 characters. When it waits on a numbered menu (a question, a
+  permission, an approval), it is what the menu asks, as
+  `sheprd_client::herdr::prompt` reads it, never the choices. The daemon reads only while a phone is connected: when
+  an agent first shows up, when it changes state, every 10 seconds while
+  it works, and 10 seconds after a failed read, at most 8 screens a pass;
+  a phone that comes back after none was connected has every screen read
+  again. A Herdr 2 screen is read by its core (`terminal.read`), so these
+  reads never take a screen a phone opens a terminal with. Skipping the agent's interface
+  is a best guess at Claude Code, Codex, and OpenCode's screens. It is
+  absent until read, when the screen shows nothing else, and from older
+  daemons.
 - `agent.transcript` is `true` when the agent's own conversation can be
   read as a chat: Claude Code or Codex in a Herdr 1 pane, as
   `sheprd_client::herdr::observe` lists them. The phone then opens it
@@ -347,10 +363,14 @@ app learns the pane it should open:
   this computer (all of them if it finds none or cannot run); `id` is
   what a request names.
 - `POST /api/v2/workspaces` takes `{"cwd", "agent", "branch"?, "prompt"?,
-  "start"?, "session"?}` and answers `{"workspace": "w3", "pane": "p7", "prompted":
+  "start"?, "session"?, "title"?}` and answers `{"workspace": "w3", "pane": "p7", "prompted":
   true, "started": true}`. The
   folder must be one `new` offers, and `branch`, when not blank, opens a
-  worktree. `session`, as home names it, opens it in that Herdr 1
+  worktree. A worktree of a folder that is a Herdr 1 repository workspace
+  is made by Herdr 1 from that workspace, so it joins the repository's
+  group, with its chat on herdr-core while one answers. `title`, when not
+  blank, names the new workspace (at most 200 characters, no control
+  characters). `session`, as home names it, opens it in that Herdr 1
   session; absent, or naming none the daemon follows, it opens where new
   workspaces go.
 - `POST /api/v2/workspaces/{workspace}/chats` takes `{"agent", "prompt"?,

@@ -50,6 +50,12 @@ impl OrchestratorView {
             return;
         }
         let handled = match (event.keystroke.key.as_str(), &self.detail) {
+            // An open stack popover closes before the page it is on.
+            ("escape", Some(_)) if self.stack.open.is_some() => {
+                self.stack = super::stack::Popover::default();
+                cx.notify();
+                true
+            }
             ("escape", Some(_)) => {
                 self.detail = None;
                 cx.notify();

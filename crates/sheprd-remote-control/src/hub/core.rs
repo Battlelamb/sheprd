@@ -8,10 +8,13 @@ mod checkouts;
 mod convert;
 mod create;
 pub(super) use create::Place;
+pub(crate) use saved::TabRef;
 mod error;
 mod hold;
 mod job;
+mod kept;
 mod lines;
+mod new_workspace;
 mod own;
 mod poller;
 mod projection;
@@ -177,6 +180,7 @@ impl Source {
         let next = {
             let mut poller = lock(&self.poller);
             poller.read_spaces(&boot, core.doc_get("herdr-app"))?;
+            poller.read_shared(core.doc_get(sheprd_session::spaces::DOC))?;
             let mut next = poller.project(
                 &boot,
                 &terminals,
@@ -246,6 +250,14 @@ impl Source {
             .cloned()
             .ok_or(HubError::Response)?;
         Ok((core, terminal))
+    }
+
+    /// `pane`'s screen as text, which the core reads itself: no shared
+    /// screen is opened, so this never holds one a phone needs to open
+    /// another terminal. Blocking.
+    pub(super) fn screen_text(&self, pane: &str) -> Result<String> {
+        let (core, terminal) = self.terminal(pane)?;
+        Ok(core.read(&terminal.address)?.text)
     }
 
     /// The shared screen of `terminal`, opened outside the state lock.

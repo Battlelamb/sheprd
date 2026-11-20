@@ -9,6 +9,7 @@ mod create;
 pub(crate) mod github;
 mod live;
 mod model;
+pub(crate) mod previews;
 mod search;
 mod summarize;
 mod title;
@@ -83,6 +84,7 @@ fn home(state: &Shared, device: &DeviceId) -> Home {
         version: crate::server::version(),
         waiting: state.attention().len(),
     });
+    home.preview_terminals(&state.previews.current());
     home.github = Some(state.github.enabled());
     home.github_hosts = github::lent_hosts(state, device);
     home

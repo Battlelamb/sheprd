@@ -12,6 +12,7 @@ mod kept_pr;
 mod muting;
 mod ports;
 mod pr;
+mod pr_change;
 mod quota;
 mod quota_accounts;
 mod remote_update;

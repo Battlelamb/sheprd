@@ -37,6 +37,8 @@ pub(super) fn pr(command: PrCommand, context: &Context) -> crate::Result<Output>
         PrCommand::Comments => HostOp::PrComments,
         PrCommand::Open => HostOp::PrOpen,
         PrCommand::Quota => HostOp::PrQuota,
+        PrCommand::Merge => HostOp::PrMerge,
+        PrCommand::Queue(change) => HostOp::PrQueue { change },
     };
     match context.call(Request::Host, op)? {
         Response::Host {

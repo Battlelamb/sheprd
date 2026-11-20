@@ -146,7 +146,7 @@ fn home() -> Home {
             commits: 3,
         }],
     };
-    Home::project(Sources {
+    let mut home = Home::project(Sources {
         checkouts: &Default::default(),
         recognized: &Default::default(),
         computer: "MacBook Pro",
@@ -169,7 +169,9 @@ fn home() -> Home {
         tags: crate::control::tags::ComputerTags::new(["work"], 1_770_000_000_000),
         version: "20261106.1",
         waiting: 1,
-    })
+    });
+    home.preview_terminals(&[("p2".to_owned(), "Fixed the build.\nPushed it.".to_owned())].into());
+    home
 }
 
 fn snapshot() -> ChatSnapshot {

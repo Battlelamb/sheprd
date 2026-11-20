@@ -15,10 +15,12 @@ pub fn encode(log: &Log) -> Result<Vec<u8>> {
     let mut bytes = MAGIC.to_vec();
     match log.base() {
         None => bytes.push(0),
-        Some((root, state)) => {
+        Some((root, _)) => {
             bytes.push(1);
             push(&mut bytes, &root.encode())?;
-            push(&mut bytes, &state.encode()?)?;
+            // The state the checkpoint names, before its own operation
+            // counted: what reading it back checks the hash against.
+            push(&mut bytes, &log.state_at(&root.id())?.encode()?)?;
         }
     }
     let ops: Vec<Vec<u8>> = log.ops().map(Op::encode).collect();

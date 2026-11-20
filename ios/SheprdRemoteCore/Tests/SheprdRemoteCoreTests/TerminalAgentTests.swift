@@ -9,6 +9,7 @@ struct TerminalAgentTests {
         let terminal = try #require(home.workspaces.first?.terminals.first)
         #expect(terminal.agent?.pane == "p2")
         #expect(terminal.agent?.title == "Fix the build")
+        #expect(terminal.agent?.preview == "Fixed the build.\nPushed it.")
         #expect(terminal.agentPane?.pane == "p2")
     }
 
@@ -28,6 +29,7 @@ struct TerminalAgentTests {
         #expect(agent.status == .working)
         #expect(agent.pane == nil)
         #expect(agent.title == nil)
+        #expect(agent.preview == nil)
     }
 
     private func row(agentPane: String) -> Home.TerminalRow {

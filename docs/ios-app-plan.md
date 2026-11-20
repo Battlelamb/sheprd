@@ -157,7 +157,8 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
     "terminals": [{
       "tab": "t2", "label": "zsh", "cwd": "/Users/me/code/sheprd", "zoomed": false,
       "panes": [{"pane": "p2", "label": null, "cwd": "/Users/me/code/sheprd", "focused": true}],
-      "agent": {"name": "claude", "status": "done", "pane": "p2", "title": "Fix the build"},
+      "agent": {"name": "claude", "status": "done", "pane": "p2", "title": "Fix the build",
+                "preview": "Fixed the build.\nPushed it."},
       "convert": {"agent": "claude", "pane": "p2"}
     }]
   }]
@@ -171,7 +172,17 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
 - A terminal's `agent` is the agent Herdr detects in the tab, such as
   `claude` run in a shell: `pane` is the pane it runs in and `title` its
   terminal title, both absent from older daemons. Home lists these tabs
-  with the chats, by status, and opens the agent's pane.
+  with the chats, by status, and opens the agent's pane, marking each row
+  with a terminal glyph so it reads apart from a chat.
+- A terminal agent's `preview` is what it last said, read off its visible
+  screen (`native/previews`): the last paragraph above the agent's own
+  input box, prompt, status, and footer, one list item to a line, at most
+  280 characters. The daemon reads only while a phone is connected: when
+  an agent first shows up, when it changes state, and every 10 seconds
+  while it works, at most 8 screens a pass. Skipping the agent's interface
+  is a best guess at Claude Code, Codex, and OpenCode's screens. It is
+  absent until read, when the screen shows nothing else, and from older
+  daemons.
 - A chat's `summary.first_prompt` is the start of its first prompt, which
   names a chat its agent has not titled; absent before one is sent and
   from older daemons.

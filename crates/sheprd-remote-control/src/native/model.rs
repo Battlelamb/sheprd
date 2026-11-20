@@ -265,6 +265,10 @@ pub(crate) struct TerminalAgent {
     /// When the daemon saw it last change state; unknown until it does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) changed_ms: Option<u64>,
+    /// What it last said, read off its screen: its latest paragraph, one
+    /// item to a line, bounded. Absent until read, and from older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) preview: Option<String>,
 }
 
 /// A chat's whole transcript and the stream position it includes.
@@ -458,6 +462,7 @@ fn terminal(terminal: &hub::Terminal) -> Terminal {
             pane: Some(agent.pane.clone()),
             title: agent.title.clone(),
             changed_ms: agent.changed_ms,
+            preview: None,
         }),
         convert: terminal.convert.as_ref().map(|(pane, agent)| ConvertOffer {
             agent: agent.name().to_owned(),
@@ -487,6 +492,23 @@ pub(crate) struct Sources<'a> {
 }
 
 impl Home {
+    /// Gives each terminal tab's agent its preview from `previews`, by the
+    /// pane it runs in.
+    pub(crate) fn preview_terminals(&mut self, previews: &HashMap<String, String>) {
+        let agents = self
+            .workspaces
+            .iter_mut()
+            .flat_map(|workspace| &mut workspace.terminals)
+            .filter_map(|terminal| terminal.agent.as_mut());
+        for agent in agents {
+            agent.preview = agent
+                .pane
+                .as_ref()
+                .and_then(|pane| previews.get(pane))
+                .cloned();
+        }
+    }
+
     pub(crate) fn project(sources: Sources<'_>) -> Self {
         let Sources {
             checkouts,

@@ -23,6 +23,7 @@ mod socket;
 mod tab_actions;
 mod term_scroll;
 mod term_size;
+mod terminal_preview;
 mod views;
 
 /// A layout with one workspace holding chat `p1` and terminal `t2`.

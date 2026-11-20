@@ -300,9 +300,13 @@ public struct Home: Codable, Hashable, Sendable {
             /// When the computer saw it last change state; unknown until
             /// it does, and from older computers.
             public var changedMs: UInt64?
+            /// What it last said, read off its screen: its latest
+            /// paragraph, one item to a line. Absent until read, and from
+            /// older computers.
+            public var preview: String?
 
             enum CodingKeys: String, CodingKey {
-                case name, status, pane, title
+                case name, status, pane, title, preview
                 case changedMs = "changed_ms"
             }
         }

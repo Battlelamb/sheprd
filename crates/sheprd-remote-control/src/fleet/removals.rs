@@ -214,6 +214,9 @@ fn record(state: &State, host: &crate::control::fleet::HostId, name: &str) -> Op
         route: record.route.clone(),
         fleet: true,
         host: None,
+        // Members and plain hosts' agents both read the purpose byte and
+        // proof first.
+        opening: true,
     })
 }
 

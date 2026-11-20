@@ -13,7 +13,7 @@ use sheprd_relay_agent::{
 
 /// An agent listening on the relay at `http`, and the intro a member that
 /// read its status over SSH would add it with.
-async fn plain_host(
+pub(super) async fn plain_host(
     http: SocketAddr,
 ) -> (
     tempfile::TempDir,

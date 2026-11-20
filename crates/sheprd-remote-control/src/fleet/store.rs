@@ -6,7 +6,7 @@
 //! in `log.bin`'s format); `lock` is
 //! `super::lock`'s.
 
-use super::{Error, Inner, Result};
+use super::{Error, Inner, Result, Suspensions};
 use crate::control::fleet::{MemberId, Op, OpId, saved, sync};
 use crate::desktop::files::{read_bounded, write_private};
 use p256::ecdsa::SigningKey;
@@ -22,8 +22,10 @@ const LOG: &str = "log.bin";
 /// The history of a fleet being joined, until it admits this computer.
 const JOINING: &str = "joining.bin";
 const PEERS: &str = "peers.json";
-/// The removals suspensions keep to check again take most of it.
-const MAX_PEERS: u64 = 16 * 1024 * 1024;
+/// Suspensions take most of it at worst: about 16 MiB, half of them for
+/// members no longer live (`tests/folding.rs` checks the bound), with room
+/// beside them for what each peer holds and the proven keys.
+pub(super) const MAX_PEERS: u64 = 32 * 1024 * 1024;
 
 fn path(state_dir: &Path, name: &str) -> PathBuf {
     state_dir.join(DIRECTORY).join(name)
@@ -53,6 +55,10 @@ struct Peers {
     held: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
     unconfirmed: BTreeMap<String, Kept>,
+    /// Suspensions folded per signer and target (`super::suspensions`),
+    /// hex, by signer then target.
+    #[serde(default)]
+    folds: BTreeMap<String, BTreeMap<String, FoldedKept>>,
     #[serde(default)]
     proven: BTreeMap<String, Proven>,
     /// What recorded `proven`: [`PROVEN_VERSION`] once keys are recorded
@@ -85,6 +91,19 @@ impl Proven {
         };
         many.into_iter().flatten().chain(one)
     }
+}
+
+#[derive(Serialize, Deserialize)]
+struct FoldedKept {
+    /// Each folded removal's id, hex, with when it arrived.
+    #[serde(default)]
+    ids: BTreeMap<String, u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    overflowed: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    named_with: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pinned: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -141,33 +160,72 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
                 Some((MemberId::from_hex(member)?, keys))
             })
             .collect(),
-        unconfirmed: peers
-            .unconfirmed
-            .iter()
-            .filter_map(|(id, kept)| {
-                let id = OpId::from_hex(id)?;
-                Some((
-                    id,
-                    super::Unconfirmed {
-                        signer: MemberId::from_hex(&kept.signer)?,
-                        targets: kept
-                            .targets
-                            .iter()
-                            .filter_map(|member| MemberId::from_hex(member))
-                            .collect(),
-                        since_ms: kept.since_ms,
-                        // One that no longer reads keeps its suspension.
-                        op: kept
-                            .op
-                            .as_deref()
-                            .and_then(|op| sync::bytes(op).ok())
-                            .and_then(|op| Op::decode(&op).ok())
-                            .filter(|op| op.id() == id),
-                    },
-                ))
-            })
-            .collect(),
+        folded: folded(&peers.folds)?,
+        folded_pending: BTreeSet::new(),
+        unconfirmed: unconfirmed(&peers.unconfirmed)?,
     })
+}
+
+/// Hex that no longer reads in a suspension is an error, never a
+/// suspension dropped: it would let its targets back in.
+fn member(hex: &str) -> Result<MemberId> {
+    MemberId::from_hex(hex).ok_or(Error::Peers)
+}
+
+fn folded(
+    kept: &BTreeMap<String, BTreeMap<String, FoldedKept>>,
+) -> Result<super::suspensions::FoldedMap> {
+    let mut folded = super::suspensions::FoldedMap::new();
+    for (signer, targets) in kept {
+        let into = folded.entry(member(signer)?).or_default();
+        for (target, kept) in targets {
+            into.insert(
+                member(target)?,
+                super::suspensions::FoldedTarget {
+                    ids: kept
+                        .ids
+                        .iter()
+                        .map(|(id, since)| Ok((OpId::from_hex(id).ok_or(Error::Peers)?, *since)))
+                        .collect::<Result<_>>()?,
+                    overflowed: kept.overflowed,
+                    named_with: kept
+                        .named_with
+                        .iter()
+                        .map(|hex| member(hex))
+                        .collect::<Result<_>>()?,
+                    pinned: kept.pinned,
+                },
+            );
+        }
+    }
+    Ok(folded)
+}
+
+fn unconfirmed(kept: &BTreeMap<String, Kept>) -> Result<BTreeMap<OpId, super::Unconfirmed>> {
+    kept.iter()
+        .map(|(id, kept)| {
+            let id = OpId::from_hex(id).ok_or(Error::Peers)?;
+            Ok((
+                id,
+                super::Unconfirmed {
+                    signer: member(&kept.signer)?,
+                    targets: kept
+                        .targets
+                        .iter()
+                        .map(|hex| member(hex))
+                        .collect::<Result<_>>()?,
+                    since_ms: kept.since_ms,
+                    // One that no longer reads keeps its suspension.
+                    op: kept
+                        .op
+                        .as_deref()
+                        .and_then(|op| sync::bytes(op).ok())
+                        .and_then(|op| Op::decode(&op).ok())
+                        .filter(|op| op.id() == id),
+                },
+            ))
+        })
+        .collect()
 }
 
 /// Writes the log and the peers' state. Blocking.
@@ -185,14 +243,26 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
 ///    suspensions, which the next load or save settles again.
 ///
 /// `on_disk` is the suspensions `peers.json` holds; kept up to date.
-pub(super) fn save(
-    state_dir: &Path,
-    inner: &Inner,
-    on_disk: &mut BTreeMap<OpId, super::Unconfirmed>,
-) -> Result<()> {
-    let mut first = inner.unconfirmed.clone();
-    for (id, kept) in on_disk.iter() {
-        first.entry(*id).or_insert_with(|| kept.clone());
+pub(super) fn save(state_dir: &Path, inner: &Inner, on_disk: &mut Suspensions) -> Result<()> {
+    let now = Suspensions {
+        unconfirmed: inner.unconfirmed.clone(),
+        folded: inner.folded.clone(),
+    };
+    let mut first = now.clone();
+    for (id, kept) in &on_disk.unconfirmed {
+        first.unconfirmed.entry(*id).or_insert_with(|| kept.clone());
+    }
+    for (signer, targets) in &on_disk.folded {
+        let folded = first.folded.entry(*signer).or_default();
+        for (target, kept) in targets {
+            let entry = folded.entry(*target).or_insert_with(|| kept.clone());
+            for (id, since) in &kept.ids {
+                entry.ids.entry(*id).or_insert(*since);
+            }
+            entry.overflowed = entry.overflowed.max(kept.overflowed);
+            entry.named_with.extend(kept.named_with.iter().copied());
+            entry.pinned |= kept.pinned;
+        }
     }
     write_peers(state_dir, inner, &first)?;
     *on_disk = first;
@@ -202,9 +272,9 @@ pub(super) fn save(
     } else if let Some(joining) = &inner.joining {
         write_private(&path(state_dir, JOINING), &saved::encode(joining)?)?;
     }
-    if on_disk.len() != inner.unconfirmed.len() {
-        match write_peers(state_dir, inner, &inner.unconfirmed) {
-            Ok(()) => on_disk.clone_from(&inner.unconfirmed),
+    if *on_disk != now {
+        match write_peers(state_dir, inner, &now) {
+            Ok(()) => *on_disk = now,
             Err(error) => {
                 tracing::warn!(error = %error, "could not drop settled suspensions; kept until the next save");
             }
@@ -215,11 +285,7 @@ pub(super) fn save(
 
 /// Writes `peers.json` from `inner`, with `unconfirmed` as its
 /// suspensions.
-fn write_peers(
-    state_dir: &Path,
-    inner: &Inner,
-    unconfirmed: &BTreeMap<OpId, super::Unconfirmed>,
-) -> Result<()> {
+fn write_peers(state_dir: &Path, inner: &Inner, suspensions: &Suspensions) -> Result<()> {
     let peers = Peers {
         held: inner
             .held
@@ -245,7 +311,31 @@ fn write_peers(
                 )
             })
             .collect(),
-        unconfirmed: unconfirmed
+        folds: suspensions
+            .folded
+            .iter()
+            .map(|(signer, targets)| {
+                let targets = targets
+                    .iter()
+                    .map(|(target, kept)| {
+                        let kept = FoldedKept {
+                            ids: kept
+                                .ids
+                                .iter()
+                                .map(|(id, since)| (id.to_string(), *since))
+                                .collect(),
+                            overflowed: kept.overflowed,
+                            named_with: kept.named_with.iter().map(ToString::to_string).collect(),
+                            pinned: kept.pinned,
+                        };
+                        (target.to_string(), kept)
+                    })
+                    .collect();
+                (signer.to_string(), targets)
+            })
+            .collect(),
+        unconfirmed: suspensions
+            .unconfirmed
             .iter()
             .map(|(id, kept)| {
                 (

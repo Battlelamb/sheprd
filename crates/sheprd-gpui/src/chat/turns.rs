@@ -38,6 +38,10 @@ const MAX_TURNS: usize = 10_000;
 const SPACING: f32 = 14.;
 /// The room the timeline keeps above and below its ticks.
 const MARGINS: f32 = 40.;
+/// The least height the timeline gets: its card under the pointer (three
+/// lines of reply under the prompt) stays inside its box, which a few ticks
+/// alone would not leave room for.
+const MIN_HEIGHT: f32 = 96.;
 
 /// Where each chat drawn last laid out its entries, by pane.
 #[derive(Debug, Default)]
@@ -137,10 +141,12 @@ pub(crate) fn reading(turns: &[Turn], top: usize, following: bool) -> Option<&Tu
 }
 
 /// The stack of `count` ticks centered in a gutter `height` tall: its top
-/// below the gutter's, and its height, the whole gutter once they fill it
-/// (the timeline then scrolls).
+/// below the gutter's, and its height, never less than a card needs, and
+/// the whole gutter once they fill it (the timeline then scrolls).
 pub(crate) fn stack(count: usize, height: f32) -> (f32, f32) {
-    let wanted = (count as f32 * SPACING + MARGINS).min(height);
+    let wanted = (count as f32 * SPACING + MARGINS)
+        .max(MIN_HEIGHT)
+        .min(height);
     ((height - wanted) / 2., wanted)
 }
 

@@ -85,11 +85,11 @@ fn a_hosted_chat_reports_its_gutter_and_turns(cx: &mut TestAppContext) {
     assert!(left >= f32::from(chat.origin.x) - 1., "{left} in {chat:?}");
     // Three ticks, stacked tightly in the middle of the entries, which
     // leave the header above and the composer below.
-    assert_eq!(turns["height"], 82.);
+    assert_eq!(turns["height"], 96.);
     let top = turns["top"].as_f64().unwrap() as f32;
     assert!(top > f32::from(chat.origin.y) + 100., "{top} in {chat:?}");
     assert!(
-        top + 82. < f32::from(chat.bottom()) - 100.,
+        top + 96. < f32::from(chat.bottom()) - 100.,
         "{top} in {chat:?}"
     );
 }

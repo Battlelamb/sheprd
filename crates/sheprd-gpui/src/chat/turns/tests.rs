@@ -95,8 +95,10 @@ fn the_turn_read_is_the_last_prompt_at_or_above_the_top() {
 
 #[test]
 fn the_ticks_stack_tightly_in_the_gutter_s_middle() {
-    // Three ticks: 3 x 14 + 40 points, centered in 600.
-    assert_eq!(stack(3, 600.), (259., 82.));
+    // Ten ticks: 10 x 14 + 40 points, centered in 600.
+    assert_eq!(stack(10, 600.), (210., 180.));
+    // Three would leave no room for a card: as tall as one needs.
+    assert_eq!(stack(3, 600.), (252., 96.));
     // More than fit: the whole gutter, from its top.
     assert_eq!(stack(100, 600.), (0., 600.));
 }

@@ -35,7 +35,9 @@ const UNIT: &str = "sheprd-relay-agent.service";
 const LABEL: &str = "org.sheprd.relay-agent";
 /// A slow link can take a while to carry a few megabytes.
 const COPY_IDLE: Duration = Duration::from_secs(300);
-const OUTPUT: u64 = 64 * 1024;
+/// What a script on the host may print: the agent's `status --json` at
+/// its largest, which every script here ends with.
+const OUTPUT: u64 = sheprd_relay_agent::status::MAX_REPORT_BYTES as u64;
 /// Starting the service and waiting for it to listen.
 const SERVICE_IDLE: Duration = Duration::from_secs(60);
 /// The most relays the service is started with; a record holds 16.

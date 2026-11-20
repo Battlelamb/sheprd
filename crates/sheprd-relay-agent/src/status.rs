@@ -161,11 +161,12 @@ impl Report {
         })
     }
 
-    /// Reads `status --json` as the agent printed it.
+    /// Reads `status --json` as the agent printed it, at most
+    /// [`MAX_REPORT_BYTES`].
     pub fn parse(bytes: &[u8]) -> Result<Self> {
-        if bytes.len() as u64 > MAX_BYTES {
+        if bytes.len() > MAX_REPORT_BYTES {
             return Err(Error::TooLarge {
-                limit: MAX_BYTES,
+                limit: MAX_REPORT_BYTES as u64,
                 path: FILE.into(),
             });
         }

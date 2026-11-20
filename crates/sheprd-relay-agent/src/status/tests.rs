@@ -45,7 +45,7 @@ fn a_report_from_an_older_agent_parses_without_host_keys() {
         Err(Error::StatusFormat { .. })
     ));
     assert!(matches!(
-        Report::parse(&vec![b' '; usize::try_from(MAX_BYTES).unwrap() + 1]),
+        Report::parse(&vec![b' '; MAX_REPORT_BYTES + 1]),
         Err(Error::TooLarge { .. })
     ));
 }

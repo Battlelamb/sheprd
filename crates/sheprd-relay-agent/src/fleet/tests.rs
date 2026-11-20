@@ -12,6 +12,7 @@ use crate::{
 mod crowded_save;
 mod paused;
 mod refused;
+mod report_parse;
 mod report_size;
 mod suspended_keys;
 

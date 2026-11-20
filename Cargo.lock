@@ -74,6 +74,7 @@ dependencies = [
 [[package]]
 name = "accesskit_macos"
 version = "0.26.3"
+source = "git+https://github.com/sheprd-labs/accesskit?rev=d7919c53f9a9667486ba61e946c44be57c3dabe7#d7919c53f9a9667486ba61e946c44be57c3dabe7"
 dependencies = [
  "accesskit 0.24.1",
  "accesskit_consumer 0.38.0",

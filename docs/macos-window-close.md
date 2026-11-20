@@ -18,8 +18,12 @@ An ordinary unobserved view still returns to its original class on close.
 
 GPUI 0.3.10 requires `accesskit_macos` 0.26 and AccessKit's 0.24 tree types.
 The published fix in `accesskit_macos` 0.27.2 uses AccessKit 0.25 tree types.
-The workspace patches GPUI's 0.26 dependency with a compatible backport in
-[`crates/vendor/accesskit_macos`](../crates/vendor/accesskit_macos).
+The workspace patches GPUI's 0.26 dependency with a backport kept on the
+[`sheprd/macos-0.26.3-kvo-close`](https://github.com/sheprd-labs/accesskit/tree/sheprd/macos-0.26.3-kvo-close)
+branch of Sheprd's AccessKit fork: the 0.26.3 release plus #835, with
+`accesskit` and `accesskit_consumer` taken from crates.io so GPUI and the
+adapter share one copy of the tree types. Drop the patch once GPUI depends on
+an adapter that carries the fix.
 Sheprd's separate 0.27.2 dependency still supplies its window-level
 accessibility focus forwarder.
 

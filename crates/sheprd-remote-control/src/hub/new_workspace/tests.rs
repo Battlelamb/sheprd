@@ -1,8 +1,11 @@
 //! Which Herdr 1 workspace a phone's new worktree grows from.
 
-use super::{Source, Worktree, herdr_1_repository};
+use super::{Checkout, Source, Worktree, herdr_1_repository};
 use crate::hub::{Layout, Workspace};
 use sheprd_client::protocol::ClientShellWorktree;
+use std::path::{Path, PathBuf};
+
+const KEY: &str = "/code/app/.git";
 
 fn workspace(id: &str, cwd: &str, linked: Option<bool>) -> Workspace {
     Workspace {
@@ -14,7 +17,7 @@ fn workspace(id: &str, cwd: &str, linked: Option<bool>) -> Workspace {
         session: None,
         terminals: Vec::new(),
         worktree: linked.map(|linked| ClientShellWorktree {
-            key: "/code/app/.git".to_owned(),
+            key: KEY.to_owned(),
             label: "app".to_owned(),
             is_linked_worktree: linked,
         }),
@@ -32,64 +35,68 @@ fn kept_none(_: &str) -> bool {
     false
 }
 
-/// The workspace a new worktree in `cwd` grows from, without a kept one.
-fn repository(layout: &Layout, cwd: &str, session: Option<&str>) -> Option<String> {
-    herdr_1_repository(layout, cwd, session, kept_none).map(|source| source.workspace)
-}
-
-fn linked(id: &str, cwd: &str, branch: Option<&str>) -> Workspace {
-    Workspace {
-        branch: branch.map(str::to_owned),
-        ..workspace(id, cwd, Some(true))
+/// The repository's own checkout at `/code/app`.
+fn main_checkout() -> Checkout {
+    Checkout {
+        common_dir: PathBuf::from(KEY),
+        linked: false,
+        branch: Some("refs/heads/main".to_owned()),
     }
 }
 
+/// A linked worktree of `/code/app` on `branch`.
+fn linked_checkout(branch: Option<&str>) -> Checkout {
+    Checkout {
+        common_dir: PathBuf::from(KEY),
+        linked: true,
+        branch: branch.map(|branch| format!("refs/heads/{branch}")),
+    }
+}
+
+/// The workspace a new worktree of `checkout` grows from, without a kept one.
+fn repository(layout: &Layout, checkout: &Checkout, session: Option<&str>) -> Option<String> {
+    herdr_1_repository(layout, checkout, session, kept_none).map(|source| source.workspace)
+}
+
 #[test]
-fn the_repository_checkout_at_the_folder_grows_the_worktree() {
+fn the_repository_checkout_grows_the_worktree_wherever_its_shell_is() {
     let layout = layout(vec![
         workspace("w2", "/code/app", Some(true)),
-        workspace("w1", "/code/app", Some(false)),
-        workspace("w3", "/code/other", Some(false)),
+        workspace("w1", "/code/app/crates", Some(false)),
     ]);
     assert_eq!(
-        repository(&layout, "/code/app", None).as_deref(),
-        Some("w1"),
-        "the repository's own checkout ahead of a linked worktree there"
-    );
-    assert_eq!(
-        repository(&layout, "/code/app/", None).as_deref(),
-        Some("w1"),
-        "the same folder written with a trailing slash"
+        herdr_1_repository(&layout, &main_checkout(), None, kept_none),
+        Some(Source {
+            workspace: "w1".to_owned(),
+            base: None,
+        }),
+        "the repository's own checkout, not a linked worktree in its folder"
     );
 }
 
 #[test]
-fn the_repository_root_finds_its_checkout_shown_from_a_subfolder() {
-    let layout = layout(vec![workspace("w1", "/code/app/crates", Some(false))]);
-    assert_eq!(
-        repository(&layout, "/code/app", None).as_deref(),
-        Some("w1")
-    );
-    let linked = layout_of_linked();
-    assert_eq!(repository(&linked, "/code/app", None), None);
-}
-
-/// Only a linked worktree of the repository at `/code/app` is shown.
-fn layout_of_linked() -> Layout {
-    layout(vec![workspace("w2", "/code/worktrees/topic", Some(true))])
+fn a_workspace_whose_shell_moved_to_another_repository_is_not_that_repository() {
+    // `w1` is `/code/app`'s, though its shell is now in `/code/other`.
+    let layout = layout(vec![workspace("w1", "/code/other", Some(false))]);
+    let other = Checkout {
+        common_dir: PathBuf::from("/code/other/.git"),
+        ..main_checkout()
+    };
+    assert_eq!(repository(&layout, &other, None), None);
 }
 
 #[test]
 fn a_folder_herdr_1_shows_as_no_repository_grows_nothing() {
     let layout = layout(vec![
-        workspace("w1", "/code/plain", None),
-        workspace("space-3", "/code/kept", Some(false)),
-        workspace("herdr:dev:w4", "/code/elsewhere", Some(false)),
+        workspace("w1", "/code/app", None),
+        workspace("space-3", "/code/app", Some(false)),
+        workspace("herdr:dev:w4", "/code/app", Some(false)),
     ]);
     let kept = |id: &str| id == "space-3";
-    for cwd in ["/code/plain", "/code/kept", "/code/none"] {
-        assert_eq!(herdr_1_repository(&layout, cwd, None, kept), None, "{cwd}");
-    }
+    assert_eq!(
+        herdr_1_repository(&layout, &main_checkout(), None, kept),
+        None
+    );
 }
 
 #[test]
@@ -98,15 +105,13 @@ fn a_repository_is_looked_for_in_the_session_asked_for() {
         workspace("w1", "/code/app", Some(false)),
         workspace("herdr:dev:w1", "/code/app", Some(false)),
     ]);
+    let checkout = main_checkout();
     assert_eq!(
-        repository(&layout, "/code/app", Some("dev")).as_deref(),
+        repository(&layout, &checkout, Some("dev")).as_deref(),
         Some("herdr:dev:w1")
     );
-    assert_eq!(
-        repository(&layout, "/code/app", None).as_deref(),
-        Some("w1")
-    );
-    assert_eq!(repository(&layout, "/code/app", Some("other")), None);
+    assert_eq!(repository(&layout, &checkout, None).as_deref(), Some("w1"));
+    assert_eq!(repository(&layout, &checkout, Some("other")), None);
 }
 
 #[test]
@@ -139,35 +144,88 @@ fn a_title_names_the_herdr_1_worktree_workspace() {
 fn a_linked_checkout_grows_from_its_main_checkout_at_its_branch() {
     let layout = layout(vec![
         workspace("w1", "/code/app", Some(false)),
-        linked("w2", "/code/worktrees/feature", Some("feature")),
+        workspace("w2", "/code/worktrees/feature", Some(true)),
     ]);
     assert_eq!(
-        herdr_1_repository(&layout, "/code/worktrees/feature", None, kept_none),
+        herdr_1_repository(&layout, &linked_checkout(Some("feature")), None, kept_none),
         Some(Source {
             workspace: "w1".to_owned(),
             base: Some("refs/heads/feature".to_owned()),
-        })
-    );
-    assert_eq!(
-        herdr_1_repository(&layout, "/code/app", None, kept_none),
-        Some(Source {
-            workspace: "w1".to_owned(),
-            base: None,
         })
     );
 }
 
 #[test]
 fn a_linked_checkout_without_its_main_checkout_or_branch_stays_on_the_core() {
-    let alone = layout(vec![linked(
-        "w2",
-        "/code/worktrees/feature",
-        Some("feature"),
-    )]);
-    assert_eq!(repository(&alone, "/code/worktrees/feature", None), None);
-    let detached = layout(vec![
+    let alone = layout(vec![workspace("w2", "/code/worktrees/feature", Some(true))]);
+    assert_eq!(
+        repository(&alone, &linked_checkout(Some("feature")), None),
+        None
+    );
+    let both = layout(vec![
         workspace("w1", "/code/app", Some(false)),
-        linked("w2", "/code/worktrees/feature", None),
+        workspace("w2", "/code/worktrees/feature", Some(true)),
     ]);
-    assert_eq!(repository(&detached, "/code/worktrees/feature", None), None);
+    assert_eq!(repository(&both, &linked_checkout(None), None), None);
+}
+
+#[test]
+fn git_says_which_checkout_a_folder_is() {
+    let same = |path: &Path| path.to_owned();
+    assert_eq!(
+        Checkout::parse(
+            "/code/app/.git\n/code/app/.git\n",
+            Some("refs/heads/main\n"),
+            same
+        ),
+        Some(main_checkout())
+    );
+    assert_eq!(
+        Checkout::parse(
+            "/code/app/.git\n/code/app/.git/worktrees/feature\n",
+            None,
+            same
+        ),
+        Some(linked_checkout(None)),
+        "a detached linked worktree has no branch"
+    );
+    assert_eq!(Checkout::parse("", None, same), None);
+}
+
+#[test]
+fn a_folder_on_disk_is_read_through_git() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = dir.path().join("app");
+    std::fs::create_dir(&app).unwrap();
+    let git = |cwd: &Path, args: &[&str]| {
+        let status = sheprd_client::new_command("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .current_dir(cwd)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&app, &["init", "--quiet", "--initial-branch=main"]);
+    git(&app, &["commit", "--quiet", "--allow-empty", "-m", "start"]);
+    git(
+        &app,
+        &["worktree", "add", "--quiet", "-b", "feature", "../feature"],
+    );
+    let key = std::fs::canonicalize(app.join(".git")).unwrap();
+    let main = Checkout::of(&app.join(".git").join("..")).unwrap();
+    assert_eq!(main.common_dir, key);
+    assert!(!main.linked);
+    let feature = Checkout::of(&dir.path().join("feature")).unwrap();
+    assert_eq!(feature.common_dir, key);
+    assert!(feature.linked);
+    assert_eq!(feature.branch.as_deref(), Some("refs/heads/feature"));
+    assert_eq!(Checkout::of(dir.path()), None, "not a checkout");
 }

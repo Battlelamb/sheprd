@@ -12,9 +12,10 @@ use super::{
     ApiMethod, CreatedWorkspace, Error, Hub, Layout, Result, command_line, core, created_tab,
     direct_command_line, on_core, place, sessions, tab_params,
 };
+use crate::native::changes::local::git;
 use serde_json::{Value, json};
 use sheprd_chat_protocol::Agent;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// What a phone's new workspace asks for.
 #[derive(Clone, Copy, Debug)]
@@ -44,8 +45,14 @@ impl Hub {
         let core = self.core_for_work().await?;
         if let Some(branch) = new.branch {
             let session = new.session.filter(|name| self.sessions.get(name).is_some());
-            let repository = herdr_1_repository(&self.layout(), new.cwd, session, |id| {
-                self.kept_workspace(id)
+            let cwd = PathBuf::from(new.cwd);
+            // Git, not a workspace's folder, says which repository `cwd`
+            // is: a workspace's folder follows its shell elsewhere.
+            let checkout = on_core(move || Ok(Checkout::of(&cwd))).await?;
+            let repository = checkout.and_then(|checkout| {
+                herdr_1_repository(&self.layout(), &checkout, session, |id| {
+                    self.kept_workspace(id)
+                })
             });
             if let Some(source) = repository {
                 let worktree = Worktree {
@@ -233,71 +240,94 @@ pub(super) struct Source {
     pub(super) base: Option<String>,
 }
 
-/// Where Herdr 1 makes a new worktree in `cwd` from, among `session`'s
-/// workspaces (the primary's when `None`):
-///
-/// - the repository checkout whose folder is `cwd`, or whose root is;
-/// - for a linked worktree at `cwd`, its repository's own checkout, from
-///   the linked worktree's branch, as the desktop's new worktree does:
-///   Herdr 1 refuses a linked checkout as the source.
+/// The checkout a folder is in, as Git and Herdr 1 name it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Checkout {
+    /// Its repository's Git directory, which Herdr 1 keys workspaces by.
+    pub(super) common_dir: PathBuf,
+    /// A linked worktree, not the repository's own checkout.
+    pub(super) linked: bool,
+    /// Its branch's full ref; `None` when detached.
+    pub(super) branch: Option<String>,
+}
+
+impl Checkout {
+    /// The checkout `cwd` is in, `None` outside one. Runs Git: call it
+    /// off the async workers.
+    fn of(cwd: &Path) -> Option<Self> {
+        let dirs = git(
+            cwd,
+            &[
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+                "--git-dir",
+            ],
+        )
+        .ok()?;
+        let branch = git(cwd, &["symbolic-ref", "--quiet", "HEAD"]).ok();
+        Self::parse(&dirs, branch.as_deref(), |path| {
+            std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
+        })
+    }
+
+    /// From `rev-parse`'s common and Git directories and `symbolic-ref`'s
+    /// branch, with paths made canonical as Herdr 1's keys are.
+    fn parse(
+        dirs: &str,
+        branch: Option<&str>,
+        canonical: impl Fn(&Path) -> PathBuf,
+    ) -> Option<Self> {
+        let mut lines = dirs.lines().map(str::trim).filter(|line| !line.is_empty());
+        let common_dir = canonical(Path::new(lines.next()?));
+        let git_dir = canonical(Path::new(lines.next()?));
+        let branch = branch
+            .map(str::trim)
+            .filter(|branch| branch.starts_with("refs/heads/"))
+            .map(str::to_owned);
+        Some(Self {
+            linked: git_dir != common_dir,
+            common_dir,
+            branch,
+        })
+    }
+}
+
+/// Where Herdr 1 makes a new worktree in `checkout` from, among
+/// `session`'s workspaces (the primary's when `None`): the workspace of
+/// its repository's own checkout, keyed by its Git directory, and for a
+/// linked worktree its branch, as the desktop's new worktree does: Herdr 1
+/// refuses a linked checkout as the source.
 ///
 /// `None` when Herdr 1 shows no such checkout, and the core makes it as
 /// before. Workspaces Sheprd keeps for Herdr 2, a core's new workspaces,
 /// and WSL's are not Herdr 1's to grow here.
 pub(super) fn herdr_1_repository(
     layout: &Layout,
-    cwd: &str,
+    checkout: &Checkout,
     session: Option<&str>,
     kept: impl Fn(&str) -> bool,
 ) -> Option<Source> {
-    let cwd = Path::new(cwd);
-    let candidates: Vec<_> = layout
-        .workspaces
-        .iter()
-        .filter(|workspace| {
-            sessions::split_id(&workspace.id).0 == session
-                && !sessions::in_wsl(&workspace.id)
-                && !core::is_new_workspace(&workspace.id)
-                && !kept(&workspace.id)
-        })
-        .filter_map(|workspace| Some((workspace, workspace.worktree.as_ref()?)))
-        .collect();
-    let main_of = |key: &str| {
-        candidates
-            .iter()
-            .find(|(_, tree)| !tree.is_linked_worktree && tree.key == key)
-            .map(|(workspace, _)| workspace.id.clone())
+    let base = match (checkout.linked, &checkout.branch) {
+        (false, _) => None,
+        (true, Some(branch)) => Some(branch.clone()),
+        (true, None) => return None,
     };
-    let here = candidates
-        .iter()
-        .filter(|(workspace, _)| !workspace.cwd.is_empty() && Path::new(&workspace.cwd) == cwd)
-        .min_by_key(|(_, tree)| tree.is_linked_worktree);
-    if let Some((workspace, tree)) = here {
-        if !tree.is_linked_worktree {
-            return Some(Source {
-                workspace: workspace.id.clone(),
-                base: None,
-            });
-        }
-        let branch = workspace.branch.as_deref().filter(|b| !b.is_empty())?;
-        return Some(Source {
-            workspace: main_of(&tree.key)?,
-            base: Some(format!("refs/heads/{branch}")),
-        });
-    }
-    // A repository's key is its Git directory, `.git` in its root.
-    candidates
-        .iter()
-        .find(|(_, tree)| {
-            !tree.is_linked_worktree
-                && Path::new(&tree.key).ends_with(".git")
-                && Path::new(&tree.key).parent() == Some(cwd)
-        })
-        .map(|(workspace, _)| Source {
-            workspace: workspace.id.clone(),
-            base: None,
-        })
+    let workspace = layout.workspaces.iter().find(|workspace| {
+        sessions::split_id(&workspace.id).0 == session
+            && !sessions::in_wsl(&workspace.id)
+            && !core::is_new_workspace(&workspace.id)
+            && !kept(&workspace.id)
+            && workspace.worktree.as_ref().is_some_and(|tree| {
+                !tree.is_linked_worktree && Path::new(&tree.key) == checkout.common_dir
+            })
+    })?;
+    Some(Source {
+        workspace: workspace.id.clone(),
+        base,
+    })
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests;

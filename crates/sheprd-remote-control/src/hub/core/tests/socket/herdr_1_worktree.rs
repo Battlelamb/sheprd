@@ -24,7 +24,7 @@ fn herdr_1(dir: &Path, answer: Value) -> thread::JoinHandle<Value> {
     })
 }
 
-fn repository(id: &str, cwd: &str) -> Workspace {
+fn repository(id: &str, cwd: &str, key: &str) -> Workspace {
     Workspace {
         branch: Some("main".to_owned()),
         chats: Vec::new(),
@@ -34,7 +34,7 @@ fn repository(id: &str, cwd: &str) -> Workspace {
         session: None,
         terminals: Vec::new(),
         worktree: Some(ClientShellWorktree {
-            key: format!("{cwd}/.git"),
+            key: key.to_owned(),
             label: "app".to_owned(),
             is_linked_worktree: false,
         }),
@@ -69,11 +69,23 @@ async fn a_worktree_of_a_herdr_1_repository_is_made_there_with_its_chat_on_the_c
             "worktree": {"path": checkout, "branch": "topic"},
         }),
     );
+    // A repository on disk, as Git says which one a folder is.
+    let app = dir.path().join("app");
+    std::fs::create_dir(&app).unwrap();
+    let init = sheprd_client::new_command("git")
+        .args(["init", "--quiet"])
+        .current_dir(&app)
+        .status()
+        .unwrap();
+    assert!(init.success());
+    let app = std::fs::canonicalize(app).unwrap();
+    let cwd = app.to_str().unwrap();
+    let key = app.join(".git");
     let (source, fake) = fake_with_doc(false, Value::Null, chat_records());
     source.poll().unwrap();
     let layout = Layout {
         connected: true,
-        workspaces: vec![repository("w1", "/code/app")],
+        workspaces: vec![repository("w1", cwd, key.to_str().unwrap())],
         ..Layout::default()
     };
     let mut hub = Hub::offline_in(layout, None, Some(dir.path().join("h-client.sock")));
@@ -85,7 +97,7 @@ async fn a_worktree_of_a_herdr_1_repository_is_made_there_with_its_chat_on_the_c
         .create_workspace(NewWorkspace {
             agent: Agent::Claude,
             branch: Some("topic"),
-            cwd: "/code/app",
+            cwd,
             session: None,
             title: Some("Review"),
         })

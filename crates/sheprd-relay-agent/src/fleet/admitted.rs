@@ -80,14 +80,22 @@ impl Admitted {
             })
     }
 
-    /// The key pairs, now and before a rotation, of suspended members.
+    /// The key pairs, now and before a rotation, of suspended members:
+    /// those each suspension keeps, which outlive a refused or unreadable
+    /// access file, and those the file held names.
     fn suspended_pairs(&self) -> impl Iterator<Item = Pair> + '_ {
         let access = self.held.access.as_ref();
         self.held
             .suspended
-            .keys()
-            .filter_map(move |id| access?.members.get(id))
-            .flat_map(Member::pairs)
+            .iter()
+            .flat_map(move |(id, suspension)| {
+                suspension.pairs.iter().copied().chain(
+                    access
+                        .and_then(|access| access.members.get(id))
+                        .into_iter()
+                        .flat_map(Member::pairs),
+                )
+            })
     }
 
     /// Both keys of a suspended member, or of one removed for good (until

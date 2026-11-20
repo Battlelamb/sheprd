@@ -55,7 +55,9 @@ pub const REFUSED: &str = "refused";
 /// Removals remembered per suspended member; past that, its suspension is
 /// one no access file lifts.
 pub const MAX_CAUSES: usize = 8;
-const MAX_SUSPENDED_BYTES: u64 = 64 * 1024;
+/// The most read of each of the fleet's small files: suspensions carry
+/// each member's key pairs as well as its removals.
+const MAX_SUSPENDED_BYTES: u64 = 160 * 1024;
 
 /// Who signed a removal that suspended a member, and with what sequence
 /// number: what Sheprd's daemon holds to its log to tell a removal that is
@@ -75,6 +77,11 @@ pub struct Suspension {
     /// settles it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub overflow: bool,
+    /// The member's key pairs, now and before its rotations, kept with
+    /// the suspension: a desktop with one stays cut off whatever becomes
+    /// of the access file, refused or unreadable included.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub pairs: BTreeSet<Pair>,
 }
 
 /// The access this agent holds, who is suspended, and the key pairs of
@@ -233,12 +240,20 @@ impl Held {
         // A desktop with both keys of a member removed for good stays
         // enrolled, cut off: never forgotten on a member's word.
         let removed = |id: &Id| merged.removed.contains(id);
+        // From the file held and from the suspensions, which keep their
+        // pairs when that file was set aside.
         let pairs: Vec<Pair> = held
             .access
             .iter()
             .flat_map(|access| &access.members)
             .filter(|(id, _)| removed(id))
             .flat_map(|(_, member)| member.pairs())
+            .chain(
+                held.suspended
+                    .iter()
+                    .filter(|(id, _)| removed(id))
+                    .flat_map(|(_, suspension)| suspension.pairs.iter().copied()),
+            )
             .collect();
         let desktops = Authorized::load(state_dir)?;
         let enrolled = |pair: &Pair| {
@@ -274,6 +289,11 @@ impl Held {
                 return false;
             }
             suspension.removals.retain(|id, _| !settled.contains(id));
+            // Its keys as the merged file has them, its older ones
+            // included: a rotation while suspended cuts the new pair off.
+            if let Some(member) = merged.members.get(member) {
+                suspension.pairs = member.pairs().collect();
+            }
             suspension.overflow || !suspension.removals.is_empty()
         });
         held.access = Some(merged);
@@ -369,6 +389,9 @@ impl Held {
             };
             for target in targets {
                 let suspension = held.suspended.entry(target).or_default();
+                if let Some(member) = access.members.get(&target) {
+                    suspension.pairs = member.pairs().collect();
+                }
                 let id = Id(removal.id);
                 if suspension.removals.contains_key(&id) {
                     continue;

@@ -106,7 +106,7 @@ scripts/ci-runners/runners.sh status m4-pro-1.local
   `ci.yml` runs on that platform (`guest-warm.sh`), so the next job compiles
   only what changed. The runner stays stopped until the build ends, and the
   build refuses to start if it cannot stop it. Keep those commands in step
-  with `ci.yml`. Logs are in `~/Library/Logs/sheprd-ci-warm/` on each host.
+  with `ci.yml`. The build runs detached inside the VM, logging to `~/sheprd-ci-warm.log` there, and skips a runner that is running a job.
 - `status` prints each VM's size, whether its runner runs, and how its last
   warm build ended; `wait` waits for warm builds to end first.
 

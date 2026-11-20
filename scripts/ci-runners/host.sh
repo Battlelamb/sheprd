@@ -6,8 +6,10 @@ export PATH="/opt/homebrew/bin:$PATH"
 
 here="$(cd "$(dirname "$0")" && pwd)"
 uid="$(id -u)"
-logs="$HOME/Library/Logs/sheprd-ci-warm"
-mkdir -p "$logs"
+# The warm build runs detached inside the VM and logs there: a `tart exec`
+# session can drop mid-build, and the guest agent then kills what it ran,
+# before the build could restart the runner.
+guest_log='$HOME/sheprd-ci-warm.log'
 
 vms() {
   local plist
@@ -21,7 +23,10 @@ vms() {
 # darwin or linux, from `tart get`'s second line.
 os_of() { tart get "$1" | awk 'NR == 2 { print $1 }'; }
 
-warming() { pgrep -f "tart exec $1 /bin/bash /tmp/guest-warm.sh" >/dev/null; }
+# Anchored, so it never matches the pgrep itself.
+warming() { tart exec "$1" pgrep -f '^/bin/bash /tmp/guest-warm.sh' >/dev/null 2>&1; }
+
+warm_log() { tart exec "$1" /bin/bash -c "cat $guest_log 2>/dev/null" 2>/dev/null || true; }
 
 # Waits for the VM's guest agent, which `tart exec` needs. An agent that died
 # (a guest short of memory loses it) stays dead while the VM runs, so a VM
@@ -81,20 +86,24 @@ warm() {
   local vm="$1"
   wait_up "$vm"
   copy_in "$vm"
-  # Detached from this shell, which `wait`s for its own children, and from
-  # the SSH session; the guest script restarts the runner when it ends.
-  (nohup tart exec "$vm" /bin/bash /tmp/guest-warm.sh </dev/null >"$logs/$vm.log" 2>&1 &)
-  echo "$vm: warming, log $logs/$vm.log"
+  # Started detached inside the VM, so neither this session nor the guest
+  # agent's ends it; the guest script restarts the runner when it ends.
+  # setsid on Linux leaves the agent's session; macOS's agent lets nohup be.
+  tart exec "$vm" /bin/bash -c "
+    if command -v setsid >/dev/null; then detach='setsid -f'; else detach=nohup; fi
+    \$detach /bin/bash /tmp/guest-warm.sh </dev/null >$guest_log 2>&1 &"
+  echo "$vm: warming, log ~/sheprd-ci-warm.log in the VM"
 }
 
 status() {
-  local vm="$1" size runner last
+  local vm="$1" size runner last log
   size="$(tart get "$vm" | awk 'NR == 2 { print $2 " cpu, " $3 " MB, " $4 " GB, " $NF }')"
   # Reading a log must not end the script under `set -e`: none may exist yet.
+  log="$(warm_log "$vm")"
   if warming "$vm"; then
-    last="warming: $(grep -E '^[0-9]+m exit=' "$logs/$vm.log" 2>/dev/null | tail -1 || true)"
-  elif [[ -f "$logs/$vm.log" ]]; then
-    last="$(grep -E '^(main at|[0-9]+m exit=[1-9]|target/)' "$logs/$vm.log" | tr '\n' ' ' || true)"
+    last="warming: $(grep -E '^[0-9]+m exit=' <<<"$log" | tail -1 || true)"
+  elif [[ -n "$log" ]]; then
+    last="$(grep -E '^(main at|[0-9]+m exit=[1-9]|target/|the runner)' <<<"$log" | tr '\n' ' ' || true)"
   else
     last="never warmed"
   fi
@@ -109,11 +118,18 @@ status() {
   echo "$vm: $size; runner $runner; $last"
 }
 
+# A VM skipped because it was warming stays skipped for the later actions
+# too: its build may end meanwhile, and `setup warm` would then warm it again.
+skipped=" "
 for action in "$@"; do
   for vm in $(vms); do
-    if [[ "$action" != status && "$action" != wait ]] && warming "$vm"; then
-      echo "$vm: a warm build is running; skipped $action"
-      continue
+    if [[ "$action" != status && "$action" != wait ]]; then
+      [[ "$skipped" == *" $vm "* ]] && continue
+      if warming "$vm"; then
+        echo "$vm: a warm build is running; skipped"
+        skipped+="$vm "
+        continue
+      fi
     fi
     case "$action" in
       resize | setup) "$action" "$vm" & ;;

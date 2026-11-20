@@ -22,6 +22,11 @@ else
   # svc.sh records the unit's name; a glob would miss a unit no longer loaded.
   running() { systemctl is-active --quiet "$(cat "$runner/.service")"; }
 fi
+# Stopping the runner would kill a job it runs; warm it another time.
+if pgrep -f 'bin/Runner\.Worker' >/dev/null; then
+  echo "the runner is running a job; not warming"
+  exit 0
+fi
 # A job checking out under the build would break both, so the build waits
 # for the service manager to confirm the runner stopped, which a stop issued
 # right after a start does not always do.

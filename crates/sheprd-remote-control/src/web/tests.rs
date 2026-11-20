@@ -22,6 +22,8 @@ mod echo;
 mod empty_core;
 #[cfg(unix)]
 pub(crate) mod fleet;
+#[cfg(unix)]
+mod fleet_copy;
 mod github;
 mod handoff;
 mod hosts;

@@ -194,3 +194,66 @@ fn calls_are_bounded_and_strict() {
     }));
     assert_eq!(error["kind"], "bounds");
 }
+
+#[test]
+fn a_damaged_copy_gives_back_only_this_phones_own_operations() {
+    let fleet = Fleet::new();
+    let replica = fleet.replica();
+    let log = log_of(&replica);
+    let removal = json!({ "body": "remove", "member": fleet.b.hex(), "reason": "lost" });
+    let drafted = ok(&json!({
+        "call": "draft", "fleet": fleet.fleet(), "me": fleet.p.hex(), "log": log,
+        "issued_ms": NOW, "now_ms": NOW, "bodies": [removal],
+    }));
+    let signed = sign_drafts(&drafted, &fleet.p.key);
+    let sealed = ok(&json!({
+        "call": "seal", "fleet": fleet.fleet(), "me": fleet.p.hex(), "log": log,
+        "ops": signed, "now_ms": NOW,
+    }));
+    let saved = sync::bytes(&log_of(&sealed)).unwrap();
+    let damage = |op: &[u8]| {
+        let mut bytes = saved.clone();
+        let at = bytes
+            .windows(op.len())
+            .position(|window| window == op)
+            .unwrap();
+        bytes[at + op.len() - 1] ^= 1;
+        sync::text(&bytes)
+    };
+    let salvage = |log: &str| -> Vec<String> {
+        let answer = ok(&json!({ "call": "salvage", "me": fleet.p.hex(), "log": log }));
+        serde_json::from_value(answer["ops"].clone()).unwrap()
+    };
+    let start = |ops: Vec<String>| {
+        let ops = [fleet.encoded(), ops].concat();
+        ok(&json!({
+            "call": "apply", "fleet": fleet.fleet(), "me": fleet.p.hex(),
+            "ops": ops, "now_ms": NOW,
+        }))
+    };
+    // The founding operation's signature is damaged: nothing opens the file,
+    // but the phone's own removal comes back and applies to a new copy.
+    let damaged = damage(&fleet.ops[0].encode());
+    let error = refused(&json!({
+        "call": "apply", "fleet": fleet.fleet(), "me": fleet.p.hex(), "log": damaged, "now_ms": NOW,
+    }));
+    assert_eq!(error["kind"], "log");
+    assert_eq!(salvage(&damaged), signed);
+    let again = start(salvage(&damaged));
+    assert_eq!(again["refused"], 0);
+    assert_eq!(again["status"]["next"]["seq"], 2);
+    // Its own operation damaged: given back, but refused rather than trusted.
+    let own = sync::bytes(&signed[0]).unwrap();
+    let damaged = damage(&own);
+    assert_eq!(start(salvage(&damaged))["refused"], 1);
+}
+
+#[test]
+fn a_request_with_an_unknown_field_is_refused() {
+    let fleet = Fleet::new();
+    let error = refused(&json!({
+        "call": "apply", "fleet": fleet.fleet(), "me": fleet.p.hex(), "ops": [],
+        "now_ms": NOW, "trust": true,
+    }));
+    assert_eq!(error["kind"], "request");
+}

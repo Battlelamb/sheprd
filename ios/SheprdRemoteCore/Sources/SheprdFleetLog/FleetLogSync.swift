@@ -9,7 +9,12 @@ import SheprdRemoteCore
 /// computers that cannot reach each other, and needs no one computer.
 public enum FleetLogSync {
     /// Rounds one sync takes each way, at most.
-    public static let maxRounds = 64
+    public static let maxRounds = 16
+    /// Operations one answer may carry: a computer's answer stops at 256
+    /// KiB, and every operation is more than 100 bytes.
+    public static let maxAnswerOps = 4096
+    /// The base64url text of one answer's operations: 256 KiB, and room.
+    public static let maxAnswerText = 512 * 1024
 
     public struct Outcome: Sendable {
         public let replica: FleetReplica
@@ -19,14 +24,15 @@ public enum FleetLogSync {
         public let refused: Int
     }
 
-    /// Syncs `log` (nil: no copy yet, which then starts from the
+    /// Syncs `replica` (nil: no copy yet, which then starts from the
     /// computer's history, from the operation that founded `fleet` only)
-    /// with the computer `client` reaches.
+    /// with the computer `client` reaches. Nothing a computer answers can
+    /// make the phone drop its copy: a bad answer fails this sync alone.
     public static func run(
-        fleet: String, me: String, log: Data?, with client: FleetClient,
+        fleet: String, me: String, replica: FleetReplica?, with client: FleetClient,
         now: @Sendable () -> Date = { Date() }
     ) async throws -> Outcome {
-        var replica = try log.map { try FleetReplica.open(fleet: fleet, me: me, log: $0, at: now()) }
+        var replica = replica
         var heads = try await pull(fleet: fleet, me: me, into: &replica, from: client, now: now, rounds: 1)
         guard var replica else { throw FleetLogError.unfounded }
         var refused = 0
@@ -73,6 +79,18 @@ public enum FleetLogSync {
     }
 
     private static func check(_ answer: API.FleetApplied, fleet: String) throws {
-        guard answer.fleet.lowercased() == fleet.lowercased() else { throw FleetLogError.otherFleet }
+        guard answer.fleet.lowercased() == fleet.lowercased() else { throw FleetLogSyncError.otherFleet }
+        guard answer.ops.count <= maxAnswerOps,
+              answer.ops.reduce(0, { $0 + $1.utf8.count }) <= maxAnswerText
+        else { throw FleetLogSyncError.bounds }
     }
+}
+
+/// Why a sync with one computer failed: its fault, never the copy's, so the
+/// copy stays as it is.
+public enum FleetLogSyncError: Error, Equatable, Sendable {
+    /// It answered for another fleet.
+    case otherFleet
+    /// Its answer is over a bound.
+    case bounds
 }

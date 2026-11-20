@@ -13,6 +13,7 @@ SheprdRemoteWatch/Info.plist
 # Xcode and SwiftPM build output.
 build/
 build-device/
+build-pkg/
 DerivedData/
 SheprdRemoteCore/.build/
 SheprdRemoteCore/.swiftpm/

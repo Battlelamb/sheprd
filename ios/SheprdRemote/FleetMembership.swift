@@ -44,6 +44,11 @@ final class FleetMembership {
         /// it signed that no computer confirmed (base64url). Taken into the
         /// copy once it exists, which hands them over, then dropped.
         var unconfirmed: [String]?
+        /// The highest sequence number this phone ever signed, kept apart
+        /// from its copy: nothing is signed at or below it, so a copy that
+        /// lost some of the phone's own operations (damaged, or started
+        /// again) can never make it sign one number twice.
+        var signedSeq: UInt64?
     }
 
     private(set) var record: Record?
@@ -75,6 +80,11 @@ final class FleetMembership {
     /// operation was signed must never save a copy without it, as the
     /// next draft would then reuse its sequence number.
     @ObservationIgnored private var queue: Task<Void, Never>?
+    /// The saved copy failed its own checks: the next sync starts again
+    /// from a computer, with `salvaged`, this phone's own operations read
+    /// back from the file, taken in and checked again.
+    @ObservationIgnored private var damaged = false
+    @ObservationIgnored private var salvaged: [String] = []
     private let sessions: Sessions
     private let store: FleetLogStore
     /// The paired computers' live links, which fleet calls go through.
@@ -356,53 +366,53 @@ final class FleetMembership {
         return await task.value
     }
 
-    /// Opens the saved copy, checking it again, off the main thread.
+    /// Opens the saved copy, checking it again, off the main thread. Only
+    /// this, never a computer's answer, may find the copy damaged.
     private func load() async {
-        guard let record, replica == nil, case let .bytes(saved) = store.read() else { return }
+        guard let record, replica == nil, !damaged, case let .bytes(saved) = store.read() else { return }
+        let fleet = record.fleet, me = record.member
         do {
-            let opened = try await Self.background {
-                try FleetReplica.open(fleet: record.fleet, me: record.member, log: saved, at: .now)
-            }
+            let opened = try await Self.background { try FleetReplica.open(fleet: fleet, me: me, log: saved, at: .now) }
             try adopt(opened)
         } catch {
-            log.error("fleet: the saved copy does not check out; it is read again from a computer")
+            damaged = true
+            salvaged = (try? await Self.background { try FleetReplica.salvage(me: me, log: saved) }) ?? []
+            log.error("fleet: the saved copy does not check out; \(self.salvaged.count) of this phone's operations kept")
         }
     }
 
     /// Syncs the copy with `computer`: takes what it has, hands it what the
     /// phone has and it lacks, the phone's own operations among them.
-    /// Nil when it could not be reached or the copy not be kept.
+    /// Nil when it could not be reached, answered badly, or the copy could
+    /// not be kept; the copy then stays as it was.
     private func syncNow(with computer: Computer) async -> FleetLogSync.Outcome? {
         guard let record else { return nil }
-        let saved: Data?
-        switch (replica, store.read()) {
-        case let (replica?, _): saved = replica.log
-        case let (nil, .bytes(bytes)): saved = bytes
-        case (nil, .none): saved = nil
-        // A copy is there but locked away: rebuilding it from a computer
-        // could drop this phone's own operations not yet handed over.
-        case (nil, .unavailable): return nil
+        if replica == nil {
+            switch store.read() {
+            // A copy is there but locked away: one rebuilt from a computer
+            // could lack this phone's own operations not yet handed over.
+            case .unavailable: return nil
+            case .bytes where !damaged:
+                await load()
+                guard replica != nil || damaged else { return nil }
+            case .bytes, .none: break
+            }
         }
         let client = client(computer)
         let fleet = record.fleet, me = record.member
         do {
-            var outcome: FleetLogSync.Outcome
-            do {
-                outcome = try await FleetLogSync.run(fleet: fleet, me: me, log: saved, with: client)
-            } catch let error as FleetLogError where error.unreadable && saved != nil {
-                // The saved copy no longer checks out: start again from the
-                // fleet's founding operation, checking everything again.
-                log.error("fleet: the saved copy does not check out; reading it again from \(computer.name, privacy: .public)")
-                outcome = try await FleetLogSync.run(fleet: fleet, me: me, log: nil, with: client)
+            var outcome = try await FleetLogSync.run(fleet: fleet, me: me, replica: replica, with: client)
+            // What the phone signed that its copy lost or never held (signed
+            // before it kept one) joins it, checked again, and goes over.
+            let carried = salvaged + (record.unconfirmed ?? [])
+            if !carried.isEmpty {
+                let synced = outcome.replica
+                let merged = try await Self.background { try synced.applying(carried, at: .now) }
+                outcome = try await FleetLogSync.run(fleet: fleet, me: me, replica: merged, with: client)
             }
-            var synced = outcome.replica
-            // Operations signed before the phone kept a copy join it, and
-            // go to the next computer it syncs with.
-            if let old = record.unconfirmed, !old.isEmpty {
-                let fresh = synced
-                synced = try await Self.background { try fresh.applying(old, at: .now) }
-            }
-            try adopt(synced, through: computer)
+            try adopt(outcome.replica, through: computer)
+            damaged = false
+            salvaged = []
             return outcome
         } catch {
             log.info("fleet: no sync with \(computer.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
@@ -417,6 +427,10 @@ final class FleetMembership {
         replica = new
         if new.status.join == .member { record.admitted = true }
         if let computer { record.through = computer.device }
+        // The copy holds the phone's own operations up to `next - 1`.
+        if let next = new.status.next, next.seq > 1 {
+            record.signedSeq = max(record.signedSeq ?? 0, next.seq - 1)
+        }
         record.unconfirmed = nil
         if record != self.record { save(record) }
         route(new.status)
@@ -461,6 +475,12 @@ final class FleetMembership {
             drafts = try await Self.background { try current.draft(bodies, issued: .now, at: .now) }
         } catch {
             problem = Self.describe(error)
+            return .nothing
+        }
+        // A copy missing some of what this phone signed would reuse a
+        // sequence number, which the fleet takes for a stolen key.
+        guard let first = drafts.first, first.seq > (record.signedSeq ?? 0) else {
+            problem = "This \(UIDevice.current.model)'s copy of the fleet lacks something it signed. Connect to a computer of your fleet that has it, then try again."
             return .nothing
         }
         let key: FleetKey

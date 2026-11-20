@@ -47,7 +47,7 @@ struct FleetLogSyncTests {
         let vector = try Vector()
         let now = vector.now
         let computer = Computer(try vector.replica())
-        let outcome = try await FleetLogSync.run(fleet: vector.fleet, me: vector.me, log: nil, with: computer.client) { now }
+        let outcome = try await FleetLogSync.run(fleet: vector.fleet, me: vector.me, replica: nil, with: computer.client) { now }
         #expect(outcome.replica.status.heads == outcome.heads)
         #expect(outcome.replica.status.join == .member)
         #expect(outcome.refused == 0)
@@ -66,12 +66,12 @@ struct FleetLogSyncTests {
         let introducer = Computer(try vector.replica())
         introducer.offline.withLock { $0 = true }
         await #expect(throws: URLError.self) {
-            _ = try await FleetLogSync.run(fleet: vector.fleet, me: vector.me, log: signed.log, with: introducer.client) { now }
+            _ = try await FleetLogSync.run(fleet: vector.fleet, me: vector.me, replica: signed, with: introducer.client) { now }
         }
         // Another computer of the fleet gets the very same bytes from the
         // phone's own copy: nothing is signed again.
         let other = Computer(try vector.replica())
-        let outcome = try await FleetLogSync.run(fleet: vector.fleet, me: vector.me, log: signed.log, with: other.client) { now }
+        let outcome = try await FleetLogSync.run(fleet: vector.fleet, me: vector.me, replica: signed, with: other.client) { now }
         #expect(outcome.refused == 0)
         #expect(outcome.heads == signed.status.heads)
         let held = other.replica.withLock { $0 }
@@ -84,8 +84,8 @@ struct FleetLogSyncTests {
         let stranger = FleetClient { _, _, _ in
             Data(#"{"fleet":"\#(String(repeating: "07", count: 32))","heads":[],"ops":[],"refused":0,"more":false}"#.utf8)
         }
-        await #expect(throws: FleetLogError.otherFleet) {
-            _ = try await FleetLogSync.run(fleet: vector.fleet, me: vector.me, log: nil, with: stranger) { now }
+        await #expect(throws: FleetLogSyncError.otherFleet) {
+            _ = try await FleetLogSync.run(fleet: vector.fleet, me: vector.me, replica: nil, with: stranger) { now }
         }
     }
 
@@ -100,7 +100,48 @@ struct FleetLogSyncTests {
             return try JSONSerialization.data(withJSONObject: answer)
         }
         await #expect(throws: FleetLogError.unfounded) {
-            _ = try await FleetLogSync.run(fleet: vector.fleet, me: vector.me, log: nil, with: liar) { now }
+            _ = try await FleetLogSync.run(fleet: vector.fleet, me: vector.me, replica: nil, with: liar) { now }
         }
+    }
+
+    @Test func aBadAnswerFailsTheSyncAndLeavesTheCopy() async throws {
+        let vector = try Vector()
+        let now = vector.now
+        let replica = try vector.replica()
+        let fleet = vector.fleet
+        // One operation that is not an operation.
+        let garbage = FleetClient { _, _, _ in
+            let answer: [String: Any] = ["fleet": fleet, "heads": [], "ops": ["!"], "refused": 0, "more": false]
+            return try JSONSerialization.data(withJSONObject: answer)
+        }
+        await #expect(throws: FleetLogError.self) {
+            _ = try await FleetLogSync.run(fleet: fleet, me: vector.me, replica: replica, with: garbage) { now }
+        }
+        // Too many to be one answer.
+        let flood = FleetClient { _, _, _ in
+            let ops = [String](repeating: "AA", count: FleetLogSync.maxAnswerOps + 1)
+            let answer: [String: Any] = ["fleet": fleet, "heads": [], "ops": ops, "refused": 0, "more": true]
+            return try JSONSerialization.data(withJSONObject: answer)
+        }
+        await #expect(throws: FleetLogSyncError.bounds) {
+            _ = try await FleetLogSync.run(fleet: fleet, me: vector.me, replica: replica, with: flood) { now }
+        }
+        // The copy the phone holds is the one it had.
+        let reopened = try FleetReplica.open(fleet: fleet, me: vector.me, log: replica.log, at: now)
+        #expect(reopened.status == replica.status)
+    }
+
+    @Test func aDamagedCopyGivesBackThePhonesOwnOperations() throws {
+        let vector = try Vector()
+        let replica = try vector.replica()
+        let (ops, signed) = try replica.signing(
+            replica.draft([.remove(member: vector.removedMember, reason: .lost)], issued: vector.now, at: vector.now),
+            with: vector.sign, at: vector.now
+        )
+        #expect(try FleetReplica.salvage(me: vector.me, log: signed.log) == ops)
+        #expect(try FleetReplica.salvage(me: vector.me, log: Data("not a log".utf8)).isEmpty)
+        // Started again from a computer's history, they apply once more.
+        let again = try FleetReplica.apply(fleet: vector.fleet, me: vector.me, log: nil, ops: vector.ops + ops, at: vector.now)
+        #expect(again.status.next?.seq == 2)
     }
 }

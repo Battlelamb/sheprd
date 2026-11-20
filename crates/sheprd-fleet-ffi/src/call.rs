@@ -21,7 +21,7 @@ const MAX_HEADS: usize = 1024;
 /// One request. Ids are hex, operations and logs base64url, times
 /// milliseconds since the epoch.
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "call")]
+#[serde(deny_unknown_fields, rename_all = "snake_case", tag = "call")]
 pub enum Call {
     /// Takes `ops` into the log: what a computer answered, or what this
     /// phone signed before. With no `log` yet, `ops` must hold the
@@ -57,6 +57,10 @@ pub enum Call {
         now_ms: u64,
         bodies: Vec<Draft>,
     },
+    /// The operations `me` signed that a saved log holds, read for their
+    /// shape alone from a log that no longer checks out, so a copy started
+    /// again takes them back, checking each.
+    Salvage { me: String, log: String },
     /// Adds operations `me` just signed. Each must apply; otherwise none is
     /// kept and the log answered is the one given.
     Seal {
@@ -70,7 +74,7 @@ pub enum Call {
 
 /// What a phone may ask to sign.
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "body")]
+#[serde(deny_unknown_fields, rename_all = "snake_case", tag = "body")]
 pub enum Draft {
     Remove {
         member: String,
@@ -215,6 +219,13 @@ fn handle(call: Call) -> Result<Value> {
                 })
                 .collect::<Result<Vec<_>>>()?;
             json!({ "drafts": drafts })
+        }
+        Call::Salvage { me, log } => {
+            let me = sync::member(&me)?;
+            let bytes = sync::bytes(&log)?;
+            let ops = saved::salvage(&bytes);
+            let mine = ops.iter().filter(|op| op.signer() == me);
+            json!({ "ops": sync::encode_ops(mine) })
         }
         Call::Seal {
             fleet,

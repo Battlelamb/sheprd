@@ -39,6 +39,15 @@ public struct FleetReplica: Sendable {
         try apply(fleet: fleet, me: me, log: log, ops: [], at: now)
     }
 
+    /// The operations `me` signed that saved `log` holds, read for their
+    /// shape alone from a copy that no longer opens, so a copy started
+    /// again takes them back, checking each. Nothing for a file that is
+    /// not a log.
+    public static func salvage(me: String, log: Data) throws -> [String] {
+        let request = Request.Salvage(me: me, log: Base64URL.encode(log))
+        return try JSONDecoder().decode(Salvaged.self, from: FleetLogFFI.call(request)).ops
+    }
+
     /// This copy with `ops` taken in.
     public func applying(_ ops: [String], at now: Date) throws -> FleetReplica {
         try Self.apply(fleet: fleet, me: me, log: log, ops: ops, at: now)
@@ -124,6 +133,7 @@ public struct FleetReplica: Sendable {
 
     private struct Removed: Decodable { let removed: Bool }
     private struct Missing: Decodable { let ops: [String]; let more: Bool }
+    private struct Salvaged: Decodable { let ops: [String] }
     private struct Drafts: Decodable { let drafts: [FleetDrafted] }
 
     private enum Request {
@@ -135,6 +145,12 @@ public struct FleetReplica: Sendable {
             let ops: [String]
             let nowMs: UInt64
             enum CodingKeys: String, CodingKey { case call, fleet, me, log, ops, nowMs = "now_ms" }
+        }
+
+        struct Salvage: Encodable {
+            let call = "salvage"
+            let me: String
+            let log: String
         }
 
         struct Missing: Encodable {

@@ -153,7 +153,7 @@ public struct Home: Codable, Hashable, Sendable {
 
         /// What the badge says, before a theme colors it.
         public enum Tone: String, Codable, Hashable, Sendable {
-            case attention, held, merged, ready, waiting, other
+            case attention, held, merged, queued, ready, waiting, other
 
             public init(from decoder: Decoder) throws {
                 self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .other

@@ -33,6 +33,8 @@ pub enum Error {
     Caffeine(#[from] crate::caffeine::Error),
     #[error(transparent)]
     Chat(#[from] crate::chat::Error),
+    #[error(transparent)]
+    ChatPullRequests(#[from] crate::chat::pull_requests::Error),
     #[error("{source}; removing {}: {cleanup}", path.display())]
     Cleanup {
         #[source]
@@ -198,6 +200,8 @@ pub enum Error {
         #[source]
         source: io::Error,
     },
+    #[error(transparent)]
+    Machine(#[from] crate::machine::Error),
     #[error("This link's address is not valid, so it opens nothing.")]
     MalformedLink,
     #[error("Reopen the deletion dialog.")]

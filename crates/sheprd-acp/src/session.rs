@@ -9,6 +9,7 @@ mod commands;
 mod harness;
 mod known;
 mod pictures;
+mod pull_requests;
 mod thread;
 
 use std::{
@@ -141,6 +142,9 @@ pub(crate) struct Config {
     pub history: Option<Transcript>,
     /// The settings each built-in agent offered last, shown while it starts.
     pub known: crate::known::Known,
+    /// Clients can attach, and the agent was told where: its
+    /// `sheprd chat pr add` reaches this chat.
+    pub listens: bool,
     pub load: Option<String>,
     pub login_hint: Option<String>,
     pub pane: Option<String>,
@@ -182,6 +186,8 @@ pub(crate) struct Session<R: FnMut(Update)> {
     acp_session: Option<wire::SessionId>,
     activity: Option<Activity>,
     asked: HashMap<PermissionId, Asked>,
+    /// The whole commands of shell calls, which their titles cut short.
+    commands: pull_requests::Commands,
     config: Config,
     /// What the agent has been told besides the person's words.
     context: Context,
@@ -247,12 +253,14 @@ impl<R: FnMut(Update)> Session<R> {
             .as_ref()
             .and_then(|_| crate::context::Recall::open(&config.cwd));
         let context = Context::new(std::mem::take(&mut config.prompts), facts, told)
-            .with_memory(config.sheprd.as_deref(), recall);
+            .with_memory(config.sheprd.as_deref(), recall)
+            .with_pull_requests(config.sheprd.as_deref().filter(|_| config.listens));
         Self {
             accepts: crate::files::Accepts::default(),
             acp_session: None,
             activity: None,
             asked: HashMap::new(),
+            commands: pull_requests::Commands::default(),
             config,
             context,
             deferred: Vec::new(),
@@ -394,6 +402,7 @@ impl<R: FnMut(Update)> Session<R> {
         }
         self.report_activity();
         self.pictures_after(&change);
+        self.find_pull_requests(&change);
     }
 
     fn emit_all(&mut self, changes: impl IntoIterator<Item = Change>) {

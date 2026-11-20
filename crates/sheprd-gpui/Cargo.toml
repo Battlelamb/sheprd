@@ -144,8 +144,9 @@ sprites = ["cloud", "sheprd-client/sprites", "sheprd-remote/sprites"]
 # Development only: `--mockup` shows UI variants from HERDR_MOCKUP_FILE side by
 # side in a native window. Never enabled in release builds. GPUI's test support
 # provides `Window::render_to_image`, so `--capture` needs no screen-recording
-# permission.
-mockup = ["gpui_platform/test-support"]
+# permission. GitHub's test support seeds pull requests the rich-chat fixture
+# shows.
+mockup = ["gpui_platform/test-support", "sheprd-github/test-support"]
 # Development only: a plain launch opens Sheprd in a window Moonframe lays out
 # from `moonframe/app` (Luau), with Inspect Element and the sparkles agent to
 # change it live; `sheprd` commands and `--socket`/`--session` launches stay
@@ -219,6 +220,7 @@ font-kit.workspace              = true
 block2.workspace                = true
 dispatch2.workspace             = true
 objc2-core-foundation.workspace = true
+objc2-virtualization.workspace  = true
 objc2-web-kit.workspace         = true
 objc2-user-notifications.workspace = true
 cocoa                        = { optional = true, workspace = true }

@@ -296,6 +296,7 @@ impl<R: FnMut(Update)> Session<R> {
             }
             content.text = rest.to_owned();
         }
+        self.commands.keep(&update);
         let changes = self.projector.update(&self.transcript, update, now_ms());
         self.emit_all(changes);
     }

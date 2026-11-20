@@ -68,6 +68,8 @@ impl<R: FnMut(Update)> Session<R> {
         // The conversation stays; what the old agent alone held does not.
         transcript.entries = std::mem::take(&mut self.transcript.entries);
         transcript.truncated = self.transcript.truncated;
+        // What the conversation worked on stays listed, added by hand too.
+        transcript.pull_requests = std::mem::take(&mut self.transcript.pull_requests);
         // Prompts typed while the old agent started go to the new one.
         transcript.queued = std::mem::take(&mut self.transcript.queued);
         transcript.harnesses = Some(Harnesses {

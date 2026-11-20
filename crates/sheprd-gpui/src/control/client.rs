@@ -316,6 +316,7 @@ pub(crate) fn status(error: &crate::Error) -> u8 {
         crate::Error::ListenToken(crate::control::listen_token::Error::Read(_)) => exit::REFUSED,
         crate::Error::ListenToken(_) => exit::USAGE,
         crate::Error::Control(crate::control::Error::Unavailable { .. }) => exit::NOT_RUNNING,
+        crate::Error::ChatPullRequests(error) => chat_pull_requests_status(error),
         crate::Error::Control(crate::control::Error::Rejected { code, .. }) => match code {
             ErrorCode::InvalidUrl => exit::USAGE,
             ErrorCode::NotFound | ErrorCode::WorkspaceNotFound | ErrorCode::NoWindow => {
@@ -327,6 +328,28 @@ pub(crate) fn status(error: &crate::Error) -> u8 {
             ErrorCode::InvalidRequest | ErrorCode::Failed => exit::REFUSED,
         },
         _ => exit::REFUSED,
+    }
+}
+
+/// How `chat pr` failing exits: the caller's mistakes as usage, a chat
+/// that is not there as not running.
+fn chat_pull_requests_status(error: &crate::chat::pull_requests::Error) -> u8 {
+    use crate::chat::pull_requests::Error;
+    use sheprd_chat_protocol::Rejection;
+    match error {
+        Error::InvalidEndpoint
+        | Error::InvalidUrl
+        | Error::NoChat
+        | Error::Rejected(Rejection::InvalidPullRequest) => exit::USAGE,
+        Error::Connect(_) => exit::NOT_RUNNING,
+        Error::Timeout => exit::TIMEOUT,
+        Error::Rejected(Rejection::Unsupported) => exit::UNSUPPORTED,
+        Error::Closed
+        | Error::Io(_)
+        | Error::NoEndpointDir
+        | Error::Protocol(_)
+        | Error::Refused
+        | Error::Rejected(_) => exit::REFUSED,
     }
 }
 
@@ -462,6 +485,7 @@ pub(crate) fn run(invocation: Invocation) -> ExitCode {
         ControlCommand::Tab(command) => tabs::tab(command, &context),
         ControlCommand::Code(command) => tabs::code(command, &context),
         ControlCommand::Devices => tabs::devices(&context),
+        ControlCommand::Machine(command) => tabs::machine(command, &context),
         ControlCommand::Orchestrator(command) => tabs::orchestrator(command, &context),
         ControlCommand::Review => tabs::review(&context),
         ControlCommand::Chat(command) => chat::chat(command, &context),

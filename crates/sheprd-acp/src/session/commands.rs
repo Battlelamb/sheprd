@@ -44,6 +44,7 @@ impl<R: FnMut(Update)> Session<R> {
             }
             Command::StopActivity { call_id } => self.stop_activity(&call_id),
             Command::SetAgent { agent } => self.set_agent(agent),
+            Command::AddPullRequest { url } => self.add_pull_request(&url),
         }
         .err();
         self.ack(conn, id, rejected);

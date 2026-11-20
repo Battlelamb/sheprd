@@ -101,15 +101,13 @@ impl Proven {
 
 #[derive(Serialize, Deserialize)]
 struct FoldedKept {
-    /// Each folded removal's id, hex, with when it arrived.
-    #[serde(default)]
-    ids: BTreeMap<String, u64>,
+    since_ms: u64,
+    /// Each member named, hex, with when the latest removal naming it
+    /// arrived.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    named: BTreeMap<String, u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    overflowed: Option<u64>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    named_with: Vec<String>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pinned: bool,
+    pinned: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -147,9 +145,13 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
             .held
             .iter()
             .filter_map(|(peer, ids)| {
+                // Forgetting one only sends it again.
                 Some((
                     MemberId::from_hex(peer)?,
-                    ids.iter().filter_map(|id| OpId::from_hex(id)).collect(),
+                    ids.iter()
+                        .filter_map(|id| OpId::from_hex(id))
+                        .take(super::MAX_HELD_PER_PEER)
+                        .collect(),
                 ))
             })
             .collect(),
@@ -221,16 +223,11 @@ fn folded(
             into.insert(
                 member(target)?,
                 super::suspensions::FoldedTarget {
-                    ids: kept
-                        .ids
+                    since_ms: kept.since_ms,
+                    named: kept
+                        .named
                         .iter()
-                        .map(|(id, since)| Ok((OpId::from_hex(id).ok_or(Error::Peers)?, *since)))
-                        .collect::<Result<_>>()?,
-                    overflowed: kept.overflowed,
-                    named_with: kept
-                        .named_with
-                        .iter()
-                        .map(|hex| member(hex))
+                        .map(|(hex, since)| Ok((member(hex)?, *since)))
                         .collect::<Result<_>>()?,
                     pinned: kept.pinned,
                 },
@@ -295,12 +292,12 @@ pub(super) fn save(state_dir: &Path, inner: &Inner, on_disk: &mut Suspensions) -
         let folded = first.folded.entry(*signer).or_default();
         for (target, kept) in targets {
             let entry = folded.entry(*target).or_insert_with(|| kept.clone());
-            for (id, since) in &kept.ids {
-                entry.ids.entry(*id).or_insert(*since);
+            entry.since_ms = entry.since_ms.max(kept.since_ms);
+            for (name, since) in &kept.named {
+                let at = entry.named.entry(*name).or_insert(*since);
+                *at = (*at).max(*since);
             }
-            entry.overflowed = entry.overflowed.max(kept.overflowed);
-            entry.named_with.extend(kept.named_with.iter().copied());
-            entry.pinned |= kept.pinned;
+            entry.pinned = entry.pinned.max(kept.pinned);
         }
     }
     write_peers(state_dir, inner, &first)?;
@@ -358,13 +355,12 @@ fn write_peers(state_dir: &Path, inner: &Inner, suspensions: &Suspensions) -> Re
                     .iter()
                     .map(|(target, kept)| {
                         let kept = FoldedKept {
-                            ids: kept
-                                .ids
+                            since_ms: kept.since_ms,
+                            named: kept
+                                .named
                                 .iter()
-                                .map(|(id, since)| (id.to_string(), *since))
+                                .map(|(name, since)| (name.to_string(), *since))
                                 .collect(),
-                            overflowed: kept.overflowed,
-                            named_with: kept.named_with.iter().map(ToString::to_string).collect(),
                             pinned: kept.pinned,
                         };
                         (target.to_string(), kept)

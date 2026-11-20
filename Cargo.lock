@@ -11002,6 +11002,7 @@ dependencies = [
  "sheprd-chat-protocol",
  "sheprd-client",
  "sheprd-protocol",
+ "sheprd-session",
  "sheprd-terminal",
  "tempfile",
  "thiserror 2.0.21",

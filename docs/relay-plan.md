@@ -1432,7 +1432,11 @@ sequenceDiagram
    writes its `ssh_access` lines and admits the members' tunnel keys.
 3. **H is a plain SSH machine.** The dialog also says "Installs
    sheprd-relay-agent on H". A installs or updates it over its working
-   SSH session (Enrolling), then runs `sheprd-relay-agent fleet apply`
+   SSH session (Enrolling), on A's relays: a private relay's listen token
+   goes over the session's input into a file in the agent's state
+   directory readable by that account alone, passed with `--token-file`,
+   and the share waits until a relay lets the agent listen. A then runs
+   `sheprd-relay-agent fleet apply`
    with an **access file** computed from the log:
    - the fleet id, which pins the account to this fleet: a file for
      another fleet is refused, naming the fleet that holds it;

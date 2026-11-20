@@ -27,6 +27,10 @@ pub enum Error {
     NoProgram,
     #[error("This computer listens on no relay; turn one on in Remote Control first")]
     NoRelays,
+    #[error(
+        "The relay agent runs on the host, but no relay lets it listen; check the relays' listen tokens"
+    )]
+    NotListening,
     #[error("The relay agent's service did not start on the host")]
     NotRunning,
     #[error("Could not read the account's name on the host")]

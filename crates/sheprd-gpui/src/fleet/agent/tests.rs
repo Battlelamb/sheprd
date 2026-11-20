@@ -1,5 +1,14 @@
 use super::*;
 
+mod tokens;
+
+fn public(url: &str) -> Relay {
+    Relay {
+        url: url.to_owned(),
+        token: None,
+    }
+}
+
 fn platform(os: &'static str, arch: &'static str) -> Platform {
     Platform { os, arch }
 }
@@ -9,7 +18,7 @@ fn report(keys: &[&str]) -> Report {
         serde_json::json!({
             "authorized": 0,
             "identity": "identity",
-            "relays": {},
+            "relays": {"https://fra1.relay.sheprd.org": {"state": "listening"}},
             "route": "route",
             "running": true,
             "ssh_host_keys": keys,
@@ -67,8 +76,8 @@ fn only_plain_relay_urls_go_into_a_service() {
 #[test]
 fn the_service_runs_the_agent_on_each_relay_on_both_systems() {
     let script = service_script(&[
-        "https://fra1.relay.sheprd.org".to_owned(),
-        "https://nyc1.relay.sheprd.org".to_owned(),
+        public("https://fra1.relay.sheprd.org"),
+        public("https://nyc1.relay.sheprd.org"),
     ]);
     assert!(script.contains(
         "\\\" --relay https://fra1.relay.sheprd.org --relay https://nyc1.relay.sheprd.org"
@@ -150,7 +159,11 @@ fn a_share_waits_for_a_running_agent() {
 #[test]
 fn the_host_scripts_parse() {
     let scripts = [
-        service_script(&["https://fra1.relay.sheprd.org".to_owned()]),
+        service_script(&[public("https://fra1.relay.sheprd.org")]),
+        service_script(&[
+            public("https://fra1.relay.sheprd.org"),
+            tokens::private("https://own.example.org"),
+        ]),
         probe_script("1.2.3"),
         RUN.replace("ARGS", "status --json"),
     ];

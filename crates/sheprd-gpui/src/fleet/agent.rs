@@ -14,10 +14,11 @@
 use super::Error;
 use crate::{
     host_build::{self, Platform},
+    remote::relay_token::ListenToken,
     teleport::Host,
 };
 use sheprd_client::{ScriptLimits, shell_quote};
-use sheprd_relay_agent::status::Report;
+use sheprd_relay_agent::status::{RelayState, Report};
 use sheprd_remote_control::control::fleet::{HostId, HostIntro, HostKind, SelfRecord, Verified};
 use std::{
     path::{Path, PathBuf},
@@ -61,18 +62,69 @@ pub(crate) fn plain_relay(relay: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || b":/.-_[]".contains(&byte))
 }
 
+/// A relay the agent listens on, with this computer's listen token for it
+/// when it is a private relay.
+#[derive(Clone, Debug)]
+pub(crate) struct Relay {
+    /// Its endpoint, as [`plain_relay`] allows.
+    pub(crate) url: String,
+    pub(crate) token: Option<ListenToken>,
+}
+
+/// Where the service's token file for the relay at `index` is.
+fn token_file(index: usize) -> String {
+    format!("$state/tokens/relay-{index}")
+}
+
+/// What the service script reads on its input: each token, in the order
+/// of `relays`, one a line. Tokens never go in the script, which the
+/// host's other users can see in its process list.
+pub(crate) fn service_input(relays: &[Relay]) -> Vec<u8> {
+    relays
+        .iter()
+        .filter_map(|relay| relay.token.as_ref())
+        .flat_map(|token| [token.expose().as_bytes(), b"\n".as_slice()])
+        .flatten()
+        .copied()
+        .collect()
+}
+
 /// The host script that keeps the agent running as a user service on
-/// `relays`: a systemd user unit on Linux, a launchd agent on macOS, both
-/// restarted so an update takes effect. It then waits up to ten seconds for
-/// the agent to listen, and prints its `status --json`.
-pub(crate) fn service_script(relays: &[String]) -> String {
+/// `relays`: each private relay's token in a private file it passes with
+/// `--token-file`, then a systemd user unit on Linux, a launchd agent on
+/// macOS, both restarted so an update takes effect. It then waits up to
+/// twenty seconds for a relay to let the agent listen, and prints its
+/// `status --json`. The tokens come on its input ([`service_input`]).
+pub(crate) fn service_script(relays: &[Relay]) -> String {
+    let token = |index: usize, relay: &Relay| relay.token.as_ref().map(|_| token_file(index));
     let args: String = relays
         .iter()
-        .map(|relay| format!(" --relay {relay}"))
+        .enumerate()
+        .map(|(index, relay)| match token(index, relay) {
+            Some(file) => format!(" --relay {} --token-file \\\"{file}\\\"", relay.url),
+            None => format!(" --relay {}", relay.url),
+        })
         .collect();
     let plist_args: String = relays
         .iter()
-        .map(|relay| format!("<string>--relay</string><string>{relay}</string>"))
+        .enumerate()
+        .map(|(index, relay)| {
+            let token = token(index, relay).map_or_else(String::new, |file| {
+                format!("<string>--token-file</string><string>{file}</string>")
+            });
+            format!(
+                "<string>--relay</string><string>{}</string>{token}",
+                relay.url
+            )
+        })
+        .collect();
+    let save_tokens: String = relays
+        .iter()
+        .enumerate()
+        .filter_map(|(index, relay)| token(index, relay))
+        .map(|file| {
+            format!("  IFS= read -r token || exit 6\n  printf '%s\\n' \"$token\" > \"{file}\"\n")
+        })
         .collect();
     format!(
         // i18n: data
@@ -90,6 +142,14 @@ else
 fi
 case "$state" in *'&'*|*'<'*|*'>'*|*'"'*|*'%'*|*'\'*) echo "the state directory's name cannot go in a service" >&2; exit 5;; esac
 case "$HOME" in *'&'*|*'<'*|*'>'*|*'"'*|*'%'*) echo "the home directory's name cannot go in a service" >&2; exit 5;; esac
+# Private relays' listen tokens, readable by this account alone; a relay
+# no longer private leaves no file behind.
+mkdir -p "$state/tokens"
+chmod 700 "$state" "$state/tokens"
+rm -f "$state/tokens/"relay-*
+(
+  umask 077
+{save_tokens}) || {{ echo "a relay's listen token did not arrive" >&2; exit 6; }}
 case "$(uname -s)" in
 Darwin)
   plist="$HOME/Library/LaunchAgents/{LABEL}.plist"
@@ -137,8 +197,8 @@ Darwin)
   ;;
 esac
 i=0
-while [ $i -lt 10 ]; do
-  case "$("$agent" status --json --state-dir "$state" 2>/dev/null)" in *'"running": true'*) break;; esac
+while [ $i -lt 20 ]; do
+  case "$("$agent" status --json --state-dir "$state" 2>/dev/null)" in *'"state": "listening"'*) break;; esac
   sleep 1
   i=$((i + 1))
 done
@@ -204,7 +264,7 @@ pub(super) fn scrub(host: &Host, cancelled: &AtomicBool) -> Result<(), Error> {
 /// there, keeps it running on `relays`, and reads its status. Blocks.
 pub(super) fn install(
     host: &Host,
-    relays: &[String],
+    relays: &[Relay],
     cancelled: &AtomicBool,
 ) -> Result<Report, Error> {
     let uname = host.capture("uname -sm\n", cancelled).map_err(Error::Run)?;
@@ -250,7 +310,7 @@ pub(super) fn install(
     let mut output = Vec::new();
     host.stream(
         &service_script(relays),
-        &b""[..],
+        &service_input(relays)[..],
         &mut output,
         ScriptLimits {
             output: OUTPUT,
@@ -262,14 +322,22 @@ pub(super) fn install(
     running(parse_status(&output)?.ok_or(Error::NoProgram)?)
 }
 
-/// `report`, once the service it came from runs: a host whose agent never
-/// started would be shared under a route nothing listens on.
+/// `report`, once the service it came from runs and a relay lets it
+/// listen: a host whose agent never started, or that every relay refused
+/// (a private relay's token missing or wrong), would be shared under a
+/// route nothing listens on.
 pub(crate) fn running(report: Report) -> Result<Report, Error> {
-    if report.running {
-        Ok(report)
-    } else {
-        Err(Error::NotRunning)
+    if !report.running {
+        return Err(Error::NotRunning);
     }
+    if !report
+        .relays
+        .values()
+        .any(|relay| *relay == RelayState::Listening)
+    {
+        return Err(Error::NotListening);
+    }
+    Ok(report)
 }
 
 /// Prints the SHA-256 of the agent of `version` the host holds, or nothing.

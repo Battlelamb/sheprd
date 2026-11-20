@@ -15,6 +15,19 @@ use sheprd_remote_control::control::fleet::{
 };
 use std::sync::atomic::AtomicBool;
 
+/// This computer's relays with its listen tokens for them, for the agent
+/// to listen on. Blocking: the tokens are read from the daemon's file.
+fn with_tokens(relays: &[String]) -> Vec<agent::Relay> {
+    let mut tokens = crate::remote::relay_token::shared(relays);
+    relays
+        .iter()
+        .map(|url| agent::Relay {
+            url: url.clone(),
+            token: tokens.remove(url),
+        })
+        .collect()
+}
+
 /// This computer's relays, from its own host record: the agent listens on
 /// them, so a member that reaches this computer reaches the host.
 pub(crate) fn relays(view: &View) -> Vec<String> {
@@ -87,7 +100,7 @@ pub(crate) fn share(
                     let host = Host::new(&connect).map_err(|_| Error::Unsupported)?;
                     let cancelled = AtomicBool::new(false);
                     let user = agent::user(&host, &cancelled)?;
-                    let report = agent::install(&host, &installing, &cancelled)?;
+                    let report = agent::install(&host, &with_tokens(&installing), &cancelled)?;
                     let known = known_keys(&target)?;
                     // Every key the record carries must be one the host
                     // negotiates in a strictly checked session, which also

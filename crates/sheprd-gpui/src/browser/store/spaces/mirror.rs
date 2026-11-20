@@ -3,10 +3,13 @@
 //! there takes the document's, one changed here and not written yet keeps
 //! the app's, and one the document dropped goes, ending nothing here.
 
-use super::{Record, View, location_of};
+use super::{Record, View, location_of, shared_tab};
 use crate::browser::store::{MAX_TABS, Place, Scope, Store, Tab, TabId, Zoom, kept};
-use sheprd_session::{SavedWorkspace, spaces::Edit};
-use std::collections::HashSet;
+use sheprd_session::{
+    SavedWorkspace,
+    spaces::{self, Edit, TabEdit},
+};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 /// How many dropped tabs are remembered: a window forgets a tab within a
 /// tick of its going, and tab ids are never reused.
@@ -22,10 +25,67 @@ pub(crate) struct Pending {
     pub(crate) forgotten: HashSet<String>,
     /// Whether workspaces moved here.
     pub(crate) moved: bool,
-    /// Tabs opened or changed here.
-    pub(crate) put: HashSet<String>,
+    /// Tabs opened here.
+    pub(crate) opened: HashSet<String>,
+    /// What changed here of each tab the document holds.
+    pub(crate) tabs: HashMap<String, TabFields>,
     /// Workspaces kept or renamed here.
     pub(crate) workspaces: HashSet<String>,
+}
+
+/// The fields of one tab changed here and not written yet; the others take
+/// what the document holds.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TabFields {
+    pub(crate) moved: bool,
+    pub(crate) name: bool,
+    /// Panes whose names changed, by terminal address.
+    pub(crate) names: BTreeSet<String>,
+    pub(crate) panes: bool,
+    pub(crate) zoom: bool,
+}
+
+impl TabFields {
+    fn take(&mut self, edit: &TabEdit) {
+        match edit {
+            TabEdit::Move { .. } => self.moved = true,
+            TabEdit::Rename { .. } => self.name = true,
+            TabEdit::RenamePane { terminal, .. } => {
+                self.names.insert(terminal.as_str().to_owned());
+            }
+            TabEdit::RemovePane { .. } | TabEdit::SetPanes { .. } | TabEdit::Split { .. } => {
+                self.panes = true;
+            }
+            // Titles are not written.
+            TabEdit::Retitle { .. } => {}
+            TabEdit::Zoom { .. } => self.zoom = true,
+        }
+    }
+
+    /// `theirs`, the document's tab, with the fields changed here taken
+    /// from `mine`.
+    fn merged(&self, theirs: &spaces::Tab, mine: &spaces::Tab) -> spaces::Tab {
+        let mut tab = theirs.clone();
+        if self.moved {
+            tab.workspace_id.clone_from(&mine.workspace_id);
+        }
+        if self.panes {
+            tab.panes = mine.panes.clone();
+        }
+        if self.name {
+            tab.name.clone_from(&mine.name);
+        }
+        for terminal in &self.names {
+            match mine.names.get(terminal) {
+                Some(name) => tab.names.insert(terminal.clone(), name.clone()),
+                None => tab.names.remove(terminal),
+            };
+        }
+        if self.zoom {
+            tab.zoomed.clone_from(&mine.zoomed);
+        }
+        tab
+    }
 }
 
 impl Pending {
@@ -44,14 +104,12 @@ impl Pending {
                 }
                 Edit::MoveWorkspace { .. } => pending.moved = true,
                 Edit::OpenTab(tab) => {
-                    pending.put.insert(tab.id.clone());
+                    pending.opened.insert(tab.id.clone());
                 }
                 Edit::RenameWorkspace { id, .. } => {
                     pending.workspaces.insert(id.clone());
                 }
-                Edit::Tab { id, .. } => {
-                    pending.put.insert(id.clone());
-                }
+                Edit::Tab { id, edit } => pending.tabs.entry(id.clone()).or_default().take(edit),
             }
         }
         pending
@@ -211,7 +269,7 @@ impl Store {
                 .iter_mut()
                 .find(|tab| &tab.scope == scope && tab.space.as_deref() == Some(&shared.id));
             match held {
-                Some(_) if pending.put.contains(&shared.id) => {}
+                Some(_) if pending.opened.contains(&shared.id) => {}
                 Some(tab) => {
                     let active = match &tab.location {
                         Some(crate::browser::Location::CoreTerminal { active, .. }) => {
@@ -219,6 +277,12 @@ impl Store {
                         }
                         _ => None,
                     };
+                    // Changed here on some fields: those stay, the rest
+                    // take the document's.
+                    let merged = (pending.tabs.get(&shared.id))
+                        .zip(shared_tab(tab))
+                        .map(|(fields, mine)| fields.merged(shared, &mine));
+                    let shared = merged.as_ref().unwrap_or(shared);
                     tab.location = Some(location_of(shared, active));
                     tab.workspace_id.clone_from(&shared.workspace_id);
                     if tab.title.is_empty() && !shared.title.is_empty() {

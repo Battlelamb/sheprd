@@ -47,20 +47,34 @@ pub(crate) fn edits(base: &View, local: &View) -> Vec<Edit> {
             });
         }
     }
-    for tab in &local.tabs {
-        match base.tab(&tab.id) {
-            None => edits.push(Edit::OpenTab(tab.clone())),
-            Some(was) => edits.extend(tab_edits(was, tab).into_iter().map(|edit| Edit::Tab {
-                id: tab.id.clone(),
-                edit,
-            })),
-        }
-    }
+    // Terminals a tab lets go of are let go first, by closing it or its
+    // pane, so a pane moved to another tab is free when it lands there.
     for tab in &base.tabs {
         if local.tab(&tab.id).is_none() {
             edits.push(Edit::CloseTab { id: tab.id.clone() });
         }
     }
+    let mut landing = Vec::new();
+    for tab in &local.tabs {
+        let Some(was) = base.tab(&tab.id) else {
+            landing.push(Edit::OpenTab(tab.clone()));
+            continue;
+        };
+        for edit in tab_edits(was, tab) {
+            let edit = Edit::Tab {
+                id: tab.id.clone(),
+                edit,
+            };
+            match &edit {
+                Edit::Tab {
+                    edit: TabEdit::RemovePane { .. },
+                    ..
+                } => edits.push(edit),
+                _ => landing.push(edit),
+            }
+        }
+    }
+    edits.extend(landing);
     for workspace in &base.workspaces {
         if local.workspace(&workspace.id).is_none() {
             edits.push(Edit::ForgetWorkspace {

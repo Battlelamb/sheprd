@@ -46,8 +46,8 @@ fn new_and_gone_records_are_kept_put_closed_and_forgotten() {
         edits(&base, &local),
         [
             Edit::KeepWorkspace(workspace("c")),
-            Edit::OpenTab(shared_tab("u", "c", "t2")),
             Edit::CloseTab { id: "t".into() },
+            Edit::OpenTab(shared_tab("u", "c", "t2")),
             Edit::ForgetWorkspace { id: "b".into() },
         ]
     );
@@ -203,4 +203,49 @@ fn a_split_here_and_a_rename_elsewhere_both_stay() {
     let tab = spaces.tab("t").unwrap();
     assert_eq!(tab.name.as_deref(), Some("api"));
     assert_eq!(tab.panes, local.tabs[0].panes);
+}
+
+fn document(view: &View) -> Spaces {
+    let mut spaces = Spaces::default();
+    for workspace in &view.workspaces {
+        spaces
+            .apply(Edit::KeepWorkspace(workspace.clone()))
+            .unwrap();
+    }
+    for tab in &view.tabs {
+        spaces.apply(Edit::OpenTab(tab.clone())).unwrap();
+    }
+    spaces
+}
+
+#[test]
+fn a_pane_moved_to_another_tab_is_let_go_before_it_lands() {
+    // The only pane of the second tab moves into the first, listed before
+    // it; then a pane of a split moves the other way.
+    let base = view(
+        &["a"],
+        vec![shared_tab("one", "a", "t1"), shared_tab("two", "a", "t2")],
+    );
+    let mut local = view(&["a"], vec![shared_tab("one", "a", "t1")]);
+    local.tabs[0]
+        .panes
+        .split(&id("t1"), Axis::Row, id("t2"))
+        .unwrap();
+    let mut spaces = document(&base);
+    for edit in edits(&base, &local) {
+        spaces.apply(edit).unwrap();
+    }
+    assert_eq!(spaces.tab("one").unwrap().panes, local.tabs[0].panes);
+    assert!(spaces.tab("two").is_none());
+
+    let base = local;
+    let mut local = base.clone();
+    local.tabs[0].panes = Panes::single(id("t1"));
+    local.tabs.insert(0, shared_tab("three", "a", "t2"));
+    let mut spaces = document(&base);
+    for edit in edits(&base, &local) {
+        spaces.apply(edit).unwrap();
+    }
+    assert_eq!(spaces.tab("one").unwrap().panes, Panes::single(id("t1")));
+    assert_eq!(spaces.tab("three").unwrap().panes, Panes::single(id("t2")));
 }

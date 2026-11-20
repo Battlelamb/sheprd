@@ -83,3 +83,54 @@ fn a_full_store_keeps_every_tab_it_had() {
         "nor is it forgotten"
     );
 }
+
+#[test]
+fn a_zoom_here_and_a_rename_elsewhere_of_one_tab_both_stay() {
+    let mut core = FakeCore::default();
+    let mut desk = Client::new();
+    let api = desk.keep("api", "/src/api");
+    let shown = desk.open(&api, "t1");
+    let mut panes = Panes::single(id("t1"));
+    panes
+        .split(&id("t1"), crate::core_terminals::panes::Axis::Row, id("t2"))
+        .unwrap();
+    desk.store.visited(
+        shown,
+        Some(Location::core_terminal(panes.clone(), false)),
+        None,
+    );
+    desk.settle(&mut core);
+    let mut laptop = Client::new();
+    laptop.settle(&mut core);
+
+    let read = desk.send().unwrap();
+    assert_eq!(read, Job::Read);
+    // The laptop names the tab while the desk zooms a pane.
+    let theirs = laptop.store.in_scope(&scope()).next().unwrap().id;
+    let mut named = Location::core_terminal(panes.clone(), false);
+    if let Location::CoreTerminal { name, .. } = &mut named {
+        *name = Some("api".into());
+    }
+    laptop.store.visited(theirs, Some(named), None);
+    laptop.settle(&mut core);
+    let mut zoomed = Location::core_terminal(panes, false);
+    if let Location::CoreTerminal { zoomed: zoom, .. } = &mut zoomed {
+        *zoom = Some(id("t2"));
+    }
+    desk.store.visited(shown, Some(zoomed), None);
+    let answered = core.run(read);
+    desk.finish(answered);
+    desk.settle(&mut core);
+    laptop.settle(&mut core);
+
+    let tab = core.spaces().tabs()[0].clone();
+    assert_eq!(tab.name.as_deref(), Some("api"), "the rename stays");
+    assert_eq!(tab.zoomed, Some(id("t2")), "and so does the zoom");
+    let Some(Location::CoreTerminal { name, zoomed, .. }) =
+        &desk.store.get(shown).unwrap().location
+    else {
+        panic!("a terminal tab");
+    };
+    assert_eq!(name.as_deref(), Some("api"));
+    assert_eq!(*zoomed, Some(id("t2")));
+}

@@ -138,3 +138,21 @@ fn the_typed_token_waits_while_the_new_sign_in_is_busy(cx: &mut TestAppContext) 
         });
     });
 }
+
+#[gpui::test]
+fn a_finished_github_sign_in_keeps_an_open_enterprise_form(cx: &mut TestAppContext) {
+    let (view, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.github_fixture(true, window, cx);
+            view.open_github_server(window, cx);
+            view.menu
+                .github
+                .complete_profile_fixture(Ok(Auth::connected_fixture().profile));
+            view.poll_github(window, cx);
+            assert!(view.menu.github.connected());
+            assert!(view.menu.page == Some(crate::menu::Page::GitHub));
+            assert!(view.menu.github_server.is_some(), "the form is kept");
+        });
+    });
+}

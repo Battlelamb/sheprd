@@ -254,11 +254,13 @@ impl SheprdWindow {
             .map(|profile| profile.avatar_url.as_str());
         changed |= menu.github_avatars.poll(avatars);
         if changed {
-            // An additional account stays shown, with the owners it reads.
+            // An additional account stays shown, with the owners it reads,
+            // and an Enterprise form being filled keeps what was typed.
             if !connected
                 && self.github_auth().connected()
                 && self.menu.page == Some(super::Page::GitHub)
                 && self.menu.github_account.is_none()
+                && self.menu.github_server.is_none()
             {
                 self.dismiss_menu(window, cx);
             }

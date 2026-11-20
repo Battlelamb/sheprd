@@ -18,6 +18,7 @@ WORKFLOW = (ROOT / ".github/workflows/ci.yml").read_text()
 SECTIONS = re.split(r"^  ([a-z0-9-]+):\n", WORKFLOW.split("\njobs:\n", 1)[1], flags=re.M)
 JOBS = dict(zip(SECTIONS[1::2], SECTIONS[2::2]))
 LABELS = '["self-hosted", "macOS", "ARM64", "tart"]'
+LINUX_LABELS = '["self-hosted", "Linux", "ARM64", "tart-linux"]'
 HOSTED = "macos-15"
 
 
@@ -59,7 +60,7 @@ def evaluate(text, context):
     return value(ast.parse(body, mode="eval").body)
 
 
-def context(event, fork=False, association="OWNER", full="true", labels=LABELS):
+def context(event, fork=False, association="OWNER", full="true", labels=LABELS, linux=LINUX_LABELS):
     return {
         "github.event_name": event,
         "github.repository": "sheprd-labs/sheprd",
@@ -68,6 +69,7 @@ def context(event, fork=False, association="OWNER", full="true", labels=LABELS):
         "github.event.pull_request.author_association": association if event == "pull_request" else "",
         "needs.commits.outputs.full": full,
         "vars.CI_MACOS_RUNNER": labels,
+        "vars.CI_LINUX_ARM_RUNNER": linux,
     }
 
 
@@ -114,9 +116,21 @@ class MacosRunners(unittest.TestCase):
                 self.assertEqual(runs_on("checks", values), HOSTED)
                 self.assertEqual(runs_on("build-macos", values), HOSTED)
 
-    def test_linux_legs_never_move(self):
-        for runner in ("ubuntu-24.04", "ubuntu-24.04-arm"):
-            self.assertEqual(runs_on("checks", context("push"), runner), runner)
+    def test_arm64_linux_follows_the_same_rule(self):
+        self.assertEqual(runs_on("checks", context("pull_request"), "ubuntu-24.04-arm"),
+                         json.loads(LINUX_LABELS))
+        self.assertEqual(runs_on("checks", context("push"), "ubuntu-24.04-arm"), json.loads(LINUX_LABELS))
+        for values in (context("pull_request", fork=True), context("pull_request", association="NONE"),
+                       context("push", linux="")):
+            with self.subTest(values=values):
+                self.assertEqual(runs_on("checks", values, "ubuntu-24.04-arm"), "ubuntu-24.04-arm")
+        # The variables are kept apart: one never sends the other's leg away.
+        self.assertEqual(runs_on("checks", context("push", labels=""), "ubuntu-24.04-arm"),
+                         json.loads(LINUX_LABELS))
+        self.assertEqual(runs_on("checks", context("push", linux="")), json.loads(LABELS))
+
+    def test_x86_linux_never_moves(self):
+        self.assertEqual(runs_on("checks", context("push"), "ubuntu-24.04"), "ubuntu-24.04")
 
     def test_every_pull_request_checks_macos(self):
         self.assertEqual(macos_legs(context("pull_request", full="false")), ["default"])

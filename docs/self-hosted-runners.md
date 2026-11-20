@@ -1,4 +1,4 @@
-# Self-hosted macOS runners
+# Self-hosted runners
 
 GitHub Team runs at most five hosted macOS jobs at once across the account,
 and a pull request or merge queue entry asks for up to four (`checks` with
@@ -16,7 +16,11 @@ Actions > Variables) holding a JSON list of runner labels:
 ```
 
 When it is set, `.github/workflows/ci.yml` sends the `checks` macOS legs and
-`build-macos` to runners with every label in it, for members' code only:
+`build-macos` to runners with every label in it. `CI_LINUX_ARM_RUNNER` does
+the same for the `checks` legs on `ubuntu-24.04-arm`, for example with
+`["self-hosted", "Linux", "ARM64", "tart-linux"]`, on Ubuntu 24.04 VMs. The
+x86_64 `ubuntu-24.04` legs stay hosted. Both follow one rule, members' code
+only:
 
 | Run | macOS runner |
 |---|---|
@@ -29,8 +33,8 @@ The author must be one GitHub lists as `OWNER`, `MEMBER`, or `COLLABORATOR`
 on the pull request, so a fork's code never reaches our machines, nor does a
 bot's: Dependabot's branches live here too, but bring in new dependencies'
 build scripts. A member whose organization membership is private may be
-listed otherwise, and then runs hosted. Linux, Windows, Nix, the
-release workflow, and the iOS workflow stay hosted.
+listed otherwise, and then runs hosted. Windows, Nix, the
+release workflow, and the iOS workflow stay hosted, as does x86_64 Linux.
 
 Every pull request runs the macOS default-features leg. One that needs every
 platform (`scripts/ci-scope.py`) also runs the all-features leg on our Macs;
@@ -69,6 +73,10 @@ without it its jobs wait for a runner forever.
 
 One runner takes one job at a time. With fewer runners than the jobs a few
 runs ask for at once, runs wait for each other.
+
+An Ubuntu runner needs passwordless `sudo` for
+`scripts/install-linux-deps.sh`, Rust through `rustup` on the runner's
+`PATH` (`~/actions-runner/.path`), and the packages that script installs.
 
 ## The build directory
 

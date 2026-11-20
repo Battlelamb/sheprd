@@ -165,14 +165,15 @@ jobs:
         # cheap; a fork's runs on the account's few hosted macOS runners and
         # skips it. Main and the merge queue run every leg.
         exclude: ${{ fromJSON(github.event_name != 'pull_request' && '[]' || needs.commits.outputs.full != 'true' && '[{"runner":"macos-15","features":"all"},{"runner":"ubuntu-24.04-arm"}]' || (github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) && '[]' || '[{"runner":"macos-15","features":"all"}]') }}
-    # The repository variable CI_MACOS_RUNNER, a JSON label list such as
-    # '["self-hosted", "macOS", "ARM64", "tart"]', moves the macOS legs to our
-    # own Macs, past the account's five hosted macOS jobs, for code only
+    # The repository variables CI_MACOS_RUNNER and CI_LINUX_ARM_RUNNER, JSON
+    # label lists such as '["self-hosted", "macOS", "ARM64", "tart"]', move
+    # the macOS and ARM64 Linux legs to our own machines, past the account's
+    # five hosted macOS jobs and onto warm build directories, for code only
     # members wrote: main, the merge queue, and pull requests from branches of
     # this repository opened by its owner, members, or collaborators. A
     # fork's pull request, or a bot's such as Dependabot's, which brings in
     # new dependencies' build scripts, stays on hosted runners.
-    runs-on: ${{ fromJSON(matrix.runner == 'macos-15' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association))) && vars.CI_MACOS_RUNNER || toJSON(matrix.runner)) }}
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association))) && (matrix.runner == 'macos-15' && vars.CI_MACOS_RUNNER || matrix.runner == 'ubuntu-24.04-arm' && vars.CI_LINUX_ARM_RUNNER) || toJSON(matrix.runner)) }}
     timeout-minutes: 60
     permissions:
       contents: read

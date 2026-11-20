@@ -272,8 +272,9 @@ what was deferred to CI.
   `windows`, `macos`, or `full-ci` label, run every platform over the whole
   workspace. The Nix flake builds on pull requests only when the flake or
   the toolchain pin changes, and on `main` and every release otherwise.
-- macOS jobs run on our own Macs when the repository variable
-  `CI_MACOS_RUNNER` names their labels (`docs/self-hosted-runners.md`), for
+- macOS jobs, and the ARM64 Linux legs, run on our own machines when the
+  repository variables `CI_MACOS_RUNNER` and `CI_LINUX_ARM_RUNNER` name their
+  labels (`docs/self-hosted-runners.md`), for
   members' code only: `main`, the merge queue, and pull requests from
   branches of this repository opened by its owner, members, or
   collaborators. A fork's or a bot's pull request always uses hosted runners.

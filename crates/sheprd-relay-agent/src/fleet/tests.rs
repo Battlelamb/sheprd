@@ -12,6 +12,7 @@ use crate::{
 mod crowded_save;
 mod paused;
 mod refused;
+mod suspended_keys;
 
 const FLEET: u8 = 0xf1;
 

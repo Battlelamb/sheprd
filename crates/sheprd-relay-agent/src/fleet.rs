@@ -55,6 +55,10 @@ pub const REFUSED: &str = "refused";
 /// Removals remembered per suspended member; past that, its suspension is
 /// one no access file lifts.
 pub const MAX_CAUSES: usize = 8;
+/// Key pairs kept per suspended member: its keys now and before as one
+/// file names them, twice over for rotations between files. Past it the
+/// agent refuses rather than forget one.
+pub const MAX_SUSPENDED_PAIRS: usize = 2 * (access::MAX_FORMER + 1);
 /// The most read of each of the fleet's small files: suspensions carry
 /// each member's key pairs as well as its removals.
 const MAX_SUSPENDED_BYTES: u64 = 160 * 1024;
@@ -82,6 +86,21 @@ pub struct Suspension {
     /// of the access file, refused or unreadable included.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub pairs: BTreeSet<Pair>,
+}
+
+impl Suspension {
+    /// Adds `pairs` to those kept: never replaced, so a pair a rotation
+    /// left behind stays cut off. Refuses past [`MAX_SUSPENDED_PAIRS`]
+    /// rather than forget one, changing nothing.
+    fn keep_pairs(&mut self, pairs: impl IntoIterator<Item = Pair>) -> Result<()> {
+        let mut kept = self.pairs.clone();
+        kept.extend(pairs);
+        if kept.len() > MAX_SUSPENDED_PAIRS {
+            return Err(Error::SuspendedKeys);
+        }
+        self.pairs = kept;
+        Ok(())
+    }
 }
 
 /// The access this agent holds, who is suspended, and the key pairs of
@@ -289,13 +308,21 @@ impl Held {
                 return false;
             }
             suspension.removals.retain(|id, _| !settled.contains(id));
-            // Its keys as the merged file has them, its older ones
-            // included: a rotation while suspended cuts the new pair off.
-            if let Some(member) = merged.members.get(member) {
-                suspension.pairs = member.pairs().collect();
-            }
             suspension.overflow || !suspension.removals.is_empty()
         });
+        // Each suspended member's keys as the merged file has them, added
+        // to those kept: a rotation while suspended cuts the new pair off
+        // and leaves the old one cut off. One that cannot be kept shuts
+        // the fleet out rather than forget it.
+        for (member, suspension) in &mut held.suspended {
+            let Some(entry) = merged.members.get(member) else {
+                continue;
+            };
+            if let Err(error) = suspension.keep_pairs(entry.pairs()) {
+                Self::refuse_locked(state_dir, keys)?;
+                return Err(error);
+            }
+        }
         held.access = Some(merged);
         held.refused = false;
         // The SSH lines first: a write that fails leaves the file it was
@@ -389,8 +416,11 @@ impl Held {
             };
             for target in targets {
                 let suspension = held.suspended.entry(target).or_default();
-                if let Some(member) = access.members.get(&target) {
-                    suspension.pairs = member.pairs().collect();
+                if let Some(member) = access.members.get(&target)
+                    && let Err(error) = suspension.keep_pairs(member.pairs())
+                {
+                    Self::refuse_locked(state_dir, keys)?;
+                    return Err(error);
                 }
                 let id = Id(removal.id);
                 if suspension.removals.contains_key(&id) {

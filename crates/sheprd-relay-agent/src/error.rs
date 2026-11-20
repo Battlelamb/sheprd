@@ -59,6 +59,8 @@ pub enum Error {
     },
     #[error("{} is not the agent's keys", path.display())]
     StoredKey { path: PathBuf },
+    #[error("a suspended member has had more keys than the agent can keep track of")]
+    SuspendedKeys,
     #[error("{} is larger than {limit} bytes", path.display())]
     TooLarge { limit: u64, path: PathBuf },
     #[cfg(feature = "runtime")]

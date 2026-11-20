@@ -20,6 +20,11 @@ pub enum Error {
     #[cfg(feature = "runtime")]
     #[error("the relay could not be reached")]
     Client(#[from] sheprd_relay::client::Error),
+    #[error(
+        "a relay lets at most {} keys dial this host; its desktops and fleet members need {needed}",
+        sheprd_relay::wire::MAX_DIAL_KEYS
+    )]
+    DialKeys { needed: usize },
     #[error("{} is not the agent's fleet state", path.display())]
     FleetFormat {
         path: PathBuf,
@@ -40,6 +45,8 @@ pub enum Error {
     NoHome,
     #[error("the removal exchange broke")]
     Removal(#[from] crate::removal::Error),
+    #[error("more desktops would be cut off than the agent can keep track of")]
+    Revoked,
     #[error("could not start the async runtime")]
     Runtime(#[source] std::io::Error),
     #[error("a session's stream broke")]

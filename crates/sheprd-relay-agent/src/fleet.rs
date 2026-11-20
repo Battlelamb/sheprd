@@ -35,7 +35,7 @@ use crate::{
     removal::Removed,
 };
 use serde::{Deserialize, Serialize};
-use sheprd_relay::wire::Key;
+use sheprd_relay::wire::{Key, MAX_DIAL_KEYS};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -138,18 +138,24 @@ impl Held {
             .filter(|(id, _)| removed(id))
             .flat_map(|(_, member)| member.pairs())
             .collect();
-        if !pairs.is_empty() {
-            let desktops = Authorized::load(state_dir)?;
-            for pair in pairs {
-                let enrolled = desktops
-                    .entries()
-                    .iter()
-                    .any(|entry| entry.dial == pair.dial && entry.tunnel == pair.tunnel);
-                if enrolled && held.revoked.len() < crate::authorized::MAX_ENTRIES {
-                    held.revoked.insert(pair);
-                }
+        let desktops = Authorized::load(state_dir)?;
+        let enrolled = |pair: &Pair| {
+            desktops
+                .entries()
+                .iter()
+                .any(|entry| entry.dial == pair.dial && entry.tunnel == pair.tunnel)
+        };
+        // A pair no desktop has any more blocks nothing: forgotten, so the
+        // set holds at most one pair per enrolled desktop and a required
+        // block always fits.
+        held.revoked.retain(|pair| enrolled(pair));
+        for pair in pairs.into_iter().filter(|pair| enrolled(pair)) {
+            if held.revoked.len() >= crate::authorized::MAX_ENTRIES {
+                return Err(Error::Revoked);
             }
+            held.revoked.insert(pair);
         }
+        fits(&desktops, Some(&merged))?;
         // Each settled removal is forgotten as it is settled, so files
         // that each settle some of a suspension's removals, as the bound
         // on `settled` may make them, lift it between them.
@@ -340,6 +346,24 @@ impl Held {
             suspended: self.suspended.clone(),
         }))
     }
+}
+
+/// Whether every enrolled desktop and every member of `access` fits in
+/// the dial keys a relay takes for one route ([`MAX_DIAL_KEYS`]). An
+/// update that would crowd one out is refused rather than leave someone
+/// enrolled who can no longer dial.
+pub fn fits(desktops: &Authorized, access: Option<&Access>) -> Result<()> {
+    let mut keys: BTreeSet<Key> = desktops.entries().iter().map(|entry| entry.dial).collect();
+    keys.extend(
+        access
+            .iter()
+            .flat_map(|access| access.members.values())
+            .map(|member| member.dial),
+    );
+    if keys.len() > MAX_DIAL_KEYS {
+        return Err(Error::DialKeys { needed: keys.len() });
+    }
+    Ok(())
 }
 
 /// The fleet in `status --json` and `fleet apply`'s answer.

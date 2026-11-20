@@ -171,6 +171,12 @@ pub struct Member {
     /// before a rotation never replace newer ones.
     #[serde(default)]
     pub keys: u64,
+    /// How many rotations at `keys` the computing log held: two that
+    /// compete at one sequence number (a key restored from a backup) tie on
+    /// `keys`, and the log that holds both picks the one it keeps, so its
+    /// file outranks one computed from either alone.
+    #[serde(default)]
+    pub seen: u32,
     /// The keys it rotated away from, as the agent saw them replaced, so a
     /// desktop enrolled one by one with an old pair goes with the member.
     /// Kept by the agent alone; never in a file Sheprd computes.
@@ -216,7 +222,7 @@ impl Member {
         };
         let rev = self.rev.max(held.rev);
         let mut former = held.former.clone();
-        let mut merged = if self.keys > held.keys {
+        let mut merged = if (self.keys, self.seen) > (held.keys, held.seen) {
             let replaced = held.pair();
             if replaced != self.pair() && !former.contains(&replaced) {
                 former.push(replaced);

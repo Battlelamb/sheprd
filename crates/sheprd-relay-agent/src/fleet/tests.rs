@@ -2,7 +2,10 @@
 
 use super::*;
 use crate::{
-    access::tests::{dial, id, member},
+    access::{
+        Pair,
+        tests::{dial, id, member},
+    },
     authorized::Entry,
 };
 
@@ -640,4 +643,63 @@ fn files_that_each_settle_part_of_a_suspension_lift_it_between_them() {
     );
     let held = host.apply(file(&members, &[], &[0x52])).unwrap();
     assert!(held.suspended.is_empty());
+}
+
+#[test]
+fn stale_revoked_pairs_never_crowd_out_a_new_revocation() {
+    let host = Host::new();
+    // Pairs left behind by desktops that were revoked or enrolled again
+    // with other keys: no desktop has them any more.
+    let mut held = Held::load(host.state()).unwrap();
+    for seed in 0..u8::try_from(crate::authorized::MAX_ENTRIES).unwrap() {
+        held.revoked.insert(Pair {
+            dial: dial(seed.wrapping_add(120)),
+            tunnel: [seed.wrapping_add(120); 32],
+        });
+    }
+    held.save(host.state()).unwrap();
+    host.enroll(2);
+    host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[]))
+        .unwrap();
+    host.apply(file(&[(1, true, 0)], &[2], &[])).unwrap();
+    let held = Held::load(host.state()).unwrap();
+    assert_eq!(held.revoked.len(), 1, "only the enrolled desktop's pair");
+    assert_eq!(host.admitted().peer(&dial(2), &[2; 32]), None);
+}
+
+#[test]
+fn a_fleet_that_would_crowd_out_an_enrolled_desktop_is_refused() {
+    let host = Host::new();
+    let mut desktops = Authorized::default();
+    for seed in 0..u8::try_from(MAX_DIAL_KEYS - 1).unwrap() {
+        desktops
+            .insert(Entry {
+                dial: dial(seed.wrapping_add(100)),
+                tunnel: [seed.wrapping_add(100); 32],
+                label: format!("desk{seed}"),
+            })
+            .unwrap();
+    }
+    desktops.save(host.state()).unwrap();
+    // One member fits; a second would leave a desktop unable to dial.
+    host.apply(file(&[(1, true, 0)], &[], &[])).unwrap();
+    assert!(matches!(
+        host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[])),
+        Err(Error::DialKeys { needed }) if needed == MAX_DIAL_KEYS + 1
+    ));
+    assert!(!Held::load(host.state()).unwrap().admits(&id(2)));
+    let admitted = host.admitted();
+    assert_eq!(admitted.dial_keys().len(), MAX_DIAL_KEYS);
+    // Enrolling one more desktop with the fleet there is refused too.
+    let mut more = Authorized::load(host.state()).unwrap();
+    more.insert(Entry {
+        dial: dial(250),
+        tunnel: [250; 32],
+        label: "one more".to_owned(),
+    })
+    .unwrap();
+    assert!(matches!(
+        fits(&more, Held::load(host.state()).unwrap().access.as_ref()),
+        Err(Error::DialKeys { .. })
+    ));
 }

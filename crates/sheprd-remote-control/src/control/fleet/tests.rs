@@ -11,7 +11,7 @@ mod admission;
 mod agents;
 mod base_lifetime;
 mod checkpoint;
-mod compat;
+mod checkpoint_bytes;
 mod convergence;
 mod drafting;
 mod encoding;

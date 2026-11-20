@@ -1612,8 +1612,7 @@ accepted on this purpose.
   a member another removal took, beside one still live). Each member's
   keys carry the sequence number of its own latest rotation, which the
   fleet's state keeps (so a checkpoint carries it and a pruned log agrees
-  with a whole one; a checkpoint signed before the state kept it names
-  the older layout, which still loads, with no rotation counted), so an agent never prefers keys a rotation replaced;
+  with a whole one), so an agent never prefers keys a rotation replaced;
   rotations competing at one number break the tie on the hash of the
   bundle. A rotation that does not fit in the relay's dial keys still
   takes the old pair away, and the member's new keys wait (`crowded`,

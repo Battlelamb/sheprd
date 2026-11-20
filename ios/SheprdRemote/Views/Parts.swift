@@ -168,7 +168,7 @@ struct ChatRowLabel: View {
         let title = item.chat.title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !title.isEmpty { return title }
         let prompt = item.chat.summary?.firstPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !prompt.isEmpty { return prompt }
+        if !prompt.isEmpty { return String(InlineMarkdown.plainSized(prompt).characters) }
         let agent = item.chat.agent?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if awaitsFirstPrompt {
             return agent.isEmpty ? String(localized: "New chat") : String(localized: "New \(agent.capitalized) chat")
@@ -200,7 +200,7 @@ struct ChatRowLabel: View {
             return Text("\(Image(systemName: "exclamationmark.triangle")) \(line(said: String(localized: "No summary: \(reason)")))")
         case .other?, nil:
             if awaitsFirstPrompt { return Text(line(said: String(localized: "Waiting for your first prompt"))) }
-            let said = (item.question?.title ?? item.chat.summary?.lastText)
+            let said = (item.question?.title ?? item.chat.summary?.lastText.map(AgentMessage.rowLine))
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .flatMap { $0.isEmpty ? nil : $0 }
             return Text(line(said: said))
@@ -238,8 +238,11 @@ enum RowPlace {
 }
 
 /// A terminal tab with an agent in it, such as `claude` run in a shell,
-/// drawn like a chat row; it opens the terminal.
+/// drawn like a chat row; it opens the terminal. A terminal glyph starts its
+/// detail line, so it reads apart from a chat, and what its screen last
+/// showed follows where it runs.
 struct AgentTerminalRowLabel: View {
+    @AppStorage(RowLines.key) private var lines = RowLines.choices.lowerBound
     var item: TerminalItem
     var showsComputer = true
     /// Off on the workspace's own screen, which shows the tab's name
@@ -261,9 +264,10 @@ struct AgentTerminalRowLabel: View {
                     if !item.needsYou, !item.working, let date = item.changed { LastAnswer(date: date) }
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(place)
-                        .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                    Text("\(Image(systemName: "apple.terminal")) \(detail)")
+                        .font(.subheadline).foregroundStyle(.secondary).lineLimit(RowLines.clamped(lines))
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityLabel(Text("Terminal: \(detail)"))
                         .accessibilityValue(showsWorkspace && !showsPullRequest && item.workspace.merged ? "Pull request merged" : "")
                     if showsPullRequest { WorkspacePullRequestBadge(workspace: item.workspace).fixedSize() }
                 }
@@ -272,9 +276,15 @@ struct AgentTerminalRowLabel: View {
         }
     }
 
-    private var place: AttributedString {
-        guard showsWorkspace else { return AttributedString(tabName) }
-        return RowPlace.line([showsComputer ? AttributedString(item.computer.name) : nil, RowPlace.name(of: item.workspace)])
+    private var detail: AttributedString {
+        let preview = (item.terminal.agent?.preview?.trimmingCharacters(in: .whitespacesAndNewlines))
+            .flatMap { $0.isEmpty ? nil : AttributedString($0) }
+        guard showsWorkspace else { return RowPlace.line([AttributedString(tabName), preview]) }
+        return RowPlace.line([
+            showsComputer ? AttributedString(item.computer.name) : nil,
+            RowPlace.name(of: item.workspace),
+            preview,
+        ])
     }
 
     /// The tab's name, unless Sheprd only numbered it or it repeats the
@@ -362,6 +372,7 @@ struct AnswerCard: View {
                 sending = false
                 return
             }
+            Feedback.shared.touch(.send)
             problem = await model.fleet.send(.answer(permission: question.id, option: option.id), to: item.key)
             sending = false
         }

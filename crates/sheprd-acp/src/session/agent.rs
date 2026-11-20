@@ -55,31 +55,45 @@ impl<R: FnMut(Update)> Session<R> {
                 self.session_opened(matches!(pending, Pending::LoadSession), result);
             }
             Pending::Prompt => self.turn_ended(id, result),
-            Pending::SetOption => match result {
-                Ok(value) => {
-                    if let Some(options) = value.get("configOptions") {
-                        let options = project::options(Some(options));
-                        self.emit(Change::Options { options });
-                    }
+            Pending::SetOption => {
+                self.option_set(result);
+                self.carry_next();
+            }
+            Pending::SetMode(mode) => {
+                self.mode_set(mode, result);
+                self.carry_next();
+            }
+        }
+    }
+
+    fn option_set(&mut self, result: Result<Value, wire::Error>) {
+        match result {
+            Ok(value) => {
+                if let Some(options) = value.get("configOptions") {
+                    let options = project::options(Some(options));
+                    self.emit(Change::Options { options });
                 }
-                Err(error) => {
-                    let notice = self.projector.notice(
-                        NoticeLevel::Warning,
-                        format!("Could not change the setting: {}", error.message),
-                    );
-                    self.emit(notice);
-                }
-            },
-            Pending::SetMode(mode) => match result {
-                Ok(_) => self.emit(Change::CurrentMode { id: mode }),
-                Err(error) => {
-                    let notice = self.projector.notice(
-                        NoticeLevel::Warning,
-                        format!("Could not change mode: {}", error.message),
-                    );
-                    self.emit(notice);
-                }
-            },
+            }
+            Err(error) => {
+                let notice = self.projector.notice(
+                    NoticeLevel::Warning,
+                    format!("Could not change the setting: {}", error.message),
+                );
+                self.emit(notice);
+            }
+        }
+    }
+
+    fn mode_set(&mut self, mode: String, result: Result<Value, wire::Error>) {
+        match result {
+            Ok(_) => self.emit(Change::CurrentMode { id: mode }),
+            Err(error) => {
+                let notice = self.projector.notice(
+                    NoticeLevel::Warning,
+                    format!("Could not change mode: {}", error.message),
+                );
+                self.emit(notice);
+            }
         }
     }
 
@@ -220,6 +234,11 @@ impl<R: FnMut(Update)> Session<R> {
         self.projector.close();
         self.hand_over(loaded);
         self.status(Status::Idle);
+        if loaded {
+            // A continued session keeps its own settings.
+            self.config.settings = None;
+        }
+        self.carry_next();
         self.next_queued();
     }
 
@@ -289,6 +308,7 @@ impl<R: FnMut(Update)> Session<R> {
             }
             content.text = rest.to_owned();
         }
+        self.commands.keep(&update);
         let changes = self.projector.update(&self.transcript, update, now_ms());
         self.emit_all(changes);
     }

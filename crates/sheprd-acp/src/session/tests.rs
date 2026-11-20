@@ -14,6 +14,7 @@ mod attach;
 mod attachments;
 mod auto_accept;
 mod bounds;
+mod carry;
 mod commands;
 mod flow;
 mod harnesses;
@@ -24,6 +25,7 @@ mod opencode;
 mod origin;
 mod permissions;
 mod prompt_titles;
+mod pull_requests;
 mod questions;
 mod resume;
 mod settings;
@@ -56,11 +58,13 @@ fn config() -> Config {
         exit_with_agent: false,
         harness: Some(Agent::Claude),
         history: None,
+        listens: false,
         load: None,
         login_hint: Some("run `claude` and use /login".to_owned()),
         pane: Some("p_1".to_owned()),
         prompts: Default::default(),
         require_load: false,
+        settings: None,
         sheprd: None,
     }
 }

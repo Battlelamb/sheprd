@@ -178,8 +178,11 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
   screen (`native/previews`): the last paragraph above the agent's own
   input box, prompt, status, and footer, one list item to a line, at most
   280 characters. The daemon reads only while a phone is connected: when
-  an agent first shows up, when it changes state, and every 10 seconds
-  while it works, at most 8 screens a pass. Skipping the agent's interface
+  an agent first shows up, when it changes state, every 10 seconds while
+  it works, and 10 seconds after a failed read, at most 8 screens a pass;
+  a phone that comes back after none was connected has every screen read
+  again. A Herdr 2 screen is read by its core (`terminal.read`), so these
+  reads never take a screen a phone opens a terminal with. Skipping the agent's interface
   is a best guess at Claude Code, Codex, and OpenCode's screens. It is
   absent until read, when the screen shows nothing else, and from older
   daemons.

@@ -3,12 +3,12 @@
 //! ([`screen::preview`]). Read only while a phone is connected, never while
 //! a home is drawn, which only looks the pane up here: when an agent first
 //! shows up, whenever it changes state, and every [`WORKING`] while it
-//! works.
+//! works. A Herdr 2 screen is read by its core ([`crate::hub::Hub::screen_text`]),
+//! so these reads never take a screen a phone opens a terminal with.
 
 mod screen;
 
-use crate::{hub::ApiMethod, web::Shared};
-use serde_json::json;
+use crate::web::Shared;
 use sheprd_client::protocol::AgentStatus;
 use std::{
     collections::HashMap,
@@ -21,10 +21,10 @@ use tokio::sync::watch;
 const MAX_AGENTS: usize = 64;
 /// Screens read in one pass, so a burst of changes waits its turn.
 const MAX_READS: usize = 8;
-/// How often a working agent's screen is read again. Longer than a
-/// Herdr 2 screen's idle time, so these reads never hold a screen a phone
-/// needs to open another terminal.
+/// How often a working agent's screen is read again.
 const WORKING: Duration = Duration::from_secs(10);
+/// How long after a failed read the screen is tried again.
+const RETRY: Duration = Duration::from_secs(10);
 /// How often the agents are looked at, to find working ones due a read.
 const TICK: Duration = Duration::from_secs(2);
 /// How long a burst of layout changes settles into one pass.
@@ -68,21 +68,27 @@ struct Agent {
     changed_ms: Option<u64>,
 }
 
-/// An agent's state at its last read, and when that was.
+/// An agent's state at its last read, when that was, and whether it
+/// failed.
 #[derive(Clone, Copy, Debug)]
 struct Read {
     status: AgentStatus,
     changed_ms: Option<u64>,
     at: Instant,
+    failed: bool,
 }
 
-/// Whether `agent`'s screen is due a read at `now`, last read as `read`.
+/// Whether `agent`'s screen is due a read at `now`, last read as `read`:
+/// a failed read is tried again after [`RETRY`] whatever the agent does.
 fn due(agent: &Agent, read: Option<&Read>, now: Instant) -> bool {
     let Some(read) = read else { return true };
+    let since = now.saturating_duration_since(read.at);
+    if read.failed {
+        return since >= RETRY;
+    }
     read.status != agent.status
         || read.changed_ms != agent.changed_ms
-        || (agent.status == AgentStatus::Working
-            && now.saturating_duration_since(read.at) >= WORKING)
+        || (agent.status == AgentStatus::Working && since >= WORKING)
 }
 
 /// The agents due a read, at most [`MAX_READS`]: never read first, then
@@ -115,30 +121,29 @@ fn agents(state: &Shared) -> Vec<Agent> {
         .collect()
 }
 
-/// The preview on `pane`'s screen now.
-async fn read(state: &Shared, pane: &str) -> crate::hub::Result<Option<String>> {
-    let params = json!({"pane_id": pane, "source": "visible", "format": "ansi"});
-    let answer = state.hub.call(ApiMethod::PaneRead, params).await?;
-    Ok(screen::preview(
-        answer["read"]["text"].as_str().unwrap_or_default(),
-    ))
-}
-
 /// Reads the agents' screens while a phone is connected, when the layout
 /// changes and every [`TICK`].
 pub(crate) async fn follow(state: Shared) {
     let mut layout = state.hub.watch_layout();
     let mut reads: HashMap<String, Read> = HashMap::new();
     loop {
-        if !state.connected().is_empty() {
+        if state.connected().is_empty() {
+            // Agents go on without a phone looking, and a Herdr 2 agent
+            // finishing another turn leaves its state and time as they
+            // were: a phone that comes back has every screen read again.
+            reads.clear();
+        } else {
             let agents = agents(&state);
-            reads.retain(|pane, _| agents.iter().any(|agent| &agent.pane == pane));
+            let listed = |pane: &String| agents.iter().any(|agent| &agent.pane == pane);
+            reads.retain(|pane, _| listed(pane));
             let mut found = state.previews.current().as_ref().clone();
-            found.retain(|pane, _| reads.contains_key(pane));
+            found.retain(|pane, _| listed(pane));
             for agent in plan(&agents, &reads, Instant::now()) {
-                // A failed read keeps the last preview; the next change or
-                // tick tries again.
-                match read(&state, &agent.pane).await {
+                // A failed read keeps the last preview, and is tried again
+                // after `RETRY`.
+                let read = state.hub.screen_text(&agent.pane).await;
+                let failed = read.is_err();
+                match read.map(|text| screen::preview(&text)) {
                     Ok(Some(preview)) => {
                         found.insert(agent.pane.clone(), preview);
                     }
@@ -153,6 +158,7 @@ pub(crate) async fn follow(state: Shared) {
                     status: agent.status,
                     changed_ms: agent.changed_ms,
                     at: Instant::now(),
+                    failed,
                 };
                 reads.insert(agent.pane.clone(), read);
             }

@@ -13,6 +13,7 @@ fn read_as(agent: &Agent, at: Instant) -> Read {
         status: agent.status,
         changed_ms: agent.changed_ms,
         at,
+        failed: false,
     }
 }
 
@@ -78,4 +79,16 @@ fn a_pass_reads_new_agents_first_and_at_most_its_bound() {
     assert_eq!(plan[0], "new");
     assert_eq!(plan[1], "w0");
     assert!(!plan.contains(&"quiet"));
+}
+
+#[test]
+fn a_failed_read_is_tried_again_after_a_while_even_when_idle() {
+    let start = Instant::now();
+    let idle = agent("p1", AgentStatus::Idle, Some(5));
+    let failed = Read {
+        failed: true,
+        ..read_as(&idle, start)
+    };
+    assert!(!due(&idle, Some(&failed), start + RETRY / 2));
+    assert!(due(&idle, Some(&failed), start + RETRY));
 }

@@ -248,6 +248,14 @@ impl Source {
         Ok((core, terminal))
     }
 
+    /// `pane`'s screen as text, which the core reads itself: no shared
+    /// screen is opened, so this never holds one a phone needs to open
+    /// another terminal. Blocking.
+    pub(super) fn screen_text(&self, pane: &str) -> Result<String> {
+        let (core, terminal) = self.terminal(pane)?;
+        Ok(core.read(&terminal.address)?.text)
+    }
+
     /// The shared screen of `terminal`, opened outside the state lock.
     fn screen(&self, core: &Arc<Core>, terminal: &Terminal) -> Result<SharedScreen> {
         let address = &terminal.address;

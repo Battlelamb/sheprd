@@ -50,6 +50,7 @@ fn held(fleet: [u8; 32]) -> sheprd_relay_agent::fleet::Report {
         denied: 0,
         digest: String::new(),
         fleet: sheprd_relay_agent::access::Id(fleet),
+        refused: false,
         removed: 0,
         revoked: Vec::new(),
         suspended: Default::default(),
@@ -120,4 +121,14 @@ fn an_agent_with_members_waiting_for_room_is_handed_the_file_again() {
         .insert(sheprd_relay_agent::access::Id([2; 32]));
     assert!(!crate::fleet::plain::current(Some(&report), &digest, &file));
     assert!(!crate::fleet::plain::current(None, &digest, &file));
+}
+
+#[test]
+fn an_agent_that_refused_its_last_file_is_handed_a_good_one_again() {
+    let file = sheprd_relay_agent::access::Access::new(sheprd_relay_agent::access::Id([1; 32]));
+    let digest = file.digest().unwrap();
+    let mut report = held([1; 32]);
+    report.digest.clone_from(&digest);
+    report.refused = true;
+    assert!(!crate::fleet::plain::current(Some(&report), &digest, &file));
 }

@@ -236,13 +236,14 @@ pub(crate) fn next(view: &View, host: &str, removed: &[String]) -> Next {
 /// Whether the agent holding `held` needs nothing from `file`, whose
 /// digest is `digest`: it holds that file, has nothing to settle, and no
 /// member's new keys wait for room on the relays, which may have freed
-/// with the digest unchanged.
+/// with the digest unchanged, and it did not refuse the last file it was
+/// handed, which shuts the fleet out until a good one arrives.
 pub(crate) fn current(
     held: Option<&sheprd_relay_agent::fleet::Report>,
     digest: &str,
     file: &Access,
 ) -> bool {
-    held.is_some_and(|held| held.digest == digest && held.crowded.is_empty())
+    held.is_some_and(|held| held.digest == digest && held.crowded.is_empty() && !held.refused)
         && file.settled.is_empty()
 }
 

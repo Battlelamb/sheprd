@@ -64,6 +64,8 @@ mod settling;
 #[cfg(unix)]
 mod shared_records;
 #[cfg(unix)]
+mod startup;
+#[cfg(unix)]
 mod store;
 #[cfg(unix)]
 mod unsaved;

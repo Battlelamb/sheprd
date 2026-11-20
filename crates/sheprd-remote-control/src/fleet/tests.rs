@@ -52,6 +52,8 @@ mod route_claims;
 #[cfg(unix)]
 mod sessions;
 #[cfg(unix)]
+mod settling;
+#[cfg(unix)]
 mod store;
 #[cfg(unix)]
 mod unsaved;

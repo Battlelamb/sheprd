@@ -38,6 +38,7 @@ fn member_view() -> View {
         suspended: Vec::new(),
         pending: 0,
         heads: Vec::new(),
+        hosted: None,
     }
 }
 

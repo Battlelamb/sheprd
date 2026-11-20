@@ -37,6 +37,7 @@ fn view(admitted: usize) -> View {
         suspended: Vec::new(),
         pending: 0,
         heads: Vec::new(),
+        hosted: None,
     }
 }
 

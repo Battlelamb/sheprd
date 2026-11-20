@@ -24,6 +24,11 @@ pub struct View {
     /// The log's heads, hex: Sheprd syncs a machine again when they move.
     #[serde(default)]
     pub heads: Vec<String>,
+    /// The host this computer is in the fleet as, hex, when it holds the
+    /// log as a shared host rather than as a member: `me` is then in no
+    /// member list, and that is no removal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hosted: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -104,6 +109,7 @@ impl View {
             suspended: suspended.iter().map(ToString::to_string).collect(),
             pending: log.pending(),
             heads: log.heads().iter().map(ToString::to_string).collect(),
+            hosted: None,
         }
     }
 }

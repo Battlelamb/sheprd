@@ -3,6 +3,7 @@
 //! public tunnel key never speaks for it, nor takes its pairing with it.
 
 use super::*;
+use crate::control::fleet::HostId;
 use crate::control::fleet::removal::{PROOF_LEN, PURPOSE_SSH};
 use crate::desktop::{keys::Keys, record::Record};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};

@@ -41,7 +41,6 @@ async fn fleet_apply_with_no_daemon_running_keeps_the_log() {
         heads: Vec::new(),
         ops: sync::encode_ops(&a.ops()),
         nonce: None,
-        more: false,
     };
     let applied = run_apply(b.dir.path(), apply).unwrap();
     assert_eq!(applied.fleet, fleet);
@@ -78,7 +77,6 @@ async fn an_answer_carries_what_the_caller_lacks() {
         heads: caller.iter().map(ToString::to_string).collect(),
         ops: Vec::new(),
         nonce: None,
-        more: false,
     })) else {
         panic!("no answer");
     };
@@ -124,7 +122,6 @@ async fn apply_naming_another_fleet_learns_nothing() {
         heads: Vec::new(),
         ops: Vec::new(),
         nonce: None,
-        more: false,
     };
     assert!(matches!(
         ask::answer(&a.state, &a.fleet, Ask::Apply(apply), now_ms()),
@@ -143,7 +140,6 @@ async fn an_answer_proves_which_host_gave_it() {
         heads: Vec::new(),
         ops: Vec::new(),
         nonce: Some(nonce.into()),
-        more: false,
     })) else {
         panic!("no answer");
     };
@@ -191,6 +187,8 @@ async fn proven_keys_an_earlier_build_recorded_are_dropped() {
 async fn a_key_past_the_bound_is_not_kept() {
     let (http, _, _) = relay().await;
     let a = Node::new(http, 1).await;
+    // Proofs are kept only in a fleet.
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
     let member = MemberId([1; 32]);
     for seed in 0..u8::try_from(MAX_PROVEN).unwrap() {
         assert!(a.fleet.proved(member, [seed; 32]).unwrap());

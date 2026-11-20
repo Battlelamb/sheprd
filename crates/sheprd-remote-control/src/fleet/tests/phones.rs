@@ -12,7 +12,7 @@ pub(super) fn nowhere() -> SocketAddr {
     "127.0.0.1:9".parse().unwrap()
 }
 
-pub(super) fn fleet_id(node: &Node) -> crate::control::fleet::FleetId {
+pub(super) fn fleet_id(node: &Node) -> FleetId {
     node.fleet.inner().log.as_ref().unwrap().fleet()
 }
 

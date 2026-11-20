@@ -29,8 +29,9 @@ pub enum FleetOp {
 impl FleetOp {
     pub fn wait_seconds(&self) -> u64 {
         match self {
-            Self::Status => DAEMON_WAIT_SECONDS,
-            Self::Open | Self::Remove { .. } | Self::RemoveHost { .. } | Self::Scrub { .. } => 0,
+            // A removal reads the daemon's view before naming its target.
+            Self::Status | Self::Remove { .. } | Self::RemoveHost { .. } => DAEMON_WAIT_SECONDS,
+            Self::Open | Self::Scrub { .. } => 0,
         }
     }
 }

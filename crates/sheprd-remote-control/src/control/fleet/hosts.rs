@@ -53,7 +53,8 @@ struct Add<'a> {
 
 /// Sets `state.hosts` from the additions and removals in `effective`, on
 /// top of `base`, and says where each live host's history starts, and
-/// which hosts the [`MAX_HOSTS`] bound left out. The `HostAdd`s in `held`
+/// which additions the [`MAX_HOSTS`] bound left out: those of the current
+/// lifetime of each host it left out. The `HostAdd`s in `held`
 /// are an equivocating member's, and do not count.
 pub(super) fn hosts(
     graph: &Graph<'_>,
@@ -62,7 +63,7 @@ pub(super) fn hosts(
     held: &BTreeSet<usize>,
     base: &State,
     state: &mut State,
-) -> (BTreeMap<HostId, Lifetime>, BTreeSet<HostId>) {
+) -> (BTreeMap<HostId, Lifetime>, BTreeSet<usize>) {
     let mut adds: BTreeMap<HostId, Vec<Add<'_>>> = BTreeMap::new();
     for (id, host) in &base.hosts {
         if host.intro.kind != HostKind::Member {
@@ -155,7 +156,14 @@ pub(super) fn hosts(
     // Concurrent additions can pass the bound each on its own; the first
     // added are kept.
     live.sort_by_key(|(earliest, id, _)| (*earliest, *id));
-    let excluded: BTreeSet<HostId> = live.iter().skip(MAX_HOSTS).map(|(_, id, _)| *id).collect();
+    // The additions of the hosts the bound leaves out, in their current
+    // lifetime: earlier lifetimes' additions still happened.
+    let excluded: BTreeSet<usize> = live
+        .iter()
+        .skip(MAX_HOSTS)
+        .filter_map(|(_, id, _)| anchors.get(id))
+        .flat_map(|lifetime: &Lifetime| lifetime.0.iter().flatten().copied())
+        .collect();
     live.truncate(MAX_HOSTS);
     state.hosts = live.into_iter().map(|(_, id, host)| (id, host)).collect();
     anchors.retain(|id, _| state.hosts.contains_key(id));

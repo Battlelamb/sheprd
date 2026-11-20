@@ -43,6 +43,7 @@ mod sign_in;
 mod source_chip;
 mod stack;
 mod stack_actions;
+mod stack_inferred;
 mod status;
 mod stores;
 mod tasks;

@@ -67,6 +67,7 @@ impl SheprdWindow {
             .map(|pr| pr.merge_methods.clone())
             .unwrap_or_default();
         self.menu.page = Some(Page::PrMerge);
+        self.menu.asked_by_command = false;
         self.menu.error = None;
         self.menu.merge_method = methods.first().copied();
         self.menu.merge_target = self.pr_actions.target().cloned();
@@ -210,7 +211,7 @@ impl SheprdWindow {
     }
 
     /// A dialog's titled header: the row's icon, a title, and the PR.
-    fn pr_dialog_header(&self, row: Row, title: String) -> Div {
+    pub(super) fn pr_dialog_header(&self, row: Row, title: String) -> Div {
         let theme = &self.theme;
         let font = &self.config.ui;
         let subtitle = self
@@ -254,7 +255,7 @@ impl SheprdWindow {
             )
     }
 
-    fn pr_dialog_error(&self) -> Option<Div> {
+    pub(super) fn pr_dialog_error(&self) -> Option<Div> {
         let theme = &self.theme;
         self.menu.error.as_ref().map(|error| {
             div()
@@ -305,7 +306,7 @@ impl SheprdWindow {
             .border_color(rgb(self.theme.active))
     }
 
-    fn pr_back_button(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn pr_back_button(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         self.pr_button("pr-dialog-back", fl!("pr-actions-back"), false)
             .on_click(cx.listener(|this, _, _, cx| {
                 cx.stop_propagation();

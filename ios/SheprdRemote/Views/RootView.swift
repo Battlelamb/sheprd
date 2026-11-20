@@ -200,7 +200,8 @@ extension RootView {
     /// if it were heard, as the simulator has no microphone, and
     /// `-voiceThen TEXT` follows it with another. `-sampleChat YES` opens a
     /// made-up chat, for screenshots without anyone's real prompts, and
-    /// `-sampleChat effects` one with text sizes and message effects.
+    /// `-sampleChat effects` one with text sizes and message effects, and
+    /// `-sampleChat activity` one running sub-agents, shells, and a plan.
     func followLaunchArguments() async {
         let defaults = UserDefaults.standard
         if let link = defaults.string(forKey: "pairLink"),
@@ -249,7 +250,9 @@ extension RootView {
                 workspacesPath.append(WorkspaceKey(device: machine.id, workspace: workspace))
             }
         }
-        if defaults.string(forKey: "sampleChat") == "effects" {
+        if defaults.string(forKey: "sampleChat") == "activity" {
+            model.pendingRoute = .chat(.activitySample, title: "Rail on iOS")
+        } else if defaults.string(forKey: "sampleChat") == "effects" {
             model.pendingRoute = .chat(.effectsSample, title: "Release checks")
         } else if defaults.bool(forKey: "sampleChat") {
             model.pendingRoute = .chat(.sample, title: "Weather widget")

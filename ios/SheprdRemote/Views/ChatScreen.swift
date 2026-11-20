@@ -13,6 +13,8 @@ struct ChatScreen: View {
     let title: String
     @State private var store: ChatStore?
     @State private var showingSession = false
+    @State private var showingPanel = false
+    @State private var panelDetent = PresentationDetent.medium
     @Environment(\.horizontalSizeClass) private var width
     @Environment(\.dismiss) private var dismiss
     @Environment(\.offersWorkspace) private var offersWorkspace
@@ -100,6 +102,13 @@ struct ChatScreen: View {
                         .accessibilityLabel("Open the terminal")
                 }
             }
+            // The desktop rail's sections: sub-agents, shells, the plan,
+            // and changed files, once the agent reports any.
+            if let transcript = store?.transcript, transcript.hasActivityPanel {
+                ToolbarItem(placement: .topBarTrailing) {
+                    AgentPanelButton(transcript: transcript) { showingPanel = true }
+                }
+            }
             if let usage = store?.transcript?.usage {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showingSession = true } label: { ContextRing(percent: usage.percent) }
@@ -115,10 +124,22 @@ struct ChatScreen: View {
                 .presentationDetents([.medium, .large])
             }
         }
+        .sheet(isPresented: $showingPanel) {
+            if let store {
+                AgentPanel(key: key, store: store)
+                    .presentationDetents([.medium, .large], selection: $panelDetent)
+                    .presentationBackground(Color(.systemGroupedBackground))
+            }
+        }
         .onAppear {
             #if DEBUG
             if key == .sample {
                 store = ChatStore(key: key, sample: .sample)
+                return
+            }
+            if key == .activitySample {
+                store = ChatStore(key: key, sample: .activitySample)
+                openPanelForLaunchArgument()
                 return
             }
             if key == .effectsSample {
@@ -139,12 +160,23 @@ struct ChatScreen: View {
             #if DEBUG
             // The simulator loop's `-session YES` opens the session sheet.
             if UserDefaults.standard.bool(forKey: "session") { showingSession = true }
+            // `-agentPanel YES` opens the activity panel, `-agentPanel large`
+            // at full height.
+            openPanelForLaunchArgument()
             #endif
         }
         .onDisappear {
             if let store { model.fleet.closeChat(store) }
         }
     }
+
+    #if DEBUG
+    private func openPanelForLaunchArgument() {
+        let defaults = UserDefaults.standard
+        if defaults.string(forKey: "agentPanel") == "large" { panelDetent = .large }
+        if defaults.bool(forKey: "agentPanel") || defaults.string(forKey: "agentPanel") == "large" { showingPanel = true }
+    }
+    #endif
 
     /// "Opus 5.5 · High · Bypass permissions", from the session's settings.
     private func sessionLine(_ transcript: Transcript) -> String {
@@ -193,8 +225,6 @@ private struct ChatDocument: View {
     @State private var away = false
     /// How many of the latest turns show; earlier ones load on request.
     @State private var shownTurns = 5
-    /// A link the agent wrote, shown in full before it opens.
-    @State private var pendingLink: URL?
     /// The latest prompt has scrolled up past the top of the chat.
     @State private var promptAbove = false
 
@@ -272,6 +302,7 @@ private struct ChatDocument: View {
         .scrollDismissesKeyboard(.interactively)
         .coordinateSpace(.named(ChatEffectsModel.space))
         .environment(\.chatEffects, store.effects)
+        .modifier(WizzShake(since: store.effects.ledger.playing(at: .now).flatMap { $0.effect == .wizz ? $0.since : nil }))
         // A screen effect plays over the chat alone, never the composer,
         // and takes no touches.
         .overlay {
@@ -330,21 +361,7 @@ private struct ChatDocument: View {
             .animation(.snappy, value: transcript.status == .working)
             .animation(.snappy, value: away)
         }
-        .environment(\.openURL, OpenURLAction { url in
-            guard MarkdownView.webSchemes.contains(url.scheme?.lowercased() ?? "") else { return .discarded }
-            pendingLink = url
-            return .handled
-        })
-        .confirmationDialog(
-            "Open this link?",
-            isPresented: Binding(get: { pendingLink != nil }, set: { if !$0 { pendingLink = nil } }),
-            titleVisibility: .visible,
-            presenting: pendingLink
-        ) { url in
-            Button("Open in Safari") { UIApplication.shared.open(url) }
-        } message: { url in
-            Text(url.absoluteString)
-        }
+        .browsesLinks(schemes: MarkdownView.webSchemes)
         .sheet(item: question) { permission in
             QuestionSheet(key: key, permission: permission)
         }

@@ -11077,6 +11077,7 @@ dependencies = [
  "sheprd-chat-protocol",
  "sheprd-client",
  "sheprd-protocol",
+ "sheprd-session",
  "sheprd-terminal",
  "tempfile",
  "thiserror 2.0.21",
@@ -11206,6 +11207,7 @@ dependencies = [
  "sheprd-diagnostics",
  "sheprd-github",
  "sheprd-i18n",
+ "sheprd-mcp",
  "sheprd-memory",
  "sheprd-mods",
  "sheprd-orchestrator",
@@ -11272,6 +11274,15 @@ name = "sheprd-luau"
 version = "0.1.0"
 dependencies = [
  "mlua",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "sheprd-mcp"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 

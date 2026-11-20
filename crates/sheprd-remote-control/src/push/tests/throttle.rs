@@ -11,6 +11,7 @@ fn notification(pane: &str, kind: Kind, body: &str) -> Notification {
         tag: format!("chat-{pane}"),
         title: "t".to_owned(),
         urgency: Urgency::Normal,
+        wizz: false,
     }
 }
 

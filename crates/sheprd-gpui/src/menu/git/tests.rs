@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 mod en_xa;
 mod remote_kept;
+mod restack;
 mod unopened;
 
 fn status(additions: u64, deletions: u64, untracked: u64) -> Status {

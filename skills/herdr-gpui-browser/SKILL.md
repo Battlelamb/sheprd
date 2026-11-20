@@ -54,6 +54,9 @@ Tests :big[pass]: :huge[214 of 214]. :small[CI took 4 min.]
   `balloons`, `celebration`, `fireworks`, `love`, `lasers`, `echo`,
   `spotlight`, or `zap`, where pixel ships shoot down the message's letters)
   fills the chat pane for a moment, when long work finally succeeds. Never use them in routine replies.
+- When you are stuck and truly need the person, such as a decision only they
+  can make, end the reply with a line `::wizz`: the chat shakes, and a paired
+  phone buzzes even when locked. Once per wait at most.
 - The iPhone and iPad app draws them too (ink shows on a tap). Terminal views
   and the phone web app show the directives as plain text, so the reply still
   reads well there.
@@ -350,6 +353,7 @@ what Sheprd shows or keeps.
 | Save the working tree before a risky change, and compare later | `sheprd checkpoint create before refactor`, `sheprd checkpoint diff ID` |
 | Your branch's pull request, its checks, and (with your workspace focused) its comments | `sheprd pr`, `sheprd pr checks`, `sheprd pr comments` |
 | Diagnose missing GitHub details: last reported GraphQL quota and rate-limit retry delays | `sheprd pr quota --json` |
+| Ask the user to merge your branch's pull request (with the stack below it), or to add it to or take it out of the merge queue; they confirm in Sheprd | `sheprd pr merge`, `sheprd pr queue add\|remove` |
 | List the vulnerability reports outsiders filed and the open Dependabot alerts of your repositories, most severe first | `sheprd security --json` |
 | Show the user an alert's or a vulnerability report's page in Sheprd | `sheprd security open OWNER/NAME 42` or `... GHSA-xxxx-xxxx-xxxx` |
 | Ask the user to approve an automation script you wrote (the app shows its plan; the user approves) | `sheprd automation approve .herdr/automations/nightly.luau` |

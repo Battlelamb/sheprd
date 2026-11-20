@@ -38,6 +38,9 @@ pub struct Layer {
     pub review: ReviewDecision,
     /// GitHub's rollup of the head commit's checks; `None` when none ran.
     pub checks: Option<Outcome>,
+    /// Its head commit, as GitHub last saw it; empty when unknown or not a
+    /// commit ID. A merged layer's tells what a branch above still carries.
+    pub head_oid: String,
 }
 
 /// Why a layer cannot merge, most fundamental first: [`Layer::blocker`]
@@ -177,6 +180,18 @@ impl Stack {
         }
     }
 
+    /// The layer directly below `position` once it merged, with its head
+    /// commit known: what a branch at `position` may still carry. Only the
+    /// lowest open layer restacks onto the base, so one with an open layer
+    /// between it and a merged one gets nothing.
+    pub fn merged_below(&self, position: u64) -> Option<&Layer> {
+        let below = position.checked_sub(1)?;
+        self.layers
+            .iter()
+            .find(|layer| layer.position == below)
+            .filter(|layer| layer.state == State::Merged && !layer.head_oid.is_empty())
+    }
+
     /// Whether every layer from the bottom up to `position` was read.
     pub fn read_through(&self, position: u64) -> bool {
         (1..=position).all(|wanted| self.layers.iter().any(|layer| layer.position == wanted))
@@ -308,6 +323,8 @@ struct RawLayer {
     merge_state_status: MergeState,
     #[serde(default)]
     review_decision: ReviewDecision,
+    #[serde(default)]
+    head_ref_oid: String,
     commits: Nodes<RawCommit>,
 }
 
@@ -355,6 +372,11 @@ impl From<RawStack> for Stack {
                     merge: pr.merge_state_status,
                     review: pr.review_decision,
                     checks,
+                    // It may be put in a Git command line, so anything else
+                    // is dropped rather than cleaned.
+                    head_oid: Some(pr.head_ref_oid)
+                        .filter(|oid| super::parse::object_id(oid))
+                        .unwrap_or_default(),
                 })
             })
             .take(LAYER_LIMIT)
@@ -374,18 +396,26 @@ impl From<RawStack> for Stack {
 /// check, this one (#1364) waiting on a review, and #1366 a draft.
 #[cfg(any(test, feature = "test-support"))]
 pub fn stacked_fixture() -> crate::Result<super::PullRequest> {
-    stacked(false)
+    stacked(false, 3)
 }
 
 /// [`stacked_fixture`] once #1362's checks pass and #1364 is approved, so
 /// both can merge, on a branch with a merge queue.
 #[cfg(any(test, feature = "test-support"))]
 pub fn ready_stacked_fixture() -> crate::Result<super::PullRequest> {
-    stacked(true)
+    stacked(true, 3)
 }
 
+/// The same stack seen from #1362, layer 2, right above the merged #1361:
+/// a branch that may need restacking onto `main`.
 #[cfg(any(test, feature = "test-support"))]
-fn stacked(ready: bool) -> crate::Result<super::PullRequest> {
+pub fn restack_fixture() -> crate::Result<super::PullRequest> {
+    stacked(false, 2)
+}
+
+/// The stack from its layer at `position`, 2 or 3.
+#[cfg(any(test, feature = "test-support"))]
+fn stacked(ready: bool, position: u64) -> crate::Result<super::PullRequest> {
     let (below, here, review) = if ready {
         ("SUCCESS", "CLEAN", "APPROVED")
     } else {
@@ -401,25 +431,30 @@ fn stacked(ready: bool) -> crate::Result<super::PullRequest> {
         serde_json::json!({"position": position, "pullRequest": {
             "number": number, "title": format!("Layer {position} of the T3 stack"),
             "state": state, "isDraft": draft, "mergeStateStatus": merge, "reviewDecision": review,
+            "headRefOid": format!("{number:040x}"),
             "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": rollup}}}]}
         }})
     };
+    let (number, head, base) = match position {
+        2 => (1362, "feat/t3-client", "main"),
+        _ => (1364, "feat/t3-sidebar", "feat/t3-client"),
+    };
     super::parse::parse(&serde_json::json!([{
-        "number": 1364, "url": "https://github.com/example/project/pull/1364",
+        "number": number, "url": format!("https://github.com/example/project/pull/{number}"),
         "title": "Show T3 sessions in the sidebar", "state": "OPEN", "isDraft": false,
-        "headRefName": "feat/t3-sidebar", "baseRefName": "feat/t3-client",
+        "headRefName": head, "baseRefName": base,
         "additions": 120, "deletions": 4, "changedFiles": 6, "updatedAt": "2026-11-17T09:00:00Z",
         "mergeStateStatus": here, "reviewDecision": review, "isMergeQueueEnabled": ready,
         "headRepositoryOwner": {"login": "example"},
         "id": "PR_kwDOstacked", "headRefOid": "0123456789abcdef0123456789abcdef01234567",
-        "stackEntry": {"position": 3},
+        "stackEntry": {"position": position},
         "stack": {"number": 950, "baseRefName": "main", "size": 4, "entries": {"nodes": [
             layer(1, 1361, "MERGED", false, "UNKNOWN", None, "SUCCESS"),
             layer(2, 1362, "OPEN", false, here, Some("APPROVED"), below),
             layer(3, 1364, "OPEN", false, here, Some(review), "SUCCESS"),
             layer(4, 1366, "OPEN", true, "DRAFT", None, "PENDING"),
         ]}}
-    }]).to_string(), "example", "project", "feat/t3-sidebar")?
+    }]).to_string(), "example", "project", head)?
     .ok_or(super::Error::Repository.into())
 }
 

@@ -22,7 +22,7 @@ fn kept(node: &Node, route: &str) -> Record {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn an_introduction_cannot_take_a_route_a_host_moved_to() {
-    let (a, b, c) = three().await;
+    let (a, b, c) = idle().await;
     let route = URL_SAFE_NO_PAD.encode([0x5a; 32]);
     // a moves to `route`, its record signed by its own authority.
     let (mut moved, _) = me::record(&a.state, now_ms() + 1).unwrap();
@@ -115,7 +115,7 @@ fn pins(state: &crate::control::fleet::State, me: &MemberId, host: HostId, route
 
 #[tokio::test(flavor = "multi_thread")]
 async fn only_a_host_still_standing_on_its_route_pins_it() {
-    let (a, b, _c) = three().await;
+    let (a, b, _c) = idle().await;
     let me = b.fleet.me();
     let (state, host, route) = {
         let inner = b.fleet.inner();

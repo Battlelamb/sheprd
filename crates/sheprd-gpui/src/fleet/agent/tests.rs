@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(unix)]
 mod installed;
 mod tokens;
 

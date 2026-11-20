@@ -97,6 +97,7 @@ fn a_newer_document_refuses_a_close_or_delete_before_anything_ends() {
         },
         Op::RemoveWorktree {
             workspace: "space-a".into(),
+            discard: true,
         },
     ] {
         let error = source.arrange_saved(&TabRef::File(0), "", &op).unwrap_err();
@@ -141,6 +142,7 @@ fn a_workspace_in_a_folder_of_a_worktree_deletes_the_whole_checkout() {
     source.poll().unwrap();
     let remove = Op::RemoveWorktree {
         workspace: "space-a".into(),
+        discard: false,
     };
     source.arrange_saved(&TabRef::File(0), "", &remove).unwrap();
     assert!(!checkout.exists());

@@ -193,6 +193,10 @@ impl SheprdWindow {
             self.add_nearby_key(event, window, cx);
             return;
         }
+        if self.menu.page == Some(Page::RemoveMerged) {
+            self.merged_sweep_key(event, window, cx);
+            return;
+        }
         if self.menu.page == Some(Page::RemoveWsl) {
             self.remove_wsl_key(event, window, cx);
             return;

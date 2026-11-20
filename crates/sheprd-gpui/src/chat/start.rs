@@ -18,9 +18,11 @@ use crate::{
 };
 use gpui::{prelude::*, *};
 use serde_json::json;
-use sheprd_chat_protocol::Agent;
+use sheprd_chat_protocol::{Agent, Settings};
 use sheprd_client::Method;
 use std::{
+    borrow::Cow,
+    collections::BTreeMap,
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -203,7 +205,7 @@ pub(crate) fn shell_line(
     agent: Agent,
     program: &Path,
     choice: AgentChoice,
-    env: &std::collections::BTreeMap<String, String>,
+    env: &BTreeMap<String, String>,
 ) -> Option<String> {
     let assignments: Vec<String> = env
         .iter()
@@ -238,7 +240,7 @@ pub(crate) fn tab_params(
     cwd: Option<&str>,
     agent: Agent,
     program: Option<&Path>,
-    extra: &std::collections::BTreeMap<String, String>,
+    extra: &BTreeMap<String, String>,
 ) -> serde_json::Value {
     let mut params = json!({
         "workspace_id": workspace,
@@ -366,13 +368,57 @@ impl SheprdWindow {
         }
     }
 
+    /// The `[chat.env]` variables, with `carry`, the settings of the chat
+    /// a new one copies, when they fit their bound; else the new chat
+    /// starts with its agent's own.
+    pub(crate) fn chat_env(&self, carry: Option<&Settings>) -> Cow<'_, BTreeMap<String, String>> {
+        let Some(carry) = carry else {
+            return Cow::Borrowed(&self.config.chat.env);
+        };
+        match carry.encode() {
+            Ok(text) => {
+                let mut env = self.config.chat.env.clone();
+                env.insert(sheprd_chat_protocol::SETTINGS_ENV.to_owned(), text);
+                Cow::Owned(env)
+            }
+            Err(error) => {
+                tracing::warn!(%error, "A new chat starts without the settings it copies");
+                Cow::Borrowed(&self.config.chat.env)
+            }
+        }
+    }
+
+    /// The built-in agent of the chat in pane `key` and the settings it
+    /// runs with, for a new chat like it; `None` when no chat this window
+    /// shows runs there, or it runs a custom command.
+    pub(crate) fn like_chat(&self, key: &str) -> Option<(Agent, Settings)> {
+        let transcript = self.chats.pane(key)?.session.transcript();
+        let agent = transcript
+            .harnesses
+            .as_ref()
+            .and_then(|harnesses| harnesses.current)
+            .or_else(|| {
+                Agent::ALL
+                    .iter()
+                    .copied()
+                    .find(|agent| agent.display_name() == transcript.agent)
+            })?;
+        Some((agent, Settings::of(agent, transcript)))
+    }
+
     pub(crate) fn chat_starting(&self) -> bool {
         self.chats.starting.is_some()
     }
 
     /// Opens a tab running a chat with `agent` in the workspace of `beside`,
-    /// else of the focused pane, in that pane's folder.
-    pub(crate) fn start_chat(&mut self, agent: Agent, beside: Option<&str>) -> Result<(), Error> {
+    /// else of the focused pane, in that pane's folder, with the settings
+    /// `carry` copies from another chat.
+    pub(crate) fn start_chat(
+        &mut self,
+        agent: Agent,
+        beside: Option<&str>,
+        carry: Option<&Settings>,
+    ) -> Result<(), Error> {
         if !self.config.features.acp_chats {
             return Err(Error::Disabled);
         }
@@ -401,20 +447,17 @@ impl SheprdWindow {
             .ok_or(Error::NoWorkspace)?;
         let cwd = pane.and_then(|pane| pane.foreground_cwd.clone().or_else(|| pane.cwd.clone()));
         let boot = snapshot.boot_id.clone();
+        let params = tab_params(
+            &workspace,
+            cwd.as_deref(),
+            agent,
+            program.as_deref(),
+            &self.chat_env(carry),
+        );
         let endpoint = &self.endpoints[self.selected_endpoint];
         let request = endpoint
             .connection
-            .request_script(
-                &boot,
-                Method::TabCreate,
-                tab_params(
-                    &workspace,
-                    cwd.as_deref(),
-                    agent,
-                    program.as_deref(),
-                    &self.config.chat.env,
-                ),
-            )
+            .request_script(&boot, Method::TabCreate, params)
             .map_err(|_| Error::NotConnected)?;
         self.chats.last_started = Some(agent);
         self.chats.starting = Some(Starting {
@@ -433,9 +476,9 @@ impl SheprdWindow {
     /// A herdr-core tab in the active group splits with the chat instead.
     pub(crate) fn start_chat_or_flash(&mut self, agent: Agent, cx: &mut Context<Self>) {
         let started = match self.core_chat_group_tab(None, cx) {
-            Some(tab) => self.start_core_chat(agent, tab, cx),
-            None if self.kept_in_front().is_some() => self.start_kept_core_chat(agent, cx),
-            None => self.start_chat(agent, None),
+            Some(tab) => self.start_core_chat(agent, tab, None, cx),
+            None if self.kept_in_front().is_some() => self.start_kept_core_chat(agent, None, cx),
+            None => self.start_chat(agent, None, None),
         };
         if let Err(error) = started {
             self.flash_chat_error(&error, cx);
@@ -448,16 +491,16 @@ impl SheprdWindow {
     /// A herdr-core tab the strip shows splits with the chat instead.
     pub(crate) fn start_chat_in(&mut self, agent: Agent, group: GroupId, cx: &mut Context<Self>) {
         if let Some(tab) = self.core_chat_group_tab(Some(group), cx) {
-            if let Err(error) = self.start_core_chat(agent, tab, cx) {
+            if let Err(error) = self.start_core_chat(agent, tab, None, cx) {
                 self.flash_chat_error(&error, cx);
             }
             cx.notify();
             return;
         }
         let started = if self.kept_in_front().is_some() {
-            self.start_kept_core_chat(agent, cx)
+            self.start_kept_core_chat(agent, None, cx)
         } else {
-            self.start_chat(agent, None)
+            self.start_chat(agent, None, None)
         };
         match started {
             Ok(()) => self.expect_new_tab_in(group),

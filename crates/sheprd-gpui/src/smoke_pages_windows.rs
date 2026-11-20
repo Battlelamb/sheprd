@@ -70,7 +70,20 @@ pub(super) fn start_pages(handle: WindowHandle<SheprdWindow>, cx: &mut App) {
                 })
                 .map_err(|error| anyhow!("{error:#}"))??;
             let started = Instant::now();
+            let mut beat = 0;
             loop {
+                // TEMPORARY diagnostics for the flaky native pages check.
+                if started.elapsed().as_secs() >= beat {
+                    beat += 5;
+                    let _ = handle.update(cx, |view, _, _| {
+                        eprintln!(
+                            "PAGES diag: {:?} page={} progress={:?}",
+                            started.elapsed(),
+                            view.has_page(id),
+                            view.page_progress(id)
+                        );
+                    });
+                }
                 timer.timer(Duration::from_millis(100)).await;
                 let loaded = handle
                     .update(cx, |view, window, cx| loaded(view, id, window, cx))
@@ -85,8 +98,10 @@ pub(super) fn start_pages(handle: WindowHandle<SheprdWindow>, cx: &mut App) {
                     let state = handle
                         .update(cx, |view, _, cx| {
                             let tab = cx.try_global::<Store>().and_then(|store| store.get(id));
+                            let (building, failed) = view.page_progress(id);
                             format!(
-                                "location={:?}, title={:?}, page={}",
+                                "location={:?}, title={:?}, page={}, building={building}, \
+                                 failed={failed:?}",
                                 tab.and_then(|tab| tab.location.as_ref()),
                                 tab.map(|tab| &tab.title),
                                 view.has_page(id),

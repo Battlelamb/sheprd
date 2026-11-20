@@ -1,6 +1,6 @@
 ---
 name: herdr-gpui-browser
-description: "Open a browser tab in Sheprd beside your terminal to show the user a web page, HTML file, or mockup, and get back their notes and picks. Use it in Herdr (HERDR_ENV=1 or HC_TERMINAL_ID set) when the user asks to open, start, or show a browser tab, page, preview, or mockup, to explain or visualize how something works, or to mock up UI variants to pick from; prefer it there over other browser skills or a system browser. Also use it for what Sheprd, not the herdr daemon, shows or keeps: a file at a line, a review of your changes, repository memory (search it before a task, add what you learn), worktree notes, checkpoints and their diffs, your branch's pull request and CI, vulnerability reports and Dependabot alerts, approving an automation script you wrote, forwarding or stopping ports, cloud machines, virtual Macs (commands, screenshots, clicks, keys), remote control from a phone, its windows and tabs, waiting for a tab to close or for notes, Sheprd settings, themes, fonts, and keeping the machine awake."
+description: "Open a browser tab in Sheprd beside your terminal to show the user a web page, HTML file, or mockup, and get back their notes and picks. Use it in Herdr (HERDR_ENV=1 or HC_TERMINAL_ID set) when the user asks to open, start, or show a browser tab, page, preview, or mockup, to explain or visualize how something works, or to mock up UI variants to pick from; prefer it there over other browser skills or a system browser. Also use it for what Sheprd, not the herdr daemon, shows or keeps: a file at a line, a review of your changes, repository memory (search it before a task, add what you learn), worktree notes, checkpoints and their diffs, your branch's pull request and CI, vulnerability reports and Dependabot alerts, approving your automation script, forwarding or stopping ports, cloud machines, virtual Macs (commands, screenshots, clicks, keys), remote control from a phone, its windows and tabs, waiting on a tab or notes, starting an agent like you, Sheprd settings, themes, fonts, and keeping the machine awake."
 ---
 <!-- herdr-gpui-managed-skill v1: Sheprd keeps this file up to date. Edit a copy under another name to keep your changes. -->
 
@@ -326,6 +326,22 @@ private terminal output: Sheprd refuses them. If your agent keeps a memory
 of its own, prefer this one for what other agents of the repository should
 know. `list`, `search`, and `index` exit 4 when they find nothing.
 
+## Starting another agent
+
+When the user asks you to start another agent, such as in a new workspace,
+tab, or worktree, start the same kind you are, with the same settings,
+unless they ask for another:
+
+- **You run in a Sheprd chat** (`SHEPRD_CHAT_ENDPOINT` is set, and Sheprd's
+  note told you so): create the workspace or tab with `herdr`, then run
+  `sheprd chat new --pane ID` with a pane of it. With no agent named it
+  starts your agent with your chat's model, thinking, and permission mode.
+  Do not run an agent's terminal command there instead.
+- **You run in a terminal**: start the same CLI you run as, with the same
+  options, such as the model and permission flags you were started with
+  (`ps -o args= -p $PPID` from your shell usually shows your command line),
+  with `herdr`.
+
 ## More of Sheprd from the command line
 
 The same executable drives the rest of Sheprd's own features. For Herdr 1,
@@ -363,6 +379,7 @@ what Sheprd shows or keeps.
 | See every port this computer listens on, with the process, directory, and workspace behind it | `sheprd ports all --json` |
 | Ask the user to stop (or pause) whatever holds a port you need | `sheprd ports stop 3000`; they confirm in the app |
 | See the processes under a pane, with CPU and memory | `sheprd processes` |
+| Start another agent like yourself, in a chat (see [Starting another agent](#starting-another-agent)) | `sheprd chat new --pane ID` from a chat, then `sheprd chat` for its status |
 | Start a chat with another agent in a new tab, shown as a native chat view | `sheprd chat new claude`, then `sheprd chat` for its status |
 | List a pull request you changed without `gh` in your chat's side rail (`gh pr` commands show there on their own) | `sheprd chat pr add https://github.com/OWNER/REPO/pull/N`; `sheprd chat pr` lists them |
 | Move a terminal agent into a native chat, keeping its conversation (an agent that is idle, in another pane) | `sheprd chat convert --pane ID`, then `sheprd chat` for its status |

@@ -144,6 +144,9 @@ pub(crate) struct ChatPane {
     /// Which slash-command completion is selected.
     pub(crate) completion: usize,
     pub(crate) composer: Option<Entity<MultilineInput>>,
+    /// Closes the open menu once the person types in the composer, as a
+    /// click outside it would.
+    pub(super) composer_typed: Option<gpui::Subscription>,
     /// The message effects met and playing.
     pub(crate) effects: super::effects::Effects,
     /// The last command this window could not send.
@@ -276,6 +279,7 @@ impl ChatPane {
             code: Default::default(),
             completion: 0,
             composer: None,
+            composer_typed: None,
             effects: Default::default(),
             error: None,
             expanded: HashSet::new(),

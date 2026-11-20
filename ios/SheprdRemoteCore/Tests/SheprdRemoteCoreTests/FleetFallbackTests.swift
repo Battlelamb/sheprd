@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import SheprdRemoteCore
 
@@ -105,6 +106,28 @@ struct FleetFallbackTests {
         // Only an explicit refusal of a link drops it, and only that one.
         let refused = FleetPendingLink.settle(pending, linked: [:], refused: ["bb"])
         #expect(refused.waiting == [pending[0]])
+    }
+
+    @Test func fleetCallsGoThroughTheLiveConnectionWhenThereIsOne() async throws {
+        typealias Computer = FleetClientTests.Computer
+        // The live link (a relay, say) answers; the saved address is the
+        // network the phone left.
+        let live = Computer { _, _, _ in FleetClientTests.status(next: nil) }
+        let saved = Computer { _, _, _ in throw Offline(name: "lan") }
+        let online = Mutex(true)
+        let client = FleetClient.preferring(
+            live: { online.withLock { $0 } ? live.send : nil },
+            fallback: saved.send
+        )
+        let status = try await client.status(member: nil)
+        #expect(status.view != nil)
+        #expect(live.requests.withLock { $0.count } == 1)
+        #expect(saved.requests.withLock { $0.isEmpty })
+        // With no live link (a computer just paired), the saved addresses.
+        online.withLock { $0 = false }
+        await #expect(throws: Offline(name: "lan")) { try await client.status(member: nil) }
+        #expect(saved.requests.withLock { $0.count } == 1)
+        #expect(live.requests.withLock { $0.count } == 1)
     }
 
     @Test func aLostOrFailedAnswerKeepsWhatTheRequestCarried() {

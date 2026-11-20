@@ -17,12 +17,14 @@ struct FleetClientTests {
             self.answer = answer
         }
 
-        var client: FleetClient {
-            FleetClient { method, path, body in
+        var send: FleetClient.Send {
+            { method, path, body in
                 self.requests.withLock { $0.append((method, path, body)) }
                 return try self.answer(method, path, body)
             }
         }
+
+        var client: FleetClient { FleetClient(send: send) }
     }
 
     static func signer(_ key: P256.Signing.PrivateKey = P256.Signing.PrivateKey()) -> Fleet.Signer {

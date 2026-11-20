@@ -294,6 +294,7 @@ final class AppModel {
         hostLinks.computers = { [weak self] in self?.computers ?? [] }
         hostLinks.onPaired = { [weak self] in self?.add($0) }
         fleetMembership.computers = { [weak self] in self?.computers ?? [] }
+        fleetMembership.links = fleet
         fleetMembership.onLinked = { [weak self] in self?.add($0) ?? false }
         fleet.onOnline = { [weak self] computer in
             self?.hostLinks.check(computer)

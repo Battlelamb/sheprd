@@ -21,9 +21,11 @@ const LOG: &str = "log.bin";
 /// The history of a fleet being joined, until it admits this computer.
 const JOINING: &str = "joining.bin";
 const PEERS: &str = "peers.json";
-/// Suspensions take most of it at worst: about 16 MiB, half of them for
-/// members no longer live (`tests/folding.rs` checks the bound), with room
-/// beside them for what each peer holds and the proven keys.
+/// At worst, suspensions take about 23.5 MB of it (a save's first write
+/// keeping what the file held beside what is held, each folded target
+/// still within its bound), the removals kept to check again about 6 MB,
+/// and what each peer holds about 2 MB: `tests/folding.rs` checks the sum
+/// stays under it.
 pub(super) const MAX_PEERS: u64 = 32 * 1024 * 1024;
 
 fn path(state_dir: &Path, name: &str) -> PathBuf {
@@ -101,6 +103,24 @@ impl Proven {
 
 #[derive(Serialize, Deserialize)]
 struct FoldedKept {
+    /// Each removal kept by id, hex.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    ids: BTreeMap<String, RemovalKept>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    overflow: Option<OverflowKept>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct RemovalKept {
+    since_ms: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    named: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pinned: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct OverflowKept {
     since_ms: u64,
     /// Each member named, hex, with when the latest removal naming it
     /// arrived.
@@ -201,13 +221,39 @@ fn folded(
             into.insert(
                 member(target)?,
                 super::suspensions::FoldedTarget {
-                    since_ms: kept.since_ms,
-                    named: kept
-                        .named
+                    ids: kept
+                        .ids
                         .iter()
-                        .map(|(hex, since)| Ok((member(hex)?, *since)))
+                        .map(|(id, removal)| {
+                            Ok((
+                                OpId::from_hex(id).ok_or(Error::Peers)?,
+                                super::suspensions::FoldedRemoval {
+                                    since_ms: removal.since_ms,
+                                    named: removal
+                                        .named
+                                        .iter()
+                                        .map(|hex| member(hex))
+                                        .collect::<Result<_>>()?,
+                                    pinned: removal.pinned,
+                                },
+                            ))
+                        })
                         .collect::<Result<_>>()?,
-                    pinned: kept.pinned,
+                    overflow: kept
+                        .overflow
+                        .as_ref()
+                        .map(|overflow| {
+                            Ok::<_, Error>(super::suspensions::Overflow {
+                                since_ms: overflow.since_ms,
+                                named: overflow
+                                    .named
+                                    .iter()
+                                    .map(|(hex, since)| Ok((member(hex)?, *since)))
+                                    .collect::<Result<_>>()?,
+                                pinned: overflow.pinned,
+                            })
+                        })
+                        .transpose()?,
                 },
             );
         }
@@ -262,22 +308,7 @@ pub(super) fn save(state_dir: &Path, inner: &Inner, on_disk: &mut Suspensions) -
         unconfirmed: inner.unconfirmed.clone(),
         folded: inner.folded.clone(),
     };
-    let mut first = now.clone();
-    for (id, kept) in &on_disk.unconfirmed {
-        first.unconfirmed.entry(*id).or_insert_with(|| kept.clone());
-    }
-    for (signer, targets) in &on_disk.folded {
-        let folded = first.folded.entry(*signer).or_default();
-        for (target, kept) in targets {
-            let entry = folded.entry(*target).or_insert_with(|| kept.clone());
-            entry.since_ms = entry.since_ms.max(kept.since_ms);
-            for (name, since) in &kept.named {
-                let at = entry.named.entry(*name).or_insert(*since);
-                *at = (*at).max(*since);
-            }
-            entry.pinned = entry.pinned.max(kept.pinned);
-        }
-    }
+    let first = merged(&now, on_disk);
     write_peers(state_dir, inner, &first)?;
     *on_disk = first;
     if let Some(log) = &inner.log {
@@ -295,6 +326,36 @@ pub(super) fn save(state_dir: &Path, inner: &Inner, on_disk: &mut Suspensions) -
         }
     }
     Ok(())
+}
+
+/// The suspensions held `now` with those `on_disk` beside them, as the
+/// first write of a save keeps them: none dropped, and each folded target
+/// still within its bound of ids, the rest in its overflow.
+pub(super) fn merged(now: &Suspensions, on_disk: &Suspensions) -> Suspensions {
+    let mut first = now.clone();
+    for (id, kept) in &on_disk.unconfirmed {
+        first.unconfirmed.entry(*id).or_insert_with(|| kept.clone());
+    }
+    for (signer, targets) in &on_disk.folded {
+        let folded = first.folded.entry(*signer).or_default();
+        for (target, kept) in targets {
+            let entry = folded.entry(*target).or_insert_with(|| kept.clone());
+            for (id, removal) in &kept.ids {
+                entry.ids.entry(*id).or_insert_with(|| removal.clone());
+            }
+            if let Some(kept) = &kept.overflow {
+                let overflow = entry.overflow.get_or_insert_with(Default::default);
+                overflow.since_ms = overflow.since_ms.max(kept.since_ms);
+                for (name, since) in &kept.named {
+                    let at = overflow.named.entry(*name).or_insert(*since);
+                    *at = (*at).max(*since);
+                }
+                overflow.pinned = overflow.pinned.max(kept.pinned);
+            }
+            entry.cap();
+        }
+    }
+    first
 }
 
 /// Writes `peers.json` from `inner`, with `unconfirmed` as its
@@ -341,13 +402,31 @@ fn write_peers(state_dir: &Path, inner: &Inner, suspensions: &Suspensions) -> Re
                     .iter()
                     .map(|(target, kept)| {
                         let kept = FoldedKept {
-                            since_ms: kept.since_ms,
-                            named: kept
-                                .named
+                            ids: kept
+                                .ids
                                 .iter()
-                                .map(|(name, since)| (name.to_string(), *since))
+                                .map(|(id, removal)| {
+                                    let removal = RemovalKept {
+                                        since_ms: removal.since_ms,
+                                        named: removal
+                                            .named
+                                            .iter()
+                                            .map(ToString::to_string)
+                                            .collect(),
+                                        pinned: removal.pinned,
+                                    };
+                                    (id.to_string(), removal)
+                                })
                                 .collect(),
-                            pinned: kept.pinned,
+                            overflow: kept.overflow.as_ref().map(|overflow| OverflowKept {
+                                since_ms: overflow.since_ms,
+                                named: overflow
+                                    .named
+                                    .iter()
+                                    .map(|(name, since)| (name.to_string(), *since))
+                                    .collect(),
+                                pinned: overflow.pinned,
+                            }),
                         };
                         (target.to_string(), kept)
                     })

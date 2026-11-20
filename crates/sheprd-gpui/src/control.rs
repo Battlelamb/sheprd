@@ -7,6 +7,7 @@
 //! an SSH host has no path to this machine's socket.
 
 mod client;
+pub(crate) mod listen_token;
 mod server;
 
 use crate::browser::Location;
@@ -27,7 +28,7 @@ pub use protocol::{
     app::{FontSize, Size, Switch},
     events::{Cursor, EventKind},
     settings::Sound,
-    tabs::ZoomChange,
+    tabs::{MachineButton, MachineModifier, ZoomChange},
     work::Script,
 };
 pub(crate) use sheprd_control_protocol::Error;

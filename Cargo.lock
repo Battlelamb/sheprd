@@ -8002,6 +8002,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-virtualization"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8edb98625ad1f7dea2e82ab54d5bdf3f477e6645b550f4a7cced1818be9ff59d"
+dependencies = [
+ "bitflags 2.13.2",
+ "block2 0.6.2",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+]
+
+[[package]]
 name = "objc2-web-kit"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10854,6 +10867,8 @@ dependencies = [
  "sheprd-core-client",
  "sheprd-memory",
  "sheprd-t3",
+ "sheprd-traces",
+ "sysinfo 0.39.6",
  "tempfile",
  "thiserror 2.0.21",
  "tungstenite 0.30.0",
@@ -10949,6 +10964,7 @@ dependencies = [
  "crossbeam-channel",
  "interprocess",
  "libc",
+ "libproc",
  "nix",
  "process-wrap",
  "rustix",
@@ -10961,6 +10977,7 @@ dependencies = [
  "thiserror 2.0.21",
  "toml_edit 0.25.19+spec-1.1.0",
  "tracing",
+ "uuid",
  "windows 0.62.2",
  "windows-sys 0.61.2",
 ]
@@ -11003,6 +11020,7 @@ dependencies = [
  "sheprd-chat-protocol",
  "sheprd-client",
  "sheprd-protocol",
+ "sheprd-session",
  "sheprd-terminal",
  "tempfile",
  "thiserror 2.0.21",
@@ -11103,6 +11121,7 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
  "objc2-user-notifications",
+ "objc2-virtualization",
  "objc2-web-kit",
  "oo7",
  "percent-encoding",
@@ -11138,6 +11157,7 @@ dependencies = [
  "sheprd-remote",
  "sheprd-remote-control",
  "sheprd-session",
+ "sheprd-traces",
  "sheprd-updater",
  "sheprd-usage",
  "sheprd-vcs",
@@ -11488,6 +11508,23 @@ dependencies = [
  "sheprd-backend",
  "sheprd-protocol",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "sheprd-traces"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "notify",
+ "rusqlite",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sheprd-client",
+ "tempfile",
+ "thiserror 2.0.21",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

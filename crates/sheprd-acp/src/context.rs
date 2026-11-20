@@ -10,6 +10,10 @@
 //! here to use it; with each prompt after, the few entries that bear on
 //! what the person asked.
 //!
+//! With the memory guide it also says that the pull requests the agent
+//! works on show in the chat's rail, and how to list one it changed
+//! without `gh`, when the chat listens for the `sheprd` command to reach it.
+//!
 //! ACP has no system prompt every agent takes, so all of it goes as a text
 //! block ahead of the prompt's own. The transcript shows only the person's
 //! words. The texts are templates the user may replace ([`prompts`]); the
@@ -44,12 +48,7 @@ pub(crate) fn sheprd_executable() -> Option<PathBuf> {
 
 /// How the agent keeps and searches the repository's memory with `sheprd`.
 pub(crate) fn memory_guide(sheprd: &Path) -> String {
-    let text = sheprd.display().to_string();
-    let sheprd = if text.contains(char::is_whitespace) {
-        format!("\"{text}\"")
-    } else {
-        text
-    };
+    let sheprd = quoted(sheprd);
     format!(
         "Sheprd keeps a memory for this Git repository, shared by every worktree, tab, and \
          chat of it on this computer, so what one agent learns the next one can find. \
@@ -73,6 +72,26 @@ pub(crate) fn memory_guide(sheprd: &Path) -> String {
     )
 }
 
+/// How the agent lists a pull request the chat could not see it work on.
+pub(crate) fn pull_requests_guide(sheprd: &Path) -> String {
+    format!(
+        "Pull requests you create, push to, comment on, review, merge, or close show in \
+         this chat's side rail. `gh pr` commands are picked up on their own; for one you \
+         changed another way, run `{} chat pr add URL`.\n",
+        quoted(sheprd)
+    )
+}
+
+/// `path` as a shell word, quoted when it holds whitespace.
+fn quoted(path: &Path) -> String {
+    let text = path.display().to_string();
+    if text.contains(char::is_whitespace) {
+        format!("\"{text}\"")
+    } else {
+        text
+    }
+}
+
 /// What the agent has been told in this conversation.
 #[derive(Debug, Default)]
 pub(crate) struct Context {
@@ -87,6 +106,9 @@ pub(crate) struct Context {
     /// How to use the repository's memory, escaped for the note; `None`
     /// without a `sheprd` command to use it with.
     memory: Option<String>,
+    /// How to list a pull request, told with the memory guide; `None`
+    /// without a `sheprd` command that reaches this chat.
+    pull_requests: Option<String>,
     /// The repository's memory, for the index and each prompt's recall.
     recall: Option<Recall>,
 }
@@ -100,6 +122,7 @@ impl Context {
             prompts,
             told,
             memory: None,
+            pull_requests: None,
             recall: None,
         }
     }
@@ -111,6 +134,13 @@ impl Context {
     pub(crate) fn with_memory(mut self, sheprd: Option<&Path>, recall: Option<Recall>) -> Self {
         self.memory = sheprd.map(|sheprd| note::escape(&memory_guide(sheprd)));
         self.recall = recall.filter(|_| self.memory.is_some());
+        self
+    }
+
+    /// Tells the agent, with the memory guide, that its pull requests show
+    /// in the rail and how `sheprd` lists one; `None` leaves it out.
+    pub(crate) fn with_pull_requests(mut self, sheprd: Option<&Path>) -> Self {
+        self.pull_requests = sheprd.map(|sheprd| note::escape(&pull_requests_guide(sheprd)));
         self
     }
 
@@ -174,6 +204,10 @@ impl Context {
             body.push('\n');
             body.push_str(&note::memory(&memory));
             self.told.memory = true;
+            if let Some(guide) = &self.pull_requests {
+                body.push('\n');
+                body.push_str(guide);
+            }
         }
         if let Some(recalled) = recalled {
             body.push('\n');
@@ -184,6 +218,9 @@ impl Context {
             self.told.place = place;
             body.push('\n');
             body.push_str(&self.part(Kind::of(origin), Some(origin)));
+            if let Some(kind) = Kind::after(origin) {
+                body.push_str(&self.part(kind, Some(origin)));
+            }
         }
         Some(note::wrap(place, &body))
     }

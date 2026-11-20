@@ -197,12 +197,36 @@ fn handle(
             views.start(view, follow_home(state, device.clone(), out))
         }
         View::Chat { pane } => {
-            let Some(link) = layout.chat(&pane).and_then(|_| state.hub.chat(&pane)) else {
+            let link = layout.chat(&pane).and_then(|_| state.hub.chat(&pane));
+            if link.is_none() && !state.hub.observable(&pane) {
                 return Some(("no such chat", Some(view)));
-            };
+            }
             let watching = Watching::new(&state, &pane);
-            views.start(view, async move {
+            views.start(view.clone(), async move {
                 let _watching = watching;
+                // A terminal agent's conversation is observed only once a
+                // phone asks for it, and only while its agent runs.
+                let link = match link {
+                    Some(link) => link,
+                    None => match state.hub.observe(&pane).await {
+                        Ok(link) => link,
+                        Err(error) => {
+                            tracing::info!(%error, "a terminal agent's chat cannot be shown");
+                            // What the person can do about it, when it is
+                            // theirs to fix; never a path or a process.
+                            let message = match error {
+                                crate::hub::Error::Observed(error) => error.to_string(),
+                                _ => "this agent's conversation cannot be shown".to_owned(),
+                            };
+                            let message = ServerMessage::Error {
+                                message,
+                                view: Some(view),
+                            };
+                            let _ = out.send(message).await;
+                            return;
+                        }
+                    },
+                };
                 follow_chat(state, link, since, out).await;
             });
         }
@@ -267,6 +291,7 @@ async fn follow_home(state: Shared, device: DeviceId, out: Outbound) {
     let mut shortcuts = state.shortcuts.subscribe();
     let mut opened = state.opened.changed();
     let mut lending = state.lending.watch();
+    let mut previews = state.previews.watch();
     let mut sent = None;
     loop {
         state.lending.checkouts.want();
@@ -292,6 +317,7 @@ async fn follow_home(state: Shared, device: DeviceId, out: Outbound) {
                 changed = tags.changed() => if changed.is_err() { return } else { break },
                 changed = shortcuts.changed() => if changed.is_err() { return } else { break },
                 changed = opened.changed() => if changed.is_err() { return } else { break },
+                changed = previews.changed() => if changed.is_err() { return } else { break },
                 changed = lending.changed() => if changed { break } else { return },
                 // A stopped sampler leaves the last figures standing.
                 changed = load.changed(), if load.has_changed().is_ok() => if changed.is_ok() { break },
@@ -453,7 +479,9 @@ async fn follow_chat(state: Shared, link: Arc<Chat>, since: Option<Cursor>, out:
                 if changed.is_err() {
                     return;
                 }
-                if state.hub.layout().chat(&pane).is_none() {
+                let shown = state.hub.layout().chat(&pane).is_some()
+                    || (state.hub.observable(&pane) && !link.is_closed());
+                if !shown {
                     let _ = out.send(reload).await;
                     return;
                 }
@@ -476,6 +504,12 @@ async fn follow_chat(state: Shared, link: Arc<Chat>, since: Option<Cursor>, out:
             }
         }
         if !send_all(&out, batch.messages(&pane, link.summary().connected)).await {
+            return;
+        }
+        // An observed terminal agent's chat ends for good when its agent
+        // moves to another session or exits: the phone opens it afresh.
+        if link.is_closed() && state.hub.layout().chat(&pane).is_none() {
+            let _ = out.send(reload).await;
             return;
         }
     }

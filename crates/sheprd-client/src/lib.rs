@@ -12,7 +12,9 @@ mod connect;
 #[cfg(unix)]
 mod control_dir;
 pub mod core_bridge;
+pub mod device_tags;
 mod discovery;
+pub mod edited;
 mod environment;
 mod error;
 mod event;

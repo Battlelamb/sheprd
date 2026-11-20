@@ -158,7 +158,7 @@ struct TermKeyRows: View {
         // Under the keyboard too: its rounded top corners would otherwise
         // show the window's light background beside the dark rows.
         .background { Rectangle().fill(.bar).ignoresSafeArea() }
-        .sensoryFeedback(.selection, trigger: typing.modifiers)
+        .haptic(.selection, trigger: typing.modifiers)
     }
 
     /// The keyboard's own mic cannot reach a terminal, which has no text
@@ -198,7 +198,12 @@ struct TermKeyRows: View {
     }
 
     private func keyButton(_ label: String, tint: Color? = nil, repeats: Bool = true, action: @escaping () -> Void) -> some View {
-        Button(action: action) { TermKeyCap(label: label, tint: tint) }
+        Button {
+            Feedback.shared.touch(.tap)
+            action()
+        } label: {
+            TermKeyCap(label: label, tint: tint)
+        }
             .buttonStyle(.plain)
             .buttonRepeatBehavior(repeats ? .enabled : .disabled)
     }

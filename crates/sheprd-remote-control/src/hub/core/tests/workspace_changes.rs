@@ -32,7 +32,7 @@ fn closing_or_deleting_a_kept_workspace_needs_sheprd_and_leaves_its_tabs() {
             discard: true,
         },
     ] {
-        let error = source.arrange_saved(0, "", &op).unwrap_err();
+        let error = source.arrange_saved(&TabRef::File(0), "", &op).unwrap_err();
         assert!(
             matches!(
                 error,

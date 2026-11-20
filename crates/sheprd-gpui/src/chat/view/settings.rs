@@ -26,6 +26,9 @@ const AT_HAND: [OptionCategory; 3] = [
 const WARN: u8 = 75;
 const ALARM: u8 = 90;
 const METER: f32 = 48.;
+/// The narrowest any footer setting gets once its label is truncated away:
+/// a switch's track and mark. Its tooltip still names the value.
+pub(super) const SHRUNK: f32 = 58.;
 /// A setting with this many choices, other than the model, is a switch
 /// between them rather than a menu: build or plan, say.
 const SWITCH: usize = 2;
@@ -269,7 +272,8 @@ impl SheprdWindow {
         div()
             .id(SharedString::from(id))
             .debug_selector(move || selector.clone())
-            .flex_none()
+            .flex_shrink_1()
+            .min_w(px(SHRUNK))
             .flex()
             .items_center()
             .gap(px(6.))
@@ -294,7 +298,7 @@ impl SheprdWindow {
                     .child(div().size(px(11.)).rounded_full().bg(rgb(theme.background))),
             )
             .child(mark)
-            .child(safe_text(&name, 40))
+            .child(div().min_w_0().truncate().child(safe_text(&name, 40)))
             .tooltip(hint)
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -318,10 +322,16 @@ impl SheprdWindow {
         let on = chat.session.transcript().auto_accept;
         let pane = chat.target.pane_id.clone();
         let color = if on { yellow } else { theme.subtext() };
+        let label = if on {
+            fl!("chat-settings-auto-accept-on")
+        } else {
+            fl!("chat-settings-auto-accept-off")
+        };
         div()
             .id("chat-auto-accept")
             .debug_selector(|| "chat-auto-accept".into())
-            .flex_none()
+            .flex_shrink_1()
+            .min_w(px(36.))
             .flex()
             .items_center()
             .gap(px(5.))
@@ -350,11 +360,9 @@ impl SheprdWindow {
                     .size(px(12.))
                     .text_color(rgb(color)),
             )
-            .child(if on {
-                fl!("chat-settings-auto-accept-on")
-            } else {
-                fl!("chat-settings-auto-accept-off")
-            })
+            .child(div().min_w_0().truncate().child(label.clone()))
+            // The label may be truncated; the tooltip names it in full.
+            .tooltip(self.chat_setting_hint(&fl!("chat-settings-auto-accept"), &label))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                 cx.stop_propagation();
@@ -483,7 +491,15 @@ impl SheprdWindow {
                                 category_icon(OptionCategory::Mode),
                             ),
                         )
-                        .child(div().max_w(px(160.)).truncate().child(safe_text(&name, 80)))
+                        .flex_shrink_1()
+                        .min_w(px(46.))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .max_w(px(160.))
+                                .truncate()
+                                .child(safe_text(&name, 80)),
+                        )
                         .child(chevron())
                         .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                             cx.stop_propagation();

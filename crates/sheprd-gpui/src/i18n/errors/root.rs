@@ -27,6 +27,7 @@ impl Localize for Error {
             ),
             Self::Caffeine(error) => error.localize(),
             Self::Chat(error) => error.localize(),
+            Self::ChatPullRequests(error) => error.localize(),
             Self::Cleanup {
                 source,
                 path: file,
@@ -110,6 +111,7 @@ impl Localize for Error {
                 fl!("error-link-on-another-host", host = host.as_str())
             }
             Self::ListeningPorts(error) => error.localize(),
+            Self::ListenToken(error) => error.localize(),
             Self::LocalAddresses(source) => {
                 fl!("error-local-addresses", error = source.to_string())
             }
@@ -122,6 +124,7 @@ impl Localize for Error {
                 path = path(file),
                 error = source.to_string()
             ),
+            Self::Machine(error) => error.localize(),
             Self::MalformedLink => fl!("error-malformed-link"),
             Self::MissingDeletion => fl!("error-missing-deletion"),
             Self::MissingHome => fl!("error-missing-home"),

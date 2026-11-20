@@ -34,11 +34,44 @@ pub(super) fn config(client: Option<McpClient>) -> crate::Result<Output> {
     Output::data(format!("{text}\n\n{note}"), &data)
 }
 
-/// The configuration `client` reads, starting `executable mcp`.
+/// The shell a printed command is pasted into.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Shell {
+    /// sh, bash, zsh, and the like.
+    Posix,
+    /// cmd.exe or PowerShell.
+    Windows,
+}
+
+impl Shell {
+    /// The shell people use on this platform.
+    pub(super) const CURRENT: Self = if cfg!(windows) {
+        Self::Windows
+    } else {
+        Self::Posix
+    };
+
+    /// `text` as one word of this shell.
+    fn quote(self, text: &str) -> String {
+        match self {
+            Self::Posix => posix_quote(text),
+            // Both cmd.exe and PowerShell read a double-quoted path as one
+            // word, and no Windows file name can hold a `"`.
+            Self::Windows => format!("\"{text}\""),
+        }
+    }
+}
+
+/// The configuration `client` reads, starting `executable mcp`, with any
+/// command quoted for this platform's shell.
 pub(super) fn snippet(client: McpClient, executable: &Path) -> String {
+    snippet_for(client, executable, Shell::CURRENT)
+}
+
+pub(super) fn snippet_for(client: McpClient, executable: &Path, shell: Shell) -> String {
     let command = executable.to_string_lossy();
     match client {
-        McpClient::ClaudeCode => format!("claude mcp add sheprd -- {} mcp", shell_quote(&command)),
+        McpClient::ClaudeCode => format!("claude mcp add sheprd -- {} mcp", shell.quote(&command)),
         McpClient::ClaudeDesktop | McpClient::Cursor => {
             let config =
                 json!({ "mcpServers": { "sheprd": { "command": command, "args": ["mcp"] } } });
@@ -53,7 +86,7 @@ pub(super) fn snippet(client: McpClient, executable: &Path) -> String {
 }
 
 /// `text` as one POSIX shell word.
-fn shell_quote(text: &str) -> String {
+fn posix_quote(text: &str) -> String {
     if !text.is_empty()
         && text
             .bytes()

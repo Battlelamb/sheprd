@@ -46,6 +46,10 @@ pub struct PullRequest {
     pub merge_state_status: MergeState,
     #[serde(default)]
     pub review_decision: ReviewDecision,
+    /// Waiting in the repository's merge queue, which GitHub merges on its
+    /// own once the queue's checks pass.
+    #[serde(default)]
+    pub is_in_merge_queue: bool,
     #[serde(skip)]
     pub checks_summary: String,
     #[serde(default)]
@@ -62,6 +66,17 @@ pub struct PullRequest {
     /// The merge methods the repository allows, in GitHub's own order.
     #[serde(skip)]
     pub merge_methods: Vec<MergeMethod>,
+    /// The GitHub stack this pull request is a layer of; see [`Self::stack`].
+    #[serde(default)]
+    pub(super) stack: Option<super::Stack>,
+    #[serde(default)]
+    pub(super) stack_entry: Option<super::stack::Entry>,
+    /// Its entry in the base branch's merge queue, while it has one.
+    #[serde(default, rename = "mergeQueueEntry")]
+    pub queue: Option<super::QueueEntry>,
+    /// Whether its base branch merges through a merge queue.
+    #[serde(default, rename = "isMergeQueueEnabled")]
+    pub merge_queue: bool,
 }
 
 /// How a pull request is merged: GitHub's `PullRequestMergeMethod`.
@@ -378,6 +393,8 @@ pub enum Tone {
     Held,
     /// Merged.
     Merged,
+    /// In the merge queue, so GitHub will merge it without anyone acting.
+    Queued,
     /// Ready to merge.
     Ready,
     /// Checks are running, a review is required, or GitHub has not decided.
@@ -424,17 +441,32 @@ impl Standing {
     }
 }
 
+/// A badge's tone: the lifecycle first, then, for an open pull request
+/// ready for review, `standing`. Shared by pull requests and stack layers.
+pub(super) fn lifecycle_tone(state: State, draft: bool, standing: impl FnOnce() -> Tone) -> Tone {
+    match state {
+        State::Merged => Tone::Merged,
+        State::Closed => Tone::Attention,
+        State::Unknown => Tone::Muted,
+        State::Open if draft => Tone::Muted,
+        State::Open => standing(),
+    }
+}
+
 impl PullRequest {
     /// Lifecycle takes precedence over the [`Standing`]. Shared by sidebar
     /// and titlebar badges and the workspace menu.
     pub fn tone(&self) -> Tone {
-        match self.state {
-            State::Merged => return Tone::Merged,
-            State::Closed => return Tone::Attention,
-            State::Unknown => return Tone::Muted,
-            State::Open if self.is_draft => return Tone::Muted,
-            State::Open => {}
-        }
+        lifecycle_tone(self.state, self.is_draft, || {
+            if self.is_in_merge_queue {
+                Tone::Queued
+            } else {
+                self.standing_tone()
+            }
+        })
+    }
+
+    fn standing_tone(&self) -> Tone {
         let has_check = |outcome| {
             self.status_check_rollup
                 .iter()
@@ -448,6 +480,16 @@ impl PullRequest {
             running: has_check(Outcome::Pending),
         }
         .tone()
+    }
+
+    /// The stack this pull request is a layer of, with its own position,
+    /// when GitHub reported both and they agree.
+    pub fn stack(&self) -> Option<(&super::Stack, u64)> {
+        let stack = self.stack.as_ref()?;
+        let position = self.stack_entry?.position;
+        (1..=stack.size)
+            .contains(&position)
+            .then_some((stack, position))
     }
 
     pub fn lifecycle(&self) -> &'static str {

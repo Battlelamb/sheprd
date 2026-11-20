@@ -187,7 +187,7 @@ async fn act(state: &Shared, workspace: String, action: Action) -> Result<Json<V
     }
     if state.hub.kept_workspace(&workspace) {
         let keeper = crate::hub::Keeper::Saved {
-            tab: 0,
+            tab: crate::hub::TabRef::File(0),
             terminal: String::new(),
         };
         crate::native::changes::arrange(state, keeper, action.op(workspace)).await?;

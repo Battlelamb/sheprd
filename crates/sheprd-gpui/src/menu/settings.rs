@@ -394,6 +394,8 @@ impl SheprdWindow {
                 | Command::ToggleSidebar
                 | Command::OpenCode
                 | Command::OpenPx0
+                | Command::OpenMachine
+                | Command::NewMachine
                 | Command::RemotePair
                 | Command::ToggleStatusBar
                 | Command::ToggleMenuBar

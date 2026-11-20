@@ -53,6 +53,7 @@ Everything around the terminals is Luau in `crates/sheprd-gpui/moonframe/app`:
 | `mods/agents/main.luau` | The agents under the worktrees, in Sheprd's sort and the same layout |
 | `mods/devices/main.luau` | The device picker at the left pane's foot, and the sheet it opens: the agents' activity, every device and the unfolded one's sessions, and Add Device |
 | `mods/details/main.luau` | The right pane; the toggle at the end of the title bar opens it |
+| `mods/turns/main.luau` | A chat's turns in its left gutter, as Moonframe's revision timeline draws its chat rail: a tight stack of ticks in the gutter's middle, one per prompt, the prompt and the start of its reply on the card under the pointer, the turn being read marked, and a click back to a prompt. The shell floats it where Sheprd laid the gutter out |
 | `mods/status/main.luau` | The status bar |
 | `components/sheprd-*.luau` | What the worktrees and agents share: a row highlighted as the layout marks the selected one, the status dot, and the section names |
 | `style.luau` | The hover looks, for every mod |
@@ -94,6 +95,7 @@ shows in the log when one appears: `unknown key` names it.
 | `multi` | Whether several devices are listed, so each shows a header |
 | `device_picker` | The device picker: `footer` (`label`, `initials` beside the activity bar, `hosts`, `connected`, `adding`, `settings` (its tooltip, without the bar), `aria`, `shown`, `width`), `online` and `wash` (the connected dot's and the current line's colors), `open`, and while open `sheet`: `activity` (`heading`, `overview`, `working`, `blocked`, `bars` of `working` and `blocked`, or `false` before a step was seen, and their `peak`), `heading`, `hint`, `selected` (the line the keys are on), `lines` (each `kind`: `all`, `device`, `session`, `add`, `note` or `error`; the lines the keys reach have `ordinal`, `key`, `label`, `detail`, `checked`, `enabled`, and `online`, a device its session `chip` (`word`, `session`, `open`, `hint`), a session `delete` (whether it can be deleted now); a note or error its `text`), and `adding` (cloud machines still being added) |
 | `build` | The worktree a build came from: `worktree`, `branch`, `pr` |
+| `chat_turns` | The turns of the chat on screen (Herdr's focused pane when several are), or `null` while none shows, its gutter (the room its reading column, `[chat] max_width`, leaves on the left) is under 120 pixels, or it has fewer than two prompts: `pane`; `left`, `top`, `width`, `height`, where the ticks go in the `main` region's coordinates: the gutter's width, and a stack only as tall as the ticks need at `spacing` points apart, in the gutter's middle (the whole gutter once they fill it), since the timeline spreads its ticks over the height it gets; `entries`, each prompt's `id` (its entry), `label` and the start of its reply as `summary`, once there is one; and `selected`, the turn being read |
 | `workspaces` | The selected device's, folded or not, in the sidebar's order: `id`, `number`, `label`, `branch`, `repo`, `repo_key`, `linked`, `child` (shown under its checkout), `focused`, `agent_status`, `ahead`, `behind`, `added`, `removed`, `dirty`, `pr`, `pr_color` (the number's color for its state) |
 | `agents` | In Sheprd's sort: `name`, `kind` (`claude`, `codex`, ...), `status`, `state` (the status's word, when the agent's integration shows one), `title`, `pane`, `pane_name`, `workspace`, `workspace_label`, `tab`, `focused` |
 | `agent_sort` | `grouped` or `priority` |
@@ -147,6 +149,7 @@ Send a message with `to = "provider:sheprd"`:
 | `{ open_build_pr = true }` | Opens the pull request a worktree build came from |
 | `{ device_picker = true }`, `{ device_picker_dismiss = true }` | Opens the device picker or closes it, or only closes it (a click outside, Escape) |
 | `{ device_line = ordinal, key = key, how = "choose" }` | Picks a picker line: a device (with Cmd, Ctrl elsewhere, listed too or no longer, the sheet left open), a session, or Add Device. `how = "sessions"` unfolds a device's sessions or folds them, `how = "delete"` asks to delete a session. A line whose `key` no longer matches its `ordinal` is left alone |
+| `{ chat_turn = pane, revision = id }` | Scrolls the chat in `pane` back to the prompt `id`, as the revision timeline sends it with `select = { chat_turn = pane }`. A prompt the chat no longer has is left alone |
 | `{ device_key = key }` | A key the open picker took (`up`, `down`, `left`, `right`, `enter`, `backspace`, `delete`, `escape`), as Sheprd's own picker reads it |
 | `{ devices_overview = true }` | Opens the Devices overview, as the picker's activity card does |
 | `{ usage = id }`, `{ usage_refresh = true }` | Opens a usage provider's panel above the status bar, or reads usage again |

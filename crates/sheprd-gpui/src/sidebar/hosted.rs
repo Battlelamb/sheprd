@@ -69,6 +69,8 @@ pub struct Palette {
 pub struct Stamp {
     agent_sort: AgentSort,
     agents_list: bool,
+    /// The chat whose turns the layout shows; see `chat::turns`.
+    chat_turns: Option<crate::chat::turns::TurnsStamp>,
     connected: bool,
     details_visible: bool,
     /// The device footer, and the picker while it is open, as a host's
@@ -97,6 +99,7 @@ impl PartialEq for Stamp {
         same_snapshot
             && self.agent_sort == other.agent_sort
             && self.agents_list == other.agents_list
+            && self.chat_turns == other.chat_turns
             && self.connected == other.connected
             && self.details_visible == other.details_visible
             && self.device_picker == other.device_picker
@@ -259,6 +262,7 @@ impl SheprdWindow {
         Stamp {
             agent_sort: self.agent_sort,
             agents_list: self.hosted_agents_list(),
+            chat_turns: self.hosted_chat_turns_stamp(),
             connected: self.live.status.is_connected(),
             details_visible: self.details_visible,
             device_picker: self.hosted_device_picker(),
@@ -357,6 +361,7 @@ impl SheprdWindow {
                     AgentSort::Grouped => "grouped",
                     AgentSort::Priority => "priority",
                 },
+                "chat_turns": self.hosted_chat_turns(),
                 "layout": layout_state(self.config.layout.mode.name(), &self.hosted_metrics()),
                 "connected": self.live.status.is_connected(),
                 "details_visible": self.details_visible,

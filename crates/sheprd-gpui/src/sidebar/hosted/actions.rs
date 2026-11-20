@@ -10,6 +10,8 @@ use gpui::{Context, Window};
 /// endpoint id; none means the selected one.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
+    /// Scrolls the chat in `pane` to the prompt `entry`, a tick of its turns.
+    ChatTurn { pane: String, entry: u64 },
     /// Runs a command by its name in the catalog, as a shortcut does.
     Command(String),
     /// Acts on a line of the device picker: its place among the lines the
@@ -134,6 +136,7 @@ impl SheprdWindow {
     ) {
         let pointer = window.mouse_position();
         match action {
+            Action::ChatTurn { pane, entry } => self.go_to_chat_turn(&pane, entry, cx),
             Action::Command(name) => {
                 let found = sheprd_commands::COMMANDS
                     .iter()

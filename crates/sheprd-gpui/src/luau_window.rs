@@ -213,6 +213,7 @@ fn action(message: &Data) -> Option<Action> {
         })
         .or_else(|| sidebar_width(message))
         .or_else(|| device_line(message))
+        .or_else(|| chat_turn(message))
         .or_else(|| flag("device_picker").map(|_| Action::DevicePicker))
         .or_else(|| flag("device_picker_dismiss").map(|_| Action::DevicePickerDismiss))
         .or_else(|| text("device_key").map(Action::DevicePickerKey))
@@ -240,6 +241,18 @@ fn sidebar_width(message: &Data) -> Option<Action> {
         _ => return None,
     };
     Some(Action::SidebarWidth { phase, dx })
+}
+
+/// A tick of a chat's turns: `chat_turn` names its pane, and the timeline
+/// adds the prompt's entry id as `revision`.
+fn chat_turn(message: &Data) -> Option<Action> {
+    let pane = message.get("chat_turn").and_then(Data::as_str)?.to_owned();
+    let entry = message
+        .get("revision")
+        .and_then(Data::as_str)?
+        .parse()
+        .ok()?;
+    Some(Action::ChatTurn { pane, entry })
 }
 
 /// A device picker line's click or hover: `device_line` is its ordinal,

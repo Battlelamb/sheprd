@@ -159,6 +159,9 @@ pub(crate) struct SheprdWindow {
     /// Native views of the `herdr-acp` chats in this daemon's panes.
     /// The rail beside an agent chat, shared by every chat in the window.
     pub(crate) chat_rail_width: crate::panel_resize::PanelWidth,
+    /// Where the chats on screen laid out their entries, for a host's
+    /// ruler of their turns.
+    pub(crate) chat_turns: crate::chat::turns::Spots,
     pub(crate) chats: crate::chat::Chats,
     /// Snapshots of checkouts taken at agent turns, and the dialog listing them.
     pub(crate) checkpoints: crate::checkpoint::Checkpoints,

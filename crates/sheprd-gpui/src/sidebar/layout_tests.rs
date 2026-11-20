@@ -608,6 +608,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         chrome_region: None,
         hosted: false,
         chat_rail_width: crate::panel_resize::CHAT_RAIL,
+        chat_turns: Default::default(),
         chats: Default::default(),
         sound: Default::default(),
         bell: Default::default(),

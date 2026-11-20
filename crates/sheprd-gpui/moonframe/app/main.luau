@@ -214,6 +214,17 @@ return mod {
 								-- end, the room it leaves free, the title bar's end
 								-- (changes, branch, account, the details toggle).
 								region "main",
+								-- The turns of the chat on screen, over its left
+								-- gutter, where Sheprd laid it out.
+								if sheprd.chat_turns
+									then ui.row {
+										float = { top = sheprd.chat_turns.top, left = sheprd.chat_turns.left },
+										width = sheprd.chat_turns.width,
+										height = sheprd.chat_turns.height,
+										gap = "none",
+										ui.mount "turns",
+									}
+									else false,
 								-- Drawn before Sheprd has measured it, so it can.
 								ui.row {
 									float = { top = 0, right = 0 },

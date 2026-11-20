@@ -374,6 +374,7 @@ impl Fleet {
         }
         let heads = apply.heads()?;
         let ops = apply.ops()?;
+        let peer = apply.peer.as_deref().map(sync::host).transpose()?;
         let named = match &apply.fleet {
             Some(named) => Some(sync::fleet(named)?),
             None => ops.first().map(joining::fleet_of),
@@ -393,6 +394,11 @@ impl Fleet {
         let inner = self.inner();
         let log = match (&inner.log, named) {
             (Some(log), Some(named)) if log.fleet() != named => return Err(Error::OtherFleet),
+            // Removed while its answer was on its way: it gets its removal
+            // alone (`sync::removal_for`), never what came after.
+            (Some(log), _) if peer.is_some_and(|peer| !log.state().hosts.contains_key(&peer)) => {
+                return Err(Error::HostRemoved);
+            }
             (Some(log), _) => log,
             (None, named) => named
                 .and_then(|named| inner.joining.get(&named))

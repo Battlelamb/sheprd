@@ -50,6 +50,8 @@ mod records;
 #[cfg(unix)]
 mod rejected;
 #[cfg(unix)]
+mod removed_peer;
+#[cfg(unix)]
 mod restore;
 #[cfg(unix)]
 mod retry;

@@ -41,6 +41,7 @@ async fn fleet_apply_with_no_daemon_running_keeps_the_log() {
         heads: Vec::new(),
         ops: sync::encode_ops(&a.ops()),
         nonce: None,
+        peer: None,
     };
     let applied = run_apply(b.dir.path(), apply).unwrap();
     assert_eq!(applied.fleet, fleet);
@@ -77,6 +78,7 @@ async fn an_answer_carries_what_the_caller_lacks() {
         heads: caller.iter().map(ToString::to_string).collect(),
         ops: Vec::new(),
         nonce: None,
+        peer: None,
     })) else {
         panic!("no answer");
     };
@@ -122,6 +124,7 @@ async fn apply_naming_another_fleet_learns_nothing() {
         heads: Vec::new(),
         ops: Vec::new(),
         nonce: None,
+        peer: None,
     };
     assert!(matches!(
         ask::answer(&a.state, &a.fleet, Ask::Apply(apply), now_ms()),
@@ -140,6 +143,7 @@ async fn an_answer_proves_which_host_gave_it() {
         heads: Vec::new(),
         ops: Vec::new(),
         nonce: Some(nonce.into()),
+        peer: None,
     })) else {
         panic!("no answer");
     };

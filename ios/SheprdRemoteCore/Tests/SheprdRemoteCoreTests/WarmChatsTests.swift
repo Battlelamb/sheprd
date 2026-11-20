@@ -5,8 +5,9 @@ import Testing
 struct WarmChatsTests {
     private let now = Date(timeIntervalSince1970: 1_000_000)
 
-    private func listed(_ key: String, busy: Bool = false, answered: TimeInterval? = nil) -> WarmChats<String>.Listed {
-        .init(key: key, busy: busy, lastAnswer: answered.map { now.addingTimeInterval(-$0) })
+    /// Each on a computer of its own unless `on` names one.
+    private func listed(_ key: String, on computer: String? = nil, busy: Bool = false, answered: TimeInterval? = nil) -> WarmChats<String>.Listed {
+        .init(key: key, computer: computer ?? key, busy: busy, lastAnswer: answered.map { now.addingTimeInterval(-$0) })
     }
 
     @Test func busyChatsComeFirstThenTheMostRecentlyAnswered() {
@@ -33,6 +34,26 @@ struct WarmChatsTests {
         warm.closed("quiet", at: now)
         let later = now.addingTimeInterval(WarmChats<String>.lingers)
         #expect(!warm.keys(busy + [listed("quiet")], at: later).contains("quiet"))
+    }
+
+    @Test func oneComputerKeepsRoomForScreens() {
+        var warm = WarmChats<String>()
+        warm.closed("left", at: now)
+        let busy = (0..<WarmChats<String>.listed).map { listed("busy\($0)", on: "mac", busy: true) }
+        let keys = warm.keys(busy + [listed("left", on: "mac"), listed("other", busy: true)], at: now)
+        let onMac = keys.filter { $0 != "other" }
+        #expect(onMac.count == WarmChats<String>.perComputer)
+        #expect(onMac.contains("left"), "the chat just left comes first")
+        #expect(keys.contains("other"))
+    }
+
+    @Test func aChatTheComputerStoppedIsLeftAlone() {
+        var warm = WarmChats<String>()
+        warm.closed("quiet", at: now)
+        warm.stopped("quiet", at: now)
+        #expect(!warm.keys([listed("quiet", busy: true)], at: now).contains("quiet"))
+        let later = now.addingTimeInterval(WarmChats<String>.lingers)
+        #expect(warm.keys([listed("quiet", busy: true)], at: later).contains("quiet"))
     }
 
     @Test func aChatNoLongerListedIsNotFollowed() {

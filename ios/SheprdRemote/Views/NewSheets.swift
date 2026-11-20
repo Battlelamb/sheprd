@@ -38,6 +38,8 @@ struct NewWorkspaceSheet: View {
     @State private var worktree = false
     /// Proposed up front, as on the desktop, so Create needs no typing.
     @State private var branch = NewWorkspaceRequest.proposedBranch()
+    /// The workspace's name; empty, the computer names it.
+    @State private var title = ""
     @State private var agent = "claude"
     @State private var prompt = ""
     @State private var problem: String?
@@ -99,6 +101,7 @@ struct NewWorkspaceSheet: View {
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
                             .font(.body.monospaced())
                     }
+                    TextField("Title (optional)", text: $title)
                 }
                 Section("Agent") {
                     AgentGrid(agents: options?.agents ?? [], selection: $agent)
@@ -213,14 +216,17 @@ struct NewWorkspaceSheet: View {
 
     private func create() {
         guard let device, let folder else { return }
-        let title = options?.agents.first { $0.id == agent }?.name ?? "Chat"
+        let chatTitle = options?.agents.first { $0.id == agent }?.name ?? "Chat"
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let named = trimmed.isEmpty ? nil : trimmed
         let request = NewWorkspaceRequest(
             cwd: folder,
             branch: worktree ? branch.trimmingCharacters(in: .whitespaces) : "",
             agent: agent,
             prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
-            start: model.startChoice(for: title).start,
-            session: preset?.device == device && preset?.folder == folder ? session : nil
+            start: model.startChoice(for: chatTitle).start,
+            session: preset?.device == device && preset?.folder == folder ? session : nil,
+            title: named
         )
         creating = true
         Task {
@@ -231,7 +237,7 @@ struct NewWorkspaceSheet: View {
                 }
                 model.recentAgent = request.agent
                 dismiss()
-                model.opened(created, prompt: request.prompt, start: request.start, device: device, title: title)
+                model.opened(created, prompt: request.prompt, start: request.start, device: device, title: chatTitle)
             } catch {
                 problem = error.localizedDescription
             }

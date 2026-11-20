@@ -4,6 +4,7 @@
 
 use super::shared_spaces::{document, fake_sharing, shared};
 use super::*;
+use crate::hub::NewWorkspace;
 use sheprd_chat_protocol::Agent;
 use sheprd_session::{NEW_WORKSPACE_LABEL, spaces::DOC};
 use std::path::{Path, PathBuf};
@@ -39,7 +40,13 @@ async fn a_phones_new_workspace_is_kept_in_the_document_with_its_first_tab() {
     source.poll().unwrap();
     let hub = hub_on(&source);
     let created = hub
-        .create_workspace("/code/new", None, Agent::Claude, None)
+        .create_workspace(NewWorkspace {
+            agent: Agent::Claude,
+            branch: None,
+            cwd: "/code/new",
+            session: None,
+            title: None,
+        })
         .await
         .unwrap();
     let run = started(&fake);
@@ -69,7 +76,13 @@ async fn a_new_workspace_in_a_kept_folder_joins_that_workspace() {
     source.poll().unwrap();
     let hub = hub_on(&source);
     let created = hub
-        .create_workspace("/code/app", None, Agent::Claude, None)
+        .create_workspace(NewWorkspace {
+            agent: Agent::Claude,
+            branch: None,
+            cwd: "/code/app",
+            session: None,
+            title: None,
+        })
         .await
         .unwrap();
     assert_eq!(created.workspace, "space-a");
@@ -87,7 +100,13 @@ async fn a_new_workspace_waits_for_sheprd_while_the_document_was_never_written()
     source.poll().unwrap();
     let hub = hub_on(&source);
     let created = hub
-        .create_workspace("/code/new", None, Agent::Claude, None)
+        .create_workspace(NewWorkspace {
+            agent: Agent::Claude,
+            branch: None,
+            cwd: "/code/new",
+            session: None,
+            title: None,
+        })
         .await
         .unwrap();
     assert_eq!(created.workspace, new_workspace_id("/code/new"));
@@ -115,12 +134,13 @@ async fn a_phones_new_worktree_is_kept_in_its_new_checkout() {
     let root = dir.path().join("worktrees");
     hub.worktrees = Some(root.clone());
     let created = hub
-        .create_workspace(
-            repository.to_str().unwrap(),
-            Some("topic"),
-            Agent::Claude,
-            None,
-        )
+        .create_workspace(NewWorkspace {
+            agent: Agent::Claude,
+            branch: Some("topic"),
+            cwd: repository.to_str().unwrap(),
+            session: None,
+            title: None,
+        })
         .await
         .unwrap();
     let checkout = root.join("project").join("topic");

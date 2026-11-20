@@ -27,7 +27,7 @@ use crate::{control::layout::Op, hub::Hub};
 use sheprd_backend::TerminalId;
 use sheprd_core_client::wire::{Run, Terminal};
 use sheprd_session::{
-    NEW_WORKSPACE_LABEL, SESSION_LABEL, WORKSPACE_LABEL,
+    NEW_WORKSPACE_LABEL, NEW_WORKSPACE_TITLE_LABEL, SESSION_LABEL, WORKSPACE_LABEL,
     panes::Axis,
     saved::edit::{self, Change},
 };
@@ -107,10 +107,15 @@ impl Source {
             }
             let record = self.record(address)?;
             // Where its workspace is, for Sheprd to list it there too.
-            let labels = [WORKSPACE_LABEL, SESSION_LABEL, NEW_WORKSPACE_LABEL]
-                .into_iter()
-                .filter_map(|key| Some((key, record.labels.get(key)?.as_str())))
-                .collect();
+            let labels = [
+                WORKSPACE_LABEL,
+                SESSION_LABEL,
+                NEW_WORKSPACE_LABEL,
+                NEW_WORKSPACE_TITLE_LABEL,
+            ]
+            .into_iter()
+            .filter_map(|key| Some((key, record.labels.get(key)?.as_str())))
+            .collect();
             let new = self.start_beside(&record, labels)?;
             let split = TerminalId::new(new.address.as_str())
                 .map_err(Error::from)

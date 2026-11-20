@@ -46,6 +46,7 @@ fn a_machine_whose_key_is_not_checked_is_asked_rarely() {
 fn held(fleet: [u8; 32]) -> sheprd_relay_agent::fleet::Report {
     sheprd_relay_agent::fleet::Report {
         allowed: 1,
+        crowded: Default::default(),
         denied: 0,
         digest: String::new(),
         fleet: sheprd_relay_agent::access::Id(fleet),
@@ -105,4 +106,18 @@ fn an_agent_of_a_host_removed_everywhere_is_told_to_forget_the_fleet() {
     assert_eq!(next(&view, "live", &[]), Next::Keep);
     assert_eq!(next(&view, "gone", &["gone".to_owned()]), Next::Forget);
     assert_eq!(next(&view, "other", &["gone".to_owned()]), Next::Leave);
+}
+
+#[test]
+fn an_agent_with_members_waiting_for_room_is_handed_the_file_again() {
+    let file = sheprd_relay_agent::access::Access::new(sheprd_relay_agent::access::Id([1; 32]));
+    let digest = file.digest().unwrap();
+    let mut report = held([1; 32]);
+    report.digest.clone_from(&digest);
+    assert!(crate::fleet::plain::current(Some(&report), &digest, &file));
+    report
+        .crowded
+        .insert(sheprd_relay_agent::access::Id([2; 32]));
+    assert!(!crate::fleet::plain::current(Some(&report), &digest, &file));
+    assert!(!crate::fleet::plain::current(None, &digest, &file));
 }

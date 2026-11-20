@@ -220,6 +220,19 @@ pub(crate) fn next(view: &View, host: &str, removed: &[String]) -> Next {
     }
 }
 
+/// Whether the agent holding `held` needs nothing from `file`, whose
+/// digest is `digest`: it holds that file, has nothing to settle, and no
+/// member's new keys wait for room on the relays, which may have freed
+/// with the digest unchanged.
+pub(crate) fn current(
+    held: Option<&sheprd_relay_agent::fleet::Report>,
+    digest: &str,
+    file: &Access,
+) -> bool {
+    held.is_some_and(|held| held.digest == digest && held.crowded.is_empty())
+        && file.settled.is_empty()
+}
+
 /// Hands the agent on `machine` the access file the daemon computes for
 /// `host`, settling what it reported suspending, unless it holds that file
 /// already and has nothing to settle.
@@ -246,7 +259,7 @@ async fn keep(
     };
     let file = Access::parse(access.as_bytes())?;
     let digest = file.digest().map_err(sheprd_relay_agent::Error::from)?;
-    if held.is_some_and(|held| held.digest == digest) && file.settled.is_empty() {
+    if current(held, &digest, &file) {
         return Ok(());
     }
     let connect = machine.target.clone();

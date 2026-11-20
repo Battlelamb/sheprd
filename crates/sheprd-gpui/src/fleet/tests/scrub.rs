@@ -95,3 +95,105 @@ fn the_scrub_runs_the_installed_agent_never_another_on_path() {
     assert!(!decoy_ran.exists(), "a copy on PATH must never run");
     assert!(remote::scrub_outcome(printed.as_bytes()).is_ok());
 }
+
+/// An executable daemon program `name` in `dir` that knows `fleet scrub`,
+/// adds a line to `marker` each time it runs it, and succeeds only when
+/// `succeeds`.
+#[cfg(unix)]
+fn daemon(dir: &std::path::Path, name: &str, marker: &std::path::Path, succeeds: bool) {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::create_dir_all(dir).unwrap();
+    let path = dir.join(name);
+    let status = if succeeds { 0 } else { 1 };
+    std::fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\ncase \"$1\" in --help) echo 'usage: fleet scrub';; fleet) echo ran >> '{}'; exit {status};; esac\n",
+            marker.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn every_daemon_program_that_may_hold_the_fleet_is_scrubbed() {
+    for (installed_ok, decoy_ok) in [(true, true), (false, true), (true, false)] {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let decoy = root.path().join("decoy");
+        let (installed_ran, decoy_ran) =
+            (root.path().join("installed"), root.path().join("decoy-ran"));
+        daemon(
+            &home.join(".local/bin"),
+            "sheprd-remote-control",
+            &installed_ran,
+            installed_ok,
+        );
+        daemon(&decoy, "herdr-remote-control", &decoy_ran, decoy_ok);
+        let path =
+            std::env::join_paths([decoy.as_path(), "/usr/bin".as_ref(), "/bin".as_ref()]).unwrap();
+        let printed = run_scrub(&home, &path);
+        // Both copies were scrubbed, whichever failed.
+        assert!(installed_ran.exists() && decoy_ran.exists());
+        assert_eq!(
+            remote::scrub_outcome(printed.as_bytes()).is_ok(),
+            installed_ok && decoy_ok,
+            "{printed}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_daemon_program_reached_twice_is_scrubbed_once() {
+    use std::os::unix::fs::symlink;
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let bin = home.join(".local/bin");
+    let ran = root.path().join("ran");
+    daemon(&bin, "sheprd-remote-control", &ran, true);
+    // The same program again on PATH, through a link.
+    let linked = root.path().join("linked");
+    std::fs::create_dir_all(&linked).unwrap();
+    symlink(
+        bin.join("sheprd-remote-control"),
+        linked.join("sheprd-remote-control"),
+    )
+    .unwrap();
+    let path =
+        std::env::join_paths([linked.as_path(), "/usr/bin".as_ref(), "/bin".as_ref()]).unwrap();
+    let printed = run_scrub(&home, &path);
+    assert_eq!(std::fs::read_to_string(&ran).unwrap().lines().count(), 1);
+    assert!(
+        remote::scrub_outcome(printed.as_bytes()).is_ok(),
+        "{printed}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_daemon_program_without_fleet_scrub_is_left_alone() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let bin = home.join(".local/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let ran = root.path().join("ran");
+    // An older program, from before the fleet, holds no fleet state.
+    let path = bin.join("sheprd-remote-control");
+    std::fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\ncase \"$1\" in --help) echo 'usage: serve';; *) : > '{}';; esac\n",
+            ran.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let printed = run_scrub(&home, std::ffi::OsStr::new("/usr/bin:/bin"));
+    assert!(!ran.exists());
+    // Nothing that held a fleet ran: not reported as access gone.
+    assert!(remote::scrub_outcome(printed.as_bytes()).is_err());
+}

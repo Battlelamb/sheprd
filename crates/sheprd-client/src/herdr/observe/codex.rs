@@ -7,7 +7,7 @@ use uuid::Uuid;
 /// Bare/new sessions and `fork` still use the existing daemon/file checks:
 /// a fork's argument names its parent, not the conversation it creates.
 /// This is only a conflict guard: argv cannot attest to an in-process switch.
-pub(super) fn session_matches(args: &[String], advertised: &str) -> bool {
+pub fn session_matches(args: &[String], advertised: &str) -> bool {
     let Ok(advertised) = Uuid::parse_str(advertised) else {
         return false;
     };

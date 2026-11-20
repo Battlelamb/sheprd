@@ -304,11 +304,17 @@ public struct Home: Codable, Hashable, Sendable {
             /// paragraph, one item to a line. Absent until read, and from
             /// older computers.
             public var preview: String?
+            /// Whether its conversation opens as a read-only chat on its
+            /// pane, beside the terminal; older computers leave it out.
+            public var transcript: Bool?
 
             enum CodingKeys: String, CodingKey {
-                case name, status, pane, title, preview
+                case name, status, pane, title, preview, transcript
                 case changedMs = "changed_ms"
             }
+
+            /// Whether the computer shows its conversation as a chat.
+            public var opensAsChat: Bool { transcript == true && pane != nil }
         }
 
         /// The pane a phone opens for the tab's agent: its own, else the

@@ -48,8 +48,8 @@ struct WorkspacesTab: View {
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Workspaces, chats, terminals")
         // No title, as Home and Settings have none; the search names it.
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(for: WorkspaceKey.self) { WorkspaceScreen(key: $0) }
-        .navigationDestination(item: $details) { ComputerScreen(device: $0) }
+        .navigationDestination(for: WorkspaceKey.self) { WorkspaceScreen(key: $0).makesRoomForConnectionToast() }
+        .navigationDestination(item: $details) { ComputerScreen(device: $0).makesRoomForConnectionToast() }
         .forgetConfirmation($forgetting)
         #if DEBUG
         .task { if UserDefaults.standard.bool(forKey: "openComputer") { details = model.computers.first?.device } }

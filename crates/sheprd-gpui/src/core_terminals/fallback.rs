@@ -12,7 +12,7 @@ use sheprd_core_client::CoreBackend;
 use std::sync::mpsc;
 
 /// The name of the shell the window shows in place of Herdr 1.
-const SHELL: &str = "herdr-ui";
+const SHELL: &str = sheprd_session::STAND_IN_SHELL;
 
 /// The id of a shell the core refused as already running, so the window shows
 /// the one an earlier launch left: its address, as the core lists it.

@@ -3,6 +3,7 @@
 use super::*;
 
 mod memory;
+mod phone_app;
 
 /// The built-in text for a person at `origin`.
 fn describe(origin: Origin) -> String {

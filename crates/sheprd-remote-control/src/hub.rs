@@ -12,6 +12,7 @@ mod convert;
 mod core;
 mod daemon;
 mod layout;
+mod observed;
 mod recency;
 pub(crate) mod row_summary;
 mod sessions;
@@ -25,6 +26,7 @@ pub(crate) use core::{Keeper, arrangeable};
 #[cfg(test)]
 pub(crate) use layout::TerminalAgent;
 pub(crate) use layout::{Chat as ChatRow, Job, Layout, Terminal, TerminalPane, Workspace};
+pub(crate) use observed::observable;
 pub(crate) use row_summary::RowSummary;
 
 use serde_json::{Value, json};
@@ -62,6 +64,8 @@ pub enum Error {
     Daemon(String),
     #[error("Herdr is not running on this computer")]
     NotConnected,
+    #[error(transparent)]
+    Observed(#[from] observed::Error),
     #[error("sheprd-acp was not found beside sheprd-remote-control or on PATH")]
     ProgramMissing,
     #[error(transparent)]
@@ -106,6 +110,8 @@ pub(crate) struct Hub {
     layout: watch::Receiver<Arc<Layout>>,
     /// Terminal agents moving into chats now.
     moving: convert::Moving,
+    /// Terminal agents' conversations phones read as chats now.
+    observed: observed::Observed,
     /// The primary session's own layout, to tell whether it answers.
     primary: watch::Receiver<Arc<Layout>>,
     program: Option<PathBuf>,
@@ -170,6 +176,7 @@ impl Hub {
             home: None,
             layout,
             moving: convert::Moving::default(),
+            observed: observed::Observed::default(),
             primary: daemon_layout,
             program: locate_program(),
             search_program: true,
@@ -185,6 +192,7 @@ impl Hub {
         }
         let follower = hub.clone();
         tokio::spawn(async move { follower.follow().await });
+        tokio::spawn(hub.clone().follow_observed_sessions());
         Ok(hub)
     }
 
@@ -258,6 +266,7 @@ impl Hub {
             core: None,
             home: None,
             moving: convert::Moving::default(),
+            observed: observed::Observed::default(),
             primary: receiver.clone(),
             layout: receiver,
             program: None,
@@ -627,6 +636,7 @@ impl Hub {
     }
 
     fn reconcile(&self, layout: &Layout) {
+        self.observed.retain(|pane| self.observable(pane));
         let mut chats = self.chats.lock().unwrap_or_else(PoisonError::into_inner);
         chats.retain(|pane, (endpoint, chat)| {
             let keep = layout

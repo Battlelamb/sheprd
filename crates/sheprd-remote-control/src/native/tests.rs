@@ -21,6 +21,7 @@ mod projection;
 mod reducer;
 mod socket;
 mod tab_actions;
+mod term_prompt;
 mod term_scroll;
 mod term_size;
 mod terminal_preview;

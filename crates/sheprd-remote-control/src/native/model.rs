@@ -269,6 +269,10 @@ pub(crate) struct TerminalAgent {
     /// item to a line, bounded. Absent until read, and from older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) preview: Option<String>,
+    /// Whether its conversation opens as a read-only chat (`view: chat`
+    /// on its pane) beside the terminal; absent from older servers.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) transcript: bool,
 }
 
 /// A chat's whole transcript and the stream position it includes.
@@ -463,6 +467,7 @@ fn terminal(terminal: &hub::Terminal) -> Terminal {
             title: agent.title.clone(),
             changed_ms: agent.changed_ms,
             preview: None,
+            transcript: hub::observable(&agent.pane, agent.name.as_deref()),
         }),
         convert: terminal.convert.as_ref().map(|(pane, agent)| ConvertOffer {
             agent: agent.name().to_owned(),

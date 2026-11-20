@@ -78,6 +78,38 @@ An Ubuntu runner needs passwordless `sudo` for
 `scripts/install-linux-deps.sh`, Rust through `rustup` on the runner's
 `PATH` (`~/actions-runner/.path`), and the packages that script installs.
 
+## Managing the runners
+
+`scripts/ci-runners/runners.sh` does all of this from any machine with SSH
+access to the hosts, Mac minis whose CI VMs are Tart VMs kept running by
+LaunchAgents named `com.sheprd.tartvm.<vm>`:
+
+```sh
+scripts/ci-runners/runners.sh resize setup warm m4-pro-1.local m4-pro-2.local
+scripts/ci-runners/runners.sh wait m4-pro-1.local m4-pro-2.local
+scripts/ci-runners/runners.sh status m4-pro-1.local
+```
+
+- `resize` stops each VM, gives it the sizes below (or `MACOS_CPU`,
+  `MACOS_MEMORY_MB`, `MACOS_DISK_GB`, `LINUX_CPU`, `LINUX_MEMORY_MB`,
+  `LINUX_DISK_GB`), and starts it again; the guest grows its file system.
+  Two macOS VMs take 5 cores and 18 GB each, an Ubuntu VM 4 cores and 8 GB,
+  which leaves a 12-core, 48 GB Mac mini 4 GB.
+- `setup` installs what the Cirrus Labs base images lack
+  (`guest-setup.sh`): Rust through `rustup`, `openssl@3` and a recent
+  Python on macOS, build tools on Ubuntu, and the runner's `.path` and
+  `.env`.
+- `warm` builds `main` once in the runner's own checkout with the commands
+  `ci.yml` runs on that platform (`guest-warm.sh`), so the next job compiles
+  only what changed. The runner stays stopped until the build ends, and the
+  build refuses to start if it cannot stop it. Keep those commands in step
+  with `ci.yml`. Logs are in `~/Library/Logs/sheprd-ci-warm/` on each host.
+- `status` prints each VM's size, whether its runner runs, and how its last
+  warm build ended; `wait` waits for warm builds to end first.
+
+Actions skip a VM whose warm build is still running. Run `setup` and `warm`
+again after recreating a VM from its base image.
+
 ## The build directory
 
 A self-hosted job checks out without `git clean` and runs

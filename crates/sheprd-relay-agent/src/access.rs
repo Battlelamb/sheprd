@@ -161,8 +161,12 @@ pub struct Member {
     pub name: String,
     /// The `Access` register's `rev`: zero until someone set it.
     pub rev: u64,
-    /// Its `ssh-ed25519 BASE64` key.
-    pub ssh: String,
+    /// Its `ssh-ed25519 BASE64` key; none when its bundle carries no
+    /// Ed25519 key. Such a member is still listed, so its deny, its
+    /// removals, and the retiring of its older keys still land, but it
+    /// never reaches SSH.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh: Option<String>,
     /// What its end-to-end handshake must show.
     #[serde(with = "b64")]
     pub tunnel: [u8; 32],
@@ -205,7 +209,10 @@ impl Member {
         p256::PublicKey::from_sec1_bytes(&self.dial).is_ok()
             && p256::PublicKey::from_sec1_bytes(&self.fleet_key).is_ok()
             && self.dial.len() == KEY_LEN
-            && crate::authorized_keys::ed25519(&self.ssh).as_deref() == Some(self.ssh.as_str())
+            && self
+                .ssh
+                .as_deref()
+                .is_none_or(|ssh| crate::authorized_keys::ed25519(ssh).as_deref() == Some(ssh))
             && self.name.len() <= MAX_NAME
             && !self.name.chars().any(char::is_control)
     }
@@ -375,12 +382,15 @@ impl Access {
         Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
     }
 
-    /// The members that may reach SSH here: allowed, not removed, and
-    /// sharing no key with another ([`Access::shared`]).
+    /// The members that may reach SSH here: allowed, with an SSH key, not
+    /// removed, and sharing no key with another ([`Access::shared`]).
     pub fn allowed(&self) -> impl Iterator<Item = (&Id, &Member)> {
         let shared = self.shared();
         self.members.iter().filter(move |(id, member)| {
-            member.allow && !self.removed.contains(id) && !shared.contains(id)
+            member.allow
+                && member.ssh.is_some()
+                && !self.removed.contains(id)
+                && !shared.contains(id)
         })
     }
 

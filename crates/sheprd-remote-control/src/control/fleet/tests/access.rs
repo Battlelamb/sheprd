@@ -43,7 +43,7 @@ fn every_computer_is_named_with_its_keys_and_access() {
     assert_eq!(first.rev, 0);
     assert_eq!(first.dial, a.bundle.dial);
     assert_eq!(first.tunnel, a.bundle.tunnel);
-    assert_eq!(Some(first.ssh.as_str()), a.bundle.ssh.as_deref());
+    assert_eq!(first.ssh.as_deref(), a.bundle.ssh.as_deref());
     assert!(file.members[&id(&b)].allow);
     let excluded = &file.members[&id(&c)];
     assert!(!excluded.allow);

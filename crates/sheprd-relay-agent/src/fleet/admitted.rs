@@ -92,18 +92,28 @@ impl Admitted {
         self.held.revoked.contains(&pair) || self.suspended_pairs().any(|named| named == pair)
     }
 
-    /// The keys the relays let dial: members first, then desktops, at
-    /// most a relay's [`MAX_DIAL_KEYS`].
+    /// The keys the relays let dial, at most a relay's [`MAX_DIAL_KEYS`]:
+    /// enrolled desktops first, then members allowed here, then members
+    /// that only pass removals. `fleet apply` keeps them within the limit;
+    /// past it, a member denied for lack of room is the first left out.
     #[must_use]
     pub fn dial_keys(&self) -> Vec<Key> {
-        let mut keys: Vec<Key> = self.members().map(|(_, member)| member.dial).collect();
         let desktops = self
             .desktops
             .entries()
             .iter()
             .filter(|entry| !self.cut_off(&entry.dial, &entry.tunnel))
             .map(|entry| entry.dial);
-        for key in desktops {
+        let allowed = self
+            .members()
+            .filter(|(_, member)| member.allow)
+            .map(|(_, member)| member.dial);
+        let denied = self
+            .members()
+            .filter(|(_, member)| !member.allow)
+            .map(|(_, member)| member.dial);
+        let mut keys: Vec<Key> = Vec::new();
+        for key in desktops.chain(allowed).chain(denied) {
             if !keys.contains(&key) {
                 keys.push(key);
             }

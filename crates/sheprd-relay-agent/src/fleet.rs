@@ -354,10 +354,11 @@ impl Held {
     }
 }
 
-/// When `merged` would need more dial keys than a relay takes, puts back
-/// what it adds beside `held`: members `held` lacked are left out, and
-/// members whose dial key changed keep their held keys, with the new
-/// allow, deny, and `rev`. Removals, denials, and suspensions stay. The
+/// When `merged` would need more dial keys than a relay takes, holds back
+/// what it adds beside `held`: members `held` lacked are left out, and a
+/// member whose dial key changed takes its new keys, the old pair gone as
+/// a rotation always removes it, but is denied until there is room: old
+/// keys are never kept. Removals, denials, and suspensions stay. The
 /// refusal, to report once the rest is applied; none when it fits.
 fn hold_back_additions(
     held: Option<&Access>,
@@ -378,19 +379,12 @@ fn hold_back_additions(
         return None;
     }
     for id in added {
-        match before(&id) {
-            Some(old) => {
-                if let Some(member) = merged.members.get_mut(&id) {
-                    *member = Member {
-                        allow: member.allow,
-                        rev: member.rev,
-                        ..old.clone()
-                    };
-                }
+        if before(&id).is_some() {
+            if let Some(member) = merged.members.get_mut(&id) {
+                member.allow = false;
             }
-            None => {
-                merged.members.remove(&id);
-            }
+        } else {
+            merged.members.remove(&id);
         }
     }
     Some(error)

@@ -169,32 +169,54 @@ fn an_agent_keeps_a_pruned_logs_newer_keys_over_a_stale_whole_view() {
 }
 
 #[test]
-fn views_of_a_key_in_two_places_settle_on_the_logs_bundle_once_it_signs_again() {
-    let (mut log, _, b, host) = two();
+fn an_operation_that_is_no_rotation_leaves_the_key_version_pruned_or_whole() {
+    let (mut log, a, b, host) = two();
+    let rotation = act(&mut log, &b, rotated(&b, 0x62));
+    let version = |log: &Log| {
+        let member = keys_of(log, &host, &b);
+        (member.keys, member.tiebreak)
+    };
+    let after_rotation = version(&log);
+    assert_eq!(after_rotation.0, rotation.unsigned().seq);
+    act(&mut log, &b, access_body(host, &b, true, 1));
+    act(&mut log, &b, access_body(host, &b, true, 2));
+    assert_eq!(version(&log), after_rotation);
+    let hash = log.state().hash().unwrap();
+    let checkpoint = act(&mut log, &a, Body::Checkpoint(hash));
+    let whole = copy(&log);
+    log.prune(&checkpoint.id()).unwrap();
+    act(&mut log, &b, access_body(host, &b, true, 3));
+    assert_eq!(version(&log), after_rotation);
+    assert_eq!(version(&whole), after_rotation);
+}
+
+#[test]
+fn rotations_competing_at_one_number_are_ordered_by_their_bundle_in_every_view() {
+    let (log, _, b, host) = two();
     let before = log.heads().to_vec();
     let seq = log.state().members[&b.id()].seq + 1;
     let first = sign_on(&log, &b, &before, seq, rotated(&b, 0x61));
     let second = sign_on(&log, &b, &before, seq, rotated(&b, 0x62));
-    let mut one = copy(&log);
-    apply(&mut one, first.clone());
-    apply(&mut log, first);
-    apply(&mut log, second);
-    // Both views tie on the number; the bundle hash orders them the same
-    // way everywhere.
-    let (alone, both) = (keys_of(&one, &host, &b), keys_of(&log, &host, &b));
-    assert_eq!(alone.keys, both.keys);
-    // Once b signs again, every agent takes the bundle the log kept.
-    act(&mut log, &b, access_body(host, &b, true, 1));
-    let kept = log.state().members[&b.id()].bundle.tunnel;
-    let held = host_access::Access::merge(
-        None,
-        host_access::compute(&one, &host, [], |_| false).unwrap(),
-    )
-    .unwrap();
-    let after = host_access::Access::merge(
-        Some(&held),
-        host_access::compute(&log, &host, [], |_| false).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(after.members[&Id(b.id().0)].tunnel, kept);
+    let view = |op: &Op| {
+        let mut one = copy(&log);
+        apply(&mut one, op.clone());
+        keys_of(&one, &host, &b)
+    };
+    let (one, other) = (view(&first), view(&second));
+    assert_eq!(one.keys, other.keys);
+    assert_ne!(one.tiebreak, other.tiebreak);
+    // An agent ends on the same keys whichever view it got first.
+    let file = |member: &host_access::Member| {
+        let mut file = host_access::compute(&log, &host, [], |_| false).unwrap();
+        file.members.insert(Id(b.id().0), member.clone());
+        file
+    };
+    let ends = |first: &host_access::Member, then: &host_access::Member| {
+        let held = host_access::Access::merge(None, file(first)).unwrap();
+        host_access::Access::merge(Some(&held), file(then))
+            .unwrap()
+            .members[&Id(b.id().0)]
+            .tunnel
+    };
+    assert_eq!(ends(&one, &other), ends(&other, &one));
 }

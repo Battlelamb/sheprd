@@ -739,3 +739,49 @@ fn a_file_that_only_takes_access_away_applies_with_the_agent_at_capacity() {
     host.apply(file(&[(1, false, 2)], &[2, 3], &[])).unwrap();
     assert!(host.lines().is_empty());
 }
+
+#[test]
+fn a_rotation_at_capacity_takes_the_old_keys_away_and_waits_denied() {
+    let host = Host::new();
+    let mut desktops = Authorized::default();
+    // A desktop shares member 2's dial key, so a new one for member 2 adds
+    // a key where the old one stays counted.
+    desktops
+        .insert(Entry {
+            dial: dial(2),
+            tunnel: [0xfe; 32],
+            label: "beside".to_owned(),
+        })
+        .unwrap();
+    for seed in 0..u8::try_from(MAX_DIAL_KEYS - 2).unwrap() {
+        desktops
+            .insert(Entry {
+                dial: dial(seed.wrapping_add(100)),
+                tunnel: [seed.wrapping_add(100); 32],
+                label: format!("desk{seed}"),
+            })
+            .unwrap();
+    }
+    desktops.save(host.state()).unwrap();
+    host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[]))
+        .unwrap();
+    assert_eq!(host.lines().len(), 2);
+    let mut rotated = file(&[(1, true, 0), (2, true, 0)], &[], &[]);
+    let two = rotated.members.get_mut(&id(2)).unwrap();
+    two.dial = dial(12);
+    two.tunnel = [12; 32];
+    two.keys = 1;
+    let outcome = host.apply(rotated);
+    assert!(
+        matches!(outcome, Err(Error::DialKeys { .. })),
+        "{outcome:?}"
+    );
+    // The old pair is gone; the new one waits, denied, for room.
+    let admitted = host.admitted();
+    assert_eq!(admitted.peer(&dial(2), &[2; 32]), None);
+    let held = Held::load(host.state()).unwrap();
+    let member = &held.access.as_ref().unwrap().members[&id(2)];
+    assert_eq!((member.dial, member.allow), (dial(12), false));
+    assert_eq!(host.lines(), [id(1).short()]);
+    assert!(admitted.dial_keys().len() <= MAX_DIAL_KEYS);
+}

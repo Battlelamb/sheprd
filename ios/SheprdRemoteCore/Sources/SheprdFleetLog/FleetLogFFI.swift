@@ -43,6 +43,8 @@ public enum FleetLogError: Error, Equatable, Sendable {
     case unfounded
     /// The saved log is another fleet's.
     case otherFleet
+    /// The saved log holds operations that no longer check out.
+    case damaged
     /// An operation to seal is not this phone's.
     case notMine
     /// Over a bound.
@@ -55,6 +57,7 @@ public enum FleetLogError: Error, Equatable, Sendable {
         case "log": .refused(rule: refusal.rule ?? "")
         case "unfounded": .unfounded
         case "other_fleet": .otherFleet
+        case "damaged": .damaged
         case "not_mine": .notMine
         case "bounds": .bounds
         default: .call
@@ -66,7 +69,7 @@ public enum FleetLogError: Error, Equatable, Sendable {
     /// checking everything again.
     public var unreadable: Bool {
         switch self {
-        case .otherFleet, .refused: true
+        case .otherFleet, .damaged, .refused: true
         default: false
         }
     }

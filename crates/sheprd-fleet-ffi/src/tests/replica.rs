@@ -257,3 +257,52 @@ fn a_request_with_an_unknown_field_is_refused() {
     }));
     assert_eq!(error["kind"], "request");
 }
+
+#[test]
+fn a_saved_copy_missing_any_operation_on_reading_is_damaged() {
+    let fleet = Fleet::new();
+    let replica = fleet.replica();
+    let mut bytes = sync::bytes(&log_of(&replica)).unwrap();
+    // The host's addition, not the founding operation: a daemon reading
+    // this file drops it and goes on; the phone refuses the copy.
+    let host_add = fleet.ops.last().unwrap().encode();
+    let at = bytes
+        .windows(host_add.len())
+        .position(|window| window == host_add.as_slice())
+        .unwrap();
+    bytes[at + host_add.len() - 1] ^= 1;
+    assert!(sheprd_remote_control::control::fleet::saved::decode(&bytes, NOW).is_ok());
+    let error = refused(&json!({
+        "call": "apply", "fleet": fleet.fleet(), "me": fleet.p.hex(),
+        "log": sync::text(&bytes), "now_ms": NOW,
+    }));
+    assert_eq!(error["kind"], "damaged");
+}
+
+#[test]
+fn the_phone_names_shared_history_beside_heads_a_computer_lacks() {
+    let fleet = Fleet::new();
+    let replica = fleet.replica();
+    let drafted = ok(&json!({
+        "call": "draft", "fleet": fleet.fleet(), "me": fleet.p.hex(), "log": log_of(&replica),
+        "issued_ms": NOW, "now_ms": NOW,
+        "bodies": [{ "body": "host_remove", "host": fleet.host }],
+    }));
+    let signed = sign_drafts(&drafted, &fleet.p.key);
+    let sealed = ok(&json!({
+        "call": "seal", "fleet": fleet.fleet(), "me": fleet.p.hex(), "log": log_of(&replica),
+        "ops": signed, "now_ms": NOW,
+    }));
+    let known: Vec<String> = serde_json::from_value(sealed["known"].clone()).unwrap();
+    // Its own new head first, then the history the computer shares.
+    assert_eq!(known[0], drafted["drafts"][0]["id"]);
+    let shared: Vec<String> = fleet.log.heads().iter().map(ToString::to_string).collect();
+    assert!(shared.iter().all(|head| known.contains(head)));
+    // A computer that lacks the phone's operation credits the rest: it
+    // would send nothing it shares.
+    let heads: Vec<sheprd_remote_control::control::fleet::OpId> = known
+        .iter()
+        .filter_map(|id| sheprd_remote_control::control::fleet::OpId::from_hex(id))
+        .collect();
+    assert!(fleet.log.missing_for(&heads).is_empty());
+}

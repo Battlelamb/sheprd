@@ -14,6 +14,8 @@ struct FleetLogSyncTests {
         let replica: Mutex<FleetReplica>
         let posts = Mutex(0)
         let offline = Mutex(false)
+        /// Takes nothing posted to it, as a computer missing its history.
+        let ignoring = Mutex(false)
 
         init(_ replica: FleetReplica) {
             self.replica = Mutex(replica)
@@ -27,7 +29,9 @@ struct FleetLogSyncTests {
                 return try self.replica.withLock { replica in
                     guard request.fleet == replica.fleet else { throw URLError(.badServerResponse) }
                     let now = Date(timeIntervalSince1970: 1_800_000_000)
-                    replica = try replica.applying(request.ops, at: now)
+                    if !self.ignoring.withLock({ $0 }) {
+                        replica = try replica.applying(request.ops, at: now)
+                    }
                     // The answer to a post is lost on its way back.
                     if self.offline.withLock({ $0 }) { throw URLError(.networkConnectionLost) }
                     let missing = try replica.missing(for: request.heads, at: now)
@@ -72,7 +76,7 @@ struct FleetLogSyncTests {
         // phone's own copy: nothing is signed again.
         let other = Computer(try vector.replica())
         let outcome = try await FleetLogSync.run(fleet: vector.fleet, me: vector.me, replica: signed, with: other.client) { now }
-        #expect(outcome.refused == 0)
+        #expect(outcome.refused == 0 && !outcome.undelivered)
         #expect(outcome.heads == signed.status.heads)
         let held = other.replica.withLock { $0 }
         #expect(held.status.view?.members.contains { $0.id == vector.removedMember } == false)
@@ -143,5 +147,21 @@ struct FleetLogSyncTests {
         // Started again from a computer's history, they apply once more.
         let again = try FleetReplica.apply(fleet: vector.fleet, me: vector.me, log: nil, ops: vector.ops + ops, at: vector.now)
         #expect(again.status.next?.seq == 2)
+    }
+
+    @Test func whatAComputerDidNotTakeIsUndelivered() async throws {
+        let vector = try Vector()
+        let now = vector.now
+        let replica = try vector.replica()
+        let (_, signed) = try replica.signing(
+            replica.draft([.hostRemove(host: vector.host)], issued: vector.now, at: vector.now),
+            with: vector.sign, at: vector.now
+        )
+        let computer = Computer(try vector.replica())
+        computer.ignoring.withLock { $0 = true }
+        let outcome = try await FleetLogSync.run(fleet: vector.fleet, me: vector.me, replica: signed, with: computer.client) { now }
+        #expect(outcome.undelivered)
+        // The phone's copy keeps it for the next computer.
+        #expect(outcome.replica.status.heads == signed.status.heads)
     }
 }

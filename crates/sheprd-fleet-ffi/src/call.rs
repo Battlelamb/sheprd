@@ -13,6 +13,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 pub const MAX_SYNC_OPS: usize = 64;
 /// Operations one call takes: a sync answer's worth many times over.
 const MAX_CALL_OPS: usize = 4096;
+/// Heads one sync may name: a member daemon refuses more.
+const MAX_SYNC_HEADS: usize = 64;
 /// Operations one draft signs, under one Face ID.
 pub const MAX_BODIES: usize = 64;
 /// Heads one call names.
@@ -98,6 +100,8 @@ pub enum Draft {
 #[derive(Debug, Serialize)]
 struct Replica {
     log: String,
+    /// What to name as heads when asking a computer for what it lacks.
+    known: Vec<String>,
     applied: usize,
     pending: usize,
     refused: usize,
@@ -268,7 +272,35 @@ fn open(fleet: &str, text: &str, now_ms: u64) -> Result<Log> {
     if log.fleet() != fleet {
         return Err(Error::OtherFleet);
     }
+    // Reading back drops what no longer checks out, which a daemon lives
+    // with. The phone's copy must hold all of it: an operation of its own
+    // dropped here would be lost, and its sequence number signed again.
+    let held = log.ops().count() + usize::from(log.root().is_some());
+    if held != saved::salvage(&bytes).len() {
+        return Err(Error::Damaged);
+    }
     Ok(log)
+}
+
+/// What the phone names as its heads when it asks a computer for what it
+/// lacks: its heads, then its latest operations, newest first, up to what
+/// one sync may name. A computer passes over the ids it does not hold, so
+/// when the phone's heads are its own operations the computer has not
+/// seen yet, the history they share still counts, and the answer does not
+/// start again from the founding operation.
+fn known(log: &Log) -> Vec<String> {
+    let heads = log.heads().iter().copied();
+    let latest = log.missing_for(&[]).into_iter().rev().map(Op::id);
+    let mut known: Vec<OpId> = Vec::with_capacity(MAX_SYNC_HEADS);
+    for id in heads.chain(latest) {
+        if known.len() == MAX_SYNC_HEADS {
+            break;
+        }
+        if !known.contains(&id) {
+            known.push(id);
+        }
+    }
+    known.iter().map(ToString::to_string).collect()
 }
 
 /// A new log, from the operation in `ops` that founded `fleet`.
@@ -366,6 +398,7 @@ fn replica(log: &Log, me: &MemberId, counts: Counts, now_ms: u64) -> Result<Repl
     let live = log.is_member(me);
     Ok(Replica {
         log: sync::text(&saved::encode(log)?),
+        known: known(log),
         applied: counts.applied,
         pending: counts.pending,
         refused: counts.refused,

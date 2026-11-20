@@ -8,6 +8,12 @@ import os
 
 private let log = Logger(subsystem: "so.pen.herdr.remote", category: "fleet-membership")
 
+/// Why the phone kept nothing of a change to its copy.
+enum FleetMembershipError: Error {
+    /// The Keychain record could not be written, so neither was the copy.
+    case notKept
+}
+
 /// This phone as a member of the person's fleet (`docs/relay-plan.md`,
 /// Fleet, phase 5): joining through a paired computer, which a person then
 /// admits in Sheprd there; keeping its own copy of the fleet log, synced
@@ -420,11 +426,13 @@ final class FleetMembership {
         }
     }
 
-    /// Keeps `new` as the copy: written before anything relies on it.
+    /// Keeps `new` as the copy: written before anything relies on it. The
+    /// record goes first: the highest sequence number the copy says this
+    /// phone signed is in the Keychain before the copy holding it is on
+    /// disk, let alone handed to a computer. Throws, keeping nothing, when
+    /// either cannot be written.
     private func adopt(_ new: FleetReplica, through computer: Computer? = nil) throws {
         guard var record, new.fleet == record.fleet, new.me == record.member else { return }
-        try store.write(new.log)
-        replica = new
         if new.status.join == .member { record.admitted = true }
         if let computer { record.through = computer.device }
         // The copy holds the phone's own operations up to `next - 1`.
@@ -432,7 +440,9 @@ final class FleetMembership {
             record.signedSeq = max(record.signedSeq ?? 0, next.seq - 1)
         }
         record.unconfirmed = nil
-        if record != self.record { save(record) }
+        if record != self.record, !save(record) { throw FleetMembershipError.notKept }
+        try store.write(new.log)
+        replica = new
         route(new.status)
         settleLinks(new.status)
     }
@@ -505,7 +515,9 @@ final class FleetMembership {
                 problem = Self.describe(FleetClientError.refused(outcome.refused))
                 return .refused
             }
-            return .taken
+            // Synced, but its copy still lacks what the phone just signed:
+            // held waiting there, say. Another computer may take it.
+            guard outcome.undelivered else { return .taken }
         }
         problem = "Signed. It goes to your fleet the next time this \(UIDevice.current.model) reaches one of its computers."
         return .unknown
@@ -590,6 +602,7 @@ final class FleetMembership {
         case FleetLogError.refused(rule: "signer"): "This \(UIDevice.current.model) is no longer a member of the fleet."
         case FleetLogError.refused(rule: "unknown"): "That member is no longer in the fleet."
         case FleetLogError.refused: "Your fleet would refuse it, so nothing was signed."
+        case FleetMembershipError.notKept: "This \(UIDevice.current.model) could not save it, so nothing was sent."
         case FleetClientError.noFleet: "That computer is no longer in a fleet."
         case FleetClientError.notMember: "This \(UIDevice.current.model) is not a member of that fleet yet."
         case let FleetClientError.refused(count): "The fleet refused \(count == 1 ? "it" : "\(count) of them")."

@@ -13,6 +13,10 @@ public struct FleetReplica: Sendable {
     public let me: String
     /// The saved log (`saved::encode`).
     public let log: Data
+    /// What to name as heads when asking a computer for what the phone
+    /// lacks: its heads, then its latest operations, so history the two
+    /// share counts even when the phone's heads are new to the computer.
+    public let known: [String]
     /// The fleet as the log says it, in the shape a computer answers.
     public let status: API.FleetStatus
     /// This phone was removed: it signs nothing more.
@@ -103,6 +107,7 @@ public struct FleetReplica: Sendable {
         self.fleet = fleet
         self.me = me
         self.log = log
+        known = decoded.known
         status = decoded.status
         removed = decoded.removed.removed
         applied = decoded.applied
@@ -112,17 +117,19 @@ public struct FleetReplica: Sendable {
 
     private struct Answer: Decodable {
         let log: String
+        let known: [String]
         let applied: Int
         let pending: Int
         let refused: Int
         let status: API.FleetStatus
         let removed: Removed
 
-        enum CodingKeys: String, CodingKey { case log, applied, pending, refused, status }
+        enum CodingKeys: String, CodingKey { case log, known, applied, pending, refused, status }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             log = try c.decode(String.self, forKey: .log)
+            known = try c.decode([String].self, forKey: .known)
             applied = try c.decode(Int.self, forKey: .applied)
             pending = try c.decode(Int.self, forKey: .pending)
             refused = try c.decode(Int.self, forKey: .refused)

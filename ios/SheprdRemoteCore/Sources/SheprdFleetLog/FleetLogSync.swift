@@ -22,6 +22,10 @@ public enum FleetLogSync {
         public let heads: [String]
         /// How many of this phone's operations the computer refused.
         public let refused: Int
+        /// Operations this phone signed that the computer still lacks after
+        /// the sync: refused, held waiting, or not yet sent. Only without
+        /// any did they reach it.
+        public let undelivered: Bool
     }
 
     /// Syncs `replica` (nil: no copy yet, which then starts from the
@@ -39,7 +43,7 @@ public enum FleetLogSync {
         for _ in 0..<maxRounds {
             let (ops, _) = try replica.missing(for: heads, at: now())
             guard !ops.isEmpty else { break }
-            let answer = try await client.sync(ops, heads: own(replica), fleet: fleet)
+            let answer = try await client.sync(ops, heads: replica.known, fleet: fleet)
             try check(answer, fleet: fleet)
             refused += answer.refused
             replica = try replica.applying(answer.ops, at: now())
@@ -50,7 +54,12 @@ public enum FleetLogSync {
         }
         var pulled: FleetReplica? = replica
         heads = try await pull(fleet: fleet, me: me, into: &pulled, from: client, now: now, rounds: maxRounds)
-        return Outcome(replica: pulled ?? replica, heads: heads, refused: refused)
+        let final = pulled ?? replica
+        let left = try final.missing(for: heads, at: now())
+        let undelivered = left.more || left.ops.contains { text in
+            Base64URL.decode(text).flatMap { try? Fleet.Op.decode($0) }?.signer.hexString == me.lowercased()
+        }
+        return Outcome(replica: final, heads: heads, refused: refused, undelivered: undelivered)
     }
 
     /// Takes what the computer has, `rounds` answers at most, stopping once
@@ -61,7 +70,7 @@ public enum FleetLogSync {
     ) async throws -> [String] {
         var heads: [String] = []
         for _ in 0..<rounds {
-            let answer = try await client.sync([], heads: replica.map(own) ?? [], fleet: fleet)
+            let answer = try await client.sync([], heads: replica.map(\.known) ?? [], fleet: fleet)
             try check(answer, fleet: fleet)
             heads = answer.heads
             let next = try replica.map { try $0.applying(answer.ops, at: now()) }
@@ -72,10 +81,6 @@ public enum FleetLogSync {
             guard answer.more, next.applied > 0 else { break }
         }
         return heads
-    }
-
-    private static func own(_ replica: FleetReplica) -> [String] {
-        Array(replica.status.heads.prefix(FleetClient.maxSyncHeads))
     }
 
     private static func check(_ answer: API.FleetApplied, fleet: String) throws {

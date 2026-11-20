@@ -7,6 +7,8 @@ pub enum Error {
     // keep-sorted start
     #[error("a fleet request is over its bounds")]
     Bounds,
+    #[error("the saved fleet log holds operations that no longer check out")]
+    Damaged,
     #[error(transparent)]
     Log(#[from] fleet::Error),
     #[error("an operation is signed by another member than this one")]
@@ -28,6 +30,7 @@ impl Error {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Bounds => "bounds",
+            Self::Damaged => "damaged",
             Self::Log(_) => "log",
             Self::NotMine => "not_mine",
             Self::OtherFleet => "other_fleet",

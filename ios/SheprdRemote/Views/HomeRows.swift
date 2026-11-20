@@ -37,7 +37,8 @@ enum HomeRow: Identifiable {
                 date: [started, item.lastAnswer].compactMap { $0 }.max(),
                 title: item.chat.title,
                 group: "\(item.computer.device)/\(item.workspace.id)",
-                groupTitle: "\(item.workspace.label) · \(item.computer.name)"
+                groupTitle: "\(item.workspace.label) · \(item.computer.name)",
+                favorite: item.chat.favorite == true
             )
         case let .agent(item):
             return AgentSort.Facts(
@@ -45,7 +46,8 @@ enum HomeRow: Identifiable {
                 date: item.changed,
                 title: item.title,
                 group: "\(item.computer.device)/\(item.workspace.id)",
-                groupTitle: "\(item.workspace.label) · \(item.computer.name)"
+                groupTitle: "\(item.workspace.label) · \(item.computer.name)",
+                favorite: item.agent?.favorite == true
             )
         }
     }

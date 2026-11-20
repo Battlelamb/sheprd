@@ -256,6 +256,20 @@ final class RemoteClient: Sendable {
         try await send("PUT", "/api/v2/tags", body: tags, bearer: bearer)
     }
 
+    // MARK: Favorites
+
+    /// Stars or unstars the agent in `pane`; the computer's homes mark it.
+    /// An older computer answers 404.
+    func setFavorite(_ favorite: Bool, pane: String, bearer: String) async throws {
+        struct Change: Encodable {
+            let pane: String
+            let favorite: Bool
+        }
+        let _: EmptyAnswer = try await send(
+            "POST", "/api/v2/favorites", body: Change(pane: pane, favorite: favorite), bearer: bearer
+        )
+    }
+
     // MARK: Text shortcuts
 
     /// The computer's text shortcuts. An older computer answers 404, and

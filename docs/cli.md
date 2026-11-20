@@ -487,6 +487,58 @@ sheprd mod check ~/.config/herdr/gpui-mods/agents
 sheprd mod logs agents --lines 20
 ```
 
+### MCP
+
+| Command | What it does |
+| --- | --- |
+| `mcp [serve]` | Speak the [Model Context Protocol](https://modelcontextprotocol.io/) on standard input and output, for an MCP client that starts it. Lists no tools while MCP server is off |
+| `mcp config [--client claude-code\|claude-desktop\|codex\|cursor]` | What to paste into a client, or every client's, so it starts this executable's server. Runs here; Sheprd need not run |
+
+Sheprd's MCP server lets an MCP client, such as Claude Desktop, Claude Code,
+Codex, or Cursor, use what the commands on this page reach. It is **off by
+default**: turn on **MCP server** in Settings > General (`[features] mcp =
+true`). Settings > General also copies the `mcpServers` setting Claude Desktop
+and Cursor read. Builds without the `mcp` Cargo feature, which release builds
+include, have neither the command nor the switch.
+
+```sh
+sheprd mcp config --client claude-code   # prints: claude mcp add sheprd -- /path/to/sheprd mcp
+sheprd mcp config --client codex --json
+```
+
+Each tool is the `sheprd` command it is named after, run with `--json`: the
+same targeting (the caller's pane from `HERDR_PANE_ID` and the other Herdr
+variables when the client runs in a Herdr pane, else the frontmost window),
+the same bounds, and an optional `window` argument as `--window`. A tool's
+answer carries the command's text and its JSON as `structuredContent` (a list
+comes as `{"result": [...]}`). A failure is a tool error starting with the
+exit code's name below (`not_running`, `not_found`, `busy`, `timeout`,
+`unsupported`, `refused`), followed by the message. Memory and checkpoint tools
+act on the repository of the directory the client starts `sheprd mcp` in.
+
+| Reads | Changes or opens a dialog |
+| --- | --- |
+| `status`, `window_list`, `window_alerts`, `tab_list` | `browser_open`, `browser_navigate`, `browser_reload` |
+| `browser_list`, `browser_text`, `browser_feedback` | `code_open` |
+| `worktree_list`, `chat_status`, `notes_get`, `notes_list` | `notes_set` |
+| `memory_index`, `memory_list`, `memory_search`, `memory_get` | `memory_add`, `memory_pin`, `memory_forget` |
+| `checkpoint_list`, `checkpoint_diff` | `checkpoint_create`, `checkpoint_restore` (dialog) |
+| `pr_status`, `pr_checks`, `pr_comments` | `ports_open`, `ports_forward` |
+| `ports_list`, `usage`, `system`, `security_list` | `worktree_create`, `fan_out`, `teleport` (dialogs) |
+| `wait` | |
+
+Requests `sheprd mcp` sends are marked as relayed for the client, by the name
+it gave (control protocol 16). The app refuses them while the switch is off,
+and when one opens a dialog the window says which client asked. Restoring a
+checkpoint, creating a worktree, fanning out, and teleporting happen only once
+the user confirms in that dialog. Like the `sheprd` commands, the other tools
+act at once: `memory_add`, `memory_pin`, `memory_forget` (which removes an
+entry), `notes_set`, `checkpoint_create`, and opening pages, files, and
+ports. Quitting
+the app, running any palette command, stopping processes on ports, `cloud
+exec`, settings changes, pairing, updates, and mods have no tool. The plan and
+its later steps are in [MCP plan](mcp-plan.md).
+
 ### Events
 
 `events` prints what happened in the app: windows opening, closing, and
@@ -596,8 +648,10 @@ One JSON request line, one JSON response line, then the socket closes. A
 request is `{"method", "caller", "op"}`, where `caller` carries the pane,
 workspace, daemon socket, and window, and `op` is tagged with `"op"`. Browser
 requests keep their original flat form (`browser.open`, `browser.reload`,
-`browser.feedback`, `notes.send`). `status` reports the protocol version,
-currently 6. Requests and responses are bounded to 256 KiB, a request that
+`browser.feedback`, `notes.send`). A request `sheprd mcp` relays also carries
+`"via": {"mcp": {"client": NAME}}`, in its `caller` or, for
+`browser.feedback`, beside `pane_id`. `status` reports the protocol version,
+currently 16. Requests and responses are bounded to 256 KiB, a request that
 waits says for how long (at most 600 seconds), and the app answers at most a
 few requests at a time.
 

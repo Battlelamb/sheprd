@@ -9,6 +9,8 @@ mod chat;
 mod exec;
 mod hosts;
 mod machine_agent;
+#[cfg(feature = "mcp")]
+mod mcp;
 mod memory;
 mod mods;
 mod remote;
@@ -30,6 +32,8 @@ pub use exec::ExecCommand;
 pub use hosts::{
     AutomationCommand, CloudCommand, HostCommand, PortsCommand, PrCommand, SecurityCommand,
 };
+#[cfg(feature = "mcp")]
+pub use mcp::{McpClient, McpCommand};
 pub use memory::{MemoryAdd, MemoryCommand};
 pub use mods::ModCommand;
 pub use remote::RemoteCommand;
@@ -77,6 +81,9 @@ pub enum ControlCommand {
     Px0,
     Notes(NotesCommand),
     Memory(MemoryCommand),
+    /// `sheprd mcp`: an MCP server on stdio, or a client's configuration.
+    #[cfg(feature = "mcp")]
+    Mcp(McpCommand),
     Worktree(WorktreeCommand),
     /// Every kind of note the user sent this pane: page, review, terminal.
     Feedback {
@@ -195,6 +202,11 @@ pub const FAMILIES: &[(&str, &str)] = &[
     (
         "memory",
         "What agents learned about a repository, shared by its worktrees",
+    ),
+    #[cfg(feature = "mcp")]
+    (
+        "mcp",
+        "Serve Sheprd's tools to MCP clients, or print a client's setup",
     ),
     (
         "worktree",
@@ -379,6 +391,8 @@ fn command(family: &'static str, args: &mut Args) -> Result<ControlCommand, CliE
         }
         "notes" => ControlCommand::Notes(work::notes(args)?),
         "memory" => ControlCommand::Memory(memory::memory(args)?),
+        #[cfg(feature = "mcp")]
+        "mcp" => ControlCommand::Mcp(mcp::mcp(args)?),
         "worktree" => ControlCommand::Worktree(work::worktree(args)?),
         "feedback" => ControlCommand::Feedback {
             wait: wait_option(args, "--wait")?,

@@ -41,6 +41,8 @@ mod listen_token;
 mod listening_ports;
 mod local_ports;
 mod machine;
+#[cfg(feature = "mcp")]
+mod mcp;
 mod mods;
 mod nearby;
 mod notification_mutes;

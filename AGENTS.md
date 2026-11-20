@@ -271,6 +271,10 @@ what was deferred to CI.
   `windows`, `macos`, or `full-ci` label run every platform over the whole
   workspace. The Nix flake builds on pull requests only when the flake or
   the toolchain pin changes, and on `main` and every release otherwise.
+- The merge queue's and `main`'s macOS jobs run on our own Macs when the
+  repository variable `CI_MACOS_RUNNER` names their labels
+  (`docs/self-hosted-runners.md`); pull requests always use hosted runners.
+  Such a runner keeps `target/` between runs (`scripts/ci-clean-self-hosted.sh`).
 - A `cfg` gate is only proven on the platform it names. For changes that touch
   one, rely on the corresponding platform CI jobs: a macOS run cannot see a
   Linux-only gate, and neither can the Windows cross-check. A pull request

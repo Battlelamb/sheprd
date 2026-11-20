@@ -163,7 +163,12 @@ jobs:
         # When they do, they run one macOS leg, as macOS jobs have the
         # smallest runner limit; the merge queue and main run both.
         exclude: ${{ fromJSON(needs.commits.outputs.full != 'true' && '[{"runner":"macos-15"},{"runner":"ubuntu-24.04-arm"}]' || github.event_name == 'pull_request' && '[{"runner":"macos-15","features":"all"}]' || '[]') }}
-    runs-on: ${{ matrix.runner }}
+    # The repository variable CI_MACOS_RUNNER, a JSON label list such as
+    # '["self-hosted", "macOS", "ARM64"]', moves the macOS legs of the merge
+    # queue and main to our own Macs, past the account's five hosted macOS
+    # jobs. Pull requests always stay on hosted runners: a fork's code runs
+    # on our machines only once a maintainer has queued it.
+    runs-on: ${{ fromJSON(matrix.runner == 'macos-15' && github.event_name != 'pull_request' && vars.CI_MACOS_RUNNER || toJSON(matrix.runner)) }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -174,6 +179,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # A self-hosted runner keeps its target directory between runs, so
+          # a build compiles only what changed; the next step cleans the rest.
+          clean: ${{ runner.environment != 'self-hosted' }}
+      - name: Clean the self-hosted checkout but its build
+        if: runner.environment == 'self-hosted'
+        run: bash scripts/ci-clean-self-hosted.sh
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: bash scripts/install-linux-deps.sh
@@ -215,6 +226,7 @@ jobs:
           PYTHONDONTWRITEBYTECODE: '1'
         run: python3 scripts/tests/test_remote_work.py
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        if: runner.environment != 'self-hosted'
         with:
           key: checks-${{ matrix.features }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -628,7 +640,9 @@ jobs:
         # x86_64 macOS cross-compiles on Apple Silicon and runs under Rosetta,
         # as the release workflow builds it; Intel runners are scarce.
         target: [aarch64-apple-darwin, x86_64-apple-darwin]
-    runs-on: macos-15
+    # Our own Macs in the merge queue when CI_MACOS_RUNNER names them, as in
+    # the checks job; pull requests stay on hosted runners.
+    runs-on: ${{ fromJSON(github.event_name == 'merge_group' && vars.CI_MACOS_RUNNER || '"macos-15"') }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -636,6 +650,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # A self-hosted runner keeps its target directory between runs, so
+          # a build compiles only what changed; the next step cleans the rest.
+          clean: ${{ runner.environment != 'self-hosted' }}
+      - name: Clean the self-hosted checkout but its build
+        if: runner.environment == 'self-hosted'
+        run: bash scripts/ci-clean-self-hosted.sh
       - name: Install pinned Rust toolchain
         env:
           TARGET: ${{ matrix.target }}

@@ -296,11 +296,27 @@ class CiPolicy(unittest.TestCase):
                 if "Swatinem/rust-cache@" in job:
                     self.assertIn("save-if: ${{ github.ref == 'refs/heads/main' }}", job)
         # Keep runners a fixed hosted set; never accept a PR-controlled label.
+        # The macOS jobs may move to our own Macs through CI_MACOS_RUNNER, a
+        # repository variable only admins set, and never for a pull request.
         self.assertEqual(re.findall(r"^    runs-on: (.+)$", WORKFLOW, re.M), [
-            "ubuntu-latest", "ubuntu-24.04", "${{ matrix.runner }}",
+            "ubuntu-latest", "ubuntu-24.04",
+            "${{ fromJSON(matrix.runner == 'macos-15' && github.event_name != 'pull_request' "
+            "&& vars.CI_MACOS_RUNNER || toJSON(matrix.runner)) }}",
             "${{ matrix.runner }}", "${{ matrix.runner }}", "windows-2025",
-            "ubuntu-24.04", "ubuntu-24.04", "${{ matrix.runner }}", "macos-15",
+            "ubuntu-24.04", "ubuntu-24.04", "${{ matrix.runner }}",
+            "${{ fromJSON(github.event_name == 'merge_group' && vars.CI_MACOS_RUNNER || '\"macos-15\"') }}",
         ])
+        # build-macos runs only for pull requests and the merge queue, so its
+        # self-hosted branch can only ever be the merge queue's.
+        self.assertIn("(github.event_name == 'pull_request' || github.event_name == 'merge_group')",
+                      JOBS["build-macos"])
+        for name in ("checks", "build-macos"):
+            with self.subTest(job=name):
+                # A self-hosted runner keeps target/ but nothing else, and
+                # restores no hosted cache over it.
+                self.assertIn("clean: ${{ runner.environment != 'self-hosted' }}", JOBS[name])
+                self.assertIn("if: runner.environment == 'self-hosted'\n"
+                              "        run: bash scripts/ci-clean-self-hosted.sh", JOBS[name])
         self.assertEqual(re.findall(r"^        runner: (.+)$", WORKFLOW, re.M), [
             "[macos-15, ubuntu-24.04, ubuntu-24.04-arm]",
             "[windows-2025, windows-11-arm]",

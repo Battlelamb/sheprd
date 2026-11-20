@@ -38,8 +38,13 @@ impl Admitted {
         Self { desktops, held }
     }
 
-    /// Reads `authorized` and the fleet's files. Blocking.
+    /// Reads `authorized` and the fleet's files as one snapshot, under the
+    /// state directory's lock every update takes: a read never mixes the
+    /// files from before an update with those from after it, which could
+    /// rank members by a wait the access file read does not have yet.
+    /// Never call it while holding that lock. Blocking.
     pub fn load(state_dir: &Path) -> Result<Self> {
+        let _lock = crate::files::Lock::acquire(state_dir)?;
         Ok(Self::new(
             Authorized::load(state_dir)?,
             Held::load(state_dir)?,

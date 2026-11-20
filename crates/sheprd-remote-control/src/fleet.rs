@@ -361,8 +361,9 @@ impl Fleet {
     /// at `now_ms`; says how many were refused. With no fleet yet, it joins
     /// one only when the operations found it and admit this computer: a
     /// member admitted it, after a person's approval there. Blocking.
-    // Phones' syncs on later branches call it; here only tests do.
-    #[cfg_attr(not(test), allow(dead_code))]
+    // Phones' syncs on later branches call it; here only the Unix-only
+    // fleet tests do, so a Windows test build sees it unused too.
+    #[cfg_attr(not(all(test, unix)), allow(dead_code))]
     pub(crate) fn receive(&self, ops: Vec<Op>, now_ms: u64) -> Result<usize> {
         self.receive_from(ops, &[], now_ms)
     }

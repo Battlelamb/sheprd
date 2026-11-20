@@ -285,21 +285,69 @@ pub fn confirm_host_key(target: &str, key: &str) -> Result<bool> {
         .tempdir()?;
     let only = scratch.path().join("known_hosts");
     std::fs::write(&only, format!("{} {key}\n", known.name))?;
+    // `ssh`'s own log, in the private scratch directory: a proxy it runs
+    // writes to the stderr they share, never here.
+    let log = scratch.path().join("ssh.log");
     let mut command = crate::environment::command("ssh");
     command
+        .arg("-E")
+        .arg(&log)
         .args(confirm_options(&only, algorithms))
         .args(crate::relay_host::options(target))
         .args(super::POLICY)
-        .args(["-o", "ClearAllForwardings=yes", "--", target, "true"])
-        .stderr(Stdio::piped());
-    let (status, _, stderr) =
-        super::run_with_stderr(&mut command, Duration::from_secs(20), || false)?;
-    Ok(match status.code() {
-        // Authentication is refused only after the host was verified.
-        Some(255) => SshFailure::classify(status.code(), &stderr) == SshFailure::Auth,
-        Some(_) => true,
-        None => false,
-    })
+        .args(["-o", "ClearAllForwardings=yes", "--", target, "true"]);
+    proven(&mut command, &log)
+}
+
+/// The most of `ssh`'s own log read; a probe's is a few kilobytes.
+const MAX_PROBE_LOG: u64 = 256 * 1024;
+
+/// Runs `command`, an `ssh` writing its own log to `log` (`-E`), and
+/// whether that log shows the key exchange completed and no host key
+/// check failed. Only `ssh` writes there: what a `ProxyCommand` or a
+/// `ProxyJump` hop prints goes to the stderr they share, which proves
+/// nothing either way, so a proxy cannot print the proof itself. Fails
+/// closed: a log that does not read, or is too long, proves nothing.
+fn proven(command: &mut std::process::Command, log: &Path) -> Result<bool> {
+    command.stderr(Stdio::piped());
+    let (_, _, stderr) = super::run_with_stderr(command, Duration::from_secs(20), || false)?;
+    let Ok(file) = std::fs::File::open(log) else {
+        return Ok(false);
+    };
+    let mut logged = Vec::new();
+    let read = file.take(MAX_PROBE_LOG + 1).read_to_end(&mut logged);
+    if read.is_err() || logged.len() as u64 > MAX_PROBE_LOG {
+        return Ok(false);
+    }
+    Ok(!host_key_refused(&logged) && !host_key_refused(&stderr) && key_exchange_completed(&logged))
+}
+
+/// Whether `ssh` said the host key check failed: never a confirmation,
+/// whatever else it logged.
+fn host_key_refused(text: &[u8]) -> bool {
+    String::from_utf8_lossy(text).contains("Host key verification failed")
+}
+
+/// Lines `ssh` logs at `DEBUG1` only once a key exchange completed: the
+/// server signed it with the host key the strict check accepted, and the
+/// keys it sets were taken in use. Nothing before that, whatever the
+/// server sends, makes `ssh` print them.
+const KEY_EXCHANGE_DONE: [&str; 2] = [
+    "debug1: SSH2_MSG_NEWKEYS received",
+    "debug1: SSH2_MSG_SERVICE_ACCEPT received",
+];
+
+/// Whether `log`, `ssh`'s own at `DEBUG1`, shows a completed key
+/// exchange: a whole line `ssh` writes itself. Text a server sends (a
+/// banner, a disconnect reason) reaches stderr only after a prefix of
+/// `ssh`'s own and with control characters escaped, so it can neither
+/// start such a line nor end one; an exit code or an error message is no
+/// proof at all, so anything else is `false`.
+fn key_exchange_completed(log: &[u8]) -> bool {
+    String::from_utf8_lossy(log)
+        .split('\n')
+        .map(|line| line.trim_end_matches('\r'))
+        .any(|line| KEY_EXCHANGE_DONE.contains(&line))
 }
 
 /// The host key algorithms that prove a key of `key`'s type.
@@ -319,6 +367,8 @@ fn host_key_algorithms(key: &str) -> Option<&'static str> {
 /// and every authentication method is off.
 fn confirm_options(only: &Path, algorithms: &str) -> Vec<String> {
     [
+        // What shows the key exchange completed ([`key_exchange_completed`]).
+        "LogLevel=DEBUG1".into(),
         format!("UserKnownHostsFile=\"{}\"", option_path(only)),
         "GlobalKnownHostsFile=/dev/null".into(),
         "KnownHostsCommand=none".into(),

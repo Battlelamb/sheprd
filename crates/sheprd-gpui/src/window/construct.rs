@@ -209,6 +209,7 @@ impl SheprdWindow {
             flash: None,
             flash_motion: Default::default(),
             focus,
+            front_watch: Default::default(),
             git: git::Git::default(),
             git_anchor: Default::default(),
             gui_config_diagnostic,

@@ -1,7 +1,9 @@
 use super::*;
 use crate::host_build::Platform;
+use std::path::Path;
 
 mod build;
+mod installed;
 mod tokens;
 
 fn public(url: &str) -> Relay {

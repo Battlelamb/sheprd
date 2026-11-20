@@ -360,7 +360,9 @@ impl SheprdWindow {
                     .child(error.clone()),
             );
         }
-        if creating || removing {
+        if let Some(removal) = self.removal.as_ref().filter(|_| removing) {
+            body = body.child(self.render_removal_progress(removal));
+        } else if creating {
             // Dismissing only closes the panel; the daemon keeps the queued work.
             let waiting = match self.dispatch_job.as_ref().filter(|_| dispatching) {
                 Some(job) => fl!("workspace-dialog-job-waiting", status = job.status()),

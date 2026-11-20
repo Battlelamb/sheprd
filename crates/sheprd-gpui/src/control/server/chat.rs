@@ -14,17 +14,39 @@ pub(super) fn serve(call: Call<ChatOp>, cx: &mut App) -> Response {
             },
         }),
         ChatOp::New { agent, pane } => {
-            let Ok(agent) = agent.parse::<sheprd_chat_protocol::Agent>() else {
-                return Response::error(
-                    ErrorCode::InvalidRequest,
-                    format!(
-                        "Unknown agent {agent}; known agents are {}",
-                        sheprd_chat_protocol::Agent::names()
-                    ),
-                );
+            let named = match agent.map(|agent| agent.parse::<sheprd_chat_protocol::Agent>()) {
+                None => None,
+                Some(Ok(agent)) => Some(agent),
+                Some(Err(_)) => {
+                    return Response::error(
+                        ErrorCode::InvalidRequest,
+                        format!(
+                            "Unknown agent; known agents are {}",
+                            sheprd_chat_protocol::Agent::names()
+                        ),
+                    );
+                }
             };
+            let own = callers_pane(&caller);
             let beside = pane.or_else(|| caller.pane_id.clone());
             in_window(&caller, cx, move |view, _, cx| {
+                // A chat's agent asking for another chat gets one like its
+                // own: the same agent, unless it names another, and then
+                // the same settings too.
+                let like = own.as_deref().and_then(|own| view.like_chat(own));
+                let Some(agent) = named.or(like.as_ref().map(|(agent, _)| *agent)) else {
+                    return Response::error(
+                        ErrorCode::InvalidRequest,
+                        format!(
+                            "Name an agent ({}); only a chat's own agent may leave it out",
+                            sheprd_chat_protocol::Agent::names()
+                        ),
+                    );
+                };
+                let carry = like
+                    .as_ref()
+                    .filter(|(own, _)| *own == agent)
+                    .map(|(_, settings)| settings);
                 // With no Herdr pane named, as from an agent in a herdr-core
                 // pane, a herdr-core tab in the active group splits instead.
                 let core = beside
@@ -35,14 +57,14 @@ pub(super) fn serve(call: Call<ChatOp>, cx: &mut App) -> Response {
                     .as_deref()
                     .filter(|key| key.starts_with("core:") || key.starts_with("core@"))
                 {
-                    view.start_core_chat_beside(agent, key, cx)
+                    view.start_core_chat_beside(agent, key, carry, cx)
                 } else {
                     match core {
-                        Some(tab) => view.start_core_chat(agent, tab, cx),
+                        Some(tab) => view.start_core_chat(agent, tab, carry, cx),
                         None if beside.is_none() && view.kept_in_front().is_some() => {
-                            view.start_kept_core_chat(agent, cx)
+                            view.start_kept_core_chat(agent, carry, cx)
                         }
-                        None => view.start_chat(agent, beside.as_deref()),
+                        None => view.start_chat(agent, beside.as_deref(), carry),
                     }
                 };
                 match started {

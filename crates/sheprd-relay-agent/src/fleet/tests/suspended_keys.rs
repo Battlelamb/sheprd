@@ -88,8 +88,10 @@ fn past_the_bound_every_pair_a_desktop_has_stays_cut_off() {
     assert!(!held.refused);
     let suspension = &held.suspended[&id(2)];
     assert!(suspension.overflow, "only its removal ends it now");
-    assert!(suspension.pairs.contains(&incoming));
+    assert!(suspension.pairs.len() <= MAX_SUSPENDED_PAIRS);
     assert!(suspension.pairs.contains(&early));
+    // The pair past the bound is kept with the cut-off desktops.
+    assert!(held.revoked.contains(&incoming));
     // The rotation itself was taken: the file names the member's keys now.
     let member = held.access.as_ref().unwrap().members[&id(2)].clone();
     assert_eq!(member.pair(), incoming);

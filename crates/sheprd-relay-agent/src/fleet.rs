@@ -56,12 +56,14 @@ pub const REFUSED: &str = "refused";
 /// one no access file lifts.
 pub const MAX_CAUSES: usize = 8;
 /// Key pairs kept per suspended member: its keys now and before as one
-/// file names them, twice over for rotations between files. Past it only
-/// the pairs enrolled desktops have are added ([`Suspension::keep_pairs`]).
+/// file names them, twice over for rotations between files. Past it the
+/// pairs enrolled desktops have go to `revoked` ([`Suspension::keep_pairs`]),
+/// so every file stays within what is read back.
 pub const MAX_SUSPENDED_PAIRS: usize = 2 * (access::MAX_FORMER + 1);
 /// The most read of each of the fleet's small files: suspensions carry
-/// each member's key pairs as well as its removals.
-const MAX_SUSPENDED_BYTES: u64 = 160 * 1024;
+/// each member's key pairs as well as its removals; twice what the largest
+/// state the bounds allow takes (`fleet/tests/stored_size.rs`).
+const MAX_SUSPENDED_BYTES: u64 = 256 * 1024;
 
 /// Who signed a removal that suspended a member, and with what sequence
 /// number: what Sheprd's daemon holds to its log to tell a removal that is
@@ -92,27 +94,46 @@ impl Suspension {
     /// Adds `pairs`, the member's keys as a file names them, to those
     /// kept: never replaced, so a pair a rotation left behind stays cut
     /// off. Past [`MAX_SUSPENDED_PAIRS`] the suspension overflows, so only
-    /// the member's removal ends it, and from then on only the pairs an
-    /// enrolled desktop has (`enrolled`) are added: those are the ones a
-    /// session could come back with, at most one per desktop. The member's
-    /// keys the access file names stay cut off with it besides
-    /// (`Admitted::cut_off`). Only that member pays for its rotations.
-    fn keep_pairs(
-        &mut self,
-        pairs: impl IntoIterator<Item = Pair>,
-        enrolled: impl Fn(&Pair) -> bool,
-    ) {
-        let pairs: Vec<Pair> = pairs.into_iter().collect();
-        let mut kept = self.pairs.clone();
-        kept.extend(pairs.iter().copied());
-        if kept.len() <= MAX_SUSPENDED_PAIRS && !self.overflow {
-            self.pairs = kept;
-            return;
+    /// the member's removal ends it, and the pairs that did not fit are
+    /// returned: [`cut_off_desktops`] keeps those an enrolled desktop has,
+    /// the ones a session could come back with. The member's keys the
+    /// access file names stay cut off besides (`Admitted::cut_off`). Only
+    /// that member pays for its rotations.
+    fn keep_pairs(&mut self, pairs: impl IntoIterator<Item = Pair>) -> Vec<Pair> {
+        let mut left = Vec::new();
+        for pair in pairs {
+            if self.pairs.contains(&pair) {
+                continue;
+            }
+            if self.pairs.len() < MAX_SUSPENDED_PAIRS {
+                self.pairs.insert(pair);
+            } else {
+                self.overflow = true;
+                left.push(pair);
+            }
         }
-        self.overflow = true;
-        self.pairs
-            .extend(pairs.into_iter().filter(|pair| enrolled(pair)));
+        left
     }
+}
+
+/// Cuts off, in `revoked`, the desktops among `desktops` that have one of
+/// `pairs`, a suspended member's keys past what its suspension keeps. The
+/// set holds only enrolled desktops' pairs, at most one each, so it always
+/// fits; a person enrolling the desktop again lets it back in, as for a
+/// member removed for good.
+fn cut_off_desktops(
+    revoked: &mut BTreeSet<Pair>,
+    desktops: &Authorized,
+    pairs: impl IntoIterator<Item = Pair>,
+) {
+    let enrolled = |pair: &Pair| {
+        desktops
+            .entries()
+            .iter()
+            .any(|entry| entry.dial == pair.dial && entry.tunnel == pair.tunnel)
+    };
+    revoked.retain(|pair| enrolled(pair));
+    revoked.extend(pairs.into_iter().filter(|pair| enrolled(pair)));
 }
 
 /// The access this agent holds, who is suspended, and the key pairs of
@@ -121,8 +142,9 @@ impl Suspension {
 pub struct Held {
     pub access: Option<Access>,
     pub suspended: BTreeMap<Id, Suspension>,
-    /// Key pairs of members removed for good: a desktop with one stays
-    /// cut off until enrolled again.
+    /// Key pairs of members removed for good, and of suspended members
+    /// past what their suspension keeps, that an enrolled desktop has: a
+    /// desktop with one stays cut off until enrolled again.
     pub revoked: BTreeSet<Pair>,
     /// Members whose rotated keys do not fit in the relay's dial keys yet:
     /// kept apart from the fleet's own allow and deny, which the access
@@ -329,7 +351,8 @@ impl Held {
         // off; the rest of the file applies.
         for (member, suspension) in &mut held.suspended {
             if let Some(entry) = merged.members.get(member) {
-                suspension.keep_pairs(entry.pairs(), enrolled);
+                let left = suspension.keep_pairs(entry.pairs());
+                cut_off_desktops(&mut held.revoked, &desktops, left);
             }
         }
         held.access = Some(merged);
@@ -383,12 +406,6 @@ impl Held {
         let _lock = files::Lock::acquire(state_dir)?;
         let mut held = Self::load(state_dir)?;
         let desktops = Authorized::load(state_dir)?;
-        let enrolled = |pair: &Pair| {
-            desktops
-                .entries()
-                .iter()
-                .any(|entry| entry.dial == pair.dial && entry.tunnel == pair.tunnel)
-        };
         let Some(access) = held.access.as_ref().filter(|_| !held.refused) else {
             return Ok(Vec::new());
         };
@@ -433,7 +450,8 @@ impl Held {
             for target in targets {
                 let suspension = held.suspended.entry(target).or_default();
                 if let Some(member) = access.members.get(&target) {
-                    suspension.keep_pairs(member.pairs(), enrolled);
+                    let left = suspension.keep_pairs(member.pairs());
+                    cut_off_desktops(&mut held.revoked, &desktops, left);
                 }
                 let id = Id(removal.id);
                 if suspension.removals.contains_key(&id) {
@@ -685,11 +703,20 @@ fn read_json<T: serde::de::DeserializeOwned + Default>(state_dir: &Path, name: &
     }
 }
 
+/// `value` as its file keeps it, refused past what [`read_json`] reads
+/// back, so a save never leaves a file the next load rejects.
 fn json(name: &str, value: &impl Serialize) -> Result<Vec<u8>> {
-    serde_json::to_vec(value).map_err(|source| Error::FleetFormat {
+    let bytes = serde_json::to_vec(value).map_err(|source| Error::FleetFormat {
         path: name.into(),
         source,
-    })
+    })?;
+    if bytes.len() as u64 > MAX_SUSPENDED_BYTES {
+        return Err(Error::TooLarge {
+            limit: MAX_SUSPENDED_BYTES,
+            path: name.into(),
+        });
+    }
+    Ok(bytes)
 }
 
 #[cfg(test)]

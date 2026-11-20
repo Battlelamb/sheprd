@@ -4,11 +4,13 @@
 //! ([`MAX_REPORT_BYTES`]), the rest left for the status around it.
 
 use super::*;
+#[cfg(feature = "runtime")]
 use crate::status::MAX_REPORT_BYTES;
 
 /// The largest fleet report the bounds allow: every member suspended by
 /// as many removals as are remembered, every desktop cut off with the
 /// longest label (each character escaped in JSON), every member waiting.
+#[cfg_attr(not(feature = "runtime"), allow(dead_code))]
 pub(crate) fn largest() -> Report {
     let count = |n: usize| u8::try_from(n).unwrap();
     let member = |n: u8| Id([n; 32]);
@@ -47,6 +49,8 @@ pub(crate) fn largest() -> Report {
     }
 }
 
+// The limit is `status`'s, built with the agent's runtime.
+#[cfg(feature = "runtime")]
 #[test]
 fn the_largest_fleet_report_fits_its_budget_with_room_to_spare() {
     let printed = serde_json::to_vec_pretty(&largest()).unwrap();

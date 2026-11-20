@@ -454,6 +454,16 @@ impl Fleet {
             Some(named) => Some(sync::fleet(named)?),
             None => ops.first().map(joining::fleet_of),
         };
+        // With no log yet, a caller naming a fleet hands over that fleet
+        // alone: another fleet's history it carries, one this computer
+        // once signed a join for, say, never becomes this computer's log.
+        let ops = match (&apply.fleet, named) {
+            (Some(_), Some(named)) if self.inner().log.is_none() => ops
+                .into_iter()
+                .filter(|op| joining::fleet_of(op) == named)
+                .collect(),
+            _ => ops,
+        };
         let refused = match self.receive_from(ops, &heads, now_ms) {
             Ok(refused) => refused,
             Err(Error::NotAdmitted)

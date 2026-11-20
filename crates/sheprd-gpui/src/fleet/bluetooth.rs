@@ -14,7 +14,7 @@ use sheprd_remote_control::control::fleet::{
     bluetooth::{ApprovedFleet, Hint, Joining},
     sync::{Answer, Apply, Ask},
 };
-use std::sync::atomic::AtomicBool;
+use std::{sync::atomic::AtomicBool, time::Duration};
 
 /// The session saved devices use.
 const SESSION: &str = "default";
@@ -55,7 +55,7 @@ pub(crate) fn joining(
         let answer = flows::daemon(&client, Ask::Joining { fleet, pairing }).await;
         let joining = match answer {
             Ok(Answer::Joining(joining)) => Ok(joining),
-            Ok(_) => Err(Error::Daemon(String::new())),
+            Ok(_) => Err(Error::Unexpected),
             Err(error) => Err(error),
         };
         cx.update(|cx| done(joining, cx));
@@ -75,7 +75,7 @@ pub(crate) fn found(cx: &mut App, done: impl FnOnce(Result<Hint, Error>, &mut Ap
             flows::daemon(&client, Ask::Found).await?;
             match flows::daemon(&client, Ask::Status).await? {
                 Answer::Status { view: Some(view) } => Ok(hint(&view)),
-                _ => Err(Error::Daemon(String::new())),
+                _ => Err(Error::Unexpected),
             }
         }
         .await;
@@ -103,31 +103,18 @@ pub(crate) fn paired(cx: &mut App, target: String, fleet: ApprovedFleet) {
     };
     let executor = cx.background_executor().clone();
     cx.spawn(async move |cx| {
-        let outcome = async {
-            match fleet {
-                ApprovedFleet::Joining(joining) => {
-                    let ours = ours.ok_or(Error::NoDaemon)?;
-                    flows::daemon(
-                        &client,
-                        Ask::Admit {
-                            bundle: joining.bundle,
-                            signature: joining.signature,
-                            method: Method::Bluetooth,
-                        },
-                    )
-                    .await?;
-                    flows::hand_over(&client, &executor, &target, &ours).await
-                }
-                ApprovedFleet::Joined { fleet } => {
-                    take_over(&client, &executor, &target, &fleet).await?;
-                    match flows::daemon(&client, Ask::Status).await? {
-                        Answer::Status { view: Some(view) } if view.fleet == fleet => Ok(()),
-                        _ => Err(Error::NotAdmitted),
-                    }
-                }
+        // The other computer may still be starting what its Allow set off,
+        // or the relays may blink: tried again a few times, as each step is
+        // safe to repeat (an admitted bundle is admitted once, and a log is
+        // handed over from the heads each side holds).
+        let mut outcome = Err(Error::Unexpected);
+        for wait in RETRIES {
+            executor.timer(wait).await;
+            outcome = finish(&client, &executor, &target, &fleet, ours.as_deref()).await;
+            if outcome.is_ok() {
+                break;
             }
         }
-        .await;
         cx.update(|cx| {
             if let Err(error) = outcome {
                 Fleet::fail(cx, error.to_string());
@@ -136,6 +123,47 @@ pub(crate) fn paired(cx: &mut App, target: String, fleet: ApprovedFleet) {
         });
     })
     .detach();
+}
+
+/// How long `paired` waits before each try.
+const RETRIES: [Duration; 5] = [
+    Duration::ZERO,
+    Duration::from_secs(10),
+    Duration::from_secs(30),
+    Duration::from_secs(60),
+    Duration::from_secs(300),
+];
+
+/// One try at what the pairing left for the fleet.
+async fn finish(
+    client: &crate::remote::supervisor::Client,
+    executor: &gpui::BackgroundExecutor,
+    target: &ConnectTarget,
+    fleet: &ApprovedFleet,
+    ours: Option<&str>,
+) -> Result<(), Error> {
+    match fleet.clone() {
+        ApprovedFleet::Joining(joining) => {
+            let ours = ours.ok_or(Error::NoDaemon)?;
+            flows::daemon(
+                client,
+                Ask::Admit {
+                    bundle: joining.bundle,
+                    signature: joining.signature,
+                    method: Method::Bluetooth,
+                },
+            )
+            .await?;
+            flows::hand_over(client, executor, target, ours).await
+        }
+        ApprovedFleet::Joined { fleet } => {
+            take_over(client, executor, target, &fleet).await?;
+            match flows::daemon(client, Ask::Status).await? {
+                Answer::Status { view: Some(view) } if view.fleet == fleet => Ok(()),
+                _ => Err(Error::NotAdmitted),
+            }
+        }
+    }
 }
 
 /// Takes `fleet`'s log from `target`, which admitted this computer, one

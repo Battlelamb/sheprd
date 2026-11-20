@@ -62,6 +62,11 @@ pub(crate) fn line(phase: &Phase, cx: &App) -> Option<Line> {
     else {
         return None;
     };
+    // Until the daemon has said, this computer's fleet is unknown: no
+    // switch promises what Allow might not do.
+    if !Fleet::read(cx) {
+        return None;
+    }
     Line::of(asked, Fleet::view(cx), Fleet::member_of(cx).as_deref())
 }
 

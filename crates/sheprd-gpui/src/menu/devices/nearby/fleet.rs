@@ -138,7 +138,9 @@ impl SheprdWindow {
         let Some(setup) = &mut self.menu.nearby_setup else {
             return;
         };
-        if setup.attempt != attempt {
+        // Cancelled, failed, or another computer picked meanwhile: the
+        // child that waited for this is gone.
+        if setup.attempt != attempt || !matches!(setup.step, Step::Code { .. }) {
             return;
         }
         match fleet {

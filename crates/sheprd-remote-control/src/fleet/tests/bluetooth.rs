@@ -430,3 +430,61 @@ async fn a_claim_without_the_token_learns_nothing_of_the_fleet() {
     let asked = send(&b.state, post("/api/pair/claim", body(joining))).await;
     assert_eq!((plain.0, plain.2), (asked.0, asked.2));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_handover_naming_one_fleet_never_adopts_another() {
+    let (http, _, _) = relay().await;
+    let (a, b, c) = (
+        Node::new(http, 1).await,
+        Node::new(http, 2).await,
+        Node::new(http, 3).await,
+    );
+    assert_eq!(b.ask(Ask::Found), Answer::Done);
+    assert_eq!(c.ask(Ask::Found), Answer::Done);
+    let fleet = b.view().fleet;
+    let other = c.view().fleet;
+    // a once signed a join for c's fleet, which c admitted, and a never
+    // took that log.
+    let Answer::Bundle { bundle, signature } = a.ask(Ask::Bundle {
+        fleet: other.clone(),
+    }) else {
+        panic!("no bundle");
+    };
+    assert_eq!(
+        c.ask(Ask::Admit {
+            bundle,
+            signature,
+            method: Method::Ssh,
+        }),
+        Answer::Done
+    );
+    // b, asked for its own fleet's log, carries c's history instead.
+    let carried = sync::Apply {
+        fleet: Some(fleet.clone()),
+        ops: sync::encode_ops(&c.ops()),
+        ..sync::Apply::default()
+    };
+    let _ = a.fleet.apply(&carried, now_ms());
+    assert!(
+        ask::view(&a.fleet).is_none(),
+        "a took a fleet it did not name"
+    );
+    // The fleet it named, once that admits it, is taken.
+    let Answer::Bundle { bundle, signature } = a.ask(Ask::Bundle {
+        fleet: fleet.clone(),
+    }) else {
+        panic!("no bundle");
+    };
+    b.ask(Ask::Admit {
+        bundle,
+        signature,
+        method: Method::Bluetooth,
+    });
+    let handed = sync::Apply {
+        fleet: Some(fleet.clone()),
+        ops: sync::encode_ops(&b.ops()),
+        ..sync::Apply::default()
+    };
+    a.fleet.apply(&handed, now_ms()).unwrap();
+    assert_eq!(a.view().fleet, fleet);
+}

@@ -84,7 +84,7 @@ enum Step {
 
 /// A number no attempt in this process had before: windows and reopened
 /// pages share it.
-fn next_attempt() -> u64 {
+pub(super) fn next_attempt() -> u64 {
     static ATTEMPTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }

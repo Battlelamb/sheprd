@@ -19,6 +19,8 @@ pub enum Error {
     Run(#[source] sheprd_client::Error),
     #[error("The fleet's log is larger than a daemon keeps")]
     TooLarge,
+    #[error("The remote control daemon answered something else")]
+    Unexpected,
     #[error("Could not remove all fleet access on the host; some may remain")]
     Unscrubbed,
     #[error("The fleet cannot reach this kind of device")]

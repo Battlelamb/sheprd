@@ -252,6 +252,7 @@ chat-settings-search = Search…
 chat-settings-hint = { $name }: { $value }
 chat-settings-mode = Mode
 chat-settings-agent = Agent
+chat-settings-auto-accept = Auto-accept
 chat-settings-auto-accept-on = Auto-accepting
 chat-settings-auto-accept-off = Asks first
 chat-settings-no-match = No match

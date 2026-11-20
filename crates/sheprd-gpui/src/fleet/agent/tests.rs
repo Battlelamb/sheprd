@@ -1,8 +1,11 @@
 use super::*;
 use crate::host_build::Platform;
+// For `installed`.
+#[cfg(unix)]
 use std::path::Path;
 
 mod build;
+#[cfg(unix)]
 mod installed;
 mod tokens;
 

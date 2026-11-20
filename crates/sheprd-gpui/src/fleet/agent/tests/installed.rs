@@ -1,9 +1,9 @@
 //! Every command Sheprd runs through the agent goes to the one it
-//! installed, which its service runs, whatever else is on `PATH`.
+//! installed, which its service runs, whatever else is on `PATH`. Unix
+//! only: they run the script under `sh`.
 
 use super::*;
 
-#[cfg(unix)]
 #[test]
 fn commands_go_to_the_installed_agent_not_one_earlier_on_path() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -33,7 +33,6 @@ fn commands_go_to_the_installed_agent_not_one_earlier_on_path() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn without_the_installed_agent_nothing_runs() {
     let dir = tempfile::tempdir().unwrap();

@@ -67,6 +67,7 @@ pub(crate) async fn verify_native_close(
     close_observed(other.into(), cx, press_close_button).await?;
     let last = main.update(cx, |_, window, _| native_window(window))??;
     eprintln!(
+        // i18n: data
         "WINDOW CLOSE native PASS: Settings closed twice, Cmd-W saved the theme, and another main window closed"
     );
     // Closing the last window exercises the app's normal quit path. The outer

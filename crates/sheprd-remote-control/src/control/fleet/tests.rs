@@ -26,6 +26,7 @@ mod removal;
 mod returns;
 mod rotation;
 mod routes;
+mod saved_checkpoint;
 mod settled;
 mod vectors;
 

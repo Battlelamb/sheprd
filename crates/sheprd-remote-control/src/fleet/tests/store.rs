@@ -164,17 +164,25 @@ async fn an_answer_proves_which_host_gave_it() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_peers_file_with_one_proven_key_per_member_still_reads() {
+async fn proven_keys_an_earlier_build_recorded_are_dropped() {
     let (http, _, _) = relay().await;
     let a = Node::new(http, 1).await;
     assert_eq!(a.ask(Ask::Found), Answer::Done);
     let member = "11".repeat(32);
     let key = "5a".repeat(32);
-    std::fs::write(
-        a.dir.path().join("fleet/peers.json"),
-        format!("{{\"proven\": {{\"{member}\": \"{key}\"}}}}"),
-    )
-    .unwrap();
+    // Both shapes earlier builds wrote, recorded on a handshake alone:
+    // they still read, and count for nothing.
+    for proven in [format!("\"{key}\""), format!("[\"{key}\"]")] {
+        std::fs::write(
+            a.dir.path().join("fleet/peers.json"),
+            format!("{{\"proven\": {{\"{member}\": {proven}}}}}"),
+        )
+        .unwrap();
+        let again = Fleet::load(a.dir.path(), now_ms()).unwrap();
+        assert!(again.inner().proven.is_empty());
+    }
+    // What this build records survives a restart.
+    a.fleet.proved(MemberId([0x11; 32]), [0x5a; 32]).unwrap();
     let again = Fleet::load(a.dir.path(), now_ms()).unwrap();
     assert_eq!(again.inner().proven[&MemberId([0x11; 32])].len(), 1);
 }

@@ -22,6 +22,7 @@ mod removal;
 mod returns;
 mod rotation;
 mod routes;
+mod settled;
 mod vectors;
 
 /// A fixed "now": 2027-01-15.

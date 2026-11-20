@@ -16,6 +16,10 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(super) fn fold(folder: &Folder<'_, '_>, set: &Bits, base: &State) -> State {
     let graph = folder.graph();
     let members = folder.members(set);
+    // What came before the set's barrier is settled in the state there.
+    let (set, settled) = folder.split(set);
+    let base = settled.as_ref().map_or(base, |(_, state)| state.as_ref());
+    let set = &set;
     let positions: Vec<usize> = set
         .iter()
         .filter(|&position| folder.check(position).is_ok())
@@ -39,7 +43,7 @@ pub(super) fn fold(folder: &Folder<'_, '_>, set: &Bits, base: &State) -> State {
             member.seq = member.seq.max(op.unsigned().seq);
         }
     }
-    let held = held(folder, &positions, &effective, &state.equivocating);
+    let held = held(folder, &positions, &state.equivocating);
     let anchors = hosts::hosts(graph, &members, &effective, &held, base, &mut state);
     routes::records(graph, &members, &effective, &held, base, &mut state);
     access(
@@ -49,32 +53,19 @@ pub(super) fn fold(folder: &Folder<'_, '_>, set: &Bits, base: &State) -> State {
     state
 }
 
-/// The operations of members found `equivocating` whose `HostAdd` and
-/// `Access` are held: those no checkpoint had seen. A checkpoint settles
-/// what it saw, as the state it names keeps it, so a log pruned to it
-/// and the whole log hold the same ones when an equivocation turns up
-/// later. Only a checkpoint that counts (`effective`, not voided) and
-/// whose signer is not equivocating settles anything: an equivocator
-/// cannot checkpoint its own fork out of the hold.
+/// The operations of members found `equivocating`, whose `HostAdd` and
+/// `Access` are held. Only those after the set's barrier are folded at
+/// all: what came before is settled in the state there.
 fn held(
     folder: &Folder<'_, '_>,
     positions: &[usize],
-    effective: &[(usize, &Op)],
     equivocating: &BTreeSet<MemberId>,
 ) -> BTreeSet<usize> {
     let graph = folder.graph();
-    let mut settled = Bits::new(graph.len());
-    for &(position, op) in effective {
-        if matches!(op.body(), Body::Checkpoint(_)) && !equivocating.contains(&op.signer()) {
-            settled.union(&graph.ancestors[position]);
-        }
-    }
     positions
         .iter()
         .copied()
-        .filter(|&position| {
-            equivocating.contains(&graph.order[position].signer()) && !settled.contains(position)
-        })
+        .filter(|&position| equivocating.contains(&graph.order[position].signer()))
         .collect()
 }
 

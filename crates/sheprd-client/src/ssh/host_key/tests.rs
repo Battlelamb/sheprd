@@ -1,6 +1,8 @@
 use super::*;
 
 mod proof;
+#[cfg(unix)]
+mod proxy;
 
 #[test]
 fn fingerprints_are_read_from_ssh_keygen_lines() {

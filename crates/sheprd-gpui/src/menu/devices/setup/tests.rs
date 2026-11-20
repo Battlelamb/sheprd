@@ -271,6 +271,8 @@ fn save_failures_keep_only_the_final_diagnostic_line() {
 }
 
 #[cfg(unix)]
+mod path;
+#[cfg(unix)]
 mod server_restart;
 #[cfg(unix)]
 mod terminal_setup;

@@ -611,10 +611,10 @@ creating them in Settings does.
 
 Adding an SSH or local network device, or a nearby Sheprd over Bluetooth,
 has no command: the Add Device dialog runs it, and the other computer opens
-`remote pair`. Its setup workspace runs `sheprd __device-setup-attach SOCKET`,
-an internal helper that shows the setup the app runs (see the Native Shell
-README's "Local Network access"); it is not a command to call yourself, and
-the socket it names is single use.
+`remote pair`. On macOS and Linux, SSH setup stays in Add Device with native
+progress, confirmation buttons, and masked password responses. Its private
+terminal belongs to the app (see the Native Shell README's "Local Network
+access"); it creates no workspace or terminal tab.
 
 Herdr 1 scrollback search is not repeated here: `herdr pane read` covers it. Moving a
 window and capturing a whole window have no command because the app cannot

@@ -4,15 +4,15 @@
 //! - a release copies only the release's own build for the host's
 //!   platform: static musl on Linux, Developer ID signed on each Mac
 //!   architecture. It downloads the release's agent archive once per
-//!   version into this app's state and keeps the build only after checking
+//!   share into a private folder and uses the build only after checking
 //!   it against the Ed25519-signed manifest packed first in the archive
 //!   (`sheprd_updater::download_host_agent`), by the key this build
-//!   embeds. Nothing else reaches the host: not a program on `PATH`, not a
+//!   embeds, each time it shares a host. Nothing else reaches the host: not a program on `PATH`, not a
 //!   file beside the app. The host then checks the copy's SHA-256 before
 //!   it puts it in place (`host_build::copy_script`), and only then runs it.
-//! - a development build has no signed release to read: it copies its own
-//!   agent to a host of its kind, else `relay-agent/TRIPLE/` beside the
-//!   executable.
+//! - a development build has no signed release to read: it copies the
+//!   agent beside its executable to a host of its kind, else
+//!   `relay-agent/TRIPLE/` there, never one from `PATH`.
 //!
 //! A host on any other platform (Windows, the BSDs, 32-bit Linux) is
 //! refused before anything is copied: the agent's service and installer
@@ -26,19 +26,12 @@ use super::PROGRAM;
 use crate::host_build::{self, Platform};
 use std::{
     path::{Path, PathBuf},
-    sync::{
-        Mutex, PoisonError,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+    sync::atomic::AtomicBool,
 };
 
 /// Where builds for other platforms ship, beside a development build's
 /// executable.
 pub(super) const BUILDS: &str = "relay-agent";
-
-/// One download at a time: sharing two hosts of the same kind starts two
-/// jobs for the same build, and the second then finds it in place.
-static DOWNLOADS: Mutex<()> = Mutex::new(());
 
 /// The platform `uname -sm` names, when the release ships an agent for it.
 pub(crate) fn platform(uname: &str) -> Result<Platform, Error> {
@@ -107,11 +100,35 @@ pub(crate) fn build_for(
     host_build::build_for(platform, beside, BUILDS, PROGRAM, bundled)
 }
 
+/// A build of the agent on this computer, ready to copy.
+#[derive(Debug)]
+pub(crate) enum Located {
+    /// The release's build, checked against its signed manifest just now,
+    /// in a private folder removed with it.
+    Checked {
+        _dir: tempfile::TempDir,
+        path: PathBuf,
+    },
+    /// A development build's.
+    Local(PathBuf),
+}
+
+impl Located {
+    pub(crate) fn path(&self) -> &Path {
+        match self {
+            Self::Checked { path, .. } | Self::Local(path) => path,
+        }
+    }
+}
+
 /// The build of the agent for a host on `platform`, on this computer.
-/// Blocks: a release downloads it the first time.
-pub(super) fn locate(platform: &Platform, cancelled: &AtomicBool) -> Result<PathBuf, Error> {
+/// Blocks: a release downloads it.
+pub(super) fn locate(platform: &Platform, cancelled: &AtomicBool) -> Result<Located, Error> {
+    // Only what sits beside this app's executable: never a program on
+    // `PATH`, which anything in the login environment could put first.
+    let exe = std::env::current_exe().ok();
     let bundled = (!crate::RELEASE_BUILD)
-        .then(|| crate::bundled::locate(PROGRAM))
+        .then(|| crate::bundled::locate_in(PROGRAM, exe.as_deref(), None))
         .flatten();
     match choose(
         platform,
@@ -120,51 +137,31 @@ pub(super) fn locate(platform: &Platform, cancelled: &AtomicBool) -> Result<Path
         &host_build::beside_app(),
     )? {
         Source::Release(target) => download(target, cancelled),
-        Source::Local(path) => Ok(path),
+        Source::Local(path) => Ok(Located::Local(path)),
     }
 }
 
-/// Where the release's build for `target` is kept once checked.
-pub(crate) fn cached(dir: &Path, target: &str) -> PathBuf {
-    dir.join(format!("{PROGRAM}-{target}"))
-}
-
-/// The release's build for `target`, downloaded and checked once per
-/// version into this app's private state. Blocks.
-fn download(target: &'static str, cancelled: &AtomicBool) -> Result<PathBuf, Error> {
-    let dir = crate::remote::state_dir()
-        .map_err(|_| Error::NoStateDir)?
-        .join("host-builds")
-        .join(crate::APP_VERSION);
-    let path = cached(&dir, target);
-    let _one = DOWNLOADS.lock().unwrap_or_else(PoisonError::into_inner);
-    if path.is_file() {
-        return Ok(path);
-    }
+/// The release's build for `target`, downloaded and checked against the
+/// signed manifest into a new private folder in this app's state. Nothing
+/// is kept for the next share, so no file left on this computer is ever
+/// taken for a checked build. Blocks.
+fn download(target: &'static str, cancelled: &AtomicBool) -> Result<Located, Error> {
+    let state = crate::remote::state_dir().map_err(|_| Error::NoStateDir)?;
     let failed = |source| Error::Cache {
-        path: dir.clone(),
+        path: state.clone(),
         source,
     };
-    std::fs::create_dir_all(&dir).map_err(failed)?;
-    let part = dir.join(format!(".{}.part", unique(target)));
-    // Only a build that matched the signed manifest is renamed into place.
-    if let Err(source) = sheprd_updater::download_host_agent(target, &part, cancelled) {
-        let _ = std::fs::remove_file(&part);
-        return Err(Error::Download {
+    std::fs::create_dir_all(&state).map_err(failed)?;
+    let dir = tempfile::Builder::new()
+        .prefix(".sheprd-relay-agent-")
+        .tempdir_in(&state)
+        .map_err(failed)?;
+    let path = dir.path().join(PROGRAM);
+    sheprd_updater::download_host_agent(target, &path, cancelled).map_err(|source| {
+        Error::Download {
             target: target.to_owned(),
             source,
-        });
-    }
-    std::fs::rename(&part, &path).map_err(failed)?;
-    Ok(path)
-}
-
-/// A name no other job in this process uses, for its temporary file.
-fn unique(stem: &str) -> String {
-    static NEXT: AtomicU64 = AtomicU64::new(1);
-    format!(
-        "{PROGRAM}-{stem}-{}-{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    )
+        }
+    })?;
+    Ok(Located::Checked { _dir: dir, path })
 }

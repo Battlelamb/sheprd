@@ -256,16 +256,17 @@ pub(super) fn install(
     let uname = host.capture("uname -sm\n", cancelled).map_err(Error::Run)?;
     // Refused before anything is copied: a platform with no agent.
     let platform = build::platform(&String::from_utf8_lossy(&uname))?;
-    let source = build::locate(&platform, cancelled)?;
-    let (_, sha256) = host_build::digest(PROGRAM, &source)?;
+    let located = build::locate(&platform, cancelled)?;
+    let source = located.path();
+    let (_, sha256) = host_build::digest(PROGRAM, source)?;
     let installed = host
         .capture(&probe_script(crate::APP_VERSION), cancelled)
         .map_err(Error::Run)?;
     if String::from_utf8_lossy(&installed).trim() != sha256 {
         let file =
-            std::fs::File::open(&source).map_err(|source_error| host_build::Error::Binary {
+            std::fs::File::open(source).map_err(|source_error| host_build::Error::Binary {
                 program: PROGRAM,
-                path: source.clone(),
+                path: source.to_owned(),
                 source: source_error,
             })?;
         host.stream(

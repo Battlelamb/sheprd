@@ -2,7 +2,7 @@
 # it shares as a fleet's plain host.
 
 # $path is a folder in this app's state; $error is the system's reason.
-error-fleet-agent-build-cache = Could not keep the relay agent's download in { $path }: { $error }
+error-fleet-agent-build-cache = Could not make a folder for the relay agent's download in { $path }: { $error }
 # $target is a Rust target such as aarch64-unknown-linux-musl; $error says why.
 error-fleet-agent-build-download = Could not download this release's sheprd-relay-agent for { $target }: { $error }
 # $platform is the host's platform, such as "Linux x86_64".

@@ -1,8 +1,8 @@
 //! Which agent build a plain host gets, by its `uname -sm`.
 
 use super::*;
-use crate::fleet::agent::build::{self, BUILDS, Error, Source, build_for, cached, choose};
-use std::path::Path;
+use crate::fleet::agent::build::{self, BUILDS, Error, Located, Source, build_for, choose};
+use std::path::{Path, PathBuf};
 
 #[test]
 fn each_supported_platform_maps_to_a_release_target() {
@@ -142,25 +142,18 @@ fn a_development_build_sends_its_own_agent_to_its_kind_and_shipped_builds_to_oth
 }
 
 #[test]
-fn each_target_is_cached_under_its_own_name() {
-    let dir = Path::new("/state/remote/host-builds/20261120.1");
-    let names: Vec<_> = sheprd_updater::AGENT_TARGETS
-        .into_iter()
-        .map(|target| cached(dir, target))
-        .collect();
-    for (index, name) in names.iter().enumerate() {
-        assert_eq!(name.parent(), Some(dir));
-        assert!(!names[..index].contains(name));
-        assert!(
-            name.file_name()
-                .unwrap()
-                .to_string_lossy()
-                .starts_with("sheprd-relay-agent-")
-        );
-    }
-    // Never the name remote control's own downloads use for a target.
-    assert_ne!(
-        cached(dir, "x86_64-unknown-linux-musl"),
-        dir.join("x86_64-unknown-linux-musl")
-    );
+fn a_located_build_names_its_file_and_a_checked_one_leaves_nothing_behind() {
+    let local = Located::Local(PathBuf::from("/beside/sheprd-relay-agent"));
+    assert_eq!(local.path(), Path::new("/beside/sheprd-relay-agent"));
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().to_owned();
+    let path = folder.join(PROGRAM);
+    std::fs::write(&path, b"checked").unwrap();
+    let checked = Located::Checked {
+        _dir: dir,
+        path: path.clone(),
+    };
+    assert_eq!(checked.path(), path);
+    drop(checked);
+    assert!(!folder.exists());
 }

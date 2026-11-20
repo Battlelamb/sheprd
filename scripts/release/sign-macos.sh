@@ -111,7 +111,9 @@ codesign --verify --deep --strict --verbose=2 "$app"
 # The same identity and hardened runtime, and no entitlements. They are never
 # quarantined, as they reach a Mac over SSH, so they are not notarized.
 for executable in ${standalone[@]+"${standalone[@]}"}; do
-    codesign --force --sign "$MACOS_SIGNING_IDENTITY" --keychain "$keychain" --options runtime --timestamp "$executable"
+    # A fixed identifier, not one from the versioned file name, so macOS
+    # knows every release's build as the same program.
+    codesign --force --sign "$MACOS_SIGNING_IDENTITY" --keychain "$keychain" --identifier "org.sheprd.$(basename "$executable" | sed -E 's/^sheprd-//; s/-[0-9]{8}\.[0-9]+-.*$//')" --options runtime --timestamp "$executable"
     codesign --verify --strict --verbose=2 "$executable"
 done
 # Apple's notary and ticket services drop connections now and then ("The

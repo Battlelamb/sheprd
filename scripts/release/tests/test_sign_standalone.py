@@ -66,6 +66,8 @@ class SignStandalone(unittest.TestCase):
             self.assertEqual(signing[0][signing[0].index("--options") + 1], "runtime")
             self.assertIn("--timestamp", signing[0])
             self.assertNotIn("--entitlements", signing[0])
+            # One identity for every release's build, whatever its file name.
+            self.assertEqual(signing[0][signing[0].index("--identifier") + 1], "org.sheprd.relay-agent")
             self.assertEqual(signing[0][signing[0].index("--sign") + 1], "Developer ID Application: Dummy")
             self.assertEqual(signing[1][:2], ["codesign", "--verify"])
         # Signed while the keychain still exists, before it is deleted.

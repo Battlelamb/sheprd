@@ -2124,13 +2124,14 @@ manual multi-machine and phone steps left unticked in its QA list.
      with no agent (Windows, the BSDs, 32-bit or RISC-V Linux) with a
      localized "A plain host runs Linux or macOS on x86_64 or ARM64; this
      host reports PLATFORM" before anything is copied. A release then
-     downloads the archive once per version, keeps the build only if the
-     manifest's signature (by the key the app embeds), schema, version,
-     name, size, and SHA-256 all check, and copies only that build: never
-     a program on `PATH` or a file beside the app. The host checks the
+     downloads the archive into a new private folder each time it shares
+     a host, uses the build only if the manifest's signature (by the key
+     the app embeds), schema, version, name, size, and SHA-256 all check,
+     copies only that build (never a program on `PATH`, a file beside the
+     app, or one kept from before), and removes the folder. The host checks the
      copy's SHA-256 before it moves it into place and runs it. A
-     development build copies its own agent to a host of its kind, else
-     `relay-agent/TRIPLE/` beside the executable. CI builds all four only
+     development build copies the agent beside its executable to a host of
+     its kind, else `relay-agent/TRIPLE/` there; never one from `PATH`. CI builds all four only
      when the agent's inputs change (`relay_agent` in
      `scripts/ci-changes.sh`): the `x86_64` Linux one on a pull request,
      the others when every platform runs. The agent has no Windows build:

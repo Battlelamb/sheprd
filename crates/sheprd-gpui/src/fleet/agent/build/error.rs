@@ -5,7 +5,7 @@ use std::{io, path::PathBuf};
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     // keep-sorted start
-    #[error("Could not keep the relay agent's download in {}: {source}", path.display())]
+    #[error("Could not make a folder for the relay agent's download in {}: {source}", path.display())]
     Cache {
         path: PathBuf,
         #[source]

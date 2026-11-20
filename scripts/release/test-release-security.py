@@ -47,7 +47,7 @@ class ReleaseTargets(unittest.TestCase):
             self.assertIn("github.repository == 'sheprd-labs/sheprd'", job)
         # Keeps every main cache inside the repository's 10 GB cache budget.
         self.assertIn("\nenv:\n  CARGO_PROFILE_DEV_DEBUG: '0'\n\njobs:\n", workflow)
-        self.assertIn("    needs: [checks, windows, windows-native, windows-package, build-macos, commits, website, zizmor]\n",
+        self.assertIn("    needs: [checks, windows, windows-native, windows-package, build-macos, relay-agent, commits, website, zizmor]\n",
                       jobs["checks-passed"])
         # The workflow audit runs beside the other jobs, so the gate requires it.
         self.assertIn('test "$COMMITS" = success && test "$ZIZMOR" = success || exit 1',

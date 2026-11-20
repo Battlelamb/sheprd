@@ -25,6 +25,10 @@ class ReleaseAgentWorkflow(unittest.TestCase):
         for target in ("aarch64-apple-darwin", "x86_64-apple-darwin"):
             self.assertIn(f'"host-agents/sheprd-relay-agent-$VERSION-{target}"', sign)
         self.assertLess(sign.index("sign-macos.sh"), sign.index("--host-agents"))
+        # Checked again after the Linux builds land in the same folder.
+        check = sign.index('grep -Fqx "Authority=$MACOS_SIGNING_IDENTITY"')
+        self.assertLess(sign.index("name: linux-host-agent-aarch64-unknown-linux-gnu"), check)
+        self.assertLess(check, sign.index('create host-agents "$VERSION" --host-agents'))
 
     def test_the_sign_job_signs_verifies_and_packs_every_build(self):
         sign = JOBS["sign"]

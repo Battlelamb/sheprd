@@ -726,6 +726,7 @@ jobs:
           path: windows
       - name: Generate and verify signed update manifest
         env:
+          MACOS_SIGNING_IDENTITY: ${{ vars.MACOS_SIGNING_IDENTITY }}
           HERDR_UPDATE_PUBLIC_KEY: ${{ vars.HERDR_UPDATE_PUBLIC_KEY }}
           HERDR_UPDATE_SIGNING_KEY: ${{ secrets.HERDR_UPDATE_SIGNING_KEY }}
         run: |
@@ -786,6 +787,14 @@ jobs:
           # sheprd-relay-agent, for machines shared as a fleet's plain host,
           # gets a sixth manifest (schema 6), packed with all four builds
           # into one archive the same way.
+          # The Linux builds share this folder: check the Mac builds are
+          # still the thin, Developer ID signed ones before listing them.
+          for pair in aarch64:arm64 x86_64:x86_64; do
+            agent="host-agents/sheprd-relay-agent-$VERSION-${pair%%:*}-apple-darwin"
+            test "$(lipo -archs "$agent")" = "${pair#*:}"
+            codesign --verify --strict "$agent"
+            codesign -dvv "$agent" 2>&1 | grep -Fqx "Authority=$MACOS_SIGNING_IDENTITY"
+          done
           python3 scripts/update-manifest.py create host-agents "$VERSION" --host-agents
           "$OPENSSL" pkeyutl -sign -rawin -inkey "$KEY_DIR/private.pem" -passin pass: \
             -in host-agents/host-agent-manifest.json -out host-agents/host-agent-manifest.sig

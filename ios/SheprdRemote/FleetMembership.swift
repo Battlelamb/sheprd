@@ -61,6 +61,8 @@ final class FleetMembership {
     @ObservationIgnored private var asked: [String: Date] = [:]
     @ObservationIgnored private var waiting: Task<Void, Never>?
     private let sessions: Sessions
+    /// The paired computers' live links, which fleet calls go through.
+    @ObservationIgnored weak var links: Fleet?
 
     private static let account = "fleet"
     /// How often one computer is asked when its link comes online.
@@ -418,12 +420,24 @@ final class FleetMembership {
         }
     }
 
+    /// The fleet calls of `computer`, through its live connection when it
+    /// has one (`Fleet.call`, relay included), else by signing in at its
+    /// saved addresses, as a computer just paired, with no link yet, needs.
     private func client(_ computer: Computer) -> FleetClient {
         let sessions = sessions
-        return FleetClient { method, path, body in
+        let links = links
+        let device = computer.device
+        return FleetClient.preferring(live: { @MainActor in
+            guard let links, case .online = links.status(of: device) else { return nil }
+            return { method, path, body in
+                try await links.call(device) { client, token in
+                    try await client.fleetCall(method, path, body: body, bearer: token)
+                }
+            }
+        }, fallback: { method, path, body in
             let (client, token) = try await sessions.session(for: computer)
             return try await client.fleetCall(method, path, body: body, bearer: token)
-        }
+        })
     }
 
     private func save(_ record: Record) {

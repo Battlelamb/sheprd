@@ -122,6 +122,18 @@ public struct FleetClient: Sendable {
         self.send = send
     }
 
+    /// Calls through the computer's live connection when it has one, asked
+    /// afresh for every call (`live`), relay included; through `fallback`
+    /// (signing in at its saved addresses) only while it has none. A
+    /// saved address may be the network the phone left; the live link is
+    /// the path that answers now.
+    public static func preferring(live: @escaping @Sendable () async -> Send?, fallback: @escaping Send) -> FleetClient {
+        FleetClient { method, path, body in
+            let send = await live() ?? fallback
+            return try await send(method, path, body)
+        }
+    }
+
     /// The fleet, and what `member` signs on next when it is one.
     public func status(member: Data?) async throws -> API.FleetStatus {
         let path = member.map { "/api/v2/fleet?member=\($0.hexString)" } ?? "/api/v2/fleet"

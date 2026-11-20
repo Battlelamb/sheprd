@@ -28,6 +28,10 @@ pub enum Error {
     NoModes,
     #[error("entry {0:?} has no text to append to")]
     NotText(EntryId),
+    #[error("not a GitHub pull request, or an action is listed twice")]
+    PullRequest,
+    #[error("{} pull requests are already kept", crate::MAX_PULL_REQUESTS)]
+    PullRequestLimit,
     #[error("question answers in entry {0:?} exceed their count or text limit")]
     QuestionAnswersLimit(EntryId),
     #[error(transparent)]

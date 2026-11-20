@@ -14,6 +14,7 @@ mod backdrop;
 mod caffeine;
 mod chat;
 mod chat_protocol;
+mod chat_pull_requests;
 mod client;
 mod clipboard;
 #[cfg(feature = "cloud")]

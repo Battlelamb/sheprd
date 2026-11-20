@@ -19,6 +19,7 @@ mod pi;
 mod pictures;
 mod process;
 mod project;
+mod pull_requests;
 mod relay;
 mod restore;
 mod rpc;

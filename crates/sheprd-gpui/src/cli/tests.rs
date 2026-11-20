@@ -4,6 +4,7 @@ use control::BrowserCommand;
 mod automation;
 mod browser_zoom;
 mod chat;
+mod chat_pull_requests;
 mod chat_shortcuts;
 mod cloud_batch;
 mod cloud_exec;

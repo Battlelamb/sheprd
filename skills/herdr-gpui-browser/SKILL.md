@@ -360,6 +360,7 @@ what Sheprd shows or keeps.
 | Ask the user to stop (or pause) whatever holds a port you need | `sheprd ports stop 3000`; they confirm in the app |
 | See the processes under a pane, with CPU and memory | `sheprd processes` |
 | Start a chat with another agent in a new tab, shown as a native chat view | `sheprd chat new claude`, then `sheprd chat` for its status |
+| List a pull request you changed without `gh` in your chat's side rail (`gh pr` commands show there on their own) | `sheprd chat pr add https://github.com/OWNER/REPO/pull/N`; `sheprd chat pr` lists them |
 | Move a terminal agent into a native chat, keeping its conversation (an agent that is idle, in another pane) | `sheprd chat convert --pane ID`, then `sheprd chat` for its status |
 | Render existing Linux Codex/Claude conversations in their current panes | `sheprd config set chat.render_existing true` (needs `features.acp_chats`, on by default); `chat status --json` reports the session and input mode |
 | List or focus the app's windows and its own tabs | `sheprd window`, `sheprd tab`, `sheprd tab focus ID` |

@@ -139,7 +139,7 @@ impl<'a> Pass<'a> {
     ) {
         let survives = self.survives(graph, position, id);
         if survives {
-            self.lifetime.entry(id).or_default().push(position);
+            self.added(id, position);
         }
         let named = match self.own.get(&member) {
             Some(named) if named.host == id => Named {
@@ -157,6 +157,18 @@ impl<'a> Pass<'a> {
         };
         self.own.insert(member, named);
         self.settle(id);
+    }
+
+    /// An addition of `id` at `position` that counts, in its lifetime. A
+    /// host live since the base keeps none: every record after the base
+    /// counts for it, so a repeated addition must not narrow that. One
+    /// added since gets each addition, concurrent ones too, so a record
+    /// after any of them counts.
+    fn added(&mut self, id: HostId, position: usize) {
+        if self.hosts.contains_key(&id) && !self.lifetime.contains_key(&id) {
+            return;
+        }
+        self.lifetime.entry(id).or_default().push(position);
     }
 
     /// A removal of `id` at `position`.
@@ -218,12 +230,14 @@ impl<'a> Pass<'a> {
     }
 
     /// A `HostAdd` of `id` at `position`: it makes the host live when it
-    /// was not; another addition of a live host changes nothing.
+    /// was not; another addition of a live host changes nothing, its
+    /// lifetime included. A host live since the base has no addition to
+    /// see, so a record concurrent with a repeated one still counts.
     fn add(&mut self, graph: &Graph<'_>, position: usize, id: HostId, intro: &'a HostIntro) {
         if !self.survives(graph, position, id) {
             return;
         }
-        self.lifetime.entry(id).or_default().push(position);
+        self.added(id, position);
         if self.hosts.contains_key(&id) {
             return;
         }

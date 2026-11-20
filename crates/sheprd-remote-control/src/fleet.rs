@@ -105,6 +105,8 @@ pub(crate) struct Fleet {
     /// of them, and the next change, even one that moves nothing, writes
     /// again.
     unsaved: AtomicBool,
+    /// The suspensions `peers.json` holds (`store::save`).
+    on_disk: Mutex<BTreeMap<OpId, Unconfirmed>>,
 }
 
 #[derive(Debug, Default)]
@@ -149,6 +151,7 @@ impl Fleet {
         let key = store::load_or_create_key(state_dir)?;
         let me = member_id(&key);
         let mut inner = store::load(state_dir, now_ms)?;
+        let on_disk = Mutex::new(inner.unconfirmed.clone());
         // A history `fleet apply` brought while the daemon was stopped may
         // settle a suspension.
         settle_unconfirmed(&mut inner, now_ms);
@@ -177,6 +180,7 @@ impl Fleet {
             inbound: tokio::sync::Semaphore::new(removals::CONCURRENT),
             _lock: lock,
             unsaved: AtomicBool::new(false),
+            on_disk,
         })
     }
 
@@ -321,6 +325,14 @@ impl Fleet {
     /// one only when the operations found it and admit this computer: a
     /// member admitted it, after a person's approval there. Blocking.
     pub(crate) fn receive(&self, ops: Vec<Op>, now_ms: u64) -> Result<usize> {
+        self.receive_from(ops, &[], now_ms)
+    }
+
+    /// [`Fleet::receive`], from a caller whose heads are `caller`: with no
+    /// fleet yet, a history that shares this computer as a host becomes
+    /// the log only once it holds all of them, the caller's whole log, so
+    /// the `Access` denials signed with the share have arrived too.
+    fn receive_from(&self, ops: Vec<Op>, caller: &[OpId], now_ms: u64) -> Result<usize> {
         let mut inner = self.inner();
         self.release_if_left(&mut inner)?;
         let before = inner.log.as_ref().map(|log| log.heads().to_vec());
@@ -332,7 +344,7 @@ impl Fleet {
                 .filter(|(_, result)| result.is_err())
                 .count(),
             None => {
-                let Some((log, refused)) = self.join_parts(&mut inner, ops, now_ms)? else {
+                let Some((log, refused)) = self.join_parts(&mut inner, ops, caller, now_ms)? else {
                     // Kept, granting nothing, for the rest to arrive.
                     let saved = self.save(&inner);
                     drop(inner);
@@ -382,7 +394,7 @@ impl Fleet {
             Some(named) => Some(sync::fleet(named)?),
             None => ops.first().map(joining::fleet_of),
         };
-        let refused = match self.receive(ops, now_ms) {
+        let refused = match self.receive_from(ops, &heads, now_ms) {
             Ok(refused) => refused,
             Err(Error::NotAdmitted)
                 if named.is_some_and(|named| self.inner().joining.contains_key(&named)) =>
@@ -531,7 +543,9 @@ impl Fleet {
     }
 
     fn save(&self, inner: &Inner) -> Result<()> {
-        let saved = store::save(&self.state_dir, inner);
+        // Taken only while `inner` is held, so never out of order.
+        let mut on_disk = self.on_disk.lock().unwrap_or_else(PoisonError::into_inner);
+        let saved = store::save(&self.state_dir, inner, &mut on_disk);
         self.unsaved.store(saved.is_err(), Ordering::SeqCst);
         saved
     }

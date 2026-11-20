@@ -31,6 +31,8 @@ pub(crate) struct Kept {
     next_scan: Option<Instant>,
     /// The last scan found nothing to check.
     pub(super) idle: bool,
+    /// Removals sent and not yet answered, by request ID.
+    removing: Vec<(String, Candidate)>,
 }
 
 impl Kept {
@@ -46,9 +48,14 @@ impl Kept {
         self.probe.as_ref().map(|probe| &probe.candidate)
     }
 
-    /// Nothing left to check and no check running.
+    /// Waits for the answer to the removal sent as `request`.
+    pub(super) fn track_removal(&mut self, request: String, candidate: Candidate) {
+        self.removing.push((request, candidate));
+    }
+
+    /// Nothing left to check, and no check or removal running.
     pub(super) fn settled(&self) -> bool {
-        self.idle && self.probe.is_none()
+        self.idle && self.probe.is_none() && self.removing.is_empty()
     }
 }
 
@@ -141,11 +148,13 @@ impl SheprdWindow {
             return;
         };
         let cache = &self.menu.pr_cache;
-        let ledger = &self.merged_cleanup.kept.ledger;
+        let cleanup = &self.merged_cleanup;
         let found = kept_candidates_on(&workspaces, self.selected_is_remote(), |input| {
             cache.peek_input(&view, input)
         })
-        .find(|candidate| !ledger.waiting(candidate, now));
+        .find(|candidate| {
+            !cleanup.kept.ledger.waiting(candidate, now) && !cleanup.handled(candidate)
+        });
         self.merged_cleanup.kept.idle = found.is_none();
         let Some(candidate) = found else {
             return;
@@ -203,7 +212,7 @@ impl SheprdWindow {
         let Ok(report) = result else {
             // Git's diagnostics may name private paths; log the category only.
             tracing::debug!(category = "check_failed", "Merged kept worktree kept");
-            self.merged_cleanup.skipped();
+            self.merged_cleanup.skipped(&candidate);
             self.merged_cleanup.kept.ledger.settle(candidate, retry);
             return;
         };
@@ -217,7 +226,7 @@ impl SheprdWindow {
         match decide_status(&candidate, &report, workspace.status, focused) {
             Err(skip) => {
                 tracing::debug!(?skip, "Merged kept worktree kept");
-                self.merged_cleanup.skipped();
+                self.merged_cleanup.skipped(&candidate);
                 self.merged_cleanup.kept.ledger.settle(candidate, retry);
             }
             Ok(Action::Ask) => {
@@ -237,10 +246,27 @@ impl SheprdWindow {
                     .kept
                     .ledger
                     .settle(candidate.clone(), retry);
-                self.merged_cleanup.removed();
-                self.remove_merged_kept_checkout(id, path, candidate, cx);
+                // Counted once Git answers, which the sweep waits for.
+                self.merged_cleanup.handle(&candidate);
+                let request = self.remove_merged_kept_checkout(id, path, candidate.clone(), cx);
+                self.merged_cleanup.kept.track_removal(request, candidate);
             }
         }
         cx.notify();
+    }
+
+    /// The answer to a kept checkout's removal: a cleanup's removal counts
+    /// toward a running sweep, removed or kept, once Git has answered.
+    pub(crate) fn finish_merged_kept_removal(&mut self, request: &str, removed: bool) {
+        let kept = &mut self.merged_cleanup.kept;
+        let Some(at) = kept.removing.iter().position(|(id, _)| id == request) else {
+            return;
+        };
+        let (_, candidate) = kept.removing.remove(at);
+        if removed {
+            self.merged_cleanup.removed(&candidate);
+        } else {
+            self.merged_cleanup.skipped(&candidate);
+        }
     }
 }

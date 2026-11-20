@@ -20,3 +20,4 @@ merged-sweep-running = Removing merged worktrees…
 merged-sweep-count = { $done } of { $total }
 merged-sweep-running-note = Other workspace actions wait until Git finishes each one. Hiding this does not stop it.
 merged-sweep-hide = Hide
+merged-sweep-stopped = Stopped removing merged worktrees: another device or connection is selected

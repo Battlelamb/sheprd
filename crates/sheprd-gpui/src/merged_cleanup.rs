@@ -216,18 +216,36 @@ impl Cleanup {
     }
 
     /// Counts a merged worktree the sweep left in place.
-    fn skipped(&mut self) {
+    fn skipped(&mut self, candidate: &Candidate) {
         if let Some(sweep) = &mut self.sweep {
             sweep.skipped += 1;
             sweep.done += 1;
         }
+        self.handle(candidate);
     }
 
-    /// Counts a merged worktree the sweep removed, or sent away to remove.
-    fn removed(&mut self) {
+    /// Counts a merged worktree the sweep removed.
+    fn removed(&mut self, candidate: &Candidate) {
         if let Some(sweep) = &mut self.sweep {
             sweep.done += 1;
         }
+        self.handle(candidate);
+    }
+
+    /// Marks a merged worktree as one the sweep is done checking.
+    fn handle(&mut self, candidate: &Candidate) {
+        if let Some(sweep) = &mut self.sweep
+            && !sweep.handled.contains(candidate)
+        {
+            sweep.handled.push(candidate.clone());
+        }
+    }
+
+    /// Whether the running sweep has already dealt with `candidate`.
+    fn handled(&self, candidate: &Candidate) -> bool {
+        self.sweep
+            .as_ref()
+            .is_some_and(|sweep| sweep.handled.contains(candidate))
     }
 
     /// The merged worktree being checked or removed now.
@@ -371,6 +389,7 @@ impl SheprdWindow {
     /// Scan for a merged pull request, check its checkout off the UI thread,
     /// and remove it or ask. One check and one removal at a time.
     pub(crate) fn update_merged_cleanup(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.stop_merged_sweep_elsewhere(window, cx);
         self.end_merged_sweep(window, cx);
         let sweeping = self.merged_cleanup.sweep.is_some();
         if !self.config.remove_merged_worktrees && !sweeping {
@@ -421,9 +440,10 @@ impl SheprdWindow {
             return;
         };
         let cache = &self.menu.pr_cache;
-        let ledger = &self.merged_cleanup.ledger;
-        let found = candidates(snapshot, |input| cache.get(input))
-            .find(|candidate| !ledger.waiting(candidate, now));
+        let cleanup = &self.merged_cleanup;
+        let found = candidates(snapshot, |input| cache.get(input)).find(|candidate| {
+            !cleanup.ledger.waiting(candidate, now) && !cleanup.handled(candidate)
+        });
         self.merged_cleanup.idle = found.is_none();
         let Some(candidate) = found else {
             return;
@@ -479,7 +499,7 @@ impl SheprdWindow {
             // Git's diagnostics may name private paths; log the category only.
             Err(_) => {
                 tracing::debug!(category = "check_failed", "Merged worktree kept");
-                self.merged_cleanup.skipped();
+                self.merged_cleanup.skipped(&candidate);
                 self.merged_cleanup.ledger.settle(candidate, retry);
                 return;
             }
@@ -500,7 +520,7 @@ impl SheprdWindow {
         match decide(&candidate, &report, workspace, focused) {
             Err(skip) => {
                 tracing::debug!(?skip, "Merged worktree kept");
-                self.merged_cleanup.skipped();
+                self.merged_cleanup.skipped(&candidate);
                 self.merged_cleanup.ledger.settle(candidate, retry);
             }
             Ok(Action::Ask) => {
@@ -525,7 +545,7 @@ impl SheprdWindow {
                     Ok(id) => self.merged_cleanup.removing = Some((candidate, id)),
                     Err(_) => {
                         tracing::warn!(category = "not_queued", "Merged worktree kept");
-                        self.merged_cleanup.skipped();
+                        self.merged_cleanup.skipped(&candidate);
                         self.merged_cleanup.ledger.settle(candidate, retry);
                     }
                 }
@@ -561,7 +581,7 @@ impl SheprdWindow {
         match refusal {
             None => {
                 let number = candidate.number;
-                self.merged_cleanup.removed();
+                self.merged_cleanup.removed(&candidate);
                 self.merged_cleanup.ledger.settle(candidate, None);
                 self.show_flash(
                     crate::window::Flash::success(format!(
@@ -572,7 +592,7 @@ impl SheprdWindow {
             }
             Some(error) => {
                 tracing::warn!(category = "refused", "Merged worktree kept");
-                self.merged_cleanup.skipped();
+                self.merged_cleanup.skipped(&candidate);
                 self.merged_cleanup
                     .ledger
                     .settle(candidate, Some(Instant::now() + RETRY));

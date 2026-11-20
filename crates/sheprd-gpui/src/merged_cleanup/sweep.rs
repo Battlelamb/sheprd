@@ -7,6 +7,9 @@
 //! stays open with a bar of how many are done until the last one is, as
 //! Herdr answers nothing else while Git removes a checkout; dismissing it
 //! leaves the sweep running, and the broom shows it again.
+//!
+//! The confirmation covers one device's connection: switching devices or
+//! reconnecting stops the sweep rather than carrying it to another list.
 
 use super::{Candidate, Ledger, candidates, kept::kept_candidates_on};
 use crate::{
@@ -25,6 +28,12 @@ const LISTED: usize = 8;
 /// A confirmed pass over every merged worktree.
 #[derive(Debug, Default)]
 pub(crate) struct Sweep {
+    /// The device's endpoint ID and connection generation it was confirmed
+    /// for; any other stops it.
+    pub(super) device: (String, u64),
+    /// Merged worktrees this sweep removed, sent away, or left in place, so
+    /// none is checked twice whatever the cleanup's ledger forgets.
+    pub(super) handled: Vec<Candidate>,
     /// Merged worktrees left in place, for the summary.
     pub(super) skipped: usize,
     /// Merged worktrees removed or left in place so far.
@@ -78,8 +87,10 @@ impl SheprdWindow {
             return;
         }
         let total = self.merged_worktrees().len();
+        let device = self.sweep_device();
         let cleanup = &mut self.merged_cleanup;
         cleanup.sweep = Some(Sweep {
+            device,
             total,
             ..Sweep::default()
         });
@@ -88,6 +99,35 @@ impl SheprdWindow {
         cleanup.idle = false;
         cleanup.kept.reset_for_sweep();
         self.update_merged_cleanup(window, cx);
+    }
+
+    /// The selected device, as a sweep is tied to it.
+    pub(super) fn sweep_device(&self) -> (String, u64) {
+        let endpoint = &self.endpoints[self.selected_endpoint];
+        (endpoint.id.clone(), endpoint.generation)
+    }
+
+    /// Stops a sweep once another device, or another connection to its own,
+    /// is selected: its confirmation named this device's worktrees only.
+    pub(super) fn stop_merged_sweep_elsewhere(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let device = self.sweep_device();
+        if self
+            .merged_cleanup
+            .sweep
+            .as_ref()
+            .is_none_or(|sweep| sweep.device == device)
+        {
+            return;
+        }
+        self.merged_cleanup.sweep = None;
+        if self.menu.page == Some(Page::RemoveMerged) {
+            self.dismiss_menu(window, cx);
+        }
+        self.show_flash(Flash::warning(fl!("merged-sweep-stopped")), cx);
     }
 
     /// Ends the sweep once neither list has a merged worktree left to check
@@ -122,6 +162,9 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) {
         match event.keystroke.key.as_str() {
+            // The Enter that chose the command in the palette may still be
+            // held: consent to delete needs a fresh press.
+            "enter" if event.is_held => {}
             "enter" => self.confirm_merged_sweep(window, cx),
             "escape" => self.dismiss_menu(window, cx),
             _ => return,

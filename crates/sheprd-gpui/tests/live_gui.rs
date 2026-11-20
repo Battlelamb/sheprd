@@ -96,19 +96,12 @@ fn native_pages() {
     // TEMPORARY: watch WebView2's processes during the cold first run.
     #[cfg(windows)]
     {
-        let defender = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                "Get-MpComputerStatus | Format-List RealTimeProtectionEnabled,AMRunningMode",
-            ])
-            .output();
-        if let Ok(out) = defender {
-            eprintln!(
-                "PAGES diag: defender {}",
-                String::from_utf8_lossy(&out.stdout).trim()
-            );
-        }
+        let warming = Instant::now();
+        let (files, bytes) = warm_webview2();
+        eprintln!(
+            "PAGES diag: read the WebView2 runtime, {files} files and {bytes} bytes, in {:?}",
+            warming.elapsed()
+        );
         let started = Instant::now();
         thread::spawn(move || {
             loop {
@@ -143,6 +136,31 @@ fn native_pages() {
         failures += usize::from(result.is_err());
     }
     assert_eq!(failures, 0, "native pages failed {failures} of 2 runs");
+}
+
+/// Reads every file of the installed WebView2 runtime once.
+#[cfg(windows)]
+fn warm_webview2() -> (u64, u64) {
+    let Some(root) = std::env::var_os("ProgramFiles(x86)") else {
+        return (0, 0);
+    };
+    let mut pending = vec![Path::new(&root).join(r"Microsoft\EdgeWebView\Application")];
+    let (mut files, mut bytes) = (0, 0);
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if let Ok(mut file) = fs::File::open(&path) {
+                files += 1;
+                bytes += std::io::copy(&mut file, &mut std::io::sink()).unwrap_or(0);
+            }
+        }
+    }
+    (files, bytes)
 }
 
 #[cfg(target_os = "linux")]

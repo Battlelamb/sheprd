@@ -484,6 +484,11 @@ impl Attachment {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SessionInfo {
+    /// The notice that closes the conversation a continued session brought
+    /// with it, such as a terminal agent's moved into this chat: entries up
+    /// to it came before this chat, and a client may fold them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continued: Option<EntryId>,
     #[serde(default)]
     pub cwd: Option<String>,
     pub id: String,

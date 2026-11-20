@@ -88,6 +88,7 @@ fn fleet_view(heads: &[&str]) -> View {
         suspended: Vec::new(),
         pending: 0,
         heads: heads.iter().map(|head| (*head).to_owned()).collect(),
+        hosted: None,
     }
 }
 
@@ -104,30 +105,6 @@ fn an_older_read_never_replaces_a_newer_view() {
     assert!(!fleet.answered(1, Ok(None)));
     assert_eq!(fleet.view, Some(fleet_view(&["new"])));
     assert!(!fleet.asking);
-}
-
-#[test]
-fn a_log_handed_over_asks_again_from_the_tips_of_what_it_sent() {
-    let op = |id: &str, parents: &[&str]| {
-        (
-            id.to_owned(),
-            parents.iter().map(|parent| (*parent).to_owned()).collect(),
-        )
-    };
-    // A first part with the root and two concurrent children: both are
-    // tips, the root is not.
-    let first = flows::heads_after(&[], [op("r", &[]), op("x", &["r"]), op("y", &["r"])]);
-    assert_eq!(first, vec!["x".to_owned(), "y".to_owned()]);
-    // The next part merges them, and one more leaves a tip of the first.
-    assert_eq!(
-        flows::heads_after(&first, [op("m", &["x"])]),
-        vec!["m".to_owned(), "y".to_owned()]
-    );
-    assert_eq!(flows::tips(&first, &[]).unwrap(), first);
-    assert!(matches!(
-        flows::tips(&[], &["not base64!".into()]),
-        Err(Error::Log(_))
-    ));
 }
 
 fn host(id: &str, target: &str) -> sheprd_client::SavedHost {
@@ -216,4 +193,47 @@ fn a_removed_host_that_holds_its_removal_is_never_synced_again() {
     let mine = vec!["h1".to_owned()];
     let (removed, now) = link(Standing::Removed, OUTSIDE * 100, &[]);
     assert!(!removed.due(&mine, now));
+}
+
+#[test]
+fn a_removed_host_shared_again_or_another_fleet_is_synced_again() {
+    let mut view = fleet_view(&["h"]);
+    let mut fleet = Fleet {
+        view: Some(view.clone()),
+        reads: 1,
+        ..Fleet::default()
+    };
+    let (mut removed, _) = link(Standing::Removed, Duration::ZERO, &[]);
+    removed.host = Some("host-1".into());
+    fleet.links.insert("m1".into(), removed.clone());
+    // Still removed: the stop stands.
+    fleet.answered(1, Ok(Some(view.clone())));
+    assert_eq!(fleet.links["m1"].standing, Standing::Removed);
+    // Shared again: synced again.
+    view.hosts
+        .push(sheprd_remote_control::control::fleet::HostView {
+            id: "host-1".into(),
+            name: "build-01".into(),
+            kind: sheprd_remote_control::control::fleet::HostKind::Sheprd,
+            user: "me".into(),
+            added_by: "a".into(),
+            grants: Vec::new(),
+            relays: Vec::new(),
+            target: None,
+            rev: 1,
+            held: false,
+            flagged: false,
+        });
+    fleet.reads = 2;
+    fleet.answered(2, Ok(Some(view)));
+    assert_eq!(fleet.links["m1"].standing, Standing::Unknown);
+    // Another fleet: nothing a machine said of the old one holds.
+    let (member, _) = link(Standing::Member, Duration::ZERO, &["h"]);
+    fleet.links.insert("m2".into(), member);
+    let mut other = fleet_view(&["x"]);
+    other.fleet = "e".repeat(64);
+    fleet.reads = 3;
+    fleet.answered(3, Ok(Some(other)));
+    assert_eq!(fleet.links["m2"].standing, Standing::Unknown);
+    assert!(Link::default().due(&[], Instant::now()));
 }

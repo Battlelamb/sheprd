@@ -23,6 +23,8 @@ static SERIAL: Mutex<()> = Mutex::new(());
 static IN_FLEET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 /// The fleet removed this computer.
 static REMOVED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// This computer holds the log as a shared host, not as a member.
+static HOSTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn view() -> View {
     let member = |id: &str, name: &str, kind, by: Option<&str>| MemberView {
@@ -62,6 +64,7 @@ fn view() -> View {
         suspended: Vec::new(),
         pending: 0,
         heads: vec!["h".into()],
+        hosted: None,
     }
 }
 
@@ -73,6 +76,10 @@ fn daemon(_: &Path, request: &Request) -> Result<Response, control::Error> {
         Ask::Status => Answer::Status {
             view: IN_FLEET.load(Ordering::SeqCst).then(|| {
                 let mut view = view();
+                if HOSTED.load(Ordering::SeqCst) {
+                    view.members.retain(|member| member.id != view.me);
+                    view.hosted = Some("ha".into());
+                }
                 if REMOVED.load(Ordering::SeqCst) {
                     view.members.retain(|member| member.id != view.me);
                 }
@@ -96,6 +103,7 @@ pub(super) fn serial() -> std::sync::MutexGuard<'static, ()> {
 pub(super) fn page(cx: &mut TestAppContext, in_fleet: bool) -> &mut VisualTestContext {
     IN_FLEET.store(in_fleet, Ordering::SeqCst);
     REMOVED.store(false, Ordering::SeqCst);
+    HOSTED.store(false, Ordering::SeqCst);
     ASKED.lock().unwrap().clear();
     let (view, cx) = cx.add_window_view(skill_fixture);
     let config = RemoteConfig {
@@ -231,4 +239,21 @@ fn with_no_fleet_a_machine_still_offers_to_remove_fleet_access(cx: &mut TestAppC
     click(cx, "fleet-machine-0-scrub-cancel");
     assert!(cx.debug_bounds("fleet-machine-0-scrub-confirm").is_none());
     assert!(ASKED.lock().unwrap().is_empty());
+}
+
+#[gpui::test]
+fn a_shared_host_is_not_shown_as_removed(cx: &mut TestAppContext) {
+    let _serial = serial();
+    let cx = page(cx, true);
+    HOSTED.store(true, Ordering::SeqCst);
+    cx.update(|_, cx| Fleet::refresh(cx));
+    cx.run_until_parked();
+    draw(cx);
+    assert!(cx.debug_bounds("fleet-hosted").is_some());
+    assert!(cx.debug_bounds("fleet-removed").is_none());
+    assert!(cx.debug_bounds("fleet-forget").is_none());
+    // The members show, with nothing to sign.
+    assert!(cx.debug_bounds("fleet-member-0").is_some());
+    assert!(cx.debug_bounds("fleet-member-1-remove").is_none());
+    HOSTED.store(false, Ordering::SeqCst);
 }

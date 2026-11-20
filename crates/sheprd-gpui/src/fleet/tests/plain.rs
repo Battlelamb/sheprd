@@ -100,6 +100,7 @@ fn an_agent_of_a_host_removed_everywhere_is_told_to_forget_the_fleet() {
         suspended: Vec::new(),
         pending: 0,
         heads: Vec::new(),
+        hosted: None,
     };
     assert_eq!(next(&view, "live", &[]), Next::Keep);
     assert_eq!(next(&view, "gone", &["gone".to_owned()]), Next::Forget);

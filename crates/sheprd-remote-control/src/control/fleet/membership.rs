@@ -63,6 +63,9 @@ impl Members {
     }
 }
 
+/// A set's membership operations after its barrier, and that barrier.
+type MembersKey = (Bits, Option<usize>);
+
 /// Checks operations and folds membership over a graph.
 pub(super) struct Folder<'g, 'a> {
     graph: &'g Graph<'a>,
@@ -71,7 +74,11 @@ pub(super) struct Folder<'g, 'a> {
     /// The membership operations.
     mask: Bits,
     checks: Vec<Result<()>>,
-    cache: RefCell<HashMap<Bits, Rc<Members>>>,
+    /// Members of each set's membership operations after its barrier
+    /// ([`Folder::barrier`]), by that barrier.
+    cache: RefCell<HashMap<MembersKey, Rc<Members>>>,
+    /// The state at each barrier checkpoint, counting it.
+    states: RefCell<HashMap<usize, Rc<State>>>,
     /// Operations whose signature was checked against their signer's key
     /// already ([`Folder::new`]).
     signed: &'g HashSet<OpId>,
@@ -111,6 +118,7 @@ impl<'g, 'a> Folder<'g, 'a> {
             mask,
             checks: Vec::with_capacity(graph.len()),
             cache: RefCell::default(),
+            states: RefCell::default(),
             signed,
         };
         for position in 0..graph.len() {
@@ -135,13 +143,62 @@ impl<'g, 'a> Folder<'g, 'a> {
 
     /// The members of the down-closed set `set`.
     pub(super) fn members(&self, set: &Bits) -> Rc<Members> {
-        let key = set.masked(&self.mask);
+        let (rest, base) = self.split(set);
+        let key = (rest.masked(&self.mask), base.as_ref().map(|(at, _)| *at));
         if let Some(members) = self.cache.borrow().get(&key) {
             return Rc::clone(members);
         }
-        let members = Rc::new(self.fold(&key));
+        let members = Rc::new(self.fold(
+            &key.0,
+            base.as_ref().map_or(self.base, |(_, state)| state.as_ref()),
+        ));
         self.cache.borrow_mut().insert(key, Rc::clone(&members));
         members
+    }
+
+    /// The last checkpoint in the down-closed `set` that every other
+    /// operation there has seen or was seen by: a barrier. What came before
+    /// it is settled in the state it names, the one a log pruned to it
+    /// keeps, so the fold of `set` starts there, in a log pruned to it and
+    /// in the whole log alike.
+    pub(super) fn barrier(&self, set: &Bits) -> Option<usize> {
+        let positions: Vec<usize> = set.iter().collect();
+        positions.iter().rev().copied().find(|&at| {
+            matches!(self.graph.order[at].body(), Body::Checkpoint(_))
+                && self.checks.get(at).is_some_and(Result::is_ok)
+                && positions.iter().all(|&other| {
+                    other == at || self.graph.sees(at, other) || self.graph.sees(other, at)
+                })
+        })
+    }
+
+    /// `set` after its barrier, and the state there; `set` itself and no
+    /// state when it has none.
+    pub(super) fn split(&self, set: &Bits) -> (Bits, Option<(usize, Rc<State>)>) {
+        let Some(at) = self.barrier(set) else {
+            return (set.clone(), None);
+        };
+        let mut rest = Bits::new(self.graph.len());
+        for position in set.iter().filter(|&position| self.graph.sees(position, at)) {
+            rest.insert(position);
+        }
+        (rest, Some((at, self.state_at(at))))
+    }
+
+    /// The state the checkpoint at `at` names, counting the checkpoint
+    /// itself, as a log pruned to it keeps it.
+    fn state_at(&self, at: usize) -> Rc<State> {
+        if let Some(state) = self.states.borrow().get(&at) {
+            return Rc::clone(state);
+        }
+        let mut state = super::fold::fold(self, &self.graph.ancestors[at], self.base);
+        let checkpoint = self.graph.order[at];
+        if let Some(member) = state.members.get_mut(&checkpoint.signer()) {
+            member.seq = member.seq.max(checkpoint.unsigned().seq);
+        }
+        let state = Rc::new(state);
+        self.states.borrow_mut().insert(at, Rc::clone(&state));
+        state
     }
 
     /// Whether `position` is void because an effective removal of its
@@ -290,15 +347,15 @@ impl<'g, 'a> Folder<'g, 'a> {
     }
 
     /// Membership of the membership operations in `set`.
-    fn fold(&self, set: &Bits) -> Members {
+    fn fold(&self, set: &Bits, base: &State) -> Members {
         let checked: Vec<usize> = set
             .iter()
             .filter(|&position| self.checks.get(position).is_some_and(Result::is_ok))
             .collect();
         let removals = self.effective_removals(&checked);
         let mut members = Members {
-            live: self.base.members.clone(),
-            tombstones: self.base.tombstones.clone(),
+            live: base.members.clone(),
+            tombstones: base.tombstones.clone(),
             removals: BTreeMap::new(),
             origins: BTreeMap::new(),
             claims: BTreeMap::new(),
@@ -375,7 +432,10 @@ impl<'g, 'a> Folder<'g, 'a> {
                         member.rotated = op.unsigned().seq;
                     } else if let Some(host) = unseated.get_mut(&op.signer())
                         && let Some(id) = host_id(bundle)
+                        && *host != id
                     {
+                        // Naming another host drops the old one here too.
+                        members.dropped.push((position, *host));
                         *host = id;
                     }
                 }

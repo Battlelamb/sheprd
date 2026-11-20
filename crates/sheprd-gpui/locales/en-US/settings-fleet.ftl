@@ -71,8 +71,14 @@ settings-fleet-share-plain = Share as a plain host
 settings-fleet-share-plain-ask = Installs sheprd-relay-agent on this machine, runs it as a user service on this computer's relays, and lets the computers allowed below in over SSH:
 
 settings-fleet-removed = This computer is not in the fleet any more
+settings-fleet-hosted = This computer is a shared host of the fleet
+settings-fleet-hosted-description = The fleet lets the computers allowed here open terminals on it. It is not a member, so it signs nothing; a member removes it from the fleet.
 settings-fleet-removed-description = A member removed it. Its keys no longer count anywhere; forget the fleet here to remove what it wrote, then join again with a new approval.
 settings-fleet-forget = Forget the fleet
 settings-fleet-scrub = Remove fleet access
 settings-fleet-scrub-ask = Remove every way a fleet reaches this account: its authorized_keys lines and the relay agent's entries. Nothing is signed; it only takes access away.
 settings-fleet-scrub-description = The last resort for a machine no member can reach: removes what any fleet wrote on it.
+settings-fleet-unsaved = { $count ->
+    [one] One fleet host could not be added to Devices
+   *[other] { $count } fleet hosts could not be added to Devices
+}

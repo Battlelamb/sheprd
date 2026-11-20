@@ -113,6 +113,7 @@ async fn joining_supersedes_a_pairing_here_so_removal_takes_every_way_in() {
         route: info.route,
         fleet: true,
         host: None,
+        opening: true,
     };
     let host = sheprd_client::relay_host::host_name(&record.id().unwrap());
     let mut opened = None;
@@ -191,6 +192,7 @@ async fn removing_a_member_revokes_a_pairing_whose_key_it_proved() {
         route: info.route,
         fleet: true,
         host: None,
+        opening: true,
     };
     // b proves its tunnel key by finishing the handshake, asking for SSH.
     let mut proved = false;

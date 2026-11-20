@@ -42,6 +42,8 @@ mod link_recovery;
 #[cfg(unix)]
 mod offline;
 #[cfg(unix)]
+mod opening;
+#[cfg(unix)]
 mod other_fleet;
 #[cfg(unix)]
 mod partial_join;

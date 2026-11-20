@@ -19,6 +19,7 @@ fn record(route: String, identity: &str) -> Record {
         route,
         fleet: false,
         host: None,
+        opening: false,
     }
 }
 

@@ -93,7 +93,56 @@ fn native_notifications() {
 #[test]
 #[ignore = "requires active native desktop; a page in the window, no daemon"]
 fn native_pages() {
-    native_fixture(Fixture::Pages);
+    // TEMPORARY: watch WebView2's processes during the cold first run.
+    #[cfg(windows)]
+    {
+        let defender = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "Get-MpComputerStatus | Format-List RealTimeProtectionEnabled,AMRunningMode",
+            ])
+            .output();
+        if let Ok(out) = defender {
+            eprintln!(
+                "PAGES diag: defender {}",
+                String::from_utf8_lossy(&out.stdout).trim()
+            );
+        }
+        let started = Instant::now();
+        thread::spawn(move || {
+            loop {
+                if let Ok(out) = Command::new("tasklist")
+                    .args([
+                        "/FI",
+                        "IMAGENAME eq msedgewebview2.exe",
+                        "/FO",
+                        "CSV",
+                        "/NH",
+                    ])
+                    .output()
+                {
+                    let text = String::from_utf8_lossy(&out.stdout);
+                    let count = text
+                        .lines()
+                        .filter(|line| line.contains("msedgewebview2"))
+                        .count();
+                    eprintln!(
+                        "PAGES diag: {:?} msedgewebview2 processes={count}",
+                        started.elapsed()
+                    );
+                }
+                thread::sleep(Duration::from_secs(5));
+            }
+        });
+    }
+    let mut failures = 0;
+    for run in 0..2 {
+        let result = std::panic::catch_unwind(|| native_fixture(Fixture::Pages));
+        eprintln!("PAGES diag: run {run} ok={}", result.is_ok());
+        failures += usize::from(result.is_err());
+    }
+    assert_eq!(failures, 0, "native pages failed {failures} of 2 runs");
 }
 
 #[cfg(target_os = "linux")]
@@ -264,7 +313,7 @@ fn run_fixture(fixture: &Fixture) -> Option<(ExitStatus, String)> {
     let pages = matches!(fixture, Fixture::Pages);
     #[cfg(not(any(target_os = "macos", windows)))]
     let pages = false;
-    let bound = if pages { 100 } else { 40 };
+    let bound = if pages { 300 } else { 40 };
     let deadline = Instant::now() + Duration::from_secs(bound);
     while gui.try_wait().unwrap().is_none() {
         if Instant::now() >= deadline {

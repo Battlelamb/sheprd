@@ -19,6 +19,9 @@ pub enum Command {
     OpenWorktree,
     /// The focused linked worktree's delete confirmation.
     RemoveWorktree,
+    /// Asks once, then removes every linked worktree on the selected device
+    /// whose pull request is merged.
+    RemoveMergedWorktrees,
     /// Go To, listing only the checkouts that have a note.
     WorktreeNotes,
     /// The focused checkout's note.
@@ -217,6 +220,11 @@ pub const COMMANDS: &[CommandInfo] = &[
         command: Command::RemoveWorktree,
         name: "remove_worktree",
         message: "commands-remove-worktree",
+    },
+    CommandInfo {
+        command: Command::RemoveMergedWorktrees,
+        name: "remove_merged_worktrees",
+        message: "commands-remove-merged-worktrees",
     },
     CommandInfo {
         command: Command::WorktreeNotes,

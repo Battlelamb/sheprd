@@ -36,6 +36,8 @@ pub enum Error {
     QuestionAnswersLimit(EntryId),
     #[error(transparent)]
     Restore(#[from] crate::restore::Error),
+    #[error("chat settings of {len} bytes exceed the limit")]
+    SettingsLimit { len: usize },
     #[error("no entry {0:?}")]
     UnknownEntry(EntryId),
     #[error("no pending permission request {0:?}")]

@@ -56,6 +56,7 @@ menu-page-remote-control-phones = Remote control phones
 menu-page-pair-another-machine = Pair another machine
 menu-page-update-remote-sheprd = Update Sheprd
 menu-page-remove-device = Remove device
+menu-page-remove-merged = Remove merged worktrees
 menu-page-remove-wsl-distribution = Remove WSL distribution
 menu-page-rename-device = Rename device
 menu-page-rename-pane = Rename pane

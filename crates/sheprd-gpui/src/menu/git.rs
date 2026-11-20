@@ -3,7 +3,7 @@
 //! open pull request.
 // i18n: migrated
 use super::{Page, accent, danger};
-use crate::i18n::fl;
+use crate::i18n::{Localize, fl};
 use crate::{
     SheprdWindow,
     dialog_input::DialogInput,
@@ -20,6 +20,7 @@ pub(super) enum Row {
     Review,
     Comment,
     Merge,
+    Restack,
 }
 
 impl Row {
@@ -31,7 +32,18 @@ impl Row {
             Self::Review => "icons/pulse.svg",
             Self::Comment => "icons/plus.svg",
             Self::Merge => "icons/arrow-right.svg",
+            Self::Restack => "icons/git-branch.svg",
         }
+    }
+}
+
+/// What a running Git action says while it runs.
+fn running_text(action: &Action) -> String {
+    match action {
+        Action::Commit(_) => fl!("git-menu-running-commit"),
+        Action::Push => fl!("git-menu-running-push"),
+        Action::CreatePullRequest => fl!("git-menu-running-pull-request"),
+        Action::Restack { .. } => fl!("git-menu-running-restack"),
     }
 }
 
@@ -268,10 +280,18 @@ impl SheprdWindow {
         {
             rows.push((Row::Review, fl!("git-menu-checks-and-comments")));
             rows.push((Row::Comment, fl!("git-menu-comment")));
-            // GitHub refuses to merge a draft; the repository may allow nothing.
-            if !pr.is_draft && !pr.merge_methods.is_empty() {
+            // GitHub refuses to merge a draft; the repository may allow
+            // nothing. A stacked one merges the layers below it too, so only
+            // once they are all known and ready.
+            if !pr.is_draft && !pr.merge_methods.is_empty() && pr.stack_mergeable() {
                 rows.push((Row::Merge, fl!("git-menu-merge")));
             }
+        }
+        if let Some(restack) = self.git_restack() {
+            rows.push((
+                Row::Restack,
+                fl!("git-menu-restack", base = restack.base.as_str()),
+            ));
         }
         rows
     }
@@ -303,11 +323,12 @@ impl SheprdWindow {
             Row::Review => self.open_pr_review(),
             Row::Comment => self.open_pr_comment(),
             Row::Merge => self.open_pr_merge(),
+            Row::Restack => self.open_git_restack(),
         }
         cx.notify();
     }
 
-    fn start_git(&mut self, action: Action) {
+    pub(super) fn start_git(&mut self, action: Action) {
         if let Err(error) = self.git.start(action, self.main_tokens()) {
             self.menu.error = Some(error.to_string());
         } else {
@@ -637,7 +658,7 @@ impl SheprdWindow {
                     .debug_selector(|| "git-menu-running".into())
                     .p(px(8.))
                     .text_color(rgb(theme.ink(theme.palette[3])))
-                    .child(action.running_label()),
+                    .child(running_text(action)),
             );
         }
         if let Some(outcome) = self.git.outcome() {
@@ -645,7 +666,10 @@ impl SheprdWindow {
                 div()
                     .debug_selector(|| "git-menu-outcome".into())
                     .p(px(8.))
-                    .child(outcome.message.clone()),
+                    .child(match &outcome.restacked {
+                        Some(restacked) => super::git_restack::restacked_text(restacked),
+                        None => outcome.message.clone(),
+                    }),
             );
             if let Some(url) = outcome.url.clone() {
                 panel = panel.child(
@@ -666,18 +690,19 @@ impl SheprdWindow {
             }
         }
         panel = self.render_pr_action_status(panel, cx);
-        for error in self
+        let errors = self
             .git
             .error()
+            .map(Localize::localize)
             .into_iter()
-            .chain(self.menu.error.as_deref())
-        {
+            .chain(self.menu.error.clone());
+        for error in errors {
             panel = panel.child(
                 div()
                     .debug_selector(|| "git-menu-error".into())
                     .p(px(8.))
                     .text_color(rgb(theme.ink(theme.palette[1])))
-                    .child(error.to_owned()),
+                    .child(error),
             );
         }
         panel

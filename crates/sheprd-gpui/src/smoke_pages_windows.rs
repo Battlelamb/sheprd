@@ -27,8 +27,11 @@ use wry::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 /// The title of the page `serve` serves, which the tab takes once it loads.
 const TITLE: &str = "Pages check";
 
-/// How long WebView2 may take to start, build the page, and load it.
-const SETTLE: Duration = Duration::from_secs(20);
+/// How long WebView2 may take to start, build the page, and load it. A
+/// cold WebView2 on a CI runner takes up to about 20 s on a passing run
+/// (5–19 s measured), so the bound leaves room above that rather than
+/// failing a page that is only slow to start.
+const SETTLE: Duration = Duration::from_secs(60);
 
 /// Enter's virtual key, and its key-down message's repeat count and scan
 /// code.

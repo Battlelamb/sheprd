@@ -13,6 +13,8 @@ mod control_commands;
 mod language;
 mod links;
 mod local_ports;
+mod machine;
+mod machine_agent;
 mod memory;
 mod menu_bar;
 mod mods;
@@ -24,6 +26,7 @@ mod remote_update;
 mod security;
 mod ui_agent_group;
 mod ui_panel;
+mod ui_traces;
 mod usage_pick;
 mod worktrees;
 

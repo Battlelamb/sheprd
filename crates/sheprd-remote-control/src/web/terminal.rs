@@ -65,7 +65,7 @@ pub(crate) fn valid_key(key: &str) -> bool {
 }
 
 /// The terminal pane `pane` names in `layout`, or not found.
-fn known(layout: &Layout, pane: &str) -> Result<(), ApiError> {
+pub(super) fn known(layout: &Layout, pane: &str) -> Result<(), ApiError> {
     layout.terminal(pane).map(|_| ()).ok_or(ApiError::NotFound)
 }
 

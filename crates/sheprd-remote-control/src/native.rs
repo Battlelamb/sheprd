@@ -99,8 +99,15 @@ pub(crate) async fn get_chat(
     _device: Device,
     Path(pane): Path<String>,
 ) -> Result<Json<ChatSnapshot>, ApiError> {
-    state.hub.layout().chat(&pane).ok_or(ApiError::NotFound)?;
-    let link = state.hub.chat(&pane).ok_or(ApiError::NotFound)?;
+    let link = match state.hub.layout().chat(&pane) {
+        Some(_) => state.hub.chat(&pane).ok_or(ApiError::NotFound)?,
+        None if state.hub.observable(&pane) => state
+            .hub
+            .observe(&pane)
+            .await
+            .map_err(|_| ApiError::NotFound)?,
+        None => return Err(ApiError::NotFound),
+    };
     let (transcript, cursor) = link.base();
     Ok(Json(ChatSnapshot {
         pane,

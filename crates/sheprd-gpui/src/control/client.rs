@@ -311,6 +311,10 @@ pub(crate) fn send_notes(text: String) -> crate::Result<super::NotesTo> {
 pub(crate) fn status(error: &crate::Error) -> u8 {
     match error {
         crate::Error::InvalidBrowserUrl | crate::Error::InvalidLocalPage => exit::USAGE,
+        // A token that could not be read is a failure; one that is not there
+        // or not a token is the caller's to fix.
+        crate::Error::ListenToken(crate::control::listen_token::Error::Read(_)) => exit::REFUSED,
+        crate::Error::ListenToken(_) => exit::USAGE,
         crate::Error::Control(crate::control::Error::Unavailable { .. }) => exit::NOT_RUNNING,
         crate::Error::Control(crate::control::Error::Rejected { code, .. }) => match code {
             ErrorCode::InvalidUrl => exit::USAGE,
@@ -458,6 +462,7 @@ pub(crate) fn run(invocation: Invocation) -> ExitCode {
         ControlCommand::Tab(command) => tabs::tab(command, &context),
         ControlCommand::Code(command) => tabs::code(command, &context),
         ControlCommand::Devices => tabs::devices(&context),
+        ControlCommand::Machine(command) => tabs::machine(command, &context),
         ControlCommand::Orchestrator(command) => tabs::orchestrator(command, &context),
         ControlCommand::Review => tabs::review(&context),
         ControlCommand::Chat(command) => chat::chat(command, &context),

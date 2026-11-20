@@ -124,14 +124,26 @@ pub(crate) fn migrate(spaces: &mut Spaces, offer: &Offer) -> Result<Adopted, Err
         } else {
             tab.id.clone()
         };
-        match spaces.apply(Edit::PutTab(Tab {
+        match spaces.apply(Edit::OpenTab(Tab {
             id: id.clone(),
             ..tab
         })) {
+            // Past the byte bound, it is left out as `adopt` leaves one.
+            Ok(()) if matches!(spaces.to_value(), Err(Error::Large)) => {
+                spaces.apply(Edit::CloseTab { id })?;
+            }
             Ok(()) => {
                 adopted.tabs.insert(was, id);
             }
-            Err(Error::Full | Error::Invalid | Error::Missing(_)) => {}
+            // Left out, as `adopt` leaves out what does not fit.
+            Err(
+                Error::Full
+                | Error::Held(_)
+                | Error::Invalid
+                | Error::Large
+                | Error::Missing(_)
+                | Error::Taken(_),
+            ) => {}
             Err(error) => return Err(error),
         }
     }

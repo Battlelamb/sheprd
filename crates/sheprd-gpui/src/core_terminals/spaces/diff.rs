@@ -3,7 +3,9 @@
 //! opened, changed, or closed.
 
 use crate::browser::shared::View;
-use sheprd_session::spaces::{Edit, Tab};
+use crate::core_terminals::panes::{Axis, Panes};
+use sheprd_backend::TerminalId;
+use sheprd_session::spaces::{Edit, Tab, TabEdit};
 
 /// The edits from `base`, the document as last read, to `local`, the
 /// store's view of the same scope now. None when nothing changed.
@@ -46,8 +48,12 @@ pub(crate) fn edits(base: &View, local: &View) -> Vec<Edit> {
         }
     }
     for tab in &local.tabs {
-        if base.tab(&tab.id).is_none_or(|was| !same(was, tab)) {
-            edits.push(Edit::PutTab(tab.clone()));
+        match base.tab(&tab.id) {
+            None => edits.push(Edit::OpenTab(tab.clone())),
+            Some(was) => edits.extend(tab_edits(was, tab).into_iter().map(|edit| Edit::Tab {
+                id: tab.id.clone(),
+                edit,
+            })),
         }
     }
     for tab in &base.tabs {
@@ -65,12 +71,87 @@ pub(crate) fn edits(base: &View, local: &View) -> Vec<Edit> {
     edits
 }
 
-/// Whether two tabs share the same layout, names, zoom, and workspace. Its
-/// program's title changes as it runs and is written only with them.
-fn same(a: &Tab, b: &Tab) -> bool {
-    a.workspace_id == b.workspace_id
-        && a.panes == b.panes
-        && a.name == b.name
-        && a.names == b.names
-        && a.zoomed == b.zoomed
+/// The changes from `was` to `now` of one tab, each touching only its own
+/// fields, so a change another client made to the same tab stays. Its
+/// program's title changes as it runs and is not written.
+fn tab_edits(was: &Tab, now: &Tab) -> Vec<TabEdit> {
+    let mut edits = Vec::new();
+    if was.workspace_id != now.workspace_id {
+        edits.push(TabEdit::Move {
+            workspace_id: now.workspace_id.clone(),
+        });
+    }
+    edits.extend(pane_edits(&was.panes, &now.panes));
+    if was.name != now.name {
+        edits.push(TabEdit::Rename {
+            name: now.name.clone(),
+        });
+    }
+    let renamed = (now.names.keys())
+        .chain(was.names.keys())
+        .filter(|terminal| was.names.get(*terminal) != now.names.get(*terminal))
+        .collect::<std::collections::BTreeSet<_>>();
+    for terminal in renamed {
+        let Ok(id) = TerminalId::new(terminal.clone()) else {
+            continue;
+        };
+        // A pane closed here takes its name with it.
+        if now.panes.contains(&id) {
+            edits.push(TabEdit::RenamePane {
+                terminal: id,
+                name: now.names.get(terminal).cloned(),
+            });
+        }
+    }
+    if was.zoomed != now.zoomed {
+        edits.push(TabEdit::Zoom {
+            zoomed: now.zoomed.clone(),
+        });
+    }
+    edits
+}
+
+/// The pane changes from `was` to `now`: each pane closed, then a pane
+/// opened by a split, so another client's split of the same tab stays. A
+/// layout no such steps reach, as from a resize or a swap, is written
+/// whole.
+fn pane_edits(was: &Panes, now: &Panes) -> Vec<TabEdit> {
+    if was == now {
+        return Vec::new();
+    }
+    let mut edits = Vec::new();
+    let mut panes = was.clone();
+    for terminal in was.terminals() {
+        if !now.contains(terminal) && panes.count() > 1 && panes.remove(terminal) {
+            edits.push(TabEdit::RemovePane {
+                terminal: terminal.clone(),
+            });
+        }
+    }
+    // One pane opened here is a split of one already there; anything
+    // more is written whole.
+    let opened: Vec<&TerminalId> = (now.terminals().into_iter())
+        .filter(|terminal| !panes.contains(terminal))
+        .collect();
+    if let [new] = opened[..] {
+        let split = panes.terminals().into_iter().find_map(|at| {
+            [Axis::Row, Axis::Column].into_iter().find_map(|axis| {
+                let mut tried = panes.clone();
+                tried.split(at, axis, new.clone()).ok()?;
+                (tried == *now).then(|| (at.clone(), axis, tried))
+            })
+        });
+        if let Some((at, axis, tried)) = split {
+            panes = tried;
+            edits.push(TabEdit::Split {
+                at,
+                axis,
+                new: new.clone(),
+            });
+        }
+    }
+    if panes != *now {
+        edits.push(TabEdit::SetPanes { panes: now.clone() });
+    }
+    edits
 }

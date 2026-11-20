@@ -1,7 +1,8 @@
 use super::super::diff::edits;
 use super::*;
 use crate::browser::shared::View;
-use sheprd_session::spaces::{Tab, Workspace};
+use crate::core_terminals::panes::Axis;
+use sheprd_session::spaces::{Tab, TabEdit, Workspace};
 
 fn workspace(id: &str) -> Workspace {
     Workspace {
@@ -12,14 +13,14 @@ fn workspace(id: &str) -> Workspace {
     }
 }
 
-fn shared_tab(id: &str, workspace: &str, terminal: &str) -> Tab {
+fn shared_tab(tab: &str, workspace: &str, terminal: &str) -> Tab {
     Tab {
-        id: id.to_owned(),
+        id: tab.to_owned(),
         workspace_id: workspace.to_owned(),
         title: String::new(),
         name: None,
         names: Default::default(),
-        panes: Panes::single(super::id(terminal)),
+        panes: Panes::single(id(terminal)),
         zoomed: None,
     }
 }
@@ -45,7 +46,7 @@ fn new_and_gone_records_are_kept_put_closed_and_forgotten() {
         edits(&base, &local),
         [
             Edit::KeepWorkspace(workspace("c")),
-            Edit::PutTab(shared_tab("u", "c", "t2")),
+            Edit::OpenTab(shared_tab("u", "c", "t2")),
             Edit::CloseTab { id: "t".into() },
             Edit::ForgetWorkspace { id: "b".into() },
         ]
@@ -91,5 +92,115 @@ fn a_title_alone_is_not_a_change() {
     local.tabs[0].title = "vim".into();
     assert!(edits(&base, &local).is_empty());
     local.tabs[0].name = Some("editor".into());
-    assert!(matches!(&edits(&base, &local)[..], [Edit::PutTab(_)]));
+    assert_eq!(
+        edits(&base, &local),
+        [Edit::Tab {
+            id: "t".into(),
+            edit: TabEdit::Rename {
+                name: Some("editor".into())
+            }
+        }]
+    );
+}
+
+fn tab_edit(id: &str, edit: TabEdit) -> Edit {
+    Edit::Tab {
+        id: id.to_owned(),
+        edit,
+    }
+}
+
+#[test]
+fn each_change_to_a_tab_is_its_own_edit() {
+    let base = view(&["a", "b"], vec![shared_tab("t", "a", "t1")]);
+    let mut local = base.clone();
+    let tab = &mut local.tabs[0];
+    tab.workspace_id = "b".into();
+    tab.panes.split(&id("t1"), Axis::Column, id("t2")).unwrap();
+    tab.names.insert("t2".into(), "logs".into());
+    tab.zoomed = Some(id("t2"));
+    assert_eq!(
+        edits(&base, &local),
+        [
+            tab_edit(
+                "t",
+                TabEdit::Move {
+                    workspace_id: "b".into()
+                }
+            ),
+            tab_edit(
+                "t",
+                TabEdit::Split {
+                    at: id("t1"),
+                    axis: Axis::Column,
+                    new: id("t2"),
+                }
+            ),
+            tab_edit(
+                "t",
+                TabEdit::RenamePane {
+                    terminal: id("t2"),
+                    name: Some("logs".into()),
+                }
+            ),
+            tab_edit(
+                "t",
+                TabEdit::Zoom {
+                    zoomed: Some(id("t2"))
+                }
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_closed_pane_is_removed_and_a_new_layout_is_set_whole() {
+    let mut split = Panes::single(id("t1"));
+    split.split(&id("t1"), Axis::Row, id("t2")).unwrap();
+    let mut tab = shared_tab("t", "a", "t1");
+    tab.panes = split.clone();
+    let base = view(&["a"], vec![tab]);
+    let mut local = base.clone();
+    local.tabs[0].panes = Panes::single(id("t1"));
+    assert_eq!(
+        edits(&base, &local),
+        [tab_edit("t", TabEdit::RemovePane { terminal: id("t2") })]
+    );
+    let mut swapped = split.clone();
+    assert!(swapped.swap(&id("t1"), &id("t2")));
+    local.tabs[0].panes = swapped.clone();
+    assert_eq!(
+        edits(&base, &local),
+        [tab_edit("t", TabEdit::SetPanes { panes: swapped })]
+    );
+}
+
+#[test]
+fn a_split_here_and_a_rename_elsewhere_both_stay() {
+    let base = view(&["a"], vec![shared_tab("t", "a", "t1")]);
+    let mut spaces = Spaces::default();
+    spaces.apply(Edit::KeepWorkspace(workspace("a"))).unwrap();
+    spaces
+        .apply(Edit::OpenTab(shared_tab("t", "a", "t1")))
+        .unwrap();
+    // Another client renames the tab; this one splits it.
+    spaces
+        .apply(tab_edit(
+            "t",
+            TabEdit::Rename {
+                name: Some("api".into()),
+            },
+        ))
+        .unwrap();
+    let mut local = base.clone();
+    local.tabs[0]
+        .panes
+        .split(&id("t1"), Axis::Row, id("t2"))
+        .unwrap();
+    for edit in edits(&base, &local) {
+        spaces.apply(edit).unwrap();
+    }
+    let tab = spaces.tab("t").unwrap();
+    assert_eq!(tab.name.as_deref(), Some("api"));
+    assert_eq!(tab.panes, local.tabs[0].panes);
 }

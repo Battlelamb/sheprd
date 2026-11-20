@@ -43,11 +43,14 @@ impl Pending {
                     pending.workspaces.insert(workspace.id.clone());
                 }
                 Edit::MoveWorkspace { .. } => pending.moved = true,
-                Edit::PutTab(tab) => {
+                Edit::OpenTab(tab) => {
                     pending.put.insert(tab.id.clone());
                 }
                 Edit::RenameWorkspace { id, .. } => {
                     pending.workspaces.insert(id.clone());
+                }
+                Edit::Tab { id, .. } => {
+                    pending.put.insert(id.clone());
                 }
             }
         }

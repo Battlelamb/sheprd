@@ -45,7 +45,7 @@ fn a_refused_edit_leaves_the_document_and_takes_it_back() {
     laptop.settle(&mut core);
     desk.open(&api, "t1");
     let job = desk.send().unwrap();
-    assert!(matches!(&job, Job::Update(edits) if matches!(edits[..], [Edit::PutTab(_)])));
+    assert!(matches!(&job, Job::Update(edits) if matches!(edits[..], [Edit::OpenTab(_)])));
     let refused = core.run(job);
     assert!(matches!(
         refused,

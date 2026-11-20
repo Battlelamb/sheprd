@@ -311,6 +311,10 @@ just test-perf
 
 - Only commit, push, or create/update a PR when requested. Do not amend, force-push, discard changes, or clean up other worktrees without explicit authorization.
 - Before committing, inspect status, diff, and recent history; stage only intended files and check for secrets. Do not bypass hooks or signing when they fail.
+- Push with an upstream (`git push -u origin HEAD:refs/heads/NAME`, or
+  `git branch --set-upstream-to` afterwards). The app finds a checkout's pull
+  request through `branch.<name>.merge`, falling back to the local branch
+  name, so a branch pushed under another name without one shows no PR.
 - Use conventional commit subjects (`feat`, `fix`, `refactor`, `test`, `docs`, `chore`). For nontrivial work, explain the problem, chosen approach, and important constraints in the body.
 - Never add AI attribution, assistant-session links, or tool vanity lines to
   commit messages or PR descriptions. This includes `Co-Authored-By` trailers

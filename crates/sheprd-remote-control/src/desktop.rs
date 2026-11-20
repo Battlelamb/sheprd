@@ -28,8 +28,8 @@ pub(crate) mod record;
 pub use error::{Error, Result};
 
 /// The steps `desktop-pair` takes, for other modules' tests to run them
-/// against a daemon of their own.
-#[cfg(test)]
+/// against a daemon of their own: Unix only, as those tests are.
+#[cfg(all(test, unix))]
 pub(crate) mod for_tests {
     pub(crate) use super::{
         claim::{Allowed, Claimant, claim},

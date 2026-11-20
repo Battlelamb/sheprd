@@ -24,6 +24,10 @@ enum HomeRow: Identifiable {
     /// The status its row is listed by, which the edge index colors it in.
     var status: Home.AgentStatus { facts.status }
 
+    /// Starred on some device, so it lists under Favorites, away from its
+    /// workspace's section.
+    var favorite: Bool { facts.favorite }
+
     private var facts: AgentSort.Facts {
         switch self {
         case let .chat(item):

@@ -133,8 +133,9 @@ struct ChatList: View {
 
     @ViewBuilder
     private func row(_ row: HomeRow) -> some View {
-        // A section names the workspace when they are grouped by it.
-        let grouped = sort == .workspace
+        // A section names the workspace when they are grouped by it; the
+        // Favorites section mixes workspaces, so its rows name their own.
+        let grouped = sort == .workspace && !row.favorite
         switch row {
         case let .chat(item):
             Group {

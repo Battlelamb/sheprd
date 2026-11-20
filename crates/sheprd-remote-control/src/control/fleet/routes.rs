@@ -306,14 +306,15 @@ impl<'a> Pass<'a> {
 
 /// Applies the records `effective` carries to `state`'s hosts, holds those
 /// whose intro names a route another host owns, and settles who owns each
-/// route. `excluded` are the hosts the [`super::MAX_HOSTS`] bound left
-/// out, whose additions claim nothing.
+/// route. `excluded` are the additions the [`super::MAX_HOSTS`] bound
+/// left out, which claim nothing; earlier lifetimes of those hosts still
+/// claimed what they did.
 pub(super) fn records(
     graph: &Graph<'_>,
     members: &Members,
     effective: &[(usize, &Op)],
     held: &BTreeSet<usize>,
-    excluded: &BTreeSet<HostId>,
+    excluded: &BTreeSet<usize>,
     base: &State,
     state: &mut State,
 ) {
@@ -329,9 +330,9 @@ pub(super) fn records(
         }
         match op.body() {
             Body::HostAdd(intro) if intro.kind != HostKind::Member && !held.contains(&position) => {
-                // A host the bound left out (`hosts`) claims nothing.
+                // An addition the bound left out (`hosts`) claims nothing.
                 if let Ok(id) = intro.id()
-                    && !excluded.contains(&id)
+                    && !excluded.contains(&position)
                 {
                     pass.add(graph, position, id, intro);
                 }

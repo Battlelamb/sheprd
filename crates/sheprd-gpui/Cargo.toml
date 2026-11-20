@@ -41,6 +41,7 @@ sheprd-credentials.workspace    = true
 sheprd-diagnostics.workspace    = true
 sheprd-github.workspace         = true
 sheprd-i18n.workspace           = true
+sheprd-mcp                      = { optional = true, workspace = true }
 sheprd-memory.workspace         = true
 sheprd-mods.workspace           = true
 sheprd-orchestrator.workspace   = true
@@ -121,7 +122,7 @@ test-case.workspace = true
 libc.workspace = true
 
 [features]
-default = ["azure", "boat", "boxd", "coder", "container", "daytona", "opensandbox", "railway", "sprites"]
+default = ["azure", "boat", "boxd", "coder", "container", "daytona", "mcp", "opensandbox", "railway", "sprites"]
 # Machines from cloud providers as devices: the shared device list, background
 # jobs, and connector. Turned on by each provider below; not useful alone.
 cloud = ["sheprd-client/cloud", "sheprd-remote/cloud", "sheprd-usage/cloud", "sheprd-vcs/cloud"]
@@ -144,11 +145,17 @@ opensandbox = ["cloud", "sheprd-client/opensandbox", "sheprd-remote/opensandbox"
 railway = ["cloud", "sheprd-client/railway", "sheprd-remote/railway"]
 # Fly Sprites as devices, with an API token and this app as their exec relay.
 sprites = ["cloud", "sheprd-client/sprites", "sheprd-remote/sprites"]
+# `sheprd mcp`: a Model Context Protocol server over stdio that MCP clients
+# start, behind the `[features] mcp` switch, which is off until the user turns
+# it on (`docs/mcp-plan.md`). Without this feature the command, the switch, and
+# its Settings row do not exist.
+mcp = ["dep:sheprd-mcp"]
 # Development only: `--mockup` shows UI variants from HERDR_MOCKUP_FILE side by
 # side in a native window. Never enabled in release builds. GPUI's test support
 # provides `Window::render_to_image`, so `--capture` needs no screen-recording
-# permission.
-mockup = ["gpui_platform/test-support"]
+# permission. GitHub's test support seeds pull requests the rich-chat fixture
+# shows.
+mockup = ["gpui_platform/test-support", "sheprd-github/test-support"]
 # Development only: a plain launch opens Sheprd in a window Moonframe lays out
 # from `moonframe/app` (Luau), with Inspect Element and the sparkles agent to
 # change it live; `sheprd` commands and `--socket`/`--session` launches stay
@@ -222,6 +229,7 @@ font-kit.workspace              = true
 block2.workspace                = true
 dispatch2.workspace             = true
 objc2-core-foundation.workspace = true
+objc2-virtualization.workspace  = true
 objc2-web-kit.workspace         = true
 objc2-user-notifications.workspace = true
 cocoa                        = { optional = true, workspace = true }

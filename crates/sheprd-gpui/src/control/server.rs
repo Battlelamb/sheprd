@@ -11,6 +11,7 @@ mod fleet;
 mod hosts;
 mod links;
 mod mods;
+mod relay;
 mod remote;
 mod settings;
 mod tabs;
@@ -259,7 +260,11 @@ pub(super) fn in_free_window(
                 "A dialog is open in the window; close it first",
             );
         }
-        act(view, window, cx)
+        let response = act(view, window, cx);
+        if view.menu.page.is_some() && !matches!(response, Response::Error { .. }) {
+            relay::announce(view, caller, cx);
+        }
+        response
     })
 }
 
@@ -308,6 +313,14 @@ fn serve(incoming: socket::Incoming, state: &mut State, cx: &mut App) {
             .any(|handle| handle.window_id().as_u64() == id)
     {
         incoming.respond(not_found(format!("Sheprd has no window {id}")));
+        return;
+    }
+    if let Some(refusal) = incoming
+        .request
+        .via()
+        .and_then(|via| relay::refusal(via, cx))
+    {
+        incoming.respond(refusal);
         return;
     }
     if may_park && state.watches.full() {

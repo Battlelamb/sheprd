@@ -39,7 +39,7 @@ pub use repository::github_repo;
 pub use {
     auth::Auth,
     device::{Profile, Source, VERIFY_URL},
-    http::{graphql, graphql_aliases, hidden_hint, mutation, rest},
+    http::{graphql, graphql_aliases, hidden_hint, mutation, rest, rest_put},
     installation::{Access, Installation},
     routing::Tokens,
     store::{Account, Note, Store, note as store_note, select as select_store},

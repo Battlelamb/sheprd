@@ -147,6 +147,23 @@ Sheprd** entry, which both Windows installers add, runs this command through
 | `code open FILE[:LINE]` | A read-only code tab at a line |
 | `code edit FILE[:LINE]` | Your terminal editor, in a new pane beside yours |
 | `devices` | The Devices overview |
+| `machine [open [NAME]]` | The virtual Mac called NAME (default `default`) in a tab, started or resumed if it is not running. Closing the tab leaves it running; quitting Sheprd saves it (Apple silicon Macs) |
+| `machine list` | Each machine's state, CPUs, memory, display, and disk use, which counts blocks shared with its image. Exits 4 when there are none |
+| `machine set NAME [--cpus N] [--memory GB] [--display fit\|WxH]` | What it boots with next, after it next shuts down |
+| `machine suspend NAME` | Save it and stop it; it resumes where it was when next shown |
+| `machine delete NAME` | Ask in Settings to delete it and free its disk; the user confirms there |
+| `machine new NAME --from IMAGE` | Make a machine from an image: an APFS clone that takes no real space until it changes, with its own identity, so several can run at once (macOS allows 2) |
+| `machine new [NAME]` | Open Settings > Virtual Macs, where the user confirms downloading Apple's newest macOS for this Mac (over 20 GB) and installing it on a new machine, `NAME` or `default`; it then opens with its setup guide. Exits 2 when `NAME` exists |
+| `machine image [list]` | The images machines can start from. Exits 4 when there are none |
+| `machine image save MACHINE IMAGE` | Keep a shut down machine as an image. Exits 6 while it runs or is suspended |
+| `machine image delete IMAGE` | Ask in Settings to delete it; the user confirms there. Machines made from it stay |
+| `machine setup [NAME]` | Shows the machine with its setup guide docked beside it: sign in, install Sheprd Agent, allow its two permissions, and save an image, each checked by Sheprd before the next. A machine made from an image opens with it already |
+| `machine agent NAME` | Whether Sheprd Agent answers inside the running machine: its screen size in pixels and whether macOS lets it post input and take screenshots (see [Working inside a virtual Mac](#working-inside-a-virtual-mac)). Exits 1 when it does not answer |
+| `machine exec NAME [--timeout S] [--cwd DIR] -- COMMAND...` | Run a command as the machine's logged-in user and print its output, as `cloud exec` does |
+| `machine screenshot NAME PATH` | Write a PNG of the machine's screen to PATH |
+| `machine click NAME X Y [--right] [--double]` | Click at a point of the machine's screen, in the screenshot's pixels |
+| `machine type NAME TEXT` | Type text in the machine as from a keyboard, at most 4096 characters at once |
+| `machine key NAME KEY` | Press a key in the machine, with modifiers: `return`, `escape`, `tab`, `cmd+q`, `cmd+shift+4` |
 | `orchestrator [--repo PATH]` | Show the Issues section narrowed to your checkout's project, or PATH's |
 | `orchestrator restart RUN [--repo PATH]` | Open the user's confirmation to restart a loaded, owned Herdr 2 run in this project with its saved prompt/model and existing checkout; requires the running app |
 | `orchestrator adopt RUN [--repo PATH]` | Read the current process of a loaded legacy run and prepare the user's adoption confirmation; grants no authority until confirmed and revalidated |
@@ -197,6 +214,8 @@ share at least two of its keywords and were not shown yet in that chat.
 | `chat [status]` | The `sheprd-acp` chat panes of the window's host, this machine or an SSH host: agent, status, model, context window use, and whether the chat view or the terminal shows |
 | `chat convert [--pane ID]` | Move the terminal agent in your pane (or ID, else the focused one) into a `sheprd-acp` chat in the same pane, keeping its conversation. From a Herdr 2 pane, your pane is your terminal (`HC_TERMINAL_ID`), whose id in `chat` is `core:` and the terminal's (see [Moving a terminal agent into a chat](rich-chat.md#moving-a-terminal-agent-into-a-chat)). Returns once the move has started; `chat` shows the chat when it attaches. Exits 6 while the agent works, 5 when the pane has no terminal agent, and 8 for an agent or pane that cannot move. `config set chat.auto_convert true` moves every new agent this way ([Opening new agents as chats](rich-chat.md#opening-new-agents-as-chats)) |
 | `chat shortcuts` | Your text shortcuts, the prompts every chat's composer offers (type `/`, or use the shortcuts button beside +), in order: each label and its text. `--json` adds each one's `id` and `title`, the list's `updated_ms`, and `complete`, false when the list holds more text than one answer carries. The list is the same on this computer, every connected SSH host with `sheprd-remote-control`, and the phones paired with them; Settings > Text Shortcuts edits it. Exits 4 when there are none |
+| `chat pr [list]` | Run as the agent of a `sheprd-acp` chat: the pull requests that chat's side rail lists, oldest first, each with its repository, address, and what was done to it (`created`, `pushed`, `edited`, `commented`, `reviewed`, `ready`, `merged`, `closed`, `reopened`). Reaches the chat named by `SHEPRD_CHAT_ENDPOINT`, which the chat sets on its agent, over the chat's own socket; Sheprd need not run. Exits 4 when there are none, 2 outside a chat, and 3 when the chat cannot be reached (see [Pull requests in a chat's rail](#pull-requests-in-a-chats-rail)) |
+| `chat pr add URL` | List a pull request (`https://github.com/OWNER/REPO/pull/N`) in your chat's rail, for one you changed without `gh`. Exits 2 for an address that is not a GitHub pull request |
 | `chat show\|hide\|toggle [--pane ID]` | Show the native chat view over your pane (or ID, else the focused one), or its terminal |
 | `chat new AGENT [--pane ID]` | Open a tab running a `sheprd-acp` chat with a built-in agent (`claude`, `codex`, `copilot`, `gemini`, `kimi`, `opencode`, `pi`) in the workspace and folder of your pane (or ID). While its agent is idle, a chat on this machine can switch to another installed agent from its composer, which hands the new agent the conversation. On an SSH host the tab runs that host's `sheprd-acp` (see [Chats on SSH hosts](#chats-on-ssh-hosts)). With no Herdr pane to go by, as when called from a Herdr 2 pane, a Herdr 2 tab in the active group splits its pane in use with the chat instead (see [Chats in Herdr 2 panes](rich-chat.md#chats-in-herdr-2-panes)); its pane id in `chat` is `core:` and the terminal's. Exits 8 when `sheprd-acp` is missing here, the host cannot be reached, or the agent is not installed on it (`sheprd-acp agents` lists those that are) |
 
@@ -220,7 +239,9 @@ not take it either.
 | `host mute\|unmute [HOST]` | Silence a host's notifications as a whole, or let them through again, by ID or label; absent, your host. Works while it is offline |
 | `host tag ID [TAG...]` | Replace the tags that group a host in the sidebar and on paired phones; with no tags, clear them. Each computer's daemon keeps its own tags, so a host away gets the edit once it is back |
 | `host update [HOST]` | Ask in the app to update the Sheprd app running on an SSH or cloud host, by ID or label (default: your workspace's host), as its header's Update pill does; the user confirms there (see [Updating Sheprd on other machines](#updating-sheprd-on-other-machines)). Exits 4 with the reason when it offers no newer release, 5 when no connected host has that name, 6 while a dialog is open, 8 for this computer, which `update` covers |
-| `pr [status]\|checks\|comments\|open` | Your branch's pull request, on the window's selected host. `comments` needs your workspace focused |
+| `pr [status]\|checks\|comments\|open` | Your branch's pull request, on the window's selected host. `comments` needs your workspace focused. `status` also says where it sits in a GitHub stack and what merging there would do (`stack` in `--json`: its layers bottom first with a status word each, a `verdict` of `merged`, `ready`, `blocked`, or `unread` when a layer below it was not read, and for `blocked` the lowest layer read in the way and why), and its place in the merge queue (`queue`: `position`, `state`, `eta_seconds`); both are `null` when it is in none |
+| `pr merge` | Open the Git popup's merge dialog for your branch's pull request, which must be your focused workspace's. On a GitHub stack it lands the open pull requests below it too, bottom first, through GitHub's asynchronous merge API. Only the dialog opens: the user picks the method and confirms with a click, since Enter is ignored in a dialog a command opened, so a keystroke meant for a terminal cannot confirm it. Exits 1 with the reason when it is not open, a draft, already queued, or its stack is blocked (`The stack cannot merge yet: #1362 is checks failed`), 6 while a menu or dialog is open |
+| `pr queue add\|remove` | Open the confirmation that adds your branch's pull request (with the open layers of its stack below it) to its base branch's merge queue, or takes it out; the user confirms there. Exits 1 when the branch has no merge queue, or the pull request is already in it or not in it |
 | `pr quota` | Last reported GraphQL points used, limit, and remaining, plus rate-limit retry delays for the window's GitHub accounts. `--json` returns records merged by login: known observations are preferred, then the latest reset window and greatest usage within it; retry delays retain the longest pause. Usage is never summed across credentials. Unavailable quotas are `null`. No network request is made. |
 | `ports [list]` | Ports your workspace listens on, and forwards |
 | `ports forward\|unforward PORT` | Forward a port of the SSH host to this machine |
@@ -258,7 +279,7 @@ not take it either.
 | `config reload` | Reread Herdr's config and this app's |
 | `theme [list]`, `theme set NAME` | The app theme. A device's terminal theme is `config set devices.ID.theme NAME`, with the ID from `host list` minus its `ssh:` prefix |
 | `font [list]`, `font set NAME`, `font reset` | |
-| `language [status]`, `language list`, `language set system\|TAG` | The language set and the locale Sheprd shows, the languages there are, each with its name in itself as Settings > General lists it, or save the `language` setting (a BCP 47 tag; `en-XA` and `en-XB` are pseudo-locales). Only `status` asks the app, and without it reports what it would show |
+| `language [status]`, `language list`, `language set system\|TAG` | The language set and the locale Sheprd shows, the languages available for direct selection plus pseudo-locales, or save the `language` setting (a BCP 47 tag; `en-XA` and `en-XB` are pseudo-locales). `system` also uses Simplified Chinese when it matches the OS's preferred languages. Only `status` asks the app, and without it reports what it would show |
 | `keybinds [list]`, `keybinds check` | Shortcuts; custom Herdr commands this client cannot reach |
 | `caffeine [status]`, `caffeine on\|off\|toggle [--for 30m]` | Keep the machine awake |
 | `sound [list]`, `sound play [done\|request]`, `bell` | Sounds play at `sound.volume` percent (`config set sound.volume 30`) |
@@ -365,6 +386,44 @@ The change applies live; `config get focus_follows_mouse` reads it back.
 An unnamed tab shows its number. To show its agent's terminal title instead,
 run `sheprd config set tab_labels.agent_title true`.
 
+### Working inside a virtual Mac
+
+`machine agent`, `exec`, `screenshot`, `click`, `type`, and `key` work
+inside a running virtual Mac through Sheprd Agent, a small app in the guest
+that answers the app over the machine's vsock device: no network, and
+nothing outside the machine can reach it. A new machine's tab shows a
+setup guide beside it that walks through what follows and checks each
+step through the agent; `machine setup NAME` or Settings > Virtual Macs >
+Set up for agents shows it again. Every machine boots with a
+read-only disk from the app, Sheprd Agent, which shows on its desktop.
+Install the agent once by double-clicking Install Sheprd Agent.pkg there:
+it puts `Sheprd Agent.app` in `/Applications` and starts it at each login.
+Allow it when macOS asks about Accessibility (for input), and switch it on
+in the Screen & System Audio Recording pane the installer opens (for
+screenshots: macOS shows no prompt for it), then shut the machine down and
+keep it as an image, so every machine made from it has the agent and its
+permissions. It needs the user logged in, so turn on automatic login before
+saving the image. The disk comes with builds made by `just bundle`; release
+builds do not carry it yet.
+
+`machine exec` runs a command as that user, with a Terminal's `PATH`, in
+`--cwd` when given (`~/` being their home). Its output comes back as
+`cloud exec`'s does, and it exits 0 when the command did. At its `--timeout`, the agent stops the command and everything it started, and the command exits 7. Points for
+`machine click` are in the screenshot's pixels, top-left first, so an agent
+reads `machine screenshot` and clicks what it sees. Like `cloud exec`, none
+of these asks first: they act only inside a machine the user made, as the
+agent's own shell does on this one. macOS ignores synthetic input in
+password fields and some of its own prompts, and signing in to an Apple
+Account still needs the user.
+
+```sh
+sheprd machine exec test-1 -- xcodebuild -scheme App test
+sheprd machine screenshot test-1 /tmp/screen.png
+sheprd machine click test-1 1280 812
+sheprd machine type test-1 "hello"
+sheprd machine key test-1 cmd+s
+```
+
 ### Remote control
 
 | Command | What it does |
@@ -453,6 +512,58 @@ for `list`, each with `name`, `places`, `commands`, `drawn`, and `error`, and
 sheprd mod check ~/.config/herdr/gpui-mods/agents
 sheprd mod logs agents --lines 20
 ```
+
+### MCP
+
+| Command | What it does |
+| --- | --- |
+| `mcp [serve]` | Speak the [Model Context Protocol](https://modelcontextprotocol.io/) on standard input and output, for an MCP client that starts it. Lists no tools while MCP server is off |
+| `mcp config [--client claude-code\|claude-desktop\|codex\|cursor]` | What to paste into a client, or every client's, so it starts this executable's server. Runs here; Sheprd need not run |
+
+Sheprd's MCP server lets an MCP client, such as Claude Desktop, Claude Code,
+Codex, or Cursor, use what the commands on this page reach. It is **off by
+default**: turn on **MCP server** in Settings > General (`[features] mcp =
+true`). Settings > General also copies the `mcpServers` setting Claude Desktop
+and Cursor read. Builds without the `mcp` Cargo feature, which release builds
+include, have neither the command nor the switch.
+
+```sh
+sheprd mcp config --client claude-code   # prints: claude mcp add sheprd -- /path/to/sheprd mcp
+sheprd mcp config --client codex --json
+```
+
+Each tool is the `sheprd` command it is named after, run with `--json`: the
+same targeting (the caller's pane from `HERDR_PANE_ID` and the other Herdr
+variables when the client runs in a Herdr pane, else the frontmost window),
+the same bounds, and an optional `window` argument as `--window`. A tool's
+answer carries the command's text and its JSON as `structuredContent` (a list
+comes as `{"result": [...]}`). A failure is a tool error starting with the
+exit code's name below (`not_running`, `not_found`, `busy`, `timeout`,
+`unsupported`, `refused`), followed by the message. Memory and checkpoint tools
+act on the repository of the directory the client starts `sheprd mcp` in.
+
+| Reads | Changes or opens a dialog |
+| --- | --- |
+| `status`, `window_list`, `window_alerts`, `tab_list` | `browser_open`, `browser_navigate`, `browser_reload` |
+| `browser_list`, `browser_text`, `browser_feedback` | `code_open` |
+| `worktree_list`, `chat_status`, `notes_get`, `notes_list` | `notes_set` |
+| `memory_index`, `memory_list`, `memory_search`, `memory_get` | `memory_add`, `memory_pin`, `memory_forget` |
+| `checkpoint_list`, `checkpoint_diff` | `checkpoint_create`, `checkpoint_restore` (dialog) |
+| `pr_status`, `pr_checks`, `pr_comments` | `ports_open`, `ports_forward` |
+| `ports_list`, `usage`, `system`, `security_list` | `worktree_create`, `fan_out`, `teleport` (dialogs) |
+| `wait` | |
+
+Requests `sheprd mcp` sends are marked as relayed for the client, by the name
+it gave (control protocol 16). The app refuses them while the switch is off,
+and when one opens a dialog the window says which client asked. Restoring a
+checkpoint, creating a worktree, fanning out, and teleporting happen only once
+the user confirms in that dialog. Like the `sheprd` commands, the other tools
+act at once: `memory_add`, `memory_pin`, `memory_forget` (which removes an
+entry), `notes_set`, `checkpoint_create`, and opening pages, files, and
+ports. Quitting
+the app, running any palette command, stopping processes on ports, `cloud
+exec`, settings changes, pairing, updates, and mods have no tool. The plan and
+its later steps are in [MCP plan](mcp-plan.md).
 
 ### Events
 
@@ -563,8 +674,10 @@ One JSON request line, one JSON response line, then the socket closes. A
 request is `{"method", "caller", "op"}`, where `caller` carries the pane,
 workspace, daemon socket, and window, and `op` is tagged with `"op"`. Browser
 requests keep their original flat form (`browser.open`, `browser.reload`,
-`browser.feedback`, `notes.send`). `status` reports the protocol version,
-currently 6. Requests and responses are bounded to 256 KiB, a request that
+`browser.feedback`, `notes.send`). A request `sheprd mcp` relays also carries
+`"via": {"mcp": {"client": NAME}}`, in its `caller` or, for
+`browser.feedback`, beside `pane_id`. `status` reports the protocol version,
+currently 16. Requests and responses are bounded to 256 KiB, a request that
 waits says for how long (at most 600 seconds), and the app answers at most a
 few requests at a time.
 
@@ -592,6 +705,24 @@ A pipe has no receive or send timeout. Reads poll with `PeekNamedPipe`, as
 the daemon client does; writes have no deadline, so the app's out buffer
 holds a whole answer and the connection bound limits what a stalled caller
 can hold.
+
+## Pull requests in a chat's rail
+
+A `sheprd-acp` chat lists the pull requests its agent worked on in the
+**Pull requests** section of its side rail, beside the plan and the changed
+files, on every client attached to it. The chat program reads them from the
+agent's finished commands: `gh pr create`, `edit`, `merge`, `comment`,
+`review`, `ready`, `close`, and `reopen`, `gh api` writes to
+`repos/OWNER/REPO/pulls/N`, and `git push` output that links to a pull
+request. Commands that only read, such as `gh pr view`, list nothing. Only
+`https://github.com/OWNER/REPO/pull/N` addresses are kept, at most 64 a chat.
+For a pull request changed another way, the agent runs
+`sheprd chat pr add URL`; the note sent ahead of the first prompt tells it
+so when a `sheprd` command is beside the chat program.
+
+Each row shows the number and title, colored as the pull request's badge is
+when Sheprd has looked it up for a workspace or lists it in the Pull
+requests section; a click opens it there, else its page on GitHub.
 
 ## Recovering a kept Herdr 2 chat
 

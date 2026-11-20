@@ -47,10 +47,11 @@ impl Hub {
             let repository = herdr_1_repository(&self.layout(), new.cwd, session, |id| {
                 self.kept_workspace(id)
             });
-            if let Some(repository) = repository {
+            if let Some(source) = repository {
                 let worktree = Worktree {
+                    base: source.base.as_deref(),
                     branch,
-                    repository: &repository,
+                    repository: &source.workspace,
                     title: new.title,
                 };
                 return self
@@ -175,6 +176,7 @@ impl Hub {
             return Ok(CreatedWorkspace { workspace, pane });
         };
         let worktree = Worktree {
+            base: None,
             branch,
             repository: &workspace,
             title: new.title,
@@ -187,6 +189,8 @@ impl Hub {
 /// A new worktree Herdr 1 makes.
 #[derive(Clone, Copy, Debug)]
 struct Worktree<'a> {
+    /// The full ref it starts from; `None` for the repository's `HEAD`.
+    base: Option<&'a str>,
     branch: &'a str,
     /// The workspace of the repository it is made from.
     repository: &'a str,
@@ -204,6 +208,9 @@ impl Worktree<'_> {
         if let Some(title) = self.title {
             params["label"] = title.into();
         }
+        if let Some(base) = self.base {
+            params["base"] = base.into();
+        }
         params
     }
 }
@@ -217,20 +224,34 @@ fn answered(value: &Value) -> Result<String> {
         .ok_or(Error::Response)
 }
 
-/// The Herdr 1 workspace of `session` (the primary's when `None`) whose
-/// repository a new worktree in `cwd` is made from: one whose folder is
-/// `cwd`, else the repository's own checkout when `cwd` is its root, and
-/// the repository's own checkout ahead of its linked worktrees. Workspaces
-/// Sheprd keeps for Herdr 2, a core's new workspaces, and WSL's are not
-/// Herdr 1's to grow here.
+/// Where Herdr 1 makes a new worktree from: the workspace of the
+/// repository's own checkout, and the ref it starts from when that is not
+/// the checkout's `HEAD`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Source {
+    pub(super) workspace: String,
+    pub(super) base: Option<String>,
+}
+
+/// Where Herdr 1 makes a new worktree in `cwd` from, among `session`'s
+/// workspaces (the primary's when `None`):
+///
+/// - the repository checkout whose folder is `cwd`, or whose root is;
+/// - for a linked worktree at `cwd`, its repository's own checkout, from
+///   the linked worktree's branch, as the desktop's new worktree does:
+///   Herdr 1 refuses a linked checkout as the source.
+///
+/// `None` when Herdr 1 shows no such checkout, and the core makes it as
+/// before. Workspaces Sheprd keeps for Herdr 2, a core's new workspaces,
+/// and WSL's are not Herdr 1's to grow here.
 pub(super) fn herdr_1_repository(
     layout: &Layout,
     cwd: &str,
     session: Option<&str>,
     kept: impl Fn(&str) -> bool,
-) -> Option<String> {
+) -> Option<Source> {
     let cwd = Path::new(cwd);
-    layout
+    let candidates: Vec<_> = layout
         .workspaces
         .iter()
         .filter(|workspace| {
@@ -239,17 +260,43 @@ pub(super) fn herdr_1_repository(
                 && !core::is_new_workspace(&workspace.id)
                 && !kept(&workspace.id)
         })
-        .filter_map(|workspace| {
-            let tree = workspace.worktree.as_ref()?;
-            let here = !workspace.cwd.is_empty() && Path::new(&workspace.cwd) == cwd;
-            // A repository's key is its Git directory, `.git` in its root.
-            let root = !tree.is_linked_worktree
+        .filter_map(|workspace| Some((workspace, workspace.worktree.as_ref()?)))
+        .collect();
+    let main_of = |key: &str| {
+        candidates
+            .iter()
+            .find(|(_, tree)| !tree.is_linked_worktree && tree.key == key)
+            .map(|(workspace, _)| workspace.id.clone())
+    };
+    let here = candidates
+        .iter()
+        .filter(|(workspace, _)| !workspace.cwd.is_empty() && Path::new(&workspace.cwd) == cwd)
+        .min_by_key(|(_, tree)| tree.is_linked_worktree);
+    if let Some((workspace, tree)) = here {
+        if !tree.is_linked_worktree {
+            return Some(Source {
+                workspace: workspace.id.clone(),
+                base: None,
+            });
+        }
+        let branch = workspace.branch.as_deref().filter(|b| !b.is_empty())?;
+        return Some(Source {
+            workspace: main_of(&tree.key)?,
+            base: Some(format!("refs/heads/{branch}")),
+        });
+    }
+    // A repository's key is its Git directory, `.git` in its root.
+    candidates
+        .iter()
+        .find(|(_, tree)| {
+            !tree.is_linked_worktree
+                && Path::new(&tree.key).ends_with(".git")
                 && Path::new(&tree.key).parent() == Some(cwd)
-                && Path::new(&tree.key).ends_with(".git");
-            (here || root).then_some((tree.is_linked_worktree, !here, workspace))
         })
-        .min_by_key(|(linked, elsewhere, _)| (*linked, *elsewhere))
-        .map(|(_, _, workspace)| workspace.id.clone())
+        .map(|(workspace, _)| Source {
+            workspace: workspace.id.clone(),
+            base: None,
+        })
 }
 
 #[cfg(test)]

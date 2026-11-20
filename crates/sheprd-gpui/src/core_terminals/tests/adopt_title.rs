@@ -38,8 +38,11 @@ fn new_workspace(name: &str, title: Option<&str>) -> TerminalInfo {
 }
 
 /// The name and whether the user gave it, of the workspace kept in
-/// [`FOLDER`] after adopting `terminal`.
-fn kept_after(cx: &mut TestAppContext, terminal: TerminalInfo) -> (String, bool) {
+/// [`FOLDER`] after adopting `terminals` in turn.
+fn kept_after(
+    cx: &mut TestAppContext,
+    terminals: impl IntoIterator<Item = TerminalInfo>,
+) -> (String, bool) {
     let (fixture, cx) = cx.add_window_view(|window, cx| {
         let view = cx.new(|cx| fixture_window(window, cx));
         SidebarFixture(view)
@@ -48,8 +51,10 @@ fn kept_after(cx: &mut TestAppContext, terminal: TerminalInfo) -> (String, bool)
     cx.update(|_, cx| {
         Store::update(cx, |_| {});
         view.update(cx, |view, cx| {
-            view.core_terminals.infos.insert(terminal);
-            view.adopt_labelled_terminals(true, cx);
+            for terminal in terminals {
+                view.core_terminals.infos.insert(terminal);
+                view.adopt_labelled_terminals(true, cx);
+            }
         });
     });
     cx.update(|_, cx| {
@@ -67,12 +72,36 @@ fn kept_after(cx: &mut TestAppContext, terminal: TerminalInfo) -> (String, bool)
 
 #[gpui::test]
 fn a_titled_new_workspace_is_kept_under_that_title(cx: &mut TestAppContext) {
-    let kept = kept_after(cx, new_workspace("t5", Some("iOS vibration")));
+    let kept = kept_after(cx, [new_workspace("t5", Some("iOS vibration"))]);
     assert_eq!(kept, ("iOS vibration".to_owned(), true));
 }
 
 #[gpui::test]
 fn an_untitled_new_workspace_is_named_for_its_folder(cx: &mut TestAppContext) {
-    let kept = kept_after(cx, new_workspace("t5", None));
+    let kept = kept_after(cx, [new_workspace("t5", None)]);
     assert_eq!(kept, ("api".to_owned(), false));
+}
+
+#[gpui::test]
+fn a_title_renames_the_workspace_kept_in_that_folder_already(cx: &mut TestAppContext) {
+    let kept = kept_after(
+        cx,
+        [
+            new_workspace("t5", None),
+            new_workspace("t6", Some("Review")),
+        ],
+    );
+    assert_eq!(kept, ("Review".to_owned(), true));
+}
+
+#[gpui::test]
+fn no_title_keeps_the_name_of_the_workspace_it_joins(cx: &mut TestAppContext) {
+    let kept = kept_after(
+        cx,
+        [
+            new_workspace("t5", Some("Review")),
+            new_workspace("t6", None),
+        ],
+    );
+    assert_eq!(kept, ("Review".to_owned(), true));
 }

@@ -1,6 +1,6 @@
 //! Which Herdr 1 workspace a phone's new worktree grows from.
 
-use super::{Worktree, herdr_1_repository};
+use super::{Source, Worktree, herdr_1_repository};
 use crate::hub::{Layout, Workspace};
 use sheprd_client::protocol::ClientShellWorktree;
 
@@ -32,6 +32,18 @@ fn kept_none(_: &str) -> bool {
     false
 }
 
+/// The workspace a new worktree in `cwd` grows from, without a kept one.
+fn repository(layout: &Layout, cwd: &str, session: Option<&str>) -> Option<String> {
+    herdr_1_repository(layout, cwd, session, kept_none).map(|source| source.workspace)
+}
+
+fn linked(id: &str, cwd: &str, branch: Option<&str>) -> Workspace {
+    Workspace {
+        branch: branch.map(str::to_owned),
+        ..workspace(id, cwd, Some(true))
+    }
+}
+
 #[test]
 fn the_repository_checkout_at_the_folder_grows_the_worktree() {
     let layout = layout(vec![
@@ -40,12 +52,12 @@ fn the_repository_checkout_at_the_folder_grows_the_worktree() {
         workspace("w3", "/code/other", Some(false)),
     ]);
     assert_eq!(
-        herdr_1_repository(&layout, "/code/app", None, kept_none).as_deref(),
+        repository(&layout, "/code/app", None).as_deref(),
         Some("w1"),
         "the repository's own checkout ahead of a linked worktree there"
     );
     assert_eq!(
-        herdr_1_repository(&layout, "/code/app/", None, kept_none).as_deref(),
+        repository(&layout, "/code/app/", None).as_deref(),
         Some("w1"),
         "the same folder written with a trailing slash"
     );
@@ -55,14 +67,11 @@ fn the_repository_checkout_at_the_folder_grows_the_worktree() {
 fn the_repository_root_finds_its_checkout_shown_from_a_subfolder() {
     let layout = layout(vec![workspace("w1", "/code/app/crates", Some(false))]);
     assert_eq!(
-        herdr_1_repository(&layout, "/code/app", None, kept_none).as_deref(),
+        repository(&layout, "/code/app", None).as_deref(),
         Some("w1")
     );
     let linked = layout_of_linked();
-    assert_eq!(
-        herdr_1_repository(&linked, "/code/app", None, kept_none),
-        None
-    );
+    assert_eq!(repository(&linked, "/code/app", None), None);
 }
 
 /// Only a linked worktree of the repository at `/code/app` is shown.
@@ -78,9 +87,9 @@ fn a_folder_herdr_1_shows_as_no_repository_grows_nothing() {
         workspace("herdr:dev:w4", "/code/elsewhere", Some(false)),
     ]);
     let kept = |id: &str| id == "space-3";
-    assert_eq!(herdr_1_repository(&layout, "/code/plain", None, kept), None);
-    assert_eq!(herdr_1_repository(&layout, "/code/kept", None, kept), None);
-    assert_eq!(herdr_1_repository(&layout, "/code/none", None, kept), None);
+    for cwd in ["/code/plain", "/code/kept", "/code/none"] {
+        assert_eq!(herdr_1_repository(&layout, cwd, None, kept), None, "{cwd}");
+    }
 }
 
 #[test]
@@ -90,22 +99,20 @@ fn a_repository_is_looked_for_in_the_session_asked_for() {
         workspace("herdr:dev:w1", "/code/app", Some(false)),
     ]);
     assert_eq!(
-        herdr_1_repository(&layout, "/code/app", Some("dev"), kept_none).as_deref(),
+        repository(&layout, "/code/app", Some("dev")).as_deref(),
         Some("herdr:dev:w1")
     );
     assert_eq!(
-        herdr_1_repository(&layout, "/code/app", None, kept_none).as_deref(),
+        repository(&layout, "/code/app", None).as_deref(),
         Some("w1")
     );
-    assert_eq!(
-        herdr_1_repository(&layout, "/code/app", Some("other"), kept_none),
-        None
-    );
+    assert_eq!(repository(&layout, "/code/app", Some("other")), None);
 }
 
 #[test]
 fn a_title_names_the_herdr_1_worktree_workspace() {
     let worktree = Worktree {
+        base: None,
         branch: "topic",
         repository: "w1",
         title: Some("Review"),
@@ -120,4 +127,47 @@ fn a_title_names_the_herdr_1_worktree_workspace() {
         ..worktree
     };
     assert!(untitled.params().get("label").is_none());
+    assert!(untitled.params().get("base").is_none());
+    let from_branch = Worktree {
+        base: Some("refs/heads/feature"),
+        ..worktree
+    };
+    assert_eq!(from_branch.params()["base"], "refs/heads/feature");
+}
+
+#[test]
+fn a_linked_checkout_grows_from_its_main_checkout_at_its_branch() {
+    let layout = layout(vec![
+        workspace("w1", "/code/app", Some(false)),
+        linked("w2", "/code/worktrees/feature", Some("feature")),
+    ]);
+    assert_eq!(
+        herdr_1_repository(&layout, "/code/worktrees/feature", None, kept_none),
+        Some(Source {
+            workspace: "w1".to_owned(),
+            base: Some("refs/heads/feature".to_owned()),
+        })
+    );
+    assert_eq!(
+        herdr_1_repository(&layout, "/code/app", None, kept_none),
+        Some(Source {
+            workspace: "w1".to_owned(),
+            base: None,
+        })
+    );
+}
+
+#[test]
+fn a_linked_checkout_without_its_main_checkout_or_branch_stays_on_the_core() {
+    let alone = layout(vec![linked(
+        "w2",
+        "/code/worktrees/feature",
+        Some("feature"),
+    )]);
+    assert_eq!(repository(&alone, "/code/worktrees/feature", None), None);
+    let detached = layout(vec![
+        workspace("w1", "/code/app", Some(false)),
+        linked("w2", "/code/worktrees/feature", None),
+    ]);
+    assert_eq!(repository(&detached, "/code/worktrees/feature", None), None);
 }

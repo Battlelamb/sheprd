@@ -158,8 +158,15 @@ impl SheprdWindow {
                     && std::path::Path::new(&kept.cwd) == std::path::Path::new(&cwd)
             })
             .map(|kept| kept.id.clone());
-        if kept.is_some() {
-            return kept;
+        if let Some(id) = kept {
+            // A title the phone gave names the workspace it joins, as a
+            // rename there would.
+            if let Some(title) = title
+                && Store::update(cx, |store| store.rename_kept(scope, &id, &title))
+            {
+                self.refresh_core_session(cx);
+            }
+            return Some(id);
         }
         // Named as the phone asked, else for its folder.
         let custom = title.is_some();

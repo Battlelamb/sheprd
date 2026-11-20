@@ -127,3 +127,43 @@ async fn a_session_without_the_members_proof_ends() {
     assert!(matches!(tunnel.io.read(&mut byte).await, Ok(0) | Err(_)));
     assert!(!a.fleet.inner().proven.contains_key(&b.fleet.me()));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_key_an_earlier_build_recorded_does_not_count_as_the_members() {
+    let (http, _, _) = relay().await;
+    let (mut a, b) = (Node::new(http, 1).await, Node::new(http, 2).await);
+    // b, also paired with a one by one, and allowed on a by the fleet.
+    let paired = pair(&a, b.dir.path());
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    join(&a, &b);
+    a.fleet.receive(b.ops(), now_ms()).unwrap();
+    // An earlier build recorded b's tunnel key on a handshake alone.
+    let tunnel = Keys::load_or_create(b.dir.path())
+        .unwrap()
+        .tunnel
+        .identity()
+        .x25519();
+    std::fs::write(
+        a.dir.path().join("fleet/peers.json"),
+        format!(
+            "{{\"proven\": {{\"{}\": [\"{}\"]}}}}",
+            b.me(),
+            crate::control::fleet::HostId(tunnel)
+        ),
+    )
+    .unwrap();
+    let fleet = Arc::new(Fleet::load(a.dir.path(), now_ms()).unwrap());
+    assert!(fleet.inner().proven.is_empty());
+    Arc::get_mut(&mut a.state).unwrap().fleet = Some(Arc::clone(&fleet));
+    a.fleet = fleet;
+    a.start().await;
+    // With no purpose byte, the session goes through b's own pairing,
+    // which stays.
+    let mut tunnel = dial(b.dir.path(), &a).await;
+    tunnel.io.write_all(b"SSH-2.0-desktop\r\n").await.unwrap();
+    let mut greeting = [0; 14];
+    tunnel.io.read_exact(&mut greeting).await.unwrap();
+    assert_eq!(&greeting, b"SSH-2.0-test\r\n");
+    assert!(a.state.auth().devices().get(&paired).is_some());
+    assert!(a.fleet.inner().proven.is_empty());
+}

@@ -32,6 +32,7 @@ pub use error::{Error, Result};
 
 use crate::control::fleet::{Body, Inserted, Log, MemberId, Op, OpId, Unsigned, sync};
 use p256::ecdsa::SigningKey;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
@@ -82,7 +83,7 @@ pub(crate) struct Fleet {
     /// The last write of the fleet's files failed: what is held is ahead
     /// of them, and the next change, even one that moves nothing, writes
     /// again.
-    unsaved: std::sync::atomic::AtomicBool,
+    unsaved: AtomicBool,
 }
 
 #[derive(Debug, Default)]
@@ -134,7 +135,7 @@ impl Fleet {
             inbound: tokio::sync::Semaphore::new(removals::CONCURRENT),
             joins: Mutex::default(),
             _lock: lock,
-            unsaved: std::sync::atomic::AtomicBool::new(false),
+            unsaved: AtomicBool::new(false),
         })
     }
 
@@ -352,14 +353,13 @@ impl Fleet {
 
     fn save(&self, inner: &Inner) -> Result<()> {
         let saved = store::save(&self.state_dir, inner);
-        self.unsaved
-            .store(saved.is_err(), std::sync::atomic::Ordering::SeqCst);
+        self.unsaved.store(saved.is_err(), Ordering::SeqCst);
         saved
     }
 
     /// Whether the last write of the fleet's files failed.
     pub(crate) fn is_unsaved(&self) -> bool {
-        self.unsaved.load(std::sync::atomic::Ordering::SeqCst)
+        self.unsaved.load(Ordering::SeqCst)
     }
 }
 

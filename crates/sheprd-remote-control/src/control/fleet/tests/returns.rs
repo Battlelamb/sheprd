@@ -200,3 +200,71 @@ fn an_equivocators_own_checkpoint_settles_nothing() {
             .contains_key(&plain_host(40).id().unwrap())
     );
 }
+
+#[test]
+fn a_computer_whose_claim_was_voided_still_holds_the_host_it_names() {
+    let (mut log, a, b, _) = three();
+    let (intro, ca) = ca_host(60, HostKind::Member);
+    let host = intro.id().unwrap();
+    let mut copied = intro.clone();
+    copied.user = "root".into();
+    copied.record = record(host, 61, 2);
+    copied.record.route = "copied-route".into();
+    copied.record_signature = Some(raw_signature(&ca, &copied.record.message().unwrap()));
+    let (mut x, mut y) = (computer(9), computer(10));
+    x.bundle.host = Some(intro);
+    y.bundle.host = Some(copied);
+    let before = log.heads().to_vec();
+    let next = |log: &Log, member: &Device| log.state().members[&member.id()].seq + 1;
+    // x and y join at once; a removal of the host sees x's admission only,
+    // and x names the host again after it, not having seen y.
+    let admit_x = sign_on(&log, &a, &before, next(&log, &a), admit_body(&log, &x));
+    let admit_y = sign_on(&log, &b, &before, next(&log, &b), admit_body(&log, &y));
+    let removal = sign_on(
+        &log,
+        &a,
+        &[admit_x.id()],
+        next(&log, &a) + 1,
+        Body::HostRemove(host),
+    );
+    let mut renamed = x.bundle.clone();
+    renamed.name = "again".into();
+    let again = sign_on(&log, &x, &[removal.id()], 1, Body::Rotate(renamed));
+    for op in [admit_x, admit_y, removal, again] {
+        apply(&mut log, op);
+    }
+    // y's claim did not see the removal, but y still names the host its
+    // own way: held.
+    assert!(log.state().members.contains_key(&y.id()));
+    assert!(log.state().hosts[&host].held);
+    let (mut pruned, mut whole) = split(&mut log, &a);
+    both(
+        &mut pruned,
+        &mut whole,
+        &b,
+        Body::HostRemove(HostId([9; 32])),
+    );
+    assert!(pruned.state().hosts[&host].held);
+}
+
+#[test]
+fn a_host_added_and_joined_goes_with_the_computer_pruned_or_not() {
+    let (mut log, a, b, _) = three();
+    let (intro, _) = ca_host(60, HostKind::Sheprd);
+    let host = intro.id().unwrap();
+    act(&mut log, &a, Body::HostAdd(intro.clone()));
+    // The same machine joins as a computer.
+    let mut same = intro.clone();
+    same.kind = HostKind::Member;
+    let mut x = computer(9);
+    x.bundle.host = Some(same);
+    admit(&mut log, &a, &x);
+    assert!(!log.state().hosts[&host].held);
+    let (mut pruned, mut whole) = split(&mut log, &a);
+    // It leaves, and takes the host with it on both.
+    both(&mut pruned, &mut whole, &b, remove_body(&x));
+    assert!(!pruned.state().hosts.contains_key(&host));
+    // Added again after, it is back.
+    both(&mut pruned, &mut whole, &a, Body::HostAdd(intro));
+    assert!(pruned.state().hosts.contains_key(&host));
+}

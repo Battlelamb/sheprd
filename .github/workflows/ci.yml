@@ -164,14 +164,15 @@ jobs:
         # repository, the macOS all-features leg, which our own Macs make
         # cheap; a fork's runs on the account's few hosted macOS runners and
         # skips it. Main and the merge queue run every leg.
-        exclude: ${{ fromJSON(github.event_name != 'pull_request' && '[]' || needs.commits.outputs.full != 'true' && '[{"runner":"macos-15","features":"all"},{"runner":"ubuntu-24.04-arm"}]' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]') && '[]' || '[{"runner":"macos-15","features":"all"}]') }}
+        exclude: ${{ fromJSON(github.event_name != 'pull_request' && '[]' || needs.commits.outputs.full != 'true' && '[{"runner":"macos-15","features":"all"},{"runner":"ubuntu-24.04-arm"}]' || (github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) && '[]' || '[{"runner":"macos-15","features":"all"}]') }}
     # The repository variable CI_MACOS_RUNNER, a JSON label list such as
     # '["self-hosted", "macOS", "ARM64", "tart"]', moves the macOS legs to our
     # own Macs, past the account's five hosted macOS jobs, for code only
-    # members wrote: branches of this repository, main, and the merge queue.
-    # A fork's pull request, or Dependabot's, which brings in new
-    # dependencies' build scripts, stays on hosted runners.
-    runs-on: ${{ fromJSON(matrix.runner == 'macos-15' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && vars.CI_MACOS_RUNNER || toJSON(matrix.runner)) }}
+    # members wrote: main, the merge queue, and pull requests from branches of
+    # this repository opened by its owner, members, or collaborators. A
+    # fork's pull request, or a bot's such as Dependabot's, which brings in
+    # new dependencies' build scripts, stays on hosted runners.
+    runs-on: ${{ fromJSON(matrix.runner == 'macos-15' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association))) && vars.CI_MACOS_RUNNER || toJSON(matrix.runner)) }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -645,7 +646,7 @@ jobs:
         target: [aarch64-apple-darwin, x86_64-apple-darwin]
     # Our own Macs when CI_MACOS_RUNNER names them, for members' code only,
     # as in the checks job.
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && vars.CI_MACOS_RUNNER || '"macos-15"') }}
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association))) && vars.CI_MACOS_RUNNER || '"macos-15"') }}
     timeout-minutes: 60
     permissions:
       contents: read

@@ -20,14 +20,16 @@ When it is set, `.github/workflows/ci.yml` sends the `checks` macOS legs and
 
 | Run | macOS runner |
 |---|---|
-| Pull request from a branch of this repository | Our Macs |
+| Pull request from a branch here, by the owner, a member, or a collaborator | Our Macs |
 | `main`, the merge queue | Our Macs |
 | Pull request from a fork | Hosted `macos-15` |
-| Pull request Dependabot opened | Hosted `macos-15` |
+| Pull request a bot opened (Dependabot) | Hosted `macos-15` |
 
-Only members can push a branch here, so a fork's code never reaches our
-machines. Dependabot's branches live here too, but bring in new
-dependencies' build scripts, so they stay hosted. Linux, Windows, Nix, the
+The author must be one GitHub lists as `OWNER`, `MEMBER`, or `COLLABORATOR`
+on the pull request, so a fork's code never reaches our machines, nor does a
+bot's: Dependabot's branches live here too, but bring in new dependencies'
+build scripts. A member whose organization membership is private may be
+listed otherwise, and then runs hosted. Linux, Windows, Nix, the
 release workflow, and the iOS workflow stay hosted.
 
 Every pull request runs the macOS default-features leg. One that needs every

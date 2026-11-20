@@ -20,8 +20,8 @@ PR_ONLY_JOBS = ("build-macos",)
 
 
 # The macOS jobs' runners, kept here so a change to them is deliberate.
-MACOS_CHECKS = "${{ fromJSON(matrix.runner == 'macos-15' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && vars.CI_MACOS_RUNNER || toJSON(matrix.runner)) }}"
-MACOS_RELEASE = "${{ fromJSON((github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && vars.CI_MACOS_RUNNER || '\"macos-15\"') }}"
+MACOS_CHECKS = "${{ fromJSON(matrix.runner == 'macos-15' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('[\"OWNER\", \"MEMBER\", \"COLLABORATOR\"]'), github.event.pull_request.author_association))) && vars.CI_MACOS_RUNNER || toJSON(matrix.runner)) }}"
+MACOS_RELEASE = "${{ fromJSON((github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('[\"OWNER\", \"MEMBER\", \"COLLABORATOR\"]'), github.event.pull_request.author_association))) && vars.CI_MACOS_RUNNER || '\"macos-15\"') }}"
 
 
 def condition_matches(job, context, jobs=JOBS):

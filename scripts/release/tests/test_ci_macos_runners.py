@@ -1,8 +1,9 @@
 """Which macOS legs each run gets, and whether our own Macs run them.
 
-Members' code (branches of this repository, main, the merge queue) runs on
-the self-hosted Macs CI_MACOS_RUNNER names; a fork's or Dependabot's pull
-request never does. These evaluate the workflow's own expressions with
+Members' code (main, the merge queue, and pull requests from branches of
+this repository opened by its owner, members, or collaborators) runs on the
+self-hosted Macs CI_MACOS_RUNNER names; a fork's or a bot's pull request
+never does. These evaluate the workflow's own expressions with
 GitHub's semantics, where `a && b || c` yields a value rather than a boolean.
 """
 
@@ -47,6 +48,9 @@ def evaluate(text, context):
             if isinstance(node.ops[0], ast.NotEq):
                 return left != right
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "contains" and len(node.args) == 2):
+            return value(node.args[1]) in value(node.args[0])
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id in ("fromJSON", "toJSON") and len(node.args) == 1):
             argument = value(node.args[0])
             return json.loads(argument) if node.func.id == "fromJSON" else json.dumps(argument)
@@ -55,13 +59,13 @@ def evaluate(text, context):
     return value(ast.parse(body, mode="eval").body)
 
 
-def context(event, fork=False, author="penso", full="true", labels=LABELS):
+def context(event, fork=False, association="OWNER", full="true", labels=LABELS):
     return {
         "github.event_name": event,
         "github.repository": "sheprd-labs/sheprd",
         "github.event.pull_request.head.repo.full_name":
             ("contributor/sheprd" if fork else "sheprd-labs/sheprd") if event == "pull_request" else "",
-        "github.event.pull_request.user.login": author if event == "pull_request" else "",
+        "github.event.pull_request.author_association": association if event == "pull_request" else "",
         "needs.commits.outputs.full": full,
         "vars.CI_MACOS_RUNNER": labels,
     }
@@ -83,15 +87,22 @@ def macos_legs(values):
 
 class MacosRunners(unittest.TestCase):
     def test_members_code_runs_on_our_macs(self):
-        for event in ("pull_request", "push", "merge_group", "workflow_dispatch"):
-            with self.subTest(event=event):
-                values = context(event)
+        runs = [context(event) for event in ("push", "merge_group", "workflow_dispatch")]
+        runs += [context("pull_request", association=association)
+                 for association in ("OWNER", "MEMBER", "COLLABORATOR")]
+        for values in runs:
+            with self.subTest(values=values):
                 self.assertEqual(runs_on("checks", values), json.loads(LABELS))
                 self.assertEqual(runs_on("build-macos", values), json.loads(LABELS))
 
-    def test_forks_and_dependabot_stay_hosted(self):
+    def test_forks_and_bots_stay_hosted(self):
+        # Dependabot's and other apps' branches live here, but their authors
+        # are no members: "NONE" or "CONTRIBUTOR".
         for values in (context("pull_request", fork=True),
-                       context("pull_request", author="dependabot[bot]")):
+                       context("pull_request", fork=True, association="MEMBER"),
+                       context("pull_request", association="NONE"),
+                       context("pull_request", association="CONTRIBUTOR"),
+                       context("pull_request", association="FIRST_TIME_CONTRIBUTOR")):
             with self.subTest(values=values):
                 self.assertEqual(runs_on("checks", values), HOSTED)
                 self.assertEqual(runs_on("build-macos", values), HOSTED)

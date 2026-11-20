@@ -274,8 +274,9 @@ what was deferred to CI.
   the toolchain pin changes, and on `main` and every release otherwise.
 - macOS jobs run on our own Macs when the repository variable
   `CI_MACOS_RUNNER` names their labels (`docs/self-hosted-runners.md`), for
-  members' code only: branches of this repository, `main`, and the merge
-  queue. A fork's or Dependabot's pull request always uses hosted runners.
+  members' code only: `main`, the merge queue, and pull requests from
+  branches of this repository opened by its owner, members, or
+  collaborators. A fork's or a bot's pull request always uses hosted runners.
   A runner that outlives its job keeps `target/` between runs
   (`scripts/ci-clean-self-hosted.sh`).
 - A `cfg` gate is only proven on the platform it names. For changes that touch

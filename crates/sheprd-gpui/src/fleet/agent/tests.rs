@@ -1,5 +1,6 @@
 use super::*;
 
+mod installed;
 mod tokens;
 
 fn public(url: &str) -> Relay {

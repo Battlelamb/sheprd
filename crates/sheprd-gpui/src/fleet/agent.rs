@@ -209,11 +209,12 @@ done
     )
 }
 
-/// Finds the agent without installing it; runs it with `ARGS`, or prints
-/// nothing when there is none.
+/// Runs the agent [`install`] put on the host, the one its service runs,
+/// with `ARGS`, or prints nothing when there is none. Never another
+/// `sheprd-relay-agent` on `PATH`: an older one there would be handed
+/// commands it does not know, or a fleet the service never sees.
 const RUN: &str = "\
-agent=$(command -v sheprd-relay-agent || true)
-[ -n \"$agent\" ] || agent=\"$HOME/.local/bin/sheprd-relay-agent\"
+agent=\"$HOME/.local/bin/sheprd-relay-agent\"
 if [ -x \"$agent\" ]; then \"$agent\" ARGS; fi
 ";
 

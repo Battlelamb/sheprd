@@ -67,6 +67,10 @@ pub(crate) struct Unconfirmed {
 /// Suspensions that keep their removal to check again.
 pub(crate) const MAX_KEPT_REMOVALS: usize = crate::control::fleet::MAX_PENDING;
 
+/// How long the SSH session that asked for a scrub keeps running after
+/// it, to read the answer.
+pub(crate) const SCRUB_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// The daemon's fleet: its key, and its log once it founded or joined one.
 #[derive(Debug)]
 pub(crate) struct Fleet {
@@ -85,6 +89,14 @@ pub(crate) struct Fleet {
     /// Parts of logs handed over while this computer is in no fleet.
     joining: joining::Handovers,
     changed: watch::Sender<u64>,
+    /// Held while what the log grants is read and written, and while a
+    /// scrub forgets it, so a write of the old fleet never lands after a
+    /// scrub took its access away.
+    writing: Mutex<()>,
+    /// When this computer last forgot its fleet (`fleet scrub`), and the
+    /// SSH session that asked for it, by its client port on loopback: only
+    /// that session keeps [`SCRUB_GRACE`] to read the answer.
+    scrubbed: Mutex<Option<(std::time::Instant, u16)>>,
     /// Removal exchanges other members dialed in for, at most
     /// `removals::CONCURRENT` at once.
     pub(crate) inbound: tokio::sync::Semaphore,
@@ -169,6 +181,8 @@ impl Fleet {
             inner: Mutex::new(inner),
             joining: joining::Handovers::default(),
             changed: watch::Sender::new(0),
+            writing: Mutex::new(()),
+            scrubbed: Mutex::new(None),
             inbound: tokio::sync::Semaphore::new(removals::CONCURRENT),
             _lock: lock,
             unsaved: AtomicBool::new(false),
@@ -418,7 +432,11 @@ impl Fleet {
     /// What is held goes only once its file is gone: a log left on disk is
     /// the fleet the daemon reads at its next start, so it stays the fleet
     /// here too, and a peers file that stays keeps the keys to revoke.
-    pub(crate) fn scrub(&self) -> Result<()> {
+    /// `session` is the client port of the fleet SSH session that asked,
+    /// if one did: that one session may finish reading the answer.
+    pub(crate) fn scrub(&self, session: Option<u16>) -> Result<()> {
+        *self.scrubbed.lock().unwrap_or_else(PoisonError::into_inner) =
+            session.map(|session| (std::time::Instant::now(), session));
         let mut inner = self.inner();
         store::remove_log(&self.state_dir)?;
         inner.log = None;
@@ -436,6 +454,27 @@ impl Fleet {
         let mut inner = self.inner();
         inner.held.entry(peer).or_default().extend(ids);
         self.save(&inner)
+    }
+
+    /// Held while what the log grants is read and written.
+    pub(crate) fn writing(&self) -> MutexGuard<'_, ()> {
+        self.writing.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// How long the fleet SSH session whose client port on loopback is
+    /// `session` may still run after a scrub cut it off: what is left of
+    /// [`SCRUB_GRACE`], only for the session that asked for the scrub, and
+    /// only while this computer is in no fleet again. Every other session
+    /// ends at once; access is gone already and no new session starts.
+    pub(crate) fn scrub_grace(&self, session: u16) -> Option<std::time::Duration> {
+        let in_fleet = self.inner().log.is_some();
+        let mut scrubbed = self.scrubbed.lock().unwrap_or_else(PoisonError::into_inner);
+        let (at, asked) = (*scrubbed)?;
+        let left = SCRUB_GRACE.checked_sub(at.elapsed()).filter(|_| !in_fleet);
+        if left.is_none() {
+            *scrubbed = None;
+        }
+        left.filter(|_| asked == session)
     }
 
     pub(crate) fn bump(&self) {
@@ -511,15 +550,53 @@ pub fn run_ask(state_dir: &Path, ask: sync::Ask) -> Result<sync::Answer> {
 /// the fleet's `authorized_keys` lines and relay records itself
 /// ([`scrub`]). Succeeds only once they are gone. Blocking.
 pub fn run_scrub(state_dir: &Path) -> Result<()> {
+    let session = std::env::var("SSH_CONNECTION")
+        .ok()
+        .and_then(|connection| loopback_client_port(&connection));
+    scrub_with(state_dir, session, scrub::offline)
+}
+
+/// The client port in `SSH_CONNECTION` ("client port server port") when
+/// the client is on loopback, as a fleet member's session is: the daemon
+/// spliced it to the SSH server from that port.
+pub(crate) fn loopback_client_port(connection: &str) -> Option<u16> {
+    let mut fields = connection.split_whitespace();
+    let client: std::net::IpAddr = fields.next()?.parse().ok()?;
+    let port = fields.next()?.parse().ok()?;
+    client.is_loopback().then_some(port)
+}
+
+/// [`run_scrub`] for the fleet session `session`, with `offline`
+/// forgetting the fleet when no daemon answers, run only while holding
+/// the fleet folder's lock. Blocking.
+fn scrub_with(
+    state_dir: &Path,
+    session: Option<u16>,
+    offline: impl FnOnce(&Path) -> Result<()>,
+) -> Result<()> {
     use crate::control::{Request, Response};
-    let request = Request::Fleet(Box::new(sync::Ask::Scrub));
-    match crate::control::request(&crate::control::address(state_dir), &request) {
-        Ok(Response::Fleet(answer)) if *answer == sync::Answer::Done => Ok(()),
-        Ok(Response::Error { message, .. }) => Err(Error::Daemon(message)),
-        Ok(_) => Err(Error::Daemon("an unexpected answer".to_owned())), // i18n: data
-        // No daemon: nothing holds the fleet but its files.
-        Err(crate::control::Error::Connect(_)) => scrub::offline(state_dir),
-        Err(error) => Err(error.into()),
+    let request = Request::Fleet(Box::new(sync::Ask::Scrub { session }));
+    let deadline = std::time::Instant::now() + lock::WAIT;
+    loop {
+        match crate::control::request(&crate::control::address(state_dir), &request) {
+            Ok(Response::Fleet(answer)) if *answer == sync::Answer::Done => return Ok(()),
+            Ok(Response::Error { message, .. }) => return Err(Error::Daemon(message)),
+            Ok(_) => return Err(Error::Daemon("an unexpected answer".to_owned())), // i18n: data
+            Err(crate::control::Error::Connect(_)) => {}
+            Err(error) => return Err(error.into()),
+        }
+        // No daemon answers. Held, the lock keeps a daemon from loading
+        // the fleet, and an offline update from writing it, until the
+        // files are gone; busy, a daemon is starting (it loads the fleet
+        // before it answers) or an update is writing, and the socket is
+        // tried again.
+        if let Some(_lock) = lock::Lock::try_acquire(state_dir)? {
+            return offline(state_dir);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(Error::Busy);
+        }
+        lock::pause();
     }
 }
 

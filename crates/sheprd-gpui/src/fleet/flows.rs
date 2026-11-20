@@ -150,6 +150,44 @@ pub(super) fn heads_after(
     tips.into_iter().collect()
 }
 
+/// Hands `host`, which the fleet removed and whose heads are `heads`, its
+/// removal and that removal's ancestors it lacks, and nothing else: no
+/// operation made after or beside it. Done once the host holds them
+/// ([`Standing::Removed`]): it is not synced again.
+async fn hand_removal(
+    client: &crate::remote::supervisor::Client,
+    executor: &BackgroundExecutor,
+    target: &ConnectTarget,
+    fleet: &str,
+    host: &str,
+    mut heads: Vec<String>,
+) -> Result<Standing, Error> {
+    for _ in 0..MAX_PARTS {
+        let ask = Ask::RemovalFor {
+            host: host.to_owned(),
+            heads,
+        };
+        let Answer::Applied(part) = daemon(client, ask).await? else {
+            return Err(Error::Daemon(String::new()));
+        };
+        if part.ops.is_empty() {
+            return Ok(Standing::Removed);
+        }
+        let send = Apply {
+            fleet: Some(fleet.to_owned()),
+            heads: part.heads,
+            ops: part.ops,
+            ..Apply::default()
+        };
+        let target = target.clone();
+        heads = executor
+            .spawn(async move { remote::apply(&target, &send, &AtomicBool::new(false)) })
+            .await?
+            .heads;
+    }
+    Err(Error::TooLarge)
+}
+
 /// Syncs `machine` with this computer's fleet `fleet`:
 ///
 /// 1. asks the machine for what this computer lacks, naming no fleet,
@@ -166,12 +204,17 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
     let Some(client) = Supervisor::client(cx) else {
         return;
     };
+    // The host this machine last proved to be, if any: one the fleet
+    // removed that now answers as an outsider has forgotten the fleet.
+    let mut was = None;
     Fleet::set_link(cx, &id, |link| {
         link.running = true;
         link.last = Some(Instant::now());
+        was = link.host.clone();
     });
     let executor = cx.background_executor().clone();
     cx.spawn(async move |cx| {
+        let mut proven_as = None;
         let outcome = async {
             let view = match daemon(&client, Ask::Status).await? {
                 Answer::Status { view: Some(view) } if view.fleet == fleet => view,
@@ -180,25 +223,44 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
             // Hosts that sign with a certificate authority: computers in
             // the fleet and Sheprd hosts. Only one of them may prove it is
             // the machine answering.
-            let hosts: Vec<String> = view
+            let mut hosts: Vec<String> = view
                 .hosts
                 .iter()
                 .filter(|host| host.kind != HostKind::Agent)
                 .map(|host| host.id.clone())
                 .collect();
+            // A host the fleet removed still proves itself, so it is
+            // handed its removal, and nothing else.
+            let removed = match daemon(&client, Ask::RemovedHosts).await {
+                Ok(Answer::Hosts { hosts }) => hosts,
+                _ => Vec::new(),
+            };
+            hosts.extend(removed.iter().cloned());
             let target = &machine.target;
-            let (mut theirs, proven) =
-                match ask_proven(&executor, target, view.heads.clone(), &fleet, &hosts).await {
-                    Ok(Some(answer)) => answer,
-                    Ok(None) => return Ok((Standing::Outside, Vec::new(), Vec::new())),
-                    // No Sheprd daemon: perhaps a plain host of this fleet.
-                    Err(Error::NoProgram) => {
-                        let standing =
-                            super::plain::sync(&client, &executor, &machine, &view).await?;
-                        return Ok((standing, Vec::new(), view.heads.clone()));
-                    }
-                    Err(error) => return Err(error),
+            let answered = match ask_proven(&executor, target, view.heads.clone(), &fleet, &hosts)
+                .await
+            {
+                // No Sheprd daemon: perhaps a plain host of this fleet.
+                Err(Error::NoProgram) => {
+                    let standing = super::plain::sync(&client, &executor, &machine, &view).await?;
+                    return Ok((standing, Vec::new(), view.heads.clone()));
+                }
+                answered => answered?,
+            };
+            let Some((mut theirs, proven)) = answered else {
+                let standing = if was.as_ref().is_some_and(|host| removed.contains(host)) {
+                    Standing::Removed
+                } else {
+                    Standing::Outside
                 };
+                return Ok((standing, Vec::new(), Vec::new()));
+            };
+            proven_as = Some(proven.clone());
+            if removed.contains(&proven) {
+                let standing =
+                    hand_removal(&client, &executor, target, &fleet, &proven, theirs.heads).await?;
+                return Ok((standing, Vec::new(), Vec::new()));
+            }
             let mut ours;
             let mut parts = 1;
             loop {
@@ -290,6 +352,9 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
                     link.standing = standing;
                     link.heads = heads;
                     link.synced = synced;
+                    if proven_as.is_some() {
+                        link.host = proven_as;
+                    }
                 }),
                 Err(error) => {
                     tracing::debug!(%error, "Could not sync the fleet with a machine");

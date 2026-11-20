@@ -303,6 +303,8 @@ async fn fleet_ssh(
     let mut server = tokio::net::TcpStream::connect(server)
         .await
         .map_err(super::Error::Ssh)?;
+    // The client port the SSH server sees, as `fleet scrub` reports it.
+    let client_port = server.local_addr().ok().map(|local| local.port());
     if let Some(first) = first {
         tokio::io::AsyncWriteExt::write_all(&mut server, &[first])
             .await
@@ -311,6 +313,10 @@ async fn fleet_ssh(
     let gone = async {
         loop {
             if !crate::fleet::grants::still_allowed(fleet, &member) {
+                // A scrub asked over this session: let it read the answer.
+                if let Some(left) = client_port.and_then(|port| fleet.scrub_grace(port)) {
+                    tokio::time::sleep(left).await;
+                }
                 return;
             }
             if changed.changed().await.is_err() {

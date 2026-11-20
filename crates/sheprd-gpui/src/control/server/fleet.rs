@@ -1,4 +1,5 @@
-//! `fleet status`, `fleet open`, `fleet remove`, and `fleet remove-host`.
+//! `fleet status`, `fleet open`, `fleet remove`, `fleet remove-host`, and
+//! `fleet scrub`.
 //! The daemon is asked on the background executor. Removing opens
 //! Settings > Fleet asking, where the user picks why and confirms; nothing
 //! is signed from here.
@@ -32,39 +33,28 @@ pub(super) fn serve(
     if let Err(response) = window_for(&caller, cx) {
         return incoming.respond(response);
     }
-    let pending = match op {
+    // A removal is resolved against the daemon's view as it is now, not
+    // the one Settings last read, so a member or host just added is found.
+    let target = match op {
         FleetOp::Status => None,
-        FleetOp::Open => Some(FleetPending::Nothing),
-        FleetOp::Remove { member } => match pick_member(crate::fleet::Fleet::view(cx), &member) {
-            Ok(member) => Some(FleetPending::Remove(member)),
-            Err(response) => return incoming.respond(response),
-        },
-        FleetOp::RemoveHost { host } => match pick_host(crate::fleet::Fleet::view(cx), &host) {
-            Ok(host) => Some(FleetPending::RemoveHost(host)),
-            Err(response) => return incoming.respond(response),
-        },
+        FleetOp::Open => {
+            return incoming.respond(open(&caller, FleetPending::Nothing, cx));
+        }
+        FleetOp::Remove { member } => Some(Target::Member(member)),
+        FleetOp::RemoveHost { host } => Some(Target::Host(host)),
+        // Machines are this Sheprd's own: no daemon to ask.
         FleetOp::Scrub { machine } => {
             let machines = crate::fleet::Fleet::machines(cx);
             let named = machines
                 .iter()
                 .map(|(id, machine)| (id.as_str(), machine.label.as_str()));
-            match pick(named, &machine, "machine") {
-                Ok(id) => Some(FleetPending::Scrub(id)),
-                Err(response) => return incoming.respond(response),
-            }
+            let response = match pick(named, &machine, "machine") {
+                Ok(id) => open(&caller, FleetPending::Scrub(id), cx),
+                Err(response) => response,
+            };
+            return incoming.respond(response);
         }
     };
-    if let Some(pending) = pending {
-        let asking = !matches!(pending, FleetPending::Nothing);
-        return incoming.respond(in_window(&caller, cx, move |_, _, cx| {
-            crate::settings_window::open_fleet(cx.entity().downgrade(), pending, cx);
-            if asking {
-                Response::done("Asking in Sheprd's Settings > Fleet; the user confirms there")
-            } else {
-                Response::done("Showing Settings > Fleet")
-            }
-        }));
-    }
     let Some(client) = Supervisor::client(cx) else {
         return incoming.respond(Response::error(
             ErrorCode::Unsupported,
@@ -72,7 +62,7 @@ pub(super) fn serve(
         ));
     };
     let request = client.request(Request::Fleet(Box::new(Ask::Status)));
-    let task = cx.spawn(async move |_| {
+    let task = cx.spawn(async move |cx| {
         let (view, error) = match request.await {
             Ok(sheprd_remote_control::control::Response::Fleet(answer)) => match *answer {
                 Answer::Status { view } => (view, None),
@@ -84,11 +74,61 @@ pub(super) fn serve(
             Ok(_) => (None, Some(crate::remote::Error::Unexpected.to_string())),
             Err(error) => (None, Some(error.to_string())),
         };
-        Response::Fleet {
-            reply: Reply::Status { view, error },
+        let Some(target) = target else {
+            return Response::Fleet {
+                reply: Reply::Status { view, error },
+            };
+        };
+        match pending(view.as_deref(), error, target) {
+            Ok(pending) => cx.update(|cx| open(&caller, pending, cx)),
+            Err(response) => response,
         }
     });
     answer_when_done(task, wait, incoming, watches, cx);
+}
+
+/// What `fleet remove` or `fleet remove-host` names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum Target {
+    Member(String),
+    Host(String),
+}
+
+/// The question Settings > Fleet opens asking for `target`, resolved
+/// against `view`, the daemon's answer, or why not: `error` when the
+/// daemon could not be read.
+pub(super) fn pending(
+    view: Option<&View>,
+    error: Option<String>,
+    target: Target,
+) -> Result<FleetPending, Response> {
+    if let Some(error) = error {
+        return Err(Response::error(
+            ErrorCode::Failed,
+            format!("Could not read the fleet: {error}"),
+        ));
+    }
+    match target {
+        Target::Member(member) => pick_member(view, &member).map(FleetPending::Remove),
+        Target::Host(host) => pick_host(view, &host).map(FleetPending::RemoveHost),
+    }
+}
+
+/// Opens Settings > Fleet in the caller's window, asking `pending`.
+fn open(
+    caller: &crate::control::protocol::Caller,
+    pending: FleetPending,
+    cx: &mut App,
+) -> Response {
+    let asking = !matches!(pending, FleetPending::Nothing);
+    in_window(caller, cx, move |_, _, cx| {
+        crate::settings_window::open_fleet(cx.entity().downgrade(), pending, cx);
+        if asking {
+            Response::done("Asking in Sheprd's Settings > Fleet; the user confirms there")
+        } else {
+            Response::done("Showing Settings > Fleet")
+        }
+    })
 }
 
 /// The member `needle` names: by ID, else the one member of that name.

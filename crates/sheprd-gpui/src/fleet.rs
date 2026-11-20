@@ -70,6 +70,8 @@ pub(crate) struct Link {
     synced: Vec<String>,
     last: Option<Instant>,
     running: bool,
+    /// The host it last proved to be.
+    host: Option<String>,
     pub(crate) standing: Standing,
 }
 
@@ -92,6 +94,9 @@ pub(crate) enum Standing {
     Unchecked,
     /// Could not be asked.
     Failed,
+    /// A host the fleet removed that holds its removal, or forgot the
+    /// fleet: not synced again.
+    Removed,
 }
 
 impl Link {
@@ -108,6 +113,7 @@ impl Link {
             Standing::Member | Standing::Agent => self.synced != mine || since(REFRESH),
             Standing::Outside | Standing::NoDaemon | Standing::Unchecked => since(OUTSIDE),
             Standing::Failed => since(RETRY),
+            Standing::Removed => false,
         }
     }
 }
@@ -130,6 +136,8 @@ pub(crate) struct Fleet {
     /// How many reads were asked for: only the newest one's answer is
     /// taken, so an older answer arriving late never replaces a newer view.
     reads: u64,
+    /// The daemon answered a read, saying this computer's fleet or none.
+    answered: bool,
     /// Orders the saved devices' updates ([`saved::keep`]).
     saving: saved::Saving,
     error: Option<String>,
@@ -299,8 +307,11 @@ impl Fleet {
         self.asking = false;
         self.read = true;
         match view {
+            // The first answer counts as a change even when it says no
+            // fleet: devices of a fleet left while Sheprd was closed go.
             Ok(view) => {
-                let changed = self.view != view;
+                let changed = !self.answered || self.view != view;
+                self.answered = true;
                 self.view = view;
                 changed
             }

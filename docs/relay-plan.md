@@ -1994,7 +1994,16 @@ manual multi-machine and phone steps left unticked in its QA list.
      as a `HostSeen` (`Ask::Seen`). A computer that left, or was removed,
      keeps the log until a live computer member holds its removal (or
      none is left), then forgets the fleet and may found or join
-     another. A compromised member's removal names at most
+     another, and Sheprd forgets the devices that fleet saved. A host a
+     `HostRemove` or a removal's `also_hosts` took out still proves
+     itself to syncing members (`Ask::RemovedHosts`), and is handed only
+     its removal and that removal's ancestors it lacks
+     (`Ask::RemovalFor`), never the log made after or beside it; it then
+     stops letting the fleet in and forgets the fleet. Once it holds its
+     removal, or answers as an outsider, Sheprd stops syncing it. A
+     removed member's own host is reached through the member's removal.
+     `fleet remove` and `fleet remove-host` resolve names against the
+     daemon's current view. A compromised member's removal names at most
      16 members beside it; the members it admitted past those are removed
      by further removals in the same confirmation.
      Members cut off by an unconfirmed removal, and members that signed

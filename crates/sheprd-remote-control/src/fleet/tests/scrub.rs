@@ -69,7 +69,7 @@ async fn scrubbing_answers_once_access_is_gone() {
     let (a, b, records) = joined().await;
     let legacy = paired_and_proved(&a, &b);
     // Nothing follows the fleet here: the answer itself took access away.
-    assert_eq!(b.ask(Ask::Scrub), Answer::Done);
+    assert_eq!(b.ask(Ask::Scrub { session: None }), Answer::Done);
     assert!(b.lines().is_empty());
     assert_eq!(records.read_dir().unwrap().count(), 0);
     assert!(b.state.auth().devices().get(&legacy).is_none());
@@ -125,7 +125,7 @@ async fn a_scrub_that_cannot_delete_the_log_keeps_the_fleet() {
         std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
         return;
     }
-    let error = b.fleet.scrub().unwrap_err();
+    let error = b.fleet.scrub(None).unwrap_err();
     std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert!(
         matches!(

@@ -126,8 +126,8 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
                 intro: sync::text(&intro.to_bytes()?),
             })
         }
-        Ask::Scrub => {
-            super::scrub::live(state, fleet)?;
+        Ask::Scrub { session } => {
+            super::scrub::live(state, fleet, session)?;
             Ok(Answer::Done)
         }
         Ask::AgentAccess { host, suspended } => {
@@ -178,6 +178,26 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
                 )?;
             }
             Ok(Answer::Done)
+        }
+        Ask::RemovedHosts => {
+            let inner = fleet.inner();
+            let hosts = inner
+                .log
+                .as_ref()
+                .map(sync::removed_hosts)
+                .unwrap_or_default();
+            Ok(Answer::Hosts { hosts })
+        }
+        Ask::RemovalFor { host, heads } => {
+            let host = sync::host(&host)?;
+            let heads = heads
+                .iter()
+                .map(|head| crate::control::fleet::OpId::from_hex(head))
+                .collect::<Option<Vec<_>>>()
+                .ok_or(crate::control::fleet::Error::Encoding)?;
+            let inner = fleet.inner();
+            let log = inner.log.as_ref().ok_or(Error::NoFleet)?;
+            Ok(Answer::Applied(sync::removal_for(log, &host, &heads)))
         }
         Ask::Apply(apply) => {
             // A caller naming another fleet learns nothing of this one.

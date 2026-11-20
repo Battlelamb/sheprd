@@ -229,7 +229,12 @@ pub enum Ask {
     /// Forgets the fleet here without signing anything: its log, and the
     /// `authorized_keys` lines and relay records it wrote. For a computer
     /// the fleet removed, or a fleet that is gone (`sheprd fleet scrub`).
-    Scrub,
+    /// `session` is the loopback client port of the fleet SSH session that
+    /// asked, if one did: only it may finish reading the answer.
+    Scrub {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session: Option<u16>,
+    },
     /// The access file for plain host `host`, for Sheprd to hand its
     /// agent (`fleet apply`): computed here, so the log never leaves the
     /// daemon. `suspended` is what the agent's `status --json` reports
@@ -247,6 +252,12 @@ pub enum Ask {
     /// `HostSeen` when it moved, as a host that is no member cannot sign
     /// one. Its certificate authority's signature is what counts.
     Seen { intro: String },
+    /// The hosts removed from the fleet ([`removed_hosts`]): Sheprd still
+    /// reaches them, to hand each its removal and nothing else.
+    RemovedHosts,
+    /// What the removed `host`, whose heads are `heads`, lacks of its
+    /// removal ([`removal_for`]), as an [`Answer::Applied`].
+    RemovalFor { host: String, heads: Vec<String> },
 }
 
 /// What the daemon answers.
@@ -267,6 +278,10 @@ pub enum Answer {
     /// base64url.
     Intro {
         intro: String,
+    },
+    /// [`Ask::RemovedHosts`]'s answer: host ids, hex.
+    Hosts {
+        hosts: Vec<String>,
     },
     /// [`Ask::AgentAccess`]'s answer: the access file, as the agent reads
     /// it on stdin.
@@ -310,6 +325,89 @@ pub fn next_rev(state: &State, host: HostId, member: MemberId) -> u64 {
         .get(&(host, member))
         .map_or(0, |register| register.rev)
         .saturating_add(1)
+}
+
+/// Whether `op` removes `host`: a `HostRemove` of it, or a member's
+/// removal that takes it along.
+fn removes_host(op: &Op, host: &HostId) -> bool {
+    match op.body() {
+        Body::HostRemove(removed) => removed == host,
+        Body::Remove(remove) => remove.also_hosts.contains(host),
+        _ => false,
+    }
+}
+
+/// Every host a `HostRemove`, or a removal's `also_hosts`, took out of
+/// `log` and that it holds no longer: what may still prove itself to a
+/// member syncing it, to be handed its removal ([`removal_for`]) and
+/// nothing else. A removed member's own host is left out: the member's
+/// removal reaches it as a member.
+#[must_use]
+pub fn removed_hosts(log: &Log) -> Vec<String> {
+    let live = &log.state().hosts;
+    let mut removed = std::collections::BTreeSet::new();
+    for op in log.ops() {
+        match op.body() {
+            Body::HostRemove(host) => {
+                removed.insert(*host);
+            }
+            Body::Remove(remove) => removed.extend(remove.also_hosts.iter().copied()),
+            _ => {}
+        }
+    }
+    removed
+        .iter()
+        .filter(|host| !live.contains_key(host))
+        .map(ToString::to_string)
+        .collect()
+}
+
+/// What a host `log` removed, whose heads are `heads`, lacks of its
+/// removal: each operation that removes it and the ancestors of those, in
+/// graph order, at most [`MAX_ANSWER_BYTES`] of them (`more` when cut).
+/// Nothing made after or beside its removal, so a removed host learns
+/// nothing more of the fleet. Its `heads` are the removals' ids. Nothing
+/// for a host the fleet still holds.
+#[must_use]
+pub fn removal_for(log: &Log, host: &HostId, heads: &[OpId]) -> Applied {
+    let mut applied = Applied {
+        fleet: log.fleet().to_string(),
+        ..Applied::default()
+    };
+    if log.state().hosts.contains_key(host) {
+        return applied;
+    }
+    let removals: Vec<OpId> = log
+        .ops()
+        .filter(|op| removes_host(op, host))
+        .map(Op::id)
+        .collect();
+    // The removals and their ancestors, walked through their parents.
+    let mut history = std::collections::BTreeSet::new();
+    let mut walk = removals.clone();
+    while let Some(id) = walk.pop() {
+        if history.insert(id)
+            && let Some(op) = log.get(&id)
+        {
+            walk.extend(op.parents().iter().copied());
+        }
+    }
+    let mut bytes = 0;
+    for op in log
+        .missing_for(heads)
+        .into_iter()
+        .filter(|op| history.contains(&op.id()))
+    {
+        let encoded = op.encode();
+        if bytes + encoded.len() > MAX_ANSWER_BYTES {
+            applied.more = true;
+            break;
+        }
+        bytes += encoded.len();
+        applied.ops.push(URL_SAFE_NO_PAD.encode(encoded));
+    }
+    applied.heads = removals.iter().map(ToString::to_string).collect();
+    applied
 }
 
 /// Whether `log` shares `host`, this computer as a host the fleet holds:

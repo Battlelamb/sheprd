@@ -69,7 +69,9 @@ impl Admitted {
             .access
             .iter()
             .flat_map(|access| &access.members)
-            .filter(move |(id, _)| !self.held.suspended.contains_key(id) && !shared.contains(id))
+            .filter(move |(id, _)| {
+                !self.held.refused && !self.held.suspended.contains_key(id) && !shared.contains(id)
+            })
     }
 
     /// The key pairs, now and before a rotation, of suspended members.

@@ -1451,7 +1451,12 @@ sequenceDiagram
    keeps what it was given and merges each new file into it: removed ids
    are kept forever and never readmitted, and per member the higher `rev`
    wins, a deny winning a tie. So a member that has not yet heard of a
-   removal cannot undo it there. Members are admitted from that file:
+   removal cannot undo it there. A file that does not read or check out
+   fails closed: the agent removes the fleet's `authorized_keys` lines,
+   admits no member (`refused` in its state directory and its report)
+   until a good file arrives, and `fleet apply` exits with the error;
+   it never goes on granting from the file held before. Members are
+   admitted from that file:
    denied ones only to pass removals, allowed ones to SSH too. The agent
    writes the `authorized_keys` lines the way `ssh_access` does, with the
    same shared code: atomically, refusing a linked file, and touching

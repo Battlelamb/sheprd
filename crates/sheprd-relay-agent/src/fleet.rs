@@ -49,6 +49,9 @@ pub const REVOKED: &str = "revoked";
 /// The members whose new keys wait for room on the relays, in the state
 /// directory.
 pub const CROWDED: &str = "crowded";
+/// Present while the last access file handed over could not be read or
+/// checked: the fleet reaches nothing here until a good one arrives.
+pub const REFUSED: &str = "refused";
 /// Removals remembered per suspended member; past that, its suspension is
 /// one no access file lifts.
 pub const MAX_CAUSES: usize = 8;
@@ -88,6 +91,10 @@ pub struct Held {
     /// file holds as the log decided, so the block lifts as soon as there
     /// is room, with the same file applied again.
     pub crowded: BTreeSet<Id>,
+    /// The last file handed over could not be read or checked: no member
+    /// is admitted or reaches SSH, rather than going on with the file held
+    /// before, which may grant what the newer one took away.
+    pub refused: bool,
 }
 
 impl Held {
@@ -103,7 +110,42 @@ impl Held {
             suspended: read_json(state_dir, SUSPENDED)?,
             revoked: read_json(state_dir, REVOKED)?,
             crowded: read_json(state_dir, CROWDED)?,
+            refused: files::read_bounded(&state_dir.join(REFUSED), 64)?.is_some(),
         })
+    }
+
+    /// `fleet apply` on the bytes it was handed: [`Held::apply`] on the
+    /// file they hold. Bytes that are no access file take the fleet's
+    /// access away ([`Held::refuse`]) rather than leave the file held
+    /// before in force, and the error is returned. Blocking.
+    pub fn apply_bytes(state_dir: &Path, keys: Option<&Path>, bytes: &[u8]) -> Result<Self> {
+        match Access::parse(bytes) {
+            Ok(incoming) => Self::apply(state_dir, keys, incoming),
+            Err(error) => {
+                Self::refuse(state_dir, keys)?;
+                Err(error)
+            }
+        }
+    }
+
+    /// `fleet apply` was handed a file it could not read or check: the
+    /// fleet stops reaching this account, its `authorized_keys` lines go,
+    /// until a good file arrives. The mark is kept before the lines go, so
+    /// the running agent stops admitting members first. Blocking.
+    pub fn refuse(state_dir: &Path, keys: Option<&Path>) -> Result<()> {
+        let _lock = files::Lock::acquire(state_dir)?;
+        Self::refuse_locked(state_dir, keys)
+    }
+
+    fn refuse_locked(state_dir: &Path, keys: Option<&Path>) -> Result<()> {
+        files::write_private(&state_dir.join(REFUSED), b"1\n")?;
+        // A held file that no longer reads names no fleet whose lines to
+        // take away; the mark alone stops admissions, as loading fails.
+        let Ok(mut held) = Self::load(state_dir) else {
+            return Ok(());
+        };
+        held.refused = true;
+        held.write_keys(keys)
     }
 
     /// Writes each file whole, in the order [`Held::files`] gives.
@@ -141,7 +183,18 @@ impl Held {
         let _lock = files::Lock::acquire(state_dir)?;
         let mut held = Self::load(state_dir)?;
         let settled = incoming.settled.clone();
-        let mut merged = Access::merge(held.access.as_ref(), incoming)?;
+        let mut merged = match Access::merge(held.access.as_ref(), incoming) {
+            Ok(merged) => merged,
+            // Another fleet's file says nothing of this one's: what is
+            // held stands.
+            Err(error @ access::Error::OtherFleet { .. }) => return Err(error.into()),
+            // A file that does not check out takes the fleet's access
+            // away rather than leave the one held before in force.
+            Err(error) => {
+                Self::refuse_locked(state_dir, keys)?;
+                return Err(error.into());
+            }
+        };
         // A desktop with both keys of a member removed for good stays
         // enrolled, cut off: never forgotten on a member's word.
         let removed = |id: &Id| merged.removed.contains(id);
@@ -189,11 +242,14 @@ impl Held {
             suspension.overflow || !suspension.removals.is_empty()
         });
         held.access = Some(merged);
+        held.refused = false;
         // The SSH lines first: a write that fails leaves the file it was
         // computed from unsaved, so the digest still shows the host behind
         // and Sheprd applies it again.
         held.write_keys(keys)?;
         held.save(state_dir)?;
+        // Last: until the good file is kept, members stay out.
+        files::remove(&state_dir.join(REFUSED))?;
         match refused {
             Some(error) => Err(error),
             None => Ok(held),
@@ -210,7 +266,7 @@ impl Held {
         if let (Some(path), Some(access)) = (keys, &held.access) {
             authorized_keys::set_fleet(path, &access.fleet.short(), &[])?;
         }
-        for name in [access::FILE, SUSPENDED, REVOKED, CROWDED] {
+        for name in [access::FILE, SUSPENDED, REVOKED, CROWDED, REFUSED] {
             let path = state_dir.join(name);
             match std::fs::remove_file(&path) {
                 Ok(()) => {}
@@ -235,7 +291,7 @@ impl Held {
     ) -> Result<Vec<[u8; 32]>> {
         let _lock = files::Lock::acquire(state_dir)?;
         let mut held = Self::load(state_dir)?;
-        let Some(access) = &held.access else {
+        let Some(access) = held.access.as_ref().filter(|_| !held.refused) else {
             return Ok(Vec::new());
         };
         // The sender may have been suspended since it was let in.
@@ -315,9 +371,11 @@ impl Held {
     /// Whether `member` is admitted at all: a member here, not suspended.
     #[must_use]
     pub fn admits(&self, member: &Id) -> bool {
-        self.access
-            .as_ref()
-            .is_some_and(|access| access.members.contains_key(member))
+        !self.refused
+            && self
+                .access
+                .as_ref()
+                .is_some_and(|access| access.members.contains_key(member))
             && !self.suspended.contains_key(member)
     }
 
@@ -327,7 +385,8 @@ impl Held {
     /// apart. What `suspend`, `Admitted`, and `report` all ask.
     #[must_use]
     pub fn reaches_ssh(&self, id: &Id) -> bool {
-        !self.crowded.contains(id)
+        !self.refused
+            && !self.crowded.contains(id)
             && self
                 .access
                 .as_ref()
@@ -388,6 +447,7 @@ impl Held {
             removed: access.removed.len(),
             revoked,
             crowded: self.crowded.clone(),
+            refused: self.refused,
             suspended: self.suspended.clone(),
         }))
     }
@@ -471,6 +531,10 @@ pub struct Report {
     /// the digest unchanged.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub crowded: BTreeSet<Id>,
+    /// The last file handed over could not be read or checked, so the
+    /// fleet reaches nothing here: Sheprd applies a good one again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub refused: bool,
     /// Enrolled desktops cut off because a member removed for good named
     /// their keys: `authorize` enrolls one again.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

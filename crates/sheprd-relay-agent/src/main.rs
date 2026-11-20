@@ -1,8 +1,7 @@
 //! `sheprd-relay-agent`; see the crate documentation and `--help`.
 
 use sheprd_relay_agent::{
-    Error, Result,
-    access::{self, Access},
+    Error, Result, access,
     agent::{Agent, Options, Relay},
     authorized::Authorized,
     authorized_keys,
@@ -77,9 +76,8 @@ fn execute(command: Command, state_dir: &Path) -> Result<()> {
                     path: PathBuf::from("-"),
                     source,
                 })?;
-            let incoming = Access::parse(&bytes)?;
             let keys = keys_path(authorized_keys)?;
-            fleet::Held::apply(state_dir, Some(&keys), incoming)?;
+            fleet::Held::apply_bytes(state_dir, Some(&keys), &bytes)?;
             print_json(state_dir, &Report::read(state_dir, SystemTime::now())?)
         }
         Command::FleetScrub { authorized_keys } => {

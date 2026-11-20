@@ -31,6 +31,8 @@ fleet apply Merge the fleet access file Sheprd computed, read on stdin, into
             the one kept here, write the fleet's authorized_keys lines,
             and print the status as JSON. Run by Sheprd over SSH; a file
             for another fleet than the one this account holds is refused.
+            A file that does not read or check out removes the fleet's
+            lines and admits no member until a good one is applied.
 fleet scrub Forget the fleet: remove its authorized_keys lines, its access
             file, and its suspensions, so no member of it reaches this
             account through the agent. Desktops authorized one by one

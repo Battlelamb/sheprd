@@ -9,6 +9,8 @@ use crate::{
     authorized::Entry,
 };
 
+mod refused;
+
 const FLEET: u8 = 0xf1;
 
 fn file(members: &[(u8, bool, u64)], removed: &[u8], settled: &[u8]) -> Access {

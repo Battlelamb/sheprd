@@ -159,33 +159,48 @@ fn without_here_documents(command: &str) -> String {
 }
 
 /// The here-documents `line` starts, in order: each delimiter, and whether
-/// `<<-` lets its closing line be indented with tabs. `<<<` is a string,
-/// not a document.
+/// `<<-` lets its closing line be indented with tabs. A `<<` in quotes or a
+/// comment is text, and `<<<` is a string, not a document.
 fn delimiters(line: &str) -> Vec<(String, bool)> {
     let mut found = Vec::new();
-    let mut rest = line;
-    while let Some(at) = rest.find("<<") {
-        let after = &rest[at + 2..];
-        if after.starts_with('<') {
-            rest = after.trim_start_matches('<');
-            continue;
+    let mut quote = None;
+    let mut chars = line.char_indices().peekable();
+    while let Some((at, ch)) = chars.next() {
+        match (quote, ch) {
+            (Some(open), ch) if ch == open => quote = None,
+            (Some('"'), '\\') => {
+                chars.next();
+            }
+            (Some(_), _) => {}
+            (None, '\'' | '"') => quote = Some(ch),
+            (None, '\\') => {
+                chars.next();
+            }
+            (None, '#') if line[..at].ends_with(char::is_whitespace) || at == 0 => break,
+            (None, '<') if line[at..].starts_with("<<<") => {
+                while chars.next_if(|&(_, ch)| ch == '<').is_some() {}
+            }
+            (None, '<') if line[at..].starts_with("<<") => {
+                chars.next();
+                let after = &line[at + 2..];
+                let (tabs, after) = match after.strip_prefix('-') {
+                    Some(after) => (true, after),
+                    None => (false, after),
+                };
+                let word: String = after
+                    .trim_start()
+                    .chars()
+                    .take_while(|ch| {
+                        !ch.is_whitespace() && !matches!(ch, ';' | '&' | '|' | ')' | '<' | '>')
+                    })
+                    .filter(|ch| !matches!(ch, '\'' | '"' | '\\'))
+                    .collect();
+                if !word.is_empty() {
+                    found.push((word, tabs));
+                }
+            }
+            (None, _) => {}
         }
-        let (tabs, after) = match after.strip_prefix('-') {
-            Some(after) => (true, after),
-            None => (false, after),
-        };
-        let word: String = after
-            .trim_start()
-            .chars()
-            .take_while(|ch| {
-                !ch.is_whitespace() && !matches!(ch, ';' | '&' | '|' | ')' | '<' | '>')
-            })
-            .filter(|ch| !matches!(ch, '\'' | '"' | '\\'))
-            .collect();
-        if !word.is_empty() {
-            found.push((word, tabs));
-        }
-        rest = after;
     }
     found
 }

@@ -334,6 +334,14 @@ fn here_document_bodies_are_text_not_commands() {
     assert_eq!(after.len(), 1);
     assert_eq!(after[0].number, 7);
     assert_eq!(pulls("grep x <<< \"$text\"\ngh pr merge 7 -R o/r").len(), 1);
+    // `<<` in quotes or a comment starts no document.
+    for command in [
+        "echo 'a << b'\ngh pr merge 7 -R o/r",
+        "echo \"a << b\"\ngh pr merge 7 -R o/r",
+        "true # see <<EOF\ngh pr merge 7 -R o/r",
+    ] {
+        assert_eq!(pulls(command).len(), 1, "{command:?}");
+    }
     // The body of `gh pr create`'s own document is skipped; its URL counts.
     let create = found(
         &call("`gh pr create`", "https://github.com/o/r/pull/9"),

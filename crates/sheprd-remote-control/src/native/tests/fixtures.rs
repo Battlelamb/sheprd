@@ -150,6 +150,11 @@ fn home() -> Home {
         checkouts: &Default::default(),
         recognized: &Default::default(),
         computer: "MacBook Pro",
+        // The chat and the terminal's agent are starred.
+        favorites: &crate::control::favorites::Favorites {
+            boot: Some("b".into()),
+            panes: vec!["p1".into(), "p2".into()],
+        },
         fingerprint: &"AB".repeat(32),
         layout: &layout,
         load: Some(Load {

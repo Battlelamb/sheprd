@@ -1619,10 +1619,11 @@ history still acts on it at once, to fail closed:
 - What a receiver keeps is bounded: a live member's sixteen newest
   removals are kept apart, each settled by its own history (refused, never
   merely dropped for room); older ones, and all of a member no longer
-  live, fold per signer and target, keeping the latest arrival and each
-  member those removals named with the latest arrival naming it, so a name
-  ends with the removals that gave it and the signer rule is the same as
-  for each removal on its own. Acknowledgments count only removals sent in
+  live, fold per signer and target: four by id, each with what it named
+  and settled by its own history, then an overflow that keeps the latest
+  arrival and each member named with the latest arrival naming it, which
+  time alone ends. A name ends with the removals that gave it, and the
+  signer rule is the same as for each removal on its own. Acknowledgments count only removals sent in
   that exchange and still held, at most 2,048 per peer.
 
 That last case is only a member removing another member, which any

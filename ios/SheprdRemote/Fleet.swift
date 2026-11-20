@@ -100,6 +100,8 @@ final class Fleet {
     /// the same one, and only the last to close stops watching it.
     @ObservationIgnored private var chatViewers: [PaneKey: Int] = [:]
     @ObservationIgnored private var termViewers: [PaneKey: Int] = [:]
+    /// Chats followed with no screen showing them, so they open current.
+    @ObservationIgnored private var warmth = WarmChats<PaneKey>()
     /// One client per computer, kept while its address and CA stay.
     @ObservationIgnored private var clients: [String: RemoteClient] = [:]
     /// Each computer's relay proxy while its link runs (`RelayProxy`).
@@ -200,6 +202,7 @@ final class Fleet {
         if active { machines.forEach { startLink($0.computer) } }
         // From the cached homes at launch, and without forgotten ones.
         publishSummary()
+        rewarm()
     }
 
     /// The app came to the foreground: links connect and catch up.
@@ -212,6 +215,8 @@ final class Fleet {
     /// The app left the foreground: sockets close; pushes cover the rest.
     func deactivate() {
         active = false
+        // A launch after iOS ends the app opens them as they stand now.
+        for store in chats.values { save(store) }
         for id in Array(links.keys) { stopLink(id) }
         for index in machines.indices {
             machines[index].stale = true
@@ -368,8 +373,24 @@ final class Fleet {
 
     // MARK: Views
 
+    /// Opens a chat, current at once when it was followed (`WarmChats`).
     func openChat(_ key: PaneKey) -> ChatStore {
         chatViewers[key, default: 0] += 1
+        return follow(key)
+    }
+
+    func closeChat(_ store: ChatStore) {
+        guard chats[store.key] === store, Self.release(store.key, from: &chatViewers) else { return }
+        save(store)
+        warmth.closed(store.key, at: .now)
+        rewarm()
+        Task {
+            try? await Task.sleep(for: .seconds(WarmChats<PaneKey>.lingers))
+            rewarm()
+        }
+    }
+
+    private func follow(_ key: PaneKey) -> ChatStore {
         if let open = chats[key] { return open }
         let store = ChatStore(key: key, cached: cache.chat(key.device, pane: key.pane))
         chats[key] = store
@@ -378,13 +399,22 @@ final class Fleet {
         return store
     }
 
-    func closeChat(_ store: ChatStore) {
-        guard chats[store.key] === store, Self.release(store.key, from: &chatViewers) else { return }
-        chats[store.key] = nil
-        if let transcript = store.transcript {
-            cache.save(chat: transcript, cursor: store.cursor, device: store.key.device, pane: store.key.pane)
+    private func save(_ store: ChatStore) {
+        guard let transcript = store.transcript else { return }
+        cache.save(chat: transcript, cursor: store.cursor, device: store.key.device, pane: store.key.pane)
+    }
+
+    /// Follows the chats `WarmChats` picks and lets go of the rest no
+    /// screen shows, saving what they hold for the next opening.
+    private func rewarm() {
+        let listed = chatItems.map { WarmChats.Listed(key: $0.key, busy: $0.working || $0.needsYou, lastAnswer: $0.lastAnswer) }
+        let wanted = warmth.keys(listed, at: .now)
+        for key in wanted { _ = follow(key) }
+        for (key, store) in chats where chatViewers[key] == nil && !wanted.contains(key) {
+            chats[key] = nil
+            save(store)
+            Task { await links[key.device]?.unwatch(.chat(pane: key.pane)) }
         }
-        Task { await links[store.key.device]?.unwatch(.chat(pane: store.key.pane)) }
     }
 
     func openTerm(_ key: PaneKey) -> TermStore {
@@ -843,6 +873,7 @@ final class Fleet {
                 pending.settle(key) { shown($0) }
             }
             publishSummary()
+            rewarm()
         case let .event(.error(message)):
             log.error("\(self.machines[index].computer.name, privacy: .public) refused: \(message, privacy: .public)")
         case let .event(.refused(view, message)):

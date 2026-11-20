@@ -161,8 +161,6 @@ private struct ChatDocument: View {
     let transcript: Transcript
     @State private var problem: String?
     @State private var dismissedQuestion: PermissionId?
-    /// A link the agent wrote, shown in full before it opens.
-    @State private var pendingLink: URL?
     /// The latest prompt has scrolled up past the top of the chat.
     @State private var promptAbove = false
 
@@ -290,21 +288,7 @@ private struct ChatDocument: View {
             }
             .animation(.snappy, value: transcript.status == .working)
         }
-        .environment(\.openURL, OpenURLAction { url in
-            guard MarkdownView.webSchemes.contains(url.scheme?.lowercased() ?? "") else { return .discarded }
-            pendingLink = url
-            return .handled
-        })
-        .confirmationDialog(
-            "Open this link?",
-            isPresented: Binding(get: { pendingLink != nil }, set: { if !$0 { pendingLink = nil } }),
-            titleVisibility: .visible,
-            presenting: pendingLink
-        ) { url in
-            Button("Open in Safari") { UIApplication.shared.open(url) }
-        } message: { url in
-            Text(url.absoluteString)
-        }
+        .browsesLinks(schemes: MarkdownView.webSchemes)
         .sheet(item: question) { permission in
             QuestionSheet(key: key, permission: permission)
         }

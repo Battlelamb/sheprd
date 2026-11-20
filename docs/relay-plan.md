@@ -1897,7 +1897,9 @@ manual multi-machine and phone steps left unticked in its QA list.
      key is the member's.
    - **Joining over SSH:** creating a fleet, `fleet bundle` on the
      joiner, `Admit` on the member, and the log handed over; a daemon
-     with no fleet takes a log only when it admits this computer.
+     with no fleet takes a log only when it admits this computer, keeping
+     a history too large for one `fleet apply` in `fleet/joining.bin`,
+     granting nothing, until the rest arrives.
    - **Own record:** every 10 minutes the daemon signs a `HostSeen` with
      its certificate authority when its relays, route, tunnel identity,
      or SSH host keys moved.

@@ -1,7 +1,9 @@
 //! The fleet's files, in the state directory's `fleet` folder, private to
 //! this user: `key` (the fleet key's 32-byte secret), `log.bin` (the log,
 //! `control::fleet::saved`), and `peers.json` (which removals each peer
-//! holds, and which suspensions wait for their history); `lock` is
+//! holds, and which suspensions wait for their history); `joining.bin`
+//! (the history of a fleet being joined, until it admits this computer,
+//! in `log.bin`'s format); `lock` is
 //! `super::lock`'s.
 
 use super::{Error, Inner, Result};
@@ -17,6 +19,8 @@ use std::{
 pub(super) const DIRECTORY: &str = "fleet";
 const KEY: &str = "key";
 const LOG: &str = "log.bin";
+/// The history of a fleet being joined, until it admits this computer.
+const JOINING: &str = "joining.bin";
 const PEERS: &str = "peers.json";
 /// The removals suspensions keep to check again take most of it.
 const MAX_PEERS: u64 = 16 * 1024 * 1024;
@@ -107,7 +111,13 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
         .transpose()
         .map_err(|_| Error::Peers)?
         .unwrap_or_default();
+    let joining = match log {
+        Some(_) => None,
+        None => read_bounded(&path(state_dir, JOINING), saved::MAX_SAVED as u64)?
+            .and_then(|bytes| saved::decode(&bytes, now_ms).ok()),
+    };
     Ok(Inner {
+        joining,
         log,
         held: peers
             .held
@@ -162,9 +172,6 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
 
 /// Writes the log and the peers' state. Blocking.
 pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
-    if let Some(log) = &inner.log {
-        write_private(&path(state_dir, LOG), &saved::encode(log)?)?;
-    }
     let peers = Peers {
         held: inner
             .held
@@ -209,5 +216,28 @@ pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
     };
     let json = serde_json::to_vec(&peers).map_err(|_| crate::desktop::Error::RecordFormat)?;
     write_private(&path(state_dir, PEERS), &json)?;
+    // The log goes last, each file replaced whole: a save that fails
+    // leaves the log on disk as it was, so a caller that rolls back what
+    // it holds matches the file again.
+    if let Some(log) = &inner.log {
+        write_private(&path(state_dir, LOG), &saved::encode(log)?)?;
+        remove(&path(state_dir, JOINING))?;
+    } else if let Some(joining) = &inner.joining {
+        write_private(&path(state_dir, JOINING), &saved::encode(joining)?)?;
+    }
     Ok(())
+}
+
+/// Removes `file`, which may not exist.
+fn remove(file: &Path) -> Result<()> {
+    match std::fs::remove_file(file) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(crate::desktop::Error::File {
+            operation: "remove",
+            path: file.to_owned(),
+            source,
+        }
+        .into()),
+    }
 }

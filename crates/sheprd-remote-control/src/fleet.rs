@@ -93,6 +93,11 @@ pub(crate) struct Inner {
     /// removed, a desktop paired here one by one with any of them goes
     /// with it, keys it rotated away from included.
     pub(crate) proven: BTreeMap<MemberId, BTreeSet<[u8; 32]>>,
+    /// With no fleet yet, the history of the fleet this computer is
+    /// joining, as far as it arrived: a history too large for one
+    /// `fleet apply` comes over several. It grants nothing; it becomes the
+    /// log once it admits this computer.
+    pub(crate) joining: Option<Log>,
 }
 
 impl Fleet {
@@ -272,7 +277,15 @@ impl Fleet {
                 .filter(|(_, result)| result.is_err())
                 .count(),
             None => {
-                let (log, refused) = join(ops, self.me, now_ms)?;
+                let (log, refused) = join(inner.joining.take(), ops, now_ms)?;
+                if !sync::admits(&log, &self.me) {
+                    // Kept, granting nothing, for the rest to arrive.
+                    inner.joining = Some(log);
+                    let saved = self.save(&inner);
+                    drop(inner);
+                    saved?;
+                    return Err(Error::NotAdmitted);
+                }
                 inner.log = Some(log);
                 refused
             }
@@ -293,6 +306,50 @@ impl Fleet {
             saved?;
         }
         Ok(refused)
+    }
+
+    /// Takes what `fleet apply` carried and answers it from the log, or,
+    /// while joining, from the history so far, so the member sends the
+    /// rest. Blocking.
+    pub(crate) fn apply(&self, apply: &sync::Apply, now_ms: u64) -> Result<sync::Applied> {
+        let heads = apply.heads()?;
+        let refused = match self.receive(apply.ops()?, now_ms) {
+            Ok(refused) => refused,
+            Err(Error::NotAdmitted) if self.inner().joining.is_some() => 0,
+            Err(error) => return Err(error),
+        };
+        let inner = self.inner();
+        let log = inner
+            .log
+            .as_ref()
+            .or(inner.joining.as_ref())
+            .ok_or(Error::NoFleet)?;
+        Ok(sync::answer(log, &heads, refused))
+    }
+
+    /// Ages what waits on time alone, at `now_ms`: removals waiting for
+    /// their history leave the pending pool, and suspensions past
+    /// [`UNCONFIRMED_TTL_MS`] end, so their targets' grants return on an
+    /// idle daemon too. Blocking.
+    pub(crate) fn tick(&self, now_ms: u64) -> Result<()> {
+        let before = self.suspended();
+        let mut inner = self.inner();
+        let Some(log) = inner.log.as_mut() else {
+            return Ok(());
+        };
+        let _ = log.insert_all(Vec::new(), now_ms);
+        let kept: Vec<OpId> = inner.unconfirmed.keys().copied().collect();
+        settle_unconfirmed(&mut inner, now_ms);
+        let saved = if kept.iter().eq(inner.unconfirmed.keys()) {
+            Ok(())
+        } else {
+            self.save(&inner)
+        };
+        drop(inner);
+        if self.suspended() != before {
+            self.bump();
+        }
+        saved
     }
 
     /// Records that `member` proved `tunnel` by finishing the tunnel's
@@ -373,11 +430,7 @@ pub fn run_apply(state_dir: &Path, apply: sync::Apply) -> Result<sync::Applied> 
         if let Some(_lock) = lock::Lock::try_acquire(state_dir)? {
             let now = crate::web::now_ms();
             let fleet = Fleet::load(state_dir, now)?;
-            let heads = apply.heads()?;
-            let refused = fleet.receive(apply.ops()?, now)?;
-            let inner = fleet.inner();
-            let log = inner.log.as_ref().ok_or(Error::NoFleet)?;
-            return Ok(sync::answer(log, &heads, refused));
+            return fleet.apply(&apply, now);
         }
         if std::time::Instant::now() >= deadline {
             return Err(Error::Busy);
@@ -398,22 +451,27 @@ pub fn run_bundle(state_dir: &Path, fleet: String) -> Result<sync::Answer> {
     }
 }
 
-/// A log from operations that found a fleet, or `Error::NotAdmitted` when
-/// they do not admit `me`.
-fn join(mut ops: Vec<Op>, me: MemberId, now_ms: u64) -> Result<(Log, usize)> {
+/// The history of a fleet being joined, `joining` so far with `ops` added:
+/// a founding operation starts it anew unless it founded `joining`, and
+/// with neither there is nothing to join (`Error::NotAdmitted`).
+fn join(joining: Option<Log>, mut ops: Vec<Op>, now_ms: u64) -> Result<(Log, usize)> {
     let found = ops
         .iter()
-        .position(|op| matches!(op.body(), Body::Found(_)))
-        .ok_or(Error::NotAdmitted)?;
-    let mut log = Log::found(ops.swap_remove(found))?;
+        .position(|op| matches!(op.body(), Body::Found(_)));
+    let mut log = match (joining, found) {
+        (Some(log), Some(found)) if log.fleet().0 == ops[found].id().0 => {
+            ops.swap_remove(found);
+            log
+        }
+        (_, Some(found)) => Log::found(ops.swap_remove(found))?,
+        (Some(log), None) => log,
+        (None, None) => return Err(Error::NotAdmitted),
+    };
     let refused = log
         .insert_all(ops, now_ms)
         .iter()
         .filter(|(_, result)| result.is_err())
         .count();
-    if !sync::admits(&log, &me) {
-        return Err(Error::NotAdmitted);
-    }
     Ok((log, refused))
 }
 

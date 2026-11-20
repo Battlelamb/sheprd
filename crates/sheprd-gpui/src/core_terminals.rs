@@ -43,6 +43,7 @@ mod screen;
 mod selection;
 mod session;
 mod sidebar;
+mod spaces;
 mod split;
 mod start;
 mod tabs;
@@ -777,6 +778,7 @@ impl SheprdWindow {
         );
         self.poll_core_panes(window, cx);
         self.poll_core_edits(cx);
+        self.sync_shared_spaces(cx);
         // While a phone may start work here, this computer's core is joined
         // (never started) to see it, with or without a tab of its own.
         if crate::remote::supervisor::Supervisor::enabled(cx) {

@@ -12,6 +12,7 @@ impl<R: FnMut(Update)> Session<R> {
     /// one left, as a model's thinking levels follow the model. A setting
     /// the agent does not offer, or already has, is skipped; auto-accepting
     /// and the mode come last. Settings read from another agent are dropped.
+    /// Once none is left, the prompts queued meanwhile go.
     pub(super) fn carry_next(&mut self) {
         let harness = self.config.harness;
         loop {
@@ -21,7 +22,9 @@ impl<R: FnMut(Update)> Session<R> {
                 .as_mut()
                 .filter(|settings| harness.is_some_and(|agent| settings.is_for(agent)))
             else {
-                self.config.settings = None;
+                if self.config.settings.take().is_some() {
+                    self.next_queued();
+                }
                 return;
             };
             if !settings.options.is_empty() {
@@ -38,24 +41,33 @@ impl<R: FnMut(Update)> Session<R> {
                 }
                 continue;
             }
-            let Some(settings) = self.config.settings.take() else {
-                return;
-            };
-            if settings.auto_accept {
+            if std::mem::take(&mut settings.auto_accept) {
                 self.set_auto_accept(true);
+                continue;
             }
-            if let Some(mode) = settings.mode
+            let mode = settings.mode.take();
+            if let Some(mode) = mode
                 && self
                     .transcript
                     .modes
                     .as_ref()
                     .is_some_and(|modes| modes.current != mode)
-            {
                 // An unknown mode is refused and the session's stays.
-                let _ = self.set_mode(mode);
+                && self.set_mode(mode).is_ok()
+            {
+                // Its answer comes back here, to end the carrying.
+                return;
             }
+            self.config.settings = None;
+            self.next_queued();
             return;
         }
+    }
+
+    /// Whether carried settings are still being set: prompts wait for
+    /// them, so the first one runs with the model and mode asked for.
+    pub(super) fn carrying(&self) -> bool {
+        self.config.settings.is_some()
     }
 }
 

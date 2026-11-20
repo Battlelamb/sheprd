@@ -133,3 +133,54 @@ fn settings_of_another_agent_or_for_a_continued_session_stay_unused() {
         assert!(!harness.transcript().auto_accept);
     }
 }
+
+#[test]
+fn a_prompt_waits_until_every_carried_setting_is_set() {
+    let mut harness = opened(carried("claude"), None);
+    let mut sent_now = harness.sent();
+    harness.command(
+        1,
+        Command::Prompt {
+            origin: None,
+            text: "go".into(),
+            attachments: Vec::new(),
+        },
+    );
+    assert_eq!(harness.transcript().queued.len(), 1);
+    for configs in [options("sonnet", "low"), options("sonnet", "high")] {
+        sent_now.extend(harness.sent());
+        assert!(only(&sent_now, "session/prompt").is_empty(), "{sent_now:?}");
+        let set = only(&sent_now, "session/set_config_option");
+        let id = set.last().unwrap()["id"].as_i64().unwrap();
+        harness.respond(id, json!({ "configOptions": configs }));
+        sent_now.clear();
+    }
+    sent_now = harness.sent();
+    assert!(only(&sent_now, "session/prompt").is_empty(), "{sent_now:?}");
+    let mode = only(&sent_now, "session/set_mode")[0]["id"]
+        .as_i64()
+        .unwrap();
+    harness.respond(mode, json!({}));
+    let sent_now = harness.sent();
+    let prompts = only(&sent_now, "session/prompt");
+    assert_eq!(prompts.len(), 1, "{sent_now:?}");
+    assert!(harness.transcript().queued.is_empty());
+}
+
+#[test]
+fn a_prompt_goes_at_once_when_nothing_is_carried() {
+    for (agent, load) in [("codex", None), ("claude", Some("old"))] {
+        let mut harness = opened(carried(agent), load);
+        harness.sent();
+        harness.command(
+            1,
+            Command::Prompt {
+                origin: None,
+                text: "go".into(),
+                attachments: Vec::new(),
+            },
+        );
+        let sent_now = harness.sent();
+        assert_eq!(only(&sent_now, "session/prompt").len(), 1, "{sent_now:?}");
+    }
+}

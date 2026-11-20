@@ -72,7 +72,7 @@ impl<R: FnMut(Update)> Session<R> {
         if !self.transcript.status.accepts_prompts() {
             return Err(Rejection::NotReady);
         }
-        if self.turn.is_some() || !self.ready {
+        if self.turn.is_some() || !self.ready || self.carrying() {
             let waiting = &self.transcript.queued;
             let text_size: usize = waiting.iter().map(|queued| queued.text.len()).sum();
             if waiting.len() >= MAX_QUEUED || text_size + text.len() > MAX_QUEUED_TEXT {
@@ -158,7 +158,7 @@ impl<R: FnMut(Update)> Session<R> {
 
     /// Sends the oldest queued prompt once the agent is free.
     pub(super) fn next_queued(&mut self) {
-        if self.turn.is_some() || !self.ready {
+        if self.turn.is_some() || !self.ready || self.carrying() {
             return;
         }
         let mut queued = self.transcript.queued.clone();

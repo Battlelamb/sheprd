@@ -234,9 +234,11 @@ impl<R: FnMut(Update)> Session<R> {
         self.projector.close();
         self.hand_over(loaded);
         self.status(Status::Idle);
-        if !loaded {
-            self.carry_next();
+        if loaded {
+            // A continued session keeps its own settings.
+            self.config.settings = None;
         }
+        self.carry_next();
         self.next_queued();
     }
 

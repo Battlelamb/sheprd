@@ -43,7 +43,7 @@ pub(super) fn chat(command: ChatCommand, context: &Context) -> crate::Result<Out
     let op = match command {
         ChatCommand::Status => ChatOp::Status,
         ChatCommand::New { agent, pane } => ChatOp::New {
-            agent: agent.name().to_owned(),
+            agent: agent.map(|agent| agent.name().to_owned()),
             pane,
         },
         ChatCommand::Convert { pane } => ChatOp::Convert { pane },

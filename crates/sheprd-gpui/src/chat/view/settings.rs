@@ -241,6 +241,21 @@ impl SheprdWindow {
         cx.notify();
     }
 
+    /// Closes the menu open over the chat once the person types in its
+    /// composer, as a click outside it would. A menu with its own search
+    /// field holds the keyboard, so typing there never reaches this.
+    pub(in crate::chat) fn close_chat_menu_on_typing(
+        &mut self,
+        pane_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(menu) = self.chats.pane(pane_id).and_then(|pane| pane.menu.clone()) else {
+            return;
+        };
+        self.toggle_chat_menu(pane_id, menu, window, cx);
+    }
+
     /// An on/off switch between a setting's two choices, marked with what
     /// it sets and labeled with the current one: off is the first choice,
     /// on the second.

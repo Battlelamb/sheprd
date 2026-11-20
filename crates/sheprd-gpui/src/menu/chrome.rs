@@ -685,6 +685,8 @@ impl SheprdWindow {
             panel = panel.child(self.render_add_wsl(compact_rail, cx));
         } else if page == Page::AddNearby {
             panel = panel.child(self.render_add_nearby(compact_rail, cx));
+        } else if page == Page::RemoveMerged {
+            panel = panel.child(self.render_merged_sweep(cx));
         } else if page == Page::RemoveWsl {
             panel = panel.child(self.render_remove_wsl(cx));
         } else if page == Page::GitHub {

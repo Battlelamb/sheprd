@@ -31,6 +31,11 @@ pub(super) fn start(
         let Ok(parent) = cx.update(|window, _| parent(window)) else {
             return;
         };
+        // TEMPORARY diagnostics for the flaky native pages check.
+        #[cfg(feature = "integration-test")]
+        let begun = std::time::Instant::now();
+        #[cfg(feature = "integration-test")]
+        eprintln!("PAGES diag: build {number} started");
         let built = match parent {
             Ok(parent) => builder
                 .build_as_child_async(&parent)
@@ -38,6 +43,12 @@ pub(super) fn start(
                 .map_err(crate::Error::from),
             Err(error) => Err(error),
         };
+        #[cfg(feature = "integration-test")]
+        eprintln!(
+            "PAGES diag: build {number} finished after {:?}: {:?}",
+            begun.elapsed(),
+            built.as_ref().map(|_| ())
+        );
         let _ = this.update_in(cx, |this, window, cx| {
             this.page_built(id, number, built, window, cx)
         });

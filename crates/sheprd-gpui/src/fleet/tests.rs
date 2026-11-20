@@ -232,3 +232,16 @@ fn a_removed_host_shared_again_or_another_fleet_is_synced_again() {
     assert_eq!(fleet.links["m2"].standing, Standing::Unknown);
     assert!(Link::default().due(&[], Instant::now()));
 }
+
+#[test]
+fn a_successful_read_clears_an_earlier_failure() {
+    let mut fleet = Fleet {
+        reads: 1,
+        ..Fleet::default()
+    };
+    fleet.answered(1, Err(Some("refused".into())));
+    assert_eq!(fleet.error.as_deref(), Some("refused"));
+    fleet.reads = 2;
+    fleet.answered(2, Ok(None));
+    assert_eq!(fleet.error, None);
+}

@@ -99,12 +99,13 @@ pub(crate) fn parse_applied(output: &[u8]) -> Result<Applied, Error> {
 /// state failed: an agent whose usage names no `fleet scrub` predates the
 /// fleet and holds none. The daemon goes last: forgetting its fleet ends
 /// the fleet sessions it carries, this one perhaps among them, and it
-/// keeps this one only long enough to read the answer.
+/// keeps this one only long enough to read the answer. The agent is the
+/// one Sheprd installs and its service runs, `~/.local/bin`'s, never
+/// another copy earlier on `PATH`, which would scrub other state or none.
 pub(super) const SCRUB: &str = "\
 cleared=false
 failed=false
-agent=$(command -v sheprd-relay-agent || true)
-[ -n \"$agent\" ] || agent=\"$HOME/.local/bin/sheprd-relay-agent\"
+agent=\"$HOME/.local/bin/sheprd-relay-agent\"
 if [ -x \"$agent\" ] && \"$agent\" --help 2>&1 | grep -q 'fleet scrub'; then
   if \"$agent\" fleet scrub >/dev/null 2>&1; then cleared=true; else failed=true; fi
 fi

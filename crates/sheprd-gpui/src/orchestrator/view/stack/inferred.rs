@@ -149,6 +149,8 @@ fn layer(item: &Item, position: u64, statuses: &HashMap<(String, u64), PrStatus>
             .and_then(|status| status.review)
             .map_or(ReviewDecision::None, |review: Review| review.into()),
         checks: status.and_then(|status| rollup(status.checks.iter().map(|check| check.state))),
+        // Restacking reads GitHub's own stacks only.
+        head_oid: String::new(),
     })
 }
 

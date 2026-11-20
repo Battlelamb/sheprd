@@ -15,6 +15,7 @@ mod colors;
 pub(crate) mod devices;
 mod fan_out;
 mod git;
+mod git_restack;
 mod github;
 pub(crate) mod gitlab;
 mod mute;

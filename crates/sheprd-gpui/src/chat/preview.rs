@@ -24,6 +24,7 @@ use super::{
 };
 use crate::{SheprdWindow, config::ChatLayoutMode};
 
+mod continued;
 mod effects;
 mod input_resize;
 mod progress;
@@ -123,6 +124,9 @@ impl Options {
                 | "widgets-end"
                 | "jump"
                 | "conversation"
+                | "continued"
+                | "continued-before"
+                | "continued-open"
                 | "existing"
                 | "loading"
                 | "input-resize"
@@ -142,7 +146,7 @@ impl Options {
                 | "all"
         ) {
             bail!(
-                "HERDR_TEST_RICH_CHAT expects math, code, diagram, effects, activity, activity-open, running-rail, attachments, questions, selection, user, widgets, widgets-end, jump, conversation, existing, loading, input-resize, tools, turns, progress, progress-before, running, running-open, steps, steps-open, state-completed, state-failed, state-stopped, state-waiting, or all"
+                "HERDR_TEST_RICH_CHAT expects math, code, diagram, effects, activity, activity-open, running-rail, attachments, questions, selection, user, widgets, widgets-end, jump, conversation, continued, continued-before, continued-open, existing, loading, input-resize, tools, turns, progress, progress-before, running, running-open, steps, steps-open, state-completed, state-failed, state-stopped, state-waiting, or all"
             );
         }
         let hold = std::env::var("HERDR_TEST_RICH_CHAT_HOLD_MS")
@@ -518,6 +522,9 @@ fn install(
             },
         }];
     }
+    if options.case.starts_with("continued") {
+        continued::apply(&options.case, &mut transcript);
+    }
     if options.case == "user" {
         transcript.entries = vec![Entry {
             id: EntryId(1),
@@ -561,6 +568,12 @@ fn install(
         && let Some(pane) = view.chats.pane_mut(PANE)
     {
         pane.expanded.insert(EntryId(1));
+    }
+    if options.case == "continued-open"
+        && let Some(pane) = view.chats.pane_mut(PANE)
+    {
+        pane.expanded
+            .extend([continued::DIVIDER, continued::COMPACTED]);
     }
     // The first sub-agent's steps and the table of what runs, open.
     if options.case == "running-open"

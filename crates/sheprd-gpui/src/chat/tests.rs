@@ -31,6 +31,7 @@ mod convert;
 mod core_convert;
 mod core_panes;
 mod discovery;
+mod earlier;
 mod effects;
 mod embeds;
 mod en_xa;

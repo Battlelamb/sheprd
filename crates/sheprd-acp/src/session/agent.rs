@@ -206,8 +206,12 @@ impl<R: FnMut(Update)> Session<R> {
         };
         self.ready = true;
         (self.report)(Update::Opened(id.0.to_string()));
+        let continued = self.continued(loaded);
         self.emit(Change::Session {
-            session: Some(project::session(&id, &self.config.cwd)),
+            session: Some(sheprd_chat_protocol::SessionInfo {
+                continued,
+                ..project::session(&id, &self.config.cwd)
+            }),
         });
         if let Some(modes) = modes {
             self.emit(Change::Modes {
@@ -221,6 +225,36 @@ impl<R: FnMut(Update)> Session<R> {
         self.hand_over(loaded);
         self.status(Status::Idle);
         self.next_queued();
+    }
+
+    /// The notice under the conversation a continued session brought with
+    /// it, which the chat's first session places as it opens and every
+    /// later one keeps. A new session, or one that brought nothing, has
+    /// none.
+    fn continued(&mut self, loaded: bool) -> Option<sheprd_chat_protocol::EntryId> {
+        if let Some(session) = &self.transcript.session {
+            return session.continued;
+        }
+        let brought = self.transcript.entries.iter().any(|entry| {
+            matches!(
+                entry.kind,
+                sheprd_chat_protocol::EntryKind::User { .. }
+                    | sheprd_chat_protocol::EntryKind::Agent { .. }
+            )
+        });
+        if !loaded || !brought {
+            return None;
+        }
+        let notice = self.projector.notice(
+            NoticeLevel::Info,
+            format!("Continued from {}'s earlier session", self.config.agent),
+        );
+        let Change::Push { entry } = &notice else {
+            return None;
+        };
+        let id = entry.id;
+        self.emit(notice);
+        Some(id)
     }
 
     /// The agent that took over opened its session: prepare what it is

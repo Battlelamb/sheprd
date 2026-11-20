@@ -43,6 +43,43 @@ public struct ChatEffects: Hashable, Sendable {
         }
     }
 
+    /// An effect that began to play, for its sound and taps.
+    public enum Began: Hashable, Sendable {
+        case bubble(BubbleEffect)
+        /// A screen effect, and its message's words.
+        case screen(ScreenEffect, text: String)
+        /// More of the letters zap shoots down streamed in, `at` seconds
+        /// after it began: their shots are still to come.
+        case letters(Range<Int>, at: Double)
+
+        /// Where its sound and taps play: a bubble's beside anything else,
+        /// a screen effect's in place of the one before.
+        public enum Lane: Hashable, Sendable {
+            case bubble
+            /// The screen effect's, stopping whatever the last one still
+            /// had to play.
+            case newScreen
+            /// More of the screen effect playing.
+            case screen
+        }
+
+        public var lane: Lane {
+            switch self {
+            case .bubble: .bubble
+            case .screen: .newScreen
+            case .letters: .screen
+            }
+        }
+
+        public var cue: Cue {
+            switch self {
+            case let .bubble(effect): effect.cue
+            case let .screen(effect, text): effect.cue(letters: EffectScene.letters(in: text))
+            case let .letters(letters, at): ScreenEffect.zap(letters).after(at)
+            }
+        }
+    }
+
     /// Bubbles met in each message, so only a new one plays.
     private var bubbles: [EntryId: Int] = [:]
     /// Messages whose screen effect was met.
@@ -67,24 +104,40 @@ public struct ChatEffects: Hashable, Sendable {
 
     /// Plays the effects new in the entries of `transcript` that `changed`
     /// names, wherever they are in it. A screen effect arriving while
-    /// another plays is dropped, not queued.
-    public mutating func live(_ transcript: Transcript, changed: some Sequence<EntryId>, now: Date) {
+    /// another plays is dropped, not queued. Returns the effects that began,
+    /// each kind once: eight slams landing together sound as one.
+    @discardableResult
+    public mutating func live(_ transcript: Transcript, changed: some Sequence<EntryId>, now: Date) -> [Began] {
+        var began: [Began] = []
         var seen: Set<EntryId> = []
         for id in changed where seen.insert(id).inserted {
             guard let entry = transcript.entry(id), let message = Self.message(entry) else { continue }
-            // The words an effect draws stream in after its directive.
-            if playing?.entry == id { playing?.text = message.gist() }
+            // The words an effect draws stream in after its directive, and
+            // zap's newly arrived letters are still to be shot down.
+            if let shown = playing, shown.entry == id {
+                let text = message.gist()
+                let (had, has) = (EffectScene.letters(in: shown.text), EffectScene.letters(in: text))
+                if shown.effect == .zap, has > had, let at = shown.elapsed(at: now) {
+                    began.append(.letters(had..<has, at: at))
+                }
+                playing?.text = text
+            }
             let met = bubbles[id] ?? 0
             let count = message.bubbles
             if count > met {
                 bubbles[id] = count
                 for order in met..<count { started[BubbleKey(entry: id, order: order)] = now }
+                for effect in message.bubbleEffects[met..<count] where !began.contains(.bubble(effect)) {
+                    began.append(.bubble(effect))
+                }
             }
             if let effect = message.screen, screens.insert(id).inserted, playing(at: now) == nil {
                 playing = Playing(entry: id, effect: effect, since: now, text: message.gist())
+                began.append(.screen(effect, text: message.gist()))
             }
         }
         expire(now: now)
+        return began
     }
 
     /// Plays a message's bubble again, as its replay link asks.
@@ -93,9 +146,11 @@ public struct ChatEffects: Hashable, Sendable {
     }
 
     /// Plays a message's screen effect again, in place of one playing.
-    public mutating func replayScreen(_ entry: Entry, now: Date) {
-        guard let message = Self.message(entry), let effect = message.screen else { return }
+    @discardableResult
+    public mutating func replayScreen(_ entry: Entry, now: Date) -> Began? {
+        guard let message = Self.message(entry), let effect = message.screen else { return nil }
         playing = Playing(entry: entry.id, effect: effect, since: now, text: message.gist())
+        return .screen(effect, text: message.gist())
     }
 
     /// When a bubble began to play, if it may still be playing.

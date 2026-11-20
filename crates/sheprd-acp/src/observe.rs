@@ -4,6 +4,7 @@
 
 mod error;
 pub(crate) mod identity;
+mod process;
 #[cfg(test)]
 mod tests;
 

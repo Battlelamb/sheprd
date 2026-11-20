@@ -8,10 +8,14 @@ use crate::{
     browser::WebUrl,
     control::protocol::{
         Caller, ErrorCode, Response,
-        hosts::{AccountQuota, COMMENTS_WAIT_SECONDS, CheckInfo, CommentInfo, PrInfo, Reply},
+        hosts::{
+            AccountQuota, COMMENTS_WAIT_SECONDS, CheckInfo, CommentInfo, LayerInfo, PrInfo,
+            QueueInfo, QueueOp, Reply, StackInfo,
+        },
     },
+    menu::PrChange,
     pr_actions::{Comment, Target},
-    pull_request::{MergeState, PullRequest, ReviewDecision, workspace_input},
+    pull_request::{MergeState, PullRequest, ReviewDecision, State, Verdict, workspace_input},
 };
 use gpui::{App, Context, Window};
 use std::time::Duration;
@@ -188,7 +192,43 @@ pub(super) fn pr_info(pr: &PullRequest) -> PrInfo {
                 outcome: outcome.to_string(),
             })
             .collect(),
+        stack: stack_info(pr),
+        queue: pr.queue.map(|queue| QueueInfo {
+            position: queue.position,
+            state: queue.state.key().to_owned(),
+            eta_seconds: queue.eta,
+        }),
     }
+}
+
+fn stack_info(pr: &PullRequest) -> Option<StackInfo> {
+    let (stack, position) = pr.stack()?;
+    let (verdict, ready, blocked) = match stack.verdict(position) {
+        Verdict::Merged => ("merged", None, None),
+        Verdict::Ready { count } => ("ready", Some(count), None),
+        Verdict::Unread => ("unread", None, None),
+        Verdict::Blocked { number, blocker } => ("blocked", None, Some((number, blocker))),
+    };
+    Some(StackInfo {
+        number: stack.number,
+        base: stack.base.clone(),
+        size: stack.size,
+        position,
+        verdict: verdict.to_owned(),
+        ready,
+        blocked_by: blocked.map(|(number, _)| number),
+        reason: blocked.map(|(_, blocker)| blocker.key().to_owned()),
+        layers: stack
+            .layers
+            .iter()
+            .map(|layer| LayerInfo {
+                position: layer.position,
+                number: layer.number,
+                title: layer.title.clone(),
+                status: layer.status_key().to_owned(),
+            })
+            .collect(),
+    })
 }
 
 pub(super) fn comment_info(comment: &Comment) -> CommentInfo {
@@ -319,4 +359,111 @@ pub(super) fn open(
     super::page_answer(Some(how), || {
         format!("Opened the pull request in workspace {}", place.workspace)
     })
+}
+
+/// `pr merge` and `pr queue`: opens the Git popup's confirmation for the
+/// caller's pull request, which must be the focused workspace's, as the
+/// popup follows. Nothing is merged or queued until the user confirms.
+pub(super) fn ask(
+    view: &mut SheprdWindow,
+    caller: &Caller,
+    change: PrChange,
+    window: &mut Window,
+    cx: &mut Context<SheprdWindow>,
+) -> Response {
+    let (place, pr) = match lookup(view, caller) {
+        Ok((place, Lookup::Found(pr))) => (place, pr),
+        Ok((_, Lookup::Missing(note))) => return missing(note),
+        Err(response) => return response,
+    };
+    // What the pull request itself rules out comes first: focusing a
+    // workspace cannot open a closed one.
+    if let Some(reason) = refusal(&pr, change) {
+        return Response::error(ErrorCode::InvalidRequest, reason);
+    }
+    let followed = Target::try_from(&*pr).ok().is_some_and(|wanted| {
+        view.pr_actions
+            .target()
+            .is_some_and(|target| target.same_pull_request(&wanted))
+    });
+    if !followed || !place.focused(view) {
+        return Response::error(
+            ErrorCode::InvalidRequest,
+            format!(
+                "Merging and queueing confirm in the Git popup, which follows the focused \
+                 workspace's open pull request; focus workspace {} first",
+                place.workspace
+            ),
+        );
+    }
+    if !view.ask_pr_change(change, window, cx) {
+        return Response::error(
+            ErrorCode::WindowBusy,
+            "A menu or dialog is open in the window; close it first",
+        );
+    }
+    super::super::work::bring_forward(window, cx);
+    let what = match change {
+        PrChange::Merge => "merge dialog",
+        PrChange::Queue(QueueOp::Add) => "merge queue confirmation",
+        PrChange::Queue(QueueOp::Remove) => "confirmation to leave the merge queue",
+    };
+    Response::Done {
+        message: format!(
+            "Opened the {what} for #{} in Sheprd; the user confirms there",
+            pr.number
+        ),
+    }
+}
+
+/// Why `change` cannot be offered for `pr`, as the command says it.
+pub(super) fn refusal(pr: &PullRequest, change: PrChange) -> Option<String> {
+    let number = pr.number;
+    if pr.state != State::Open {
+        return Some(format!("#{number} is not open"));
+    }
+    if pr.is_draft {
+        return Some(format!(
+            "#{number} is a draft; mark it ready for review first"
+        ));
+    }
+    match change {
+        PrChange::Merge if pr.queue.is_some() => Some(format!(
+            "#{number} is in the merge queue, which merges it; `sheprd pr queue remove` takes it out"
+        )),
+        PrChange::Merge if pr.merge_methods.is_empty() => {
+            Some("The repository allows no merge method".into())
+        }
+        PrChange::Merge => match pr.stack().map(|(stack, position)| stack.verdict(position)) {
+            Some(Verdict::Blocked {
+                number: blocking,
+                blocker,
+            }) => Some(format!(
+                "The stack cannot merge yet: #{blocking} is {}",
+                blocker.key().replace('_', " ")
+            )),
+            Some(Verdict::Unread) => Some(unread(number)),
+            _ => None,
+        },
+        PrChange::Queue(QueueOp::Add) if !pr.stack_known() => Some(unread(number)),
+        PrChange::Queue(QueueOp::Add) if !pr.merge_queue => {
+            Some(format!("#{number}'s base branch has no merge queue"))
+        }
+        PrChange::Queue(QueueOp::Add) if pr.queue.is_some() => {
+            Some(format!("#{number} is already in the merge queue"))
+        }
+        PrChange::Queue(QueueOp::Remove) if pr.queue.is_none() => {
+            Some(format!("#{number} is not in the merge queue"))
+        }
+        PrChange::Queue(_) => None,
+    }
+}
+
+/// Why a stack with a layer this reader could not see is not landed from
+/// here: the confirmation could not name everything GitHub would land.
+fn unread(number: u64) -> String {
+    format!(
+        "Not every pull request below #{number} in its stack could be read, so what would land \
+         is not known; check the stack on GitHub"
+    )
 }

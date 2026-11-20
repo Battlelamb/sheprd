@@ -8,11 +8,13 @@ use serde::{Deserialize, Serialize};
 use crate::{Author, CommandId, Image};
 
 mod activity;
+mod pull_request;
 mod question;
 mod question_answers;
 pub use activity::{
     Activity, ActivityKind, ActivityState, MAX_ACTIVITIES, MAX_ACTIVITY_TEXT, Running,
 };
+pub use pull_request::{MAX_PULL_REQUESTS, PullRequest, PullRequestAction};
 pub use question::{MAX_ANSWER_TEXT, MAX_QUESTION_CHOICES, Question, QuestionOption};
 pub use question_answers::{MAX_QUESTION_ANSWERS, MAX_QUESTION_TEXT, valid_question_answers};
 
@@ -63,6 +65,9 @@ pub struct Transcript {
     pub permissions: Vec<Permission>,
     #[serde(default)]
     pub plan: Vec<PlanEntry>,
+    /// Pull requests the agent worked on in this chat, oldest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pull_requests: Vec<PullRequest>,
     /// Prompts waiting for the current turn to end, oldest first.
     #[serde(default)]
     pub queued: Vec<Queued>,
@@ -135,6 +140,11 @@ impl Transcript {
         self.activities
             .iter()
             .find(|activity| activity.call_id == call_id)
+    }
+
+    /// The pull request kept for the same repository and number as `pull`.
+    pub fn pull_request(&self, pull: &PullRequest) -> Option<&PullRequest> {
+        self.pull_requests.iter().find(|known| known.is(pull))
     }
 
     pub(crate) fn position(&self, id: EntryId) -> Option<usize> {

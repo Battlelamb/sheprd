@@ -6,6 +6,7 @@ mod automation;
 mod local_ports;
 mod quota;
 mod security;
+mod stack;
 
 #[test]
 fn host_requests_have_a_stable_wire_form() {
@@ -95,6 +96,8 @@ fn host_replies_round_trip() {
             name: "test".into(),
             outcome: "passed".into(),
         }],
+        stack: None,
+        queue: None,
     };
     for reply in [
         Reply::Pr {

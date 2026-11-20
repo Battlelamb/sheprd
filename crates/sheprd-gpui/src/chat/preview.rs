@@ -28,6 +28,7 @@ mod continued;
 mod effects;
 mod input_resize;
 mod progress;
+mod pull_requests;
 mod running;
 mod selection;
 mod states;
@@ -134,6 +135,8 @@ impl Options {
                 | "turns"
                 | "progress"
                 | "progress-before"
+                | "pull-requests"
+                | "pull-requests-before"
                 | "running"
                 | "running-open"
                 | "running-rail"
@@ -146,7 +149,7 @@ impl Options {
                 | "all"
         ) {
             bail!(
-                "HERDR_TEST_RICH_CHAT expects math, code, diagram, effects, activity, activity-open, running-rail, attachments, questions, selection, user, widgets, widgets-end, jump, conversation, continued, continued-before, continued-open, existing, loading, input-resize, tools, turns, progress, progress-before, running, running-open, steps, steps-open, state-completed, state-failed, state-stopped, state-waiting, or all"
+                "HERDR_TEST_RICH_CHAT expects math, code, diagram, effects, activity, activity-open, running-rail, attachments, questions, selection, user, widgets, widgets-end, jump, conversation, continued, continued-before, continued-open, existing, loading, input-resize, tools, turns, progress, progress-before, pull-requests, pull-requests-before, running, running-open, steps, steps-open, state-completed, state-failed, state-stopped, state-waiting, or all"
             );
         }
         let hold = std::env::var("HERDR_TEST_RICH_CHAT_HOLD_MS")
@@ -478,6 +481,9 @@ fn install(
     if options.case.starts_with("progress") {
         transcript.entries = progress::entries(options.case == "progress");
     }
+    if options.case.starts_with("pull-requests") {
+        pull_requests::apply(&mut transcript, options.case == "pull-requests");
+    }
     if options.case.starts_with("running") {
         transcript.entries = running::entries();
         transcript.activities = running::activities(super::now_ms());
@@ -590,10 +596,14 @@ fn install(
         pane.toggle_expanded(EntryId(4));
     }
     // The rail, which a fixture leaves off, listing what runs.
-    if options.case == "running-rail"
+    if (options.case == "running-rail" || options.case.starts_with("pull-requests"))
         && let Some(pane) = view.chats.pane_mut(PANE)
     {
         pane.rail = true;
+    }
+    #[cfg(feature = "mockup")]
+    if options.case.starts_with("pull-requests") {
+        pull_requests::seed(&mut view.menu.pr_cache);
     }
     // Every running step in full, from the working row.
     if options.case == "steps-open"

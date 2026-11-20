@@ -36,6 +36,7 @@ mod pick;
 mod prepared;
 #[cfg(feature = "integration-test")]
 pub(crate) mod preview;
+pub(crate) mod pull_requests;
 mod rail_folds;
 mod reader;
 mod remote_route;

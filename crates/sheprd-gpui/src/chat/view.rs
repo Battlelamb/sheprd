@@ -433,6 +433,9 @@ impl SheprdWindow {
                     .flex_1()
                     .min_h_0()
                     .flex()
+                    .when_some(Self::chat_wizz_shake(chat, cx), |view, (dx, dy)| {
+                        view.relative().left(px(dx)).top(px(dy))
+                    })
                     .child(
                         div()
                             .flex_1()

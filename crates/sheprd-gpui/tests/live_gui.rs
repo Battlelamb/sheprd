@@ -257,8 +257,15 @@ fn run_fixture(fixture: &Fixture) -> Option<(ExitStatus, String)> {
     let gui = isolated.gui.as_mut().unwrap();
     // A bound on a hung fixture, not a performance budget (`just test-perf`
     // measures that): the debug build's startup, catalog loading, and every
-    // layout already take about 17 seconds on a shared Windows runner.
-    let deadline = Instant::now() + Duration::from_secs(40);
+    // layout already take about 17 seconds on a shared Windows runner. The
+    // pages fixture also waits for a cold WebView2, which alone can take
+    // about 20 seconds there (`smoke_pages_windows::SETTLE` allows 60).
+    #[cfg(any(target_os = "macos", windows))]
+    let pages = matches!(fixture, Fixture::Pages);
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let pages = false;
+    let bound = if pages { 100 } else { 40 };
+    let deadline = Instant::now() + Duration::from_secs(bound);
     while gui.try_wait().unwrap().is_none() {
         if Instant::now() >= deadline {
             let _ = gui.kill();

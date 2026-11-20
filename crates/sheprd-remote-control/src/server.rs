@@ -157,6 +157,7 @@ pub async fn run(options: Options) -> Result<()> {
         near: Mutex::default(),
         opened: web::attention::Opened::default(),
         port: options.port,
+        previews: Default::default(),
         privacy: options.privacy,
         pull_requests,
         push,
@@ -190,6 +191,7 @@ pub async fn run(options: Options) -> Result<()> {
         tokio::spawn(crate::fleet::removals::flood(fleet));
     }
     tokio::spawn(crate::native::github::checkouts::follow(state.clone()));
+    tokio::spawn(crate::native::previews::follow(state.clone()));
     tokio::spawn(crate::native::github::follow_gh_hosts(state.clone()));
     if state.github.enabled() {
         tokio::spawn(crate::native::changes::github::badges(state.clone()));

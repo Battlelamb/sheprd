@@ -23,18 +23,24 @@ final class ChatEffectsModel {
         update { $0.history(transcript) }
     }
 
-    /// Plays what is new in the entries a live update changed.
+    /// Plays what is new in the entries a live update changed, with the
+    /// sounds and taps of what begins.
     func live(_ transcript: Transcript, changed: [EntryId]) {
         guard !changed.isEmpty else { return }
-        update { $0.live(transcript, changed: changed, now: .now) }
+        var began: [ChatEffects.Began] = []
+        update { began = $0.live(transcript, changed: changed, now: .now) }
+        Feedback.shared.play(began, in: self)
     }
 
-    func replayBubble(_ key: ChatEffects.BubbleKey) {
+    func replayBubble(_ key: ChatEffects.BubbleKey, effect: BubbleEffect) {
         update { $0.replayBubble(key, now: .now) }
+        Feedback.shared.play(effect.cue)
     }
 
     func replayScreen(_ entry: Entry) {
-        update { $0.replayScreen(entry, now: .now) }
+        var began: ChatEffects.Began?
+        update { began = $0.replayScreen(entry, now: .now) }
+        if let began { Feedback.shared.play([began], in: self) }
     }
 
     /// Where the message a playing screen effect belongs to was last drawn.

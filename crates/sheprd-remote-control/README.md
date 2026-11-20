@@ -82,7 +82,15 @@ least every 3 seconds, and parses it only when its version changes. It accepts a
 256 spaces and tabs, and 16 terminal panes per tab within 16 tree levels.
 A malformed or oversized document falls back to Sheprd's saved tabs.
 
-Without a valid document, Herdr 2 tabs in Sheprd's `browser-tabs.json` keep
+Once any client has written the core's shared workspaces document,
+`sheprd.spaces` (`docs/shared-spaces-plan.md`), the workspaces Sheprd keeps
+for Herdr 2 and their tabs come from it instead of `browser-tabs.json`, so
+every computer and phone showing the core lists the same ones. A tab of the
+document is `core:tab:` and its document id. While the document was never
+written (version 0), or does not read, the saved tabs below stand in for it,
+with their numeric tab ids.
+
+Without a valid `herdr-app` document, Herdr 2 tabs in Sheprd's kept tabs keep
 their workspace and split membership. The file is read beside the explicit
 remote `--state-dir`
 (for example, `gpui/browser-tabs.json` beside `gpui/remote`), using the
@@ -123,8 +131,18 @@ Sheprd keeps a Herdr 2 tab's layout with the tab. While the desktop reports
 itself open, a phone's split, zoom, rename, or close of a saved tab is routed
 through `control::layout` to its window. A split is answered once its shell is
 in the tab and refused as busy while another terminal is starting. With the
-desktop closed, `hub::core::arrange` edits that tab in the saved tabs file;
-Sheprd reads the layout when it starts. Tabs outside Sheprd's saved layout use
+desktop closed, `hub::core::arrange` writes the change to the shared
+document as `sheprd_session::spaces` edits, made again over another
+client's write that landed first, or edits that tab in the saved tabs file
+while the document was never written; Sheprd reads the layout when it
+starts. A document tab no saved tab of the running desktop holds is changed
+in the document directly. With the desktop closed and the document written,
+closing a kept workspace ends its terminals and forgets it, and deleting its
+linked worktree runs `git worktree remove` without `--force`, so a checkout
+with changes stays, and keeps the branch. A phone's new workspace or
+worktree is written to the document with its first tab, titled with the
+agent's name, joining a kept workspace in the same folder; its terminal
+keeps the `sheprd.new_workspace` label for desktops of earlier versions. Tabs outside Sheprd's saved layout use
 the remote daemon's own persisted layout and can also be split, zoomed and
 renamed. Tabs from the Herdr desktop app's `herdr-app` document remain owned by
 that app and cannot be rearranged here. Closing ends the named terminals.

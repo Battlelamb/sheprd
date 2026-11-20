@@ -1,6 +1,6 @@
 //! `pr`, `host`, `cloud`, `ports`, `security`, and `automation`.
 use super::{Args, BatchCommand, CliError, ExecCommand, batch, exec, unknown};
-use sheprd_control_protocol::protocol::hosts::PortAction;
+use sheprd_control_protocol::protocol::hosts::{PortAction, QueueOp};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrCommand {
@@ -9,6 +9,10 @@ pub enum PrCommand {
     Comments,
     Open,
     Quota,
+    /// Open the merge dialog, which the user confirms.
+    Merge,
+    /// Open the merge queue confirmation.
+    Queue(QueueOp),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,6 +97,20 @@ pub(super) fn pr(args: &mut Args) -> Result<PrCommand, CliError> {
         Some("comments") => PrCommand::Comments,
         Some("open") => PrCommand::Open,
         Some("quota") => PrCommand::Quota,
+        Some("merge") => PrCommand::Merge,
+        Some("queue") => {
+            let Some(change) = args.verb() else {
+                return Err(CliError::MissingArgument {
+                    command: "pr queue",
+                    what: "add|remove",
+                });
+            };
+            PrCommand::Queue(match change.to_str() {
+                Some("add") => QueueOp::Add,
+                Some("remove") => QueueOp::Remove,
+                _ => return Err(unknown("pr queue", change)),
+            })
+        }
         _ => return Err(unknown("pr", verb)),
     })
 }

@@ -1,5 +1,6 @@
 mod accessibility;
 mod adopt;
+mod adopt_title;
 mod agent_row_rescroll;
 mod chats;
 mod clear;

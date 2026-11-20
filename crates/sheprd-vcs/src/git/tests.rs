@@ -234,6 +234,7 @@ fn one_action_runs_at_a_time_and_reports_its_own_result() {
         Completion::Action(Ok(Outcome {
             message: "Committed abc1234 subject".into(),
             url: None,
+            restacked: None,
         })),
         now,
     );
@@ -258,7 +259,7 @@ fn one_action_runs_at_a_time_and_reports_its_own_result() {
     assert!(
         peer.git
             .error()
-            .is_some_and(|error| error.contains("rejected"))
+            .is_some_and(|error| error.to_string().contains("rejected"))
     );
 }
 
@@ -349,7 +350,10 @@ fn a_stopped_worker_is_reported_and_does_not_strand_an_action() {
     drop(peer.outgoing);
     assert!(peer.git.poll(now));
     assert!(peer.git.running().is_none());
-    assert_eq!(peer.git.error(), Some(Error::Worker.to_string().as_str()));
+    assert!(matches!(
+        peer.git.error(),
+        Some(crate::Error::Git(Error::Worker))
+    ));
 }
 
 #[test]

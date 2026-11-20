@@ -15,6 +15,7 @@
 //! with the certificate authority of one of the fleet's computers or
 //! Sheprd hosts goes on; any other is left alone.
 
+pub(crate) mod bluetooth;
 mod error;
 pub(crate) mod flows;
 pub(crate) mod joins;
@@ -372,6 +373,14 @@ impl Fleet {
             if other || shared_again {
                 link.restart();
             }
+        }
+    }
+
+    /// Shows `message` in Settings > Fleet: something a person asked for
+    /// elsewhere, such as joining while pairing, could not be done.
+    pub(crate) fn fail(cx: &mut App, message: String) {
+        if cx.has_global::<Self>() {
+            cx.update_global::<Self, _>(|this, _| this.error = Some(message));
         }
     }
 

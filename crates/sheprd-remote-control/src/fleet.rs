@@ -12,6 +12,8 @@
 //!   tunnel, so they land while every Sheprd window is shut.
 //! - [`joins`]: phones asking to join through this computer, waiting for a
 //!   person to admit them in Sheprd.
+//! - [`bluetooth`]: computers joining, or inviting this one, as they pair
+//!   over Bluetooth.
 //! - [`links`]: phones on this computer's API through the `Link`s they
 //!   signed.
 //! - [`scrub`]: forgetting the fleet, with every way it let someone in.
@@ -20,6 +22,7 @@
 //! log grants, off the control thread.
 
 pub(crate) mod ask;
+pub(crate) mod bluetooth;
 mod error;
 pub(crate) mod grants;
 mod joining;

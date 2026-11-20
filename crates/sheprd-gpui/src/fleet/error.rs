@@ -11,6 +11,8 @@ pub enum Error {
     NoDaemon,
     #[error("The host has no Sheprd remote control to ask")]
     NoProgram,
+    #[error("The other computer's fleet did not admit this one")]
+    NotAdmitted,
     #[error("Could not reach the remote control daemon")]
     Request(#[source] sheprd_remote_control::control::Error),
     #[error("Could not run sheprd-remote-control on the host")]

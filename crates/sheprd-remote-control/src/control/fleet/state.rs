@@ -82,11 +82,20 @@ pub struct State {
 }
 
 impl State {
-    /// Whether computer member `member` may reach host `host`: both live,
-    /// the host not held, the member not the host itself, and no deny.
+    /// Whether computer member `member` may reach host `host`: the host
+    /// not held, and [`State::granted`].
     #[must_use]
     pub fn allowed(&self, host: &HostId, member: &MemberId) -> bool {
-        let (Some(entry), Some(person)) = (self.hosts.get(host), self.members.get(member)) else {
+        self.hosts.get(host).is_some_and(|entry| !entry.held) && self.granted(host, member)
+    }
+
+    /// Whether the fleet grants computer member `member` host `host`, a
+    /// hold aside: both live, the member not the host itself, and no deny.
+    /// What a plain host's access file says of each member, so a hold,
+    /// which the file carries apart (`paused`), never reads as a deny.
+    #[must_use]
+    pub fn granted(&self, host: &HostId, member: &MemberId) -> bool {
+        let (Some(_), Some(person)) = (self.hosts.get(host), self.members.get(member)) else {
             return false;
         };
         let own = person
@@ -96,7 +105,6 @@ impl State {
             .and_then(|intro| intro.id().ok())
             .is_some_and(|id| id == *host);
         person.bundle.kind == Kind::Computer
-            && !entry.held
             && !own
             && self
                 .access

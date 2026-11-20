@@ -141,6 +141,19 @@ impl SettingsWindow {
             return page.child(row).children(self.fleet_scrub_only(cx));
         };
         page = page.children(self.fleet_notices(&view));
+        // A shared host holds the log without being a member: no removal.
+        // It signs nothing, so it shows what the fleet lets in here, and
+        // can still take fleet access away.
+        if view.hosted.is_some() && !view.members.iter().any(|member| member.id == view.me) {
+            return page
+                .child(
+                    ui::row(theme, "fleet-hosted", fl!("settings-fleet-hosted"))
+                        .description(fl!("settings-fleet-hosted-description")),
+                )
+                .child(ui::section(theme, &fl!("settings-fleet-members"), None))
+                .children(self.fleet_member_names(&view))
+                .children(self.fleet_scrub_only(cx));
+        }
         // Removed from the fleet: nothing here counts any more; what it
         // wrote is forgotten once the person says so.
         if !view.members.iter().any(|member| member.id == view.me) {
@@ -165,6 +178,25 @@ impl SettingsWindow {
             .child(ui::section(theme, &fl!("settings-fleet-machines"), None))
             .children(self.fleet_machines(&view, cx));
         page
+    }
+
+    /// The members, without actions: what a shared host shows.
+    fn fleet_member_names(&self, view: &View) -> Vec<ui::Row> {
+        view.members
+            .iter()
+            .enumerate()
+            .map(|(index, member)| {
+                ui::row(
+                    &self.theme,
+                    format!("fleet-member-{index}"),
+                    crate::notifications::safe_text(&member.name, 64),
+                )
+                .description(match member.kind {
+                    Kind::Computer => fl!("settings-fleet-kind-computer"),
+                    Kind::Phone => fl!("settings-fleet-kind-phone"),
+                })
+            })
+            .collect()
     }
 
     fn fleet_notices(&self, view: &View) -> Vec<ui::Row> {

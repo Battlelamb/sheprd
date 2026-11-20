@@ -86,6 +86,7 @@ fn fleet_view(heads: &[&str]) -> View {
         suspended: Vec::new(),
         pending: 0,
         heads: heads.iter().map(|head| (*head).to_owned()).collect(),
+        hosted: None,
     }
 }
 

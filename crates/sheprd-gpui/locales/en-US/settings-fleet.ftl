@@ -66,6 +66,8 @@ settings-fleet-share = Share
 settings-fleet-share-ask = Share this host with the computers allowed below:
 
 settings-fleet-removed = This computer is not in the fleet any more
+settings-fleet-hosted = This computer is a shared host of the fleet
+settings-fleet-hosted-description = The fleet lets the computers allowed here open terminals on it. It is not a member, so it signs nothing; a member removes it from the fleet.
 settings-fleet-removed-description = A member removed it. Its keys no longer count anywhere; forget the fleet here to remove what it wrote, then join again with a new approval.
 settings-fleet-forget = Forget the fleet
 settings-fleet-scrub = Remove fleet access

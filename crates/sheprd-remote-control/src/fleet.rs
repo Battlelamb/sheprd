@@ -380,7 +380,15 @@ impl Fleet {
     /// caller revokes its pairing at once instead, so no key a member
     /// proved is ever forgotten while a pairing with it stands.
     pub(crate) fn proved(&self, member: MemberId, tunnel: [u8; 32]) -> Result<bool> {
+        // One step with a scrub, which collects, revokes, and forgets what
+        // was proved under the same lock: a proof never lands between.
+        let _writing = self.writing();
         let mut inner = self.inner();
+        // Scrubbed meanwhile: nothing is kept, and the caller revokes the
+        // pairing itself.
+        if inner.log.is_none() {
+            return Ok(false);
+        }
         let keys = inner.proven.entry(member).or_default();
         if keys.contains(&tunnel) {
             return Ok(true);

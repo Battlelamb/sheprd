@@ -118,13 +118,9 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
                 ))
             })
             .collect(),
-        // Keys an earlier build recorded on a handshake alone do not count;
-        // a scrub still revokes them all (`proven_keys`).
-        proven: if peers.proven_version == PROVEN_VERSION {
-            proven(&peers)
-        } else {
-            BTreeMap::new()
-        },
+        // Keys an earlier build recorded on a handshake alone do not count,
+        // here or in a scrub (`proven_keys`).
+        proven: counted(&peers),
         unconfirmed: peers
             .unconfirmed
             .iter()
@@ -176,11 +172,23 @@ fn proven(peers: &Peers) -> BTreeMap<MemberId, BTreeSet<[u8; 32]>> {
         .collect()
 }
 
+/// The proven keys that count: those a proven session recorded. An
+/// earlier build's, recorded on a handshake alone, could name any
+/// desktop's key, so neither a removal nor a scrub revokes a pairing for
+/// them.
+fn counted(peers: &Peers) -> BTreeMap<MemberId, BTreeSet<[u8; 32]>> {
+    if peers.proven_version == PROVEN_VERSION {
+        proven(peers)
+    } else {
+        BTreeMap::new()
+    }
+}
+
 /// Every tunnel key a member proved, read from the peers' state alone, so
 /// a damaged log does not stop a scrub from revoking their pairings.
 /// Blocking.
 pub(super) fn proven_keys(state_dir: &Path) -> Result<Vec<[u8; 32]>> {
-    Ok(proven(&read_peers(state_dir)?)
+    Ok(counted(&read_peers(state_dir)?)
         .into_values()
         .flatten()
         .collect())

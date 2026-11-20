@@ -100,3 +100,48 @@ fn a_scrub_with_no_session_keeps_its_wire_shape() {
         r#"{"ask":"scrub"}"#
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_proof_after_a_scrub_is_not_kept() {
+    let (http, _, _) = relay().await;
+    let (a, b) = (Node::new(http, 1).await, Node::new(http, 2).await);
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    join(&a, &b);
+    assert!(b.fleet.proved(a.fleet.me(), [0x31; 32]).unwrap());
+    assert_eq!(b.ask(Ask::Scrub { session: None }), Answer::Done);
+    // A removal exchange that proved a key while the scrub ran keeps
+    // nothing: its caller revokes the pairing itself.
+    assert!(!b.fleet.proved(a.fleet.me(), [0x32; 32]).unwrap());
+    assert!(b.fleet.proven_keys().is_empty());
+}
+
+#[test]
+fn keys_an_earlier_build_recorded_are_not_revoked_by_a_scrub() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("fleet");
+    std::fs::create_dir_all(&folder).unwrap();
+    let member = "ab".repeat(32);
+    let key = "cd".repeat(32);
+    // An earlier build recorded keys on a handshake alone: any member's
+    // bundle could have named them.
+    std::fs::write(
+        folder.join("peers.json"),
+        format!(r#"{{"proven":{{"{member}":"{key}"}}}}"#),
+    )
+    .unwrap();
+    assert!(
+        crate::fleet::store::proven_keys(dir.path())
+            .unwrap()
+            .is_empty()
+    );
+    // Recorded by a proven session, they count.
+    std::fs::write(
+        folder.join("peers.json"),
+        format!(r#"{{"proven":{{"{member}":["{key}"]}},"proven_version":2}}"#),
+    )
+    .unwrap();
+    assert_eq!(
+        crate::fleet::store::proven_keys(dir.path()).unwrap(),
+        vec![[0xcd; 32]]
+    );
+}

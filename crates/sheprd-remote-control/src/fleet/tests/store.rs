@@ -191,6 +191,8 @@ async fn proven_keys_an_earlier_build_recorded_are_dropped() {
 async fn a_key_past_the_bound_is_not_kept() {
     let (http, _, _) = relay().await;
     let a = Node::new(http, 1).await;
+    // Proofs are kept only in a fleet.
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
     let member = MemberId([1; 32]);
     for seed in 0..u8::try_from(MAX_PROVEN).unwrap() {
         assert!(a.fleet.proved(member, [seed; 32]).unwrap());

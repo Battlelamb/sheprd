@@ -263,8 +263,11 @@ pub(crate) fn view(fleet: &Fleet) -> Option<View> {
     if let Err(error) = fleet.release_if_left(&mut inner) {
         tracing::warn!(%error, "could not forget a fleet this computer left");
     }
-    inner
-        .log
-        .as_ref()
-        .map(|log| View::of(log, &fleet.me(), &suspended))
+    inner.log.as_ref().map(|log| View {
+        hosted: fleet
+            .host()
+            .filter(|host| log.state().hosts.contains_key(host))
+            .map(|host| host.to_string()),
+        ..View::of(log, &fleet.me(), &suspended)
+    })
 }

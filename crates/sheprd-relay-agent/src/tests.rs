@@ -21,6 +21,7 @@ use tokio::{
 };
 
 mod fleet;
+mod fleet_refused;
 mod status;
 
 /// A relay serving QUIC and HTTP on loopback: its HTTP address, and its

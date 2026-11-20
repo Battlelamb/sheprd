@@ -160,7 +160,7 @@ fn only_a_known_plain_host_has_an_access_file() {
 }
 
 #[test]
-fn a_host_two_members_added_with_different_keys_has_none() {
+fn a_host_two_members_added_with_different_keys_is_paused() {
     let (a, b) = (computer(1), computer(2));
     let mut log = found(&a);
     admit(&mut log, &a, &b);
@@ -177,10 +177,17 @@ fn a_host_two_members_added_with_different_keys_has_none() {
     for op in ops {
         apply(&mut log, op);
     }
-    assert_eq!(
-        host_access::compute(&log, &host, [], never),
-        Err(Error::HostHeld)
-    );
+    let file = host_access::compute(&log, &host, [], never).unwrap();
+    assert!(file.paused);
+    // Everyone is still named, so removals and denials land; no one
+    // reaches SSH while it is held.
+    assert_eq!(file.members.len(), 2);
+    assert_eq!(file.allowed().count(), 0);
+    // A file from before the hold, merged under it, grants nothing.
+    let mut before = file.clone();
+    before.paused = false;
+    let merged = host_access::Access::merge(Some(&before), file).unwrap();
+    assert_eq!(merged.allowed().count(), 0);
 }
 
 #[test]

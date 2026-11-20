@@ -264,6 +264,20 @@ impl Member {
     }
 }
 
+/// The fleet `bytes`, a stored or handed access file, names, read on its
+/// own: what a refusal needs to find the fleet's lines when the rest of
+/// the file does not read.
+#[must_use]
+pub fn fleet_of(bytes: &[u8]) -> Option<Id> {
+    #[derive(Deserialize)]
+    struct Named {
+        fleet: Id,
+    }
+    serde_json::from_slice::<Named>(bytes)
+        .ok()
+        .map(|named| named.fleet)
+}
+
 /// What a plain host is told about its fleet.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Access {
@@ -271,6 +285,13 @@ pub struct Access {
     /// Live computer members, by id.
     #[serde(default)]
     pub members: BTreeMap<Id, Member>,
+    /// No member reaches SSH here while this is set: the fleet holds the
+    /// host, as two members added it with keys that disagree, until a
+    /// person picks one. Members are still admitted, to pass removals, and
+    /// removals and denials still land. Each file says it anew: the latest
+    /// one handed over decides.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub paused: bool,
     /// Every member ever removed.
     #[serde(default)]
     pub removed: BTreeSet<Id>,
@@ -287,6 +308,7 @@ impl Access {
         Self {
             fleet,
             members: BTreeMap::new(),
+            paused: false,
             removed: BTreeSet::new(),
             settled: BTreeSet::new(),
         }
@@ -382,12 +404,14 @@ impl Access {
         Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
     }
 
-    /// The members that may reach SSH here: allowed, with an SSH key, not
-    /// removed, and sharing no key with another ([`Access::shared`]).
+    /// The members that may reach SSH here: none while [`Access::paused`],
+    /// else allowed, with an SSH key, not removed, and sharing no key with
+    /// another ([`Access::shared`]).
     pub fn allowed(&self) -> impl Iterator<Item = (&Id, &Member)> {
         let shared = self.shared();
         self.members.iter().filter(move |(id, member)| {
-            member.allow
+            !self.paused
+                && member.allow
                 && member.ssh.is_some()
                 && !self.removed.contains(id)
                 && !shared.contains(id)
@@ -408,6 +432,7 @@ impl Access {
             }
             Some(held) => {
                 let mut merged = held.clone();
+                merged.paused = incoming.paused;
                 merged.removed.extend(incoming.removed);
                 for (id, member) in incoming.members {
                     let member = match merged.members.get(&id) {

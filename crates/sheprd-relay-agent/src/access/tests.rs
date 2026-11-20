@@ -49,6 +49,7 @@ fn access(members: &[(u8, bool, u64)], removed: &[u8]) -> Access {
             .map(|&(seed, allow, rev)| (id(seed), member(seed, allow, rev)))
             .collect(),
         removed: removed.iter().map(|&seed| id(seed)).collect(),
+        paused: false,
         settled: BTreeSet::new(),
     }
 }

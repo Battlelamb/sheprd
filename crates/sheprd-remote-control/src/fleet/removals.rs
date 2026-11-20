@@ -185,7 +185,9 @@ fn owed(fleet: &Fleet) -> Vec<(Holder, Record, Vec<Op>)> {
     let hosts = state
         .hosts
         .iter()
-        .filter(|(_, host)| host.intro.kind == HostKind::Agent && !host.held)
+        // A held host's agent too: removals reach it while its access is
+        // paused.
+        .filter(|(_, host)| host.intro.kind == HostKind::Agent)
         .filter_map(|(id, host)| {
             let record = record(state, id, &host.intro.name)?;
             let holder = Holder::Host(*id);

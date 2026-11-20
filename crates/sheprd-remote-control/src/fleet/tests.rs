@@ -34,6 +34,8 @@ mod catch_up;
 #[cfg(unix)]
 mod flood;
 #[cfg(unix)]
+mod held_agent;
+#[cfg(unix)]
 mod joining;
 #[cfg(unix)]
 mod offline;

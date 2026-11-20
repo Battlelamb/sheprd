@@ -101,16 +101,24 @@ impl Held {
     /// What `state_dir` holds; nothing for an agent no fleet reached.
     /// Blocking.
     pub fn load(state_dir: &Path) -> Result<Self> {
+        let refused = files::read_bounded(&state_dir.join(REFUSED), 64)?.is_some();
         let path = state_dir.join(access::FILE);
-        let access = files::read_bounded(&path, access::MAX_STORED_BYTES as u64)?
+        let access = match files::read_bounded(&path, access::MAX_STORED_BYTES as u64)?
             .map(|bytes| Access::parse_stored(&bytes))
-            .transpose()?;
+            .transpose()
+        {
+            Ok(access) => access,
+            // Refused, the held file no longer counts: one that does not
+            // read is set aside, and the next good file starts afresh.
+            Err(_) if refused => None,
+            Err(error) => return Err(error),
+        };
         Ok(Self {
             access,
             suspended: read_json(state_dir, SUSPENDED)?,
             revoked: read_json(state_dir, REVOKED)?,
             crowded: read_json(state_dir, CROWDED)?,
-            refused: files::read_bounded(&state_dir.join(REFUSED), 64)?.is_some(),
+            refused,
         })
     }
 
@@ -137,39 +145,57 @@ impl Held {
         Self::refuse_locked(state_dir, keys)
     }
 
+    /// Needs nothing else here to read: the fleet's lines are found from
+    /// the held file's fleet id alone, or, when even that does not read,
+    /// every fleet line goes. A running agent that cannot read the
+    /// fleet's files after this shuts the fleet out (`Agent::reload`).
     fn refuse_locked(state_dir: &Path, keys: Option<&Path>) -> Result<()> {
         files::write_private(&state_dir.join(REFUSED), b"1\n")?;
-        // A held file that no longer reads names no fleet whose lines to
-        // take away; the mark alone stops admissions, as loading fails.
-        let Ok(mut held) = Self::load(state_dir) else {
+        let Some(path) = keys else {
             return Ok(());
         };
-        held.refused = true;
-        held.write_keys(keys)
+        let stored = files::read_bounded(
+            &state_dir.join(access::FILE),
+            access::MAX_STORED_BYTES as u64,
+        )?;
+        // No fleet held yet: none of its lines were written.
+        let Some(stored) = stored else {
+            return Ok(());
+        };
+        match access::fleet_of(&stored) {
+            Some(fleet) => authorized_keys::set_fleet(path, &fleet.short(), &[]),
+            None => authorized_keys::clear_fleets(path),
+        }
     }
 
-    /// Writes each file whole, in the order [`Held::files`] gives.
-    fn save(&self, state_dir: &Path) -> Result<()> {
-        for (name, bytes) in self.files()? {
+    /// Writes each file whole, in the order [`Held::files`] gives, from
+    /// what was held with `before` waiting for room.
+    fn save(&self, state_dir: &Path, before: &BTreeSet<Id>) -> Result<()> {
+        for (name, bytes) in self.files(before)? {
             files::write_private(&state_dir.join(name), &bytes)?;
         }
         Ok(())
     }
 
     /// The files kept, by name, in the order that fails closed when saving
-    /// stops part way: the revoked pairs before the access file that drops
-    /// the members they come from (a retry finds them there again), the
-    /// members waiting for room before the file that gives them new keys,
-    /// and
-    /// the suspensions after it, so one is lifted only once the file that
-    /// lifts it, or removes its member, is kept.
-    fn files(&self) -> Result<Vec<(&'static str, Vec<u8>)>> {
+    /// stops part way, from what was held with `before` waiting for room:
+    /// the revoked pairs before the access file that drops the members
+    /// they come from (a retry finds them there again); the members
+    /// waiting for room, those before and those now, before the file that
+    /// gives the new ones their keys, and only those now after the file
+    /// that frees the room; and the suspensions after it, so one is lifted
+    /// only once the file that lifts it, or removes its member, is kept.
+    fn files(&self, before: &BTreeSet<Id>) -> Result<Vec<(&'static str, Vec<u8>)>> {
+        let waiting: BTreeSet<Id> = before.union(&self.crowded).copied().collect();
         let mut files = vec![
             (REVOKED, json(REVOKED, &self.revoked)?),
-            (CROWDED, json(CROWDED, &self.crowded)?),
+            (CROWDED, json(CROWDED, &waiting)?),
         ];
         if let Some(access) = &self.access {
             files.push((access::FILE, access.to_stored_bytes()?));
+        }
+        if waiting != self.crowded {
+            files.push((CROWDED, json(CROWDED, &self.crowded)?));
         }
         files.push((SUSPENDED, json(SUSPENDED, &self.suspended)?));
         Ok(files)
@@ -181,7 +207,16 @@ impl Held {
     /// one). Refuses a file for another fleet. Blocking.
     pub fn apply(state_dir: &Path, keys: Option<&Path>, incoming: Access) -> Result<Self> {
         let _lock = files::Lock::acquire(state_dir)?;
-        let mut held = Self::load(state_dir)?;
+        // Files that do not read shut the fleet out rather than leave the
+        // running agent on what it read before.
+        let mut held = match Self::load(state_dir) {
+            Ok(held) => held,
+            Err(error) => {
+                Self::refuse_locked(state_dir, keys)?;
+                return Err(error);
+            }
+        };
+        let before = held.crowded.clone();
         let settled = incoming.settled.clone();
         let mut merged = match Access::merge(held.access.as_ref(), incoming) {
             Ok(merged) => merged,
@@ -247,7 +282,7 @@ impl Held {
         // computed from unsaved, so the digest still shows the host behind
         // and Sheprd applies it again.
         held.write_keys(keys)?;
-        held.save(state_dir)?;
+        held.save(state_dir, &before)?;
         // Last: until the good file is kept, members stay out.
         files::remove(&state_dir.join(REFUSED))?;
         match refused {
@@ -345,7 +380,7 @@ impl Held {
             }
         }
         if changed {
-            held.save(state_dir)?;
+            held.save(state_dir, &held.crowded)?;
         }
         // Even when nothing changed: a suspension saved by an earlier try
         // whose `authorized_keys` write failed is finished before the
@@ -363,7 +398,7 @@ impl Held {
         let _lock = files::Lock::acquire(state_dir)?;
         let mut held = Self::load(state_dir)?;
         if held.revoked.remove(&Pair { dial, tunnel }) {
-            held.save(state_dir)?;
+            held.save(state_dir, &held.crowded)?;
         }
         Ok(())
     }

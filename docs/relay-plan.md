@@ -1455,8 +1455,15 @@ sequenceDiagram
    fails closed: the agent removes the fleet's `authorized_keys` lines,
    admits no member (`refused` in its state directory and its report)
    until a good file arrives, and `fleet apply` exits with the error;
-   it never goes on granting from the file held before. Members are
-   admitted from that file:
+   it never goes on granting from the file held before. The refusal
+   needs nothing else to read: it finds the lines by the held file's
+   fleet id alone, or removes every fleet line when even that does not
+   read, and a running agent whose fleet files stop reading shuts the
+   fleet's members out, keeping the cut-offs it last read. A held host
+   (two members added it with keys that disagree) gets a `paused` file:
+   every member is still named, so removals, denials, and rotations
+   land, and daemons still pass it removals, but no member reaches SSH
+   until a person picks the keys. Members are admitted from that file:
    denied ones only to pass removals, allowed ones to SSH too. The agent
    writes the `authorized_keys` lines the way `ssh_access` does, with the
    same shared code: atomically, refusing a linked file, and touching

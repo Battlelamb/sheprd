@@ -1992,8 +1992,10 @@ manual multi-machine and phone steps left unticked in its QA list.
      bundle over SSH, `Admit` here, the log handed over) or Share (its
      CA-signed `fleet intro` over SSH, with the computers ticked, then
      the log handed over: a Sheprd host that is not a member takes a log
-     that shares it, by its certificate authority's host id, and lets in
-     the computers allowed there). A log larger than one answer is handed
+     that shares it, by its certificate authority's host id, once it
+     holds every head of the member handing it over, so the denials
+     signed with the share have arrived, and lets in the computers
+     allowed there). A log larger than one answer is handed
      over one answer at a time through the same `Fleet::apply` as sync and
      `fleet apply` with no daemon: the joining daemon keeps each fleet's
      history apart and answers its heads, so two handovers at once never

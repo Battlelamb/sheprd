@@ -136,3 +136,34 @@ fn a_record_from_before_a_removal_does_not_cross_into_the_next_lifetime() {
         assert!(!state.routes.contains_key("old-route"), "seed {seed}");
     }
 }
+
+#[test]
+fn a_record_after_either_concurrent_addition_counts() {
+    for seed in 40..48u8 {
+        let (log, a, b, _) = three();
+        let (intro, ca) = ca_host(seed, HostKind::Sheprd);
+        let host = intro.id().unwrap();
+        let before = log.heads().to_vec();
+        let next = |member: &Device| log.state().members[&member.id()].seq + 1;
+        let by_a = sign_on(&log, &a, &before, next(&a), Body::HostAdd(intro.clone()));
+        let by_b = sign_on(&log, &b, &before, next(&b), Body::HostAdd(intro.clone()));
+        // b carries a newer record, having seen only its own addition.
+        let newer = record(host, seed, 2);
+        let signature = Some(raw_signature(&ca, &newer.message().unwrap()));
+        let seen = sign_on(
+            &log,
+            &b,
+            &[by_b.id()],
+            next(&b) + 1,
+            Body::HostSeen(HostSeen {
+                record: newer.clone(),
+                signature,
+            }),
+        );
+        let mut log = log;
+        for op in [by_a, by_b, seen] {
+            apply(&mut log, op);
+        }
+        assert_eq!(log.state().hosts[&host].record, newer, "seed {seed}");
+    }
+}

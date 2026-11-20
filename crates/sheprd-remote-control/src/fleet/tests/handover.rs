@@ -39,7 +39,11 @@ async fn a_shared_sheprd_host_takes_the_log_and_lets_allowed_members_in() {
         }),
         Answer::Done
     );
-    let Answer::Applied(applied) = apply(&host, &a.ops()) else {
+    let Answer::Applied(applied) = host.ask(Ask::Apply(Apply {
+        heads: a.view().heads,
+        ops: sync::encode_ops(&a.ops()),
+        ..Apply::default()
+    })) else {
         panic!("not applied");
     };
     assert_eq!(applied.fleet, a.view().fleet);
@@ -203,4 +207,49 @@ async fn an_invitation_cut_off_after_admission_resumes() {
     };
     assert_eq!(applied.fleet, a.view().fleet);
     assert!(b.view().members.iter().any(|member| member.id == b.me()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_shared_host_waits_for_the_denials_signed_with_its_share() {
+    let (http, _, _) = relay().await;
+    let (a, b, host) = (
+        Node::new(http, 1).await,
+        Node::new(http, 2).await,
+        Node::new(http, 5).await,
+    );
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    join(&a, &b);
+    let Answer::Intro { intro } = host.ask(Ask::Intro) else {
+        panic!("no intro");
+    };
+    // Shared with b left out.
+    a.ask(Ask::AddHost {
+        intro,
+        deny: vec![b.me()],
+    });
+    let ops = in_order(&a);
+    let heads = a.view().heads;
+    // A part that ends with the share's addition, before its denial: the
+    // host takes nothing yet, so b is never let in.
+    let (first, rest) = ops.split_at(ops.len() - 1);
+    assert!(matches!(first.last().unwrap().body(), Body::HostAdd(_)));
+    let part = |ops: &[Op]| {
+        host.fleet.apply(
+            &Apply {
+                fleet: Some(a.view().fleet),
+                heads: heads.clone(),
+                ops: sync::encode_ops(ops),
+                ..Apply::default()
+            },
+            now_ms(),
+        )
+    };
+    part(first).unwrap();
+    assert!(host.fleet.inner().log.is_none());
+    assert!(!grants::still_allowed(&host.fleet, &b.fleet.me()));
+    // With the rest, the caller's whole log, it joins: a is let in, b not.
+    part(rest).unwrap();
+    assert!(host.fleet.inner().log.is_some());
+    assert!(grants::still_allowed(&host.fleet, &a.fleet.me()));
+    assert!(!grants::still_allowed(&host.fleet, &b.fleet.me()));
 }

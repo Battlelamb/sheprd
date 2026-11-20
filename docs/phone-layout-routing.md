@@ -41,11 +41,11 @@ iOS `closeWorkspace` and `removeWorktree` call
 `/api/v2/workspaces/{workspace}/close` and
 `/api/v2/workspaces/{workspace}/remove-worktree`, handled in
 `sheprd-remote-control/src/web/workspace.rs`. Herdr 1 gets `workspace.close`
-for that workspace alone (`close_group: false`) and `worktree.remove` without
-force. A workspace Sheprd keeps for Herdr 2 gets `Op::CloseWorkspace` or
+for that workspace alone (`close_group: false`) and `worktree.remove`, forced
+only for `?discard=true`. A workspace Sheprd keeps for Herdr 2 gets `Op::CloseWorkspace` or
 `Op::RemoveWorktree` through `control::layout`, which the desktop makes as its
 workspace menu does: closing ends the workspace's tabs, and deleting removes the
-linked checkout with Git, never forced, then closes the workspace.
+linked checkout with Git, forced only for `discard`, then closes the workspace.
 
 With the desktop closed, it depends on where the workspace is kept:
 
@@ -56,7 +56,8 @@ With the desktop closed, it depends on where the workspace is kept:
   workspace's tabs and of terminals labelled for it, and forgets it only
   once every tab still in it has had its terminals ended, so a tab another
   client adds meanwhile is not dropped while still running. Deleting runs
-  `git worktree remove` on the checkout's root without `--force`, keeps the
+  `git worktree remove` on the checkout's root, with `--force` only for
+  `discard`, keeps the
   branch, then closes the workspace.
 - In the saved-tabs file (the document never written), the daemon makes
   neither and says to open Sheprd.
@@ -64,8 +65,10 @@ With the desktop closed, it depends on where the workspace is kept:
 Deleting is refused before it reaches either keeper for a main checkout, and
 for a checkout whose `.herdr/worktree.toml` has an archive script or cannot be
 read: Sheprd's own delete dialog runs that script first. A checkout with
-uncommitted changes stays; the phone is told to delete it in Sheprd, which
-offers to discard them.
+uncommitted changes stays unless the phone sends `?discard=true`, which it
+does only after the person confirms losing them: up front when the phone
+counted changes, or after a refusal for changes it had not counted. A Sheprd
+that predates `discard` ignores it and keeps the checkout.
 
 ## Verification boundaries
 

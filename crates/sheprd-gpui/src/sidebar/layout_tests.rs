@@ -643,6 +643,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         flash: None,
         flash_motion: Default::default(),
         configured_terminal_size: crate::config::Config::default().terminal.size,
+        front_watch: Default::default(),
         gui_config_diagnostic: Default::default(),
         icon_font_notice: Default::default(),
         // Keep the original geometry fixture explicit; density-switching tests

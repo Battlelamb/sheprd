@@ -32,10 +32,10 @@ const LIFETIME_MS: u64 = 24 * 60 * 60 * 1000;
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
     // keep-sorted start
-    #[error("that is not a PNG, JPEG, GIF, or WebP picture")]
-    NotAnImage,
     #[error("the file is larger than {MAX_FILE} bytes")]
     FileTooLarge,
+    #[error("that is not a PNG, JPEG, GIF, or WebP picture")]
+    NotAnImage,
     #[error("the picture is larger than {MAX_UPLOAD} bytes")]
     TooLarge,
     #[error("that attachment is no longer available; attach it again")]

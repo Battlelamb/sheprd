@@ -218,15 +218,17 @@ impl<'a> Pass<'a> {
     }
 
     /// A `HostAdd` of `id` at `position`: it makes the host live when it
-    /// was not; another addition of a live host changes nothing.
+    /// was not; another addition of a live host changes nothing, its
+    /// lifetime included. A host live since the base has no addition to
+    /// see, so a record concurrent with a repeated one still counts.
     fn add(&mut self, graph: &Graph<'_>, position: usize, id: HostId, intro: &'a HostIntro) {
         if !self.survives(graph, position, id) {
             return;
         }
-        self.lifetime.entry(id).or_default().push(position);
         if self.hosts.contains_key(&id) {
             return;
         }
+        self.lifetime.entry(id).or_default().push(position);
         self.hosts.insert(id, Tracked::new(intro));
         self.claim_route(id);
     }

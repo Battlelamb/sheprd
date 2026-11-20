@@ -305,6 +305,14 @@ impl Fleet {
     /// one only when the operations found it and admit this computer: a
     /// member admitted it, after a person's approval there. Blocking.
     pub(crate) fn receive(&self, ops: Vec<Op>, now_ms: u64) -> Result<usize> {
+        self.receive_from(ops, &[], now_ms)
+    }
+
+    /// [`Fleet::receive`], from a caller whose heads are `caller`: with no
+    /// fleet yet, a history that shares this computer as a host becomes
+    /// the log only once it holds all of them, the caller's whole log, so
+    /// the `Access` denials signed with the share have arrived too.
+    fn receive_from(&self, ops: Vec<Op>, caller: &[OpId], now_ms: u64) -> Result<usize> {
         let mut inner = self.inner();
         self.release_if_left(&mut inner)?;
         let before = inner.log.as_ref().map(|log| log.heads().to_vec());
@@ -316,7 +324,7 @@ impl Fleet {
                 .filter(|(_, result)| result.is_err())
                 .count(),
             None => {
-                let Some((log, refused)) = self.join_parts(&mut inner, ops, now_ms)? else {
+                let Some((log, refused)) = self.join_parts(&mut inner, ops, caller, now_ms)? else {
                     // Kept, granting nothing, for the rest to arrive.
                     let saved = self.save(&inner);
                     drop(inner);
@@ -366,7 +374,7 @@ impl Fleet {
             Some(named) => Some(sync::fleet(named)?),
             None => ops.first().map(joining::fleet_of),
         };
-        let refused = match self.receive(ops, now_ms) {
+        let refused = match self.receive_from(ops, &heads, now_ms) {
             Ok(refused) => refused,
             Err(Error::NotAdmitted)
                 if named.is_some_and(|named| self.inner().joining.contains_key(&named)) =>

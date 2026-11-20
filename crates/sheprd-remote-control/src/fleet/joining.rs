@@ -8,7 +8,7 @@
 //! host the fleet holds; then it becomes the log and the rest are dropped.
 
 use super::{Error, Fleet, Inner, Result, store};
-use crate::control::fleet::{Body, FleetId, Log, Op, sync};
+use crate::control::fleet::{Body, FleetId, Log, Op, OpId, sync};
 use std::{collections::BTreeMap, sync::atomic::Ordering};
 
 /// Histories kept at once; past it, the one touched longest ago goes.
@@ -33,15 +33,19 @@ pub(crate) fn fleet_of(op: &Op) -> FleetId {
 impl Fleet {
     /// Adds `ops` to the histories `inner` keeps of the fleets they belong
     /// to, with no log yet. The first history that admits this computer,
-    /// or shares it as a host, is the log, returned with how many of its
+    /// or shares it as a host and holds `caller`, the heads of the member
+    /// handing it over, is the log, returned with how many of its
     /// operations were refused; the others are dropped. `None` while none
-    /// does. A history taken because it shares this computer is recorded
+    /// does. Answers are cut by bytes, so a share's `HostAdd` may arrive
+    /// before the `Access` denials signed with it: a shared host waits for
+    /// the caller's whole log, or it would let in computers left out. A history taken because it shares this computer is recorded
     /// (`fleet/hosted`), so only such a computer ever acts as a host
     /// without being a member. Blocking.
     pub(super) fn join_parts(
         &self,
         inner: &mut Inner,
         ops: Vec<Op>,
+        caller: &[OpId],
         now_ms: u64,
     ) -> Result<Option<(Log, usize)>> {
         let mut by_fleet: BTreeMap<FleetId, Vec<Op>> = BTreeMap::new();
@@ -91,8 +95,11 @@ impl Fleet {
                 .joining
                 .iter()
                 .find(|(_, joining)| {
-                    self.host
-                        .is_some_and(|host| sync::shares(&joining.log, &host))
+                    !caller.is_empty()
+                        && caller.iter().all(|head| joining.log.get(head).is_some())
+                        && self
+                            .host
+                            .is_some_and(|host| sync::shares(&joining.log, &host))
                 })
                 .map(|(fleet, _)| (*fleet, true))
         };

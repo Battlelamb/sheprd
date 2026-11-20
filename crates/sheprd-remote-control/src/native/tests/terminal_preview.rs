@@ -15,6 +15,7 @@ async fn home_sends_a_terminal_agents_preview_when_it_is_read() {
     let mut session = Session::start(state.clone());
     session
         .send(ClientMessage::Subscribe {
+            background: false,
             view: View::Home,
             since: None,
             size: None,

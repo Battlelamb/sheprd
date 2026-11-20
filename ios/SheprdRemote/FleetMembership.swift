@@ -557,12 +557,17 @@ final class FleetMembership {
         })
     }
 
-    private func save(_ record: Record) {
+    /// Saves `record` to the Keychain; whether that landed. Only a saved
+    /// record replaces the one in memory.
+    @discardableResult
+    private func save(_ record: Record) -> Bool {
         do {
             try Keychain.write(JSONEncoder().encode(record), account: Self.account)
             self.record = record
+            return true
         } catch {
             problem = error.localizedDescription
+            return false
         }
     }
 

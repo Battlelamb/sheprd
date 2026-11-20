@@ -26,6 +26,7 @@ mod returns;
 mod rotation;
 mod routes;
 mod salvage;
+mod saved_bounds;
 mod saved_checkpoint;
 mod settled;
 mod vectors;

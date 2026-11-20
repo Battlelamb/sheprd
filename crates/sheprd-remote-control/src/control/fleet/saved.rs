@@ -3,12 +3,25 @@
 //! checks every operation again, as if it had just arrived, so a file
 //! changed on disk computes nothing a signature does not back.
 
-use super::{Body, Error, Log, MAX_OPS, MAX_PENDING, MAX_REMOVALS, MAX_STATE, Op, OpId, Result};
+use super::{
+    Body, Error, Log, MAX_CHECKPOINTS_PER_SIGNER, MAX_COMPUTERS, MAX_MEMBERSHIP_OPS, MAX_OPS,
+    MAX_PENDING, MAX_PHONES, MAX_REMOVALS_PER_SIGNER, MAX_STATE, Op, OpId, Result,
+};
 use std::collections::HashMap;
 
 const MAGIC: &[u8] = b"sheprd-fleet-log-v1";
+/// Members whose operations a log can hold between checkpoints: the live
+/// members the checkpoint carries, and every one admitted since, each by
+/// one of the membership operations the log bounds.
+const SIGNERS: usize = MAX_COMPUTERS + MAX_PHONES + MAX_MEMBERSHIP_OPS;
+/// Every operation a log can hold: the ordinary ones, and each signer's
+/// own share of removals and checkpoints, which count against no other
+/// bound (`Log::over_caps`). A saved log never holds more, so reading one
+/// back never refuses what the log took.
+pub const MAX_HELD: usize =
+    MAX_OPS + SIGNERS * (MAX_REMOVALS_PER_SIGNER + MAX_CHECKPOINTS_PER_SIGNER);
 /// The largest file read: a full log, a full state, and their lengths.
-pub const MAX_SAVED: usize = MAX_STATE + (MAX_OPS + MAX_REMOVALS) * (super::MAX_OP + 4) + 1024;
+pub const MAX_SAVED: usize = MAX_STATE + MAX_HELD * (super::MAX_OP + 4) + 1024;
 
 /// The bytes that keep `log`.
 pub fn encode(log: &Log) -> Result<Vec<u8>> {
@@ -56,7 +69,7 @@ pub fn decode(bytes: &[u8], now_ms: u64) -> Result<Log> {
     };
     let count =
         usize::try_from(u32::from_be_bytes(array(&mut rest)?)).map_err(|_| Error::Bounds)?;
-    if count > MAX_OPS + MAX_REMOVALS {
+    if count > MAX_HELD {
         return Err(Error::Bounds);
     }
     let mut ops = (0..count)
@@ -123,7 +136,7 @@ pub fn salvage(bytes: &[u8]) -> Vec<Op> {
     let Ok(count) = array(&mut rest).map(u32::from_be_bytes) else {
         return ops;
     };
-    for _ in 0..count.min(u32::try_from(MAX_OPS + MAX_REMOVALS).unwrap_or(u32::MAX)) {
+    for _ in 0..count.min(u32::try_from(MAX_HELD).unwrap_or(u32::MAX)) {
         let Ok(op) = take(&mut rest, super::MAX_OP) else {
             break;
         };

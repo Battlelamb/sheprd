@@ -14,6 +14,10 @@
 //! works on show in the chat's rail, and how to list one it changed
 //! without `gh`, when the chat listens for the `sheprd` command to reach it.
 //!
+//! With the first prompt, and again when it changes, it tells the agent
+//! that it runs in a Sheprd chat, as which agent and with which settings,
+//! so another agent it starts is a chat like this one ([`launch`]).
+//!
 //! ACP has no system prompt every agent takes, so all of it goes as a text
 //! block ahead of the prompt's own. The transcript shows only the person's
 //! words. The texts are templates the user may replace ([`prompts`]); the
@@ -22,10 +26,12 @@
 use sheprd_chat_protocol::{Device, Origin, Via};
 use std::path::{Path, PathBuf};
 
+pub(crate) use launch::Running;
 pub(crate) use note::{Place, Told, hide, split};
 pub(crate) use prompts::{Facts, Kind, Prompts};
 pub(crate) use recall::Recall;
 
+mod launch;
 mod note;
 mod prompts;
 mod recall;
@@ -96,6 +102,9 @@ fn quoted(path: &Path) -> String {
 #[derive(Debug, Default)]
 pub(crate) struct Context {
     facts: Facts,
+    /// The `sheprd` command the agent starts a chat like this one with;
+    /// `None` leaves what it runs as out of the note.
+    launch: Option<PathBuf>,
     /// Where the person last said they are, for the intro of a note sent
     /// for a client that does not say.
     last: Option<Origin>,
@@ -111,6 +120,8 @@ pub(crate) struct Context {
     pull_requests: Option<String>,
     /// The repository's memory, for the index and each prompt's recall.
     recall: Option<Recall>,
+    /// The chat's settings now, which the agent is told it runs with.
+    running: Running,
 }
 
 impl Context {
@@ -118,12 +129,14 @@ impl Context {
     pub(crate) fn new(prompts: Prompts, facts: Facts, told: Told) -> Self {
         Self {
             facts,
+            launch: None,
             last: None,
             prompts,
             told,
             memory: None,
             pull_requests: None,
             recall: None,
+            running: Running::default(),
         }
     }
 
@@ -142,6 +155,18 @@ impl Context {
     pub(crate) fn with_pull_requests(mut self, sheprd: Option<&Path>) -> Self {
         self.pull_requests = sheprd.map(|sheprd| note::escape(&pull_requests_guide(sheprd)));
         self
+    }
+
+    /// Tells the agent what it runs as, and that `sheprd chat new` starts
+    /// another like it, for a built-in agent; `None` leaves it out.
+    pub(crate) fn with_launch(mut self, sheprd: Option<&Path>) -> Self {
+        self.launch = sheprd.map(Path::to_owned);
+        self
+    }
+
+    /// The chat's settings now, which the next note names when they changed.
+    pub(crate) fn running(&mut self, running: Running) {
+        self.running = running;
     }
 
     /// Takes in a note the agent replayed from its saved conversation.
@@ -174,6 +199,11 @@ impl Context {
             .instructions(&self.facts)
             .map(|text| note::escape(&text))
             .filter(|text| self.told.instructions.as_ref() != Some(text));
+        let chat = self
+            .launch
+            .as_deref()
+            .map(|sheprd| note::escape(&launch::guide(sheprd, &self.facts.agent, &self.running)))
+            .filter(|text| self.told.chat.as_ref() != Some(text));
         let memory = self
             .memory
             .clone()
@@ -191,7 +221,12 @@ impl Context {
             .and_then(|recall| recall.recall(prompt))
             .map(|lines| note::escape(&lines));
         let moved = origin.filter(|origin| self.told.place != Some(Place::from(*origin)));
-        if instructions.is_none() && memory.is_none() && recalled.is_none() && moved.is_none() {
+        if instructions.is_none()
+            && chat.is_none()
+            && memory.is_none()
+            && recalled.is_none()
+            && moved.is_none()
+        {
             return None;
         }
         let mut body = self.part(Kind::Intro, self.last);
@@ -199,6 +234,11 @@ impl Context {
             body.push_str("\nThe person's instructions for every chat:\n");
             body.push_str(&note::instructions(&instructions));
             self.told.instructions = Some(instructions);
+        }
+        if let Some(chat) = chat {
+            body.push('\n');
+            body.push_str(&note::chat(&chat));
+            self.told.chat = Some(chat);
         }
         if let Some(memory) = memory {
             body.push('\n');

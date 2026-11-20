@@ -26,7 +26,7 @@ pub enum Error {
     SheprdOpen,
     #[error("That is not a Herdr 2 terminal")]
     Terminal(#[from] sheprd_backend::Error),
-    #[error("Git kept this worktree, which may have changes; delete it in Sheprd to discard them")]
+    #[error("Git kept this worktree, which may have uncommitted changes")]
     WorktreeKept,
     // keep-sorted end
 }

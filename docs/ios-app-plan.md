@@ -281,6 +281,14 @@ The phone sends:
 
 `since` is optional: the cursor of the transcript the phone has cached.
 
+`background` is optional and only read for `chat`: `true` follows a chat
+no screen shows, so it opens current. It does not count as opening the
+chat, so its answers stay unseen and its badge stays. A socket follows
+at most eight views; when it is full, a view a screen shows takes a
+background chat's place, which ends with `error` "this chat gave way to
+a view on screen", and a background chat never takes another view's
+place. The phone follows at most three in the background per computer.
+
 `size` is optional and only read for `term`: the columns and rows the
 phone draws. While the view runs, the daemon holds a direct terminal
 attach to Herdr at that size (without taking the terminal from another

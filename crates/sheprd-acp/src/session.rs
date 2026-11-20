@@ -5,6 +5,7 @@
 //! have one order and a client's catch-up can never interleave with a change.
 
 mod agent;
+mod carry;
 mod commands;
 mod harness;
 mod pictures;
@@ -147,6 +148,9 @@ pub(crate) struct Config {
     /// Fail rather than start a new session when the agent cannot continue
     /// `load`.
     pub require_load: bool,
+    /// What the chat that asked for this one ran with, applied once the
+    /// agent's new session opens; never to a continued one.
+    pub settings: Option<sheprd_chat_protocol::Settings>,
     /// The `sheprd` command the first note tells the agent to keep the
     /// repository's memory with; `None` leaves memory out of it.
     pub sheprd: Option<PathBuf>,
@@ -244,7 +248,13 @@ impl<R: FnMut(Update)> Session<R> {
             .and_then(|_| crate::context::Recall::open(&config.cwd));
         let context = Context::new(std::mem::take(&mut config.prompts), facts, told)
             .with_memory(config.sheprd.as_deref(), recall)
-            .with_pull_requests(config.sheprd.as_deref().filter(|_| config.listens));
+            .with_pull_requests(config.sheprd.as_deref().filter(|_| config.listens))
+            .with_launch(
+                config
+                    .sheprd
+                    .as_deref()
+                    .filter(|_| config.harness.is_some()),
+            );
         Self {
             accepts: crate::files::Accepts::default(),
             acp_session: None,

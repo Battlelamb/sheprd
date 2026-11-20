@@ -78,14 +78,14 @@ fn chat_new_names_a_built_in_agent() {
     assert_eq!(
         command(&["chat", "new", "claude"]),
         ControlCommand::Chat(ChatCommand::New {
-            agent: sheprd_chat_protocol::Agent::Claude,
+            agent: Some(sheprd_chat_protocol::Agent::Claude),
             pane: None
         })
     );
     assert_eq!(
         command(&["chat", "new", "--pane", "w1:p2", "codex"]),
         ControlCommand::Chat(ChatCommand::New {
-            agent: sheprd_chat_protocol::Agent::Codex,
+            agent: Some(sheprd_chat_protocol::Agent::Codex),
             pane: Some("w1:p2".into())
         })
     );
@@ -93,10 +93,14 @@ fn chat_new_names_a_built_in_agent() {
         parse(&["chat", "new", "cursor"]),
         Err(CliError::InvalidValue("AGENT"))
     ));
-    assert!(matches!(
-        parse(&["chat", "new"]),
-        Err(CliError::MissingArgument { .. })
-    ));
+    // No agent: the caller's chat's own, with its settings.
+    assert_eq!(
+        command(&["chat", "new", "--pane", "w1:p2"]),
+        ControlCommand::Chat(ChatCommand::New {
+            agent: None,
+            pane: Some("w1:p2".into())
+        })
+    );
     assert!(parse(&["chat", "new", "claude", "codex"]).is_err());
 }
 

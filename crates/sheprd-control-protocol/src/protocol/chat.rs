@@ -6,9 +6,11 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChatOp {
     Status,
-    /// Opens a tab running a `herdr-acp` chat with a built-in agent, by name.
+    /// Opens a tab running a `herdr-acp` chat with a built-in agent, by
+    /// name, or with none, the caller's own chat's agent and settings.
     New {
-        agent: String,
+        #[serde(default)]
+        agent: Option<String>,
         /// The pane whose workspace and folder it starts in, else the
         /// caller's own, else the focused one.
         #[serde(default)]

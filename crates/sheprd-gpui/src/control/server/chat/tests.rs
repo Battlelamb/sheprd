@@ -3,6 +3,7 @@ use super::*;
 
 mod core_routing;
 mod favorite;
+mod like;
 use crate::{
     control::protocol::{Caller, chat::Reply},
     sidebar::layout_tests::fixture_window,
@@ -59,7 +60,7 @@ fn a_new_chat_names_a_known_agent_and_needs_herdr_acp(cx: &mut gpui::TestAppCont
     cx.cx.update(|cx| {
         let unknown = serve(
             call(ChatOp::New {
-                agent: "cursor".into(),
+                agent: Some("cursor".into()),
                 pane: None,
             }),
             cx,
@@ -72,7 +73,7 @@ fn a_new_chat_names_a_known_agent_and_needs_herdr_acp(cx: &mut gpui::TestAppCont
     cx.cx.update(|cx| {
         let missing = serve(
             call(ChatOp::New {
-                agent: "claude".into(),
+                agent: Some("claude".into()),
                 pane: None,
             }),
             cx,

@@ -101,6 +101,8 @@ mod log_window;
 mod luau_window;
 mod machine;
 mod mark_layer;
+#[cfg(feature = "mcp")]
+mod mcp;
 mod menu;
 mod menus;
 mod merged_cleanup;

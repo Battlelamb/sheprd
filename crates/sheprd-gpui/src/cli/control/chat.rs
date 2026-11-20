@@ -5,9 +5,10 @@ use super::{Args, CliError, Switch, unknown};
 pub enum ChatCommand {
     /// The window's chat panes and how each shows.
     Status,
-    /// Open a tab running a chat with `agent`.
+    /// Open a tab running a chat with `agent`, else the caller's own
+    /// chat's agent with that chat's settings.
     New {
-        agent: sheprd_chat_protocol::Agent,
+        agent: Option<sheprd_chat_protocol::Agent>,
         /// The pane whose workspace and folder it starts in, else the caller's.
         pane: Option<String>,
     },
@@ -56,8 +57,9 @@ pub(super) fn chat(args: &mut Args) -> Result<ChatCommand, CliError> {
         Some("new") => {
             let pane = args.text_option("--pane")?;
             let agent = args
-                .required_text("an agent, such as claude")?
-                .parse()
+                .optional_text()?
+                .map(|agent| agent.parse())
+                .transpose()
                 .map_err(|_| CliError::InvalidValue("AGENT"))?;
             return Ok(ChatCommand::New { agent, pane });
         }

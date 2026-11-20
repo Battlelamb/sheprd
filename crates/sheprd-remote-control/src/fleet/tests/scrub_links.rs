@@ -44,3 +44,12 @@ async fn a_damaged_links_file_still_lets_the_phones_go() {
     assert!(auth.devices().get(&id).is_none());
     assert!(!file.exists());
 }
+
+#[tokio::test]
+async fn links_applied_after_a_scrub_admit_nothing() {
+    let (a, _phone) = linked().await;
+    assert_eq!(a.ask(Ask::Scrub { session: None }), Answer::Done);
+    // The follower runs after the scrub: no fleet, so nothing comes back.
+    assert!(!apply(&a));
+    assert!(device(&a, 20).is_none());
+}

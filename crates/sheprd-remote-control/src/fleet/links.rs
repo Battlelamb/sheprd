@@ -72,6 +72,10 @@ struct Wanted {
 /// no longer does; whether any changed. Blocking: it writes
 /// `devices.json` and `fleet/links.json`.
 pub(crate) fn apply(state: &State, fleet: &Fleet, now_ms: u64) -> Result<bool> {
+    // Held from reading the log to writing the devices, as a scrub holds
+    // it while it forgets the fleet: no scrub runs in between, so none can
+    // be undone by devices admitted from the log it just forgot.
+    let _writing = fleet.writing();
     let (wanted, linked, via) = wanted(fleet);
     let file = fleet.state_dir().join(FILE);
     let stored = read(&file)?;

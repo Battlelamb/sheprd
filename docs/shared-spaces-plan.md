@@ -39,7 +39,9 @@ added with this plan:
   with one `TabEdit`: `Split`, `RemovePane`, `SetPanes`, `Zoom`, `Rename`,
   `RenamePane`, `Retitle`, `Move`). Each names only what it changes, so a
   rename on one computer and a zoom on another both stay, and an edit to a
-  tab another client closed changes nothing. They are applied with
+  tab another client closed changes nothing. `SetPanes`, for resizing or
+  swapping, is refused as `Stale` once the tab holds other terminals, so
+  re-read and redo it. They are applied with
   `sheprd_core_client::spaces::update(core, &edits)`, or any change with
   `spaces::change(core, |spaces| ...)`. Both write over the version they
   read; when another client wrote first, they apply the edit again to its

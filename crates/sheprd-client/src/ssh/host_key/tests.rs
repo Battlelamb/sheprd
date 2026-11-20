@@ -1,5 +1,7 @@
 use super::*;
 
+mod proof;
+
 #[test]
 fn fingerprints_are_read_from_ssh_keygen_lines() {
     assert_eq!(

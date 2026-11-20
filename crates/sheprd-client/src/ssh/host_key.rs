@@ -292,14 +292,30 @@ pub fn confirm_host_key(target: &str, key: &str) -> Result<bool> {
         .args(super::POLICY)
         .args(["-o", "ClearAllForwardings=yes", "--", target, "true"])
         .stderr(Stdio::piped());
-    let (status, _, stderr) =
-        super::run_with_stderr(&mut command, Duration::from_secs(20), || false)?;
-    Ok(match status.code() {
-        // Authentication is refused only after the host was verified.
-        Some(255) => SshFailure::classify(status.code(), &stderr) == SshFailure::Auth,
-        Some(_) => true,
-        None => false,
-    })
+    let (_, _, stderr) = super::run_with_stderr(&mut command, Duration::from_secs(20), || false)?;
+    Ok(key_exchange_completed(&stderr))
+}
+
+/// Lines `ssh` logs at `DEBUG1` only once a key exchange completed: the
+/// server signed it with the host key the strict check accepted, and the
+/// keys it sets were taken in use. Nothing before that, whatever the
+/// server sends, makes `ssh` print them.
+const KEY_EXCHANGE_DONE: [&str; 2] = [
+    "debug1: SSH2_MSG_NEWKEYS received",
+    "debug1: SSH2_MSG_SERVICE_ACCEPT received",
+];
+
+/// Whether `stderr`, from `ssh` at `DEBUG1`, shows a completed key
+/// exchange: a whole line `ssh` writes itself. Text a server sends (a
+/// banner, a disconnect reason) reaches stderr only after a prefix of
+/// `ssh`'s own and with control characters escaped, so it can neither
+/// start such a line nor end one; an exit code or an error message is no
+/// proof at all, so anything else is `false`.
+fn key_exchange_completed(stderr: &[u8]) -> bool {
+    String::from_utf8_lossy(stderr)
+        .split('\n')
+        .map(|line| line.trim_end_matches('\r'))
+        .any(|line| KEY_EXCHANGE_DONE.contains(&line))
 }
 
 /// The host key algorithms that prove a key of `key`'s type.
@@ -319,6 +335,8 @@ fn host_key_algorithms(key: &str) -> Option<&'static str> {
 /// and every authentication method is off.
 fn confirm_options(only: &Path, algorithms: &str) -> Vec<String> {
     [
+        // What shows the key exchange completed ([`key_exchange_completed`]).
+        "LogLevel=DEBUG1".into(),
         format!("UserKnownHostsFile=\"{}\"", option_path(only)),
         "GlobalKnownHostsFile=/dev/null".into(),
         "KnownHostsCommand=none".into(),

@@ -50,6 +50,10 @@ fn another_computer_lists_and_changes_what_one_kept() {
     desk.settle(&mut core);
     assert!(desk.tabs().is_empty());
     assert!(!desk.store.has_ending());
+    assert!(
+        desk.store.dropped_shared(first),
+        "no window here ends its terminals"
+    );
     assert_eq!(core.spaces().tabs().len(), 0);
 }
 

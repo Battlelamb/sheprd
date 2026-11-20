@@ -103,3 +103,48 @@ fn a_new_document_takes_what_the_app_holds_again() {
     assert_eq!(wiped.spaces().workspaces().len(), 1);
     assert_eq!(wiped.spaces().tabs().len(), 1);
 }
+
+#[test]
+fn a_document_wiped_while_the_app_was_closed_takes_what_it_kept() {
+    let mut core = FakeCore::default();
+    let mut desk = Client::new();
+    let api = desk.keep("api", "/src/api");
+    desk.open(&api, "t1");
+    desk.settle(&mut core);
+    desk.settle(&mut core);
+    assert!(core.version > 0);
+    desk.restart();
+    let mut wiped = FakeCore::default();
+    desk.settle(&mut wiped);
+    assert_eq!(desk.labels(), ["api"]);
+    assert_eq!(desk.tabs(), [tab("api", &["t1"])]);
+    assert_eq!(wiped.spaces().workspaces().len(), 1);
+    assert_eq!(wiped.spaces().tabs().len(), 1);
+}
+
+#[test]
+fn a_rename_made_while_the_first_read_is_out_is_written() {
+    let mut core = FakeCore::default();
+    let mut desk = Client::new();
+    let api = desk.keep("api", "/src/api");
+    let first = desk.send().unwrap();
+    assert!(matches!(first, Job::Migrate(_)));
+    assert!(desk.store.rename_kept(&scope(), &api, "backend"));
+    let answered = core.run(first);
+    desk.finish(answered);
+    assert_eq!(desk.labels(), ["backend"]);
+    desk.settle(&mut core);
+    assert_eq!(core.spaces().workspace(&api).unwrap().label, "backend");
+}
+
+#[test]
+fn adoption_waits_for_the_first_read() {
+    let mut core = FakeCore::default();
+    let mut desk = Client::new();
+    assert!(!desk.sync.answered());
+    let job = desk.send().unwrap();
+    assert!(!desk.sync.answered(), "not while the first read is out");
+    let answered = core.run(job);
+    desk.finish(answered);
+    assert!(desk.sync.answered());
+}

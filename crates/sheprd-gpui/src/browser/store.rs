@@ -225,6 +225,9 @@ pub(crate) struct Store {
     /// Herdr 2 workspaces, in the user's order (`kept.rs`).
     pub(super) workspaces: Vec<SavedWorkspace>,
     next: u64,
+    /// Tabs taken out because a core's shared document dropped them, whose
+    /// terminals the client that closed them ends, not a window here.
+    pub(super) dropped: std::collections::VecDeque<TabId>,
     /// What each core's shared document held when last read (`spaces.rs`).
     pub(super) synced: std::collections::BTreeMap<String, spaces::Synced>,
     pub(super) closed: super::closed::ClosedTabs,
@@ -362,6 +365,7 @@ impl Store {
             tabs,
             workspaces: Vec::new(),
             next,
+            dropped: Default::default(),
             synced: Default::default(),
             closed: Default::default(),
             writer,

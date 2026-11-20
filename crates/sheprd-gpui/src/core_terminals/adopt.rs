@@ -77,8 +77,9 @@ impl SheprdWindow {
                     && !self.core_terminals.adopted.contains(&info.id)
                     && !retired.contains_key(&info.id)
                     // A tab of the core's shared document holds it, whoever
-                    // put it there: it shows here once that tab is read.
-                    && !super::spaces::Shared::holds(cx, &Host::Local, &info.id)
+                    // put it there, and it shows here once that tab is read;
+                    // until the document is read, any tab may.
+                    && !super::spaces::Shared::may_hold(cx, &Host::Local, &info.id)
             })
             .filter_map(|info| {
                 // A phone's new workspace: kept in its folder, once a tab

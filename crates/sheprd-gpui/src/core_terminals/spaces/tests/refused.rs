@@ -16,8 +16,11 @@ fn a_newer_format_is_read_and_never_written() {
     desk.keep("mine", "/src/mine");
     desk.settle(&mut core);
     assert_eq!(core.writes, 0);
-    assert!(desk.labels().contains(&"api".to_owned()));
-    assert!(desk.sync.take_refused().is_none());
+    assert_eq!(desk.labels(), ["api", "mine"], "nothing kept here is lost");
+    assert!(
+        desk.sync.take_refused().is_some(),
+        "what is kept here cannot be shared"
+    );
 
     // A change here is refused once, and the document stays as it was.
     assert!(desk.store.rename_kept(&scope(), "space-1", "backend"));
@@ -71,6 +74,19 @@ fn a_core_that_does_not_answer_gets_the_change_later() {
     assert!(matches!(job, Job::Update(_)));
     desk.finish(Err(sheprd_core_client::Error::Lost));
     assert!(desk.sync.take_refused().is_none());
+    desk.settle(&mut core);
+    assert_eq!(core.spaces().workspace(&api).unwrap().label, "backend");
+}
+
+#[test]
+fn an_edit_whose_worker_never_started_is_sent_later() {
+    let mut core = FakeCore::default();
+    let mut desk = Client::new();
+    let api = desk.keep("api", "/src/api");
+    desk.settle(&mut core);
+    assert!(desk.store.rename_kept(&scope(), &api, "backend"));
+    assert!(matches!(desk.send(), Some(Job::Update(_))));
+    desk.sync.unsent(desk.now);
     desk.settle(&mut core);
     assert_eq!(core.spaces().workspace(&api).unwrap().label, "backend");
 }

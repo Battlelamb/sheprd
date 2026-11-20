@@ -52,7 +52,7 @@ fn a_tabs_document_id_and_what_was_synced_survive_a_restart() {
         .open(scope.clone(), &kept, terminal("t1"), None)
         .unwrap();
     store.name_shared_tabs(&scope, || "tab-1".to_owned());
-    let synced = store.shared_view(&scope).synced();
+    let synced = store.shared_view(&scope).synced(3);
     store.set_synced(&scope, Some(synced.clone()));
     let bytes = serde_json::to_vec(&Saved {
         synced: store.synced.clone(),

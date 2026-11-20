@@ -23,7 +23,7 @@ use crate::{
     SheprdWindow,
     browser::{
         Scope, Store,
-        shared::{Record, TAB_PREFIX, View, new_id},
+        shared::{Pending, Record, TAB_PREFIX, View, new_id},
     },
     i18n::fl,
     window::Flash,
@@ -58,6 +58,9 @@ pub(crate) enum Job {
 #[derive(Debug)]
 pub(crate) struct Answer {
     pub(crate) adopted: Option<Adopted>,
+    /// Whether the document was written anew since the app last read it,
+    /// so what it held then says nothing of it.
+    pub(crate) reset: bool,
     pub(crate) spaces: Spaces,
     pub(crate) version: u64,
 }
@@ -67,9 +70,8 @@ pub(crate) type Outcome = Result<Answer, sheprd_core_client::Error>;
 /// Which job is on its way, and what it was sent with.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Sent {
-    /// The ids offered, which go from the store if the document did not
-    /// take them.
-    Migrate(crate::browser::shared::Synced),
+    /// The view offered, against which changes made since are told.
+    Migrate(View),
     Read,
     /// The view the edits were made from, put back if they never arrived.
     Update(View),
@@ -83,6 +85,8 @@ pub(crate) struct CoreSync {
     /// The scope's view as the document held it when last read, which
     /// changes here are told against; none until the first read this run.
     base: Option<View>,
+    /// Whether the first job this run was answered, even with an error.
+    answered: bool,
     failed: Option<Instant>,
     /// Terminals the document's tabs hold, which adoption leaves alone.
     held: HashSet<TerminalId>,
@@ -105,6 +109,7 @@ impl CoreSync {
         Self {
             scope,
             base: None,
+            answered: false,
             failed: None,
             held: HashSet::new(),
             looked: None,
@@ -151,7 +156,7 @@ impl CoreSync {
         let Some(base) = &self.base else {
             let view = store.shared_view(&self.scope);
             let synced = store.synced(&self.scope).cloned().unwrap_or_default();
-            self.sent = Some(Sent::Migrate(view.synced()));
+            self.sent = Some(Sent::Migrate(view.clone()));
             return Some(Job::Migrate(Offer { synced, view }));
         };
         if (self.looked).is_none_or(|looked| now.saturating_duration_since(looked) >= LOOK_EVERY) {
@@ -197,20 +202,40 @@ impl CoreSync {
         quiet
     }
 
+    /// The job just taken from [`Self::next`] could not be sent: what it
+    /// would have written is told again once the core may be asked.
+    pub(crate) fn unsent(&mut self, now: Instant) {
+        if let Some(Sent::Update(from)) = self.sent.take() {
+            self.base = Some(from);
+        }
+        self.failed = Some(now);
+    }
+
+    /// Whether the document was read this run, or could not be: until then
+    /// it may hold any terminal.
+    pub(crate) fn answered(&self) -> bool {
+        self.answered
+    }
+
     /// Takes the outcome of the job on its way. Whether the store changed.
     pub(crate) fn finish(&mut self, store: &mut Store, outcome: Outcome, now: Instant) -> bool {
         let Some(sent) = self.sent.take() else {
             return false;
         };
+        self.answered = true;
         let answer = match outcome {
             Ok(answer) => answer,
             Err(error) if refused(&error) => {
                 tracing::warn!(%error, "herdr-core refused a shared workspace change");
                 self.refused = Some(error.to_string());
-                // The document stays as it was, and so does this app once
-                // it reads it again.
-                self.revert = true;
-                self.read = None;
+                if let Sent::Update(_) = sent {
+                    // The document stays as it was, and so does this app
+                    // once it reads it again.
+                    self.revert = true;
+                    self.read = None;
+                } else {
+                    self.failed = Some(now);
+                }
                 return false;
             }
             Err(error) => {
@@ -231,52 +256,58 @@ impl CoreSync {
             store.set_synced(&self.scope, None);
             return false;
         }
+        let revert = std::mem::take(&mut self.revert);
+        if !revert && answer.version == self.version && !matches!(sent, Sent::Migrate(_)) {
+            return false;
+        }
         self.writable = answer.spaces.writable();
         self.newer = (answer.spaces.to_value().err()).map(|error| error.to_string());
         self.held = (answer.spaces.tabs().iter())
             .flat_map(|tab| tab.panes.terminals().into_iter().cloned())
             .collect();
         let document = View::of(&answer.spaces);
-        let changed = match sent {
+        // What the document held as this app last knew it, and, on the
+        // first read, what it held before the app last quit.
+        let (before, synced) = match sent {
             Sent::Migrate(offered) => {
-                if let Some(adopted) = &answer.adopted {
-                    store.take_adopted(&self.scope, adopted);
-                }
-                let synced = store.synced(&self.scope).cloned().unwrap_or_default();
-                // What the document held before or was offered and did not
-                // take goes; what was made since the offer stays.
-                store.mirror_shared(&self.scope, &document, |record| match record {
-                    Record::Tab(id) => synced.tabs.contains(id) || offered.tabs.contains(id),
-                    Record::Workspace(id) => {
-                        synced.workspaces.contains(id) || offered.workspaces.contains(id)
+                let before = match &answer.adopted {
+                    Some(adopted) => {
+                        store.take_adopted(&self.scope, adopted);
+                        offered.renamed(adopted)
                     }
-                })
+                    // Not adopted: nothing offered is the document's.
+                    None => View::default(),
+                };
+                let synced = (store.synced(&self.scope).cloned())
+                    .filter(|_| !answer.reset)
+                    .unwrap_or_default();
+                (before, synced)
             }
             Sent::Read | Sent::Update(_) => {
-                if answer.version == self.version && !self.revert {
-                    return false;
-                }
-                let local = store.shared_view(&self.scope);
-                if !self.revert && Some(&local) != self.base.as_ref() {
-                    // Changed here since: those edits go first, and their
-                    // answer is taken in.
-                    return false;
-                }
-                let base = self.base.take().unwrap_or_default();
-                let revert = std::mem::take(&mut self.revert);
-                store.mirror_shared(&self.scope, &document, |record| {
-                    revert
-                        || match record {
-                            Record::Tab(id) => base.tab(id).is_some(),
-                            Record::Workspace(id) => base.workspace(id).is_some(),
-                        }
-                })
+                (self.base.take().unwrap_or_default(), Default::default())
             }
         };
+        let local = store.shared_view(&self.scope);
+        let pending = if revert {
+            Pending::default()
+        } else {
+            Pending::of(&diff::edits(&before, &local))
+        };
+        let changed = store.mirror_shared(&self.scope, &document, &pending, |record| {
+            revert
+                || before.has(record)
+                || match record {
+                    Record::Tab(id) => synced.tabs.contains(id),
+                    Record::Workspace(id) => synced.workspaces.contains(id),
+                }
+        });
         self.version = answer.version;
-        let taken = store.shared_view(&self.scope).within(&document);
-        store.set_synced(&self.scope, Some(taken.synced()));
-        self.base = Some(taken);
+        // The document's records the store holds, and those removed here
+        // and not written yet, so the next edits are told against it.
+        let holding = store.shared_view(&self.scope);
+        let base = document.only(|record| holding.has(record) || pending.removed(record));
+        store.set_synced(&self.scope, Some(base.synced(self.version)));
+        self.base = Some(base);
         changed
     }
 }
@@ -296,19 +327,23 @@ pub(crate) fn run(core: &Core, job: Job) -> Outcome {
     match job {
         Job::Read => spaces::read(core).map(|(spaces, version)| Answer {
             adopted: None,
+            reset: false,
             spaces,
             version,
         }),
         Job::Update(edits) => spaces::update(core, &edits).map(|(spaces, version)| Answer {
             adopted: None,
+            reset: false,
             spaces,
             version,
         }),
         Job::Migrate(offer) => {
             let (current, version) = spaces::read(core)?;
+            let (offer, reset) = offer.at(version);
             if !current.writable() {
                 return Ok(Answer {
                     adopted: None,
+                    reset,
                     spaces: current,
                     version,
                 });
@@ -320,6 +355,7 @@ pub(crate) fn run(core: &Core, job: Job) -> Outcome {
             })?;
             Ok(Answer {
                 adopted: Some(adopted),
+                reset,
                 spaces,
                 version,
             })
@@ -336,11 +372,13 @@ pub(crate) struct Shared {
 impl Global for Shared {}
 
 impl Shared {
-    /// Whether a tab of `host`'s document holds `terminal`.
-    pub(crate) fn holds(cx: &App, host: &Host, terminal: &TerminalId) -> bool {
+    /// Whether a tab of `host`'s document may hold `terminal`: one does,
+    /// or the document has not been read yet this run. A core the window
+    /// does not sync holds none.
+    pub(crate) fn may_hold(cx: &App, host: &Host, terminal: &TerminalId) -> bool {
         cx.try_global::<Self>()
             .and_then(|shared| shared.hosts.get(host))
-            .is_some_and(|(sync, _)| sync.holds(terminal))
+            .is_some_and(|(sync, _)| !sync.answered() || sync.holds(terminal))
     }
 }
 
@@ -398,8 +436,7 @@ impl SheprdWindow {
                     if let Some(job) = sync.next(cx.global::<Store>(), now) {
                         pending = send(backend, job);
                         if pending.is_none() {
-                            sync.sent = None;
-                            sync.failed = Some(now);
+                            sync.unsent(now);
                         }
                     }
                 }

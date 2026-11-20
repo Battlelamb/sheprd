@@ -4,6 +4,7 @@ use crate::core_terminals::panes::Panes;
 use serde_json::Value;
 
 mod diff;
+mod merge;
 mod migration;
 mod refused;
 mod two_computers;
@@ -25,7 +26,7 @@ impl FakeCore {
 
     fn run(&mut self, job: Job) -> Outcome {
         let read = self.spaces();
-        let (mut spaces, mut adopted) = (read.clone(), None);
+        let (mut spaces, mut adopted, mut reset) = (read.clone(), None, false);
         match job {
             Job::Read => {}
             Job::Update(edits) => {
@@ -33,10 +34,13 @@ impl FakeCore {
                     spaces.apply(edit)?;
                 }
             }
-            Job::Migrate(offer) if read.writable() => {
-                adopted = Some(migrate(&mut spaces, &offer)?);
+            Job::Migrate(offer) => {
+                let (offer, wiped) = offer.at(self.version);
+                reset = wiped;
+                if read.writable() {
+                    adopted = Some(migrate(&mut spaces, &offer)?);
+                }
             }
-            Job::Migrate(_) => {}
         }
         if spaces != read {
             self.value = spaces.to_value()?;
@@ -45,6 +49,7 @@ impl FakeCore {
         }
         Ok(Answer {
             adopted,
+            reset,
             spaces: self.spaces(),
             version: self.version,
         })

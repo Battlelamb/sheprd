@@ -4,15 +4,16 @@
 //! shows stays in the store alone: which pane is in use, mirror tabs, and
 //! pages.
 
-use super::{Location, MAX_TABS, Place, Scope, Store, Tab, TabId, Zoom};
+use super::{Location, Place, Scope, Store, Tab};
 use crate::core_terminals::panes::Panes;
 use serde::{Deserialize, Serialize};
 use sheprd_backend::TerminalId;
-use sheprd_session::{
-    SavedWorkspace,
-    spaces::{self, Adopted},
-};
+use sheprd_session::spaces::{self, Adopted};
 use std::collections::{BTreeSet, HashSet};
+
+mod mirror;
+
+pub(crate) use mirror::Pending;
 
 /// One scope's kept workspaces and shared tabs, as a core's document holds
 /// them, in the user's order.
@@ -38,9 +39,11 @@ impl View {
         self.tabs.iter().find(|tab| tab.id == id)
     }
 
-    /// The ids it holds, as the store keeps them across restarts.
-    pub(crate) fn synced(&self) -> Synced {
+    /// The ids it holds at `version`, as the store keeps them across
+    /// restarts.
+    pub(crate) fn synced(&self, version: u64) -> Synced {
         Synced {
+            version,
             tabs: self.tabs.iter().map(|tab| tab.id.clone()).collect(),
             workspaces: (self.workspaces.iter())
                 .map(|workspace| workspace.id.clone())
@@ -48,12 +51,40 @@ impl View {
         }
     }
 
-    /// The view less what `document` does not hold: what the store took of
-    /// it, without records only this app has made so far.
-    pub(crate) fn within(mut self, document: &Self) -> Self {
+    /// Whether it holds `record`.
+    pub(crate) fn has(&self, record: Record<'_>) -> bool {
+        match record {
+            Record::Tab(id) => self.tab(id).is_some(),
+            Record::Workspace(id) => self.workspace(id).is_some(),
+        }
+    }
+
+    /// The records `keep` keeps, in order.
+    pub(crate) fn only(mut self, keep: impl Fn(Record<'_>) -> bool) -> Self {
         self.workspaces
-            .retain(|workspace| document.workspace(&workspace.id).is_some());
-        self.tabs.retain(|tab| document.tab(&tab.id).is_some());
+            .retain(|workspace| keep(Record::Workspace(&workspace.id)));
+        self.tabs.retain(|tab| keep(Record::Tab(&tab.id)));
+        self
+    }
+
+    /// The view under the ids [`Spaces::adopt`](spaces::Spaces::adopt)
+    /// gave its records; one it gave none keeps its own.
+    pub(crate) fn renamed(mut self, adopted: &Adopted) -> Self {
+        let rename = |map: &std::collections::HashMap<String, String>, id: &mut String| {
+            if let Some(new) = map.get(id.as_str()) {
+                id.clone_from(new);
+            }
+        };
+        for workspace in &mut self.workspaces {
+            rename(&adopted.workspaces, &mut workspace.id);
+        }
+        let mut seen = HashSet::new();
+        self.workspaces
+            .retain(|workspace| seen.insert(workspace.id.clone()));
+        for tab in &mut self.tabs {
+            rename(&adopted.workspaces, &mut tab.workspace_id);
+            rename(&adopted.tabs, &mut tab.id);
+        }
         self
     }
 }
@@ -65,6 +96,10 @@ impl View {
 pub(crate) struct Synced {
     #[serde(default)]
     pub(crate) tabs: BTreeSet<String>,
+    /// The document's version then: one read lower was written anew, as
+    /// when the core's state was wiped, and these ids say nothing of it.
+    #[serde(default)]
+    pub(crate) version: u64,
     #[serde(default)]
     pub(crate) workspaces: BTreeSet<String>,
 }
@@ -188,135 +223,6 @@ impl Store {
         }
         if changed {
             self.save();
-        }
-    }
-
-    /// Takes `document` in as `scope`'s kept workspaces and shared tabs,
-    /// keeping what one window shows: the pane in use and a tab's title.
-    /// A workspace or tab the document does not hold goes only when
-    /// `gone` says the document held it before; it ends nothing itself,
-    /// as the client that closed it does. Whether anything changed.
-    pub(crate) fn mirror_shared(
-        &mut self,
-        scope: &Scope,
-        document: &View,
-        gone: impl Fn(Record<'_>) -> bool,
-    ) -> bool {
-        let before = (self.workspaces.clone(), self.tabs.clone());
-        self.mirror_workspaces(scope, document, &gone);
-        self.mirror_tabs(scope, document, &gone);
-        let changed = before != (self.workspaces.clone(), self.tabs.clone());
-        if changed {
-            self.save();
-        }
-        changed
-    }
-
-    fn mirror_workspaces(
-        &mut self,
-        scope: &Scope,
-        document: &View,
-        gone: &impl Fn(Record<'_>) -> bool,
-    ) {
-        let ours = |workspace: &SavedWorkspace| workspace.scope == scope.as_str();
-        let at = self.workspaces.iter().position(ours);
-        let mine: Vec<SavedWorkspace> = self
-            .workspaces
-            .iter()
-            .filter(|w| ours(w))
-            .cloned()
-            .collect();
-        let others = self.workspaces.len() - mine.len();
-        let mut room = super::kept::MAX_WORKSPACES.saturating_sub(others);
-        let mut taken: Vec<SavedWorkspace> = Vec::new();
-        for workspace in &document.workspaces {
-            if room == 0 {
-                break;
-            }
-            room -= 1;
-            taken.push(SavedWorkspace {
-                cwd: workspace.cwd.clone(),
-                custom: workspace.custom,
-                id: workspace.id.clone(),
-                label: workspace.label.clone(),
-                scope: scope.as_str().to_owned(),
-            });
-        }
-        // Workspaces made here and not written yet stay, after the
-        // document's.
-        for workspace in mine {
-            if document.workspace(&workspace.id).is_none()
-                && !gone(Record::Workspace(&workspace.id))
-                && room > 0
-            {
-                room -= 1;
-                taken.push(workspace);
-            }
-        }
-        let gone_ids: HashSet<String> = (self.workspaces.iter())
-            .filter(|workspace| {
-                ours(workspace) && !taken.iter().any(|kept| kept.id == workspace.id)
-            })
-            .map(|workspace| workspace.id.clone())
-            .collect();
-        self.tabs
-            .retain(|tab| &tab.scope != scope || !gone_ids.contains(&tab.workspace_id));
-        self.workspaces.retain(|workspace| !ours(workspace));
-        let at = at
-            .unwrap_or(self.workspaces.len())
-            .min(self.workspaces.len());
-        self.workspaces.splice(at..at, taken);
-    }
-
-    fn mirror_tabs(&mut self, scope: &Scope, document: &View, gone: &impl Fn(Record<'_>) -> bool) {
-        self.tabs.retain(|tab| {
-            let Some(space) = tab.space.as_deref().filter(|_| &tab.scope == scope) else {
-                return true;
-            };
-            document.tab(space).is_some() || !gone(Record::Tab(space))
-        });
-        for shared in &document.tabs {
-            if self.kept_workspace(scope, &shared.workspace_id).is_none() {
-                continue;
-            }
-            let room = self.tabs.len() < MAX_TABS;
-            let held = self
-                .tabs
-                .iter_mut()
-                .find(|tab| &tab.scope == scope && tab.space.as_deref() == Some(&shared.id));
-            match held {
-                Some(tab) => {
-                    let active = match &tab.location {
-                        Some(Location::CoreTerminal { active, .. }) => active.clone(),
-                        _ => None,
-                    };
-                    tab.location = Some(location_of(shared, active));
-                    tab.workspace_id.clone_from(&shared.workspace_id);
-                    if tab.title.is_empty() && !shared.title.is_empty() {
-                        tab.title.clone_from(&shared.title);
-                    }
-                }
-                None if room => {
-                    let location = location_of(shared, None);
-                    let title = Some(shared.title.clone())
-                        .filter(|title| !title.is_empty())
-                        .unwrap_or_else(|| location.default_title());
-                    let id = TabId(self.next);
-                    self.next += 1;
-                    self.tabs.push(Tab {
-                        id,
-                        scope: scope.clone(),
-                        workspace_id: shared.workspace_id.clone(),
-                        location: Some(location),
-                        title,
-                        origin: None,
-                        place: Place::Group,
-                        space: Some(shared.id.clone()),
-                        zoom: Zoom::default(),
-                    });
-                }
-                None => tracing::warn!("No room for a shared herdr-core tab"),
-            }
         }
     }
 }

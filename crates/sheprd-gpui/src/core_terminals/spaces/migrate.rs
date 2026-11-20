@@ -14,6 +14,21 @@ pub(crate) struct Offer {
     pub(crate) view: View,
 }
 
+impl Offer {
+    /// The offer for a document read at `version`, and whether it was
+    /// written anew since the app last read it: one of a lower version, as
+    /// when the core's state was wiped, never held what the app's ids say,
+    /// so everything the app keeps is offered to it.
+    pub(crate) fn at(&self, version: u64) -> (Self, bool) {
+        let reset = version < self.synced.version;
+        let mut offer = self.clone();
+        if reset {
+            offer.synced = Synced::default();
+        }
+        (offer, reset)
+    }
+}
+
 /// Adds `offer` to `spaces`, and answers the document ids each offered
 /// workspace and tab took. Runs again when another client wrote first.
 pub(crate) fn migrate(spaces: &mut Spaces, offer: &Offer) -> Result<Adopted, Error> {

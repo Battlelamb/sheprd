@@ -1,0 +1,248 @@
+//! Taking a core's document into the store, merged three ways: against
+//! what the document held when the app last read it, a record changed only
+//! there takes the document's, one changed here and not written yet keeps
+//! the app's, and one the document dropped goes, ending nothing here.
+
+use super::{Record, View, location_of};
+use crate::browser::store::{MAX_TABS, Place, Scope, Store, Tab, TabId, Zoom, kept};
+use sheprd_session::{SavedWorkspace, spaces::Edit};
+use std::collections::HashSet;
+
+/// How many dropped tabs are remembered: a window forgets a tab within a
+/// tick of its going, and tab ids are never reused.
+const MAX_DROPPED: usize = 1024;
+
+/// What the app changed and has not written yet, by record: the edits
+/// from the document as last read to the store now.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Pending {
+    /// Tabs closed here.
+    pub(crate) closed: HashSet<String>,
+    /// Workspaces forgotten here.
+    pub(crate) forgotten: HashSet<String>,
+    /// Whether workspaces moved here.
+    pub(crate) moved: bool,
+    /// Tabs opened or changed here.
+    pub(crate) put: HashSet<String>,
+    /// Workspaces kept or renamed here.
+    pub(crate) workspaces: HashSet<String>,
+}
+
+impl Pending {
+    pub(crate) fn of(edits: &[Edit]) -> Self {
+        let mut pending = Self::default();
+        for edit in edits {
+            match edit {
+                Edit::CloseTab { id } => {
+                    pending.closed.insert(id.clone());
+                }
+                Edit::ForgetWorkspace { id } => {
+                    pending.forgotten.insert(id.clone());
+                }
+                Edit::KeepWorkspace(workspace) => {
+                    pending.workspaces.insert(workspace.id.clone());
+                }
+                Edit::MoveWorkspace { .. } => pending.moved = true,
+                Edit::PutTab(tab) => {
+                    pending.put.insert(tab.id.clone());
+                }
+                Edit::RenameWorkspace { id, .. } => {
+                    pending.workspaces.insert(id.clone());
+                }
+            }
+        }
+        pending
+    }
+
+    /// Whether `record` was removed here.
+    pub(crate) fn removed(&self, record: Record<'_>) -> bool {
+        match record {
+            Record::Tab(id) => self.closed.contains(id),
+            Record::Workspace(id) => self.forgotten.contains(id),
+        }
+    }
+}
+
+impl Store {
+    /// Takes `document` in as `scope`'s kept workspaces and shared tabs,
+    /// keeping what one window shows (the pane in use, a tab's title) and
+    /// what `pending` says changed here. A record the document does not
+    /// hold goes only when `gone` says the document held it before; a tab
+    /// that goes is [dropped](Self::dropped_shared), so no window ends its
+    /// terminals. Whether anything changed.
+    pub(crate) fn mirror_shared(
+        &mut self,
+        scope: &Scope,
+        document: &View,
+        pending: &Pending,
+        gone: impl Fn(Record<'_>) -> bool,
+    ) -> bool {
+        let before = (self.workspaces.clone(), self.tabs.clone());
+        self.mirror_workspaces(scope, document, pending, &gone);
+        self.mirror_tabs(scope, document, pending, &gone);
+        let changed = before != (self.workspaces.clone(), self.tabs.clone());
+        if changed {
+            self.save();
+        }
+        changed
+    }
+
+    /// Whether `tab` went because its core's document dropped it.
+    pub(crate) fn dropped_shared(&self, tab: TabId) -> bool {
+        self.dropped.contains(&tab)
+    }
+
+    fn drop_tabs(&mut self, mut goes: impl FnMut(&Tab) -> bool) {
+        let mut dropped = Vec::new();
+        self.tabs.retain(|tab| {
+            let keep = !goes(tab);
+            if !keep {
+                dropped.push(tab.id);
+            }
+            keep
+        });
+        for id in dropped {
+            if self.dropped.len() >= MAX_DROPPED {
+                self.dropped.pop_front();
+            }
+            self.dropped.push_back(id);
+        }
+    }
+
+    fn mirror_workspaces(
+        &mut self,
+        scope: &Scope,
+        document: &View,
+        pending: &Pending,
+        gone: &impl Fn(Record<'_>) -> bool,
+    ) {
+        let ours = |workspace: &SavedWorkspace| workspace.scope == scope.as_str();
+        let at = self.workspaces.iter().position(ours);
+        let mine: Vec<SavedWorkspace> = self
+            .workspaces
+            .iter()
+            .filter(|w| ours(w))
+            .cloned()
+            .collect();
+        let held = |id: &str| mine.iter().find(|workspace| workspace.id == id);
+        let others = self.workspaces.len() - mine.len();
+        // Those already here stay; a new one comes while there is room.
+        let staying = |workspace: &SavedWorkspace| match document.workspace(&workspace.id) {
+            Some(_) => !pending.forgotten.contains(&workspace.id),
+            None => !gone(Record::Workspace(&workspace.id)),
+        };
+        let mut room = kept::MAX_WORKSPACES
+            .saturating_sub(others)
+            .saturating_sub(mine.iter().filter(|w| staying(w)).count());
+        let mut taken: Vec<SavedWorkspace> = Vec::new();
+        for workspace in &document.workspaces {
+            if pending.forgotten.contains(&workspace.id) {
+                continue;
+            }
+            let theirs = || SavedWorkspace {
+                cwd: workspace.cwd.clone(),
+                custom: workspace.custom,
+                id: workspace.id.clone(),
+                label: workspace.label.clone(),
+                scope: scope.as_str().to_owned(),
+            };
+            let record = match held(&workspace.id) {
+                // Kept or renamed here, not written yet: the app's stands.
+                Some(here) if pending.workspaces.contains(&workspace.id) => here.clone(),
+                Some(_) => theirs(),
+                None if room == 0 => continue,
+                None => {
+                    room -= 1;
+                    theirs()
+                }
+            };
+            taken.push(record);
+        }
+        // Workspaces made here and not written yet stay, after the
+        // document's.
+        taken.extend(
+            (mine.iter())
+                .filter(|workspace| {
+                    document.workspace(&workspace.id).is_none() && staying(workspace)
+                })
+                .cloned(),
+        );
+        if pending.moved {
+            // Moved here and not written yet: the order stays this app's.
+            let place = |id: &str| mine.iter().position(|workspace| workspace.id == id);
+            taken.sort_by_key(|workspace| place(&workspace.id).unwrap_or(usize::MAX));
+        }
+        let gone_ids: HashSet<String> = (mine.iter())
+            .filter(|workspace| !taken.iter().any(|kept| kept.id == workspace.id))
+            .map(|workspace| workspace.id.clone())
+            .collect();
+        self.drop_tabs(|tab| &tab.scope == scope && gone_ids.contains(&tab.workspace_id));
+        self.workspaces.retain(|workspace| !ours(workspace));
+        let at = at
+            .unwrap_or(self.workspaces.len())
+            .min(self.workspaces.len());
+        self.workspaces.splice(at..at, taken);
+    }
+
+    fn mirror_tabs(
+        &mut self,
+        scope: &Scope,
+        document: &View,
+        pending: &Pending,
+        gone: &impl Fn(Record<'_>) -> bool,
+    ) {
+        self.drop_tabs(|tab| {
+            tab.space.as_deref().is_some_and(|space| {
+                &tab.scope == scope && document.tab(space).is_none() && gone(Record::Tab(space))
+            })
+        });
+        for shared in &document.tabs {
+            if pending.closed.contains(&shared.id)
+                || self.kept_workspace(scope, &shared.workspace_id).is_none()
+            {
+                continue;
+            }
+            let room = self.tabs.len() < MAX_TABS;
+            let held = self
+                .tabs
+                .iter_mut()
+                .find(|tab| &tab.scope == scope && tab.space.as_deref() == Some(&shared.id));
+            match held {
+                Some(_) if pending.put.contains(&shared.id) => {}
+                Some(tab) => {
+                    let active = match &tab.location {
+                        Some(crate::browser::Location::CoreTerminal { active, .. }) => {
+                            active.clone()
+                        }
+                        _ => None,
+                    };
+                    tab.location = Some(location_of(shared, active));
+                    tab.workspace_id.clone_from(&shared.workspace_id);
+                    if tab.title.is_empty() && !shared.title.is_empty() {
+                        tab.title.clone_from(&shared.title);
+                    }
+                }
+                None if room => {
+                    let location = location_of(shared, None);
+                    let title = Some(shared.title.clone())
+                        .filter(|title| !title.is_empty())
+                        .unwrap_or_else(|| location.default_title());
+                    let id = TabId(self.next);
+                    self.next += 1;
+                    self.tabs.push(Tab {
+                        id,
+                        scope: scope.clone(),
+                        workspace_id: shared.workspace_id.clone(),
+                        location: Some(location),
+                        title,
+                        origin: None,
+                        place: Place::Group,
+                        space: Some(shared.id.clone()),
+                        zoom: Zoom::default(),
+                    });
+                }
+                None => tracing::warn!("No room for a shared herdr-core tab"),
+            }
+        }
+    }
+}

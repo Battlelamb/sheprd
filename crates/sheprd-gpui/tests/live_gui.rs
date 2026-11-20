@@ -55,6 +55,14 @@ fn native_github_quota() {
     native_fixture(Fixture::GitHubQuota);
 }
 
+#[test]
+#[ignore = "requires active native desktop; synthetic Traces sessions, no daemon"]
+fn native_traces() {
+    let (status, log) = run_fixture(&Fixture::Traces).expect("native Traces timed out");
+    assert!(status.success(), "native Traces failed: {status}");
+    assert!(log.contains("TRACES native PASS"), "{log}");
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 #[ignore = "requires active Linux desktop; GUI-only menu fixtures, no daemon"]
@@ -120,6 +128,7 @@ fn native_input_shutdown(field: &'static str) {
 
 enum Fixture {
     GitHubQuota,
+    Traces,
     Sidebar,
     #[cfg(target_os = "linux")]
     ApplicationMenus,
@@ -208,9 +217,15 @@ fn run_fixture(fixture: &Fixture) -> Option<(ExitStatus, String)> {
     if let Some(path) = std::env::var_os("HERDR_TEST_GITHUB_CAPTURE") {
         command.env("HERDR_TEST_GITHUB_CAPTURE", path);
     }
+    if let Some(path) = std::env::var_os("HERDR_TEST_TRACES_CAPTURE") {
+        command.env("HERDR_TEST_TRACES_CAPTURE", path);
+    }
     match fixture {
         Fixture::GitHubQuota => {
             command.env("HERDR_TEST_GITHUB_QUOTA_ONLY", "1");
+        }
+        Fixture::Traces => {
+            command.env("HERDR_TEST_TRACES_ONLY", "1");
         }
         Fixture::Sidebar => {}
         #[cfg(target_os = "linux")]

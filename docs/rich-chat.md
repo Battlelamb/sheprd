@@ -69,7 +69,7 @@ short: when its plan has hit a limit, is 80% used, or is half used and on
 pace to run out before it resets, the button starts the installed agent with
 the most room instead, and its tooltip says why. Usage comes from the status
 bar's last reading of the selected host, matched by name (Claude, Codex,
-Copilot, Gemini, OpenCode, Pi); every window counts, so a weekly limit
+Copilot, Gemini, Kimi Code, OpenCode, Pi); every window counts, so a weekly limit
 running out matters even when a session window is fuller. An agent without
 a reading, or whose limits have reset since, counts as having room, and one
 tight plan never replaces another. With usage turned off
@@ -182,6 +182,49 @@ Limitations:
 - If `sheprd-acp` cannot continue the session, the pane keeps its error, and
   the agent's own command (such as `claude --resume ID`) still can.
 
+### Opening new agents as chats
+
+Turn on **Open new agents as chats** in Settings > Chat, or run
+`sheprd config set chat.auto_convert true`, and each agent that starts in a
+terminal afterwards moves into a chat on its own, as `chat convert` would.
+It does not matter what started it: typing `claude` at a prompt, `herdr agent
+start`, or another agent or tool driving Herdr. The calling tool needs no
+change. It is off by default.
+
+- Only agents that start after the window connected to their daemon move.
+  Turning it on, restarting Sheprd, or reconnecting leaves what already runs
+  in its terminal.
+- An agent moves once it has been idle for 10 seconds with no change Herdr
+  reports. A tool that prompts the agent as soon as it is ready makes it work,
+  which starts the wait again, so the move comes after that turn rather than
+  in the middle of the tool's handshake. An agent that turns busy just as it
+  was to move is watched again, up to twice.
+- Each pane is tried once. A refusal, such as a missing Herdr integration, is
+  logged and leaves the terminal; a chat moved back to its terminal stays
+  there.
+- Typing, composing, or pasting into the agent's pane from this window keeps
+  its terminal, since a move would clear what is typed. That holds while the
+  move is still checking the agent too: it stops before pressing Ctrl+C, or,
+  for an agent you quit meanwhile, before typing its line. Once Ctrl+C is
+  pressed, the move finishes, since the agent is on its way out and only its
+  chat can continue the conversation.
+  Typing into another pane, then clicking the agent's, does not count, nor
+  does moving the pointer, scrolling, or clicking. Text typed from another
+  client, such as the Herdr TUI, is not seen: that is what the wait is for.
+- Several Sheprd windows on one daemon move each agent once: a window claims
+  the pane before it stops the agent, and the others leave it alone. The same
+  claim keeps **Move Agent into Chat** in one window from racing a move
+  another window started. Two separate Sheprd processes do not see each
+  other's claims.
+- A tool that must keep an agent in its terminal can mark the pane:
+  `herdr pane report-metadata PANE --source ID --token sheprd_terminal=keep`.
+- Agents move one at a time, so ten started together move one after another.
+- The moved agent runs as a chat, which Herdr reports as an `acp` agent with
+  the original agent's display name. A tool that later finds the pane's agent
+  by its kind, such as `claude`, no longer finds it there.
+- Herdr 1 panes only, with the limitations above; Herdr 2 panes stay as they
+  are.
+
 ## Chats after a reboot
 
 When Herdr restores its panes after a reboot or a server restart, a pane that
@@ -256,7 +299,7 @@ Limitations:
   folder could be handed the old chat.
 - A chat whose shell folder differs from the chat's own (started with
   `--cwd`) is not continued.
-- Only the built-in agents (`claude`, `codex`, `copilot`, `gemini`,
+- Only the built-in agents (`claude`, `codex`, `copilot`, `gemini`, `kimi`,
   `opencode`, `pi`) started without extra agent arguments. Custom commands
   are not continued.
 - `[chat.env]` variables are not set again: typing their values into a shell
@@ -555,8 +598,9 @@ prompt or answer a permission request. Existing CLI sessions and read-only mirro
 ### Text size and effects
 
 An agent can set words larger or smaller within a line, and play an effect as
-a phone's messages do. Markdown directives keep the source readable where it is
-not drawn, such as terminal views and the phone:
+a phone's messages do, in the desktop chat and in the iPhone and iPad app.
+Markdown directives keep the source readable where they are not drawn, such
+as terminal views and the phone web app:
 
 ```markdown
 Tests pass and :huge[the PR is merged]. :small[CI took 4 min.]
@@ -585,13 +629,32 @@ All 214 tests pass.
   the terminals, tabs, or sidebar, and never take the pointer. A message plays its first; another
   arriving while one plays is dropped, not queued.
 
-Only an agent's replies play effects; a user's message shows its directives as
-text. Each effect plays once, as its message arrives: a transcript loaded,
-reopened, or received again after reconnecting shows each message at rest,
-with a **Replay** link under it. With the system's reduce motion setting on,
-nothing moves, and invisible ink still hides until hovered. The agent learns
-the syntax from the note Sheprd sends with the first prompt on a desktop
-(`desktop.md` and `remote.md` in `crates/sheprd-acp/prompts`).
+Only an agent's replies play effects; a user's message shows its effect
+directives as text, though its size spans still apply. Each effect plays once,
+as its message arrives: a transcript loaded, reopened, or received again after
+reconnecting shows each message at rest, with a **Replay** link under it. With
+the system's reduce motion setting on, nothing moves, and invisible ink still
+hides until hovered. The agent learns the syntax from the note Sheprd sends
+with the first prompt on a desktop (`desktop.md` and `remote.md` in
+`crates/sheprd-acp/prompts`) and in the iPhone and iPad app (`phone-app.md`).
+
+The iPhone and iPad app draws the same sizes and effects
+(`ios/SheprdRemoteCore/Sources/SheprdRemoteCore/Chat/TextSize.swift` and
+`Chat/Effects`, ported from the desktop's with the same tests), with these
+differences:
+
+- Invisible ink hides its text until tapped, and a second tap hides it again.
+- Screen effects play over the chat screen above the composer, never over
+  the composer, the navigation bar, or other screens, and take no touches.
+- A transcript from the phone's cache or a snapshot is history; only the
+  entries a live change pushes, appends to, or replaces play, wherever they
+  are in the transcript. The system's Reduce Motion setting draws everything
+  at rest.
+- A list row strips the directives from the computer's one-line excerpt of
+  the latest reply.
+
+The phone web app draws neither, so `phone.md` does not mention them and only
+`phone-app.md`, which follows it for the iPhone and iPad app, does.
 
 The catalog is application-specific, not an A2UI implementation or MCP Apps
 host. Embedded HTML pages use the platform webview; see the
@@ -624,13 +687,20 @@ again only when they differ from the last ones sent, and the origin only on
 another device or a change between this machine and SSH. Where the person cannot open paths on the
 agent's machine, the note asks the agent to link pictures as Markdown images,
 which [linked pictures](#messages-and-controls) attach to the chat, and to
-render HTML mockups to screenshots. The transcript shows only the person's
+render HTML mockups to screenshots. It also says the person cannot touch
+the agent's computer, so a hardware key, Touch ID, or an on-screen prompt
+is out of their reach: the agent pushes and fetches over HTTPS with the
+GitHub CLI's credentials rather than SSH, and stops rather than turning
+off signing when a commit needs a key (`phone.md` and `remote.md`; the
+iPhone and iPad app's `phone-app.md` follows `phone.md`, so says it once
+through it). The transcript shows only the person's
 words. An older program ignores the field, and an older client sends none.
 
 The note's texts are templates (`context/prompts.rs`): the built-in ones in
 `crates/sheprd-acp/prompts`, compiled in, each replaced by a non-empty file
 of the same name in `herdr/chat-prompts/`. One template per place
-(`desktop`, `terminal`, `remote`, `phone`, chosen by `Kind::of`) avoids
+(`desktop`, `terminal`, `remote`, `phone`, chosen by `Kind::of`), followed for
+the iPhone and iPad app alone by `phone-app.md` (`Kind::after`), avoids
 conditionals: `{{ name }}` substitution (`context/template.rs`) is one pass
 over known names, a value is never read as a template, and an unknown name
 stays as written, as Moltis fills its webhook templates. Files are read once
@@ -673,7 +743,11 @@ terminal. Goal status stays in the original CLI interface; it is not inferred
 from conversation text.
 
 Observation requires a Linux agent host, its Herdr CLI metadata API, and a
-matching `sheprd-acp` helper. Local helpers are paired with the GUI; SSH observers
+matching `sheprd-acp` helper. The observer itself also runs on macOS, where the
+iPhone app uses it (`docs/ios-app-plan.md`): it reads the process's birth from
+the kernel and finds the log by its exact name, and since macOS shows no other
+process's environment, it reads the default config directory, never a
+`CLAUDE_CONFIG_DIR` or `CODEX_HOME` override. Local helpers are paired with the GUI; SSH observers
 run on the agent's host through the existing encrypted connection. Remote helper
 installation is explicit. Observation creates no listening port or persistent
 service. Closing the GUI stops its observer children and leaves agents running.

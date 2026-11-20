@@ -45,6 +45,7 @@ pub(super) fn start(
         };
         #[cfg(feature = "integration-test")]
         eprintln!(
+            // i18n: data
             "PAGES diag: build {number} finished after {:?}: {:?}",
             begun.elapsed(),
             built.as_ref().map(|_| ())

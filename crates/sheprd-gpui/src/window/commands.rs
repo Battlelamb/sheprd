@@ -539,6 +539,10 @@ impl SheprdWindow {
                 self.open_worktree_shortcut(shortcut, window, cx);
                 return;
             }
+            Command::RemoveMergedWorktrees => {
+                self.open_merged_sweep(window, cx);
+                return;
+            }
             Command::WorktreeNotes => {
                 self.open_palette(crate::palette::Filter::Notes, window, cx);
                 return;

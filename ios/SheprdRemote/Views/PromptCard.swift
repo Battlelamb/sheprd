@@ -33,7 +33,7 @@ struct PromptCard: View {
             }
         }
         .animation(.snappy, value: prompt)
-        .sensoryFeedback(.selection, trigger: answered)
+        .haptic(.selection, trigger: answered)
         .task(id: waiting) {
             while !Task.isCancelled {
                 await refresh()

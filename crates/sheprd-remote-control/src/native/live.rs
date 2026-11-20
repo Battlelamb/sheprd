@@ -291,6 +291,7 @@ async fn follow_home(state: Shared, device: DeviceId, out: Outbound) {
     let mut shortcuts = state.shortcuts.subscribe();
     let mut opened = state.opened.changed();
     let mut lending = state.lending.watch();
+    let mut previews = state.previews.watch();
     let mut sent = None;
     loop {
         state.lending.checkouts.want();
@@ -316,6 +317,7 @@ async fn follow_home(state: Shared, device: DeviceId, out: Outbound) {
                 changed = tags.changed() => if changed.is_err() { return } else { break },
                 changed = shortcuts.changed() => if changed.is_err() { return } else { break },
                 changed = opened.changed() => if changed.is_err() { return } else { break },
+                changed = previews.changed() => if changed.is_err() { return } else { break },
                 changed = lending.changed() => if changed { break } else { return },
                 // A stopped sampler leaves the last figures standing.
                 changed = load.changed(), if load.has_changed().is_ok() => if changed.is_ok() { break },

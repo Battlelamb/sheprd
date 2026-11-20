@@ -44,6 +44,15 @@ pub enum HostOp {
     PrComments,
     /// Open it in a browser tab.
     PrOpen,
+    /// Open the Git popup's merge dialog for it, which on a GitHub stack
+    /// lands the open layers below it too. Only the dialog opens: the user
+    /// picks the method and confirms there.
+    PrMerge,
+    /// Open the confirmation that adds it to its base branch's merge queue,
+    /// or takes it out. The user confirms there.
+    PrQueue {
+        change: QueueOp,
+    },
     /// Last reported GitHub GraphQL quota and active account pauses.
     PrQuota,
     /// Ports the caller's workspace's processes listen on, and forwards.
@@ -102,6 +111,14 @@ pub enum HostOp {
     CloudImages {
         provider: Option<String>,
     },
+}
+
+/// What `pr queue` asks to confirm.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueOp {
+    Add,
+    Remove,
 }
 
 impl HostOp {

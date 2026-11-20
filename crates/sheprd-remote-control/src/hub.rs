@@ -23,7 +23,7 @@ pub(crate) use api::ApiMethod;
 pub(crate) use attach::TermHold;
 pub(crate) use chat::{Chat, Event, Summary, View};
 pub(crate) use convert::Error as ConvertError;
-pub(crate) use core::{Keeper, arrangeable};
+pub(crate) use core::{Keeper, TabRef, arrangeable};
 #[cfg(test)]
 pub(crate) use layout::TerminalAgent;
 pub(crate) use layout::{Chat as ChatRow, Job, Layout, Terminal, TerminalPane, Workspace};
@@ -449,6 +449,28 @@ impl Hub {
             }
             result => result,
         }
+    }
+
+    /// A terminal pane's visible screen as text, for its row's preview. A
+    /// Herdr 2 pane is read by its core, so these reads never hold a screen
+    /// a phone needs to open a terminal; any other goes to `pane.read`.
+    pub(crate) async fn screen_text(&self, pane: &str) -> Result<String> {
+        let params = json!({"pane_id": pane, "source": "visible", "format": "ansi"});
+        if core::owns(&params) {
+            if !self.layout().connected {
+                return Err(Error::NotConnected);
+            }
+            let core = self.core.clone().ok_or(core::Error::Disconnected)?;
+            let pane = pane.to_owned();
+            return tokio::task::spawn_blocking(move || core.screen_text(&pane))
+                .await
+                .map_err(|_| core::Error::Disconnected)?;
+        }
+        let answer = self.call(ApiMethod::PaneRead, params).await?;
+        Ok(answer["read"]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned())
     }
 
     /// [`Hub::call`] for a request whose ids do not say where it goes, such

@@ -13,6 +13,7 @@ fn question(pane: &str) -> Notification {
         tag: format!("chat-{pane}"),
         title: "Claude needs an answer".to_owned(),
         urgency: Urgency::High,
+        wizz: false,
     }
 }
 

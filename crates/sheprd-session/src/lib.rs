@@ -4,6 +4,7 @@ mod error;
 pub mod panes;
 pub mod saved;
 pub mod session;
+pub mod spaces;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]

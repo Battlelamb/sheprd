@@ -152,25 +152,35 @@ impl Source {
             }
             (core, addresses)
         };
-        // Each one ended is gone from the list, even if a later one fails.
+        self.end_terminals(&core, &addresses)?;
+        Ok(json!({}))
+    }
+
+    /// Ends the terminals at `addresses`, chats as their recovery expects.
+    /// Each one ended is gone from the list, even if a later one fails.
+    pub(super) fn end_terminals(
+        &self,
+        core: &sheprd_core_client::Core,
+        addresses: &[String],
+    ) -> Result<()> {
         for address in addresses {
             let terminal = lock(&self.state)
                 .terminals
                 .iter()
-                .find(|terminal| terminal.address == address)
+                .find(|terminal| &terminal.address == address)
                 .cloned();
             if let Some(terminal) = terminal {
-                sheprd_core_client::chat_recovery::close_terminal(&core, &terminal)?;
+                sheprd_core_client::chat_recovery::close_terminal(core, &terminal)?;
             } else {
-                core.kill(&address)?;
+                core.kill(address)?;
             }
             let mut state = lock(&self.state);
-            state.screens.remove(&address);
+            state.screens.remove(address);
             state
                 .terminals
-                .retain(|terminal| terminal.address != address);
+                .retain(|terminal| &terminal.address != address);
         }
-        Ok(json!({}))
+        Ok(())
     }
 }
 

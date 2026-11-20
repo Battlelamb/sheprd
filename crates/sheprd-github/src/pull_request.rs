@@ -34,7 +34,7 @@ pub use model::MergeState;
 #[cfg(any(test, feature = "test-support"))]
 pub use {
     model::fixture,
-    stack::{ready_stacked_fixture, stacked_fixture},
+    stack::{ready_stacked_fixture, restack_fixture, stacked_fixture},
 };
 
 use fetch::Origins;

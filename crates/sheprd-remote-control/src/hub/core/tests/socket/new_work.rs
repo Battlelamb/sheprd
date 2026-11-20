@@ -416,7 +416,7 @@ fn a_saved_tab_names_its_id_and_the_panes_terminal() {
     source.poll().unwrap();
     assert_eq!(
         source.saved_target("core:tab:4", &id("t1")),
-        Some((4, "t1".to_owned()))
+        Some((TabRef::File(4), "t1".to_owned()))
     );
     // A desktop space's tab, or a terminal no tab holds, is not Sheprd's.
     assert_eq!(source.saved_target("core:app-tab:ab", &id("t1")), None);

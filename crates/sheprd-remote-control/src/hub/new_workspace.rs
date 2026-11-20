@@ -92,9 +92,9 @@ impl Hub {
         let (cwd, program, agent) = (new.cwd.to_owned(), program.to_owned(), new.agent);
         let (branch, root) = (new.branch.map(str::to_owned), self.worktrees.clone());
         let title = new.title.map(str::to_owned);
-        let (pane, folder) = on_core(move || {
+        let (pane, folder, kept) = on_core(move || {
             let title = title.as_deref();
-            match branch {
+            let (pane, folder) = match branch {
                 Some(branch) => {
                     core.open_worktree_chat(agent, &program, &cwd, &branch, title, root.as_deref())
                 }
@@ -107,11 +107,21 @@ impl Hub {
                         Some(core::Place::New { cwd: &cwd, title }),
                     )
                     .map(|pane| (pane, cwd)),
-            }
+            }?;
+            // Kept in the core's shared document at once, titled as the
+            // phone shows it; its label still asks a desktop to keep it.
+            let kept = core
+                .share_new_workspace(&folder, &pane, title.unwrap_or(agent.display_name()))
+                .unwrap_or_else(|error| {
+                    tracing::warn!(%error, "A phone's new workspace waits for Sheprd to keep it");
+                    None
+                });
+            Ok((pane, folder, kept))
         })
         .await?;
+        // Otherwise listed apart until Sheprd keeps its workspace.
         Ok(CreatedWorkspace {
-            workspace: core::new_workspace_id(&folder),
+            workspace: kept.unwrap_or_else(|| core::new_workspace_id(&folder)),
             pane,
         })
     }

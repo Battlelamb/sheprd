@@ -155,3 +155,25 @@ fn a_queued_pull_request_outside_a_stack_shows_its_place_in_the_queue(cx: &mut T
     let title = cx.debug_bounds("orchestrator-detail-title").unwrap();
     assert!(tag.bottom() <= title.top());
 }
+
+#[gpui::test]
+fn escape_closes_the_stack_popover_before_the_page(cx: &mut TestAppContext) {
+    let (_dir, view, cx) = open_stacked(cx, crate::pull_request::stacked_fixture().unwrap());
+    let chip = cx.debug_bounds("orchestrator-stack-chip").unwrap();
+    cx.simulate_click(chip.center(), Modifiers::none());
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+        let focus = view.read(cx).focus_handle().clone();
+        window.focus(&focus, cx);
+    });
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    cx.update(|_, cx| {
+        let view = view.read(cx);
+        assert_eq!(view.stack.open, None);
+        assert!(view.detail.is_some(), "the page stays open");
+    });
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    cx.update(|_, cx| assert!(view.read(cx).detail.is_none()));
+}

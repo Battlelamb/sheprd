@@ -6,7 +6,7 @@
 //! in `log.bin`'s format); `lock` is
 //! `super::lock`'s.
 
-use super::{Error, Inner, Result};
+use super::{Error, Inner, Result, Suspensions};
 use crate::control::fleet::{MemberId, Op, OpId, saved, sync};
 use crate::desktop::files::{read_bounded, write_private};
 use p256::ecdsa::SigningKey;
@@ -53,6 +53,9 @@ struct Peers {
     held: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
     unconfirmed: BTreeMap<String, Kept>,
+    /// Suspensions folded per signer and target (`super::suspensions`).
+    #[serde(default)]
+    folded: Vec<FoldedKept>,
     #[serde(default)]
     proven: BTreeMap<String, Proven>,
     /// What recorded `proven`: [`PROVEN_VERSION`] once keys are recorded
@@ -85,6 +88,17 @@ impl Proven {
         };
         many.into_iter().flatten().chain(one)
     }
+}
+
+#[derive(Serialize, Deserialize)]
+struct FoldedKept {
+    signer: String,
+    target: String,
+    /// Each removal's id, hex, with when it arrived.
+    #[serde(default)]
+    ids: BTreeMap<String, u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    overflowed: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -141,6 +155,30 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
                 Some((MemberId::from_hex(member)?, keys))
             })
             .collect(),
+        folded: peers
+            .folded
+            .iter()
+            .filter_map(|kept| {
+                let ids: BTreeMap<OpId, u64> = kept
+                    .ids
+                    .iter()
+                    .filter_map(|(id, since)| Some((OpId::from_hex(id)?, *since)))
+                    .collect();
+                // An id that no longer reads still holds the target.
+                let overflowed = if ids.len() < kept.ids.len() {
+                    kept.ids.values().copied().chain(kept.overflowed).min()
+                } else {
+                    kept.overflowed
+                };
+                Some((
+                    (
+                        MemberId::from_hex(&kept.signer)?,
+                        MemberId::from_hex(&kept.target)?,
+                    ),
+                    super::suspensions::Folded { ids, overflowed },
+                ))
+            })
+            .collect(),
         unconfirmed: peers
             .unconfirmed
             .iter()
@@ -185,14 +223,24 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
 ///    suspensions, which the next load or save settles again.
 ///
 /// `on_disk` is the suspensions `peers.json` holds; kept up to date.
-pub(super) fn save(
-    state_dir: &Path,
-    inner: &Inner,
-    on_disk: &mut BTreeMap<OpId, super::Unconfirmed>,
-) -> Result<()> {
-    let mut first = inner.unconfirmed.clone();
-    for (id, kept) in on_disk.iter() {
-        first.entry(*id).or_insert_with(|| kept.clone());
+pub(super) fn save(state_dir: &Path, inner: &Inner, on_disk: &mut Suspensions) -> Result<()> {
+    let now = Suspensions {
+        unconfirmed: inner.unconfirmed.clone(),
+        folded: inner.folded.clone(),
+    };
+    let mut first = now.clone();
+    for (id, kept) in &on_disk.unconfirmed {
+        first.unconfirmed.entry(*id).or_insert_with(|| kept.clone());
+    }
+    for (key, kept) in &on_disk.folded {
+        let folded = first.folded.entry(*key).or_default();
+        for (id, since) in &kept.ids {
+            folded.ids.entry(*id).or_insert(*since);
+        }
+        folded.overflowed = match (folded.overflowed, kept.overflowed) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
     }
     write_peers(state_dir, inner, &first)?;
     *on_disk = first;
@@ -202,9 +250,9 @@ pub(super) fn save(
     } else if let Some(joining) = &inner.joining {
         write_private(&path(state_dir, JOINING), &saved::encode(joining)?)?;
     }
-    if on_disk.len() != inner.unconfirmed.len() {
-        match write_peers(state_dir, inner, &inner.unconfirmed) {
-            Ok(()) => on_disk.clone_from(&inner.unconfirmed),
+    if *on_disk != now {
+        match write_peers(state_dir, inner, &now) {
+            Ok(()) => *on_disk = now,
             Err(error) => {
                 tracing::warn!(error = %error, "could not drop settled suspensions; kept until the next save");
             }
@@ -215,11 +263,7 @@ pub(super) fn save(
 
 /// Writes `peers.json` from `inner`, with `unconfirmed` as its
 /// suspensions.
-fn write_peers(
-    state_dir: &Path,
-    inner: &Inner,
-    unconfirmed: &BTreeMap<OpId, super::Unconfirmed>,
-) -> Result<()> {
+fn write_peers(state_dir: &Path, inner: &Inner, suspensions: &Suspensions) -> Result<()> {
     let peers = Peers {
         held: inner
             .held
@@ -245,7 +289,22 @@ fn write_peers(
                 )
             })
             .collect(),
-        unconfirmed: unconfirmed
+        folded: suspensions
+            .folded
+            .iter()
+            .map(|((signer, target), folded)| FoldedKept {
+                signer: signer.to_string(),
+                target: target.to_string(),
+                ids: folded
+                    .ids
+                    .iter()
+                    .map(|(id, since)| (id.to_string(), *since))
+                    .collect(),
+                overflowed: folded.overflowed,
+            })
+            .collect(),
+        unconfirmed: suspensions
+            .unconfirmed
             .iter()
             .map(|(id, kept)| {
                 (

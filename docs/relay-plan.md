@@ -1616,6 +1616,10 @@ history still acts on it at once, to fail closed:
   syncs brings the history long before, so only a removal whose history
   does not exist outlives it. A removal that cannot be checked yet never
   cuts off the computer receiving it.
+- What a receiver keeps is bounded: past eight removals a member keeps
+  apart, older ones fold per signer and target, each keeping its id and
+  arrival, so every removal is still settled by its own history, ends on
+  its own time, and stands only by its own signer's rule.
 
 That last case is only a member removing another member, which any
 member can do anyway.

@@ -44,6 +44,18 @@ fn fleet_requests_have_a_stable_wire_form() {
 }
 
 #[test]
+fn removals_wait_for_the_daemon_they_read_first() {
+    let remove = FleetOp::Remove {
+        member: "studio".into(),
+    };
+    let remove_host = FleetOp::RemoveHost {
+        host: "build-01".into(),
+    };
+    assert_eq!(remove.wait_seconds(), FleetOp::Status.wait_seconds());
+    assert_eq!(remove_host.wait_seconds(), FleetOp::Status.wait_seconds());
+}
+
+#[test]
 fn fleet_replies_read_back() {
     let response = Response::Fleet {
         reply: Reply::Status {

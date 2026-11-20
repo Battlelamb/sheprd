@@ -149,13 +149,12 @@ pub(crate) fn apply(state: &State, fleet: &Fleet) -> Result<()> {
 fn revoke_removed(state: &State, fleet: &Fleet) -> Result<()> {
     let gone: Vec<(MemberId, Vec<[u8; 32]>)> = {
         let inner = fleet.inner();
-        let Some(log) = &inner.log else {
-            return Ok(());
-        };
+        // With no log, as after leaving the fleet, no one is a member here
+        // any more: every key a member proved goes.
         inner
             .proven
             .iter()
-            .filter(|(member, _)| !log.is_member(member))
+            .filter(|(member, _)| inner.log.as_ref().is_none_or(|log| !log.is_member(member)))
             .map(|(member, keys)| (*member, keys.iter().copied().collect()))
             .collect()
     };

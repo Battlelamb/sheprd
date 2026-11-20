@@ -393,6 +393,10 @@ pub(crate) fn invite(
         .await;
         cx.update(|cx| {
             Fleet::set_acting(cx, &id, false);
+            // It is in the fleet now, whatever it said before: sync it.
+            if outcome.is_ok() {
+                Fleet::set_link(cx, &id, super::Link::restart);
+            }
             Fleet::refresh(cx);
             done(outcome.err().map(|error| error.to_string()), cx);
         });
@@ -436,6 +440,10 @@ pub(crate) fn share(
         .await;
         cx.update(|cx| {
             Fleet::set_acting(cx, &id, false);
+            // It is in the fleet now, whatever it said before: sync it.
+            if outcome.is_ok() {
+                Fleet::set_link(cx, &id, super::Link::restart);
+            }
             Fleet::refresh(cx);
             done(outcome.err().map(|error| error.to_string()), cx);
         });

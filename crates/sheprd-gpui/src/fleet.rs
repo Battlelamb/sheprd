@@ -88,6 +88,15 @@ pub(crate) enum Standing {
 }
 
 impl Link {
+    /// Starts over, as for a machine never asked; a sync running for it
+    /// still finishes.
+    pub(super) fn restart(&mut self) {
+        *self = Self {
+            running: self.running,
+            ..Self::default()
+        };
+    }
+
     fn due(&self, mine: &[String], now: Instant) -> bool {
         if self.running {
             return false;
@@ -300,6 +309,7 @@ impl Fleet {
             Ok(view) => {
                 let changed = !self.answered || self.view != view;
                 self.answered = true;
+                self.forget_stale_links(view.as_ref());
                 self.view = view;
                 changed
             }
@@ -307,6 +317,25 @@ impl Fleet {
             Err(message) => {
                 self.error = message;
                 false
+            }
+        }
+    }
+
+    /// Forgets what machines said when it no longer holds under `view`:
+    /// every link once this computer is in another fleet or none, and the
+    /// stop on a removed host the fleet shares again.
+    fn forget_stale_links(&mut self, view: Option<&View>) {
+        let fleet = |view: Option<&View>| view.map(|view| view.fleet.clone());
+        let other = fleet(self.view.as_ref()) != fleet(view);
+        for link in self.links.values_mut() {
+            let shared_again = link.standing == Standing::Removed
+                && view.is_some_and(|view| {
+                    view.hosts
+                        .iter()
+                        .any(|host| Some(&host.id) == link.host.as_ref())
+                });
+            if other || shared_again {
+                link.restart();
             }
         }
     }

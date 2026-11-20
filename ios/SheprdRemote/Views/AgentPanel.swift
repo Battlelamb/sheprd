@@ -10,7 +10,8 @@ struct AgentPanel: View {
     @Environment(\.dismiss) private var dismiss
     let key: PaneKey
     let store: ChatStore
-    /// Activities a Stop was sent for, until they end.
+    /// Activities a Stop was sent for, until they end or `stopWait`
+    /// passes without them ending.
     @State private var stopping: Set<String> = []
     @State private var problem: String?
     @State private var folded: Set<PanelSection> = []
@@ -130,11 +131,19 @@ struct AgentPanel: View {
         }
     }
 
+    /// How long a Stop the chat accepted may take to end its activity.
+    /// The chat accepting the command is not the agent stopping it: an
+    /// agent that refuses says so only in a notice, so after this the
+    /// button comes back and the person can try again.
+    static let stopWait = Duration.seconds(10)
+
     private func stop(_ activity: AgentActivity) {
-        stopping.insert(activity.callId)
+        let id = activity.callId
+        stopping.insert(id)
         Task {
-            problem = await model.fleet.send(.stopActivity(callId: activity.callId), to: key)
-            if problem != nil { stopping.remove(activity.callId) }
+            problem = await model.fleet.send(.stopActivity(callId: id), to: key)
+            if problem == nil { try? await Task.sleep(for: Self.stopWait) }
+            stopping.remove(id)
         }
     }
 }

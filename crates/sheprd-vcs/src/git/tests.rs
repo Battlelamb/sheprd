@@ -359,7 +359,7 @@ fn a_stopped_worker_is_reported_and_does_not_strand_an_action() {
 #[test]
 fn created_pull_requests_must_match_their_repository() {
     let response = |url: &str, number: u64| serde_json::json!({"data":{"createPullRequest":{"pullRequest":{"number":number,"url":url}}}});
-    let outcome = parse_created(
+    let outcome = create_pr::parse_created(
         &response("https://github.com/example/project/pull/7", 7),
         &sheprd_github::Server::GitHub,
         "example",
@@ -378,7 +378,7 @@ fn created_pull_requests_must_match_their_repository() {
         ("https://github.com/example/project/pull/0", 0),
     ] {
         assert!(matches!(
-            parse_created(
+            create_pr::parse_created(
                 &response(url, number),
                 &sheprd_github::Server::GitHub,
                 "example",

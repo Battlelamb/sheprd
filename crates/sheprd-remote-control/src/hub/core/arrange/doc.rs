@@ -93,7 +93,17 @@ impl Source {
                     })
                 });
             if let Err(error) = split {
-                self.end(&new.address);
+                // A write that timed out may still have landed: the shell
+                // is ended only once a later read shows the tab without it.
+                // The core answers one connection's requests in order, so
+                // that read comes after the write it follows.
+                match split_landed(&core, id, &new.address) {
+                    Some(true) => return Ok(Some(new.address)),
+                    Some(false) => self.end(&new.address),
+                    None => {
+                        tracing::warn!(%error, "A split's shell stayed: its tab could not be read")
+                    }
+                }
                 return Err(error);
             }
             return Ok(Some(new.address));
@@ -157,6 +167,18 @@ impl Source {
             addresses.sort_unstable();
             addresses.dedup();
             addresses.retain(|address| !ended.contains(address));
+            // A pane already closed stays in its tab until a desktop drops
+            // it: a terminal the core no longer lists is ended already.
+            let live: HashSet<String> = core
+                .list(false)?
+                .terminals
+                .into_iter()
+                .map(|terminal| terminal.address)
+                .collect();
+            let (addresses, gone): (Vec<_>, Vec<_>) = addresses
+                .into_iter()
+                .partition(|address| live.contains(address));
+            ended.extend(gone);
             self.end_terminals(core, &addresses)?;
             ended.extend(addresses);
             let mut missed = false;
@@ -249,6 +271,18 @@ fn edit_tab(
         return Err(Error::from(sheprd_session::panes::Error::Missing(at.clone())).into());
     }
     Ok(())
+}
+
+/// Whether the shared document's tab `id` holds the terminal at `address`
+/// now; `None` when it cannot be read.
+fn split_landed(core: &Core, id: &str, address: &str) -> Option<bool> {
+    let terminal = TerminalId::new(address).ok()?;
+    let (spaces, _) = spaces::read(core).ok()?;
+    Some(
+        spaces
+            .tab(id)
+            .is_some_and(|tab| tab.panes.contains(&terminal)),
+    )
 }
 
 /// The pane of `tab` the phone names `at`: that terminal, or the one a

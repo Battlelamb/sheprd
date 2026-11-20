@@ -148,3 +148,59 @@ fn a_workspace_in_a_folder_of_a_worktree_deletes_the_whole_checkout() {
     drop(source);
     fake.server.join().unwrap();
 }
+
+#[test]
+fn a_pane_already_closed_does_not_stop_its_workspace_closing() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut doc = document();
+    doc["tabs"][0]["panes"] = json!({"axis": "row", "first": "t1", "second": "t5"});
+    // The core no longer lists `t5`: a phone closed it.
+    let (source, fake) = fake_sharing(dir.path(), Some(doc), vec![record("t1")]);
+    source.poll().unwrap();
+    let close = Op::CloseWorkspace {
+        workspace: "space-a".into(),
+    };
+    source.arrange_saved(&TabRef::File(0), "", &close).unwrap();
+    let killed: Vec<Value> = std::iter::from_fn(|| sent(&fake))
+        .map(|request| request["params"]["terminal"].clone())
+        .collect();
+    assert_eq!(killed, [json!("t1")]);
+    assert!(shared(&fake).workspace("space-a").is_none());
+    drop(source);
+    fake.server.join().unwrap();
+}
+
+#[test]
+fn a_split_whose_write_landed_keeps_its_shell_though_the_answer_was_lost() {
+    let dir = tempfile::tempdir().unwrap();
+    let (source, fake) = fake_sharing(dir.path(), Some(document()), vec![record("t1")]);
+    source.poll().unwrap();
+    fake.lose.store(true, Ordering::SeqCst);
+    let tab = TabRef::Doc("tab-a".into());
+    let split = source.arrange_saved(&tab, "t1", &Op::SplitRight).unwrap();
+    assert_eq!(split.as_deref(), Some("t9"));
+    assert_eq!(sent(&fake).unwrap()["method"], "terminal.run");
+    assert!(sent(&fake).is_none(), "the shell was not ended");
+    let spaces = shared(&fake);
+    let held = spaces.tab("tab-a").unwrap().panes.terminals();
+    assert_eq!(held.len(), 2);
+    drop(source);
+    fake.server.join().unwrap();
+}
+
+#[test]
+fn a_split_that_did_not_land_ends_its_shell() {
+    let dir = tempfile::tempdir().unwrap();
+    let (source, fake) = fake_sharing(dir.path(), Some(document()), vec![record("t1")]);
+    source.poll().unwrap();
+    let tab = TabRef::Doc("tab-gone".into());
+    assert!(source.arrange_saved(&tab, "t1", &Op::SplitRight).is_err());
+    assert_eq!(sent(&fake).unwrap()["method"], "terminal.run");
+    let kill = sent(&fake).unwrap();
+    assert_eq!(
+        (kill["method"].as_str(), kill["params"]["terminal"].as_str()),
+        (Some("terminal.kill"), Some("t9"))
+    );
+    drop(source);
+    fake.server.join().unwrap();
+}

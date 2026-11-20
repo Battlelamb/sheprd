@@ -145,6 +145,8 @@ mod socket {
         /// A shared document another client writes just before the
         /// daemon's next write of it lands, making that write stale.
         first: Arc<Mutex<Option<Value>>>,
+        /// Makes the next shared document write land but answer an error.
+        lose: Arc<AtomicBool>,
         inputs: mpsc::Receiver<Vec<u8>>,
         resizes: mpsc::Receiver<(u16, u16)>,
         server: thread::JoinHandle<()>,
@@ -215,7 +217,8 @@ mod socket {
         let (resized, resizes) = mpsc::channel();
         let docs = Docs::default();
         let first = Arc::new(Mutex::new(None));
-        let (shared_docs, shared_first) = (docs.clone(), first.clone());
+        let lose = Arc::new(AtomicBool::new(false));
+        let (shared_docs, shared_first, shared_lose) = (docs.clone(), first.clone(), lose.clone());
         let server = thread::spawn(move || {
             let (mut socket, _) = listener.accept().unwrap();
             socket
@@ -233,6 +236,7 @@ mod socket {
             let mut channel = 6;
             while let Some(frame) = receive(&mut socket, &mut decoder) {
                 let mut stale = false;
+                let mut lost_answer = false;
                 if frame.kind == Kind::Resize {
                     let side =
                         |at: usize| u16::from_le_bytes([frame.payload[at], frame.payload[at + 1]]);
@@ -287,6 +291,9 @@ mod socket {
                                 name.to_owned(),
                                 (request["params"]["value"].clone(), version + 1),
                             );
+                            // A write that lands but whose answer is lost.
+                            lost_answer = name == sheprd_session::spaces::DOC
+                                && lose.swap(false, Ordering::SeqCst);
                             json!({"version": version + 1})
                         } else {
                             stale = true;
@@ -313,6 +320,9 @@ mod socket {
                 let response = if stale {
                     json!({"jsonrpc": "2.0", "id": request["id"],
                         "error": {"code": -32000, "message": "stale", "data": {"kind": "conflict"}}})
+                } else if lost_answer {
+                    json!({"jsonrpc": "2.0", "id": request["id"],
+                        "error": {"code": -32000, "message": "lost"}})
                 } else if refused {
                     json!({"jsonrpc": "2.0", "id": request["id"],
                         "error": {"code": -32000, "message": "refused"}})
@@ -382,6 +392,7 @@ mod socket {
                 docs: shared_docs,
                 first: shared_first,
                 inputs,
+                lose: shared_lose,
                 resizes,
                 server,
             },

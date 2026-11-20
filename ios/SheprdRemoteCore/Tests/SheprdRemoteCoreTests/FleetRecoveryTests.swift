@@ -1,11 +1,10 @@
-import CryptoKit
 import Foundation
 import Testing
 @testable import SheprdRemoteCore
 
-/// What keeps a phone's fleet actions whole when things go wrong: links
-/// posted in bounded batches, keys of links whose reply never came, and a
-/// phone a computer no longer counts as a member.
+/// What keeps a phone's fleet actions whole when things go wrong: keys of
+/// links whose reply never came, and a phone a computer no longer counts
+/// as a member.
 struct FleetRecoveryTests {
     typealias Computer = FleetClientTests.Computer
 
@@ -14,43 +13,6 @@ struct FleetRecoveryTests {
             host: host, name: host, keyKind: .software, keyData: Data(repeating: seed, count: 32),
             publicKey: "k\(seed)", point: Data(repeating: seed, count: 65)
         )
-    }
-
-    @Test func manyLinksArePostedInBoundedChainedBatches() async throws {
-        let key = P256.Signing.PrivateKey()
-        let signer = FleetClientTests.signer(key)
-        let next = API.FleetNext(fleet: String(repeating: "09", count: 32), seq: 1, parents: [String(repeating: "01", count: 32)])
-        let computer = FleetClientTests.applying(next)
-        let count = FleetClient.maxSyncOps + 1
-        let device = P256.Signing.PrivateKey().publicKey.x963Representation
-        let bodies: [Fleet.Body] = (0..<count).map { index in
-            .link(host: Data(repeating: UInt8(index), count: 32), deviceKey: device)
-        }
-        try await computer.client.sign(bodies, as: signer, at: .now)
-        let posts = computer.requests.withLock { $0 }.filter { $0.method == "POST" }
-        #expect(posts.count == 2)
-        let batches = try posts.map { request in
-            try JSONDecoder().decode(FleetClientTests.Posted.self, from: try #require(request.body))
-        }
-        #expect(batches.map(\.ops.count) == [FleetClient.maxSyncOps, 1])
-        let ops = try batches.flatMap(\.ops).map { try Fleet.Op.decode(try #require(Base64URL.decode($0))) }
-        #expect(ops.map(\.seq) == (1...UInt64(count)).map { $0 })
-        // The second batch follows the first, on the heads it left.
-        let lastOfFirst = try ops[FleetClient.maxSyncOps - 1].id()
-        #expect(ops[FleetClient.maxSyncOps].parents == [lastOfFirst])
-        #expect(batches[1].heads == [lastOfFirst.hexString])
-    }
-
-    @Test func aRefusedBatchStopsTheRest() async throws {
-        let next = API.FleetNext(fleet: String(repeating: "09", count: 32), seq: 1, parents: [String(repeating: "01", count: 32)])
-        let computer = Computer { method, _, _ in
-            method == "GET" ? FleetClientTests.status(next: next) : Data(#"{"fleet":"09","heads":[],"refused":1}"#.utf8)
-        }
-        let bodies = [Fleet.Body](repeating: .hostRemove(Data(repeating: 4, count: 32)), count: FleetClient.maxSyncOps + 5)
-        await #expect(throws: FleetClientError.refused(1)) {
-            try await computer.client.sign(bodies, as: FleetClientTests.signer(), at: .now)
-        }
-        #expect(computer.requests.withLock { $0 }.filter { $0.method == "POST" }.count == 1)
     }
 
     @Test func aLinkWithNoReplyKeepsItsKeyUntilTheFleetSays() {

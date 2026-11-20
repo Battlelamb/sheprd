@@ -38,6 +38,7 @@ mod hosts;
 mod log;
 mod membership;
 mod op;
+pub mod phone;
 pub mod removal;
 mod routes;
 pub mod saved;

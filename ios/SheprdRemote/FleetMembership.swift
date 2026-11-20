@@ -1,6 +1,7 @@
 import Foundation
 import LocalAuthentication
 import Observation
+import SheprdFleetLog
 import SheprdRemoteCore
 import UIKit
 import os
@@ -9,12 +10,13 @@ private let log = Logger(subsystem: "so.pen.herdr.remote", category: "fleet-memb
 
 /// This phone as a member of the person's fleet (`docs/relay-plan.md`,
 /// Fleet, phase 5): joining through a paired computer, which a person then
-/// admits in Sheprd there; reading the fleet from it; and signing what the
-/// phone may sign, each with Face ID: removals of members and hosts, and
-/// one `Link` per Sheprd host it adds, which those hosts admit to their
-/// API only. The phone keeps no log of its own in this version: it signs
-/// on what a member computer answers, and that computer checks every
-/// operation as it checks any member's.
+/// admits in Sheprd there; keeping its own copy of the fleet log, synced
+/// with any computer of the fleet it reaches and checked by the same rules
+/// every computer runs (`SheprdFleetLog`); and signing what the phone may
+/// sign, each batch with Face ID: removals of members and hosts, and one
+/// `Link` per Sheprd host it adds, which those hosts admit to their API
+/// only. It drafts on its own copy and refuses, before Face ID, whatever
+/// that copy would refuse, so no computer's word decides what it signs.
 @MainActor
 @Observable
 final class FleetMembership {
@@ -26,7 +28,7 @@ final class FleetMembership {
         /// The member id, hex.
         var member: String
         var fleet: String
-        /// The computer it joined through, which it reads the fleet from.
+        /// The computer it last synced with, tried first.
         var through: String
         /// A person admitted it; until then the join waits on `through`.
         var admitted: Bool
@@ -38,15 +40,21 @@ final class FleetMembership {
         var relayTunnel: Data
         /// Device keys made for hosts whose `Link` may not have landed yet.
         var pendingLinks: [FleetPendingLink]?
-        /// Operations this phone signed that no computer confirmed it
-        /// applied (base64url): sent again until one does, and followed by
-        /// any new ones, so none shares a sequence number with another.
+        /// From before the phone kept its own copy of the log: operations
+        /// it signed that no computer confirmed (base64url). Taken into the
+        /// copy once it exists, which hands them over, then dropped.
         var unconfirmed: [String]?
     }
 
     private(set) var record: Record?
-    /// The fleet as `record.through`, or the computer last asked, said it.
-    private(set) var status: API.FleetStatus?
+    /// This phone's own copy of the log, once it holds one.
+    private(set) var replica: FleetReplica?
+    /// What a computer last said, while this phone waits to join or has no
+    /// copy yet: only ever a reason to sync, never what it signs on.
+    private var joinStatus: API.FleetStatus?
+    /// The fleet as this phone's own copy says it once it has one; before,
+    /// what a computer said about the join.
+    var status: API.FleetStatus? { replica?.status ?? (admitted ? nil : joinStatus) }
     /// The paired computers in a fleet, by device, with the fleet's id.
     private(set) var fleets: [String: String] = [:]
     private(set) var busy = false
@@ -54,17 +62,21 @@ final class FleetMembership {
     var problem: String?
     /// The offer card was closed this launch.
     var offerDismissed = false
-    /// A computer of this phone's fleet says the phone is not a member:
-    /// another member removed it, or that computer has not heard of its
-    /// admission yet. The phone can then forget the fleet and join again.
-    private(set) var notMember = false
+    /// The phone's own copy of the log says another member removed it. The
+    /// phone can then forget the fleet and join again.
+    var notMember: Bool { replica?.removed == true }
     /// The computers on this phone.
     @ObservationIgnored var computers: () -> [Computer] = { [] }
     /// Keeps a host the phone linked itself to; whether it was saved.
     @ObservationIgnored var onLinked: (Computer) -> Bool = { _ in false }
     @ObservationIgnored private var asked: [String: Date] = [:]
     @ObservationIgnored private var waiting: Task<Void, Never>?
+    /// Every change to the copy runs in turn: a sync that started before an
+    /// operation was signed must never save a copy without it, as the
+    /// next draft would then reuse its sequence number.
+    @ObservationIgnored private var queue: Task<Void, Never>?
     private let sessions: Sessions
+    private let store: FleetLogStore
     /// The paired computers' live links, which fleet calls go through.
     @ObservationIgnored weak var links: Fleet?
 
@@ -74,10 +86,12 @@ final class FleetMembership {
     /// How long a join is followed: the daemon keeps it ten minutes.
     private static let patience: Duration = .seconds(10 * 60)
 
-    init(sessions: Sessions) {
+    init(sessions: Sessions, store: FleetLogStore = .shared) {
         self.sessions = sessions
+        self.store = store
         record = (try? Keychain.read(Self.account)).flatMap { $0 }
             .flatMap { try? JSONDecoder().decode(Record.self, from: $0) }
+        if record != nil { Task { await serialized { await self.load() } } }
     }
 
     var admitted: Bool { record?.admitted == true }
@@ -91,21 +105,24 @@ final class FleetMembership {
     /// The computer the phone reads the fleet from and posts to.
     var through: Computer? { candidates.first }
 
-    /// The computers of this phone's fleet it may post to: the one it last
-    /// reached first, then every other directly paired one in the fleet,
-    /// so one that is offline or lost never blocks the rest.
+    /// The computers of this phone's fleet it may sync with: the one it
+    /// last reached first, then every other one, paired directly or linked
+    /// through the fleet, so a computer that is offline, or the one that
+    /// introduced the phone and is gone, never blocks the rest.
     private var candidates: [Computer] {
         guard let record else { return [] }
-        let computers = computers().filter { $0.via == nil }
-        let saved = computers.filter { $0.device == record.through }
-        let others = computers.filter { $0.device != record.through && fleets[$0.device] == record.fleet }
-        return saved + others
+        let hosts = Set(replica?.status.view?.hosts.map { $0.id.lowercased() } ?? [])
+        let inFleet = computers().filter { computer in
+            hosts.contains(computer.fingerprint.hex.lowercased())
+                || (computer.via == nil && (fleets[computer.device] == record.fleet || computer.device == record.through))
+        }
+        return inFleet.filter { $0.device == record.through } + inFleet.filter { $0.device != record.through }
     }
 
     /// Sheprd hosts in the fleet the phone may add: not linked yet, not
     /// held, and not a computer it already holds.
     var offers: [API.FleetHost] {
-        guard admitted, !notMember, let status, let view = status.view else { return [] }
+        guard admitted, !notMember, let status = replica?.status, let view = status.view else { return [] }
         let held = Set(computers().map(\.fingerprint.hex))
         return view.hosts.filter { host in
             host.runsSheprd && !host.held && !status.links.contains(host.id)
@@ -113,18 +130,19 @@ final class FleetMembership {
         }
     }
 
-    /// Reads the fleet from `computer` when its link comes online, at
-    /// most once a minute.
+    /// Syncs with `computer` when its link comes online, at most once a
+    /// minute: a paired computer, or one of the fleet's linked ones.
     func online(_ computer: Computer) {
-        guard computer.via == nil else { return }
+        guard computer.via == nil || candidates.contains(where: { $0.device == computer.device }) else { return }
         if let last = asked[computer.device], Date.now.timeIntervalSince(last) < Self.interval { return }
         asked[computer.device] = .now
         Task { await check(computer) }
     }
 
-    /// Reads the fleet from `computer`; whether a fresh answer about this
-    /// phone's fleet came back. A failed read keeps the last status, which
-    /// must not settle anything a post just changed.
+    /// Asks `computer` about its fleet and, for this phone's, syncs the
+    /// phone's copy with it; whether it answered about this phone's fleet.
+    /// What it says only decides whether to sync: membership, removal, and
+    /// what to sign come from the copy, checked here.
     @discardableResult
     func check(_ computer: Computer) async -> Bool {
         do {
@@ -132,19 +150,12 @@ final class FleetMembership {
             let status = try await client(computer).status(member: member)
             fleets[computer.device] = status.view?.fleet
             guard let record, status.view?.fleet == record.fleet else {
-                if self.record == nil { self.status = status }
+                if self.record == nil { joinStatus = status }
                 return false
             }
-            self.status = status
-            route(status)
-            settleLinks(status)
-            confirm(status, through: computer)
-            notMember = record.admitted && status.lacks(member: record.member, in: record.fleet)
-            if !record.admitted, status.join == .member {
-                var admitted = record
-                admitted.admitted = true
-                admitted.through = computer.device
-                save(admitted)
+            joinStatus = status
+            if record.admitted || status.join == .member || replica != nil {
+                await serialized { _ = await self.syncNow(with: computer) }
             }
             return true
         } catch {
@@ -221,7 +232,7 @@ final class FleetMembership {
         guard let id = FleetLog.data(hex: member) else { return }
         let leaving = member == record?.member
         let posted = await sign("Remove this member from your fleet", [
-            .remove(member: id, alsoMembers: [], alsoHosts: [], reason: leaving ? .left : reason),
+            .remove(member: id.hexString, reason: leaving ? .left : reason),
         ])
         // Left once a computer took it, whatever failed before it.
         if leaving, case .taken = posted { forget() }
@@ -230,14 +241,13 @@ final class FleetMembership {
     /// Removes a host from the whole fleet.
     func removeHost(_ host: String) async {
         guard let id = FleetLog.data(hex: host) else { return }
-        await sign("Remove this host from your fleet", [.hostRemove(id)])
+        await sign("Remove this host from your fleet", [.hostRemove(host: id.hexString)])
     }
 
     /// Signs one `Link` per host, with a new device key for each, so those
-    /// hosts admit this phone to their API; keeps each as a computer
-    /// reached through the one the phone joined through. The keys are kept
-    /// before posting, so a reply that never arrives loses none of a link
-    /// that landed: the next read of the fleet finishes them.
+    /// hosts admit this phone to their API; keeps each as a computer once
+    /// the phone's copy holds its link. The keys are kept before signing,
+    /// so a link that lands loses none of them: the next sync finishes them.
     func link(_ hosts: [API.FleetHost]) async {
         guard var record, record.admitted else { return }
         let reason = hosts.count == 1 ? "Add \(hosts[0].name)" : "Add \(hosts.count) computers"
@@ -267,19 +277,18 @@ final class FleetMembership {
         record.pendingLinks = FleetPendingLink.merge(record.pendingLinks ?? [], made)
         save(record)
         guard self.record == record else { return }
-        let bodies: [FleetLog.Body] = made.compactMap { pending in
-            FleetLog.data(hex: pending.host).map { .link(host: $0, deviceKey: pending.point) }
+        let bodies: [FleetDraft] = made.compactMap { pending in
+            FleetLog.data(hex: pending.host).map { .link(host: $0.hexString, deviceKey: pending.point) }
         }
         let posted = await sign(reason, bodies)
-        guard let status else { return }
+        guard let status = replica?.status else { return }
         // A link's key goes only when the link surely never landed: nothing
-        // was posted, or the computer that took the post refused it and
-        // its own fresh read does not show it. Missing from any other read
-        // may only mean that computer has not caught up.
+        // was signed, or a computer refused it and the phone's own copy,
+        // synced with it, does not hold it.
         switch posted {
-        case .nothing, .refused(fresh: true):
+        case .nothing, .refused:
             settleLinks(status, refused: fresh)
-        case .taken, .refused(fresh: false), .unknown:
+        case .taken, .unknown:
             settleLinks(status)
         }
     }
@@ -290,6 +299,7 @@ final class FleetMembership {
         guard var record, let pending = record.pendingLinks, !pending.isEmpty,
               let through = through
         else { return }
+        // Kept as reached through the computer the phone syncs with first.
         let (done, settled) = FleetPendingLink.settle(pending, linked: status.linkedKeys, refused: refused)
         // A link whose computer could not be saved keeps its key pending.
         let unsaved = FleetPendingLink.unsaved(done) { link in
@@ -333,68 +343,126 @@ final class FleetMembership {
         }
     }
 
-    // MARK: Private
+    // MARK: The phone's copy
 
-    /// The operations no computer confirmed applied yet.
-    private var unconfirmedOps: [FleetLog.Op] {
-        (record?.unconfirmed ?? []).compactMap { Base64URL.decode($0).flatMap { try? FleetLog.Op.decode($0) } }
+    /// Runs `work` after every change to the copy queued before it.
+    private func serialized<T: Sendable>(_ work: @escaping @MainActor () async -> T) async -> T {
+        let previous = queue
+        let task = Task { @MainActor in
+            await previous?.value
+            return await work()
+        }
+        queue = Task { _ = await task.value }
+        return await task.value
     }
 
-    /// Keeps `ops` as unconfirmed, or forgets them all with none.
-    private func remember(_ ops: [FleetLog.Op]) {
-        guard var record else { return }
-        let encoded = ops.compactMap { try? $0.encode() }.map(Base64URL.encode)
-        record.unconfirmed = encoded.isEmpty ? nil : encoded
-        if record != self.record { save(record) }
+    /// Opens the saved copy, checking it again, off the main thread.
+    private func load() async {
+        guard let record, replica == nil, case let .bytes(saved) = store.read() else { return }
+        do {
+            let opened = try await Self.background {
+                try FleetReplica.open(fleet: record.fleet, me: record.member, log: saved, at: .now)
+            }
+            try adopt(opened)
+        } catch {
+            log.error("fleet: the saved copy does not check out; it is read again from a computer")
+        }
     }
 
-    /// Settles unconfirmed operations against a fresh read from `computer`:
-    /// forgotten once the fleet applied them there, else sent to it again,
-    /// as the same bytes, until it applies or refuses them.
-    private func confirm(_ status: API.FleetStatus, through computer: Computer) {
-        let ops = unconfirmedOps
-        guard let last = ops.last, let next = status.next else { return }
-        if next.seq > last.seq {
-            remember([])
-            return
+    /// Syncs the copy with `computer`: takes what it has, hands it what the
+    /// phone has and it lacks, the phone's own operations among them.
+    /// Nil when it could not be reached or the copy not be kept.
+    private func syncNow(with computer: Computer) async -> FleetLogSync.Outcome? {
+        guard let record else { return nil }
+        let saved: Data?
+        switch (replica, store.read()) {
+        case let (replica?, _): saved = replica.log
+        case let (nil, .bytes(bytes)): saved = bytes
+        case (nil, .none): saved = nil
+        // A copy is there but locked away: rebuilding it from a computer
+        // could drop this phone's own operations not yet handed over.
+        case (nil, .unavailable): return nil
         }
         let client = client(computer)
-        Task {
+        let fleet = record.fleet, me = record.member
+        do {
+            var outcome: FleetLogSync.Outcome
             do {
-                try await client.post(FleetClient.Signed(ops: ops, heads: status.heads))
-                if self.unconfirmedOps == ops { remember([]) }
-            } catch FleetClientError.refused {
-                if self.unconfirmedOps == ops { remember([]) }
-            } catch {
-                log.info("fleet: \(computer.name, privacy: .public) has not applied this phone's operations yet")
+                outcome = try await FleetLogSync.run(fleet: fleet, me: me, log: saved, with: client)
+            } catch let error as FleetLogError where error.unreadable && saved != nil {
+                // The saved copy no longer checks out: start again from the
+                // fleet's founding operation, checking everything again.
+                log.error("fleet: the saved copy does not check out; reading it again from \(computer.name, privacy: .public)")
+                outcome = try await FleetLogSync.run(fleet: fleet, me: me, log: nil, with: client)
             }
+            var synced = outcome.replica
+            // Operations signed before the phone kept a copy join it, and
+            // go to the next computer it syncs with.
+            if let old = record.unconfirmed, !old.isEmpty {
+                let fresh = synced
+                synced = try await Self.background { try fresh.applying(old, at: .now) }
+            }
+            try adopt(synced, through: computer)
+            return outcome
+        } catch {
+            log.info("fleet: no sync with \(computer.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return nil
         }
+    }
+
+    /// Keeps `new` as the copy: written before anything relies on it.
+    private func adopt(_ new: FleetReplica, through computer: Computer? = nil) throws {
+        guard var record, new.fleet == record.fleet, new.me == record.member else { return }
+        try store.write(new.log)
+        replica = new
+        if new.status.join == .member { record.admitted = true }
+        if let computer { record.through = computer.device }
+        record.unconfirmed = nil
+        if record != self.record { save(record) }
+        route(new.status)
+        settleLinks(new.status)
     }
 
     /// How signing and posting ended.
     private enum Posted {
-        /// Nothing reached a computer.
+        /// Nothing was signed.
         case nothing
         /// A computer took every operation.
         case taken
-        /// The computer that took the post refused some; `fresh` says
-        /// whether that same computer could be read after it.
-        case refused(fresh: Bool)
-        /// No computer answered after it was posted: it may have landed.
+        /// A computer refused some.
+        case refused
+        /// No computer answered: the copy keeps them, and the next sync with
+        /// any computer hands them over.
         case unknown
     }
 
-    /// Signs `bodies` and posts them through the first computer of the
-    /// fleet that answers. Answers how it ended for links that may have
-    /// landed: `nil` when nothing was posted (Face ID refused, say).
+    /// Signs `bodies` on the phone's own copy, after syncing it with the
+    /// first computer that answers, and hands them to the first computer
+    /// that takes them. Refused, before Face ID, when the copy would refuse
+    /// them.
     @discardableResult
-    private func sign(_ reason: String, _ bodies: [FleetLog.Body]) async -> Posted {
+    private func sign(_ reason: String, _ bodies: [FleetDraft]) async -> Posted {
+        await serialized { await self.signNow(reason, bodies) }
+    }
+
+    private func signNow(_ reason: String, _ bodies: [FleetDraft]) async -> Posted {
         guard let record, record.admitted, !bodies.isEmpty else { return .nothing }
-        let candidates = candidates
-        guard !candidates.isEmpty else { return .nothing }
         busy = true
         problem = nil
         defer { busy = false }
+        // Drafted on the newest heads a computer has, when one answers.
+        for computer in candidates where await syncNow(with: computer) != nil { break }
+        guard let current = replica else {
+            problem = "This \(UIDevice.current.model) has no copy of the fleet yet. Connect to one of its computers first."
+            return .nothing
+        }
+        let drafts: [FleetDrafted]
+        do {
+            drafts = try await Self.background { try current.draft(bodies, issued: .now, at: .now) }
+        } catch {
+            problem = Self.describe(error)
+            return .nothing
+        }
         let key: FleetKey
         do {
             key = try await Self.open(record, reason: reason)
@@ -402,49 +470,29 @@ final class FleetMembership {
             problem = Self.describe(error)
             return .nothing
         }
-        // Signed once, by the first computer that answers its fleet: a post
-        // whose answer is lost goes to the next computer as the same bytes.
-        var signed: FleetClient.Signed?
-        let after = unconfirmedOps
-        let attempt = await FleetAttempt.first(candidates) { computer in
-            let client = client(computer)
-            let ops: FleetClient.Signed
-            if let signed {
-                ops = signed
-            } else {
-                ops = try await client.prepare(bodies, as: key.signer, at: .now, after: after)
-                signed = ops
-                // Kept before it is posted: until a computer confirms it
-                // applied, it is sent again, and new ones follow it.
-                remember(ops.ops)
-            }
-            try await client.post(ops)
-        } failed: { computer, error in
-            log.error("fleet: \(computer.name, privacy: .public) did not take it: \(error.localizedDescription, privacy: .public)")
+        do {
+            let signer = key.signer
+            let sealed = try await Self.background { try current.signing(drafts, with: signer.sign, at: .now).replica }
+            // Kept before it is handed over, so the next draft follows it.
+            try adopt(sealed)
+        } catch {
+            problem = Self.describe(error)
+            return .nothing
         }
-        switch attempt {
-        case let .done(computer):
-            remember([])
-            // A computer before it may have failed: that no longer matters.
-            problem = nil
-            if computer.device != record.through, var moved = self.record {
-                moved.through = computer.device
-                save(moved)
+        for computer in candidates {
+            guard let outcome = await syncNow(with: computer) else { continue }
+            guard outcome.refused == 0 else {
+                problem = Self.describe(FleetClientError.refused(outcome.refused))
+                return .refused
             }
-            await check(computer)
             return .taken
-        case let .refused(computer, count):
-            // Refused by the fleet: carrying them would only block what
-            // follows.
-            remember([])
-            problem = Self.describe(FleetClientError.refused(count))
-            return .refused(fresh: await check(computer))
-        case let .failed(error):
-            problem = error.map(Self.describe)
-            // Nothing signed means nothing posted; otherwise what was
-            // posted may have landed.
-            return signed == nil ? .nothing : .unknown
         }
+        problem = "Signed. It goes to your fleet the next time this \(UIDevice.current.model) reaches one of its computers."
+        return .unknown
+    }
+
+    private static func background<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
+        try await Task.detached(priority: .userInitiated) { try work() }.value
     }
 
     /// Opens the fleet key with one Face ID for `reason`, so a batch of
@@ -500,9 +548,10 @@ final class FleetMembership {
 
     private func forget() {
         try? Keychain.delete(Self.account)
+        store.delete()
         record = nil
-        status = nil
-        notMember = false
+        replica = nil
+        joinStatus = nil
     }
 
     /// The HTTP status a computer answered with, when it answered.
@@ -513,6 +562,9 @@ final class FleetMembership {
 
     private static func describe(_ error: Error) -> String {
         switch error {
+        case FleetLogError.refused(rule: "signer"): "This \(UIDevice.current.model) is no longer a member of the fleet."
+        case FleetLogError.refused(rule: "unknown"): "That member is no longer in the fleet."
+        case FleetLogError.refused: "Your fleet would refuse it, so nothing was signed."
         case FleetClientError.noFleet: "That computer is no longer in a fleet."
         case FleetClientError.notMember: "This \(UIDevice.current.model) is not a member of that fleet yet."
         case let FleetClientError.refused(count): "The fleet refused \(count == 1 ? "it" : "\(count) of them")."

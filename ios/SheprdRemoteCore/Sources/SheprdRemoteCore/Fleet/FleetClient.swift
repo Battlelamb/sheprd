@@ -105,15 +105,12 @@ public enum FleetClientError: Error, Equatable, Sendable {
     case notMember
     /// The computer refused operations this phone signed.
     case refused(Int)
-    /// The computer took them without applying them: it waits for history
-    /// it lacks. Another computer, or this one later, may apply them.
-    case unapplied
 }
 
-/// The fleet calls of one member computer, over a transport the app
-/// supplies (a pinned session with a bearer token). Every operation is
-/// built on what the computer answered, signed by this phone, and sent
-/// back: the computer checks it as it checks any member's.
+/// The fleet calls of one computer of the fleet, over a transport the app
+/// supplies (a pinned session with a bearer token). The phone signs on
+/// its own copy of the log (`SheprdFleetLog`), never on what a computer
+/// answers; the computer checks what it posts as it checks any member's.
 public struct FleetClient: Sendable {
     /// Sends `body` (JSON) with `method` to `path`; answers the response
     /// body, throwing for any status but success.
@@ -143,9 +140,12 @@ public struct FleetClient: Sendable {
         return try JSONDecoder().decode(API.FleetStatus.self, from: await send("GET", path, nil))
     }
 
-    /// Posts `ops`; answers the computer's heads and what the phone lacks.
-    public func sync(_ ops: [Fleet.Op], heads: [String]) async throws -> API.FleetApplied {
-        let body = API.FleetSync(heads: heads, ops: try ops.map { Base64URL.encode(try $0.encode()) })
+    /// Posts `ops` (base64url) for `fleet`, which a computer of another
+    /// fleet refuses; answers the computer's heads and what the phone
+    /// lacks after `heads`.
+    public func sync(_ ops: [String], heads: [String], fleet: String) async throws -> API.FleetApplied {
+        guard ops.count <= Self.maxSyncOps, heads.count <= Self.maxSyncHeads else { throw FleetError.bounds }
+        let body = API.FleetSync(fleet: fleet, heads: heads, ops: ops)
         let data = try await send("POST", "/api/v2/fleet/sync", try JSONEncoder().encode(body))
         return try JSONDecoder().decode(API.FleetApplied.self, from: data)
     }
@@ -153,87 +153,9 @@ public struct FleetClient: Sendable {
     /// Operations one sync may carry: the daemon refuses more.
     public static let maxSyncOps = 64
 
-    /// Operations this phone signed, ready to post, and the heads of the
-    /// computer they were drafted on.
-    public struct Signed: Equatable, Sendable {
-        public let ops: [Fleet.Op]
-        public let heads: [String]
-
-        public init(ops: [Fleet.Op], heads: [String]) {
-            self.ops = ops
-            self.heads = heads
-        }
-    }
-
     /// Heads one sync may name: the daemon refuses more. They only say
     /// what the phone knows, so fewer only make the answer longer.
     public static let maxSyncHeads = 64
-
-    /// Signs one operation per body, each on the one before, on what this
-    /// computer answers. Nothing is posted: a post whose answer is lost is
-    /// sent again as these same bytes, to this computer or another, never
-    /// signed afresh, as two different operations with one sequence number
-    /// would look like this phone's key in use in two places.
-    ///
-    /// `unconfirmed` are operations this phone signed before whose
-    /// application no computer confirmed yet. While this computer has not
-    /// applied them, the new ones follow them (and travel with them), so
-    /// they never share a sequence number.
-    public func prepare(
-        _ bodies: [Fleet.Body], as signer: Fleet.Signer, at now: Date, after unconfirmed: [Fleet.Op] = []
-    ) async throws -> Signed {
-        let status = try await status(member: signer.member)
-        guard status.view != nil else { throw FleetClientError.noFleet }
-        guard let next = status.next else { throw FleetClientError.notMember }
-        let issued = UInt64(max(0, now.timeIntervalSince1970 * 1000))
-        var on = next
-        var ops: [Fleet.Op] = []
-        if let last = unconfirmed.last, next.seq <= last.seq {
-            ops = unconfirmed
-            on = API.FleetNext(fleet: next.fleet, seq: last.seq + 1, parents: [try last.id().hexString])
-        }
-        for body in bodies {
-            var op = try Fleet.draft(on: on, signer: signer.member, issuedMs: issued, body: body)
-            try op.sign(using: signer.sign)
-            ops.append(op)
-            on = API.FleetNext(fleet: next.fleet, seq: op.seq + 1, parents: [try op.id().hexString])
-        }
-        guard !ops.isEmpty else { throw FleetError.invalid }
-        return Signed(ops: ops, heads: status.heads)
-    }
-
-    /// Posts `signed` at most `maxSyncOps` at a time, each batch on the
-    /// heads the last one left (at most `maxSyncHeads`), then reads the
-    /// fleet back to confirm they applied: a computer that lacks their
-    /// history takes them without a refusal and only holds them waiting,
-    /// which `unapplied` reports. Throws when the computer refused any;
-    /// batches before it stand. Posting the same operations again is
-    /// harmless: a computer that holds one already takes it as known.
-    @discardableResult
-    public func post(_ signed: Signed) async throws -> API.FleetApplied {
-        var heads = signed.heads
-        var applied: API.FleetApplied?
-        for start in stride(from: 0, to: signed.ops.count, by: Self.maxSyncOps) {
-            let batch = Array(signed.ops[start..<min(start + Self.maxSyncOps, signed.ops.count)])
-            let answer = try await sync(batch, heads: Array(heads.prefix(Self.maxSyncHeads)))
-            if answer.refused > 0 { throw FleetClientError.refused(answer.refused) }
-            heads = answer.heads
-            applied = answer
-        }
-        guard let applied, let last = signed.ops.last else { throw FleetError.invalid }
-        // The member's next sequence number moves past an operation only
-        // once it applies (the daemon drafts on what it applied).
-        let after = try await status(member: last.signer)
-        guard let next = after.next, next.seq > last.seq else { throw FleetClientError.unapplied }
-        return applied
-    }
-
-    /// Signs one operation per body and posts them (`prepare`, then
-    /// `post`).
-    @discardableResult
-    public func sign(_ bodies: [Fleet.Body], as signer: Fleet.Signer, at now: Date) async throws -> API.FleetApplied {
-        try await post(prepare(bodies, as: signer, at: now))
-    }
 
     /// Asks to join the computer's fleet with `bundle`, signed with
     /// `signer` for `fleet`; a person admits it in Sheprd.

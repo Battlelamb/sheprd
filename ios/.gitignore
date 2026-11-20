@@ -18,3 +18,6 @@ SheprdRemoteCore/.build/
 SheprdRemoteCore/.swiftpm/
 *.xcuserstate
 xcuserdata/
+
+# The fleet log library tools/build-fleet-ffi.sh builds from Rust.
+SheprdRemoteCore/Frameworks/

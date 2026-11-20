@@ -2024,10 +2024,44 @@ manual multi-machine and phone steps left unticked in its QA list.
      pins, with the bundle's relay keys, kept in the Keychain; a later
      checked record replaces it only when its `rev` is higher), so
      the relay race reaches it as it reaches computers paired directly.
-   - **Left:** the
-     phone's own copy of the log, so it checks what it signs on rather
-     than trusting the member it asks; admitting a computer from the
-     phone; pushes; and history. A
+   - **Built, the phone's own log** (`crates/sheprd-fleet-ffi`, linked
+     as `SheprdFleetLog`): the phone replays its copy with the very Rust
+     code computers run, built for iOS behind a two-function C interface
+     that takes JSON and keeps nothing between calls
+     (`ios/tools/build-fleet-ffi.sh`), so the two can never disagree on a
+     rule. The copy lives in the app group's container (`Fleet/log.bin`,
+     complete file protection, written atomically) and every call reads it
+     back through `saved::decode`, checking every operation again.
+     - **Starting it:** only from the operation that founded the fleet the
+       phone joined, whose hash is the fleet id it signed its join for, so
+       no computer can hand it another fleet's history or a forged one.
+     - **Sync:** `POST /api/v2/fleet/sync` with any computer of the fleet
+       it reaches, paired directly or linked through the fleet (the
+       linked Sheprd hosts and computer members in its own copy), the one
+       last reached first: it takes what that computer has, then hands
+       over what it lacks, the phone's own operations among them. The
+       request names the fleet, which another fleet's computer refuses.
+       The computer that introduced the phone may be gone.
+     - **Signing:** the phone drafts on its own heads and sequence
+       (`Log::drafts`), and every rule but the signature is checked on a
+       throwaway copy first, so what its replay would refuse is refused
+       before Face ID. The signed operations must then apply to its copy
+       (`seal`), which is written before any computer sees them, so the
+       next draft always follows them and nothing is signed twice. Syncs
+       and signatures run one at a time, and a copy locked away (the
+       phone is locked) is never replaced by one rebuilt from a computer.
+       A copy that no longer checks out is read again from a computer,
+       from the founding operation on.
+     - **What it shows:** members, hosts, links, routes, and whether this
+       phone was removed come from its own copy; a computer's answer only
+       says where a join stands and when to sync.
+     - **Next:** admitting a computer from the phone falls out of this: a
+       computer's bundle and join signature over Nearby pairing, an
+       `Admit` drafted and checked on the phone's copy.
+   - **Left:** admitting a computer from the phone; pushes; and history.
+     Once checkpoints prune the log, a sync must also carry the
+     checkpoint's state, as a joining computer's handover does, for a
+     phone that starts a copy. A
      phone's bundle relay keys are set before it proves the tunnel key:
      the relays must name the dial key before it can dial at all.
 6. **Migration and scrub** (built):

@@ -12,6 +12,7 @@ mod bounds;
 mod checkpoint;
 mod convergence;
 mod drafting;
+mod dry_run;
 mod encoding;
 mod forgery;
 mod hardening;

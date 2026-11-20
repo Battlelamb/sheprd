@@ -5,9 +5,10 @@
 //!   and what the phone needs to sign its next operation when `ID` is a
 //!   live member: the fleet, its sequence number, and the parents, and for
 //!   each Sheprd host it linked, that host's latest record with its CA's
-//!   signature and certificate, for the phone to check itself. The
-//!   phone keeps no log in this version; a removal it signs counts once
-//!   any member holds it, whatever parents it names.
+//!   signature and certificate, for the phone to check itself
+//!   ([`Linked`]). The phone keeps its own copy of the log and signs on
+//!   that (`crates/sheprd-fleet-ffi`), so it reads this for where its
+//!   join stands and when to sync.
 //! - `POST /api/v2/fleet/sync`: operations the phone signed or carries,
 //!   taken like any member's (`Fleet::receive`); the answer is what the
 //!   phone lacks (`sync::answer`). Removals flood the fleet as soon as they
@@ -21,7 +22,8 @@
 
 use super::{ApiError, Device, Shared, render::now_ms};
 use crate::control::fleet::{
-    Body, HostId, HostKind, MAX_OP, MemberId, View,
+    MAX_OP, MemberId, View,
+    phone::Linked,
     sync::{self, Applied},
 };
 use crate::fleet::{Fleet, joins::Standing};
@@ -30,7 +32,7 @@ use axum::{
     extract::{Query, State},
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 /// Operations one sync may carry.
 pub(super) const MAX_SYNC_OPS: usize = 64;
@@ -57,58 +59,12 @@ pub(super) struct Status {
     #[serde(skip_serializing_if = "Option::is_none")]
     view: Option<View>,
     heads: Vec<String>,
-    /// What the member signs next on, when it is live here.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    next: Option<Next>,
     /// Where the member's join stands, when it asked here.
     #[serde(skip_serializing_if = "Option::is_none")]
     join: Option<Standing>,
-    /// The hosts the member linked a device key for.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    links: Vec<String>,
-    /// The device key each of those links names, base64url, by host: what
-    /// the phone checks against the key it made before keeping a host, as
-    /// a link the fleet holds may be an earlier one.
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    link_keys: BTreeMap<String, String>,
-    /// Where each Sheprd host and computer member says it takes direct
-    /// connections, by host: what a phone tries before its relays.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    reach: Vec<Reach>,
-    /// Each Sheprd host the member linked: its latest record as its
-    /// certificate authority signed it, which the phone checks against the
-    /// fingerprint it pins before dialing its relays with its bundle's keys.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    routes: Vec<Route>,
-}
-
-/// What a member signs its next operation on.
-#[derive(Debug, Serialize)]
-pub(super) struct Next {
-    fleet: String,
-    seq: u64,
-    parents: Vec<String>,
-}
-
-/// A linked host's latest record, as its certificate authority signed it,
-/// so the phone checks it against the fingerprint it pins rather than
-/// taking this computer's word for where the host is. Bytes in base64url.
-#[derive(Debug, Serialize)]
-pub(super) struct Route {
-    host: String,
-    /// The CA's certificate, DER: its SHA-256 is the host's id.
-    certificate: String,
-    /// The CA's key, SEC1 uncompressed, which appears in the certificate.
-    key: String,
-    /// What the CA signed (`SelfRecord::message`).
-    record: String,
-    signature: String,
-}
-
-#[derive(Debug, Serialize)]
-pub(super) struct Reach {
-    host: String,
-    direct: Vec<String>,
+    /// What the member signs next on, its links, and where hosts are.
+    #[serde(flatten)]
+    linked: Linked,
 }
 
 pub(super) async fn status(
@@ -141,72 +97,12 @@ fn read(fleet: &Fleet, member: Option<&MemberId>, now_ms: u64) -> Status {
             ..Status::default()
         };
     };
-    let state = log.state();
-    let live = member.filter(|member| log.is_member(member));
-    let next = live.map(|member| {
-        // The body is not signed here: only its sequence number and
-        // parents are read.
-        let draft = log.draft(*member, now_ms, Body::HostRemove(HostId([0; 32])));
-        Next {
-            fleet: draft.fleet.to_string(),
-            seq: draft.seq,
-            parents: draft.parents.iter().map(ToString::to_string).collect(),
-        }
-    });
-    let linked: Vec<HostId> = live
-        .map(|member| {
-            state
-                .links
-                .keys()
-                .filter(|(phone, _)| phone == member)
-                .map(|(_, host)| *host)
-                .collect()
-        })
-        .unwrap_or_default();
-    let routes = linked
-        .iter()
-        .filter_map(|id| {
-            let host = state.hosts.get(id)?;
-            // A plain host has no certificate authority to pin, and no API.
-            let ca = host.intro.ca.as_ref()?;
-            Some(Route {
-                host: id.to_string(),
-                certificate: sync::text(&ca.certificate),
-                key: sync::text(&ca.key),
-                record: sync::text(&host.record.message()?),
-                signature: sync::text(host.record_signature.as_ref()?),
-            })
-        })
-        .collect();
-    let links = linked.iter().map(ToString::to_string).collect();
-    let link_keys = live
-        .map(|member| {
-            state
-                .links
-                .iter()
-                .filter(|((phone, _), _)| phone == member)
-                .map(|((_, host), key)| (host.to_string(), sync::text(key)))
-                .collect()
-        })
-        .unwrap_or_default();
-    let reach = state
-        .hosts
-        .iter()
-        .filter(|(_, host)| host.intro.kind != HostKind::Agent && !host.record.direct.is_empty())
-        .map(|(id, host)| Reach {
-            host: id.to_string(),
-            direct: host.record.direct.clone(),
-        })
-        .collect();
+    let live = member.is_some_and(|member| log.is_member(member));
     Status {
         view,
         heads: log.heads().iter().map(ToString::to_string).collect(),
-        next,
-        join: live.map_or(join, |_| Some(Standing::Member)),
-        links,
-        link_keys,
-        reach,
-        routes,
+        join: if live { Some(Standing::Member) } else { join },
+        linked: Linked::of(log, member, now_ms),
     }
 }
 

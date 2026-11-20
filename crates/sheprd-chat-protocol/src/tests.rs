@@ -14,6 +14,7 @@ mod harnesses;
 mod media;
 mod notices;
 mod origin;
+mod pull_requests;
 mod questions;
 mod revisions;
 mod wire;

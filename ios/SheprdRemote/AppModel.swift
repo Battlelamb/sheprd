@@ -489,6 +489,11 @@ final class AppModel {
         // An agent in a plain terminal alerts too, and opens its terminal,
         // even before this phone has heard of a new one.
         let terminal = fleet.terminalItems.first { $0.computer.device == computer.device && $0.terminal.panes.contains { $0.pane == link.pane } }
+        // Its conversation, when the computer shows the agent's as a chat.
+        if !link.terminal, let terminal, terminal.agent?.pane == link.pane, case let .chat(key, title)? = terminal.route {
+            pendingRoute = .chat(key, title: title)
+            return
+        }
         if link.terminal || terminal != nil {
             pendingRoute = .term(key, title: terminal?.terminal.label ?? "Terminal")
             return

@@ -108,6 +108,10 @@ pub enum Command {
     SplitEditor,
     OpenCode,
     OpenPx0,
+    /// A virtual Mac in a tab, or Settings when there is none or a choice.
+    OpenMachine,
+    /// Settings > Virtual Macs, where a machine is made from Apple's macOS.
+    NewMachine,
     /// The remote control pairing dialog.
     RemotePair,
     ToggleFullScreen,
@@ -798,6 +802,16 @@ pub const COMMANDS: &[CommandInfo] = &[
         command: Command::OpenPx0,
         name: "open_px0",
         message: "commands-open-px0",
+    },
+    CommandInfo {
+        command: Command::OpenMachine,
+        name: "open_machine",
+        message: "commands-open-machine",
+    },
+    CommandInfo {
+        command: Command::NewMachine,
+        name: "new_machine",
+        message: "commands-new-machine",
     },
     CommandInfo {
         command: Command::RemotePair,

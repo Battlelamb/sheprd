@@ -360,7 +360,13 @@ pub(super) async fn create_workspace(
         check_new_workspace(&state, &request.cwd, &request.branch, &request.agent).await?;
     state
         .hub
-        .create_workspace(&request.cwd, branch.as_deref(), agent, None)
+        .create_workspace(crate::hub::NewWorkspace {
+            agent,
+            branch: branch.as_deref(),
+            cwd: &request.cwd,
+            session: None,
+            title: None,
+        })
         .await?;
     Ok(Json(json!({ "location": "/" })))
 }

@@ -22,8 +22,14 @@ macro_rules! fields {
         r#"
 fragment PullRequestFields on PullRequest {
   id number url title state isDraft headRefName headRefOid baseRefName additions deletions
-  changedFiles updatedAt mergeStateStatus reviewDecision isCrossRepository
+  changedFiles updatedAt mergeStateStatus reviewDecision isInMergeQueue isCrossRepository
   headRepositoryOwner { login } headRepository { name }
+  stackEntry { position }
+  stack { number baseRefName size entries(first: 16) { nodes { position pullRequest {
+    number title state isDraft mergeStateStatus reviewDecision headRefOid
+    commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+  } } } }
+  mergeQueueEntry { state position estimatedTimeToMerge } isMergeQueueEnabled
   commits(last: 1) { nodes { commit { statusCheckRollup {
     contexts(first: 100) {
       pageInfo { hasNextPage }

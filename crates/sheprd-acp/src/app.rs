@@ -131,14 +131,20 @@ fn choices(agent: crate::agents::Agent) -> Vec<crate::agents::Agent> {
 }
 
 /// Starts `start` in `cwd` as `harness`: what the agent says, and its end,
-/// reach the session through `inputs`, marked as this harness's.
+/// reach the session through `inputs`, marked as this harness's. The agent
+/// is told the endpoint of `chat`, the chat it runs in, when it listens.
 fn start(
     start: Start,
     cwd: &std::path::Path,
     inputs: &Sender<Input>,
     harness: HarnessId,
+    chat: Option<&EndpointId>,
 ) -> crate::Result<Started> {
-    let spawned = process::spawn(&start.program, &start.args, &start.env, cwd)?;
+    let mut env = start.env.clone();
+    if let Some(chat) = chat {
+        env.push((sheprd_chat_protocol::AGENT_CHAT_ENV, chat.as_str()));
+    }
+    let spawned = process::spawn(&start.program, &start.args, &env, cwd)?;
     let process = spawned.process.clone();
     let to_session = inputs.clone();
     let wired = start.reach.connect(
@@ -247,7 +253,20 @@ pub(crate) fn run_owned(
         .with_context(|| format!("no directory {}", cwd.display()))?;
     let agent = agent(&options, &cwd);
     let (inputs, receiver) = bounded::<Input>(INPUTS);
-    let first = start(agent.start, &cwd, &inputs, HarnessId::default())?;
+    // Where the chat listens is chosen before its agent starts, so the agent
+    // can be told.
+    let address = options.attach.then(crate::attach::address);
+    let chat = address
+        .as_ref()
+        .and_then(|address| address.as_ref().ok())
+        .map(|(_, id)| id.clone());
+    let first = start(
+        agent.start,
+        &cwd,
+        &inputs,
+        HarnessId::default(),
+        chat.as_ref(),
+    )?;
     let agent_process = first.process.clone();
     // Stops the first agent on every early return; a switch stops it sooner.
     let owned_agent = agent_process.owned();
@@ -270,11 +289,11 @@ pub(crate) fn run_owned(
         }
     });
     // Held to the end: dropping the server removes its socket.
-    let (_server, endpoint) = if options.attach {
-        listen(inputs.clone(), &mut notices)
-    } else {
-        (None, None)
+    let (_server, endpoint) = match address {
+        Some(address) => listen(address, inputs.clone(), &mut notices),
+        None => (None, None),
     };
+    let listens = endpoint.is_some();
     let target = Target::from_env();
     let mut keeper = if target.is_none() && std::env::var_os("HC_TERMINAL_ID").is_some() {
         crate::restore::Keeper::core(
@@ -346,6 +365,7 @@ pub(crate) fn run_owned(
         exit_with_agent: options.headless,
         harness,
         history,
+        listens,
         load: options.load,
         login_hint: agent.login_hint,
         pane: target.map(|target| target.pane),
@@ -415,7 +435,7 @@ pub(crate) fn run_owned(
                             continue;
                         }
                         let next = builtin(agent, load.as_deref(), adapter, &cwd);
-                        match start(next.start, &cwd, &launcher, harness) {
+                        match start(next.start, &cwd, &launcher, harness, chat.as_ref()) {
                             Ok(started) => {
                                 let pid = started.process.id();
                                 current = Some(started.process);
@@ -472,10 +492,11 @@ fn headless_result(expected: bool) -> anyhow::Result<()> {
 }
 
 fn listen(
+    address: crate::Result<(PathBuf, EndpointId)>,
     inputs: Sender<Input>,
     notices: &mut Vec<(NoticeLevel, String)>,
 ) -> (Option<crate::attach::Server>, Option<EndpointId>) {
-    let listening = crate::attach::address().and_then(|(address, id)| {
+    let listening = address.and_then(|(address, id)| {
         crate::attach::Server::listen(&address, inputs).map(|server| (server, id))
     });
     match listening {

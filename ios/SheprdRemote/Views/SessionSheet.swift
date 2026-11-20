@@ -131,7 +131,7 @@ struct SessionSheet: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(selected ? .isSelected : [])
-                    .sensoryFeedback(.selection, trigger: modes.current)
+                    .haptic(.selection, trigger: modes.current)
                 }
             }
         }

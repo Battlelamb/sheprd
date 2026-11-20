@@ -190,6 +190,8 @@ pub fn request(command: Command, snapshot: &ClientShellSnapshot) -> Option<(Meth
         | Command::SplitEditor
         | Command::OpenCode
         | Command::OpenPx0
+        | Command::OpenMachine
+        | Command::NewMachine
         | Command::RemotePair
         | Command::ToggleFullScreen
         | Command::CycleWindows

@@ -21,6 +21,8 @@ struct SettingsView: View {
     @AppStorage(VoiceSettings.languageKey) private var voicePhoneLanguage = false
     @AppStorage(ActivityTokens.genericSetting) private var genericActivities = false
     @AppStorage(RowLines.key) private var rowLines = RowLines.choices.lowerBound
+    @AppStorage(FeedbackSettings.soundsKey) private var effectSounds = true
+    @AppStorage(FeedbackSettings.hapticsKey) private var haptics = true
 
     var body: some View {
         List {
@@ -102,6 +104,18 @@ struct SettingsView: View {
                 Text("Chats")
             } footer: {
                 Text("Lines per Row is how much of a chat's latest reply or summary its row shows in the lists.")
+            }
+            Section {
+                Toggle("Effect Sounds", isOn: $effectSounds)
+                if FeedbackSettings.canTap {
+                    Toggle("Haptics", isOn: $haptics)
+                }
+            } header: {
+                Text("Sounds & Haptics")
+            } footer: {
+                Text(FeedbackSettings.canTap
+                    ? "Effect sounds go with an agent's message effects, such as slam and fireworks, and stay quiet when the Ring/Silent switch is on silent. Haptics are what you feel on sending, answering, terminal keys, and effects."
+                    : "Effect sounds go with an agent's message effects, such as slam and fireworks, and stay quiet when the \(UIDevice.current.model) is muted.")
             }
             Section {
                 Toggle("Speak Results", isOn: $voiceSpeaks)

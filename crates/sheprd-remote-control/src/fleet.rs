@@ -110,6 +110,9 @@ pub(crate) struct Inner {
     /// Older suspensions past what `unconfirmed` keeps per signer, folded
     /// per signer and target (`suspensions`).
     pub(crate) folded: suspensions::FoldedMap,
+    /// Removals folded while they still wait in the pending pool, so they
+    /// are not kept apart again; never saved, as the pool is not.
+    pub(crate) folded_pending: BTreeSet<OpId>,
     /// Every tunnel key each computer member proved by finishing the
     /// tunnel's handshake here, at most [`MAX_PROVEN`] each: once it is
     /// removed, a desktop paired here one by one with any of them goes
@@ -336,8 +339,8 @@ impl Fleet {
         };
         let gone = inner
             .log
-            .as_ref()
-            .map(|log| suspensions::refused(log, &waiting))
+            .as_mut()
+            .map(|log| suspensions::refused(log, waiting, now_ms))
             .unwrap_or_default();
         suspensions::settle(&mut inner, now_ms, gone);
         let after = inner.log.as_ref().map(|log| log.heads().to_vec());

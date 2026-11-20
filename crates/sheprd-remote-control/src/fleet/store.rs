@@ -22,8 +22,10 @@ const LOG: &str = "log.bin";
 /// The history of a fleet being joined, until it admits this computer.
 const JOINING: &str = "joining.bin";
 const PEERS: &str = "peers.json";
-/// The removals suspensions keep to check again take most of it.
-pub(super) const MAX_PEERS: u64 = 16 * 1024 * 1024;
+/// Suspensions take most of it at worst: about 16 MiB, half of them for
+/// members no longer live (`tests/folding.rs` checks the bound), with room
+/// beside them for what each peer holds and the proven keys.
+pub(super) const MAX_PEERS: u64 = 32 * 1024 * 1024;
 
 fn path(state_dir: &Path, name: &str) -> PathBuf {
     state_dir.join(DIRECTORY).join(name)
@@ -53,9 +55,10 @@ struct Peers {
     held: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
     unconfirmed: BTreeMap<String, Kept>,
-    /// Suspensions folded per signer and target (`super::suspensions`).
+    /// Suspensions folded per signer and target (`super::suspensions`),
+    /// hex, by signer then target.
     #[serde(default)]
-    folded: Vec<FoldedKept>,
+    folds: BTreeMap<String, BTreeMap<String, FoldedKept>>,
     #[serde(default)]
     proven: BTreeMap<String, Proven>,
     /// What recorded `proven`: [`PROVEN_VERSION`] once keys are recorded
@@ -92,13 +95,15 @@ impl Proven {
 
 #[derive(Serialize, Deserialize)]
 struct FoldedKept {
-    signer: String,
-    target: String,
-    /// Each removal's id, hex, with when it arrived.
+    /// Each folded removal's id, hex, with when it arrived.
     #[serde(default)]
     ids: BTreeMap<String, u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     overflowed: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    named_with: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pinned: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -155,57 +160,72 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
                 Some((MemberId::from_hex(member)?, keys))
             })
             .collect(),
-        folded: peers
-            .folded
-            .iter()
-            .filter_map(|kept| {
-                let ids: BTreeMap<OpId, u64> = kept
-                    .ids
-                    .iter()
-                    .filter_map(|(id, since)| Some((OpId::from_hex(id)?, *since)))
-                    .collect();
-                // An id that no longer reads still holds the target.
-                let overflowed = if ids.len() < kept.ids.len() {
-                    kept.ids.values().copied().chain(kept.overflowed).min()
-                } else {
-                    kept.overflowed
-                };
-                Some((
-                    (
-                        MemberId::from_hex(&kept.signer)?,
-                        MemberId::from_hex(&kept.target)?,
-                    ),
-                    super::suspensions::Folded { ids, overflowed },
-                ))
-            })
-            .collect(),
-        unconfirmed: peers
-            .unconfirmed
-            .iter()
-            .filter_map(|(id, kept)| {
-                let id = OpId::from_hex(id)?;
-                Some((
-                    id,
-                    super::Unconfirmed {
-                        signer: MemberId::from_hex(&kept.signer)?,
-                        targets: kept
-                            .targets
-                            .iter()
-                            .filter_map(|member| MemberId::from_hex(member))
-                            .collect(),
-                        since_ms: kept.since_ms,
-                        // One that no longer reads keeps its suspension.
-                        op: kept
-                            .op
-                            .as_deref()
-                            .and_then(|op| sync::bytes(op).ok())
-                            .and_then(|op| Op::decode(&op).ok())
-                            .filter(|op| op.id() == id),
-                    },
-                ))
-            })
-            .collect(),
+        folded: folded(&peers.folds)?,
+        folded_pending: BTreeSet::new(),
+        unconfirmed: unconfirmed(&peers.unconfirmed)?,
     })
+}
+
+/// Hex that no longer reads in a suspension is an error, never a
+/// suspension dropped: it would let its targets back in.
+fn member(hex: &str) -> Result<MemberId> {
+    MemberId::from_hex(hex).ok_or(Error::Peers)
+}
+
+fn folded(
+    kept: &BTreeMap<String, BTreeMap<String, FoldedKept>>,
+) -> Result<super::suspensions::FoldedMap> {
+    let mut folded = super::suspensions::FoldedMap::new();
+    for (signer, targets) in kept {
+        let into = folded.entry(member(signer)?).or_default();
+        for (target, kept) in targets {
+            into.insert(
+                member(target)?,
+                super::suspensions::FoldedTarget {
+                    ids: kept
+                        .ids
+                        .iter()
+                        .map(|(id, since)| Ok((OpId::from_hex(id).ok_or(Error::Peers)?, *since)))
+                        .collect::<Result<_>>()?,
+                    overflowed: kept.overflowed,
+                    named_with: kept
+                        .named_with
+                        .iter()
+                        .map(|hex| member(hex))
+                        .collect::<Result<_>>()?,
+                    pinned: kept.pinned,
+                },
+            );
+        }
+    }
+    Ok(folded)
+}
+
+fn unconfirmed(kept: &BTreeMap<String, Kept>) -> Result<BTreeMap<OpId, super::Unconfirmed>> {
+    kept.iter()
+        .map(|(id, kept)| {
+            let id = OpId::from_hex(id).ok_or(Error::Peers)?;
+            Ok((
+                id,
+                super::Unconfirmed {
+                    signer: member(&kept.signer)?,
+                    targets: kept
+                        .targets
+                        .iter()
+                        .map(|hex| member(hex))
+                        .collect::<Result<_>>()?,
+                    since_ms: kept.since_ms,
+                    // One that no longer reads keeps its suspension.
+                    op: kept
+                        .op
+                        .as_deref()
+                        .and_then(|op| sync::bytes(op).ok())
+                        .and_then(|op| Op::decode(&op).ok())
+                        .filter(|op| op.id() == id),
+                },
+            ))
+        })
+        .collect()
 }
 
 /// Writes the log and the peers' state. Blocking.
@@ -232,15 +252,17 @@ pub(super) fn save(state_dir: &Path, inner: &Inner, on_disk: &mut Suspensions) -
     for (id, kept) in &on_disk.unconfirmed {
         first.unconfirmed.entry(*id).or_insert_with(|| kept.clone());
     }
-    for (key, kept) in &on_disk.folded {
-        let folded = first.folded.entry(*key).or_default();
-        for (id, since) in &kept.ids {
-            folded.ids.entry(*id).or_insert(*since);
+    for (signer, targets) in &on_disk.folded {
+        let folded = first.folded.entry(*signer).or_default();
+        for (target, kept) in targets {
+            let entry = folded.entry(*target).or_insert_with(|| kept.clone());
+            for (id, since) in &kept.ids {
+                entry.ids.entry(*id).or_insert(*since);
+            }
+            entry.overflowed = entry.overflowed.max(kept.overflowed);
+            entry.named_with.extend(kept.named_with.iter().copied());
+            entry.pinned |= kept.pinned;
         }
-        folded.overflowed = match (folded.overflowed, kept.overflowed) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        };
     }
     write_peers(state_dir, inner, &first)?;
     *on_disk = first;
@@ -289,18 +311,27 @@ fn write_peers(state_dir: &Path, inner: &Inner, suspensions: &Suspensions) -> Re
                 )
             })
             .collect(),
-        folded: suspensions
+        folds: suspensions
             .folded
             .iter()
-            .map(|((signer, target), folded)| FoldedKept {
-                signer: signer.to_string(),
-                target: target.to_string(),
-                ids: folded
-                    .ids
+            .map(|(signer, targets)| {
+                let targets = targets
                     .iter()
-                    .map(|(id, since)| (id.to_string(), *since))
-                    .collect(),
-                overflowed: folded.overflowed,
+                    .map(|(target, kept)| {
+                        let kept = FoldedKept {
+                            ids: kept
+                                .ids
+                                .iter()
+                                .map(|(id, since)| (id.to_string(), *since))
+                                .collect(),
+                            overflowed: kept.overflowed,
+                            named_with: kept.named_with.iter().map(ToString::to_string).collect(),
+                            pinned: kept.pinned,
+                        };
+                        (target.to_string(), kept)
+                    })
+                    .collect();
+                (signer.to_string(), targets)
             })
             .collect(),
         unconfirmed: suspensions

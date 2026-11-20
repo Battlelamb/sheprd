@@ -1,41 +1,47 @@
 //! Suspensions: members cut off by a removal whose history has not
 //! arrived (`docs/relay-plan.md`, Suspend first, confirm after).
 //!
-//! Each removal is kept apart ([`Unconfirmed`]) until its history settles
-//! it, at most [`MAX_UNCONFIRMED_PER_SIGNER`] for a live signer. Older ones
-//! fold per signer and target ([`Folded`]), keeping the ids of the
-//! removals behind them, so each is still settled by its own history,
-//! checked against its own signer's standing, and ended by its own TTL,
-//! never moved by a later one. However many removals a member
-//! sends, what is kept is bounded by the members, and no suspension ends
-//! sooner than it would have kept apart.
+//! Each removal is kept apart ([`Unconfirmed`]), with every target it
+//! named, until its history settles it, its signer no longer stands for
+//! it, or its TTL passes: at most [`MAX_UNCONFIRMED_PER_SIGNER`] for a live
+//! signer and none for a signer no longer live. Older ones fold into their
+//! signer's [`Folded`] suspensions: each target with the latest arrival of
+//! the removals that named it, and every member those removals named
+//! beside it, so its signer's standing is judged by the same rule as for
+//! each removal on its own. However many removals a member sends, what is
+//! kept is bounded by the members, and no target is let back in before a
+//! removal that named it would have let it in.
 
 use super::{Inner, MAX_KEPT_REMOVALS, UNCONFIRMED_TTL_MS, Unconfirmed};
-use crate::control::fleet::{Error, Log, MemberId, Op, OpId};
+use crate::control::fleet::{Error, Inserted, Log, MemberId, Op, OpId};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Removals a live signer keeps apart, each with its targets and, for the
 /// newest, the operation to check again.
 pub(crate) const MAX_UNCONFIRMED_PER_SIGNER: usize = 8;
-/// Removal ids a folded suspension keeps for one target of a live signer;
-/// one for a signer no longer live. Past it, the suspension is
-/// `overflowed`.
-pub(crate) const MAX_FOLDED_IDS: usize = 8;
 
-/// One target's suspension by one signer's removals that were folded.
+/// One target's suspension by one signer's folded removals.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub(crate) struct Folded {
-    /// The removals that cut this target off, with when each arrived:
-    /// each is settled by its own history and ends on its own TTL.
+pub(crate) struct FoldedTarget {
+    /// The folded removals that named it, with when each arrived: each is
+    /// settled by its own history and ends on its own TTL. At most
+    /// [`MAX_FOLDED_IDS`] for a live signer, one for one no longer live.
     pub(crate) ids: BTreeMap<OpId, u64>,
-    /// More removals cut it off than `ids` keeps: when the first of those
-    /// arrived. They end on its TTL, or once the signer no longer stands
-    /// for this target.
+    /// More named it than `ids` keeps: when the latest of those arrived,
+    /// so they end no sooner than any of them, on its TTL or once the
+    /// signer no longer stands.
     pub(crate) overflowed: Option<u64>,
+    /// Every member those removals named, this one included: the signer
+    /// stands for this target while it is a member, or once one of them
+    /// removed it, as for each removal on its own.
+    pub(crate) named_with: BTreeSet<MemberId>,
+    /// Its signer is no longer a member and was removed by one of
+    /// `named_with`, which is then dropped: that never stops holding.
+    pub(crate) pinned: bool,
 }
 
-impl Folded {
-    /// Whether anything still holds the target at `now_ms`.
+impl FoldedTarget {
+    /// Whether a removal still holds the target at `now_ms`.
     fn live(&self, now_ms: u64) -> bool {
         let fresh = |since: &u64| now_ms.saturating_sub(*since) <= UNCONFIRMED_TTL_MS;
         self.ids.values().any(fresh) || self.overflowed.as_ref().is_some_and(fresh)
@@ -55,42 +61,65 @@ impl Folded {
 
     /// Counts a removal that arrived at `since_ms` past the ids kept.
     fn overflow(&mut self, since_ms: u64) {
-        self.overflowed = Some(self.overflowed.map_or(since_ms, |kept| kept.min(since_ms)));
+        self.overflowed = Some(self.overflowed.map_or(since_ms, |kept| kept.max(since_ms)));
     }
 }
 
-/// Folded suspensions, by signer and target.
-pub(crate) type FoldedMap = BTreeMap<(MemberId, MemberId), Folded>;
+/// Removal ids a folded suspension keeps for one target of a live signer.
+pub(crate) const MAX_FOLDED_IDS: usize = 8;
 
-/// The removals waiting for their history now, with their parents: taken
-/// before a batch, after expiring the pool at the batch's time, so a
-/// removal that leaves the pool during the batch was taken or refused,
+/// One signer's folded suspensions, by target.
+pub(crate) type Folded = BTreeMap<MemberId, FoldedTarget>;
+
+/// Folded suspensions, by signer.
+pub(crate) type FoldedMap = BTreeMap<MemberId, Folded>;
+
+/// The removals waiting for their history now: taken before a batch,
+/// after expiring the pool at the batch's time, so a removal that leaves
+/// the pool during the batch was taken in, refused, or dropped for room,
 /// never expired.
-pub(super) fn waiting(log: &mut Log, now_ms: u64) -> Vec<(OpId, Vec<OpId>)> {
+pub(super) fn waiting(log: &mut Log, now_ms: u64) -> Vec<Op> {
     let _ = log.insert_all(Vec::new(), now_ms);
     log.pending_removals()
         .into_iter()
-        .map(|(op, _)| (op.id(), op.parents().to_vec()))
+        .map(|(op, _)| op.clone())
         .collect()
 }
 
 /// Of the removals `waiting` before a batch, those the log refused once
-/// their history arrived: no longer waiting, not held, every parent held.
-pub(super) fn refused(log: &Log, waiting: &[(OpId, Vec<OpId>)]) -> BTreeSet<OpId> {
+/// their history arrived: no longer waiting, not held, every parent held,
+/// and refused again when put to the log once more for a reason that
+/// judges the removal itself. Room (a full log, the bounds) or a missing
+/// parent says nothing of it, and keeps its suspension.
+pub(super) fn refused(log: &mut Log, waiting: Vec<Op>, now_ms: u64) -> BTreeSet<OpId> {
     let still: BTreeSet<OpId> = log
         .pending_removals()
         .into_iter()
         .map(|(op, _)| op.id())
         .collect();
-    waiting
-        .iter()
-        .filter(|(id, parents)| {
-            !still.contains(id)
-                && log.get(id).is_none()
-                && parents.iter().all(|parent| log.get(parent).is_some())
-        })
-        .map(|(id, _)| *id)
-        .collect()
+    let mut refused = BTreeSet::new();
+    for op in waiting {
+        let id = op.id();
+        if still.contains(&id)
+            || log.get(&id).is_some()
+            || !op.parents().iter().all(|parent| log.get(parent).is_some())
+        {
+            continue;
+        }
+        if refuses(&log.insert(op, now_ms)) {
+            refused.insert(id);
+        }
+    }
+    refused
+}
+
+/// Whether putting a removal to the log refused it for what it is, not for
+/// want of room or of its parents.
+pub(super) fn refuses(result: &crate::control::fleet::Result<Inserted>) -> bool {
+    !matches!(
+        result,
+        Ok(_) | Err(Error::Full | Error::Bounds | Error::ParentMissing)
+    )
 }
 
 /// Moves the log's pending removals into `unconfirmed`, drops those the
@@ -101,20 +130,26 @@ pub(super) fn settle(inner: &mut Inner, now_ms: u64, mut refused: BTreeSet<OpId>
     let Some(log) = &mut inner.log else {
         return;
     };
-    for (op, targets) in log.pending_removals() {
+    let pending: Vec<(Op, Vec<MemberId>)> = log
+        .pending_removals()
+        .into_iter()
+        .map(|(op, targets)| (op.clone(), targets))
+        .collect();
+    // A removal folded while it still waits is not kept apart again: that
+    // would restart its time.
+    inner
+        .folded_pending
+        .retain(|id| pending.iter().any(|(op, _)| op.id() == *id));
+    for (op, targets) in pending {
         let id = op.id();
-        if inner
-            .folded
-            .values()
-            .any(|folded| folded.ids.contains_key(&id))
-        {
+        if inner.folded_pending.contains(&id) {
             continue;
         }
         inner.unconfirmed.entry(id).or_insert(Unconfirmed {
             signer: op.signer(),
             targets,
             since_ms: now_ms,
-            op: Some(op.clone()),
+            op: Some(op),
         });
     }
     // A removal whose history is now held, and that the log does not
@@ -130,40 +165,46 @@ pub(super) fn settle(inner: &mut Inner, now_ms: u64, mut refused: BTreeSet<OpId>
         .collect();
     for op in ready {
         let id = op.id();
-        match log.insert(op, now_ms) {
-            Err(Error::Full | Error::Bounds | Error::ParentMissing) | Ok(_) => {}
-            Err(_) => {
-                refused.insert(id);
-            }
+        if refuses(&log.insert(op, now_ms)) {
+            refused.insert(id);
         }
     }
     let log: &Log = log;
+    let fresh = |since: u64| now_ms.saturating_sub(since) <= UNCONFIRMED_TTL_MS;
     inner.unconfirmed.retain(|id, kept| {
         log.get(id).is_none()
             && !refused.contains(id)
             && standing(log, kept)
-            && now_ms.saturating_sub(kept.since_ms) <= UNCONFIRMED_TTL_MS
+            && fresh(kept.since_ms)
     });
-    let fresh = |since: &u64| now_ms.saturating_sub(*since) <= UNCONFIRMED_TTL_MS;
-    for folded in inner.folded.values_mut() {
-        folded
-            .ids
-            .retain(|id, since| log.get(id).is_none() && !refused.contains(id) && fresh(since));
-        folded.overflowed = folded.overflowed.filter(fresh);
+    for (signer, folded) in &mut inner.folded {
+        for kept in folded.values_mut() {
+            kept.ids.retain(|id, since| {
+                log.get(id).is_none() && !refused.contains(id) && fresh(*since)
+            });
+            kept.overflowed = kept.overflowed.filter(|since| fresh(*since));
+        }
+        folded.retain(|target, kept| {
+            log.is_member(target)
+                && (!kept.ids.is_empty() || kept.overflowed.is_some())
+                && target_standing(log, signer, kept)
+        });
+        // A signer no longer a member: what stands now stands for good,
+        // and needs no list.
+        if !log.is_member(signer) {
+            for kept in folded.values_mut() {
+                kept.pinned = true;
+                kept.named_with.clear();
+            }
+        }
     }
-    let lifted: Vec<(MemberId, MemberId)> = inner
-        .folded
-        .iter()
-        .filter(|(key, folded)| {
-            (folded.ids.is_empty() && folded.overflowed.is_none())
-                || !folded_standing(log, &inner.folded, key)
-        })
-        .map(|(key, _)| *key)
-        .collect();
-    for key in lifted {
-        inner.folded.remove(&key);
-    }
-    fold(&mut inner.unconfirmed, &mut inner.folded, log);
+    inner.folded.retain(|_, folded| !folded.is_empty());
+    fold(
+        &mut inner.unconfirmed,
+        &mut inner.folded,
+        &mut inner.folded_pending,
+        log,
+    );
     // Bounded: the oldest give up their removal, never their suspension.
     let mut kept: Vec<(u64, OpId)> = inner
         .unconfirmed
@@ -184,18 +225,18 @@ pub(super) fn settle(inner: &mut Inner, now_ms: u64, mut refused: BTreeSet<OpId>
 /// The members suspended at `now_ms`, before leaving out this computer and
 /// those no longer members.
 pub(super) fn suspended(inner: &Inner, log: &Log, now_ms: u64) -> BTreeSet<MemberId> {
+    let fresh = |since: u64| now_ms.saturating_sub(since) <= UNCONFIRMED_TTL_MS;
     let kept = inner
         .unconfirmed
         .values()
-        .filter(|kept| {
-            standing(log, kept) && now_ms.saturating_sub(kept.since_ms) <= UNCONFIRMED_TTL_MS
-        })
+        .filter(|kept| standing(log, kept) && fresh(kept.since_ms))
         .flat_map(|kept| kept.targets.iter().copied());
-    let folded = inner
-        .folded
-        .iter()
-        .filter(|(key, folded)| folded.live(now_ms) && folded_standing(log, &inner.folded, key))
-        .map(|((_, target), _)| *target);
+    let folded = inner.folded.iter().flat_map(|(signer, folded)| {
+        folded
+            .iter()
+            .filter(move |(_, kept)| kept.live(now_ms) && target_standing(log, signer, kept))
+            .map(|(target, _)| *target)
+    });
     let pending = log
         .pending_removals()
         .into_iter()
@@ -208,51 +249,45 @@ pub(super) fn suspended(inner: &Inner, log: &Log, now_ms: u64) -> BTreeSet<Membe
 /// lift its own suspension by removing whoever signed it; the history,
 /// once it arrives, settles both removals.
 fn standing(log: &Log, kept: &Unconfirmed) -> bool {
-    stands(log, &kept.signer, &kept.targets)
+    stands(log, &kept.signer, kept.targets.iter())
 }
 
-/// The rule [`standing`] applies to one removal by `signer` of `targets`.
-fn stands(log: &Log, signer: &MemberId, targets: &[MemberId]) -> bool {
-    log.is_member(signer)
-        || log
-            .removers(signer)
-            .iter()
-            .any(|remover| targets.contains(remover))
-}
-
-/// Whether the folded suspension of `key`'s target by its signer stands:
-/// by the rule for one removal, for any removal folded into it, with the
-/// targets that removal named (every target whose folded suspension by
-/// the same signer keeps its id); once overflowed, by the same rule for
-/// this target alone.
-fn folded_standing(log: &Log, folded: &FoldedMap, key: &(MemberId, MemberId)) -> bool {
-    let (signer, target) = key;
-    let Some(this) = folded.get(key) else {
-        return false;
-    };
-    if this.overflowed.is_some() && stands(log, signer, &[*target]) {
+/// The rule [`standing`] applies to a removal by `signer` of `targets`.
+fn stands<'a>(
+    log: &Log,
+    signer: &MemberId,
+    targets: impl IntoIterator<Item = &'a MemberId>,
+) -> bool {
+    if log.is_member(signer) {
         return true;
     }
-    this.ids.keys().any(|id| {
-        let targets: Vec<MemberId> = folded
-            .range((*signer, MemberId([0; 32]))..=(*signer, MemberId([0xff; 32])))
-            .filter(|(_, other)| other.ids.contains_key(id))
-            .map(|((_, target), _)| *target)
-            .collect();
-        stands(log, signer, &targets)
-    })
+    let removers = log.removers(signer);
+    targets.into_iter().any(|target| removers.contains(target))
+}
+
+/// Whether `signer`'s folded suspension of one target stands. Some
+/// removal that named it stands by [`stands`] exactly when the signer's
+/// removers meet the union of what those removals named, which is
+/// `named_with`.
+fn target_standing(log: &Log, signer: &MemberId, kept: &FoldedTarget) -> bool {
+    kept.pinned || stands(log, signer, kept.named_with.iter())
 }
 
 /// Bounds what is kept: targets no longer members go (a removed member
-/// never comes back), and past [`MAX_UNCONFIRMED_PER_SIGNER`] a signer's
-/// oldest removals fold, target by target, into [`Folded`] suspensions
-/// that keep their ids and when each arrived.
-fn fold(unconfirmed: &mut BTreeMap<OpId, Unconfirmed>, folded_map: &mut FoldedMap, log: &Log) {
+/// never comes back), and past [`MAX_UNCONFIRMED_PER_SIGNER`] for a live
+/// signer, or any for a signer no longer live, its oldest removals fold
+/// into its [`Folded`] suspensions, each target keeping the latest
+/// arrival.
+fn fold(
+    unconfirmed: &mut BTreeMap<OpId, Unconfirmed>,
+    folded_map: &mut FoldedMap,
+    folded_pending: &mut BTreeSet<OpId>,
+    log: &Log,
+) {
     for kept in unconfirmed.values_mut() {
         kept.targets.retain(|target| log.is_member(target));
     }
     unconfirmed.retain(|_, kept| !kept.targets.is_empty());
-    folded_map.retain(|(_, target), _| log.is_member(target));
     let mut by_signer: BTreeMap<MemberId, Vec<(u64, OpId)>> = BTreeMap::new();
     for (id, kept) in unconfirmed.iter() {
         by_signer
@@ -260,6 +295,11 @@ fn fold(unconfirmed: &mut BTreeMap<OpId, Unconfirmed>, folded_map: &mut FoldedMa
             .or_default()
             .push((kept.since_ms, *id));
     }
+    let waiting: BTreeSet<OpId> = log
+        .pending_removals()
+        .into_iter()
+        .map(|(op, _)| op.id())
+        .collect();
     for (signer, mut ids) in by_signer {
         let limit = if log.is_member(&signer) {
             MAX_UNCONFIRMED_PER_SIGNER
@@ -274,23 +314,35 @@ fn fold(unconfirmed: &mut BTreeMap<OpId, Unconfirmed>, folded_map: &mut FoldedMa
             let Some(kept) = unconfirmed.remove(id) else {
                 continue;
             };
-            for target in kept.targets {
-                folded_map.entry((signer, target)).or_default().add(
-                    *id,
-                    kept.since_ms,
-                    MAX_FOLDED_IDS,
-                );
+            if waiting.contains(id) {
+                folded_pending.insert(*id);
+            }
+            let live = log.is_member(&signer);
+            let folded = folded_map.entry(signer).or_default();
+            for target in &kept.targets {
+                let entry = folded.entry(*target).or_default();
+                let cap = if live { MAX_FOLDED_IDS } else { 1 };
+                entry.add(*id, kept.since_ms, cap);
+                if live {
+                    entry.named_with.extend(kept.targets.iter().copied());
+                } else {
+                    // Kept apart, it stood: it stands for good.
+                    entry.pinned = true;
+                    entry.named_with.clear();
+                }
             }
         }
     }
     // A signer no longer live keeps one id per target.
-    for ((signer, _), folded) in folded_map.iter_mut() {
+    for (signer, folded) in folded_map.iter_mut() {
         if log.is_member(signer) {
             continue;
         }
-        while folded.ids.len() > 1 {
-            if let Some((_, since)) = folded.ids.pop_last() {
-                folded.overflow(since);
+        for kept in folded.values_mut() {
+            while kept.ids.len() > 1 {
+                if let Some((_, since)) = kept.ids.pop_last() {
+                    kept.overflow(since);
+                }
             }
         }
     }

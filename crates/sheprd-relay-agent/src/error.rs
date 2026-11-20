@@ -47,6 +47,8 @@ pub enum Error {
     Removal(#[from] crate::removal::Error),
     #[error("more desktops would be cut off than the agent can keep track of")]
     Revoked,
+    #[error("a suspended member has had more keys than the agent can keep track of")]
+    SuspendedKeys,
     #[error("could not start the async runtime")]
     Runtime(#[source] std::io::Error),
     #[error("a session's stream broke")]

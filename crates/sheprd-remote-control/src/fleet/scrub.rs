@@ -24,8 +24,11 @@ pub(crate) fn live(state: &State, fleet: &Fleet, session: Option<u16>) -> Result
         grants::supersede(state, &tunnel)?;
     }
     // Access goes even when a file stays; the failure is still reported.
+    // Located before anything goes: a scrub that cannot find the lines
+    // it must remove says so rather than leave them.
+    let keys = daemon_keys(state)?;
     let forgotten = fleet.scrub(session);
-    forget_access(daemon_keys(state).as_ref(), fleet.state_dir())?;
+    forget_access(keys.as_ref(), fleet.state_dir())?;
     forgotten
 }
 
@@ -33,7 +36,8 @@ pub(crate) fn live(state: &State, fleet: &Fleet, session: Option<u16>) -> Result
 /// damaged file, which a scrub must still clear. Blocking.
 pub(crate) fn unloaded(state: &State) -> Result<()> {
     let state_dir = state.auth().state_dir().to_owned();
-    on_disk(&state_dir, daemon_keys(state).as_ref(), |tunnels| {
+    let keys = daemon_keys(state)?;
+    on_disk(&state_dir, keys.as_ref(), |tunnels| {
         for tunnel in tunnels {
             grants::supersede(state, tunnel)?;
         }
@@ -43,12 +47,7 @@ pub(crate) fn unloaded(state: &State) -> Result<()> {
 
 /// `fleet scrub` with no daemon running. Blocking.
 pub(crate) fn offline(state_dir: &Path) -> Result<()> {
-    let keys = match AuthorizedKeys::of_user() {
-        Ok(keys) => Some(keys),
-        // Where the fleet never writes lines, there are none to remove.
-        Err(ssh_access::Error::Unsupported) => None,
-        Err(error) => return Err(error.into()),
-    };
+    let keys = located(None, AuthorizedKeys::of_user)?;
     on_disk(state_dir, keys.as_ref(), |tunnels| {
         if tunnels.is_empty() {
             return Ok(());
@@ -61,10 +60,34 @@ pub(crate) fn offline(state_dir: &Path) -> Result<()> {
     })
 }
 
-/// The `authorized_keys` the daemon lets members in through, if any.
-fn daemon_keys(state: &State) -> Option<AuthorizedKeys> {
-    let auth = state.auth();
-    auth.ssh_access().ok().map(|access| access.keys.clone())
+/// The `authorized_keys` the daemon lets members in through, or the
+/// user's own when it started without them: lines an earlier run wrote
+/// may still be there.
+fn daemon_keys(state: &State) -> Result<Option<AuthorizedKeys>> {
+    let running = state
+        .auth()
+        .ssh_access()
+        .ok()
+        .map(|access| access.keys.clone());
+    located(running, AuthorizedKeys::of_user)
+}
+
+/// `known`, or the file `locate` finds. Only where the fleet never writes
+/// lines (`Unsupported`) are there none to remove; any other failure to
+/// find them, such as no usable `HOME`, fails the scrub, which must not
+/// say access is gone while lines may remain.
+pub(super) fn located(
+    known: Option<AuthorizedKeys>,
+    locate: impl FnOnce() -> ssh_access::Result<AuthorizedKeys>,
+) -> Result<Option<AuthorizedKeys>> {
+    if known.is_some() {
+        return Ok(known);
+    }
+    match locate() {
+        Ok(keys) => Ok(Some(keys)),
+        Err(ssh_access::Error::Unsupported) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// Removes the members' lines from `keys` and the fleet's relay records.

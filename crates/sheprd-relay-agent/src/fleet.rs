@@ -46,6 +46,9 @@ pub const SUSPENDED: &str = "suspended";
 /// The key pairs of members removed for good that an enrolled desktop
 /// still has, in the state directory.
 pub const REVOKED: &str = "revoked";
+/// The members whose new keys wait for room on the relays, in the state
+/// directory.
+pub const CROWDED: &str = "crowded";
 /// Removals remembered per suspended member; past that, its suspension is
 /// one no access file lifts.
 pub const MAX_CAUSES: usize = 8;
@@ -80,6 +83,11 @@ pub struct Held {
     /// Key pairs of members removed for good: a desktop with one stays
     /// cut off until enrolled again.
     pub revoked: BTreeSet<Pair>,
+    /// Members whose rotated keys do not fit in the relay's dial keys yet:
+    /// kept apart from the fleet's own allow and deny, which the access
+    /// file holds as the log decided, so the block lifts as soon as there
+    /// is room, with the same file applied again.
+    pub crowded: BTreeSet<Id>,
 }
 
 impl Held {
@@ -94,6 +102,7 @@ impl Held {
             access,
             suspended: read_json(state_dir, SUSPENDED)?,
             revoked: read_json(state_dir, REVOKED)?,
+            crowded: read_json(state_dir, CROWDED)?,
         })
     }
 
@@ -107,11 +116,16 @@ impl Held {
 
     /// The files kept, by name, in the order that fails closed when saving
     /// stops part way: the revoked pairs before the access file that drops
-    /// the members they come from (a retry finds them there again), and
+    /// the members they come from (a retry finds them there again), the
+    /// members waiting for room before the file that gives them new keys,
+    /// and
     /// the suspensions after it, so one is lifted only once the file that
     /// lifts it, or removes its member, is kept.
     fn files(&self) -> Result<Vec<(&'static str, Vec<u8>)>> {
-        let mut files = vec![(REVOKED, json(REVOKED, &self.revoked)?)];
+        let mut files = vec![
+            (REVOKED, json(REVOKED, &self.revoked)?),
+            (CROWDED, json(CROWDED, &self.crowded)?),
+        ];
         if let Some(access) = &self.access {
             files.push((access::FILE, access.to_stored_bytes()?));
         }
@@ -158,7 +172,12 @@ impl Held {
         }
         // Taking access away always applies; only what adds a dial key
         // waits for room, counted after the removals.
-        let refused = hold_back_additions(held.access.as_ref(), &mut merged, &desktops);
+        let refused = hold_back_additions(
+            held.access.as_ref(),
+            &mut merged,
+            &desktops,
+            &mut held.crowded,
+        );
         // Each settled removal is forgotten as it is settled, so files
         // that each settle some of a suspension's removals, as the bound
         // on `settled` may make them, lift it between them.
@@ -191,7 +210,7 @@ impl Held {
         if let (Some(path), Some(access)) = (keys, &held.access) {
             authorized_keys::set_fleet(path, &access.fleet.short(), &[])?;
         }
-        for name in [access::FILE, SUSPENDED, REVOKED] {
+        for name in [access::FILE, SUSPENDED, REVOKED, CROWDED] {
             let path = state_dir.join(name);
             match std::fs::remove_file(&path) {
                 Ok(()) => {}
@@ -301,12 +320,13 @@ impl Held {
             && !self.suspended.contains_key(member)
     }
 
-    /// The members that may reach SSH here now.
+    /// The members that may reach SSH here now: allowed, not suspended,
+    /// and not waiting for room for their keys.
     pub fn ssh_members(&self) -> impl Iterator<Item = (&Id, &Member)> {
         self.access
             .iter()
             .flat_map(Access::allowed)
-            .filter(|(id, _)| !self.suspended.contains_key(id))
+            .filter(|(id, _)| !self.suspended.contains_key(id) && !self.crowded.contains(id))
     }
 
     fn write_keys(&self, keys: Option<&Path>) -> Result<()> {
@@ -357,15 +377,22 @@ impl Held {
 /// When `merged` would need more dial keys than a relay takes, holds back
 /// what it adds beside `held`: members `held` lacked are left out, and a
 /// member whose dial key changed takes its new keys, the old pair gone as
-/// a rotation always removes it, but is denied until there is room: old
-/// keys are never kept. Removals, denials, and suspensions stay. The
-/// refusal, to report once the rest is applied; none when it fits.
+/// a rotation always removes it, but waits in `crowded` until there is
+/// room: old keys are never kept, and the fleet's allow is left as the
+/// log decided. Removals, denials, and suspensions stay. Once everything
+/// fits, no one waits. The refusal, to report once the rest is applied;
+/// none when it fits.
 fn hold_back_additions(
     held: Option<&Access>,
     merged: &mut Access,
     desktops: &Authorized,
+    crowded: &mut BTreeSet<Id>,
 ) -> Option<Error> {
-    let error = fits(desktops, Some(merged)).err()?;
+    crowded.retain(|id| merged.members.contains_key(id));
+    let Err(error) = fits(desktops, Some(merged)) else {
+        crowded.clear();
+        return None;
+    };
     let before = |id: &Id| held.and_then(|held| held.members.get(id));
     let added: Vec<Id> = merged
         .members
@@ -380,9 +407,7 @@ fn hold_back_additions(
     }
     for id in added {
         if before(&id).is_some() {
-            if let Some(member) = merged.members.get_mut(&id) {
-                member.allow = false;
-            }
+            crowded.insert(id);
         } else {
             merged.members.remove(&id);
         }

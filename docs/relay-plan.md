@@ -1615,8 +1615,9 @@ accepted on this purpose.
   with a whole one), so an agent never prefers keys a rotation replaced;
   rotations competing at one number break the tie on the hash of the
   bundle. A rotation that does not fit in the relay's dial keys still
-  takes the old pair away, and leaves the member denied until there is
-  room. Every member session to
+  takes the old pair away, and the member's new keys wait (`crowded`,
+  kept apart from the fleet's allow and deny) until there is room, when
+  the same file applied again lets it in. Every member session to
   an agent, SSH or removal, carries the member's fleet key signing the
   tunnel handshake hash after the purpose byte, checked against the fleet
   key in the access file; a session whose proof is missing or wrong ends.

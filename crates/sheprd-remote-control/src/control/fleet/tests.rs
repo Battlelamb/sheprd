@@ -11,6 +11,7 @@ mod admission;
 mod agent_ssh_keys;
 mod agents;
 mod base_lifetime;
+mod bounds;
 mod checkpoint;
 mod checkpoint_bytes;
 mod convergence;

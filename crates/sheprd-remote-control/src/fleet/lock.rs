@@ -15,7 +15,11 @@ use std::{
 
 /// How long the daemon waits for an offline update to finish, and an
 /// offline update for a daemon starting to answer.
-pub(crate) const WAIT: Duration = Duration::from_secs(10);
+pub(crate) const WAIT: Duration = if cfg!(test) {
+    Duration::from_secs(2)
+} else {
+    Duration::from_secs(10)
+};
 /// How often a busy lock is tried again.
 const POLL: Duration = Duration::from_millis(50);
 

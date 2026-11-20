@@ -123,17 +123,11 @@ pub async fn run(options: Options) -> Result<()> {
         }
         Err(error) => return Err(error.into()),
     };
-    let fleet = match crate::fleet::Fleet::load_exclusive(&options.state_dir, web::now_ms()) {
-        Ok(fleet) => Some(Arc::new(fleet)),
-        Err(error) => {
-            tracing::warn!(%error, "Could not load the fleet; it stays off until the daemon restarts");
-            // Fail closed: what the fleet let in here goes until it loads.
-            if let Ok(access) = auth.ssh_access() {
-                let _ = access.keys.set_fleet(&[]);
-            }
-            None
-        }
-    };
+    // A second daemon on this state directory stops here, before it
+    // changes anything the running one keeps.
+    let keys = auth.ssh_access().ok().map(|access| &access.keys);
+    let fleet =
+        crate::fleet::Fleet::for_daemon(&options.state_dir, web::now_ms(), keys)?.map(Arc::new);
     let state = Arc::new(State {
         apns,
         apps,

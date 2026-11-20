@@ -14,7 +14,7 @@ use sheprd_remote_control::control::{
         sync::{self, Answer, Applied, Apply, Ask},
     },
 };
-use std::{collections::BTreeSet, sync::atomic::AtomicBool, time::Instant};
+use std::{sync::atomic::AtomicBool, time::Instant};
 
 /// Asks this computer's daemon `ask` and waits for its fleet answer.
 async fn daemon(client: &crate::remote::supervisor::Client, ask: Ask) -> Result<Answer, Error> {
@@ -73,77 +73,47 @@ async fn ask_proven(
 }
 
 /// Hands this computer's whole log to `target`, which is in no fleet yet,
-/// in parts of at most one answer each, every part but the last marked
-/// `more`: the machine joins with the last, as the operation that admits
-/// it, or shares it as a host, comes last.
+/// one answer at a time: the machine keeps the history as far as it
+/// arrived, granting nothing, and answers its heads, from which this
+/// computer's daemon says what comes next. It joins once the history
+/// admits it, or shares it as a host, which the last part holds.
 async fn hand_over(
     client: &crate::remote::supervisor::Client,
     executor: &BackgroundExecutor,
     target: &ConnectTarget,
     fleet: &str,
 ) -> Result<(), Error> {
-    let mut sent = Vec::new();
+    let mut theirs = Vec::new();
     for _ in 0..MAX_PARTS {
         let part = applied(
             client,
             Apply {
                 fleet: Some(fleet.to_owned()),
-                heads: sent.clone(),
+                heads: theirs,
                 ..Apply::default()
             },
         )
         .await?;
-        sent = tips(&sent, &part.ops)?;
+        if part.ops.is_empty() {
+            return Ok(());
+        }
         let more = part.more;
-        // The fleet is named so the machine keeps this handover's parts
-        // apart from any other's.
         let send = Apply {
             fleet: Some(fleet.to_owned()),
+            heads: part.heads,
             ops: part.ops,
-            more,
             ..Apply::default()
         };
         let target = target.clone();
-        executor
+        theirs = executor
             .spawn(async move { remote::apply(&target, &send, &AtomicBool::new(false)) })
-            .await?;
+            .await?
+            .heads;
         if !more {
             return Ok(());
         }
     }
     Err(Error::TooLarge)
-}
-
-/// The heads of what was sent, after `ops`, base64url, as [`heads_after`].
-pub(super) fn tips(before: &[String], ops: &[String]) -> Result<Vec<String>, Error> {
-    let ops = sync::decode_ops(ops)?;
-    Ok(heads_after(
-        before,
-        ops.iter().map(|op| {
-            (
-                op.id().to_string(),
-                op.parents().iter().map(ToString::to_string).collect(),
-            )
-        }),
-    ))
-}
-
-/// The heads of what was sent: `before`'s and the ids of `ops` (each with
-/// its parents), but for those `ops` name as parents. As the daemon
-/// answers from the start of the log, what was sent holds every ancestor
-/// of what it holds, so asking from these heads gives the rest.
-pub(super) fn heads_after(
-    before: &[String],
-    ops: impl IntoIterator<Item = (String, Vec<String>)>,
-) -> Vec<String> {
-    let mut tips: BTreeSet<String> = before.iter().cloned().collect();
-    let mut parents = BTreeSet::new();
-    for (id, named) in ops {
-        tips.insert(id);
-        parents.extend(named);
-    }
-    tips.retain(|id| !parents.contains(id));
-    tips.into_iter().collect()
 }
 
 /// Hands `host`, which the fleet removed and whose heads are `heads`, its
@@ -393,6 +363,10 @@ pub(crate) fn invite(
         .await;
         cx.update(|cx| {
             Fleet::set_acting(cx, &id, false);
+            // It is in the fleet now, whatever it said before: sync it.
+            if outcome.is_ok() {
+                Fleet::set_link(cx, &id, super::Link::restart);
+            }
             Fleet::refresh(cx);
             done(outcome.err().map(|error| error.to_string()), cx);
         });
@@ -436,6 +410,10 @@ pub(crate) fn share(
         .await;
         cx.update(|cx| {
             Fleet::set_acting(cx, &id, false);
+            // It is in the fleet now, whatever it said before: sync it.
+            if outcome.is_ok() {
+                Fleet::set_link(cx, &id, super::Link::restart);
+            }
             Fleet::refresh(cx);
             done(outcome.err().map(|error| error.to_string()), cx);
         });

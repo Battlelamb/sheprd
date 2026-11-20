@@ -94,13 +94,13 @@ fn daemon(_: &Path, request: &Request) -> Result<Response, control::Error> {
     Ok(Response::Fleet(Box::new(answer)))
 }
 
-fn serial() -> std::sync::MutexGuard<'static, ()> {
+pub(super) fn serial() -> std::sync::MutexGuard<'static, ()> {
     SERIAL
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-fn page(cx: &mut TestAppContext, in_fleet: bool) -> &mut VisualTestContext {
+pub(super) fn page(cx: &mut TestAppContext, in_fleet: bool) -> &mut VisualTestContext {
     IN_FLEET.store(in_fleet, Ordering::SeqCst);
     REMOVED.store(false, Ordering::SeqCst);
     HOSTED.store(false, Ordering::SeqCst);

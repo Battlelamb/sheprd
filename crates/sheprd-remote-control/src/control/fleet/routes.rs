@@ -55,6 +55,11 @@ struct Pass<'a> {
     own: BTreeMap<MemberId, Named<'a>>,
     /// The intro the base kept for each host.
     kept: BTreeMap<HostId, &'a HostIntro>,
+    /// The additions of each host that count, since it was last removed;
+    /// none for a host live since the base. A record counts only after
+    /// one of them, so a host removed and added again starts its records
+    /// over.
+    lifetime: BTreeMap<HostId, Vec<usize>>,
 }
 
 /// A computer's claim on the host its bundle names.
@@ -110,6 +115,7 @@ impl<'a> Pass<'a> {
                 .iter()
                 .map(|(id, host)| (*id, &host.intro))
                 .collect(),
+            lifetime: BTreeMap::new(),
         }
     }
 
@@ -132,6 +138,9 @@ impl<'a> Pass<'a> {
         intro: &'a HostIntro,
     ) {
         let survives = self.survives(graph, position, id);
+        if survives {
+            self.lifetime.entry(id).or_default().push(position);
+        }
         let named = match self.own.get(&member) {
             Some(named) if named.host == id => Named {
                 host: id,
@@ -211,7 +220,11 @@ impl<'a> Pass<'a> {
     /// A `HostAdd` of `id` at `position`: it makes the host live when it
     /// was not; another addition of a live host changes nothing.
     fn add(&mut self, graph: &Graph<'_>, position: usize, id: HostId, intro: &'a HostIntro) {
-        if !self.survives(graph, position, id) || self.hosts.contains_key(&id) {
+        if !self.survives(graph, position, id) {
+            return;
+        }
+        self.lifetime.entry(id).or_default().push(position);
+        if self.hosts.contains_key(&id) {
             return;
         }
         self.hosts.insert(id, Tracked::new(intro));
@@ -222,6 +235,7 @@ impl<'a> Pass<'a> {
     /// over when added again.
     fn remove(&mut self, id: HostId) {
         self.hosts.remove(&id);
+        self.lifetime.insert(id, Vec::new());
         self.routes.retain(|_, owner| *owner != id);
         for named in self.own.values_mut() {
             if named.host == id {
@@ -232,9 +246,16 @@ impl<'a> Pass<'a> {
 
     /// A carried record, if it is its host's word and its route is the
     /// host's own or free.
-    fn seen(&mut self, seen: &HostSeen) {
+    fn seen(&mut self, graph: &Graph<'_>, position: usize, seen: &HostSeen) {
         let id = seen.record.host;
-        let Some(host) = self.hosts.get_mut(&id) else {
+        // A record that had not seen the host's addition speaks of an
+        // earlier lifetime of it.
+        let after = self.lifetime.get(&id).is_none_or(|added| {
+            added
+                .iter()
+                .any(|&at| at == position || graph.sees(position, at))
+        });
+        let Some(host) = self.hosts.get_mut(&id).filter(|_| after) else {
             return;
         };
         // A plain host's keys only change through a member that checked
@@ -314,7 +335,7 @@ pub(super) fn records(
                     pass.removal(position, *id);
                 }
             }
-            Body::HostSeen(seen) => pass.seen(seen),
+            Body::HostSeen(seen) => pass.seen(graph, position, seen),
             _ => {}
         }
     }

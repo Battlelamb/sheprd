@@ -88,6 +88,15 @@ pub(crate) enum Standing {
 }
 
 impl Link {
+    /// Starts over, as for a machine never asked; a sync running for it
+    /// still finishes.
+    pub(super) fn restart(&mut self) {
+        *self = Self {
+            running: self.running,
+            ..Self::default()
+        };
+    }
+
     fn due(&self, mine: &[String], now: Instant) -> bool {
         if self.running {
             return false;
@@ -128,6 +137,8 @@ pub(crate) struct Fleet {
     answered: bool,
     /// Orders the saved devices' updates ([`saved::keep`]).
     saving: saved::Saving,
+    /// Fleet hosts the last update could not save as devices.
+    unsaved: Option<saved::Unsaved>,
     error: Option<String>,
     windows: HashMap<EntityId, Reached>,
     links: HashMap<String, Link>,
@@ -150,6 +161,17 @@ impl Fleet {
     /// Whether the daemon has answered at least once.
     pub(crate) fn read(cx: &App) -> bool {
         cx.try_global::<Self>().is_some_and(|fleet| fleet.read)
+    }
+
+    /// Fleet hosts that could not be saved as devices, if any.
+    pub(crate) fn unsaved(cx: &App) -> Option<saved::Unsaved> {
+        cx.try_global::<Self>()?.unsaved.clone()
+    }
+
+    /// Records which fleet hosts could not be saved as devices.
+    pub(crate) fn set_unsaved(cx: &mut App, unsaved: Option<saved::Unsaved>) {
+        cx.update_global::<Self, _>(|fleet, _| fleet.unsaved = unsaved);
+        cx.refresh_windows();
     }
 
     /// The last failure to show, if any.
@@ -300,6 +322,7 @@ impl Fleet {
             Ok(view) => {
                 let changed = !self.answered || self.view != view;
                 self.answered = true;
+                self.forget_stale_links(view.as_ref());
                 self.view = view;
                 changed
             }
@@ -307,6 +330,25 @@ impl Fleet {
             Err(message) => {
                 self.error = message;
                 false
+            }
+        }
+    }
+
+    /// Forgets what machines said when it no longer holds under `view`:
+    /// every link once this computer is in another fleet or none, and the
+    /// stop on a removed host the fleet shares again.
+    fn forget_stale_links(&mut self, view: Option<&View>) {
+        let fleet = |view: Option<&View>| view.map(|view| view.fleet.clone());
+        let other = fleet(self.view.as_ref()) != fleet(view);
+        for link in self.links.values_mut() {
+            let shared_again = link.standing == Standing::Removed
+                && view.is_some_and(|view| {
+                    view.hosts
+                        .iter()
+                        .any(|host| Some(&host.id) == link.host.as_ref())
+                });
+            if other || shared_again {
+                link.restart();
             }
         }
     }

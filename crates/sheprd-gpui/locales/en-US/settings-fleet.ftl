@@ -73,3 +73,7 @@ settings-fleet-forget = Forget the fleet
 settings-fleet-scrub = Remove fleet access
 settings-fleet-scrub-ask = Remove every way a fleet reaches this account: its authorized_keys lines and the relay agent's entries. Nothing is signed; it only takes access away.
 settings-fleet-scrub-description = The last resort for a machine no member can reach: removes what any fleet wrote on it.
+settings-fleet-unsaved = { $count ->
+    [one] One fleet host could not be added to Devices
+   *[other] { $count } fleet hosts could not be added to Devices
+}

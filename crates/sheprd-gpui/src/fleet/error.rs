@@ -7,8 +7,6 @@ pub enum Error {
     Answer(#[source] serde_json::Error),
     #[error("The remote control daemon refused: {0}")]
     Daemon(String),
-    #[error(transparent)]
-    Log(#[from] sheprd_remote_control::control::fleet::Error),
     #[error("Remote control is off on this computer")]
     NoDaemon,
     #[error("The host has no Sheprd remote control to ask")]

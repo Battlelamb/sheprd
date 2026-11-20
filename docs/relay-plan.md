@@ -1693,6 +1693,7 @@ all of them. It needs no fleet key, because it only removes access.
 | Parents | 16 per operation. With more heads, a member names those of members not flagged for equivocation first, so a member forking its key cannot crowd out everyone's operations, removals included. |
 | Checkpoints between prunes | 8 per signer. They count against no other bound, so a full log can always checkpoint and prune. |
 | Operations between checkpoints | 2,048. A computer signs a `Checkpoint` after 512 operations or 30 days, and earlier operations are pruned once every live member's heads descend from it. A Sheprd host never trusts a checkpoint it cannot recompute from what it holds. |
+| Settled checkpoints | A checkpoint that every other operation held has seen, or was seen by, settles what came before it: the state is computed from the state it names, whether the log was pruned to it or not, so nothing signed after it (a removal, a fork, a later checkpoint) changes what was decided before it. A fork it did not see leaves it unsettled. |
 | One operation | 16 KiB. A bundle with ML-KEM-768 is about 2 KiB. |
 | One `fleet apply` or sync message | 256 KiB and 64 operations. More takes several rounds. |
 | Operations waiting for parents | 256 per peer, dropped after 1 hour. Copies of one operation with different signatures wait side by side, and the one whose signature checks out is kept, so a damaged copy cannot keep out the genuine one. |
@@ -1775,12 +1776,9 @@ all of them. It needs no fleet key, because it only removes access.
 from the other mean its key is in use in two places: a cloned disk, a
 restored backup, or theft. Both are kept, because they may be honest.
 The member is flagged everywhere, and its `HostAdd` and `Access`
-operations that no checkpoint had seen count for nothing (only a
-checkpoint that counts and whose signer is not equivocating itself) until a person
-removes it or picks Keep (an operation that clears the flag, which comes
-with Settings > Fleet in phase 3). A checkpoint settles what it saw, as
-the state it names keeps it, so a member that pruned to it holds the same
-operations as one that kept the whole log.
+operations after the last settled checkpoint count for nothing until a
+person removes it or picks Keep (an operation that clears the flag,
+which comes with Settings > Fleet in phase 3).
 
 ### Migration
 
@@ -1897,7 +1895,11 @@ manual multi-machine and phone steps left unticked in its QA list.
      key is the member's.
    - **Joining over SSH:** creating a fleet, `fleet bundle` on the
      joiner, `Admit` on the member, and the log handed over; a daemon
-     with no fleet takes a log only when it admits this computer.
+     with no fleet takes a log only when it admits this computer (or,
+     phase 3, shares it as a host), keeping a history too large for one
+     `fleet apply` in `fleet/joining/FLEET.bin`, one per fleet and at
+     most 4, granting nothing, and answering its heads so the member
+     sends the rest.
    - **Own record:** every 10 minutes the daemon signs a `HostSeen` with
      its certificate authority when its relays, route, tunnel identity,
      or SSH host keys moved.
@@ -1928,9 +1930,10 @@ manual multi-machine and phone steps left unticked in its QA list.
      the log handed over: a Sheprd host that is not a member takes a log
      that shares it, by its certificate authority's host id, and lets in
      the computers allowed there). A log larger than one answer is handed
-     over in parts marked `more`, naming the fleet, which the joining
-     daemon keeps in memory per fleet until the last, so two handovers
-     at once never take each other's parts. A shared Sheprd host is no
+     over one answer at a time through the same `Fleet::apply` as sync and
+     `fleet apply` with no daemon: the joining daemon keeps each fleet's
+     history apart and answers its heads, so two handovers at once never
+     take each other's parts. A shared Sheprd host is no
      member and cannot sign its own record, so a member syncing it reads
      its `fleet intro` and carries a newer CA-signed record into the log
      as a `HostSeen` (`Ask::Seen`). A computer that left, or was removed,

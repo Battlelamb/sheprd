@@ -28,12 +28,6 @@ pub struct Apply {
     /// the fleet holds before sending it anything.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nonce: Option<String>,
-    /// More of the log follows: what a computer with no fleet keeps until
-    /// the last part arrives, as the operation that admits it, or shares
-    /// it as a host, comes last. A log larger than one answer
-    /// ([`MAX_ANSWER_BYTES`]) is handed over in parts.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub more: bool,
 }
 
 /// An answering computer's proof that it is the host its certificate

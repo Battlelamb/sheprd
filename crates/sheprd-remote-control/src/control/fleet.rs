@@ -21,6 +21,10 @@
 //!   keeps trust that came only from a voided admission.
 //! - Every conflict resolves to the safer side: a removal over an
 //!   addition, a deny over an allow.
+//! - A checkpoint that every other operation has seen or was seen by
+//!   settles what came before it: the state is folded from the state it
+//!   names, in a log pruned to it and in the whole log alike, so nothing
+//!   signed after it changes what was decided before it.
 //!
 //! Sans-I/O and without Tokio: the daemon, Sheprd, and the tests drive it,
 //! and the iOS app's Swift copy is checked against the vectors

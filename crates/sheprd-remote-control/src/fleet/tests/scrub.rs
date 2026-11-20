@@ -182,3 +182,15 @@ async fn a_desktops_line_that_cannot_go_keeps_its_pairing() {
     // Kept, with the proof that names it, for another try.
     assert!(auth.devices().get(&legacy).is_some());
 }
+
+#[test]
+fn a_scrub_forgets_the_histories_of_fleets_being_joined() {
+    let dir = tempfile::tempdir().unwrap();
+    let joining = dir.path().join(crate::fleet::store::DIRECTORY).join("joining");
+    std::fs::create_dir_all(&joining).unwrap();
+    std::fs::write(joining.join(format!("{}.bin", "ab".repeat(32))), b"history").unwrap();
+    crate::fleet::store::remove_log(dir.path()).unwrap();
+    assert!(!joining.exists());
+    // Nothing to remove is no failure.
+    crate::fleet::store::remove_log(dir.path()).unwrap();
+}

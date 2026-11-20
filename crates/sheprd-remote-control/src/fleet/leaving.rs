@@ -45,8 +45,10 @@ fn removals_of(log: &Log, me: &MemberId) -> BTreeSet<OpId> {
 
 impl Fleet {
     /// Forgets the fleet once this computer is out of it for good
-    /// ([`released`]): its log, what peers hold, suspensions, and proven
-    /// keys. Says whether it did. Blocking.
+    /// ([`released`]): its log, what peers hold, and suspensions. The keys
+    /// members proved here are kept, and saved, until `grants::apply`
+    /// revokes the pairings made with them: with no log, it treats every
+    /// one as removed. Says whether it did. Blocking.
     pub(crate) fn release_if_left(&self, inner: &mut Inner) -> Result<bool> {
         let host_removed = self.hosted.load(Ordering::SeqCst)
             && inner.log.as_ref().is_some_and(|log| {
@@ -58,8 +60,11 @@ impl Fleet {
         if !host_removed && !released(inner, &self.me) {
             return Ok(false);
         }
+        let proven = std::mem::take(&mut inner.proven);
         *inner = Inner::default();
+        inner.proven = proven;
         store::forget(&self.state_dir)?;
+        self.save(inner)?;
         self.hosted.store(false, Ordering::SeqCst);
         self.bump();
         Ok(true)

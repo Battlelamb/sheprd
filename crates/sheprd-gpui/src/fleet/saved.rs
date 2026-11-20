@@ -124,30 +124,54 @@ pub(super) fn wanted(view: Option<&View>) -> Vec<SavedHost> {
         .collect()
 }
 
+/// Fleet hosts that could not be saved as devices: how many, and why the
+/// last one could not, which Settings > Fleet shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Unsaved {
+    pub(crate) count: usize,
+    pub(crate) reason: String,
+}
+
 /// Saves the fleet hosts this computer may reach and forgets those it no
-/// longer may, on the background executor. Called only after the daemon
-/// answered: a view of `None` then means this computer is in no fleet, not
-/// that the daemon could not be read.
+/// longer may, on the background executor, then says on the page which
+/// could not be saved. Called only after the daemon answered: a view of
+/// `None` then means this computer is in no fleet, not that the daemon
+/// could not be read.
 pub(super) fn keep(cx: &mut App) {
     let wanted = wanted(Fleet::view(cx));
     let (saving, number) = cx.update_global::<Fleet, _>(|fleet, _| {
         fleet.saving.started += 1;
         (fleet.saving.clone(), fleet.saving.started)
     });
-    cx.background_executor()
-        .spawn(async move {
-            saving.run(number, || {
-                if let Err(error) = keep_blocking(&wanted) {
-                    tracing::warn!(%error, "Could not keep the fleet's saved devices");
-                }
-            });
-        })
-        .detach();
+    let task = cx.background_executor().spawn(async move {
+        let mut outcome = None;
+        saving.run(number, || {
+            outcome = Some(keep_blocking(&wanted).unwrap_or_else(|error| {
+                tracing::warn!(%error, "Could not keep the fleet's saved devices");
+                Some(Unsaved {
+                    count: wanted.len(),
+                    reason: error.to_string(),
+                })
+            }));
+        });
+        outcome
+    });
+    cx.spawn(async move |cx| {
+        // An update a newer one overtook says nothing.
+        let Some(unsaved) = task.await else {
+            return;
+        };
+        cx.update(|cx| Fleet::set_unsaved(cx, unsaved));
+    })
+    .detach();
 }
 
-fn keep_blocking(wanted: &[SavedHost]) -> crate::Result<()> {
+/// Saves and forgets as [`plan`] says. The fleet's devices afterwards are
+/// those saved, so one that could not be saved is tried again on the next
+/// change rather than counted as saved. Says which could not be saved.
+fn keep_blocking(wanted: &[SavedHost]) -> crate::Result<Option<Unsaved>> {
     let Some(file) = file() else {
-        return Ok(());
+        return Ok(None);
     };
     let before: BTreeSet<String> = crate::state_file::read(&file, MAX_FILE)?
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
@@ -161,12 +185,18 @@ fn keep_blocking(wanted: &[SavedHost]) -> crate::Result<()> {
             plan.kept.insert(id.clone());
         }
     }
+    let mut unsaved: Option<Unsaved> = None;
     for host in &plan.save {
-        // A failure keeps the id: the device is the fleet's either way,
-        // and saving it is tried again on the next change.
         if let Err(error) = sheprd_client::store_saved_host(false, host) {
             tracing::warn!(%error, "Could not save a fleet host");
+            plan.kept.remove(&host.id);
+            let count = unsaved.as_ref().map_or(0, |unsaved| unsaved.count) + 1;
+            unsaved = Some(Unsaved {
+                count,
+                reason: error.to_string(),
+            });
         }
     }
-    crate::state_file::write(&file, &plan.kept)
+    crate::state_file::write(&file, &plan.kept)?;
+    Ok(unsaved)
 }

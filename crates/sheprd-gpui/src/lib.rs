@@ -98,7 +98,10 @@ mod log_targets;
 mod log_window;
 #[cfg(feature = "moonframe")]
 mod luau_window;
+mod machine;
 mod mark_layer;
+#[cfg(feature = "mcp")]
+mod mcp;
 mod menu;
 mod menus;
 mod merged_cleanup;
@@ -165,6 +168,7 @@ mod text_shortcuts;
 mod theme_picker;
 mod titlebar;
 mod toggles;
+mod traces;
 mod truncate;
 mod update_panel;
 mod upload_chips;

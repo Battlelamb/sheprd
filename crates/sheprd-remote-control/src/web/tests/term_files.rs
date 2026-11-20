@@ -1,6 +1,6 @@
 use super::terminal::{authorized, with_terminal};
 use super::*;
-use crate::web::uploads::{Error, MAX_FILE, MAX_NAME, file_name};
+use crate::web::uploads::{Error, MAX_FILE, file_name};
 
 #[test]
 fn a_file_keeps_its_name_made_safe() {
@@ -14,24 +14,26 @@ fn a_file_keeps_its_name_made_safe() {
     assert_eq!(file_name("$(rm -rf ~);.sh"), "__rm_-rf____.sh");
     let long = format!("{}.tar.gz", "a".repeat(300));
     let kept = file_name(&long);
-    assert_eq!(kept.len(), MAX_NAME);
+    assert_eq!(kept.len(), 100);
     assert!(kept.ends_with(".gz"), "{kept}");
 }
 
 #[test]
-fn a_long_unicode_name_is_bounded_by_bytes_and_stored() {
-    // 80 three-byte characters: short in characters, 244 bytes with
-    // its extension, past what a filesystem takes once the id is added.
-    let name = format!("{}.txt", "文".repeat(80));
-    let kept = file_name(&name);
-    assert!(kept.len() <= MAX_NAME, "{}", kept.len());
-    assert!(kept.ends_with(".txt"), "{kept}");
-    assert!(kept.starts_with('文'));
+fn a_name_in_letters_of_several_bytes_is_cut_by_bytes_at_a_letter() {
+    // 80 letters of 3 bytes each: few characters, but 244 bytes.
+    let long = format!("{}.pdf", "报".repeat(80));
+    let kept = file_name(&long);
+    assert!(kept.len() <= 100, "{} bytes", kept.len());
+    assert!(kept.ends_with(".pdf"), "{kept}");
+    assert_eq!(kept, format!("{}.pdf", "报".repeat(32)));
+    // With the id and `-` before it, the stored name fits a file system.
+    assert!(format!("{}-{kept}", "a".repeat(22)).len() <= 255);
     let dir = tempfile::tempdir().unwrap();
     let uploads = Uploads::new(dir.path());
-    let id = auth::random_id().unwrap();
-    let id = uploads.store_file(id, &name, b"text", 0).unwrap();
-    assert!(uploads.path(&id, 0).unwrap().exists());
+    let id = uploads
+        .store_file("abcdefghijklmnopqrstuv".into(), &long, b"x", 1_000)
+        .unwrap();
+    assert!(uploads.path(&id, 1_000).unwrap().exists());
 }
 
 #[test]

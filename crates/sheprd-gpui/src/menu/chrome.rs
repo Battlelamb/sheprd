@@ -717,12 +717,16 @@ impl SheprdWindow {
             panel = panel.child(self.render_git_menu(cx));
         } else if page == Page::GitCommit {
             panel = panel.child(self.render_git_commit(cx));
+        } else if page == Page::GitRestack {
+            panel = panel.child(self.render_git_restack(cx));
         } else if page == Page::PrReview {
             panel = panel.child(self.render_pr_review(cx));
         } else if page == Page::PrComment {
             panel = panel.child(self.render_pr_comment(cx));
         } else if page == Page::PrMerge {
             panel = panel.child(self.render_pr_merge(cx));
+        } else if page == Page::PrQueue {
+            panel = panel.child(self.render_pr_queue(cx));
         } else if page == Page::OverviewReply {
             panel = panel.child(self.render_overview_reply(cx));
         } else if matches!(

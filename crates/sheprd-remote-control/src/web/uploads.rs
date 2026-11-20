@@ -21,9 +21,9 @@ pub(crate) const MAX_UPLOAD: usize = 3_500_000;
 /// The largest file a phone may drop on a terminal; kept modest, as up to
 /// [`MAX_UPLOADS`] of them stay on disk for a day.
 pub(crate) const MAX_FILE: usize = 16 * 1024 * 1024;
-/// The most UTF-8 bytes of a file's name kept in its stored name: with the
-/// 22-byte id and its dash, well under the 255 bytes filesystems allow.
-pub(crate) const MAX_NAME: usize = 180;
+/// The most UTF-8 bytes of a file's name kept in its stored name. File
+/// systems limit a name's bytes, often to 255, and the id and `-` go first.
+const MAX_NAME: usize = 100;
 /// Uploads kept at once.
 const MAX_UPLOADS: usize = 64;
 /// How long an upload stays attachable.
@@ -205,8 +205,8 @@ impl Uploads {
 }
 
 /// The last part of a name a phone sent, kept to letters, digits, `.`,
-/// `-`, and `_`, never hidden or empty, and at most [`MAX_NAME`] UTF-8
-/// bytes, keeping its extension and never cutting a character.
+/// `-`, and `_`, never hidden or empty, and at most [`MAX_NAME`] bytes,
+/// keeping its extension and whole characters.
 pub(crate) fn file_name(name: &str) -> String {
     let last = name.rsplit(['/', '\\']).next().unwrap_or_default();
     let safe: String = last
@@ -230,16 +230,16 @@ pub(crate) fn file_name(name: &str) -> String {
     let extension = safe
         .rfind('.')
         .map(|dot| &safe[dot..])
-        .filter(|extension| extension.len() <= 32)
+        .filter(|extension| extension.len() <= 16)
         .unwrap_or_default();
-    let keep = MAX_NAME - extension.len();
-    let cut = safe
+    let room = MAX_NAME - extension.len();
+    let end = safe
         .char_indices()
-        .map(|(index, character)| index + character.len_utf8())
-        .take_while(|end| *end <= keep)
+        .map(|(at, c)| at + c.len_utf8())
+        .take_while(|&end| end <= room)
         .last()
-        .unwrap_or_default();
-    format!("{}{extension}", &safe[..cut])
+        .unwrap_or(0);
+    format!("{}{extension}", &safe[..end])
 }
 
 fn private_dir(dir: &Path) -> std::io::Result<()> {

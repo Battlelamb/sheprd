@@ -59,7 +59,9 @@ public enum TermInput {
 
     /// Text as pastes of at most `limit` UTF-8 bytes, in order, each ending
     /// after a line where one fits and never inside a character, so long
-    /// text reaches the terminal whole instead of cut off.
+    /// text reaches the terminal whole instead of cut off. A character
+    /// larger than `limit` (any number of combining marks) is the one cut,
+    /// between its Unicode scalars, rather than dropped with what follows.
     public static func pastes(for text: String, limit: Int = maxPaste) -> [Send] {
         var sends: [Send] = []
         var rest = Substring(text)
@@ -78,8 +80,21 @@ public enum TermInput {
                 if rest[index].isNewline { line = end }
             }
             let cut = line ?? end
-            // A single character over the limit cannot be sent at all.
-            guard cut > rest.startIndex else { break }
+            guard cut > rest.startIndex else {
+                let scalars = rest.unicodeScalars
+                var split = scalars.startIndex
+                var bytes = 0
+                for index in scalars.indices {
+                    bytes += UTF8.width(scalars[index])
+                    guard bytes <= limit else { break }
+                    split = scalars.index(after: index)
+                }
+                // A scalar is at most four bytes; a smaller limit sends one.
+                if split == scalars.startIndex { split = scalars.index(after: split) }
+                sends.append(.paste(String(scalars[..<split])))
+                rest = Substring(scalars[split...])
+                continue
+            }
             sends.append(.paste(String(rest[..<cut])))
             rest = rest[cut...]
         }

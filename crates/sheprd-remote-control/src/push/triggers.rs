@@ -1,7 +1,10 @@
 //! When a chat change is worth a push, and what it says. Pure: the daemon
 //! passes each change with the transcript it applies to, before applying it.
 
-use super::{Message, Urgency};
+use super::{
+    Message, Urgency,
+    directives::{without_directives, wizzes},
+};
 use serde::{Deserialize, Serialize};
 use sheprd_chat_protocol::{
     Change, EntryKind, NoticeLevel, Permission, Status, Transcript, TurnEnd, TurnSummary,
@@ -75,6 +78,9 @@ pub(crate) struct Notification {
     pub tag: String,
     pub title: String,
     pub urgency: Urgency,
+    /// The agent asked for the person's attention with `::wizz`: the
+    /// alert interrupts as a question does, and the phone buzzes.
+    pub wizz: bool,
 }
 
 impl Notification {
@@ -92,6 +98,7 @@ impl Notification {
             } else {
                 Urgency::Normal
             },
+            wizz: false,
         }
     }
 
@@ -110,6 +117,7 @@ impl Notification {
             tag: tag(pane),
             title: String::new(),
             urgency: Urgency::High,
+            wizz: false,
         }
     }
 
@@ -238,17 +246,29 @@ fn turn_ended(
         return None;
     }
     let facts = summary.describe();
-    let answer = (privacy == Privacy::Excerpt)
-        .then(|| last_answer(before))
-        .flatten()
-        .map(excerpt);
+    let last = last_answer(before);
+    // Only this turn's reply may nudge: an older one already did.
+    let wizz = this_turns_answer(before).is_some_and(wizzes);
+    let answer = last
+        .filter(|_| privacy == Privacy::Excerpt)
+        .map(|text| excerpt(&without_directives(text)));
     let title = format!("{} finished", chat.agent);
-    Some(Notification::new(
+    let ended = Notification::new(
         chat,
         Kind::TurnEnded,
         title,
         body(chat, answer, Some(&facts)),
-    ))
+    );
+    // Whether it asked is no part of what was said: a generic push buzzes too.
+    Some(if wizz {
+        Notification {
+            urgency: Urgency::High,
+            wizz: true,
+            ..ended
+        }
+    } else {
+        ended
+    })
 }
 
 /// The text of the agent's last answer in the transcript.
@@ -257,6 +277,20 @@ fn last_answer(transcript: &Transcript) -> Option<&str> {
         .entries
         .iter()
         .rev()
+        .find_map(|entry| match &entry.kind {
+            EntryKind::Agent { text } if !text.trim().is_empty() => Some(text.as_str()),
+            _ => None,
+        })
+}
+
+/// The agent's last answer since the user last spoke, if the turn that
+/// ends wrote one.
+fn this_turns_answer(transcript: &Transcript) -> Option<&str> {
+    transcript
+        .entries
+        .iter()
+        .rev()
+        .take_while(|entry| !matches!(entry.kind, EntryKind::User { .. }))
         .find_map(|entry| match &entry.kind {
             EntryKind::Agent { text } if !text.trim().is_empty() => Some(text.as_str()),
             _ => None,

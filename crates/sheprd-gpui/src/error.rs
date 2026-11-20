@@ -33,6 +33,8 @@ pub enum Error {
     Caffeine(#[from] crate::caffeine::Error),
     #[error(transparent)]
     Chat(#[from] crate::chat::Error),
+    #[error(transparent)]
+    ChatPullRequests(#[from] crate::chat::pull_requests::Error),
     #[error("{source}; removing {}: {cleanup}", path.display())]
     Cleanup {
         #[source]
@@ -176,6 +178,8 @@ pub enum Error {
     LinkOnAnotherHost { host: String },
     #[error(transparent)]
     ListeningPorts(#[from] crate::listening_ports::Error),
+    #[error(transparent)]
+    ListenToken(#[from] crate::control::listen_token::Error),
     #[error("Could not list this machine's network addresses: {0}")]
     LocalAddresses(#[source] io::Error),
     #[error("Git could not run")]
@@ -196,8 +200,13 @@ pub enum Error {
         #[source]
         source: io::Error,
     },
+    #[error(transparent)]
+    Machine(#[from] crate::machine::Error),
     #[error("This link's address is not valid, so it opens nothing.")]
     MalformedLink,
+    #[cfg(feature = "mcp")]
+    #[error(transparent)]
+    Mcp(#[from] crate::mcp::Error),
     #[error("Reopen the deletion dialog.")]
     MissingDeletion,
     #[error("HOME is not set")]

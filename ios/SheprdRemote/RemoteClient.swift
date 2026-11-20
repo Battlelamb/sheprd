@@ -283,6 +283,21 @@ final class RemoteClient: Sendable {
         let _: EmptyAnswer = try await send("POST", "/api/term/\(Self.segment(pane))/paste", body: Body(text: text), bearer: bearer)
     }
 
+    /// The question the terminal agent in `pane` waits on, if any.
+    func termPrompt(pane: String, bearer: String) async throws -> TermPrompt? {
+        let answer: TermPrompt.Answer = try await send("GET", "/api/term/\(Self.segment(pane))/prompt", bearer: bearer)
+        return answer.prompt
+    }
+
+    /// Takes `choice` of `prompt`, the question as shown, with `text` for
+    /// a choice that takes words; refused when the question changed since,
+    /// even to another with the same choices.
+    func termChoose(_ choice: TermPrompt.Choice, of prompt: TermPrompt, text: String?, pane: String, bearer: String) async throws {
+        struct Body: Encodable { let question: [String]; let number: UInt32; let label: String; let text: String? }
+        let body = Body(question: prompt.question, number: choice.number, label: choice.label, text: text)
+        let _: EmptyAnswer = try await send("POST", "/api/term/\(Self.segment(pane))/prompt", body: body, bearer: bearer)
+    }
+
     /// A picture the computer stores and types the path of, as a file
     /// dropped on a terminal would.
     func termUpload(_ image: Data, pane: String, bearer: String) async throws {
@@ -426,12 +441,14 @@ final class RemoteClient: Sendable {
         let _: EmptyAnswer = try await send("POST", "/api/v2/workspaces/\(Self.segment(workspace))/close", bearer: bearer, timeout: 40)
     }
 
-    /// Deletes a workspace's linked worktree, then closes it. Never forced:
-    /// the computer refuses a checkout with uncommitted changes, or one
-    /// with an archive script, which Sheprd runs first. Git and Sheprd may
-    /// take a while, so this waits longer than most requests.
-    func removeWorktree(_ workspace: String, bearer: String) async throws {
-        let _: EmptyAnswer = try await send("POST", "/api/v2/workspaces/\(Self.segment(workspace))/remove-worktree", bearer: bearer, timeout: 80)
+    /// Deletes a workspace's linked worktree, then closes it. The computer
+    /// refuses a checkout with uncommitted changes unless `discard`, sent
+    /// only once the person confirmed losing them, and always one with an
+    /// archive script, which Sheprd runs first. Git and Sheprd may take a
+    /// while, so this waits longer than most requests.
+    func removeWorktree(_ workspace: String, discard: Bool, bearer: String) async throws {
+        let query = discard ? "?discard=true" : ""
+        let _: EmptyAnswer = try await send("POST", "/api/v2/workspaces/\(Self.segment(workspace))/remove-worktree\(query)", bearer: bearer, timeout: 80)
     }
 
     /// How to reach this computer through its relays; nil from a daemon

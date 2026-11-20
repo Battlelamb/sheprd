@@ -109,3 +109,27 @@ fn a_left_out_addition_does_not_clear_an_earlier_lifetimes_claim() {
     // The claim h made before its removal still held c's host.
     assert!(log.state().hosts[&host].held);
 }
+
+#[test]
+fn removing_a_host_the_bound_kept_out_holds_nothing() {
+    let (a, c) = (computer(1), computer(3));
+    let mut log = found(&a);
+    admit(&mut log, &a, &c);
+    fill(&mut log, &a);
+    // h, past the bound, names a free route; c moves onto it, unheld.
+    let h = on(60, "free-route");
+    act(&mut log, &a, Body::HostAdd(h.clone()));
+    let host = c.bundle.host.as_ref().unwrap().id().unwrap();
+    act(&mut log, &c, moved_onto(&c, "free-route"));
+    assert!(!log.state().hosts[&host].held);
+    // Removing h, which never counted, changes nothing for c.
+    act(&mut log, &a, Body::HostRemove(h.id().unwrap()));
+    let state = log.state();
+    assert!(!state.hosts[&host].held);
+    assert_eq!(state.routes["free-route"], host);
+    // Nor does a host added once there is room again: that one counts.
+    act(&mut log, &a, Body::HostRemove(plain_host(0).id().unwrap()));
+    let next = on(61, "next-route");
+    act(&mut log, &a, Body::HostAdd(next.clone()));
+    assert!(log.state().hosts.contains_key(&next.id().unwrap()));
+}

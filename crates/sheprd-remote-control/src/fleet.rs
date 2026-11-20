@@ -66,6 +66,20 @@ pub(crate) struct Unconfirmed {
 /// Suspensions that keep their removal to check again.
 pub(crate) const MAX_KEPT_REMOVALS: usize = crate::control::fleet::MAX_PENDING;
 
+/// Suspensions a live member's removals keep apart, each settled by its
+/// own removal's history; older ones fold into one per signer
+/// ([`folded`]), which only its signer leaving or the TTL ends. A member
+/// that is no longer live keeps only that one. So however many removals
+/// a member sends, `peers.json` stays bounded and no suspension is lost.
+pub(crate) const MAX_UNCONFIRMED_PER_SIGNER: usize = 8;
+
+/// The key of `signer`'s folded suspension: a hash no operation's id can
+/// be, so no history ever settles it on its own.
+pub(crate) fn folded(signer: &MemberId) -> OpId {
+    use sha2::{Digest, Sha256};
+    OpId(Sha256::digest([b"sheprd-fleet-folded-suspension".as_slice(), &signer.0].concat()).into())
+}
+
 /// The daemon's fleet: its key, and its log once it founded or joined one.
 #[derive(Debug)]
 pub(crate) struct Fleet {
@@ -605,6 +619,7 @@ fn settle_unconfirmed(inner: &mut Inner, now_ms: u64) {
             && standing(log, kept)
             && now_ms.saturating_sub(kept.since_ms) <= UNCONFIRMED_TTL_MS
     });
+    fold_unconfirmed(&mut inner.unconfirmed, log);
     // Bounded: the oldest give up their removal, never their suspension.
     let mut kept: Vec<(u64, OpId)> = inner
         .unconfirmed
@@ -619,6 +634,55 @@ fn settle_unconfirmed(inner: &mut Inner, now_ms: u64) {
                 entry.op = None;
             }
         }
+    }
+}
+
+/// Bounds the suspensions kept: targets that are no longer members go
+/// (a removed member never comes back), and past
+/// [`MAX_UNCONFIRMED_PER_SIGNER`] a signer's oldest suspensions fold into
+/// its one folded suspension, with every target and the latest start, so
+/// none ends sooner than it would have.
+fn fold_unconfirmed(unconfirmed: &mut BTreeMap<OpId, Unconfirmed>, log: &Log) {
+    for kept in unconfirmed.values_mut() {
+        kept.targets.retain(|target| log.is_member(target));
+    }
+    unconfirmed.retain(|_, kept| !kept.targets.is_empty());
+    let mut by_signer: BTreeMap<MemberId, Vec<(u64, OpId)>> = BTreeMap::new();
+    for (id, kept) in unconfirmed.iter() {
+        if *id != folded(&kept.signer) {
+            by_signer
+                .entry(kept.signer)
+                .or_default()
+                .push((kept.since_ms, *id));
+        }
+    }
+    for (signer, mut ids) in by_signer {
+        let limit = if log.is_member(&signer) {
+            MAX_UNCONFIRMED_PER_SIGNER
+        } else {
+            0
+        };
+        if ids.len() <= limit {
+            continue;
+        }
+        ids.sort_unstable();
+        let mut targets = BTreeSet::new();
+        let mut since_ms = 0;
+        for (_, id) in &ids[..ids.len() - limit] {
+            if let Some(kept) = unconfirmed.remove(id) {
+                targets.extend(kept.targets);
+                since_ms = since_ms.max(kept.since_ms);
+            }
+        }
+        let entry = unconfirmed.entry(folded(&signer)).or_insert(Unconfirmed {
+            signer,
+            targets: Vec::new(),
+            since_ms,
+            op: None,
+        });
+        targets.extend(entry.targets.iter().copied());
+        entry.targets = targets.into_iter().collect();
+        entry.since_ms = entry.since_ms.max(since_ms);
     }
 }
 

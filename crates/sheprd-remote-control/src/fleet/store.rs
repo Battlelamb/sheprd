@@ -29,7 +29,7 @@ const PEERS: &str = "peers.json";
 /// member.
 const HOSTED: &str = "hosted";
 /// The removals suspensions keep to check again take most of it.
-const MAX_PEERS: u64 = 16 * 1024 * 1024;
+pub(super) const MAX_PEERS: u64 = 16 * 1024 * 1024;
 
 fn path(state_dir: &Path, name: &str) -> PathBuf {
     state_dir.join(DIRECTORY).join(name)

@@ -27,11 +27,9 @@ use wry::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 /// The title of the page `serve` serves, which the tab takes once it loads.
 const TITLE: &str = "Pages check";
 
-/// How long WebView2 may take to start, build the page, and load it. A
-/// cold WebView2 on a CI runner takes up to about 20 s on a passing run
-/// (5–19 s measured), so the bound leaves room above that rather than
-/// failing a page that is only slow to start.
-const SETTLE: Duration = Duration::from_secs(240);
+/// How long WebView2 may take to start, build the page, and load it, once
+/// `live_gui` has read its runtime from disk: about a second on CI.
+const SETTLE: Duration = Duration::from_secs(20);
 
 /// Enter's virtual key, and its key-down message's repeat count and scan
 /// code.
@@ -70,20 +68,7 @@ pub(super) fn start_pages(handle: WindowHandle<SheprdWindow>, cx: &mut App) {
                 })
                 .map_err(|error| anyhow!("{error:#}"))??;
             let started = Instant::now();
-            let mut beat = 0;
             loop {
-                // TEMPORARY diagnostics for the flaky native pages check.
-                if started.elapsed().as_secs() >= beat {
-                    beat += 5;
-                    let _ = handle.update(cx, |view, _, _| {
-                        eprintln!(
-                            "PAGES diag: {:?} page={} progress={:?}",
-                            started.elapsed(),
-                            view.has_page(id),
-                            view.page_progress(id)
-                        );
-                    });
-                }
                 timer.timer(Duration::from_millis(100)).await;
                 let loaded = handle
                     .update(cx, |view, window, cx| loaded(view, id, window, cx))
@@ -98,6 +83,8 @@ pub(super) fn start_pages(handle: WindowHandle<SheprdWindow>, cx: &mut App) {
                     let state = handle
                         .update(cx, |view, _, cx| {
                             let tab = cx.try_global::<Store>().and_then(|store| store.get(id));
+                            // Tells a build WebView2 is still working on
+                            // from one that failed, which keeps its error.
                             let (building, failed) = view.page_progress(id);
                             format!(
                                 "location={:?}, title={:?}, page={}, building={building}, \

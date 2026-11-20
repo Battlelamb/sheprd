@@ -7,6 +7,7 @@ mod dispatch;
 mod kept;
 mod kept_worktrees;
 pub(super) mod popover;
+mod removal_progress;
 mod render;
 mod requests;
 mod reuse;

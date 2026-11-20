@@ -85,3 +85,25 @@ fn words_around_a_tag_stay_the_persons() {
         }
     );
 }
+
+#[test]
+fn text_beside_an_envelope_keeps_the_message_the_persons() {
+    for text in [
+        "<local-command-stdout></local-command-stdout>\nExplain this <bash-stdout></bash-stdout>",
+        "<local-command-stdout>(no content)</local-command-stdout> and why?",
+        "Explain <bash-stdout></bash-stdout>",
+        "<bash-input>ls</bash-input>\nthen tell me what you see",
+        "<command-name>/x</command-name><command-name>/y</command-name>",
+        "<command-args>a</command-args>",
+    ] {
+        let transcript = parse(TranscriptAgent::Claude, &lines(&[user("u1", text)]), 0);
+        assert_eq!(
+            transcript.entries[0].kind,
+            EntryKind::User {
+                files: 0,
+                text: text.into()
+            },
+            "{text}"
+        );
+    }
+}

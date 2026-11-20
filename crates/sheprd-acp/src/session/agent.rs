@@ -229,12 +229,18 @@ impl<R: FnMut(Update)> Session<R> {
 
     /// The notice under the conversation a continued session brought with
     /// it, which the chat's first session places as it opens and every
-    /// later one keeps. A new session, or one that brought nothing, has
-    /// none.
+    /// later one, after a switch of agent too, keeps. A chat whose first
+    /// session is new, or brought nothing, has none.
     fn continued(&mut self, loaded: bool) -> Option<sheprd_chat_protocol::EntryId> {
-        if let Some(session) = &self.transcript.session {
-            return session.continued;
+        if let Some(divider) = self.divider {
+            return divider;
         }
+        let divider = self.place_divider(loaded);
+        self.divider = Some(divider);
+        divider
+    }
+
+    fn place_divider(&mut self, loaded: bool) -> Option<sheprd_chat_protocol::EntryId> {
         let brought = self.transcript.entries.iter().any(|entry| {
             matches!(
                 entry.kind,

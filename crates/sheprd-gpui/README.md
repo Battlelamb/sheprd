@@ -3734,7 +3734,9 @@ so the Herdr TUI, a plain terminal, and every app window see one conversation.
 agent `sheprd-acp` knows (Claude, Codex, Copilot, Gemini, Kimi Code, OpenCode, Pi). A row
 opens a tab named after the agent in the focused workspace, in the focused
 pane's folder, and runs the program there; `sheprd chat new AGENT` does
-the same from a pane. The rows show once the app has found `sheprd-acp`,
+the same from a pane, and from a chat, `sheprd chat new` starts that chat's
+agent with its settings ([Starting a chat like this
+one](../../docs/rich-chat.md#starting-a-chat-like-this-one)). The rows show once the app has found `sheprd-acp`,
 first beside its own executable (the app bundle, `cargo build`'s target
 directory, or where `just install` puts both) and then on the login shell's
 `PATH`. A Herdr 2 tab starts a chat beside its active pane, including on

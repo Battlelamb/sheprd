@@ -208,6 +208,53 @@ pub(crate) fn apply(state: &State, fleet: &Fleet, now_ms: u64) -> Result<bool> {
     Ok(changed)
 }
 
+/// Revokes every phone device the fleet admitted here and forgets the
+/// record of them, as a scrub does: no phone keeps API access through a
+/// fleet this computer forgot. Devices are found both in
+/// `fleet/links.json` and by their mark (a `fleet-` id with the fleet
+/// `via`), so a damaged or missing file still lets them go. Blocking.
+pub(crate) fn forget(auth: &mut crate::auth::Auth, state_dir: &std::path::Path) -> Result<()> {
+    let file = state_dir.join(FILE);
+    // A file that does not read names nothing; the marks still do.
+    let kept = read(&file).unwrap_or_default();
+    let mut ids: BTreeSet<String> = kept
+        .admitted
+        .into_keys()
+        .chain(kept.setting.into_keys())
+        .chain(kept.revoking)
+        .collect();
+    ids.extend(
+        auth.devices()
+            .records()
+            .iter()
+            .filter(|record| {
+                record.id.0.starts_with(FLEET_ID)
+                    && record
+                        .via
+                        .as_deref()
+                        .is_some_and(|via| via.starts_with(FLEET_VIA))
+            })
+            .map(|record| record.id.0.clone()),
+    );
+    for id in ids {
+        let device = DeviceId(id);
+        if auth.devices().get(&device).is_some() {
+            auth.revoke(&device)?;
+        }
+    }
+    // The record goes only once every device it named is gone.
+    match std::fs::remove_file(&file) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(crate::desktop::Error::File {
+            operation: "remove",
+            path: file,
+            source,
+        }
+        .into()),
+    }
+}
+
 fn write(file: &std::path::Path, kept: &Kept) -> Result<()> {
     let json = serde_json::to_vec(kept).map_err(|_| crate::desktop::Error::RecordFormat)?;
     files::write_private(file, &json)?;

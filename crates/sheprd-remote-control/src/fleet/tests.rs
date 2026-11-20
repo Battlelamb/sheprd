@@ -62,6 +62,8 @@ mod route_claims;
 #[cfg(unix)]
 mod scrub;
 #[cfg(unix)]
+mod scrub_links;
+#[cfg(unix)]
 mod scrub_races;
 #[cfg(unix)]
 mod sessions;

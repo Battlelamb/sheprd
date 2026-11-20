@@ -24,6 +24,8 @@ use tokio::{
 #[cfg(unix)]
 mod agent;
 #[cfg(unix)]
+mod aging;
+#[cfg(unix)]
 mod atomic;
 #[cfg(unix)]
 mod catch_up;
@@ -33,6 +35,8 @@ mod flood;
 mod joining;
 #[cfg(unix)]
 mod offline;
+#[cfg(unix)]
+mod partial_join;
 #[cfg(unix)]
 mod proof;
 #[cfg(unix)]

@@ -182,17 +182,47 @@ fn an_equivocation_after_a_checkpoint_holds_the_same_in_pruned_and_whole_logs() 
 }
 
 #[test]
-fn an_equivocators_own_checkpoint_settles_nothing() {
+fn a_fork_after_a_checkpoint_does_not_reach_back_pruned_or_not() {
     let (mut log, _, _, c) = three();
+    act(&mut log, &c, Body::HostAdd(plain_host(40)));
+    // c checkpoints its own history, then signs in two places after it.
+    let (mut pruned, mut whole) = split(&mut log, &c);
+    let heads = pruned.heads().to_vec();
+    let seq = pruned.state().members[&c.id()].seq + 1;
+    for n in [1, 2] {
+        let op = sign_on(&pruned, &c, &heads, seq, Body::HostRemove(HostId([n; 32])));
+        assert_eq!(pruned.insert(op.clone(), NOW), Ok(Inserted::Applied));
+        assert_eq!(whole.insert(op, NOW), Ok(Inserted::Applied));
+    }
+    assert_eq!(pruned.state(), whole.state());
+    assert!(pruned.state().equivocating.contains(&c.id()));
+    assert!(
+        pruned
+            .state()
+            .hosts
+            .contains_key(&plain_host(40).id().unwrap())
+    );
+}
+
+#[test]
+fn a_fork_a_checkpoint_did_not_see_unsettles_it() {
+    let (mut log, _, _, c) = three();
+    let before = log.heads().to_vec();
+    let seq = log.state().members[&c.id()].seq + 1;
+    // c keeps one branch to itself, adds a host on the other, and
+    // checkpoints that.
+    let hidden = sign_on(&log, &c, &before, seq, Body::HostRemove(HostId([1; 32])));
     act(&mut log, &c, Body::HostAdd(plain_host(40)));
     let hash = log.state().hash().unwrap();
     act(&mut log, &c, Body::Checkpoint(hash));
-    let heads = log.heads().to_vec();
-    let seq = log.state().members[&c.id()].seq + 1;
-    for n in [1, 2] {
-        let op = sign_on(&log, &c, &heads, seq, Body::HostRemove(HostId([n; 32])));
-        apply(&mut log, op);
-    }
+    assert!(
+        log.state()
+            .hosts
+            .contains_key(&plain_host(40).id().unwrap())
+    );
+    // The hidden branch is concurrent with the checkpoint: nothing is
+    // settled, and the fork holds what c added.
+    apply(&mut log, hidden);
     assert!(log.state().equivocating.contains(&c.id()));
     assert!(
         !log.state()

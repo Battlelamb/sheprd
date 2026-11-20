@@ -128,14 +128,7 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
                 access: String::from_utf8_lossy(&bytes).into_owned(),
             })
         }
-        Ask::Apply(apply) => {
-            let heads = apply.heads()?;
-            let ops = apply.ops()?;
-            let refused = fleet.receive(ops, now_ms)?;
-            let inner = fleet.inner();
-            let log = inner.log.as_ref().ok_or(Error::NoFleet)?;
-            Ok(Answer::Applied(sync::answer(log, &heads, refused)))
-        }
+        Ask::Apply(apply) => Ok(Answer::Applied(fleet.apply(&apply, now_ms)?)),
     }
 }
 

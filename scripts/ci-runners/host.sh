@@ -23,10 +23,17 @@ os_of() { tart get "$1" | awk 'NR == 2 { print $1 }'; }
 
 warming() { pgrep -f "tart exec $1 /bin/bash /tmp/guest-warm.sh" >/dev/null; }
 
+# Waits for the VM's guest agent, which `tart exec` needs. An agent that died
+# (a guest short of memory loses it) stays dead while the VM runs, so a VM
+# that does not answer within a minute is restarted once through its agent.
 wait_up() {
-  local _
-  for _ in $(seq 1 100); do
+  local attempt
+  for attempt in $(seq 1 100); do
     tart exec "$1" /usr/bin/true 2>/dev/null && return 0
+    if [[ "$attempt" == 20 ]]; then
+      echo "$1: guest agent not answering; restarting the VM"
+      launchctl kickstart -k "gui/$uid/com.sheprd.tartvm.$1"
+    fi
     sleep 3
   done
   echo "$1: not answering" >&2
@@ -43,7 +50,7 @@ copy_in() {
 resize() {
   local vm="$1" cpu memory disk label="com.sheprd.tartvm.$1"
   if [[ "$(os_of "$vm")" == darwin ]]; then
-    cpu="${MACOS_CPU:-5}" memory="${MACOS_MEMORY_MB:-18432}" disk="${MACOS_DISK_GB:-140}"
+    cpu="${MACOS_CPU:-5}" memory="${MACOS_MEMORY_MB:-14336}" disk="${MACOS_DISK_GB:-140}"
   else
     cpu="${LINUX_CPU:-4}" memory="${LINUX_MEMORY_MB:-8192}" disk="${LINUX_DISK_GB:-100}"
   fi
@@ -97,7 +104,7 @@ status() {
     if [[ "$(uname -s)" == Darwin ]]; then
       launchctl list | awk "/actions\.runner\./ { print (\$1 == \"-\") ? \"stopped\" : \"running\"; found = 1 } END { if (!found) print \"stopped\" }"
     else
-      systemctl is-active "actions.runner.*" 2>/dev/null | head -1
+      systemctl is-active "$(cat ~/actions-runner/.service)" 2>/dev/null | sed "s/^inactive$/stopped/; s/^active$/running/"
     fi' 2>/dev/null || echo unreachable)"
   echo "$vm: $size; runner $runner; $last"
 }

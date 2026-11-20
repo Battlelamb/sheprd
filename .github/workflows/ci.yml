@@ -117,6 +117,10 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: '1'
         run: python3 scripts/test_ci_scope.py
+      - name: Test the self-hosted checkout cleanup
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 scripts/tests/test_ci_clean_self_hosted.py
       - name: Detect build and test inputs
         id: changes
         env:

@@ -19,7 +19,8 @@ if [[ "$(uname -s)" == Darwin ]]; then
 else
   export PATH="$HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   service() { (cd "$runner" && sudo ./svc.sh "$1" >/dev/null 2>&1); }
-  running() { systemctl is-active --quiet 'actions.runner.*'; }
+  # svc.sh records the unit's name; a glob would miss a unit no longer loaded.
+  running() { systemctl is-active --quiet "$(cat "$runner/.service")"; }
 fi
 # A job checking out under the build would break both, so the build waits
 # for the service manager to confirm the runner stopped, which a stop issued

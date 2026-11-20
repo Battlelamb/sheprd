@@ -22,6 +22,14 @@ else
   # Grow the root file system into a disk `tart set` enlarged.
   sudo growpart /dev/vda 1 >/dev/null 2>&1 || true
   sudo resize2fs /dev/vda1 >/dev/null 2>&1 || true
+  # Ubuntu's cloud image has no swap, and one rustc of the app takes over
+  # 5 GB: without it the kernel's OOM killer takes compilers, and the Tart
+  # guest agent with them.
+  if ! swapon --show=NAME --noheadings | grep -q .; then
+    sudo fallocate -l "${SHEPRD_CI_SWAP_GB:-8}G" /swapfile && sudo chmod 600 /swapfile &&
+      sudo mkswap /swapfile >/dev/null && sudo swapon /swapfile
+    grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
+  fi
   sudo apt-get update -qq
   sudo apt-get install -y -qq --no-install-recommends build-essential git curl ca-certificates python3 jq >/dev/null
   job_path="$HOME/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"

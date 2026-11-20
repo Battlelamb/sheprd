@@ -93,12 +93,15 @@ scripts/ci-runners/runners.sh status m4-pro-1.local
 - `resize` stops each VM, gives it the sizes below (or `MACOS_CPU`,
   `MACOS_MEMORY_MB`, `MACOS_DISK_GB`, `LINUX_CPU`, `LINUX_MEMORY_MB`,
   `LINUX_DISK_GB`), and starts it again; the guest grows its file system.
-  Two macOS VMs take 5 cores and 18 GB each, an Ubuntu VM 4 cores and 8 GB,
-  which leaves a 12-core, 48 GB Mac mini 4 GB.
+  Two macOS VMs take 5 cores and 14 GB each, an Ubuntu VM 4 cores and 8 GB,
+  which leaves a 12-core, 48 GB Mac mini 12 GB; giving the VMs 44 GB left
+  the hosts compressing memory.
 - `setup` installs what the Cirrus Labs base images lack
   (`guest-setup.sh`): Rust through `rustup`, `openssl@3` and a recent
-  Python on macOS, build tools on Ubuntu, and the runner's `.path` and
-  `.env`.
+  Python on macOS, build tools and an 8 GB swap file on Ubuntu, and the
+  runner's `.path` and `.env`. The Ubuntu image has no swap, and one
+  compiler process of the app takes over 5 GB: without swap the kernel kills
+  compilers, and the Tart guest agent with them.
 - `warm` builds `main` once in the runner's own checkout with the commands
   `ci.yml` runs on that platform (`guest-warm.sh`), so the next job compiles
   only what changed. The runner stays stopped until the build ends, and the
@@ -107,7 +110,8 @@ scripts/ci-runners/runners.sh status m4-pro-1.local
 - `status` prints each VM's size, whether its runner runs, and how its last
   warm build ended; `wait` waits for warm builds to end first.
 
-Actions skip a VM whose warm build is still running. Run `setup` and `warm`
+Actions skip a VM whose warm build is still running, and restart a VM whose
+Tart guest agent does not answer within a minute, as `tart exec` needs it. Run `setup` and `warm`
 again after recreating a VM from its base image.
 
 ## The build directory
@@ -115,7 +119,27 @@ again after recreating a VM from its base image.
 A self-hosted job checks out without `git clean` and runs
 `scripts/ci-clean-self-hosted.sh`, which removes everything Git does not
 track except `target/`. On a runner that outlives its job, the next build
-then compiles only what changed, and the hosted Rust cache is skipped. The
-script deletes `target/` once it grows past `SHEPRD_CI_TARGET_LIMIT_GB` (80
-by default; set it in the runner's `.env` file). In a fresh VM per job there
-is no `target/` to keep and the step is harmless.
+then compiles only what changed, and the hosted Rust cache is skipped.
+
+`target/` keeps every feature set, profile, target, and dependency version
+any branch built, so the same script prunes it before a job once it passes
+three quarters of `SHEPRD_CI_TARGET_LIMIT_GB`, or the disk has less than
+`SHEPRD_CI_MIN_FREE_GB` free for the build about to run:
+
+1. Incremental caches go first: they only speed up rebuilding the
+   workspace's own crates.
+2. Then files no build has read in `SHEPRD_CI_STALE_DAYS`, by access time:
+   old dependency versions, features, and branches. Cargo rebuilds what it
+   finds missing.
+3. Only if it is still over the limit, or the disk still short, does all of
+   `target/` go.
+
+| Setting | Default | `setup` writes |
+|---|---|---|
+| `SHEPRD_CI_TARGET_LIMIT_GB` | 80 | 100 on macOS, 70 on Ubuntu |
+| `SHEPRD_CI_MIN_FREE_GB` | 25 | |
+| `SHEPRD_CI_STALE_DAYS` | 3 | |
+
+Set them in the runner's `.env` (`~/actions-runner/.env`) and restart it.
+In a fresh VM per job there is no `target/` to keep and the step is
+harmless.

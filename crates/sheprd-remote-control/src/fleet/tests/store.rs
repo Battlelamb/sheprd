@@ -119,9 +119,20 @@ fn what_members_and_plain_hosts_hold_survives_a_restart_beside_the_folds() {
     );
     // A suspension folded per signer and target, beside them.
     let target = suspensions::FoldedTarget {
-        since_ms: 6,
-        named: [(MemberId([3; 32]), 6)].into(),
-        pinned: None,
+        ids: [(
+            OpId([10; 32]),
+            suspensions::FoldedRemoval {
+                since_ms: 6,
+                named: [MemberId([3; 32])].into(),
+                pinned: false,
+            },
+        )]
+        .into(),
+        overflow: Some(suspensions::Overflow {
+            since_ms: 6,
+            named: [(MemberId([3; 32]), 6)].into(),
+            pinned: None,
+        }),
     };
     inner
         .folded

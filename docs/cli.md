@@ -220,7 +220,7 @@ not take it either.
 | `host mute\|unmute [HOST]` | Silence a host's notifications as a whole, or let them through again, by ID or label; absent, your host. Works while it is offline |
 | `host tag ID [TAG...]` | Replace the tags that group a host in the sidebar and on paired phones; with no tags, clear them. Each computer's daemon keeps its own tags, so a host away gets the edit once it is back |
 | `host update [HOST]` | Ask in the app to update the Sheprd app running on an SSH or cloud host, by ID or label (default: your workspace's host), as its header's Update pill does; the user confirms there (see [Updating Sheprd on other machines](#updating-sheprd-on-other-machines)). Exits 4 with the reason when it offers no newer release, 5 when no connected host has that name, 6 while a dialog is open, 8 for this computer, which `update` covers |
-| `pr [status]\|checks\|comments\|open` | Your branch's pull request, on the window's selected host. `comments` needs your workspace focused |
+| `pr [status]\|checks\|comments\|open` | Your branch's pull request, on the window's selected host. `comments` needs your workspace focused. `status` also says where it sits in a GitHub stack and what merging there would do (`stack` in `--json`: its layers bottom first with a status word each, a `verdict` of `merged`, `ready`, `blocked`, or `unread` when a layer below it was not read, and for `blocked` the lowest layer read in the way and why), and its place in the merge queue (`queue`: `position`, `state`, `eta_seconds`); both are `null` when it is in none |
 | `pr quota` | Last reported GraphQL points used, limit, and remaining, plus rate-limit retry delays for the window's GitHub accounts. `--json` returns records merged by login: known observations are preferred, then the latest reset window and greatest usage within it; retry delays retain the longest pause. Usage is never summed across credentials. Unavailable quotas are `null`. No network request is made. |
 | `ports [list]` | Ports your workspace listens on, and forwards |
 | `ports forward\|unforward PORT` | Forward a port of the SSH host to this machine |
@@ -258,7 +258,7 @@ not take it either.
 | `config reload` | Reread Herdr's config and this app's |
 | `theme [list]`, `theme set NAME` | The app theme. A device's terminal theme is `config set devices.ID.theme NAME`, with the ID from `host list` minus its `ssh:` prefix |
 | `font [list]`, `font set NAME`, `font reset` | |
-| `language [status]`, `language list`, `language set system\|TAG` | The language set and the locale Sheprd shows, the languages there are, each with its name in itself as Settings > General lists it, or save the `language` setting (a BCP 47 tag; `en-XA` and `en-XB` are pseudo-locales). Only `status` asks the app, and without it reports what it would show |
+| `language [status]`, `language list`, `language set system\|TAG` | The language set and the locale Sheprd shows, the languages available for direct selection plus pseudo-locales, or save the `language` setting (a BCP 47 tag; `en-XA` and `en-XB` are pseudo-locales). `system` also uses Simplified Chinese when it matches the OS's preferred languages. Only `status` asks the app, and without it reports what it would show |
 | `keybinds [list]`, `keybinds check` | Shortcuts; custom Herdr commands this client cannot reach |
 | `caffeine [status]`, `caffeine on\|off\|toggle [--for 30m]` | Keep the machine awake |
 | `sound [list]`, `sound play [done\|request]`, `bell` | Sounds play at `sound.volume` percent (`config set sound.volume 30`) |

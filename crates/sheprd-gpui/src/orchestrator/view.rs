@@ -15,6 +15,7 @@ mod detail;
 mod dispatch;
 mod hosts;
 mod inbox;
+mod keys;
 mod list;
 mod listing;
 mod look;
@@ -27,6 +28,7 @@ mod pull;
 mod remote;
 mod repo;
 mod rows;
+mod stack;
 mod status;
 mod tasks;
 
@@ -113,7 +115,7 @@ impl EventEmitter<Event> for OrchestratorView {}
 const REFRESH_GRACE: Duration = Duration::from_millis(1500);
 
 /// A dropdown under the search row; one is open at a time.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Menu {
     Sort,
     State,
@@ -205,6 +207,8 @@ pub(crate) struct OrchestratorView {
     sort: Sort,
     /// The dropdown open under the search row, if any.
     menu: Option<Menu>,
+    /// The room under each dropdown's control, which its menu fits in.
+    menu_room: browse::MenuRoom,
     /// How many repositories the Browse menu draws: its pages so far.
     browse_rows: usize,
     filters: Filters,
@@ -235,6 +239,9 @@ pub(crate) struct OrchestratorView {
     holders: HashMap<String, Vec<usize>>,
     /// Whether the shown list mixes backends, so rows mark their source.
     mixed_sources: bool,
+    /// The most characters of a shown row's number, which the pull request
+    /// number column grows to fit.
+    number_chars: usize,
     /// The open item's description, parsed once per change of its text.
     description: markdown::Markdown,
     dialog: Option<dispatch::Dialog>,
@@ -251,6 +258,8 @@ pub(crate) struct OrchestratorView {
     /// Conversation authors' avatars by URL.
     avatars: conversation::Avatars,
     merge_open: bool,
+    /// The pull request whose stack popover is open.
+    stack_open: Option<u64>,
     /// Hosts a dispatch could go to, while the dialog is open.
     hosts: Arc<Vec<crate::dispatch::Candidate>>,
     /// Which Herdr starts a dispatch on this machine.
@@ -304,6 +313,7 @@ impl OrchestratorView {
             tab: Tab::default(),
             sort: Sort::default(),
             menu: None,
+            menu_room: browse::MenuRoom::default(),
             browse_rows: browse::MAX_ROWS,
             filters: Filters::default(),
             yours: rows::Yours::default(),
@@ -321,6 +331,7 @@ impl OrchestratorView {
             scroll: UniformListScrollHandle::new(),
             lines: Vec::new(),
             mixed_sources: false,
+            number_chars: 0,
             holders: HashMap::new(),
             description: markdown::Markdown::default(),
             dialog: None,
@@ -332,6 +343,7 @@ impl OrchestratorView {
             conversation: conversation::Rows::default(),
             avatars: conversation::Avatars::default(),
             merge_open: false,
+            stack_open: None,
             hosts: Arc::default(),
             terminals: Vec::new(),
             core_removals: Vec::new(),
@@ -838,98 +850,6 @@ impl OrchestratorView {
                 });
                 cx.notify();
             }
-        }
-    }
-
-    fn on_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if (self.dialog.is_some() || self.confirm.is_some())
-            && self.dialog_key(&event.keystroke.key, window, cx)
-        {
-            cx.stop_propagation();
-            return;
-        }
-        if self.dialog.is_some() {
-            return;
-        }
-        if self.comment.read(cx).focus.is_focused(window) {
-            match event.keystroke.key.as_str() {
-                "enter" => self.post_comment(cx),
-                "escape" => window.focus(&self.focus, cx),
-                _ => return,
-            }
-            cx.stop_propagation();
-            return;
-        }
-        if self.message.read(cx).focus.is_focused(window) {
-            match event.keystroke.key.as_str() {
-                "enter" => self.send_message(cx),
-                "escape" => window.focus(&self.focus, cx),
-                _ => return,
-            }
-            cx.stop_propagation();
-            return;
-        }
-        if self.search.read(cx).focus.is_focused(window) {
-            if event.keystroke.key == "escape" {
-                window.focus(&self.focus, cx);
-                cx.stop_propagation();
-            }
-            return;
-        }
-        let modifiers = &event.keystroke.modifiers;
-        if modifiers.platform || modifiers.control || modifiers.alt {
-            return;
-        }
-        let handled = match (event.keystroke.key.as_str(), &self.detail) {
-            ("escape", Some(_)) => {
-                self.detail = None;
-                cx.notify();
-                true
-            }
-            ("escape", None) if self.menu.is_some() => {
-                self.menu = None;
-                cx.notify();
-                true
-            }
-            ("/", None) => {
-                window.focus(&self.search.read(cx).focus.clone(), cx);
-                true
-            }
-            ("up" | "k", None) => {
-                self.move_selection(-1, cx);
-                true
-            }
-            ("down" | "j", None) => {
-                self.move_selection(1, cx);
-                true
-            }
-            ("enter", None) => {
-                if let Some(key) = self.selected.clone() {
-                    self.open_detail(key, cx);
-                }
-                true
-            }
-            ("r", _) => {
-                self.ask_refresh();
-                true
-            }
-            ("1" | "2" | "3" | "4" | "5", Some(detail)) => {
-                let index = event.keystroke.key.parse::<usize>().unwrap_or(1) - 1;
-                let pull_request = self
-                    .item(&detail.key)
-                    .is_some_and(|item| item.github_pull_request().is_some());
-                let tabs = DetailTab::tabs(pull_request);
-                let mut detail = detail.clone();
-                detail.tab = tabs[index.min(tabs.len() - 1)];
-                self.detail = Some(detail);
-                self.follow_pull_request();
-                cx.notify();
-                true
-            }
-            _ => false,
-        };
-        if handled {
-            cx.stop_propagation();
         }
     }
 }

@@ -44,8 +44,10 @@ pub(super) fn fold(folder: &Folder<'_, '_>, set: &Bits, base: &State) -> State {
         }
     }
     let held = held(folder, &positions, &state.equivocating);
-    let anchors = hosts::hosts(graph, &members, &effective, &held, base, &mut state);
-    routes::records(graph, &members, &effective, &held, base, &mut state);
+    let (anchors, excluded) = hosts::hosts(graph, &members, &effective, &held, base, &mut state);
+    routes::records(
+        graph, &members, &effective, &held, &excluded, base, &mut state,
+    );
     access(
         folder, &positions, &anchors, &effective, &held, base, &mut state,
     );

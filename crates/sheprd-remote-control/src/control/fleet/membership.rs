@@ -368,6 +368,21 @@ impl<'g, 'a> Folder<'g, 'a> {
             ..Members::default()
         };
         let mut unseated: BTreeMap<MemberId, super::HostId> = BTreeMap::new();
+        // The seats an admission at `position` finds taken: live members of
+        // its kind, but for those a removal it had seen took out, as its
+        // own history (`Folder::check`) has them.
+        let seated = |members: &Members, kind: Kind, position: usize| {
+            members
+                .live
+                .iter()
+                .filter(|(id, member)| {
+                    member.bundle.kind == kind
+                        && !removals.iter().any(|(&removal, reach)| {
+                            reach.contains(id) && self.graph.sees(position, removal)
+                        })
+                })
+                .count()
+        };
         for &position in &checked {
             let op = self.graph.order[position];
             match op.body() {
@@ -402,7 +417,7 @@ impl<'g, 'a> Folder<'g, 'a> {
                     if !removed.contains(&id)
                         && !members.tombstones.contains(&id)
                         && !members.live.contains_key(&id)
-                        && members.kind_count(admit.bundle.kind) < limit
+                        && seated(&members, admit.bundle.kind, position) < limit
                     {
                         members.origins.insert(id, position);
                         members.claims.insert(id, vec![position]);

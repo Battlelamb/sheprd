@@ -4,7 +4,7 @@
 //! the app's, and one the document dropped goes, ending nothing here.
 
 use super::{Record, View, location_of, shared_tab};
-use crate::browser::store::{MAX_TABS, Place, Scope, Store, Tab, TabId, Zoom, kept};
+use crate::browser::store::{MAX_TABS, Place, Scope, Store, Tab, TabId, Zoom, clean_title, kept};
 use crate::core_terminals::panes::{Axis, Panes};
 use sheprd_backend::TerminalId;
 use sheprd_session::{
@@ -59,13 +59,23 @@ impl TabFields {
     /// stays.
     fn panes(&self, theirs: &Panes, mine: &Panes) -> Panes {
         let mut panes = theirs.clone();
+        // Closed first, so a pane opened here has room in a full tab; a
+        // last pane closes once its replacement is there.
+        let mut last = Vec::new();
+        for terminal in &self.removed {
+            if panes.count() > 1 {
+                panes.remove(terminal);
+            } else {
+                last.push(terminal);
+            }
+        }
         for (at, axis, new) in &self.splits {
             if !panes.contains(new) && panes.contains(at) {
                 // A split the layout refuses is left to the document.
                 let _ = panes.split(at, *axis, new.clone());
             }
         }
-        for terminal in &self.removed {
+        for terminal in last {
             if panes.count() > 1 {
                 panes.remove(terminal);
             }
@@ -320,13 +330,15 @@ impl Store {
                     let shared = merged.as_ref().unwrap_or(shared);
                     tab.location = Some(location_of(shared, active));
                     tab.workspace_id.clone_from(&shared.workspace_id);
-                    if tab.title.is_empty() && !shared.title.is_empty() {
-                        tab.title.clone_from(&shared.title);
+                    if tab.title.is_empty() {
+                        tab.title = clean_title(&shared.title);
                     }
                 }
                 None if room => {
                     let location = location_of(shared, None);
-                    let title = Some(shared.title.clone())
+                    // Bounded as the store keeps titles: a longer one would
+                    // make the saved tabs unreadable.
+                    let title = Some(clean_title(&shared.title))
                         .filter(|title| !title.is_empty())
                         .unwrap_or_else(|| location.default_title());
                     let id = TabId(self.next);

@@ -65,6 +65,8 @@ pub(crate) use fallback::Holder;
 pub(crate) use hosts::Host;
 pub(crate) use hub::{Hub, Start, State};
 pub(crate) use sheprd_session::panes;
+#[cfg(test)]
+pub(crate) use spaces::edits_for_test as spaces_edits_for_test;
 pub(crate) use view::{CoreTerminalView, LinkClick, Look};
 pub(crate) use workspaces::kept_label;
 

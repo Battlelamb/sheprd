@@ -249,3 +249,28 @@ fn a_resize_redone_after_a_read_lands_when_the_panes_still_match() {
         "the swap was redone"
     );
 }
+
+#[test]
+fn a_record_with_no_room_is_taken_once_room_is_made() {
+    let mut core = FakeCore::default();
+    let mut desk = Client::new();
+    let api = desk.keep("api", "/src/api");
+    desk.settle(&mut core);
+    let mut laptop = Client::new();
+    laptop.settle(&mut core);
+    laptop.open(&api, "t1");
+    laptop.settle(&mut core);
+
+    // The desk has no room for another tab when it reads the laptop's.
+    let mut pages = Vec::new();
+    while desk.store.room() > 0 {
+        pages.push(desk.store.open(scope(), &api, None, None).unwrap());
+    }
+    desk.settle(&mut core);
+    assert!(desk.tabs().is_empty());
+    let version = core.version;
+    desk.store.close(pages[0]);
+    desk.settle(&mut core);
+    assert_eq!(core.version, version, "the document did not change");
+    assert_eq!(desk.tabs(), [tab("api", &["t1"])]);
+}

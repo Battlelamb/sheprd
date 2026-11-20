@@ -90,3 +90,30 @@ fn an_edit_whose_worker_never_started_is_sent_later() {
     desk.settle(&mut core);
     assert_eq!(core.spaces().workspace(&api).unwrap().label, "backend");
 }
+
+#[test]
+fn a_refusal_takes_back_only_what_the_refused_edits_changed() {
+    let mut core = FakeCore::default();
+    let mut desk = Client::new();
+    let api = desk.keep("api", "/src/api");
+    let web = desk.keep("web", "/src/web");
+    desk.settle(&mut core);
+    let mut laptop = Client::new();
+    laptop.settle(&mut core);
+
+    laptop.store.forget_kept(&scope(), &api);
+    laptop.settle(&mut core);
+    desk.open(&api, "t1");
+    let job = desk.send().unwrap();
+    let refused = core.run(job);
+    desk.finish(refused);
+    assert!(desk.sync.take_refused().is_some());
+    // Changed here after the refused edits were sent: kept and written.
+    assert!(desk.store.rename_kept(&scope(), &web, "site"));
+    desk.open(&web, "t2");
+    desk.settle(&mut core);
+    assert_eq!(desk.labels(), ["site"]);
+    assert_eq!(desk.tabs(), [tab("site", &["t2"])]);
+    assert_eq!(core.spaces().workspace(&web).unwrap().label, "site");
+    assert_eq!(core.spaces().tabs().len(), 1);
+}

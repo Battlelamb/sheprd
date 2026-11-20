@@ -18,6 +18,12 @@ mod migrate;
 
 pub(crate) use migrate::{Offer, migrate};
 
+/// The edits from `base` to `local`, for the store's tests.
+#[cfg(test)]
+pub(crate) fn edits_for_test(base: &View, local: &View) -> Vec<Edit> {
+    diff::edits(base, local)
+}
+
 use super::Host;
 use crate::{
     SheprdWindow,
@@ -97,8 +103,13 @@ pub(crate) struct CoreSync {
     /// A layout written over a tab another client changed: the document
     /// is read before the change is made again.
     reread: bool,
-    /// A refused change: the next read is taken over what changed here.
-    revert: bool,
+    /// A refused change, and the view its edits were made from: the next
+    /// answer is taken over what those edits changed, keeping what changed
+    /// here since.
+    revert: Option<View>,
+    /// Records the last answer held that the store had no room for, so a
+    /// read of the same document tries them again.
+    incomplete: bool,
     sent: Option<Sent>,
     version: u64,
     /// Why this version may not write the document, when it may not.
@@ -119,7 +130,8 @@ impl CoreSync {
             read: None,
             refused: None,
             reread: false,
-            revert: false,
+            revert: None,
+            incomplete: false,
             sent: None,
             version: 0,
             newer: None,
@@ -200,7 +212,8 @@ impl CoreSync {
     /// [`Self::finish`].
     pub(crate) fn finish_quiet(&mut self, outcome: &Outcome) -> bool {
         let quiet = self.sent == Some(Sent::Read)
-            && !self.revert
+            && self.revert.is_none()
+            && !self.incomplete
             && self.base.is_some()
             && outcome
                 .as_ref()
@@ -249,10 +262,10 @@ impl CoreSync {
             Err(error) if refused(&error) => {
                 tracing::warn!(%error, "herdr-core refused a shared workspace change");
                 self.refused = Some(error.to_string());
-                if let Sent::Update(_) = sent {
-                    // The document stays as it was, and so does this app
-                    // once it reads it again.
-                    self.revert = true;
+                if let Sent::Update(from) = sent {
+                    // The document stays as it was, and so does what the
+                    // refused edits changed here once it is read again.
+                    self.revert = Some(from);
                     self.read = None;
                 } else {
                     self.failed = Some(now);
@@ -277,8 +290,12 @@ impl CoreSync {
             store.set_synced(&self.scope, None);
             return false;
         }
-        let revert = std::mem::take(&mut self.revert);
-        if !revert && answer.version == self.version && !matches!(sent, Sent::Migrate(_)) {
+        let revert = self.revert.take();
+        if revert.is_none()
+            && !self.incomplete
+            && answer.version == self.version
+            && !matches!(sent, Sent::Migrate(_))
+        {
             return false;
         }
         self.writable = answer.spaces.writable();
@@ -309,14 +326,12 @@ impl CoreSync {
             }
         };
         let local = store.shared_view(&self.scope);
-        let pending = if revert {
-            Pending::default()
-        } else {
-            Pending::of(&diff::edits(&before, &local))
-        };
+        // After a refusal `before` is the view the refused edits made, so
+        // only what changed here since stays pending.
+        let pending = Pending::of(&diff::edits(&before, &local));
         let changed = store.mirror_shared(&self.scope, &document, &pending, |record| {
-            revert
-                || before.has(record)
+            before.has(record)
+                || revert.as_ref().is_some_and(|from| from.has(record))
                 || match record {
                     Record::Tab(id) => synced.tabs.contains(id),
                     Record::Workspace(id) => synced.workspaces.contains(id),
@@ -326,7 +341,11 @@ impl CoreSync {
         // The document's records the store holds, and those removed here
         // and not written yet, so the next edits are told against it.
         let holding = store.shared_view(&self.scope);
-        let base = document.only(|record| holding.has(record) || pending.removed(record));
+        let base = (document.clone()).only(|record| holding.has(record) || pending.removed(record));
+        self.incomplete = (document.workspaces.iter())
+            .map(|workspace| Record::Workspace(&workspace.id))
+            .chain(document.tabs.iter().map(|tab| Record::Tab(&tab.id)))
+            .any(|record| !base.has(record));
         store.set_synced(&self.scope, Some(base.synced(self.version)));
         self.base = Some(base);
         changed

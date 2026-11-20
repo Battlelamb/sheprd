@@ -31,7 +31,7 @@ const TITLE: &str = "Pages check";
 /// cold WebView2 on a CI runner takes up to about 20 s on a passing run
 /// (5–19 s measured), so the bound leaves room above that rather than
 /// failing a page that is only slow to start.
-const SETTLE: Duration = Duration::from_secs(60);
+const SETTLE: Duration = Duration::from_secs(240);
 
 /// Enter's virtual key, and its key-down message's repeat count and scan
 /// code.

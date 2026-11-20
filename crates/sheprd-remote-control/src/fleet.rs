@@ -76,6 +76,8 @@ pub(crate) struct Fleet {
     /// of them, and the next change, even one that moves nothing, writes
     /// again.
     unsaved: AtomicBool,
+    /// The suspensions `peers.json` holds (`store::save`).
+    on_disk: Mutex<BTreeMap<OpId, Unconfirmed>>,
 }
 
 #[derive(Debug, Default)]
@@ -120,6 +122,7 @@ impl Fleet {
         let key = store::load_or_create_key(state_dir)?;
         let me = member_id(&key);
         let mut inner = store::load(state_dir, now_ms)?;
+        let on_disk = Mutex::new(inner.unconfirmed.clone());
         // A history `fleet apply` brought while the daemon was stopped may
         // settle a suspension.
         settle_unconfirmed(&mut inner, now_ms);
@@ -132,6 +135,7 @@ impl Fleet {
             inbound: tokio::sync::Semaphore::new(removals::CONCURRENT),
             _lock: lock,
             unsaved: AtomicBool::new(false),
+            on_disk,
         })
     }
 
@@ -394,7 +398,9 @@ impl Fleet {
     }
 
     fn save(&self, inner: &Inner) -> Result<()> {
-        let saved = store::save(&self.state_dir, inner);
+        // Taken only while `inner` is held, so never out of order.
+        let mut on_disk = self.on_disk.lock().unwrap_or_else(PoisonError::into_inner);
+        let saved = store::save(&self.state_dir, inner, &mut on_disk);
         self.unsaved.store(saved.is_err(), Ordering::SeqCst);
         saved
     }

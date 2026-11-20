@@ -171,7 +171,55 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
 }
 
 /// Writes the log and the peers' state. Blocking.
-pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
+///
+/// Each file is replaced whole, and the two in an order that is safe at
+/// every step, even if one write fails or the daemon stops between them:
+///
+/// 1. `peers.json`, keeping every suspension `on_disk` still holds beside
+///    the current ones: a suspension the new log settles must outlive the
+///    old log on disk.
+/// 2. The log, last of what a caller may roll back: a save that fails
+///    before it leaves the log on disk as it was.
+/// 3. `peers.json` again without the settled suspensions, once the log
+///    that settles them is written. A failure here only leaves extra
+///    suspensions, which the next load or save settles again.
+///
+/// `on_disk` is the suspensions `peers.json` holds; kept up to date.
+pub(super) fn save(
+    state_dir: &Path,
+    inner: &Inner,
+    on_disk: &mut BTreeMap<OpId, super::Unconfirmed>,
+) -> Result<()> {
+    let mut first = inner.unconfirmed.clone();
+    for (id, kept) in on_disk.iter() {
+        first.entry(*id).or_insert_with(|| kept.clone());
+    }
+    write_peers(state_dir, inner, &first)?;
+    *on_disk = first;
+    if let Some(log) = &inner.log {
+        write_private(&path(state_dir, LOG), &saved::encode(log)?)?;
+        remove(&path(state_dir, JOINING))?;
+    } else if let Some(joining) = &inner.joining {
+        write_private(&path(state_dir, JOINING), &saved::encode(joining)?)?;
+    }
+    if on_disk.len() != inner.unconfirmed.len() {
+        match write_peers(state_dir, inner, &inner.unconfirmed) {
+            Ok(()) => on_disk.clone_from(&inner.unconfirmed),
+            Err(error) => {
+                tracing::warn!(error = %error, "could not drop settled suspensions; kept until the next save");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Writes `peers.json` from `inner`, with `unconfirmed` as its
+/// suspensions.
+fn write_peers(
+    state_dir: &Path,
+    inner: &Inner,
+    unconfirmed: &BTreeMap<OpId, super::Unconfirmed>,
+) -> Result<()> {
     let peers = Peers {
         held: inner
             .held
@@ -197,8 +245,7 @@ pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
                 )
             })
             .collect(),
-        unconfirmed: inner
-            .unconfirmed
+        unconfirmed: unconfirmed
             .iter()
             .map(|(id, kept)| {
                 (
@@ -216,15 +263,6 @@ pub(super) fn save(state_dir: &Path, inner: &Inner) -> Result<()> {
     };
     let json = serde_json::to_vec(&peers).map_err(|_| crate::desktop::Error::RecordFormat)?;
     write_private(&path(state_dir, PEERS), &json)?;
-    // The log goes last, each file replaced whole: a save that fails
-    // leaves the log on disk as it was, so a caller that rolls back what
-    // it holds matches the file again.
-    if let Some(log) = &inner.log {
-        write_private(&path(state_dir, LOG), &saved::encode(log)?)?;
-        remove(&path(state_dir, JOINING))?;
-    } else if let Some(joining) = &inner.joining {
-        write_private(&path(state_dir, JOINING), &saved::encode(joining)?)?;
-    }
     Ok(())
 }
 

@@ -45,60 +45,6 @@ fn a_voided_removal_naming_a_member_another_removal_took_is_not_passed_to_agents
 }
 
 #[test]
-fn a_members_key_version_follows_its_rotations_not_its_other_operations() {
-    let (a, b) = (computer(1), computer(2));
-    let mut log = found(&a);
-    admit(&mut log, &a, &b);
-    let intro = plain_host(40);
-    let host = intro.id().unwrap();
-    act(&mut log, &a, Body::HostAdd(intro));
-    let version = |log: &Log| {
-        host_access::compute(log, &host, [], |_| false)
-            .unwrap()
-            .members[&Id(b.id().0)]
-            .keys
-    };
-    assert_eq!(version(&log), 0, "keys from its admission");
-    let mut rotated = b.bundle.clone();
-    rotated.tunnel = [0x62; 32];
-    let rotation = act(&mut log, &b, Body::Rotate(rotated));
-    assert_eq!(version(&log), rotation.unsigned().seq);
-    act(&mut log, &b, access_body(host, &b, true, 1));
-    act(&mut log, &b, access_body(host, &b, true, 2));
-    assert_eq!(version(&log), rotation.unsigned().seq);
-}
-
-#[test]
-fn a_rotation_on_a_shorter_branch_still_outranks_the_keys_it_replaced() {
-    let (a, b) = (computer(1), computer(2));
-    let mut log = found(&a);
-    admit(&mut log, &a, &b);
-    let intro = plain_host(40);
-    let host = intro.id().unwrap();
-    act(&mut log, &a, Body::HostAdd(intro));
-    // b's key in two places: one branch signs on without rotating, the
-    // other rotates once.
-    let before = log.heads().to_vec();
-    let seq = log.state().members[&b.id()].seq + 1;
-    let mut rotated = b.bundle.clone();
-    rotated.tunnel = [0x62; 32];
-    let rotation = sign_on(&log, &b, &before, seq, Body::Rotate(rotated));
-    for rev in 1..=5 {
-        act(&mut log, &b, access_body(host, &b, true, rev));
-    }
-    let long = host_access::compute(&log, &host, [], |_| false).unwrap();
-    apply(&mut log, rotation);
-    let merged = host_access::compute(&log, &host, [], |_| false).unwrap();
-    let (old, new) = (&long.members[&Id(b.id().0)], &merged.members[&Id(b.id().0)]);
-    assert_eq!(new.tunnel, [0x62; 32]);
-    assert!(new.keys > old.keys, "{} > {}", new.keys, old.keys);
-    // The agent that held the long branch's view takes the rotation.
-    let held = host_access::Access::merge(None, long).unwrap();
-    let after = host_access::Access::merge(Some(&held), merged).unwrap();
-    assert_eq!(after.members[&Id(b.id().0)].tunnel, [0x62; 32]);
-}
-
-#[test]
 fn a_removal_suspending_several_members_counts_once_against_the_settled_bound() {
     let (a, b) = (computer(1), computer(2));
     let mut log = found(&a);
@@ -163,33 +109,82 @@ fn an_agents_access_file_names_each_members_fleet_key() {
     assert_eq!(file.members[&Id(b.id().0)].fleet_key, b.bundle.key);
 }
 
-#[test]
-fn competing_rotations_at_one_sequence_number_count_what_the_log_held() {
+/// a and b, and a plain host a added.
+fn two() -> (Log, Device, Device, HostId) {
     let (a, b) = (computer(1), computer(2));
     let mut log = found(&a);
     admit(&mut log, &a, &b);
     let intro = plain_host(40);
     let host = intro.id().unwrap();
     act(&mut log, &a, Body::HostAdd(intro));
-    // b's key in two places rotates on each, at the same number.
+    (log, a, b, host)
+}
+
+fn rotated(member: &Device, tunnel: u8) -> Body {
+    let mut bundle = member.bundle.clone();
+    bundle.tunnel = [tunnel; 32];
+    Body::Rotate(bundle)
+}
+
+fn keys_of(log: &Log, host: &HostId, member: &Device) -> host_access::Member {
+    host_access::compute(log, host, [], |_| false)
+        .unwrap()
+        .members[&Id(member.id().0)]
+        .clone()
+}
+
+#[test]
+fn a_pruned_log_and_a_whole_log_give_the_same_key_version() {
+    let (mut log, a, b, host) = two();
+    act(&mut log, &b, rotated(&b, 0x62));
+    act(&mut log, &b, access_body(host, &b, true, 1));
+    let hash = log.state().hash().unwrap();
+    let checkpoint = act(&mut log, &a, Body::Checkpoint(hash));
+    let whole = copy(&log);
+    log.prune(&checkpoint.id()).unwrap();
+    let (pruned, whole) = (keys_of(&log, &host, &b), keys_of(&whole, &host, &b));
+    assert_eq!((pruned.keys, pruned.tiebreak), (whole.keys, whole.tiebreak));
+    assert_eq!(pruned.tunnel, [0x62; 32]);
+}
+
+#[test]
+fn an_agent_keeps_a_pruned_logs_newer_keys_over_a_stale_whole_view() {
+    let (mut log, a, b, host) = two();
+    let stale = copy(&log);
+    act(&mut log, &b, rotated(&b, 0x62));
+    let hash = log.state().hash().unwrap();
+    let checkpoint = act(&mut log, &a, Body::Checkpoint(hash));
+    log.prune(&checkpoint.id()).unwrap();
+    let held = host_access::Access::merge(
+        None,
+        host_access::compute(&log, &host, [], |_| false).unwrap(),
+    )
+    .unwrap();
+    let after = host_access::Access::merge(
+        Some(&held),
+        host_access::compute(&stale, &host, [], |_| false).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(after.members[&Id(b.id().0)].tunnel, [0x62; 32]);
+}
+
+#[test]
+fn views_of_a_key_in_two_places_settle_on_the_logs_bundle_once_it_signs_again() {
+    let (mut log, _, b, host) = two();
     let before = log.heads().to_vec();
     let seq = log.state().members[&b.id()].seq + 1;
-    let rotation = |tunnel: u8| {
-        let mut rotated = b.bundle.clone();
-        rotated.tunnel = [tunnel; 32];
-        sign_on(&log, &b, &before, seq, Body::Rotate(rotated))
-    };
-    let (first, second) = (rotation(0x61), rotation(0x62));
+    let first = sign_on(&log, &b, &before, seq, rotated(&b, 0x61));
+    let second = sign_on(&log, &b, &before, seq, rotated(&b, 0x62));
     let mut one = copy(&log);
     apply(&mut one, first.clone());
-    let alone = host_access::compute(&one, &host, [], |_| false).unwrap();
     apply(&mut log, first);
     apply(&mut log, second);
-    let both = host_access::compute(&log, &host, [], |_| false).unwrap();
-    let (alone, both) = (&alone.members[&Id(b.id().0)], &both.members[&Id(b.id().0)]);
-    assert_eq!((alone.keys, alone.seen), (seq, 1));
-    assert_eq!((both.keys, both.seen), (seq, 2));
-    // An agent that held the first takes whichever the full log kept.
+    // Both views tie on the number; the bundle hash orders them the same
+    // way everywhere.
+    let (alone, both) = (keys_of(&one, &host, &b), keys_of(&log, &host, &b));
+    assert_eq!(alone.keys, both.keys);
+    // Once b signs again, every agent takes the bundle the log kept.
+    act(&mut log, &b, access_body(host, &b, true, 1));
     let kept = log.state().members[&b.id()].bundle.tunnel;
     let held = host_access::Access::merge(
         None,

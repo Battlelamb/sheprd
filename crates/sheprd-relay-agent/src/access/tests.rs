@@ -27,7 +27,7 @@ pub(crate) fn member(seed: u8, allow: bool, rev: u64) -> Member {
         ssh: crate::authorized_keys::tests::key(seed),
         tunnel: [seed; 32],
         keys: 0,
-        seen: 0,
+        tiebreak: Id::default(),
         former: Vec::new(),
     }
 }
@@ -295,25 +295,19 @@ fn json_that_is_no_access_file_is_refused() {
 }
 
 #[test]
-fn a_file_that_knew_both_competing_rotations_outranks_one_that_knew_one() {
-    // Two rotations at one sequence number: each partial view ties.
-    let mut one = access(&[(1, true, 0)], &[]);
-    let first = one.members.get_mut(&id(1)).unwrap();
-    first.keys = 5;
-    first.seen = 1;
-    first.tunnel = [0x51; 32];
-    let held = Access::merge(None, one.clone()).unwrap();
-    let mut other = one.clone();
-    other.members.get_mut(&id(1)).unwrap().tunnel = [0x52; 32];
-    let tie = Access::merge(Some(&held), other.clone()).unwrap();
-    assert_eq!(
-        tie.members[&id(1)].tunnel,
-        [0x51; 32],
-        "a tie keeps what is held"
-    );
-    // The log that holds both picked the other: its file wins.
-    let mut full = other;
-    full.members.get_mut(&id(1)).unwrap().seen = 2;
-    let merged = Access::merge(Some(&held), full).unwrap();
-    assert_eq!(merged.members[&id(1)].tunnel, [0x52; 32]);
+fn a_tie_on_key_versions_breaks_on_the_bundle_whichever_arrives_first() {
+    let view = |tunnel: u8, tiebreak: u8| {
+        let mut file = access(&[(1, true, 0)], &[]);
+        let member = file.members.get_mut(&id(1)).unwrap();
+        member.keys = 5;
+        member.tunnel = [tunnel; 32];
+        member.tiebreak = Id([tiebreak; 32]);
+        file
+    };
+    let (low, high) = (view(0x51, 1), view(0x52, 2));
+    for (first, second) in [(&low, &high), (&high, &low)] {
+        let held = Access::merge(None, first.clone()).unwrap();
+        let merged = Access::merge(Some(&held), second.clone()).unwrap();
+        assert_eq!(merged.members[&id(1)].tunnel, [0x52; 32]);
+    }
 }

@@ -703,3 +703,39 @@ fn a_fleet_that_would_crowd_out_an_enrolled_desktop_is_refused() {
         Err(Error::DialKeys { .. })
     ));
 }
+
+#[test]
+fn a_file_that_only_takes_access_away_applies_with_the_agent_at_capacity() {
+    let host = Host::new();
+    let mut desktops = Authorized::default();
+    for seed in 0..u8::try_from(MAX_DIAL_KEYS - 2).unwrap() {
+        desktops
+            .insert(Entry {
+                dial: dial(seed.wrapping_add(100)),
+                tunnel: [seed.wrapping_add(100); 32],
+                label: format!("desk{seed}"),
+            })
+            .unwrap();
+    }
+    desktops.save(host.state()).unwrap();
+    host.apply(file(&[(1, true, 0), (2, true, 0)], &[], &[]))
+        .unwrap();
+    // Full: a third member would not fit. A file that adds member 3 while
+    // removing member 2 and denying member 1 fits once 2 is gone.
+    let changed = file(&[(1, false, 1), (3, true, 0)], &[2], &[]);
+    host.apply(changed).unwrap();
+    let held = Held::load(host.state()).unwrap();
+    assert!(held.admits(&id(3)));
+    assert!(!held.admits(&id(2)));
+    // At capacity again, a file that removes 3 and adds 4 and 5 still
+    // removes 3; only the additions wait.
+    let crowded = file(&[(1, false, 1), (4, true, 0), (5, true, 0)], &[2, 3], &[]);
+    assert!(matches!(host.apply(crowded), Err(Error::DialKeys { .. })));
+    let held = Held::load(host.state()).unwrap();
+    assert!(!held.admits(&id(3)));
+    assert!(!held.admits(&id(4)) && !held.admits(&id(5)));
+    assert!(held.access.unwrap().removed.contains(&id(3)));
+    // A denial alone, over capacity or not, always applies.
+    host.apply(file(&[(1, false, 2)], &[2, 3], &[])).unwrap();
+    assert!(host.lines().is_empty());
+}

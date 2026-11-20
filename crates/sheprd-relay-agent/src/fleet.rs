@@ -127,7 +127,7 @@ impl Held {
         let _lock = files::Lock::acquire(state_dir)?;
         let mut held = Self::load(state_dir)?;
         let settled = incoming.settled.clone();
-        let merged = Access::merge(held.access.as_ref(), incoming)?;
+        let mut merged = Access::merge(held.access.as_ref(), incoming)?;
         // A desktop with both keys of a member removed for good stays
         // enrolled, cut off: never forgotten on a member's word.
         let removed = |id: &Id| merged.removed.contains(id);
@@ -150,12 +150,15 @@ impl Held {
         // block always fits.
         held.revoked.retain(|pair| enrolled(pair));
         for pair in pairs.into_iter().filter(|pair| enrolled(pair)) {
-            if held.revoked.len() >= crate::authorized::MAX_ENTRIES {
+            if !held.revoked.contains(&pair) && held.revoked.len() >= crate::authorized::MAX_ENTRIES
+            {
                 return Err(Error::Revoked);
             }
             held.revoked.insert(pair);
         }
-        fits(&desktops, Some(&merged))?;
+        // Taking access away always applies; only what adds a dial key
+        // waits for room, counted after the removals.
+        let refused = hold_back_additions(held.access.as_ref(), &mut merged, &desktops);
         // Each settled removal is forgotten as it is settled, so files
         // that each settle some of a suspension's removals, as the bound
         // on `settled` may make them, lift it between them.
@@ -172,7 +175,10 @@ impl Held {
         // and Sheprd applies it again.
         held.write_keys(keys)?;
         held.save(state_dir)?;
-        Ok(held)
+        match refused {
+            Some(error) => Err(error),
+            None => Ok(held),
+        }
     }
 
     /// `fleet scrub`: forgets the fleet, its `authorized_keys` lines in
@@ -346,6 +352,48 @@ impl Held {
             suspended: self.suspended.clone(),
         }))
     }
+}
+
+/// When `merged` would need more dial keys than a relay takes, puts back
+/// what it adds beside `held`: members `held` lacked are left out, and
+/// members whose dial key changed keep their held keys, with the new
+/// allow, deny, and `rev`. Removals, denials, and suspensions stay. The
+/// refusal, to report once the rest is applied; none when it fits.
+fn hold_back_additions(
+    held: Option<&Access>,
+    merged: &mut Access,
+    desktops: &Authorized,
+) -> Option<Error> {
+    let error = fits(desktops, Some(merged)).err()?;
+    let before = |id: &Id| held.and_then(|held| held.members.get(id));
+    let added: Vec<Id> = merged
+        .members
+        .iter()
+        .filter(|(id, member)| before(id).is_none_or(|old| old.dial != member.dial))
+        .map(|(id, _)| *id)
+        .collect();
+    if added.is_empty() {
+        // Nothing here adds a key: what was held was already over, and
+        // what this file changes only takes access away.
+        return None;
+    }
+    for id in added {
+        match before(&id) {
+            Some(old) => {
+                if let Some(member) = merged.members.get_mut(&id) {
+                    *member = Member {
+                        allow: member.allow,
+                        rev: member.rev,
+                        ..old.clone()
+                    };
+                }
+            }
+            None => {
+                merged.members.remove(&id);
+            }
+        }
+    }
+    Some(error)
 }
 
 /// Whether every enrolled desktop and every member of `access` fits in

@@ -35,7 +35,11 @@ added with this plan:
   document: which tab or workspace is in front, the selected pane
   (`active`), mirror tabs (`observe`), folded groups.
 - Changes are `spaces::Edit`s (`KeepWorkspace`, `RenameWorkspace`,
-  `MoveWorkspace`, `ForgetWorkspace`, `PutTab`, `CloseTab`) applied with
+  `MoveWorkspace`, `ForgetWorkspace`, `OpenTab`, `CloseTab`, and `Tab`
+  with one `TabEdit`: `Split`, `RemovePane`, `SetPanes`, `Zoom`, `Rename`,
+  `RenamePane`, `Retitle`, `Move`). Each names only what it changes, so a
+  rename on one computer and a zoom on another both stay, and an edit to a
+  tab another client closed changes nothing. They are applied with
   `sheprd_core_client::spaces::update(core, &edits)`, or any change with
   `spaces::change(core, |spaces| ...)`. Both write over the version they
   read; when another client wrote first, they apply the edit again to its

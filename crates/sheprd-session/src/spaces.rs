@@ -13,9 +13,12 @@
 //! each keep their change: the later write is refused, and it applies its
 //! edit again to the newer document (`sheprd_core_client::spaces`).
 
+mod adopt;
 mod error;
+mod tabs;
 
 pub use error::Error;
+pub use tabs::TabEdit;
 
 use crate::panes::Panes;
 use crate::saved::{MAX_CWD_BYTES, MAX_ID_BYTES, MAX_LABEL_CHARS, MAX_SAVED_TABS};
@@ -85,7 +88,9 @@ pub struct Tab {
     pub zoomed: Option<TerminalId>,
 }
 
-/// One change to a document.
+/// One change to a document. Each names only what it changes, so two
+/// clients changing different things at once both keep their change when
+/// the later one applies its edit again to the newer document.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Edit {
     /// Closes a tab; one already gone is no change.
@@ -98,11 +103,14 @@ pub enum Edit {
     /// Moves a workspace before another, or to the end when `before` is
     /// `None` or gone.
     MoveWorkspace { id: String, before: Option<String> },
-    /// Adds a tab at the end, or replaces the tab of that id: its layout,
-    /// names, title, or workspace changed.
-    PutTab(Tab),
+    /// Adds a new tab at the end. An id already held is refused, and so is
+    /// a terminal another tab holds.
+    OpenTab(Tab),
     /// Renames a workspace, which the user then named.
     RenameWorkspace { id: String, label: String },
+    /// Changes one thing about the tab `id`. A tab already gone is no
+    /// change: an edit never brings back a tab another client closed.
+    Tab { id: String, edit: TabEdit },
 }
 
 /// What [`Spaces::adopt`] changed: the document ids the adopted workspaces
@@ -223,27 +231,18 @@ impl Spaces {
                 let Some(from) = self.workspaces.iter().position(|w| w.id == id) else {
                     return Err(Error::Missing(id));
                 };
+                // Before itself is where it is.
+                if before.as_deref() == Some(id.as_str()) {
+                    return Ok(());
+                }
                 let moved = self.workspaces.remove(from);
                 let to = before
                     .and_then(|before| self.workspaces.iter().position(|w| w.id == before))
                     .unwrap_or(self.workspaces.len());
                 self.workspaces.insert(to, moved);
             }
-            Edit::PutTab(tab) => {
-                if !tab.valid() {
-                    return Err(Error::Invalid);
-                }
-                if self.workspace(&tab.workspace_id).is_none() {
-                    return Err(Error::Missing(tab.workspace_id));
-                }
-                if let Some(held) = self.tabs.iter_mut().find(|held| held.id == tab.id) {
-                    *held = tab;
-                } else if self.tabs.len() >= MAX_ENTRIES {
-                    return Err(Error::Full);
-                } else {
-                    self.tabs.push(tab);
-                }
-            }
+            Edit::OpenTab(tab) => self.open_tab(tab)?,
+            Edit::Tab { id, edit } => self.edit_tab(&id, edit)?,
             Edit::RenameWorkspace { id, label } => {
                 let label = clean_label(&label);
                 if label.is_empty() || label.chars().count() > MAX_LABEL_CHARS {
@@ -260,93 +259,6 @@ impl Spaces {
         }
         Ok(())
     }
-
-    /// Adds what one client kept for this core before the document held it,
-    /// as when the app first finds a core's document, without losing what
-    /// is there:
-    ///
-    /// - a workspace whose folder a kept one has joins that one;
-    /// - any other keeps its id when free, else takes `new_id()`;
-    /// - a tab whose terminals another tab already holds is left out, and
-    ///   any other keeps its id when free, else takes `new_id()`.
-    ///
-    /// What does not fit the bounds is left out. Answers the ids taken.
-    pub fn adopt(
-        &mut self,
-        workspaces: impl IntoIterator<Item = Workspace>,
-        tabs: impl IntoIterator<Item = Tab>,
-        mut new_id: impl FnMut() -> String,
-    ) -> Result<Adopted, Error> {
-        if !self.writable() {
-            return Err(Error::Newer(self.format));
-        }
-        let mut adopted = Adopted::default();
-        for workspace in workspaces {
-            if !workspace.valid() {
-                continue;
-            }
-            let joined = self
-                .workspaces
-                .iter()
-                .find(|kept| !kept.cwd.is_empty() && kept.cwd == workspace.cwd)
-                .map(|kept| kept.id.clone());
-            if let Some(joined) = joined {
-                adopted.workspaces.insert(workspace.id, joined);
-                continue;
-            }
-            if self.workspaces.len() >= MAX_ENTRIES {
-                continue;
-            }
-            let id = self.free_workspace_id(&workspace.id, &mut new_id);
-            adopted.workspaces.insert(workspace.id.clone(), id.clone());
-            self.workspaces.push(Workspace { id, ..workspace });
-        }
-        for tab in tabs {
-            let Some(workspace_id) = adopted.workspaces.get(&tab.workspace_id).cloned() else {
-                continue;
-            };
-            let held = tab
-                .panes
-                .terminals()
-                .into_iter()
-                .any(|terminal| self.tab_holding(terminal).is_some());
-            if held || !tab.valid() || self.tabs.len() >= MAX_ENTRIES {
-                continue;
-            }
-            let id = if self.tab(&tab.id).is_some() {
-                fresh(&mut new_id, |id| self.tab(id).is_none())
-            } else {
-                tab.id.clone()
-            };
-            adopted.tabs.insert(tab.id.clone(), id.clone());
-            self.tabs.push(Tab {
-                id,
-                workspace_id,
-                ..tab
-            });
-        }
-        Ok(adopted)
-    }
-
-    fn free_workspace_id(&self, wanted: &str, new_id: &mut impl FnMut() -> String) -> String {
-        if self.workspace(wanted).is_none() {
-            return wanted.to_owned();
-        }
-        fresh(new_id, |id| self.workspace(id).is_none())
-    }
-}
-
-/// An id from `new_id` that `free` accepts. Callers hand out random ids, so
-/// a second try is rare; the bound only stops a broken generator.
-fn fresh(new_id: &mut impl FnMut() -> String, free: impl Fn(&str) -> bool) -> String {
-    let mut id = new_id();
-    for _ in 0..16 {
-        if free(&id) {
-            break;
-        }
-        id = new_id();
-    }
-    id
 }
 
 impl Workspace {
@@ -382,7 +294,7 @@ impl Tab {
     }
 }
 
-fn valid_id(id: &str) -> bool {
+pub(super) fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= MAX_ID_BYTES && !id.chars().any(char::is_control)
 }
 

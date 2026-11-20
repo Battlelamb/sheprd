@@ -246,10 +246,12 @@ fn a_pull_request_reports_its_stack_and_queue_entry() {
             layer(1, "OPEN", "CLEAN", None, Some("SUCCESS")),
             layer(2, "OPEN", "BLOCKED", Some("REVIEW_REQUIRED"), None),
         ]}},
-        "mergeQueueEntry": {"state": "QUEUED", "position": 3, "estimatedTimeToMerge": 600}
+        "mergeQueueEntry": {"state": "QUEUED", "position": 3, "estimatedTimeToMerge": 600},
+        "isMergeQueueEnabled": true
     }));
     let (stack, position) = pr.stack().unwrap();
     assert_eq!((stack.number, position), (950, 2));
+    assert!(pr.merge_queue);
     assert_eq!(pr.queue.unwrap().position, 3);
 }
 
@@ -297,4 +299,27 @@ fn a_layer_left_unread_below_keeps_the_verdict_from_ready_or_merged() {
     // A blocked layer that was read still blocks.
     let blocked = stack(vec![layer(1, "OPEN", "DIRTY", None, None)]);
     assert!(matches!(blocked.verdict(3), Verdict::Blocked { .. }));
+}
+
+#[test]
+fn merging_and_queueing_are_offered_only_when_every_layer_below_is_known() {
+    let ready = layer(1, "OPEN", "CLEAN", Some("APPROVED"), Some("SUCCESS"));
+    let full = pull_request(json!({
+        "stackEntry": {"position": 2},
+        "stack": {"number": 950, "baseRefName": "main", "size": 2, "entries": {"nodes": [
+            ready.clone(), layer(2, "OPEN", "CLEAN", None, None),
+        ]}}
+    }));
+    assert_eq!(full.lands(), [1361, 1362]);
+    assert!(full.stack_mergeable() && full.stack_known());
+    let gap = pull_request(json!({
+        "stackEntry": {"position": 3},
+        "stack": {"number": 950, "baseRefName": "main", "size": 3, "entries": {"nodes": [
+            ready, layer(3, "OPEN", "CLEAN", None, None),
+        ]}}
+    }));
+    assert!(!gap.stack_mergeable() && !gap.stack_known());
+    let alone = pull_request(json!({}));
+    assert_eq!(alone.lands(), [1364]);
+    assert!(alone.stack_mergeable() && alone.stack_known());
 }

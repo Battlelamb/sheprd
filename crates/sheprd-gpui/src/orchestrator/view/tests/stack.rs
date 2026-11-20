@@ -9,7 +9,7 @@ use crate::orchestrator::{
 use gpui::{Modifiers, TestAppContext, VisualTestContext, point, px};
 use std::sync::Arc;
 
-fn listed(number: u64) -> Item {
+pub(super) fn listed(number: u64) -> Item {
     let mut pr = item(
         Provider::Github,
         &format!("pr/{number}"),
@@ -30,7 +30,7 @@ fn listed(number: u64) -> Item {
 }
 
 /// Opens #1364's page, looked up as layer 3 of 4, with #1362 listed too.
-fn open_stacked(
+pub(super) fn open_stacked(
     cx: &mut TestAppContext,
     looked_up: crate::pull_request::PullRequest,
 ) -> (
@@ -95,7 +95,7 @@ fn the_chip_opens_the_verdict_under_it_and_a_click_elsewhere_closes_it(cx: &mut 
     cx.simulate_click(chip.center(), Modifiers::none());
     cx.run_until_parked();
     assert!(!shown_text(cx, "orchestrator-stack-popover"));
-    cx.update(|_, cx| assert_eq!(view.read(cx).stack_open, None));
+    cx.update(|_, cx| assert_eq!(view.read(cx).stack.open, None));
 
     cx.simulate_click(chip.center(), Modifiers::none());
     cx.run_until_parked();
@@ -135,7 +135,7 @@ fn the_verdict_names_the_lowest_layer_that_blocks_and_opens_it(cx: &mut TestAppC
             view.detail.as_ref().map(|d| d.key.as_str()),
             Some(opened.as_str())
         );
-        assert_eq!(view.stack_open, None);
+        assert_eq!(view.stack.open, None);
     });
 }
 

@@ -188,6 +188,33 @@ impl Stack {
     }
 }
 
+impl super::PullRequest {
+    /// The pull requests merging or queueing this one lands, bottom first:
+    /// on a stack, every open layer up to it as read; else itself.
+    pub fn lands(&self) -> Vec<u64> {
+        match self.stack() {
+            Some((stack, position)) => stack.landing(position).map(|layer| layer.number).collect(),
+            None => vec![self.number],
+        }
+    }
+
+    /// Whether a merge may be offered as far as its stack goes: in no
+    /// stack, or every layer up to it read and ready, so a confirmation can
+    /// name all that lands.
+    pub fn stack_mergeable(&self) -> bool {
+        self.stack().is_none_or(|(stack, position)| {
+            matches!(stack.verdict(position), Verdict::Ready { .. })
+        })
+    }
+
+    /// Whether queueing may be offered as far as its stack goes: in no
+    /// stack, or every layer up to it read.
+    pub fn stack_known(&self) -> bool {
+        self.stack()
+            .is_none_or(|(stack, position)| stack.read_through(position))
+    }
+}
+
 /// A pull request's entry in its base branch's merge queue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 pub struct QueueEntry {
@@ -347,6 +374,23 @@ impl From<RawStack> for Stack {
 /// check, this one (#1364) waiting on a review, and #1366 a draft.
 #[cfg(any(test, feature = "test-support"))]
 pub fn stacked_fixture() -> crate::Result<super::PullRequest> {
+    stacked(false)
+}
+
+/// [`stacked_fixture`] once #1362's checks pass and #1364 is approved, so
+/// both can merge, on a branch with a merge queue.
+#[cfg(any(test, feature = "test-support"))]
+pub fn ready_stacked_fixture() -> crate::Result<super::PullRequest> {
+    stacked(true)
+}
+
+#[cfg(any(test, feature = "test-support"))]
+fn stacked(ready: bool) -> crate::Result<super::PullRequest> {
+    let (below, here, review) = if ready {
+        ("SUCCESS", "CLEAN", "APPROVED")
+    } else {
+        ("FAILURE", "BLOCKED", "REVIEW_REQUIRED")
+    };
     let layer = |position: u64,
                  number: u64,
                  state: &str,
@@ -365,14 +409,14 @@ pub fn stacked_fixture() -> crate::Result<super::PullRequest> {
         "title": "Show T3 sessions in the sidebar", "state": "OPEN", "isDraft": false,
         "headRefName": "feat/t3-sidebar", "baseRefName": "feat/t3-client",
         "additions": 120, "deletions": 4, "changedFiles": 6, "updatedAt": "2026-11-17T09:00:00Z",
-        "mergeStateStatus": "BLOCKED", "reviewDecision": "REVIEW_REQUIRED",
+        "mergeStateStatus": here, "reviewDecision": review, "isMergeQueueEnabled": ready,
         "headRepositoryOwner": {"login": "example"},
         "id": "PR_kwDOstacked", "headRefOid": "0123456789abcdef0123456789abcdef01234567",
         "stackEntry": {"position": 3},
         "stack": {"number": 950, "baseRefName": "main", "size": 4, "entries": {"nodes": [
             layer(1, 1361, "MERGED", false, "UNKNOWN", None, "SUCCESS"),
-            layer(2, 1362, "OPEN", false, "BLOCKED", Some("APPROVED"), "FAILURE"),
-            layer(3, 1364, "OPEN", false, "BLOCKED", Some("REVIEW_REQUIRED"), "SUCCESS"),
+            layer(2, 1362, "OPEN", false, here, Some("APPROVED"), below),
+            layer(3, 1364, "OPEN", false, here, Some(review), "SUCCESS"),
             layer(4, 1366, "OPEN", true, "DRAFT", None, "PENDING"),
         ]}}
     }]).to_string(), "example", "project", "feat/t3-sidebar")?

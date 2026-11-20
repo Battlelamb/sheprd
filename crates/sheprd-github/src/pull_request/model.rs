@@ -70,6 +70,9 @@ pub struct PullRequest {
     /// Its entry in the base branch's merge queue, while it has one.
     #[serde(default, rename = "mergeQueueEntry")]
     pub queue: Option<super::QueueEntry>,
+    /// Whether its base branch merges through a merge queue.
+    #[serde(default, rename = "isMergeQueueEnabled")]
+    pub merge_queue: bool,
 }
 
 /// How a pull request is merged: GitHub's `PullRequestMergeMethod`.

@@ -126,8 +126,14 @@ pub fn compute(
         .members
         .iter()
         .filter(|(_, member)| member.bundle.kind == Kind::Computer)
-        .filter_map(|(id, member)| {
-            let ssh = sheprd_relay_agent::authorized_keys::ed25519(member.bundle.ssh.as_deref()?)?;
+        .map(|(id, member)| {
+            // A member without an Ed25519 key is still listed: leaving it
+            // out would leave the agent its older keys and access.
+            let ssh = member
+                .bundle
+                .ssh
+                .as_deref()
+                .and_then(sheprd_relay_agent::authorized_keys::ed25519);
             let rev = state
                 .access
                 .get(&(*host, *id))
@@ -145,7 +151,7 @@ pub fn compute(
                 tiebreak: version.1,
                 former: Vec::new(),
             };
-            Some((Id(id.0), member))
+            (Id(id.0), member)
         })
         .collect();
     // One removal may suspend several members: each id counts once

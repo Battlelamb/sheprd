@@ -1437,7 +1437,10 @@ sequenceDiagram
    - the fleet id, which pins the account to this fleet: a file for
      another fleet is refused, naming the fleet that holds it;
    - per computer member: its fleet, dial, tunnel, and SSH keys, its name,
-     whether it is allowed, and the `Access` `rev` (0 until set);
+     whether it is allowed, and the `Access` `rev` (0 until set). A
+     member whose SSH key is not Ed25519 is listed without one, so its
+     deny and the retiring of its older keys still land, and it never
+     reaches SSH;
    - every removed member id;
    - `settled`: of the removals the agent reported suspending for, those
      the log holds.

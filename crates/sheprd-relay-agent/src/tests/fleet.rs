@@ -28,7 +28,7 @@ fn member(desktop: &Desktop, seed: u8, allow: bool, rev: u64) -> (Id, Member) {
         fleet_key: client::public(&fleet_key(desktop)),
         name: format!("computer{seed}"),
         rev,
-        ssh: authorized_keys::tests::key(seed),
+        ssh: Some(authorized_keys::tests::key(seed)),
         tunnel: desktop.tunnel.identity().x25519(),
         keys: 0,
         tiebreak: Id::default(),

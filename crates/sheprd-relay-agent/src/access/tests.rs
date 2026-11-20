@@ -24,7 +24,7 @@ pub(crate) fn member(seed: u8, allow: bool, rev: u64) -> Member {
             .unwrap(),
         name: format!("computer{seed}"),
         rev,
-        ssh: crate::authorized_keys::tests::key(seed),
+        ssh: Some(crate::authorized_keys::tests::key(seed)),
         tunnel: [seed; 32],
         keys: 0,
         tiebreak: Id::default(),
@@ -275,7 +275,7 @@ fn a_member_with_bad_keys_or_name_is_refused() {
     file.members.get_mut(&id(1)).unwrap().dial = [0; 33];
     assert_eq!(file.check(), Err(Error::Member { member: id(1) }));
     let mut file = access(&[(1, true, 0)], &[]);
-    file.members.get_mut(&id(1)).unwrap().ssh = "ssh-rsa AAAA".to_owned();
+    file.members.get_mut(&id(1)).unwrap().ssh = Some("ssh-rsa AAAA".to_owned());
     assert_eq!(file.check(), Err(Error::Member { member: id(1) }));
     let mut file = access(&[(1, true, 0)], &[]);
     file.members.get_mut(&id(1)).unwrap().name = "line\nbreak".to_owned();

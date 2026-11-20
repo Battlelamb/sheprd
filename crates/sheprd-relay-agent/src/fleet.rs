@@ -349,7 +349,7 @@ impl Held {
         };
         let lines: Vec<(String, String)> = self
             .ssh_members()
-            .map(|(id, member)| (id.short(), member.ssh.clone()))
+            .filter_map(|(id, member)| Some((id.short(), member.ssh.clone()?)))
             .collect();
         authorized_keys::set_fleet(path, &access.fleet.short(), &lines)
     }

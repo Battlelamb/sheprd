@@ -30,6 +30,8 @@ mod flood;
 #[cfg(unix)]
 mod joining;
 #[cfg(unix)]
+mod link_intents;
+#[cfg(unix)]
 mod link_recovery;
 #[cfg(unix)]
 mod offline;

@@ -87,6 +87,7 @@ impl Page {
             Self::PortSignal => fl!("menu-page-ports"),
             Self::PrComment => fl!("menu-page-comment-on-pull-request"),
             Self::PrMerge => fl!("menu-page-merge-pull-request"),
+            Self::PrQueue => fl!("menu-page-merge-queue"),
             Self::PrReview => fl!("menu-page-pull-request"),
             Self::RemoteControl => fl!("menu-page-remote-control"),
             Self::RemoteDevices => fl!("menu-page-remote-control-phones"),

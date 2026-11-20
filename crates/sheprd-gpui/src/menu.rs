@@ -26,6 +26,7 @@ mod page_title;
 mod port_signal;
 mod pr;
 mod pr_actions;
+mod pr_queue;
 mod sessions;
 mod settings;
 mod shortcut_editor;
@@ -76,6 +77,7 @@ use crate::direction::Logical;
 pub(crate) use devices::{DeviceScope, SettingsHint, enter as enter_key};
 pub(crate) use overview_reply::open_overview_reply;
 use page::WorkspaceMenuAction;
+pub(crate) use pr_queue::PrChange;
 use state::Submission;
 use workspace::WorkspaceTarget;
 

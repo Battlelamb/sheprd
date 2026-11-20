@@ -20,6 +20,8 @@ pub enum Error {
     Newer(u32),
     #[error(transparent)]
     Panes(#[from] crate::panes::Error),
+    #[error("shared tab {0} changed its panes since its layout was read")]
+    Stale(String),
     #[error("a shared workspace {0} is already kept")]
     Taken(String),
     // keep-sorted end

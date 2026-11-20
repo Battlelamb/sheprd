@@ -131,9 +131,71 @@ fn a_split_or_layout_taking_another_tabs_terminal_is_refused_and_changes_nothing
     let taken = tab("x", "space-a", "t2").panes;
     assert!(matches!(
         spaces.apply(edit("tab-1", TabEdit::SetPanes { panes: taken })),
-        Err(Error::Held(_))
+        Err(Error::Stale(_))
     ));
     assert_eq!(spaces, before);
+}
+
+/// `tab-1` split into `t1` and `t2`.
+fn split_tab() -> Spaces {
+    let mut spaces = one_tab();
+    let split = TabEdit::Split {
+        at: terminal("t1"),
+        axis: Axis::Row,
+        new: terminal("t2"),
+    };
+    spaces.apply(edit("tab-1", split)).unwrap();
+    spaces
+}
+
+#[test]
+fn a_layout_moving_the_same_panes_is_taken() {
+    let mut spaces = split_tab();
+    let mut swapped = spaces.tab("tab-1").unwrap().panes.clone();
+    assert!(swapped.swap(&terminal("t1"), &terminal("t2")));
+    spaces
+        .apply(edit(
+            "tab-1",
+            TabEdit::SetPanes {
+                panes: swapped.clone(),
+            },
+        ))
+        .unwrap();
+    assert_eq!(spaces.tab("tab-1").unwrap().panes, swapped);
+}
+
+#[test]
+fn a_layout_read_before_another_clients_split_or_close_is_refused() {
+    // Read before the split: it would drop the new pane.
+    let before_split = one_tab().tab("tab-1").unwrap().panes.clone();
+    let mut spaces = split_tab();
+    let kept = spaces.clone();
+    assert!(matches!(
+        spaces.apply(edit(
+            "tab-1",
+            TabEdit::SetPanes {
+                panes: before_split
+            }
+        )),
+        Err(Error::Stale(_))
+    ));
+    assert_eq!(spaces, kept);
+    // Read before a pane closed: it would bring the pane back.
+    let mut swapped = spaces.tab("tab-1").unwrap().panes.clone();
+    swapped.swap(&terminal("t1"), &terminal("t2"));
+    spaces
+        .apply(edit(
+            "tab-1",
+            TabEdit::RemovePane {
+                terminal: terminal("t2"),
+            },
+        ))
+        .unwrap();
+    assert!(matches!(
+        spaces.apply(edit("tab-1", TabEdit::SetPanes { panes: swapped })),
+        Err(Error::Stale(_))
+    ));
+    assert!(!spaces.tab("tab-1").unwrap().panes.contains(&terminal("t2")));
 }
 
 #[test]

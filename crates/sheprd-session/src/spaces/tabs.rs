@@ -24,8 +24,9 @@ pub enum TabEdit {
     /// Its program's title, shown when it has no name.
     Retitle { title: String },
     /// Its whole layout, for what moves panes without adding or closing
-    /// one (resizing, swapping). Names and zoom of panes it no longer
-    /// holds go.
+    /// one (resizing, swapping). Refused as [`Error::Stale`] when the tab
+    /// no longer holds the same terminals, as after another client's split
+    /// or closed pane: writing it would undo that change.
     SetPanes { panes: Panes },
     /// `new` beside the pane `at`: right of it on [`Axis::Row`], below on
     /// [`Axis::Column`].
@@ -97,11 +98,10 @@ impl Spaces {
             }
             TabEdit::Retitle { title } => tab.title = title,
             TabEdit::SetPanes { panes } => {
-                if let Some(held) = self.held_elsewhere(id, &panes) {
-                    return Err(Error::Held(held));
+                if !same_terminals(&tab.panes, &panes) {
+                    return Err(Error::Stale(tab.id));
                 }
                 tab.panes = panes;
-                tab.forget_gone_panes();
             }
             TabEdit::Split { at, axis, new } => {
                 if self.tab_holding(&new).is_some() {
@@ -119,18 +119,15 @@ impl Spaces {
         self.tabs[index] = tab;
         Ok(())
     }
+}
 
-    /// A terminal of `panes` that a tab other than `id` holds.
-    fn held_elsewhere(&self, id: &str, panes: &Panes) -> Option<TerminalId> {
-        panes
-            .terminals()
-            .into_iter()
-            .find(|terminal| {
-                self.tab_holding(terminal)
-                    .is_some_and(|holder| holder.id != id)
-            })
-            .cloned()
-    }
+/// Whether two layouts hold the same terminals, wherever they are.
+fn same_terminals(held: &Panes, laid_out: &Panes) -> bool {
+    let mut held = held.terminals();
+    let mut laid_out = laid_out.terminals();
+    held.sort_unstable();
+    laid_out.sort_unstable();
+    held == laid_out
 }
 
 impl Tab {

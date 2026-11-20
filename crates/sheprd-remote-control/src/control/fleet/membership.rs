@@ -324,6 +324,7 @@ impl<'g, 'a> Folder<'g, 'a> {
                             bundle: bundle.clone(),
                             admitted_by: None,
                             seq: 0,
+                            rotated: 0,
                         },
                     );
                 }
@@ -354,6 +355,7 @@ impl<'g, 'a> Folder<'g, 'a> {
                             bundle: admit.bundle.clone(),
                             admitted_by: Some(op.signer()),
                             seq: 0,
+                            rotated: 0,
                         });
                     }
                 }
@@ -370,6 +372,7 @@ impl<'g, 'a> Folder<'g, 'a> {
                         claims.push(position);
                         members.bundles.insert(position);
                         member.bundle = bundle.clone();
+                        member.rotated = op.unsigned().seq;
                     } else if let Some(host) = unseated.get_mut(&op.signer())
                         && let Some(id) = host_id(bundle)
                     {

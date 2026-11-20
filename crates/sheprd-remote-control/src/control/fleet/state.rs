@@ -26,6 +26,10 @@ pub struct Member {
     pub admitted_by: Option<MemberId>,
     /// The highest sequence number it signed.
     pub seq: u64,
+    /// The sequence number of its own `Rotate` that put `bundle` in
+    /// place; 0 for the bundle it was admitted with. Kept in a checkpoint,
+    /// so a pruned log and a whole one order its key updates alike.
+    pub rotated: u64,
 }
 
 /// A live host.
@@ -124,6 +128,7 @@ impl State {
                 Ok(())
             })?;
             writer.u64(member.seq);
+            writer.u64(member.rotated);
         }
         writer.count(self.tombstones.len())?;
         self.tombstones.iter().for_each(|id| writer.raw(&id.0));
@@ -190,6 +195,7 @@ impl State {
                 bundle: Bundle::read(&mut reader)?,
                 admitted_by: reader.option(|reader| reader.array().map(MemberId))?,
                 seq: reader.u64()?,
+                rotated: reader.u64()?,
             };
             if member.bundle.id() != id {
                 return Err(Error::Invalid);

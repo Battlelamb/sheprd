@@ -1610,10 +1610,13 @@ accepted on this purpose.
   state from the host's record, and sends it the removals it signed
   itself that removed every member they name (a voided removal may name
   a member another removal took, beside one still live). Each member's
-  keys carry its own highest sequence number, which a rotation raises
-  and a pruned log keeps, so an agent never prefers keys a rotation
-  replaced; two views tied by a key in two places break the tie on the
-  hash of the bundle the log keeps. Every member session to
+  keys carry the sequence number of its own latest rotation, which the
+  fleet's state keeps (so a checkpoint carries it and a pruned log agrees
+  with a whole one), so an agent never prefers keys a rotation replaced;
+  rotations competing at one number break the tie on the hash of the
+  bundle. A rotation that does not fit in the relay's dial keys still
+  takes the old pair away, and leaves the member denied until there is
+  room. Every member session to
   an agent, SSH or removal, carries the member's fleet key signing the
   tunnel handshake hash after the purpose byte, checked against the fleet
   key in the access file; a session whose proof is missing or wrong ends.

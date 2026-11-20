@@ -85,20 +85,19 @@ fn settles(log: &Log, asked: &Asked, graced: &impl Fn(&OpId) -> bool) -> bool {
 // The agent remembers as many removed members as the log does.
 const _: () = assert!(sheprd_relay_agent::access::MAX_REMOVED == MAX_TOMBSTONES);
 
-/// How new `member`'s keys (`bundle`) are, as the agent orders key
-/// updates: its own highest sequence number, which every rotation raises
-/// and which a log pruned to a checkpoint keeps in its base, so a pruned
-/// log and a whole one give the same; then the SHA-256 of the bundle the
-/// log keeps, the same in every log, for two views that tie because the
-/// member's key signed in two places. A later operation of that member
-/// raises the number again, and every agent then takes the log's bundle.
+/// How new `member`'s keys are, as the agent orders key updates: the
+/// sequence number of its own `Rotate` that put them in place (0 for the
+/// keys it was admitted with), which no other operation moves and which a
+/// checkpoint keeps, so a pruned log and a whole one agree; then the
+/// SHA-256 of the bundle, the same in every log, between rotations that
+/// compete at one number because the member's key signed in two places.
 fn key_version(member: &crate::control::fleet::Member) -> (u64, Id) {
     let bundle = member
         .bundle
         .to_bytes()
         .map(|bytes| super::sha256(&[&bytes]))
         .unwrap_or_default();
-    (member.seq, Id(bundle))
+    (member.rotated, Id(bundle))
 }
 
 /// The access file for plain host `host` as `log` has it: every live

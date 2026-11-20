@@ -325,20 +325,20 @@ impl SheprdWindow {
 
     /// Lets an `UntilAgentsFinish` hold go once no window's agents work.
     pub(crate) fn observe_agent_work(&self, window: &Window, cx: &mut Context<Self>) {
-        let work = crate::caffeine::Work::of(
-            self.endpoints
-                .iter()
-                .filter(|endpoint| endpoint.enabled)
-                .map(|endpoint| {
-                    endpoint
-                        .live
-                        .snapshot
-                        .as_deref()
-                        .filter(|_| endpoint.live.status.is_connected())
-                }),
-        );
+        let endpoints = self
+            .endpoints
+            .iter()
+            .filter(|endpoint| endpoint.enabled)
+            .map(|endpoint| {
+                let snapshot = endpoint
+                    .live
+                    .snapshot
+                    .as_deref()
+                    .filter(|_| endpoint.live.status.is_connected());
+                (endpoint.id.as_str(), crate::caffeine::Work::of(snapshot))
+            });
         let report = Self::caffeine_report(cx);
-        crate::caffeine::observe(window.window_handle().window_id(), work, cx, report);
+        crate::caffeine::observe(window.window_handle().window_id(), endpoints, cx, report);
     }
 
     /// Shows a keep-awake failure in this window, if it is still open.

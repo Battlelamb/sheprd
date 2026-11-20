@@ -107,13 +107,14 @@ struct NewWorkspaceSheet: View {
                     }
                 }
                 Section {
-                    TextField("What should it do first? (optional)", text: $prompt, axis: .vertical).lineLimit(2...6)
+                    FirstPromptField(prompt: $prompt)
                 } header: {
                     Text("First prompt")
                 } footer: {
                     if let problem { Text(problem).foregroundStyle(.red) }
                 }
             }
+            .followsFirstPrompt(prompt)
             .navigationTitle("New Workspace")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -268,13 +269,14 @@ struct NewChatSheet: View {
                     }
                 }
                 Section {
-                    TextField("What should it do first? (optional)", text: $prompt, axis: .vertical).lineLimit(2...6)
+                    FirstPromptField(prompt: $prompt)
                 } header: {
                     Text("First prompt")
                 } footer: {
                     if let problem { Text(problem).foregroundStyle(.red) }
                 }
             }
+            .followsFirstPrompt(prompt)
             .navigationTitle("New Chat in \(label)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -438,4 +440,32 @@ extension AppModel {
 
     /// Said when a chat may be in another mode than the one the person saw.
     static let startMissed = "The chat may not have the mode or auto-accept you picked. Check them in its Session sheet."
+}
+
+/// The first prompt of a new workspace or chat: the form's last row, which
+/// grows with what is typed.
+private struct FirstPromptField: View {
+    /// The row the form scrolls to as the field grows.
+    static let id = "first-prompt"
+
+    @Binding var prompt: String
+
+    var body: some View {
+        TextField("What should it do first? (optional)", text: $prompt, axis: .vertical)
+            .lineLimit(2...6)
+            .id(Self.id)
+    }
+}
+
+extension View {
+    /// Keeps the first prompt's row in view as it grows: a form does not
+    /// scroll a growing field out from under the keyboard by itself, so its
+    /// new lines were typed out of sight.
+    fileprivate func followsFirstPrompt(_ prompt: String) -> some View {
+        ScrollViewReader { proxy in
+            onChange(of: prompt) {
+                proxy.scrollTo(FirstPromptField.id, anchor: .bottom)
+            }
+        }
+    }
 }

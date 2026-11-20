@@ -76,25 +76,13 @@ pub(super) fn apply(transcript: &mut Transcript, listed: bool) {
 #[cfg(feature = "mockup")]
 pub(super) fn seed(cache: &mut crate::pull_request::Cache) {
     use crate::pull_request::{Input, State, fixture};
+    const OPEN: &str = "Chat rail: list the pull requests an agent works on"; // i18n: data
+    const MERGED: &str = "Keep the composer's draft across reconnects"; // i18n: data
+    const DRAFT: &str = "Document the Pull requests section"; // i18n: data
     let known = [
-        (
-            1455,
-            "Chat rail: list the pull requests an agent works on",
-            State::Open,
-            false,
-        ), // i18n: data
-        (
-            1452,
-            "Keep the composer's draft across reconnects",
-            State::Merged,
-            false,
-        ), // i18n: data
-        (
-            1440,
-            "Document the Pull requests section",
-            State::Open,
-            true,
-        ), // i18n: data
+        (1455, OPEN, State::Open, false),
+        (1452, MERGED, State::Merged, false),
+        (1440, DRAFT, State::Open, true),
     ];
     let now = std::time::Instant::now();
     for (number, title, state, draft) in known {

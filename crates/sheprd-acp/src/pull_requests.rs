@@ -45,7 +45,7 @@ pub(crate) fn found(tool: &Tool, command: Option<&str>) -> Vec<PullRequest> {
         || command_text(&tool.title),
         |command| head(command, MAX_COMMAND).to_owned(),
     );
-    let work: Vec<Work> = commands(&words(text))
+    let work: Vec<Work> = commands(&words(without_here_documents(&text)))
         .filter(|command| !elsewhere(command))
         .filter_map(|command| {
             gh_pr(&command)
@@ -129,6 +129,65 @@ fn elsewhere(command: &[&str]) -> bool {
 
 fn is_github(host: &str) -> bool {
     host.eq_ignore_ascii_case("github.com")
+}
+
+/// `command` without the bodies of its here-documents (`<<EOF` … `EOF`),
+/// which are a file's text, not commands. A body never closed runs to the
+/// end, so what follows an unreadable one is left unread too.
+fn without_here_documents(command: &str) -> String {
+    let mut kept = String::with_capacity(command.len());
+    let mut pending: Vec<(String, bool)> = Vec::new();
+    let mut lines = command.split_inclusive('\n');
+    while let Some(line) = lines.next() {
+        kept.push_str(line);
+        pending.extend(delimiters(line));
+        for (delimiter, tabs) in pending.drain(..) {
+            for body in lines.by_ref() {
+                let body = body.trim_end_matches(['\n', '\r']);
+                let body = if tabs {
+                    body.trim_start_matches('\t')
+                } else {
+                    body
+                };
+                if body == delimiter {
+                    break;
+                }
+            }
+        }
+    }
+    kept
+}
+
+/// The here-documents `line` starts, in order: each delimiter, and whether
+/// `<<-` lets its closing line be indented with tabs. `<<<` is a string,
+/// not a document.
+fn delimiters(line: &str) -> Vec<(String, bool)> {
+    let mut found = Vec::new();
+    let mut rest = line;
+    while let Some(at) = rest.find("<<") {
+        let after = &rest[at + 2..];
+        if after.starts_with('<') {
+            rest = after.trim_start_matches('<');
+            continue;
+        }
+        let (tabs, after) = match after.strip_prefix('-') {
+            Some(after) => (true, after),
+            None => (false, after),
+        };
+        let word: String = after
+            .trim_start()
+            .chars()
+            .take_while(|ch| {
+                !ch.is_whitespace() && !matches!(ch, ';' | '&' | '|' | ')' | '<' | '>')
+            })
+            .filter(|ch| !matches!(ch, '\'' | '"' | '\\'))
+            .collect();
+        if !word.is_empty() {
+            found.push((word, tabs));
+        }
+        rest = after;
+    }
+    found
 }
 
 /// At most `limit` bytes of `text`, cut at a character.

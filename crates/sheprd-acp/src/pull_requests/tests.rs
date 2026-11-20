@@ -315,3 +315,30 @@ fn a_command_aimed_at_another_host_names_nothing() {
         one("o/r#7", Action::Merged)
     );
 }
+
+#[test]
+fn here_document_bodies_are_text_not_commands() {
+    let pulls = |command: &str| found(&call("`cat`", ""), Some(command));
+    for command in [
+        "cat > notes.txt <<'EOF'\ngh pr merge 7 -R o/r\nEOF",
+        "cat <<-NOTE > notes.txt\n\tgh pr close 7 -R o/r\n\tNOTE",
+        "cat <<\"EOF\" | tee notes.txt\ngh pr merge 7 -R o/r\nEOF",
+        // Never closed: the rest is the document's.
+        "cat <<EOF\ngh pr merge 7 -R o/r",
+    ] {
+        assert!(pulls(command).is_empty(), "{command:?}");
+    }
+    // A command after the document still counts, and a here-string is no
+    // document.
+    let after = pulls("cat <<EOF > notes.txt\ngh pr merge 1 -R o/r\nEOF\ngh pr merge 7 -R o/r");
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].number, 7);
+    assert_eq!(pulls("grep x <<< \"$text\"\ngh pr merge 7 -R o/r").len(), 1);
+    // The body of `gh pr create`'s own document is skipped; its URL counts.
+    let create = found(
+        &call("`gh pr create`", "https://github.com/o/r/pull/9"),
+        Some("gh pr create --body \"$(cat <<'EOF'\nFixes https://github.com/o/r/pull/3\nEOF\n)\""),
+    );
+    assert_eq!(create.len(), 1);
+    assert_eq!(create[0].number, 9);
+}

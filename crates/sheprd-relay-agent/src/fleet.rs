@@ -333,11 +333,13 @@ impl Held {
         if !access.members.contains_key(&sender) || held.suspended.contains_key(&sender) {
             return Ok(Vec::new());
         }
-        let sender_allowed = held.reaches_ssh(&sender);
+        // By what the fleet grants, a pause aside: a held host's members
+        // reach no SSH, yet a denied one still suspends only the denied.
+        let sender_allowed = held.grants(&sender);
         let reaching: BTreeSet<Id> = access
             .members
             .keys()
-            .filter(|id| held.reaches_ssh(id))
+            .filter(|id| held.grants(id))
             .copied()
             .collect();
         let mut taken = Vec::new();
@@ -414,18 +416,26 @@ impl Held {
             && !self.suspended.contains_key(member)
     }
 
-    /// Whether member `id` may reach SSH here as far as the fleet and room
-    /// go: allowed by the access file (not removed, sharing no key with
-    /// another), and not waiting for room for its keys. Suspension is
-    /// apart. What `suspend`, `Admitted`, and `report` all ask.
+    /// Whether member `id` may reach SSH here now: [`Held::grants`], the
+    /// file not paused, and no file refused. Suspension is apart. What
+    /// `Admitted` and `report` ask.
     #[must_use]
     pub fn reaches_ssh(&self, id: &Id) -> bool {
         !self.refused
-            && !self.crowded.contains(id)
+            && self.grants(id)
+            && self.access.as_ref().is_some_and(|access| !access.paused)
+    }
+
+    /// Whether the fleet grants member `id` SSH here, a pause aside:
+    /// [`Access::granted`], and not waiting for room for its keys. What
+    /// `suspend` asks, so a pause never widens who may suspend whom.
+    #[must_use]
+    pub fn grants(&self, id: &Id) -> bool {
+        !self.crowded.contains(id)
             && self
                 .access
                 .as_ref()
-                .is_some_and(|access| access.allowed().any(|(member, _)| member == id))
+                .is_some_and(|access| access.granted().any(|(member, _)| member == id))
     }
 
     /// The members that may reach SSH here now: [`Held::reaches_ssh`],

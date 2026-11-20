@@ -404,14 +404,20 @@ impl Access {
         Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
     }
 
-    /// The members that may reach SSH here: none while [`Access::paused`],
-    /// else allowed, with an SSH key, not removed, and sharing no key with
-    /// another ([`Access::shared`]).
+    /// The members that may reach SSH here: [`Access::granted`], and none
+    /// while [`Access::paused`].
     pub fn allowed(&self) -> impl Iterator<Item = (&Id, &Member)> {
+        self.granted().filter(|_| !self.paused)
+    }
+
+    /// The members the fleet grants SSH here, a pause aside: allowed, with
+    /// an SSH key, not removed, and sharing no key with another
+    /// ([`Access::shared`]). What decides who may suspend whom, which a
+    /// pause does not change.
+    pub fn granted(&self) -> impl Iterator<Item = (&Id, &Member)> {
         let shared = self.shared();
         self.members.iter().filter(move |(id, member)| {
-            !self.paused
-                && member.allow
+            member.allow
                 && member.ssh.is_some()
                 && !self.removed.contains(id)
                 && !shared.contains(id)

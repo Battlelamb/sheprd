@@ -112,13 +112,15 @@ impl Admitted {
             .iter()
             .filter(|entry| !self.cut_off(&entry.dial, &entry.tunnel))
             .map(|entry| entry.dial);
+        // Ranked by what the fleet grants, a pause aside, so holding a
+        // host never reshuffles who keeps a slot.
         let allowed = self
             .members()
-            .filter(|(id, _)| self.held.reaches_ssh(id))
+            .filter(|(id, _)| self.held.grants(id))
             .map(|(_, member)| member.dial);
         let denied = self
             .members()
-            .filter(|(id, _)| !self.held.reaches_ssh(id) && !self.held.crowded.contains(id))
+            .filter(|(id, _)| !self.held.grants(id) && !self.held.crowded.contains(id))
             .map(|(_, member)| member.dial);
         // Members whose new keys wait for room come last, so one never
         // takes another member's place.

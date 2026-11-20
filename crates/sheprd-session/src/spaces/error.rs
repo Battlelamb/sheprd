@@ -8,6 +8,8 @@ pub enum Error {
     Format(#[from] serde_json::Error),
     #[error("there are already {MAX_ENTRIES} shared workspaces or tabs")]
     Full,
+    #[error("terminal {0} is already in another shared tab")]
+    Held(sheprd_backend::TerminalId),
     #[error("a shared workspace or tab is not one Sheprd could keep")]
     Invalid,
     #[error("the shared workspaces are larger than {MAX_BYTES} bytes")]
@@ -16,6 +18,8 @@ pub enum Error {
     Missing(String),
     #[error("the shared workspaces are in format {0}, newer than this Sheprd writes")]
     Newer(u32),
+    #[error(transparent)]
+    Panes(#[from] crate::panes::Error),
     #[error("a shared workspace {0} is already kept")]
     Taken(String),
     // keep-sorted end

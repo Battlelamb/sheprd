@@ -44,6 +44,9 @@ pub(crate) const MAX_PROVEN: usize = 8;
 /// removal whose history does not exist outlives it.
 pub(crate) const UNCONFIRMED_TTL_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 
+/// Removals remembered as held by one peer; past it, some are sent again.
+pub(crate) const MAX_HELD_PER_PEER: usize = 2048;
+
 /// A suspension waiting for its removal's history.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Unconfirmed {
@@ -434,10 +437,27 @@ impl Fleet {
         self.save(&inner)
     }
 
-    /// Records that `peer` holds the removals `ids`. Blocking.
+    /// Records that `peer` holds the removals `ids`, of those the log
+    /// holds, and forgets what no longer matters: peers that are no
+    /// longer members, and removals the log no longer holds. At most
+    /// [`MAX_HELD_PER_PEER`] per peer; one forgotten is only sent again.
+    /// Blocking.
     pub(crate) fn held(&self, peer: MemberId, ids: impl IntoIterator<Item = OpId>) -> Result<()> {
         let mut inner = self.inner();
-        inner.held.entry(peer).or_default().extend(ids);
+        let Inner { log, held, .. } = &mut *inner;
+        let Some(log) = log.as_ref() else {
+            return Ok(());
+        };
+        held.entry(peer)
+            .or_default()
+            .extend(ids.into_iter().filter(|id| log.get(id).is_some()));
+        held.retain(|peer, ids| {
+            ids.retain(|id| log.get(id).is_some());
+            while ids.len() > MAX_HELD_PER_PEER {
+                ids.pop_last();
+            }
+            log.is_member(peer) && !ids.is_empty()
+        });
         self.save(&inner)
     }
 

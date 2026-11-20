@@ -21,8 +21,9 @@ pub(crate) const MAX_UPLOAD: usize = 3_500_000;
 /// The largest file a phone may drop on a terminal; kept modest, as up to
 /// [`MAX_UPLOADS`] of them stay on disk for a day.
 pub(crate) const MAX_FILE: usize = 16 * 1024 * 1024;
-/// The most characters of a file's name kept in its stored name.
-const MAX_NAME: usize = 100;
+/// The most UTF-8 bytes of a file's name kept in its stored name: with the
+/// 22-byte id and its dash, well under the 255 bytes filesystems allow.
+pub(crate) const MAX_NAME: usize = 180;
 /// Uploads kept at once.
 const MAX_UPLOADS: usize = 64;
 /// How long an upload stays attachable.
@@ -204,8 +205,8 @@ impl Uploads {
 }
 
 /// The last part of a name a phone sent, kept to letters, digits, `.`,
-/// `-`, and `_`, never hidden or empty, and at most [`MAX_NAME`]
-/// characters, keeping its extension.
+/// `-`, and `_`, never hidden or empty, and at most [`MAX_NAME`] UTF-8
+/// bytes, keeping its extension and never cutting a character.
 pub(crate) fn file_name(name: &str) -> String {
     let last = name.rsplit(['/', '\\']).next().unwrap_or_default();
     let safe: String = last
@@ -222,18 +223,23 @@ pub(crate) fn file_name(name: &str) -> String {
     if safe.is_empty() {
         return "file".to_owned();
     }
-    let count = safe.chars().count();
-    if count <= MAX_NAME {
+    if safe.len() <= MAX_NAME {
         return safe.to_owned();
     }
     // Over the limit: the start and the extension, which says the kind.
     let extension = safe
         .rfind('.')
         .map(|dot| &safe[dot..])
-        .filter(|extension| extension.chars().count() <= 16)
+        .filter(|extension| extension.len() <= 32)
         .unwrap_or_default();
-    let keep = MAX_NAME - extension.chars().count();
-    safe.chars().take(keep).chain(extension.chars()).collect()
+    let keep = MAX_NAME - extension.len();
+    let cut = safe
+        .char_indices()
+        .map(|(index, character)| index + character.len_utf8())
+        .take_while(|end| *end <= keep)
+        .last()
+        .unwrap_or_default();
+    format!("{}{extension}", &safe[..cut])
 }
 
 fn private_dir(dir: &Path) -> std::io::Result<()> {

@@ -3,12 +3,14 @@ import SwiftUI
 
 /// Room to write or paste long text before it goes to the terminal, where
 /// each key would otherwise go as typed. Pasting leaves Return to the
-/// person, as dictation does, so nothing runs until they say.
+/// person, as dictation does, so nothing runs until they say. The draft
+/// stays until the terminal has all of it, so a failed paste loses nothing.
 struct TermWriteSheet: View {
     @Environment(\.dismiss) private var dismiss
     /// Kept by the terminal, so a cancelled draft is there next time.
     @Binding var draft: String
-    let paste: (String) -> Void
+    /// Pastes the text and calls back whether all of it arrived.
+    let paste: (String, @escaping (Bool) -> Void) -> Void
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -37,8 +39,11 @@ struct TermWriteSheet: View {
                     }
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Paste", systemImage: "arrow.up") {
-                            paste(draft)
-                            draft = ""
+                            let sent = draft
+                            paste(sent) { delivered in
+                                // Edited since: what they wrote now stays.
+                                if delivered, draft == sent { draft = "" }
+                            }
                             dismiss()
                         }
                         .disabled(draft.isEmpty || tooLong)

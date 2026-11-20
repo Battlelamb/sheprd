@@ -257,7 +257,7 @@ struct TerminalScreen: View {
         }
         .photosPicker(isPresented: $choosingPhotos, selection: $picks, maxSelectionCount: 1, matching: .images)
         .sheet(isPresented: $writing) {
-            TermWriteSheet(draft: $draft) { typing?.paste($0) }
+            TermWriteSheet(draft: $draft) { text, done in typing?.paste(text, done: done) }
                 .environment(\.colorScheme, .dark)
         }
         .fileImporter(isPresented: $choosingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
@@ -327,7 +327,7 @@ struct TerminalScreen: View {
                 let text = dictation.text
                 dictation.reset()
                 return text
-            }, paste: typing.paste)
+            }, paste: { typing.paste($0) })
         }
     }
 

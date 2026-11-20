@@ -24,6 +24,8 @@ use tokio::{
 #[cfg(unix)]
 mod agent;
 #[cfg(unix)]
+mod agent_opening;
+#[cfg(unix)]
 mod aging;
 #[cfg(unix)]
 mod atomic;

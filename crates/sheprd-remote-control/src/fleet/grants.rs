@@ -264,7 +264,10 @@ fn records(state: &Log, me: &MemberId, suspended: &[MemberId]) -> Vec<(Record, V
                     route: host.record.route.clone(),
                     fleet: true,
                     host: Some(id.to_string()),
-                    opening: host.intro.kind == HostKind::Member,
+                    // A member's daemon and a plain host's agent read the
+                    // purpose byte and proof first; a shared Sheprd host
+                    // that is no member hands the session to SSH as is.
+                    opening: matches!(host.intro.kind, HostKind::Member | HostKind::Agent),
                 },
                 host.record.ssh_host_keys.clone(),
             )

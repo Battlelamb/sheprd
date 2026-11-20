@@ -19,7 +19,11 @@ When it is set, `.github/workflows/ci.yml` sends the `checks` macOS legs and
 `build-macos` to runners with every label in it. `CI_LINUX_ARM_RUNNER` does
 the same for the `checks` legs on `ubuntu-24.04-arm`, for example with
 `["self-hosted", "Linux", "ARM64", "tart-linux"]`, on Ubuntu 24.04 VMs. The
-x86_64 `ubuntu-24.04` legs stay hosted. Both follow one rule, members' code
+x86_64 `ubuntu-24.04` legs stay hosted. The jobs every run waits for
+(`zizmor`, `commits`, `website`, and the `checks-passed` gate) follow
+`CI_LINUX_ARM_RUNNER` too: hosted runners are shared with every repository
+of the account, and a run whose first job waits for one leaves our machines
+idle meanwhile. Both follow one rule, members' code
 only:
 
 | Run | macOS runner |

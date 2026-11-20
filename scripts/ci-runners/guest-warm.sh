@@ -23,7 +23,7 @@ else
   running() { systemctl is-active --quiet "$(cat "$runner/.service")"; }
 fi
 # Stopping the runner would kill a job it runs; warm it another time.
-if pgrep -f 'bin/Runner\.Worker' >/dev/null; then
+if pgrep -f '[b]in/Runner\.Worker' >/dev/null; then
   echo "the runner is running a job; not warming"
   exit 0
 fi

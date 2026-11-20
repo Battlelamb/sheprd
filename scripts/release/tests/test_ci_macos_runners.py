@@ -129,6 +129,20 @@ class MacosRunners(unittest.TestCase):
                          json.loads(LINUX_LABELS))
         self.assertEqual(runs_on("checks", context("push", linux="")), json.loads(LABELS))
 
+    def test_the_jobs_every_run_waits_for_follow_the_same_rule(self):
+        # Hosted runners are shared with the whole account: a members' run
+        # must not wait for one before reaching our machines.
+        for job in ("zizmor", "commits", "website", "checks-passed"):
+            with self.subTest(job=job):
+                self.assertEqual(runs_on(job, context("pull_request")), json.loads(LINUX_LABELS))
+                self.assertEqual(runs_on(job, context("push")), json.loads(LINUX_LABELS))
+                for values in (context("pull_request", fork=True), context("pull_request", association="NONE"),
+                               context("push", linux="")):
+                    self.assertTrue(runs_on(job, values).startswith("ubuntu-"))
+                if job != "checks-passed":
+                    self.assertIn("clean: ${{ runner.environment != 'self-hosted' }}", JOBS[job])
+                    self.assertIn("run: bash scripts/ci-clean-self-hosted.sh", JOBS[job])
+
     def test_x86_linux_never_moves(self):
         self.assertEqual(runs_on("checks", context("push"), "ubuntu-24.04"), "ubuntu-24.04")
 

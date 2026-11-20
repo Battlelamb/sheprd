@@ -16,7 +16,8 @@ if [[ "$(uname -s)" == Darwin ]]; then
   limit=100
   service() { ./svc.sh "$1"; }
 else
-  # scripts/install-linux-deps.sh runs in every job and needs it.
+  # scripts/install-linux-deps.sh runs in every job and needs it. pip is
+  # how zizmor-action fetches zizmor.
   sudo -n true || { echo "passwordless sudo is required" >&2; exit 1; }
   export DEBIAN_FRONTEND=noninteractive
   # Grow the root file system into a disk `tart set` enlarged.
@@ -31,7 +32,7 @@ else
     grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
   fi
   sudo apt-get update -qq
-  sudo apt-get install -y -qq --no-install-recommends build-essential git curl ca-certificates python3 jq >/dev/null
+  sudo apt-get install -y -qq --no-install-recommends build-essential git curl ca-certificates python3 python3-pip jq >/dev/null
   job_path="$HOME/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
   limit=70
   service() { sudo ./svc.sh "$1"; }
@@ -46,7 +47,12 @@ fi
 cd "$HOME/actions-runner"
 printf '%s\n' "$job_path" >.path
 grep -q '^SHEPRD_CI_TARGET_LIMIT_GB=' .env 2>/dev/null || echo "SHEPRD_CI_TARGET_LIMIT_GB=$limit" >>.env
-# The runner reads .path and .env when it starts.
-service stop >/dev/null 2>&1 || true
-service start >/dev/null
+# The runner reads .path and .env when it starts; restarting it would kill a
+# job it runs, so a busy runner keeps its old settings until the next setup.
+if pgrep -f '[b]in/Runner\.Worker' >/dev/null; then
+  echo "runner busy with a job: not restarted" >&2
+else
+  service stop >/dev/null 2>&1 || true
+  service start >/dev/null
+fi
 echo "$("$HOME/.cargo/bin/rustup" --version 2>/dev/null | head -1), $(PATH="$job_path" python3 --version), $(df -h / | tail -1 | awk '{print $4}') free"

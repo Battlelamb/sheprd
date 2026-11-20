@@ -21,6 +21,7 @@ PR_ONLY_JOBS = ("build-macos",)
 
 # The macOS jobs' runners, kept here so a change to them is deliberate.
 MACOS_CHECKS = "${{ fromJSON((github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('[\"OWNER\", \"MEMBER\", \"COLLABORATOR\"]'), github.event.pull_request.author_association))) && (matrix.runner == 'macos-15' && vars.CI_MACOS_RUNNER || matrix.runner == 'ubuntu-24.04-arm' && vars.CI_LINUX_ARM_RUNNER) || toJSON(matrix.runner)) }}"
+LINUX_GATE = "${{ fromJSON((github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('[\"OWNER\", \"MEMBER\", \"COLLABORATOR\"]'), github.event.pull_request.author_association))) && vars.CI_LINUX_ARM_RUNNER || '\"ubuntu-24.04\"') }}"
 MACOS_RELEASE = "${{ fromJSON((github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('[\"OWNER\", \"MEMBER\", \"COLLABORATOR\"]'), github.event.pull_request.author_association))) && vars.CI_MACOS_RUNNER || '\"macos-15\"') }}"
 
 
@@ -305,9 +306,9 @@ class CiPolicy(unittest.TestCase):
         # CI_MACOS_RUNNER, a repository variable only admins set; which runs
         # do is checked in test_ci_macos_runners.py.
         self.assertEqual(re.findall(r"^    runs-on: (.+)$", WORKFLOW, re.M), [
-            "ubuntu-latest", "ubuntu-24.04", MACOS_CHECKS,
+            LINUX_GATE.replace("ubuntu-24.04", "ubuntu-latest"), LINUX_GATE, MACOS_CHECKS,
             "${{ matrix.runner }}", "${{ matrix.runner }}", "windows-2025",
-            "ubuntu-24.04", "ubuntu-24.04", "${{ matrix.runner }}", MACOS_RELEASE,
+            LINUX_GATE, LINUX_GATE, "${{ matrix.runner }}", MACOS_RELEASE,
         ])
         for name in ("checks", "build-macos"):
             with self.subTest(job=name):

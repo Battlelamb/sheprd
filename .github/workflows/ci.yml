@@ -50,14 +50,22 @@ jobs:
         github.actor == 'penso' && github.triggering_actor == 'penso' &&
         github.ref == 'refs/heads/main'))
     name: Workflow Security
-    runs-on: ubuntu-latest
+    # Members' runs use our own Linux VMs when CI_LINUX_ARM_RUNNER names
+    # them, as the checks job does: every other job waits for this one, and
+    # hosted runners are shared with every repository of the account.
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association))) && vars.CI_LINUX_ARM_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 10
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Shares the runner's checkout with the build jobs: keep target/.
+          clean: ${{ runner.environment != 'self-hosted' }}
           persist-credentials: false
+      - name: Clean the self-hosted checkout but its build
+        if: runner.environment == 'self-hosted'
+        run: bash scripts/ci-clean-self-hosted.sh
       - uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
         with:
           advanced-security: false
@@ -83,16 +91,24 @@ jobs:
       website: ${{ steps.changes.outputs.website }}
       windows_native: ${{ steps.changes.outputs.windows_native }}
       windows_package: ${{ steps.changes.outputs.windows_package }}
-    runs-on: ubuntu-24.04
+    # Members' runs use our own Linux VMs when CI_LINUX_ARM_RUNNER names
+    # them, as the checks job does: every other job waits for this one, and
+    # hosted runners are shared with every repository of the account.
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association))) && vars.CI_LINUX_ARM_RUNNER || '"ubuntu-24.04"') }}
     timeout-minutes: 5
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Shares the runner's checkout with the build jobs: keep target/.
+          clean: ${{ runner.environment != 'self-hosted' }}
           # The range being checked is history the default shallow clone lacks.
           fetch-depth: 0
           persist-credentials: false
+      - name: Clean the self-hosted checkout but its build
+        if: runner.environment == 'self-hosted'
+        run: bash scripts/ci-clean-self-hosted.sh
       - name: Check every commit subject the changelog will publish
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
@@ -482,7 +498,10 @@ jobs:
         github.ref == 'refs/heads/main'))
     name: Website and docs
     needs: commits
-    runs-on: ubuntu-24.04
+    # Members' runs use our own Linux VMs when CI_LINUX_ARM_RUNNER names
+    # them, as the checks job does: every other job waits for this one, and
+    # hosted runners are shared with every repository of the account.
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association))) && vars.CI_LINUX_ARM_RUNNER || '"ubuntu-24.04"') }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -491,7 +510,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Shares the runner's checkout with the build jobs: keep target/.
+          clean: ${{ runner.environment != 'self-hosted' }}
           persist-credentials: false
+      - name: Clean the self-hosted checkout but its build
+        if: runner.environment == 'self-hosted'
+        run: bash scripts/ci-clean-self-hosted.sh
       - name: Check the docs site
         run: |
           python3 -m venv "$RUNNER_TEMP/docs-venv"
@@ -514,7 +538,10 @@ jobs:
        ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
         github.actor == 'penso' && github.triggering_actor == 'penso' &&
         github.ref == 'refs/heads/main'))
-    runs-on: ubuntu-24.04
+    # Members' runs use our own Linux VMs when CI_LINUX_ARM_RUNNER names
+    # them, as the checks job does: every other job waits for this one, and
+    # hosted runners are shared with every repository of the account.
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association))) && vars.CI_LINUX_ARM_RUNNER || '"ubuntu-24.04"') }}
     timeout-minutes: 5
     permissions: {}
     steps:

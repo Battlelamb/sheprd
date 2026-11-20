@@ -145,3 +145,31 @@ fn keys_an_earlier_build_recorded_are_not_revoked_by_a_scrub() {
         vec![[0xcd; 32]]
     );
 }
+
+#[test]
+fn a_scrub_that_cannot_find_the_ssh_keys_fails() {
+    use crate::ssh_access::{AuthorizedKeys, Error as SshError};
+    // The daemon started with no usable HOME: lines an earlier run wrote
+    // may remain, so the scrub refuses rather than report access gone.
+    assert!(matches!(
+        crate::fleet::scrub::located(None, || Err(SshError::NoHome)),
+        Err(Error::SshAccess(SshError::NoHome))
+    ));
+    // Where the fleet never writes lines, there are none to remove.
+    assert!(matches!(
+        crate::fleet::scrub::located(None, || Err(SshError::Unsupported)),
+        Ok(None)
+    ));
+    // The daemon's own file wins; the user's is the fallback.
+    let file = PathBuf::from("/nowhere/authorized_keys");
+    assert!(
+        crate::fleet::scrub::located(None, || Ok(AuthorizedKeys::at(file.clone())))
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        crate::fleet::scrub::located(Some(AuthorizedKeys::at(file)), || Err(SshError::NoHome))
+            .unwrap()
+            .is_some()
+    );
+}

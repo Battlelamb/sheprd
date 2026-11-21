@@ -63,7 +63,12 @@ struct WorkspaceScreen: View {
             .max { ($0.lastAnswer ?? .distantPast) < ($1.lastAnswer ?? .distantPast) }
         return endingDialogs(List {
             Section {
-                Summary(workspace: workspace, place: [model.displayName(machine.computer), repository?.label].compactMap { $0 }.joined(separator: " · "))
+                Summary(workspace: workspace, place: repository?.label ?? workspace.cwd)
+                NavigationLink {
+                    ComputerScreen(device: key.device).makesRoomForConnectionToast()
+                } label: {
+                    ComputerRow(computer: machine.computer, name: model.displayName(machine.computer), status: machine.status)
+                }
                 if let pullRequest = workspace.pullRequest, let url = URL(string: pullRequest.url) {
                     // Plain text and a chevron, like the rows below, not a
                     // tinted web link.
@@ -626,6 +631,25 @@ private struct Summary: View {
                 Text(place).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
             }
         }
+    }
+}
+
+/// The computer the workspace is on, and whether the phone reaches it now;
+/// opens that computer's page.
+private struct ComputerRow: View {
+    var computer: Computer
+    var name: String
+    var status: LinkStatus
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: computer.via == nil ? "laptopcomputer" : "server.rack").font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.tint)
+                .frame(width: 28, height: 28).background(.tint.opacity(0.15), in: .rect(cornerRadius: 28 * 0.28))
+            Text(name).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+            ComputerStatusLine(status: status).font(.subheadline).labelStyle(.iconOnly).imageScale(.small)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

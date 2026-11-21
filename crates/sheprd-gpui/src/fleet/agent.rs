@@ -104,6 +104,19 @@ case "${SSH_CONNECTION:-}" in
 esac
 "#;
 
+/// Sets `domain` to the launchd domain the agent's job goes in on a Mac:
+/// the account's graphical session when it has one, else its user domain,
+/// which an account reached only over SSH has too. A `gui/` domain exists
+/// only while the user is logged in at the screen, so an SSH-only Mac
+/// would never start a job sent there.
+pub(crate) const LAUNCHD_DOMAIN: &str = r#"uid=$(id -u)
+if launchctl print "gui/$uid" >/dev/null 2>&1; then
+  domain="gui/$uid"
+else
+  domain="user/$uid"
+fi
+"#;
+
 /// The host script that keeps the agent running as a user service on
 /// `relays`: each private relay's token in a private file it passes with
 /// `--token-file`, then a systemd user unit on Linux, a launchd agent on
@@ -176,8 +189,13 @@ Darwin)
     '<key>Label</key><string>{LABEL}</string>' \
     "<key>ProgramArguments</key><array><string>$agent</string><string>run</string><string>--state-dir</string><string>$state</string><string>--forward</string><string>$port</string>{plist_args}</array>" \
     '<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>' \
+    '<key>LimitLoadToSessionType</key><array><string>Aqua</string><string>Background</string></array>' \
     '</dict></plist>' > "$plist.part"
-  job="gui/$(id -u)/{LABEL}"
+{LAUNCHD_DOMAIN}  job="$domain/{LABEL}"
+  # A job an earlier share left in the other domain goes: one agent runs.
+  for other in "gui/$uid" "user/$uid"; do
+    [ "$other" = "$domain" ] || launchctl bootout "$other/{LABEL}" >/dev/null 2>&1 || true
+  done
   if cmp -s "$plist.part" "$plist" && launchctl print "$job" >/dev/null 2>&1; then
     # The same job is loaded: restart it in place, so the new build runs
     # and the agent is never unloaded.
@@ -190,9 +208,9 @@ Darwin)
     # sent until then fails: try again for a while rather than leave no
     # service.
     tries=0
-    until launchctl bootstrap "gui/$(id -u)" "$plist" 2>/dev/null; do
+    until launchctl bootstrap "$domain" "$plist" 2>/dev/null; do
       tries=$((tries + 1))
-      if [ "$tries" -ge 10 ]; then launchctl bootstrap "gui/$(id -u)" "$plist" >&2; break; fi
+      if [ "$tries" -ge 10 ]; then launchctl bootstrap "$domain" "$plist" >&2; break; fi
       sleep 1
     done
   fi

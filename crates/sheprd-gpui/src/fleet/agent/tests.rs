@@ -3,6 +3,8 @@ use super::*;
 #[cfg(unix)]
 mod installed;
 #[cfg(unix)]
+mod launchd;
+#[cfg(unix)]
 mod ssh_port;
 mod tokens;
 

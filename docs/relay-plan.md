@@ -2114,7 +2114,9 @@ manual multi-machine and phone steps left unticked in its QA list.
      automations do: its own build for a host of its kind, else
      `relay-agent/TRIPLE/` beside the executable), unless the host holds
      the same bytes; writes and restarts a systemd user unit (with
-     lingering asked for) or a launchd agent running `run` on this
+     lingering asked for) or a launchd agent (in the account's
+     graphical session when it is logged in at the screen, else its user
+     domain, so a Mac reached only over SSH runs it too) running `run` on this
      computer's relays (its own host record's); reads `status --json`,
      which now carries the SSH host keys; keeps only keys this computer's
      known hosts list for the target (`sheprd_client::known_host_keys`),

@@ -207,6 +207,34 @@ impl SheprdWindow {
         }
     }
 
+    pub(crate) fn ask_pr_create(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.menu.page.is_some()
+            || self.git.running().is_some()
+            || self.pr_actions.running().is_some()
+        {
+            return false;
+        }
+        let Some(input) = self
+            .git_input()
+            .filter(|input| self.git.tracked() == Some(input))
+        else {
+            return false;
+        };
+        let anchor = if self.zen_active() {
+            point(window.viewport_size().width - px(24.), px(24.))
+        } else {
+            self.git_anchor.get()
+        };
+        self.open_git_menu_on_pull_request(anchor, window, cx);
+        if self.menu.page != Some(Page::Git) {
+            return false;
+        }
+        self.menu.asked_by_command = true;
+        self.menu.git_create_target = Some(input);
+        cx.notify();
+        true
+    }
+
     /// How many commits the focused branch holds that no pull request
     /// carries, once a finished lookup can say so. Reading never schedules work.
     pub(crate) fn git_unopened_commits(&self) -> Option<u64> {
@@ -302,6 +330,12 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(input) = self.menu.git_create_target.as_ref()
+            && (self.git_input().as_ref() != Some(input) || self.git.tracked() != Some(input))
+        {
+            self.dismiss_menu(window, cx);
+            return;
+        }
         // One explicit operation at a time, Git or GitHub.
         if self.git.running().is_some() || self.pr_actions.running().is_some() {
             return;
@@ -382,6 +416,7 @@ impl SheprdWindow {
                 self.menu.git_selected = Some(rows[index].0);
                 cx.notify();
             }
+            "enter" if self.menu.asked_by_command => {}
             "enter" => {
                 if let Some(row) = self
                     .menu

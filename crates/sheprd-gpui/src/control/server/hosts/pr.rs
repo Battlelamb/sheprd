@@ -125,6 +125,69 @@ pub(super) fn status(view: &SheprdWindow, caller: &Caller) -> Response {
     }
 }
 
+pub(super) fn create(
+    view: &mut SheprdWindow,
+    caller: &Caller,
+    window: &mut Window,
+    cx: &mut Context<SheprdWindow>,
+) -> Response {
+    let place = match Place::of(view, caller) {
+        Ok(place) => place,
+        Err(response) => return response,
+    };
+    if !place.focused(view) {
+        return Response::error(
+            ErrorCode::InvalidRequest,
+            format!(
+                "Focus workspace {} before asking to create its pull request",
+                place.workspace
+            ),
+        );
+    }
+    if view.main_tokens().is_none() {
+        return Response::error(
+            ErrorCode::InvalidRequest,
+            "Sign in to GitHub in Sheprd first",
+        );
+    }
+    let Some(input) = view.git_input() else {
+        return Response::error(
+            ErrorCode::Unsupported,
+            "Pull request creation needs a local Git checkout on a branch",
+        );
+    };
+    if view.git.tracked() != Some(&input) {
+        return Response::error(
+            ErrorCode::InvalidRequest,
+            "Sheprd is still checking this checkout; try again shortly",
+        );
+    }
+    if let Ok((_, Lookup::Found(pr))) = lookup(view, caller)
+        && pr.state == State::Open
+    {
+        return Response::error(
+            ErrorCode::InvalidRequest,
+            format!(
+                "#{} is already open for this branch; use `sheprd pr open`",
+                pr.number
+            ),
+        );
+    }
+    if !view.ask_pr_create(window, cx) {
+        return Response::error(
+            ErrorCode::WindowBusy,
+            "A menu, dialog, or Git operation is open in the window; close it or wait first",
+        );
+    }
+    super::super::work::bring_forward(window, cx);
+    Response::Done {
+        message: format!(
+            "Opened Create pull request for {} in Sheprd; the user confirms with a click. Nothing has been pushed or created",
+            input.branch
+        ),
+    }
+}
+
 pub(super) fn quota(view: &SheprdWindow) -> Response {
     let now = std::time::Instant::now();
     let mut accounts: Vec<AccountQuota> = Vec::new();

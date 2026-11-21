@@ -127,13 +127,14 @@ pub(crate) struct MenuState {
     pub(super) selected: Option<usize>,
     pub(super) workspace_selected: Option<WorkspaceMenuAction>,
     pub(super) git_selected: Option<git::Row>,
+    pub(super) git_create_target: Option<crate::pull_request::Input>,
     /// The merge dialog's method, and the pull request (with its head) it
     /// was opened for: a branch that moved since must be reviewed again.
     pub(super) merge_method: Option<crate::pull_request::MergeMethod>,
     pub(super) merge_target: Option<crate::pr_actions::Target>,
     /// What the merge queue confirmation adds or takes out.
     pub(super) queue_change: Option<sheprd_control_protocol::protocol::hosts::QueueOp>,
-    /// A command opened the merge or queue dialog, which then confirms only
+    /// A command opened the Git popup or merge/queue dialog, which confirms only
     /// by a click: an Enter typed for a terminal must not land on it.
     pub(super) asked_by_command: bool,
     /// The checkout and restack the restack dialog was opened for: a focus
@@ -418,6 +419,7 @@ impl MenuState {
             selected: None,
             workspace_selected: None,
             git_selected: None,
+            git_create_target: None,
             merge_method: None,
             merge_target: None,
             queue_change: None,
@@ -538,6 +540,7 @@ impl MenuState {
         self.selected = None;
         self.workspace_selected = None;
         self.git_selected = None;
+        self.git_create_target = None;
         self.merge_method = None;
         self.merge_target = None;
         self.queue_change = None;

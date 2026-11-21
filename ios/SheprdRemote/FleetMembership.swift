@@ -659,3 +659,29 @@ final class FleetMembership {
         }
     }
 }
+
+extension FleetMembership.Record {
+    /// Reads a record of any version: one saved before the phone kept its
+    /// own copy of the log carries what it signed into `unconfirmed`, and
+    /// the highest of its numbers that may stand into `signedSeq`
+    /// (`FleetEarlierLine`), so an update neither drops an operation the
+    /// fleet has not seen nor signs another on its number.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        keyKind = try c.decode(Computer.KeyKind.self, forKey: .keyKind)
+        keyData = try c.decode(Data.self, forKey: .keyData)
+        member = try c.decode(String.self, forKey: .member)
+        fleet = try c.decode(String.self, forKey: .fleet)
+        through = try c.decode(String.self, forKey: .through)
+        admitted = try c.decode(Bool.self, forKey: .admitted)
+        relayDial = try c.decode(Data.self, forKey: .relayDial)
+        relayTunnel = try c.decode(Data.self, forKey: .relayTunnel)
+        pendingLinks = try c.decodeIfPresent([FleetPendingLink].self, forKey: .pendingLinks)
+        let unconfirmed = try c.decodeIfPresent([String].self, forKey: .unconfirmed)
+        let signedSeq = try c.decodeIfPresent(UInt64.self, forKey: .signedSeq)
+        let earlier = (try? FleetEarlierLine(from: decoder)) ?? FleetEarlierLine()
+        let (carried, seq) = earlier.carried(member: member, unconfirmed: unconfirmed)
+        self.unconfirmed = carried.isEmpty ? nil : carried
+        self.signedSeq = [signedSeq, seq].compactMap { $0 }.max()
+    }
+}

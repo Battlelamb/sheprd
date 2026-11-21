@@ -93,8 +93,14 @@ import Testing
         let daemon = try #require(fixture["apns"] as? [String: Any])
         let ours = try Self.payload(request)
         #expect(Set(ours.keys) == Set(daemon.keys))
-        #expect(NSDictionary(dictionary: try #require(ours["aps"] as? [String: Any]))
-            == NSDictionary(dictionary: try #require(daemon["aps"] as? [String: Any])))
+        // A computer's thread starts with its scope (`alert::scope`); the
+        // phone's own test names no computer, so its thread is the bare pane.
+        var ourAps = try #require(ours["aps"] as? [String: Any])
+        var daemonAps = try #require(daemon["aps"] as? [String: Any])
+        #expect(ourAps.removeValue(forKey: "thread-id") as? String == SelfTestPush.pane)
+        let daemonThread = try #require(daemonAps.removeValue(forKey: "thread-id") as? String)
+        #expect(daemonThread.hasSuffix("/\(SelfTestPush.pane)"))
+        #expect(NSDictionary(dictionary: ourAps) == NSDictionary(dictionary: daemonAps))
         // The sealed side has the daemon's keys, less the badge.
         let plaintext = try #require(fixture["plaintext"] as? [String: Any])
         let opened = try NotificationSeal.open(

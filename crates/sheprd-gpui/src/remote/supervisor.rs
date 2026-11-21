@@ -306,6 +306,12 @@ impl Supervisor {
         if supervisor.quitting || !supervisor.loaded {
             return;
         }
+        // Linked hosts have daemons of their own, asked whether or not this
+        // computer's runs or answers, while Settings watches.
+        if supervisor.watchers.get() > 0 {
+            Self::refresh_hosts(cx);
+        }
+        let supervisor = cx.global_mut::<Self>();
         // Presence runs the nearby helper while the daemon it reports to
         // does.
         {
@@ -430,7 +436,6 @@ impl Supervisor {
         });
         cx.spawn(async move |cx| {
             let (status, devices, push, sent, sent_prs, hosts, update_asked) = task.await;
-            let asked_push = push.is_some();
             cx.update(|cx| {
                 let supervisor = cx.global_mut::<Self>();
                 let push_changed = match push {
@@ -460,10 +465,6 @@ impl Supervisor {
                 }
                 if let Some(hosts) = hosts {
                     Self::take_incoming(cx, hosts);
-                }
-                // Settings watches the push status: linked hosts' too.
-                if asked_push {
-                    Self::refresh_hosts(cx);
                 }
             });
         })

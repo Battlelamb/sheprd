@@ -13,14 +13,25 @@ use std::{
 };
 
 /// How long linked hosts' answers stand before Settings asks again.
-const HOSTS_FRESH: Duration = Duration::from_secs(60);
+pub(super) const HOSTS_FRESH: Duration = Duration::from_secs(60);
 
 /// Linked hosts' push status, as last asked for Settings.
 #[derive(Debug, Default)]
 pub(super) struct HostPushes {
-    asked: Option<Instant>,
-    asking: bool,
+    pub(super) asked: Option<Instant>,
+    pub(super) asking: bool,
     hosts: Vec<HostPush>,
+}
+
+impl HostPushes {
+    /// Whether to ask the hosts again at `now`: no ask runs, and the last
+    /// answers are older than [`HOSTS_FRESH`], or there are none yet.
+    pub(super) fn due(&self, now: Instant) -> bool {
+        !self.asking
+            && self
+                .asked
+                .is_none_or(|at| now.saturating_duration_since(at) >= HOSTS_FRESH)
+    }
 }
 
 impl Supervisor {
@@ -87,11 +98,12 @@ impl Supervisor {
     }
 
     /// Asks the linked hosts again for Settings when their answers are
-    /// older than [`HOSTS_FRESH`] and no ask runs.
+    /// due ([`HostPushes::due`]). Called on every tick while Settings
+    /// watches, whether or not this computer's own daemon runs.
     pub(super) fn refresh_hosts(cx: &mut App) {
         let supervisor = cx.global_mut::<Self>();
         let pushes = &mut supervisor.host_push;
-        if pushes.asking || pushes.asked.is_some_and(|at| at.elapsed() < HOSTS_FRESH) {
+        if !pushes.due(Instant::now()) {
             return;
         }
         if supervisor.links.known().is_empty() {

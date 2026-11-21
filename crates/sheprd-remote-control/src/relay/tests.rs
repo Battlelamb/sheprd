@@ -24,6 +24,7 @@ use tokio::{
     net::TcpListener,
 };
 
+mod dial_keys;
 mod labels;
 mod nearest;
 mod shared;

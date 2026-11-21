@@ -25,10 +25,14 @@ public enum Change: Codable, Hashable, Sendable {
     /// changed; it replaces the activity with the same call id.
     case activity(AgentActivity)
     case harnesses(Harnesses?)
+    /// The agent worked on a pull request: it is added, or what it did is
+    /// added to the one with the same repository and number.
+    case pullRequest(ChatPullRequest)
 
     enum CodingKeys: String, CodingKey {
         case change, entry, id, text, before, status, permission, plan, modes, options, turn, queued, count
         case session, commands, usage, on, activity, harnesses
+        case pullRequest = "pull_request"
     }
 
     public init(from decoder: Decoder) throws {
@@ -54,6 +58,7 @@ public enum Change: Codable, Hashable, Sendable {
         case "auto_accept": self = .autoAccept(try c.decode(Bool.self, forKey: .on))
         case "activity": self = .activity(try c.decode(AgentActivity.self, forKey: .activity))
         case "harnesses": self = .harnesses(try c.decodeIfPresent(Harnesses.self, forKey: .harnesses))
+        case "pull_request": self = .pullRequest(try c.decode(ChatPullRequest.self, forKey: .pullRequest))
         case let other:
             throw DecodingError.dataCorruptedError(forKey: .change, in: c, debugDescription: "unknown change \(other)")
         }
@@ -84,6 +89,7 @@ public enum Change: Codable, Hashable, Sendable {
         case let .autoAccept(on): try c.encode("auto_accept", forKey: .change); try c.encode(on, forKey: .on)
         case let .activity(activity): try c.encode("activity", forKey: .change); try c.encode(activity, forKey: .activity)
         case let .harnesses(harnesses): try c.encode("harnesses", forKey: .change); try c.encode(harnesses, forKey: .harnesses)
+        case let .pullRequest(pull): try c.encode("pull_request", forKey: .change); try c.encode(pull, forKey: .pullRequest)
         }
     }
 }
@@ -100,6 +106,8 @@ public enum ChangeError: String, Error, Hashable, Sendable {
     case noModes = "no_modes"
     case activityLimit = "activity_limit"
     case activityText = "activity_text"
+    case pullRequest = "pull_request"
+    case pullRequestLimit = "pull_request_limit"
 }
 
 extension Transcript {
@@ -152,6 +160,7 @@ extension Transcript {
         case let .autoAccept(on): autoAccept = on
         case let .activity(activity): try record(activity)
         case let .harnesses(harnesses): self.harnesses = harnesses
+        case let .pullRequest(pull): try record(pull)
         }
     }
 }

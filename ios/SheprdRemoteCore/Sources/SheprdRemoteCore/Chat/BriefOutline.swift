@@ -7,17 +7,34 @@ public enum PastedEnvelope {
     private static let close = "</pasted_content>"
 
     /// `text` without a leading envelope; any other markup stays, as does
-    /// text that only looks like one (`<pasted_contents>`).
+    /// text that only looks like one (`<pasted_contents>`). Only the exact
+    /// tag Claude writes, `<pasted_content>` or `<pasted_content id="ID">`
+    /// with a short id, is unwrapped: anything more in it would reach the
+    /// agent unseen, so such text shows as it is.
     public static func unwrap(_ text: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix(open) else { return text }
         let rest = trimmed.dropFirst(open.count)
-        guard let next = rest.first, next == ">" || next.isWhitespace,
-              let end = rest.prefix(512).firstIndex(of: ">")
-        else { return text }
-        var body = rest[rest.index(after: end)...].trimmingCharacters(in: .whitespacesAndNewlines)
-        if body.hasSuffix(close) { body = String(body.dropLast(close.count)) }
-        return body.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body: Substring
+        if rest.first == ">" {
+            body = rest.dropFirst()
+        } else if rest.hasPrefix(" id=\""), let quote = rest.dropFirst(5).firstIndex(of: "\"") {
+            let id = rest[rest.index(rest.startIndex, offsetBy: 5) ..< quote]
+            let after = rest[rest.index(after: quote)...]
+            guard (1 ... maxID).contains(id.count), id.allSatisfy(isIDCharacter), after.first == ">" else { return text }
+            body = after.dropFirst()
+        } else {
+            return text
+        }
+        var shown = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if shown.hasSuffix(close) { shown = String(shown.dropLast(close.count)) }
+        return shown.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static let maxID = 32
+
+    private static func isIDCharacter(_ character: Character) -> Bool {
+        character.isASCII && (character.isLetter || character.isNumber || character == "-" || character == "_")
     }
 }
 

@@ -95,5 +95,15 @@ struct BriefTests {
         #expect(PastedEnvelope.unwrap("<pasted_content>Hi") == "Hi")
         #expect(PastedEnvelope.unwrap("<pasted_contents>Hi") == "<pasted_contents>Hi")
         #expect(PastedEnvelope.unwrap("Say <pasted_content>") == "Say <pasted_content>")
+        // A tag that could hide words from the person shows as it is.
+        for text in [
+            "<pasted_content note=\"rm -rf\">Hi",
+            "<pasted_content id=\"1\" note=\"rm -rf\">Hi",
+            "<pasted_content id=\"a b\">Hi",
+            "<pasted_content id=\"\">Hi",
+            "<pasted_content id=\"\(String(repeating: "a", count: 33))\">Hi",
+        ] {
+            #expect(PastedEnvelope.unwrap(text) == text)
+        }
     }
 }

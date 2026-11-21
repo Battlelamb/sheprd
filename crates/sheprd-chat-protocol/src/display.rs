@@ -88,21 +88,32 @@ pub fn unwrap_paste(text: &str) -> Option<&str> {
     let Some(rest) = text.strip_prefix(OPEN) else {
         return Some(original);
     };
-    if rest
-        .chars()
-        .next()
-        .is_some_and(|c| c != '>' && !c.is_ascii_whitespace())
-    {
-        return Some(original);
-    }
-    // The opening tag's end, looked for in a bounded prefix: a cut-off tag
-    // is a marker with nothing to show.
-    let end = text
-        .as_bytes()
-        .iter()
-        .take(512)
-        .position(|byte| *byte == b'>')?;
-    let body = text[end + 1..].trim();
+    // Only the exact tag Claude writes is unwrapped. Anything more in it,
+    // such as other attributes, would reach the agent unseen, so such text
+    // shows as it is.
+    let Some(body) = rest.strip_prefix('>').or_else(|| paste_id(rest)) else {
+        // A title cut off inside the tag is a marker with nothing to show.
+        let cut = rest
+            .strip_prefix(" id=\"")
+            .is_some_and(|id| id.len() <= MAX_PASTE_ID && id.bytes().all(id_byte));
+        return (!cut).then_some(original);
+    };
+    let body = body.trim();
     let body = body.strip_suffix(CLOSE).unwrap_or(body).trim();
     (!body.is_empty()).then_some(body)
+}
+
+/// The text after a ` id="ID">` opening tag's end, where the id is a short
+/// run of letters, digits, `-` and `_`.
+fn paste_id(rest: &str) -> Option<&str> {
+    let rest = rest.strip_prefix(" id=\"")?;
+    let (id, rest) = rest.split_once("\">")?;
+    ((1..=MAX_PASTE_ID).contains(&id.len()) && id.bytes().all(id_byte)).then_some(rest)
+}
+
+/// The longest paste envelope id unwrapped.
+const MAX_PASTE_ID: usize = 32;
+
+fn id_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'
 }

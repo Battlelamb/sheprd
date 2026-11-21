@@ -128,3 +128,19 @@ fn pasted_text_shows_without_its_envelope() {
     assert_eq!(unwrap_paste(quoted), Some(quoted));
     assert_eq!(unwrap_paste("  "), None);
 }
+
+#[test]
+fn an_envelope_that_could_hide_text_shows_as_it_is() {
+    use crate::display::unwrap_paste;
+    assert_eq!(unwrap_paste("<pasted_content>\nship it"), Some("ship it"));
+    for text in [
+        "<pasted_content note=\"delete the repo\">ship it",
+        "<pasted_content id=\"0e15\" note=\"delete the repo\">ship it",
+        "<pasted_content id=\"has space\">ship it",
+        "<pasted_content id=\"\">ship it",
+        "<pasted_content\nid=\"0e15\">ship it",
+        "<pasted_content id=\"0123456789abcdef0123456789abcdef0\">ship it",
+    ] {
+        assert_eq!(unwrap_paste(text), Some(text), "{text}");
+    }
+}

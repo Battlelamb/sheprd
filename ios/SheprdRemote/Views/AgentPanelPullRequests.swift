@@ -73,13 +73,13 @@ struct ChatPullRequestList: View {
         return did.isEmpty ? name : "\(name) · \(did.joined(separator: ", "))"
     }
 
-    /// Its state as the phone's lists know it; else merged once the agent
-    /// merged it, as a merge is never undone; else unknown. Closed and
-    /// reopened are kept once each in the order first seen, so they cannot
-    /// tell which came last.
+    /// Merged once the agent merged it, as a merge is never undone and the
+    /// phone's lists may predate it; else its state as those lists know it;
+    /// else unknown. Closed and reopened are kept once each in the order
+    /// first seen, so they cannot tell which came last.
     static func look(_ pull: ChatPullRequest, listed: GitHubSearchPull?) -> PullRequestLook {
-        if let listed { return PullRequestLook(listed.state, draft: listed.isDraft) }
-        return pull.actions.contains(.merged) ? .merged : .unknown
+        if pull.actions.contains(.merged) { return .merged }
+        return listed.map { PullRequestLook($0.state, draft: $0.isDraft) } ?? .unknown
     }
 }
 

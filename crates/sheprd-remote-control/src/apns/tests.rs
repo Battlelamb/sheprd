@@ -10,6 +10,7 @@ mod notify_key;
 mod pacer;
 mod payload;
 mod per_host;
+mod push_relay_revoke;
 mod recipient;
 mod redact;
 mod relayed;

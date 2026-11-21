@@ -385,6 +385,11 @@ impl OrchestratorView {
         self.number_chars = number_chars;
         self.lines = lines;
         self.revision += 1;
+        // A pill picked since may show the revealed pull request from
+        // another checkout: its open page follows its row.
+        if let Some(key) = self.revealed.clone() {
+            self.activate(&key);
+        }
         if self.selected.is_none() || !self.selection_listed() {
             self.selected = self.keys().into_iter().next();
         }

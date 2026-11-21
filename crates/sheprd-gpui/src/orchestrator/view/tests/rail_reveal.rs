@@ -121,6 +121,13 @@ fn the_page_reads_the_checkout_the_revealed_row_shows(cx: &mut gpui::TestAppCont
             view.refresh_rows();
             assert_eq!(view.keys(), std::slice::from_ref(&key));
             assert_eq!(view.repo_of(&key), Some(1));
+
+            // Picking the other checkout moves the row there, and the page
+            // follows it.
+            view.projects = std::collections::HashSet::from(["test".to_owned()]);
+            view.refresh_rows();
+            assert_eq!(view.repo_of(&key), Some(0));
+            assert_eq!(view.active, 0);
         })
     });
 }

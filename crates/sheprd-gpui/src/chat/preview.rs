@@ -817,6 +817,7 @@ fn attachment_entries() -> Result<Vec<Entry>> {
             kind: EntryKind::User {
                 text: "Can you explain this image and link the notes?".into(), // i18n: data
                 files: 0,
+                note: None,
             },
         },
         Entry {

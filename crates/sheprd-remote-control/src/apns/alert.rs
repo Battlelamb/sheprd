@@ -55,6 +55,10 @@ pub(crate) struct Sealed {
     /// buzz. Left out otherwise, as older phones expect.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) wizz: bool,
+    /// A test push's id, which the phone's extension records on arrival
+    /// so the app can show it came. Left out of every other push.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) test: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -90,8 +94,42 @@ impl Sealed {
                         .collect(),
                 }),
             wizz: notification.wizz,
+            test: None,
         }
     }
+
+    /// The test push `id` the phone asked for, from the computer named
+    /// `name` whose fingerprint is `computer`. It carries the computer's
+    /// real badge, since the phone takes every alert's count as current.
+    pub(crate) fn test(id: String, computer: String, name: &str, badge: u32) -> Self {
+        Self {
+            v: VERSION,
+            kind: Kind::Test,
+            clear: false,
+            computer,
+            pane: TEST_PANE.to_owned(),
+            title: "Test push".to_owned(),
+            body: format!("From {name}: notifications from this computer reach this phone."),
+            badge,
+            permission: None,
+            wizz: false,
+            test: Some(id),
+        }
+    }
+}
+
+/// The thread test pushes share, which names no chat.
+pub(crate) const TEST_PANE: &str = "test";
+/// The longest test id a phone may send.
+pub(crate) const MAX_TEST_ID: usize = 64;
+
+/// Whether `id` can be a test push's id: 1 to [`MAX_TEST_ID`] letters,
+/// digits, or dashes, as a UUID is.
+pub(crate) fn valid_test_id(id: &str) -> bool {
+    (1..=MAX_TEST_ID).contains(&id.len())
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
 }
 
 #[derive(Serialize)]
@@ -132,11 +170,13 @@ pub(crate) fn push(
     loop {
         let body = outer(&sealed, &seal)?;
         if body.len() <= MAX_PAYLOAD {
-            let question = (sealed.kind.asks() || sealed.wizz) && !sealed.clear;
+            // A test is waited for on the phone, so it may not wait either.
+            let urgent =
+                (sealed.kind.asks() || sealed.wizz || sealed.kind == Kind::Test) && !sealed.clear;
             return Ok(Push {
                 body,
                 collapse_id: Some(collapse_id(tag)),
-                priority: if question {
+                priority: if urgent {
                     Priority::High
                 } else {
                     Priority::Low

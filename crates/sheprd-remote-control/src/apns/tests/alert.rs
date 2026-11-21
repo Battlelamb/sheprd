@@ -17,14 +17,15 @@ use sha2::Sha256;
 use sheprd_chat_protocol::{Permission, PermissionId, PermissionKind, PermissionOption};
 use std::path::PathBuf;
 
-const COMPUTER: &str = "9E92A0DF1CE0967EC34C0C0146005FBC51654330E7D26EC9B5805055755E24F6";
+pub(super) const COMPUTER: &str =
+    "9E92A0DF1CE0967EC34C0C0146005FBC51654330E7D26EC9B5805055755E24F6";
 
-fn device() -> SecretKey {
+pub(super) fn device() -> SecretKey {
     SecretKey::from_slice(&[7; 32]).unwrap()
 }
 
 /// Seals as production does, with fixed one-time values.
-fn fixed_seal(plaintext: &[u8]) -> crate::apns::Result<Vec<u8>> {
+pub(super) fn fixed_seal(plaintext: &[u8]) -> crate::apns::Result<Vec<u8>> {
     Ok(seal_with(
         &device().public_key(),
         plaintext,
@@ -35,7 +36,7 @@ fn fixed_seal(plaintext: &[u8]) -> crate::apns::Result<Vec<u8>> {
 }
 
 /// Opens `sealed` (base64url) with the device key, as the app does.
-fn open(sealed: &str) -> Vec<u8> {
+pub(super) fn open(sealed: &str) -> Vec<u8> {
     let sealed = URL_SAFE_NO_PAD.decode(sealed).unwrap();
     let ephemeral = PublicKey::from_sec1_bytes(&sealed[..65]).unwrap();
     let mut salt = sealed[..65].to_vec();
@@ -92,7 +93,7 @@ fn question() -> Notification {
     }
 }
 
-fn json(bytes: &[u8]) -> Value {
+pub(super) fn json(bytes: &[u8]) -> Value {
     serde_json::from_slice(bytes).unwrap()
 }
 

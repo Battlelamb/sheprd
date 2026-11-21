@@ -545,6 +545,11 @@ final class RemoteClient: Sendable {
         let _: EmptyAnswer = try await send("POST", "/api/apns", body: registration, bearer: bearer)
     }
 
+    /// Asks the computer to send this phone a sealed test alert carrying `id`.
+    func sendTestPush(id: String, bearer: String) async throws -> API.PushTestAnswer {
+        try await send("POST", "/api/apns/test", body: API.PushTestRequest(id: id), bearer: bearer)
+    }
+
     /// Writes what only this phone saw to the computer's `daemon.log`. The
     /// route is open and rate limited, as pairing fails before any session.
     func report(context: String, message: String) async throws {

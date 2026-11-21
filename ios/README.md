@@ -375,6 +375,14 @@ the phone: Apple sees only "Sheprd", "New activity", and ciphertext.
    push that removes the chat's notifications. Badges show the questions
    waiting.
 
+5. **Test push.** Settings > Notifications > Send Test Push asks a computer
+   (`POST /api/apns/test`) for one sealed alert carrying a random id. The
+   extension records the id in the App Group as it opens the alert
+   (`PushTestReceipts`), and Settings shows "Arrived in N s", or where it
+   stopped: no APNs key on the computer, no alert token from this phone yet,
+   what APNs refused, or nothing within 30 seconds. A tap on it only opens
+   the app.
+
 A Live Activity in the question phase also offers up to three answers
 (never the "always" ones) as buttons that answer from the lock screen.
 Any computer can start an activity that names another computer's chat.

@@ -232,6 +232,8 @@ final class AppModel {
     }
     let sessions: Sessions
     let tokens: ActivityTokens
+    /// Settings' "Send test push", per computer.
+    let pushTests: PushTests
     let fleet: Fleet
     /// Pairing with the hosts each computer's Sheprd knows.
     let hostLinks: HostLinks
@@ -258,6 +260,7 @@ final class AppModel {
         let sessions = Sessions()
         self.sessions = sessions
         tokens = ActivityTokens(sessions: sessions)
+        pushTests = PushTests(sessions: sessions)
         fleet = Fleet(sessions: sessions)
         hostLinks = HostLinks(sessions: sessions)
         fleetMembership = FleetMembership(sessions: sessions)

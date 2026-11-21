@@ -431,7 +431,7 @@ async fn send_alert(state: &Arc<State>, device: &DeviceId, notification: &Notifi
 
 /// Drops `token` from `device`'s registration after APNs refused it.
 /// Blocking.
-fn forget(state: &State, device: &DeviceId, token: &apns::DeviceToken) {
+pub(crate) fn forget(state: &State, device: &DeviceId, token: &apns::DeviceToken) {
     let mut auth = state.auth();
     let devices = auth.devices_mut();
     let mut registration =

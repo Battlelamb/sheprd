@@ -30,6 +30,7 @@ mod shortcuts;
 mod stream;
 mod tags;
 mod terminal;
+mod test_push;
 mod typed;
 mod update;
 mod uploads;
@@ -238,6 +239,10 @@ pub(crate) fn router(state: Shared) -> Router {
         .route(
             "/api/apns",
             post(api::register_apns).layer(DefaultBodyLimit::max(16 * 1024)),
+        )
+        .route(
+            "/api/apns/test",
+            post(test_push::send).layer(DefaultBodyLimit::max(1024)),
         )
         .route("/api/term/{pane}/keys", post(terminal::keys))
         .route("/api/term/{pane}/paste", post(terminal::paste))

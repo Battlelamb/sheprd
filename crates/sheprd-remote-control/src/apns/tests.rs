@@ -10,6 +10,7 @@ mod pacer;
 mod payload;
 mod redact;
 mod terminal;
+mod test_push;
 mod tokens;
 
 const CHAT: Chat<'static> = Chat {

@@ -281,16 +281,17 @@ Apple takes pushes for this app only from Sheprd's. The Sheprd push relay
 (`crates/sheprd-push-relay`, `docs/apns-relay-plan.md`) holds that key and
 forwards pushes, sealed so it reads none of them. The app turns it on at
 launch, after a new install or a reinstall, unless the user turned it off in
-Settings > Push Relay, which also shows what the push relay sees. Each
-computer still needs `push_relay` in `[remote]`, off by default there.
+Settings > Push Relay, which also shows what the push relay sees. Computers
+are ready by default too (`push_relay` in `[remote]`, which a user may turn
+off per computer), so every paired computer pushes through it.
 
 How a computer delivers this phone's pushes:
 
 | Mode | Computer | Phone sends | What travels |
 | --- | --- | --- | --- |
-| Off | No APNs key, push relay off | Tokens, answered 503 | Nothing through APNs; Web Push only |
+| Off | No APNs key, `push_relay = false` | Tokens, answered 503 | Nothing through APNs; Web Push only |
 | Own key | `STATE_DIR/apns/AuthKey.p8` (below) | Tokens, with the push relay off here | Straight to Apple. Alerts sealed, Live Activities plain |
-| Push relay | No key, `push_relay = true` | Handles, with the push relay on here | Through push.sheprd.org. Alerts and Live Activities sealed |
+| Push relay | No key, `push_relay` on (the default) | Handles, with the push relay on here | Through push.sheprd.org. Alerts and Live Activities sealed |
 
 Settings shows each computer's mode, as it answered the last
 registration (older computers do not say).

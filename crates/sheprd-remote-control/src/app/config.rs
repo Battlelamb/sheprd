@@ -12,7 +12,7 @@
 //! live_activities = "detailed" # or "generic": no chat names or steps
 //! device_idle_days = 30         # 0 never forgets a device
 //! presence = false             # hold phone alerts while its owner is at this Mac
-//! push_relay = false           # iPhone pushes through push.sheprd.org without an APNs key
+//! push_relay = true            # iPhone pushes through push.sheprd.org without an APNs key
 //! relays = ["https://relay.example.org"]  # reach this computer from any network
 //! github_hosts = ["ghe.example.com"]       # Enterprise Server hosts besides gh's
 //! ```
@@ -68,7 +68,9 @@ pub struct RemoteConfig {
     pub presence: bool,
     /// Whether iPhone alerts and Live Activities may go through the Sheprd
     /// push relay, sealed, when this computer has no APNs key of its own
-    /// (`docs/apns-relay-plan.md`, Opt-in). Off by default.
+    /// (`docs/apns-relay-plan.md`, Opt-in). On by default: nothing reaches
+    /// the push relay until a phone opts in and gives this computer
+    /// handles, so every linked computer pushes without a setting each.
     pub push_relay: bool,
     /// Relays the daemon listens on, so paired phones reach this computer
     /// from any network (`docs/relay-plan.md`); none by default.
@@ -91,7 +93,7 @@ impl Default for RemoteConfig {
             notifications: Privacy::default(),
             port: DEFAULT_PORT,
             presence: false,
-            push_relay: false,
+            push_relay: true,
             relays: Vec::new(),
             // keep-sorted end
         }

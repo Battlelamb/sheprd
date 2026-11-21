@@ -527,9 +527,9 @@ The native app's alerts and Live Activities go out one of three ways
 
 | Mode | When | What travels |
 | --- | --- | --- |
-| Off | No APNs key and `push_relay` off (the default) | Nothing through APNs; `POST /api/apns` answers 503 and alerts use Web Push |
+| Off | No APNs key and `push_relay = false` (`--no-push-relay`) | Nothing through APNs; `POST /api/apns` answers 503 and alerts use Web Push |
 | Own key | `STATE_DIR/apns/AuthKey.p8` and `config.json` exist | Straight to Apple with the user's key, for an app they sign themselves. Alerts sealed, Live Activities in plain text |
-| Relay | No key, and `[remote] push_relay = true` (`--push-relay`) | Through the Sheprd push relay, which holds the app's key (`docs/apns-relay-plan.md`). Every payload is sealed to the phone |
+| Relay | No key, and `[remote] push_relay` on (the default) | Through the Sheprd push relay, which holds the app's key (`docs/apns-relay-plan.md`). Every payload is sealed to the phone |
 
 The own key wins when both are set up. Each mode reaches only its own
 recipients: a key reaches hex tokens, the relay reaches handles, which the

@@ -368,6 +368,7 @@ what Sheprd shows or keeps.
 | Update the Sheprd app on another machine (the user confirms in Sheprd) | `sheprd host update studio` |
 | Save the working tree before a risky change, and compare later | `sheprd checkpoint create before refactor`, `sheprd checkpoint diff ID` |
 | Your branch's pull request, its checks, and (with your workspace focused) its comments | `sheprd pr`, `sheprd pr checks`, `sheprd pr comments` |
+| Ask to create your branch's pull request without `gh` credentials; focus the local checkout and your core pane first, then the user clicks Create pull request in Sheprd | `sheprd pr create`; only opens the native action, does not submit or return a PR URL; after confirmation use `sheprd pr` and `sheprd chat pr add URL` |
 | Diagnose missing GitHub details: last reported GraphQL quota and rate-limit retry delays | `sheprd pr quota --json` |
 | Ask the user to merge your branch's pull request (with the stack below it), or to add it to or take it out of the merge queue; they confirm in Sheprd | `sheprd pr merge`, `sheprd pr queue add\|remove` |
 | List the vulnerability reports outsiders filed and the open Dependabot alerts of your repositories, most severe first | `sheprd security --json` |

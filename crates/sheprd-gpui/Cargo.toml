@@ -173,6 +173,7 @@ integration-test = [
 ]
 
 [target.'cfg(unix)'.dependencies]
+sheprd-terminal.workspace = true
 # `system`: the host name nearby pairing advertises over Bluetooth.
 rustix = { features = ["system"], workspace = true }
 

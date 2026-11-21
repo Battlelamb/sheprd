@@ -37,7 +37,10 @@ use axum::{
 };
 use model::{ChatSnapshot, Home, Sources};
 use secrecy::SecretString;
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 use tokio::sync::mpsc;
 use wire::{ClientMessage, ServerMessage};
 
@@ -143,7 +146,9 @@ pub(crate) async fn live(
 
 /// Carries messages between the socket and the session until either ends:
 /// the phone closes, sends a binary or oversized frame, or the session
-/// says `bye`.
+/// says `bye`. Logs how it ended and how long the phone had been quiet:
+/// a path that stopped carrying traffic shows as a socket quiet for more
+/// than a [`PING_INTERVAL`], as the phone answers every ping.
 async fn serve(mut socket: WebSocket, state: Shared, device: DeviceId, token: SecretString) {
     let _connected = Connected::new(state.clone(), device.clone());
     let (to_phone, mut outbound) = mpsc::channel(OUTBOUND_QUEUE);
@@ -151,43 +156,72 @@ async fn serve(mut socket: WebSocket, state: Shared, device: DeviceId, token: Se
     let session = tokio::spawn(live::run(state, token, device, from_phone, to_phone));
     let mut ping = tokio::time::interval(PING_INTERVAL);
     ping.reset();
-    loop {
+    let opened = Instant::now();
+    let mut heard = opened;
+    let ending = loop {
         tokio::select! {
             message = outbound.recv() => {
-                let Some(message) = message else { break };
+                let Some(message) = message else { break Ending::SessionEnded };
                 let bye = matches!(message, ServerMessage::Bye { .. });
-                if !send(&mut socket, &message).await || bye {
-                    break;
+                if !send(&mut socket, &message).await {
+                    break Ending::SendFailed;
+                }
+                if bye {
+                    break Ending::Bye;
                 }
             }
-            frame = socket.recv() => match frame {
-                Some(Ok(Message::Text(text))) => {
-                    let reply = match serde_json::from_str::<ClientMessage>(&text) {
-                        Ok(message) => inbound
-                            .try_send(message)
-                            .err()
-                            .map(|_| "too many messages at once"),
-                        Err(_) => Some("that message is not one this socket reads"),
-                    };
-                    if let Some(message) = reply {
-                        let error = ServerMessage::Error { message: message.to_owned(), view: None };
-                        if !send(&mut socket, &error).await {
-                            break;
+            frame = socket.recv() => {
+                if matches!(frame, Some(Ok(_))) {
+                    heard = Instant::now();
+                }
+                match frame {
+                    Some(Ok(Message::Text(text))) => {
+                        let reply = match serde_json::from_str::<ClientMessage>(&text) {
+                            Ok(message) => inbound
+                                .try_send(message)
+                                .err()
+                                .map(|_| "too many messages at once"),
+                            Err(_) => Some("that message is not one this socket reads"),
+                        };
+                        if let Some(message) = reply {
+                            let error = ServerMessage::Error { message: message.to_owned(), view: None };
+                            if !send(&mut socket, &error).await {
+                                break Ending::SendFailed;
+                            }
                         }
                     }
+                    Some(Ok(Message::Ping(_) | Message::Pong(_))) => {}
+                    Some(Ok(Message::Close(_))) | None => break Ending::PhoneClosed,
+                    Some(Ok(Message::Binary(_))) => break Ending::Unreadable,
+                    Some(Err(_)) => break Ending::ReadFailed,
                 }
-                Some(Ok(Message::Ping(_) | Message::Pong(_))) => {}
-                Some(Ok(Message::Binary(_) | Message::Close(_)) | Err(_)) | None => break,
             },
             _ = ping.tick() => {
                 if socket.send(Message::Ping(Default::default())).await.is_err() {
-                    break;
+                    break Ending::SendFailed;
                 }
             }
         }
-    }
+    };
     session.abort();
     let _ = socket.send(Message::Close(None)).await;
+    tracing::info!(
+        ?ending,
+        lasted_s = opened.elapsed().as_secs(),
+        quiet_s = heard.elapsed().as_secs(),
+        "a phone's live socket ended"
+    );
+}
+
+/// Why a live socket ended, as its log line says.
+#[derive(Debug)]
+enum Ending {
+    Bye,
+    PhoneClosed,
+    ReadFailed,
+    SendFailed,
+    SessionEnded,
+    Unreadable,
 }
 
 async fn send(socket: &mut WebSocket, message: &ServerMessage) -> bool {

@@ -151,3 +151,21 @@ struct RefusalTests {
         #expect(Refusal.text(status: 500, body: Data(#"{"error":""}"#.utf8)) == #"The computer answered 500: {"error":""}"#)
     }
 }
+
+/// A call's tag goes in a header the computer logs, so a report and the
+/// computer's line for the same call can be matched.
+struct CallTagTests {
+    @Test func aTagIsEightHexDigits() {
+        for _ in 0..<64 {
+            let tag = PathFailure.newTag()
+            #expect(tag.count == 8)
+            #expect(tag.allSatisfy { $0.isHexDigit && !$0.isUppercase })
+        }
+    }
+
+    @Test func aReportNamesTheCallItsAddressAndWhenItBeganToTheMillisecond() {
+        let began = Date(timeIntervalSince1970: 1_763_743_935.25)
+        let line = PathFailure.call(tag: "3fa9c2d1", origin: "https://m4max.local:7443", began: began)
+        #expect(line == "call 3fa9c2d1 at https://m4max.local:7443 begun 2025-11-21T16:52:15.250Z")
+    }
+}

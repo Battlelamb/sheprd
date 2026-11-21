@@ -386,7 +386,7 @@ final class FleetMembership {
         do {
             let opened = try await Self.background { try FleetReplica.open(fleet: fleet, me: me, log: saved, at: .now) }
             // It may lack what the record keeps; the next sync or signature takes that in.
-            try adopt(opened, holdsKept: false)
+            try adopt(opened, waiting: nil)
         } catch {
             damaged = true
             salvaged = (try? await Self.background { try FleetReplica.salvage(me: me, log: saved) }) ?? []
@@ -417,13 +417,17 @@ final class FleetMembership {
             var outcome = try await FleetLogSync.run(fleet: fleet, me: me, replica: replica, with: client)
             // What the phone signed that its copy lost or never held (signed
             // before it kept one) joins it, checked again, and goes over.
+            // Those still waiting for history this computer lacks stay in
+            // the record, for a sync with one that has it.
             let carried = salvaged + (record.unconfirmed ?? [])
+            var waiting: [String] = []
             if !carried.isEmpty {
                 let synced = outcome.replica
-                let merged = try await Self.background { try synced.applying(carried, at: .now) }
-                outcome = try await FleetLogSync.run(fleet: fleet, me: me, replica: merged, with: client)
+                let merged = try await Self.background { try synced.carrying(carried, at: .now) }
+                waiting = merged.waiting
+                outcome = try await FleetLogSync.run(fleet: fleet, me: me, replica: merged.replica, with: client)
             }
-            try adopt(outcome.replica, through: computer)
+            try adopt(outcome.replica, waiting: waiting, through: computer)
             damaged = false
             salvaged = []
             return outcome
@@ -439,10 +443,13 @@ final class FleetMembership {
     /// before the copy holding them is on disk, let alone handed to a
     /// computer. Should the copy then fail to write, the record still holds
     /// them, and the next sync or signature takes them in again, so no
-    /// number is burned on an operation nobody kept. Throws when either
-    /// cannot be written.
+    /// number is burned on an operation nobody kept. `waiting` are the
+    /// phone's own operations `new` lacks, as they wait for history it does
+    /// not hold yet: they stay in the record, as do the rest once `new` is
+    /// written. Nil when `new` may lack what the record keeps, which then
+    /// stays. Throws when either cannot be written.
     private func adopt(
-        _ new: FleetReplica, signed: [String] = [], holdsKept: Bool = true, through computer: Computer? = nil
+        _ new: FleetReplica, signed: [String] = [], waiting: [String]? = [], through computer: Computer? = nil
     ) throws {
         guard var record, new.fleet == record.fleet, new.me == record.member else { return }
         if new.status.join == .member { record.admitted = true }
@@ -451,15 +458,19 @@ final class FleetMembership {
         if let next = new.status.next, next.seq > 1 {
             record.signedSeq = max(record.signedSeq ?? 0, next.seq - 1)
         }
-        if !signed.isEmpty { record.unconfirmed = (record.unconfirmed ?? []) + signed }
+        // Salvaged ones among `waiting` are only in the damaged file this
+        // write replaces: the record takes them first.
+        let kept = record.unconfirmed ?? []
+        let joined = kept + (waiting ?? []).filter { !kept.contains($0) } + signed
+        record.unconfirmed = joined.isEmpty ? nil : joined
         if record != self.record, !save(record) { throw FleetMembershipError.notKept }
         try store.write(new.log)
         replica = new
-        // The copy on disk holds them now (a sync or signature takes them
-        // in first). A failed save here only means taking them in again,
-        // which changes nothing.
-        if holdsKept, record.unconfirmed != nil {
-            record.unconfirmed = nil
+        // The copy on disk holds the rest now (a sync or signature takes
+        // them in first). A failed save here only means taking them in
+        // again, which changes nothing.
+        if let waiting, record.unconfirmed != (waiting.isEmpty ? nil : waiting) {
+            record.unconfirmed = waiting.isEmpty ? nil : waiting
             _ = save(record)
         }
         route(new.status)
@@ -472,8 +483,8 @@ final class FleetMembership {
     /// follows them.
     private func carryKept() async throws {
         guard let carried = record?.unconfirmed, !carried.isEmpty, let current = replica else { return }
-        let merged = try await Self.background { try current.applying(carried, at: .now) }
-        try adopt(merged)
+        let merged = try await Self.background { try current.carrying(carried, at: .now) }
+        try adopt(merged.replica, waiting: merged.waiting)
     }
 
     /// How signing and posting ended.
@@ -549,7 +560,8 @@ final class FleetMembership {
         }
         do {
             // Kept before it is handed over, so the next draft follows it.
-            try adopt(sealed.replica, signed: sealed.ops)
+            // What still waits for history stays in the record.
+            try adopt(sealed.replica, signed: sealed.ops, waiting: self.record?.unconfirmed ?? [])
         } catch {
             problem = Self.describe(error)
             // The record took them, though the copy did not: they still go.

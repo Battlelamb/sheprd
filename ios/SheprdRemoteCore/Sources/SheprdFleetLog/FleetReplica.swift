@@ -57,6 +57,20 @@ public struct FleetReplica: Sendable {
         try Self.apply(fleet: fleet, me: me, log: log, ops: ops, at: now)
     }
 
+    /// This copy with `ops`, this phone's own, taken in, and those of them
+    /// it still lacks because they wait for history it does not hold: a
+    /// copy started again from a computer behind the rest, say. The saved
+    /// log keeps no waiting operation, so the caller keeps these to take in
+    /// again once a sync brings that history. None when nothing waits, as
+    /// what else was not taken was refused, which no history changes.
+    public func carrying(_ ops: [String], at now: Date) throws -> (replica: FleetReplica, waiting: [String]) {
+        let merged = try applying(ops, at: now)
+        guard merged.pending > 0 else { return (merged, []) }
+        let held = Set(try Self.salvage(me: me, log: merged.log).compactMap(Base64URL.decode))
+        let waiting = ops.filter { op in Base64URL.decode(op).map { !held.contains($0) } ?? false }
+        return (merged, waiting)
+    }
+
     /// What a computer whose heads are `heads` lacks: one sync's worth,
     /// and whether there is more.
     public func missing(for heads: [String], at now: Date) throws -> (ops: [String], more: Bool) {

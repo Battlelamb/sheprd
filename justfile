@@ -297,7 +297,7 @@ ios-build: ios-fleet-ffi ios-generate
     cd ios && xcodebuild -project SheprdRemote.xcodeproj -scheme SheprdRemote -destination 'generic/platform=iOS Simulator' -derivedDataPath build CODE_SIGNING_ALLOWED=NO -quiet build
 
 # Archive and upload to TestFlight, taking the key from `pass` when unset.
-ios-testflight:
+ios-testflight: ios-fleet-ffi
     #!/usr/bin/env bash
     set -euo pipefail
     # CI sets these from the `testflight` environment's secrets; here what

@@ -214,6 +214,13 @@ public struct FleetClient: Sendable {
         return Signed(ops: ops, heads: status.heads)
     }
 
+    /// What new operations follow and carry: the unconfirmed ones, or with
+    /// none the last one this phone signed, confirmed but perhaps unknown
+    /// to the computer it posts through next. Bounded to that one.
+    public static func carried(unconfirmed: [Fleet.Op], last: Fleet.Op?) -> [Fleet.Op] {
+        unconfirmed.isEmpty ? (last.map { [$0] } ?? []) : unconfirmed
+    }
+
     /// Posts `signed` at most `maxSyncOps` at a time, each batch on the
     /// heads the last one left (at most `maxSyncHeads`), then reads the
     /// fleet back to confirm they applied: a computer that lacks their

@@ -13,6 +13,7 @@ mod files;
 mod harness;
 mod herdr;
 mod history;
+mod known;
 mod mirror;
 mod observe;
 mod pi;

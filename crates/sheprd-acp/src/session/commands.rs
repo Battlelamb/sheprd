@@ -241,6 +241,9 @@ impl<R: FnMut(Update)> Session<R> {
     }
 
     pub(super) fn set_mode(&mut self, mode: String) -> Result<(), Rejection> {
+        if !self.ready {
+            return self.defer_mode(mode);
+        }
         let session = self.acp_session.clone().ok_or(Rejection::NotReady)?;
         let known = self
             .transcript
@@ -258,6 +261,9 @@ impl<R: FnMut(Update)> Session<R> {
     }
 
     pub(super) fn set_option(&mut self, id: String, value: &OptionValue) -> Result<(), Rejection> {
+        if !self.ready {
+            return self.defer_option(id, value.clone());
+        }
         let session = self.acp_session.clone().ok_or(Rejection::NotReady)?;
         let known = self
             .transcript

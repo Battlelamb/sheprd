@@ -24,9 +24,22 @@ public struct FleetChain: Codable, Equatable, Sendable {
         /// What was posted, and what it followed.
         var ops: [Data]
         var base: Data?
+        /// The device id of the computer that refused it: only a fresh read
+        /// from it settles the refusal, as one that lags would name an
+        /// older sequence number than the fleet has.
+        var computer: String?
     }
 
     public init() {}
+
+    /// The line a membership kept before it was one value: the last
+    /// operation signed and those no computer confirmed, base64url.
+    public init(legacyLast last: String?, unconfirmed: [String]?) {
+        let decoded = (unconfirmed ?? []).compactMap(Base64URL.decode)
+        self.unconfirmed = decoded.filter { (try? Fleet.Op.decode($0)) != nil }
+        self.last = last.flatMap(Base64URL.decode).flatMap { (try? Fleet.Op.decode($0)) == nil ? nil : $0 }
+            ?? self.unconfirmed.last
+    }
 
     /// The operation new ones follow.
     public var lastOp: Fleet.Op? { last.flatMap { try? Fleet.Op.decode($0) } }
@@ -60,26 +73,31 @@ public struct FleetChain: Codable, Equatable, Sendable {
         base = nil
     }
 
-    /// The fleet refused some of the unconfirmed operations. Which applied
-    /// is not known until a fresh read (`resolve`); until then nothing is
-    /// followed, and nothing new is signed.
-    public mutating func refused() {
+    /// The computer `computer` (a device id) refused some of the
+    /// unconfirmed operations. Which applied is not known until a fresh
+    /// read from that computer (`resolve`); until then nothing is followed,
+    /// and nothing new is signed.
+    public mutating func refused(by computer: String) {
         guard !unconfirmed.isEmpty || refusal != nil else { return }
         if refusal == nil {
-            refusal = Refusal(ops: unconfirmed, base: base)
+            refusal = Refusal(ops: unconfirmed, base: base, computer: computer)
         }
         unconfirmed = []
         base = nil
         last = nil
     }
 
-    /// Settles a refusal with a fresh read of the fleet: `next` is the
-    /// phone's next sequence number there, past every operation of its that
-    /// applied. The last of the refused post that applied, else what it
-    /// followed, becomes what new operations follow. With no `next` (the
-    /// read says nothing about the phone), the refusal stays.
-    public mutating func resolve(next: UInt64?) {
+    /// Settles a refusal with a fresh read of the fleet from `computer`:
+    /// `next` is the phone's next sequence number there, past every
+    /// operation of its that applied. The last of the refused post that
+    /// applied, else what it followed, becomes what new operations follow.
+    /// A read from another computer settles it only when it is past every
+    /// operation of the refused post, which then all applied; one behind
+    /// says nothing. With no `next`, the refusal stays.
+    public mutating func resolve(next: UInt64?, from computer: String) {
         guard let refusal, let next else { return }
+        let newest = refusal.ops.compactMap { try? Fleet.Op.decode($0) }.map(\.seq).max() ?? 0
+        guard refusal.computer == computer || next > newest else { return }
         let known = (refusal.ops + (refusal.base.map { [$0] } ?? [])).compactMap { data -> (UInt64, Data)? in
             (try? Fleet.Op.decode(data)).map { ($0.seq, data) }
         }

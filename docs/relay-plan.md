@@ -1811,7 +1811,10 @@ all of them. It needs no fleet key, because it only removes access.
   `STATE_DIR/fleet/peers.json` each peer's last heads and backoff. All
   three are 0600.
 - **Agents:** the merged access file (`fleet`) and the suspensions
-  (`suspended`) sit in the agent's state directory, 0600.
+  (`suspended`) sit in the agent's state directory, 0600, beside `lines`,
+  the fleet whose `authorized_keys` lines the agent may have written,
+  kept before any is: a scrub or a refusal removes them from it even when
+  no access file was saved, and every fleet line when it does not read.
 - **Phones:** the key is in the Secure Enclave, and the log in the app
   group container under complete file protection.
 - **Logs:** nothing beyond counts and short ids. No route, relay,

@@ -15,6 +15,10 @@ extension API {
         public let next: FleetNext?
         /// Where this phone's join stands, when it asked here.
         public let join: FleetStanding?
+        /// The member this answer was asked about (`FleetClient.status`),
+        /// hex: its `next` and `join` speak for that key alone, so an
+        /// answer about another key is never taken for the current one.
+        public internal(set) var member: String?
         /// The hosts this phone linked a device key for, by id.
         public let links: [String]
         /// The device key each of those links names, base64url, by host.
@@ -98,6 +102,13 @@ extension API {
             Dictionary(linkKeys.compactMap { host, key in
                 Base64URL.decode(key).map { (host.lowercased(), $0) }
             }, uniquingKeysWith: { first, _ in first })
+        }
+
+        /// Whether this answer was asked about `member` (hex), the phone's
+        /// key now: one asked about an earlier key, as a join cancelled and
+        /// made again, says nothing about it.
+        public func isAbout(member: String?) -> Bool {
+            self.member?.lowercased() == member?.lowercased()
         }
 
         /// The direct addresses `host` publishes, as `https://` origins.

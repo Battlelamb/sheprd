@@ -174,6 +174,10 @@ final class FleetMembership {
             let member = record.flatMap { FleetLog.data(hex: $0.member) }
             let status = try await client(computer).status(member: member)
             fleets[computer.device] = status.view?.fleet
+            // The membership may have changed while the read was out (a join
+            // cancelled and made again with a new key): an answer about the
+            // key it asked for says nothing about the one held now.
+            guard status.isAbout(member: self.record?.member) else { return false }
             guard let record, status.view?.fleet == record.fleet else {
                 if self.record == nil { self.status = status }
                 return false

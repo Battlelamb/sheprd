@@ -488,9 +488,13 @@ again, from a retry, a failover, or a second sender, shows once:
   notification's identifier. When the person already dismissed or opened
   the first, the copy is noted (`RetractedAlerts`) and taken back
   (`AlertSweep`): by the extension a moment after showing it, or at its
-  next run, and by the app at launch, in the foreground, and on a
-  background push. A newer alert for the same chat, under the same
-  identifier, is never taken back.
+  next run, and by the app at launch, whenever it becomes active (any
+  window), and on a background push. The list is a file in the App Group,
+  changed only under `NSFileCoordinator`, so the app and the extension
+  never overwrite each other. A sweep reads what is shown, checks, and
+  removes while holding it, and the extension forgets an identifier under
+  the same hold before showing another alert there, so a newer alert for
+  the same chat, under the same identifier, is never taken back.
 - With the entitlement, the copy is dropped. The account holder requests
   `com.apple.developer.usernotifications.filtering` for
   `so.pen.herdr.remote.notifications` at

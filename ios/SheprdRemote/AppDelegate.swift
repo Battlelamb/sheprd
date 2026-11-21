@@ -21,8 +21,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUser
         AppModel.current = model
         UNUserNotificationCenter.current().delegate = self
         Task { await NotificationCategories.register(.finished) }
-        // Late copies of alerts the extension could not drop.
+        // Late copies of alerts the extension could not drop, at launch and
+        // whenever the app comes back, whichever window it comes back to.
         Task { await AlertSweep.run() }
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { _ in
+            Task { await AlertSweep.run() }
+        }
         #if DEBUG
         if followDebugArguments() { return true }
         #endif

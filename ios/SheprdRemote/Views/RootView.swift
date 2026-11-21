@@ -98,8 +98,6 @@ struct RootView: View {
         // The microphone never stays open behind the app, or its lock.
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { model.voice = nil }
-            // Late copies of alerts the extension could not drop.
-            if phase == .active { Task { await AlertSweep.run() } }
         }
         .onChange(of: LockState.shared.locked) { _, locked in
             guard !locked, let talk = model.pendingTalk else { return }

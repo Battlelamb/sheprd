@@ -4,17 +4,21 @@ import Foundation
 /// dismissed or opened can only be shown again, silently: without Apple's
 /// filtering entitlement the Notification Service Extension must deliver
 /// something. It notes the copy here, and the extension's next run and the
-/// app (launch, foreground, background push) remove it. A copy is removed
+/// app (launch, activation, background push) remove it. A copy is removed
 /// only while the notification under its identifier still carries its
 /// event: a newer alert for the same chat reuses the identifier (the APNs
-/// collapse id) and stays. Kept in the App Group's defaults, at most
-/// `kept`, none older than `window`.
-public struct RetractedAlerts: Equatable, Sendable {
+/// collapse id) and stays. At most `kept`, none older than `window`.
+///
+/// The app and its extension are separate processes that both change the
+/// list, so it lives in a file in the App Group and every change is one
+/// coordinated read, change, and write (`update`), never two.
+public struct RetractedAlerts: Codable, Equatable, Sendable {
     public static let kept = 32
     public static let window: TimeInterval = 2 * 24 * 60 * 60
-    static let key = "retractedAlerts"
+    /// The file's name in the App Group container.
+    public static let fileName = "retracted-alerts.json"
 
-    struct Entry: Equatable, Sendable {
+    struct Entry: Codable, Equatable, Sendable {
         let identifier: String
         let event: String
         let at: TimeInterval
@@ -24,11 +28,19 @@ public struct RetractedAlerts: Equatable, Sendable {
 
     public init() {}
 
+    public var isEmpty: Bool { entries.isEmpty }
+
     /// Notes the copy shown as `identifier` for `event` at `date`.
     public mutating func add(_ identifier: String, event: String, at date: Date) {
         entries.removeAll { $0.identifier == identifier }
         entries.append(Entry(identifier: identifier, event: event, at: date.timeIntervalSince1970))
         if entries.count > Self.kept { entries.removeFirst(entries.count - Self.kept) }
+    }
+
+    /// Forgets any copy noted under `identifier`: another alert is about
+    /// to be shown there, which no sweep may take back.
+    public mutating func forget(_ identifier: String) {
+        entries.removeAll { $0.identifier == identifier }
     }
 
     /// The identifiers to remove now, given what is shown (`identifier` to
@@ -47,36 +59,27 @@ public struct RetractedAlerts: Equatable, Sendable {
         return remove
     }
 
-    /// `add` in the App Group's `defaults`.
-    public static func add(_ identifier: String, event: String, at date: Date, in defaults: UserDefaults?) {
-        guard let defaults else { return }
-        var retracted = load(from: defaults)
-        retracted.add(identifier, event: event, at: date)
-        retracted.save(to: defaults)
-    }
-
-    /// `take` in the App Group's `defaults`.
-    public static func take(shown: [String: String?], at date: Date, in defaults: UserDefaults?) -> [String] {
-        guard let defaults else { return [] }
-        var retracted = load(from: defaults)
-        guard !retracted.entries.isEmpty else { return [] }
-        let remove = retracted.take(shown: shown, at: date)
-        retracted.save(to: defaults)
-        return remove
-    }
-
-    static func load(from defaults: UserDefaults) -> RetractedAlerts {
-        var retracted = RetractedAlerts()
-        let flat = defaults.stringArray(forKey: key) ?? []
-        for index in stride(from: 0, to: flat.count - 2, by: 3) {
-            guard let at = TimeInterval(flat[index + 2]) else { continue }
-            retracted.entries.append(Entry(identifier: flat[index], event: flat[index + 1], at: at))
+    /// Reads the list in `file`, lets `change` change it, and writes it
+    /// back, all while holding the file against every other coordinated
+    /// reader and writer, in this process or the other. A file that is
+    /// missing or unreadable reads as empty. Blocking: `change` may wait,
+    /// briefly, for what iOS shows.
+    @discardableResult
+    public static func update<Result>(file: URL, _ change: (inout RetractedAlerts) -> Result) -> Result {
+        var outcome: Result?
+        var failure: NSError?
+        NSFileCoordinator().coordinate(writingItemAt: file, options: .forMerging, error: &failure) { url in
+            var list = (try? JSONDecoder().decode(Self.self, from: Data(contentsOf: url))) ?? Self()
+            let before = list
+            outcome = change(&list)
+            if list != before, let data = try? JSONEncoder().encode(list) {
+                try? data.write(to: url, options: .atomic)
+            }
         }
-        retracted.entries = Array(retracted.entries.suffix(kept))
-        return retracted
-    }
-
-    func save(to defaults: UserDefaults) {
-        defaults.set(entries.flatMap { [$0.identifier, $0.event, String($0.at)] }, forKey: Self.key)
+        // Coordination fails only for a file it cannot reach at all; the
+        // change then runs on an empty list that is not kept.
+        if let outcome { return outcome }
+        var list = Self()
+        return change(&list)
     }
 }

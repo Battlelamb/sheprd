@@ -36,6 +36,9 @@ final class NotificationService: UNNotificationServiceExtension {
         Task {
             await AlertSweep.run()
             let (content, first, retract) = await Self.prepare(request.value)
+            // A copy noted under this identifier must not take this alert
+            // back once it shows; a late copy is noted after this.
+            if !retract { AlertSweep.willShow(request.value.identifier) }
             deliver.value(content)
             // Copies waiting on this one go on only once it reached iOS.
             if let first { await Self.gate.delivered(first) }
@@ -130,7 +133,7 @@ final class NotificationService: UNNotificationServiceExtension {
             center.removeDeliveredNotifications(withIdentifiers: ids)
             return (content, nil, false)
         }
-        RetractedAlerts.add(id, event: event, at: Date(), in: UserDefaults(suiteName: group))
+        AlertSweep.retract(id, event: event)
         return (content, nil, true)
     }
 

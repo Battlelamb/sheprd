@@ -327,9 +327,14 @@ longer have, which shows as not reported).
   no buttons (`SealedCover`). The debug sample activity is plain, so it
   shows that cover while the push relay is on.
 - **Turning it off** revokes every handle the phone made, forgets the
-  credential, and removes the App Group key file. No token goes out
-  instead, so the phone gets no alerts or Live Activities until it is on
-  again.
+  credential, and removes the App Group key file. Each computer then gets
+  `APNsRegistration.pushRelayOff`: an explicit `null` push-to-start and
+  alert and no activities, which makes it drop the handles it held, so it
+  stops pushing even when the revocation failed or was refused (a computer
+  that is away drops them when the phone next reaches it). No token goes
+  out instead: native notifications stop until it is on again. Web Push is
+  separate and reaches only the browser app, installed and subscribed on
+  its own.
 - **Environments.** Xcode builds attest in App Attest's development
   environment and use `push-sandbox.sheprd.org`; TestFlight and App Store
   builds attest in production and use `push.sheprd.org`. The app tells them
@@ -361,7 +366,9 @@ update Sheprd first. Phones on the default are unaffected.
 ## Sealed alerts
 
 With the push relay on, questions, finished turns, and errors reach the
-phone as APNs alerts instead of Web Push. These alerts are sealed to
+phone as APNs alerts. With it off the app gets none; Web Push reaches only
+the browser app, installed and subscribed on its own. These alerts are
+sealed to
 the phone: Apple sees only "Sheprd", "New activity", and ciphertext.
 
 1. **Registration.** The app asks to show alerts after the first pairing.

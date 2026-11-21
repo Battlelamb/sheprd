@@ -11059,6 +11059,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sheprd-fleet-ffi"
+version = "0.1.0"
+dependencies = [
+ "p256 0.14.0",
+ "serde",
+ "serde_json",
+ "sheprd-remote-control",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "sheprd-github"
 version = "0.1.0"
 dependencies = [

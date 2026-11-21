@@ -31,6 +31,7 @@
 //! `tests/vectors.rs` writes.
 
 pub mod access;
+pub mod bluetooth;
 mod body;
 mod error;
 mod fold;
@@ -39,6 +40,7 @@ mod hosts;
 mod log;
 mod membership;
 mod op;
+pub mod phone;
 pub mod removal;
 mod routes;
 pub mod saved;

@@ -235,6 +235,8 @@ final class AppModel {
     let fleet: Fleet
     /// Pairing with the hosts each computer's Sheprd knows.
     let hostLinks: HostLinks
+    /// This phone as a member of the person's fleet.
+    let fleetMembership: FleetMembership
     let nearby = NearbyBrowser()
     let collapsed = CollapsedStore()
     let tagFilter = TagFilterStore()
@@ -258,6 +260,7 @@ final class AppModel {
         tokens = ActivityTokens(sessions: sessions)
         fleet = Fleet(sessions: sessions)
         hostLinks = HostLinks(sessions: sessions)
+        fleetMembership = FleetMembership(sessions: sessions)
         var loaded = false
         do {
             computers = try ComputerStore.load()
@@ -290,7 +293,13 @@ final class AppModel {
         presence.computers = computers
         hostLinks.computers = { [weak self] in self?.computers ?? [] }
         hostLinks.onPaired = { [weak self] in self?.add($0) }
-        fleet.onOnline = { [weak self] in self?.hostLinks.check($0) }
+        fleetMembership.computers = { [weak self] in self?.computers ?? [] }
+        fleetMembership.links = fleet
+        fleetMembership.onLinked = { [weak self] in self?.add($0) ?? false }
+        fleet.onOnline = { [weak self] computer in
+            self?.hostLinks.check(computer)
+            self?.fleetMembership.online(computer)
+        }
         fleet.onTags = { [weak self] in self?.tagsArrived($0, for: $1) }
         fleet.onTagsAnswer = { [weak self] in self?.tagsAnswered($0, for: $1) }
         shortcuts.perform = { [weak fleet] actions in
@@ -319,18 +328,23 @@ final class AppModel {
         paths.start(queue: .main)
     }
 
-    func add(_ computer: Computer) {
+    /// Keeps `computer`; whether it was saved.
+    @discardableResult
+    func add(_ computer: Computer) -> Bool {
         var computer = computer
         computer.carryTags(from: computers)
         // A computer is its CA: pairing the same CA (or the same device id)
         // again replaces the old record. Names are display only.
         computers.removeAll { $0.fingerprint == computer.fingerprint || $0.device == computer.device }
         computers.append(computer)
-        save()
+        let saved = save()
         learnRelays(of: computer.relay)
         Task { await AppDelegate.enableAlerts() }
         Task { await tokens.sync(only: computer.fingerprint) }
         hostLinks.check(computer, force: true)
+        // A computer in a fleet offers joining it.
+        if computer.via == nil { Task { await fleetMembership.check(computer) } }
+        return saved
     }
 
     /// Turns Bluetooth presence on or off for one computer.
@@ -376,7 +390,9 @@ final class AppModel {
         guard let index = computers.firstIndex(where: { $0.device == device }),
               computers[index].relay != record
         else { return }
-        computers[index].relay = record
+        // The highest fleet record checked for it stays, so a lagging
+        // computer cannot roll it back to an older one.
+        computers[index].relay = record?.keepingSignedRev(of: computers[index].relay)
         save()
         learnRelays(of: record)
     }
@@ -447,12 +463,16 @@ final class AppModel {
         Task { await GitHubReads.reader.tokens.forget(lender: computer.device) }
     }
 
-    private func save() {
+    /// Saves the paired computers; whether that landed.
+    @discardableResult
+    private func save() -> Bool {
         do {
             try ComputerStore.save(computers)
+            return true
         } catch {
             log.error("Could not save the paired computers: \(error.localizedDescription, privacy: .public)")
             message = error.localizedDescription
+            return false
         }
     }
 

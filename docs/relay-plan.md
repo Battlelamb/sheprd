@@ -1072,6 +1072,50 @@ through. B's daemon admits that tunnel key, sees that the device has an
 SSH key, splices the session to its SSH server instead of serving the
 API, and marks the device seen.
 
+**Joining the fleet in the same step** (built). Pairing leaves both
+computers in one fleet, whichever of them was in it (Fleet, Joining):
+
+- B names its fleet in the sealed offer while it is a live computer
+  member (`fleet::bluetooth::hint`: the id, and its computer and host
+  counts for the words, never trusted).
+- Once both screens show the code, A's page knows both fleets and the
+  child waits for its choice (`PairInput::Claim`) before it claims:
+
+  | A | B | A's page offers | The claim carries |
+  | --- | --- | --- | --- |
+  | In fleet F | In none | Add to fleet, or Pair only | `Invite(F)` |
+  | In none | In fleet G | Join fleet, or Pair only | `Join`: A's bundle for G |
+  | In none | In none | Create a fleet, or Pair only | `Invite` of the fleet A just founded |
+  | In F | In F | Says so | Nothing |
+  | In F | In G | Says B is in another fleet | `Invite(F)`, which B shows and cannot take |
+
+- A `Join` is A's bundle with its join signature, as an `Admit` carries
+  it, and a second signature by the same fleet key over the fleet, the
+  pairing's token hashed (`bluetooth::pairing_digest`), and the bundle
+  (`bluetooth::binding_message`). A's daemon makes both
+  (`Ask::Joining`), since the child holds no fleet key. B checks a
+  `Join` before it spends the token, and reads none of it for a claim
+  whose token it does not hold: the binding against this token, the
+  join signature for its own fleet, no tombstone, and the bundle's dial,
+  tunnel, and SSH keys equal to the very keys the claim carries. A
+  bundle copied from a log, or from another pairing, never binds.
+- B's dialog says what Allow does: "Also add Laptop to your fleet", or
+  "Join Laptop's fleet", a switch ticked by default; or a note when
+  both are in that fleet, or when B is in another, where Allow pairs
+  only. Allow sends the fleet the switch showed (`Approve.fleet`), and
+  the daemon acts only when it still matches: it signs `Admit`
+  (`Method::Bluetooth`), or its own bundle for A's fleet, bound to the
+  token (`ApprovedFleet::Joining`). The claim reads as waiting until
+  that is done, so A never takes the approval without the fleet's part.
+- A's child checks the answer before Sheprd sees it: a bundle must check
+  for A's fleet and this token and name the certificate authority,
+  route, and tunnel identity the code covered. Then, over the SSH the
+  pairing opened, A's Sheprd admits B and hands the log over, as Invite
+  does, or takes B's log, which A's daemon keeps only because it admits
+  A. A failure there shows in Settings > Fleet; the two stay paired.
+- From then on both are members, each a host of the other through the
+  relays, with every host the fleet shares (phase 2's grants).
+
 Not yet: Linux and Windows helpers that scan, sharing a relay record
 when B's relays change, and racing the relays. As with SSH machines,
 `git` and a typed `ssh` do not use the proxy.
@@ -2093,10 +2137,18 @@ manual multi-machine and phone steps left unticked in its QA list.
    - **Command line:** `sheprd fleet [status|members|hosts|open]`, and
      `fleet remove MEMBER` and `fleet remove-host HOST`, which open the
      page asking; `docs/cli.md` and the skill.
-   - **Left:** the join approval for phones (`Ask::Joins`, phase 5),
-     joining over Bluetooth in one step (today: pair, then Invite over
-     the SSH that pairing opened, which proves the same), the pairing
-     dialog's fleet line, `relay-connect`'s race with direct tunnels and
+   - **Phones joining:** Settings > Fleet lists the joins the daemon
+     keeps (`Ask::Joins`) under Waiting to join, and admits one on a
+     second click. The pairing dialog's line, ticked by default, admits
+     the phone it approved, matched by the daemon's device id, when that
+     phone asks to join within ten minutes; no other join is admitted
+     through it.
+   - **Joining over Bluetooth** (built): picking a nearby Sheprd,
+     comparing the code, and Allow on the other computer leave both in
+     one fleet, whichever was in it, or found one from Add Device; the
+     claim's bundle is bound to the pairing's token (Adding a nearby
+     Sheprd from another network, Joining the fleet in the same step).
+   - **Left:** `relay-connect`'s race with direct tunnels and
      `desktop/paths` for the host indicator, history, and native
      screenshots.
 4. **`sheprd-relay-agent` in Sheprd:** install and update over SSH,
@@ -2167,6 +2219,73 @@ manual multi-machine and phone steps left unticked in its QA list.
 5. **iOS:** joining at pairing, admitting a computer from the phone, the
    Secure Enclave key, sync, offers and `Link`, removing from the phone,
    pushes, and Settings > Fleet. Swift tests against phase 1's vectors.
+   - **Built, the daemon:** `GET /api/v2/fleet` (the view, heads, and a
+     live member's next sequence number and parents, and for each Sheprd
+     host it linked, that host's latest record with its CA's certificate
+     and signature, which the phone checks itself),
+     `POST /api/v2/fleet/sync` (64 operations, 256 KiB), and
+     `POST /api/v2/fleet/join`, kept in memory (8, 10 minutes) for
+     Sheprd's `Ask::Joins` and admitted only by `Ask::Admit`.
+     `fleet::links` admits a phone's linked key as an API device with an
+     id derived from the key, with the dial and tunnel keys of the
+     phone's own bundle as its relay keys, so the relays let it through
+     at once; a `Rotate` moves them, and they go with the device. Keys
+     another device or member holds, or a member proved here, are never
+     set, and keys the phone later sends itself stay. `Devices` holds each
+     relay key on one record only and refuses every clash, a fleet
+     device's keys included: posting public keys proves nothing about
+     holding them.
+   - **Built, the phone:** `FleetClient` in `SheprdRemoteCore`, checked
+     against a new phone vector; a Secure Enclave key with user presence
+     (a software key in the simulator only); "Join" after pairing with a
+     computer in a fleet; Settings > Fleet with members, hosts and their
+     paths, and removals with Face ID; and the offer card, which signs
+     one `Link` per Sheprd host and keeps each as a computer with a relay
+     record (its route, relays, and identity, from the host's own record
+     once the phone checked its CA's signature against the host id it
+     pins, with the bundle's relay keys, kept in the Keychain; a later
+     checked record replaces it only when its `rev` is higher), so
+     the relay race reaches it as it reaches computers paired directly.
+   - **Built, the phone's own log** (`crates/sheprd-fleet-ffi`, linked
+     as `SheprdFleetLog`): the phone replays its copy with the very Rust
+     code computers run, built for iOS behind a two-function C interface
+     that takes JSON and keeps nothing between calls
+     (`ios/tools/build-fleet-ffi.sh`), so the two can never disagree on a
+     rule. The copy lives in the app group's container (`Fleet/log.bin`,
+     complete file protection, written atomically) and every call reads it
+     back through `saved::decode`, checking every operation again.
+     - **Starting it:** only from the operation that founded the fleet the
+       phone joined, whose hash is the fleet id it signed its join for, so
+       no computer can hand it another fleet's history or a forged one.
+     - **Sync:** `POST /api/v2/fleet/sync` with any computer of the fleet
+       it reaches, paired directly or linked through the fleet (the
+       linked Sheprd hosts and computer members in its own copy), the one
+       last reached first: it takes what that computer has, then hands
+       over what it lacks, the phone's own operations among them. The
+       request names the fleet, which another fleet's computer refuses.
+       The computer that introduced the phone may be gone.
+     - **Signing:** the phone drafts on its own heads and sequence
+       (`Log::drafts`), and every rule but the signature is checked on a
+       throwaway copy first, so what its replay would refuse is refused
+       before Face ID. The signed operations must then apply to its copy
+       (`seal`), which is written before any computer sees them, so the
+       next draft always follows them and nothing is signed twice. Syncs
+       and signatures run one at a time, and a copy locked away (the
+       phone is locked) is never replaced by one rebuilt from a computer.
+       A copy that no longer checks out is read again from a computer,
+       from the founding operation on.
+     - **What it shows:** members, hosts, links, routes, and whether this
+       phone was removed come from its own copy; a computer's answer only
+       says where a join stands and when to sync.
+     - **Next:** admitting a computer from the phone falls out of this: a
+       computer's bundle and join signature over Nearby pairing, an
+       `Admit` drafted and checked on the phone's copy.
+   - **Left:** admitting a computer from the phone; pushes; and history.
+     Once checkpoints prune the log, a sync must also carry the
+     checkpoint's state, as a joining computer's handover does, for a
+     phone that starts a copy. A
+     phone's bundle relay keys are set before it proves the tunnel key:
+     the relays must name the dial key before it can dial at all.
 6. **Migration and scrub** (built):
    - **`fleet scrub`:** `sheprd-remote-control fleet scrub` forgets the
      fleet on a computer, with the `authorized_keys` lines and relay

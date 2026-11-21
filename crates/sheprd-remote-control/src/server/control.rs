@@ -138,11 +138,14 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
             code,
             hosts,
             share_github,
+            fleet,
         } => {
-            let answered = state
-                .auth()
-                .answer_with_hosts(&id, allow, &code, &hosts, share_github, now)
-                .map(Response::Pairing);
+            let answered = crate::fleet::bluetooth::answer(state, &id, allow, fleet, now, || {
+                state
+                    .auth()
+                    .answer_with_hosts(&id, allow, &code, &hosts, share_github, now)
+            })
+            .map(Response::Pairing);
             // An approved phone that sent relay keys reaches this computer
             // through them at once.
             if let (Ok(_), Some(relay)) = (&answered, &state.relay) {
@@ -160,8 +163,14 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
         Request::NearbyReveal { session, nonce } => {
             let origins = state.origins();
             let revealed = {
+                // Read before the auth lock: the two never nest.
+                let hint = state
+                    .fleet
+                    .as_deref()
+                    .and_then(crate::fleet::bluetooth::hint);
                 let mut auth = state.auth();
                 crate::relay::refresh_offer(state.relay.as_deref(), &mut auth);
+                auth.pairings().offer_hint(hint);
                 auth.nearby_reveal(&session, &nonce, &state.fingerprint, &origins, now)
                     .map(Response::NearbyRevealed)
             };
@@ -242,16 +251,27 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
             .map(|()| Response::Done),
         Request::RelayEnroll(request) => return relay_enroll(state, &request, now),
         Request::Fleet(ask) => return fleet(state, *ask, now),
-        Request::Revoke { device } => match state.auth().revoke(&device) {
-            Ok(true) => Ok(Response::Done),
-            Ok(false) => {
-                return Response::Error {
-                    code: ErrorCode::UnknownDevice,
-                    message: "no such device".into(),
-                };
+        Request::Revoke { device } => {
+            // Bound first, so the auth lock is released before the joins
+            // are locked: auth, released, then joins, never nested.
+            let revoked = state.auth().revoke(&device);
+            match revoked {
+                Ok(true) => {
+                    // A join it asked for ends with it.
+                    if let Some(fleet) = &state.fleet {
+                        fleet.joins().forget_device(&device);
+                    }
+                    Ok(Response::Done)
+                }
+                Ok(false) => {
+                    return Response::Error {
+                        code: ErrorCode::UnknownDevice,
+                        message: "no such device".into(),
+                    };
+                }
+                Err(error) => Err(error),
             }
-            Err(error) => Err(error),
-        },
+        }
         Request::Tags { offer } => {
             let Some(offer) = offer else {
                 return Response::Tags(state.tags.current());

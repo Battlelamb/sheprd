@@ -29,7 +29,7 @@ pub(super) async fn daemon(
     }
 }
 
-async fn applied(
+pub(super) async fn applied(
     client: &crate::remote::supervisor::Client,
     apply: Apply,
 ) -> Result<Applied, Error> {
@@ -41,7 +41,7 @@ async fn applied(
 
 /// The most parts a log is carried in: the largest log a daemon keeps,
 /// one answer at a time, and one more.
-const MAX_PARTS: usize = saved::MAX_SAVED.div_ceil(sync::MAX_ANSWER_BYTES) + 1;
+pub(super) const MAX_PARTS: usize = saved::MAX_SAVED.div_ceil(sync::MAX_ANSWER_BYTES) + 1;
 
 /// Asks `target` for what this computer lacks, from `heads`, naming no
 /// fleet and with a fresh nonce: its answer, when it proves it is one of
@@ -81,7 +81,7 @@ async fn ask_proven(
 /// arrived, granting nothing, and answers its heads, from which this
 /// computer's daemon says what comes next. It joins once the history
 /// admits it, or shares it as a host, which the last part holds.
-async fn hand_over(
+pub(super) async fn hand_over(
     client: &crate::remote::supervisor::Client,
     executor: &BackgroundExecutor,
     target: &ConnectTarget,

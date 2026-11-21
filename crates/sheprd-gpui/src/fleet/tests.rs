@@ -4,6 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod pairing_error;
 mod scrub;
 mod settle;
 
@@ -76,6 +77,40 @@ fn an_answer_reads_or_says_why_not() {
         remote::parse_applied(b"nope"),
         Err(Error::Answer(_))
     ));
+}
+
+#[test]
+fn an_approval_at_pairing_is_used_once_and_expires() {
+    use sheprd_remote_control::control::{DeviceId, fleet::Kind, fleet::sync::Join};
+    let join = |device: &str| Join {
+        member: device.into(),
+        name: "phone".into(),
+        kind: Kind::Phone,
+        bundle: "b".into(),
+        signature: "s".into(),
+        device: "iPhone".into(),
+        device_id: DeviceId(device.into()),
+        received_ms: 1,
+    };
+    let now = Instant::now() + Duration::from_secs(7200);
+    let mut expected = HashMap::from([
+        (
+            DeviceId("fresh".into()),
+            ("f1".into(), now - Duration::from_secs(5)),
+        ),
+        (DeviceId("old".into()), ("f1".into(), now - joins::EXPECT)),
+        // Given while this computer was in another fleet.
+        (DeviceId("elsewhere".into()), ("f0".into(), now)),
+    ]);
+    let (admit, rest) = joins::settle(
+        &mut expected,
+        "f1",
+        vec![join("fresh"), join("old"), join("elsewhere"), join("other")],
+        now,
+    );
+    assert_eq!(admit, vec![join("fresh")]);
+    assert_eq!(rest, vec![join("old"), join("elsewhere"), join("other")]);
+    assert!(expected.is_empty());
 }
 
 fn fleet_view(heads: &[&str]) -> View {

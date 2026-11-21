@@ -82,3 +82,8 @@ settings-fleet-unsaved = { $count ->
     [one] One fleet host could not be added to Devices
    *[other] { $count } fleet hosts could not be added to Devices
 }
+
+settings-fleet-joins = Waiting to join
+settings-fleet-join-line = Phone · asked through { $device }
+settings-fleet-join-ask = Admit this phone? It will reach every Sheprd host in the fleet, and may approve computers joining it.
+settings-fleet-admit = Admit

@@ -27,6 +27,8 @@ pub enum Error {
     NoProgram,
     #[error("This computer listens on no relay; turn one on in Remote Control first")]
     NoRelays,
+    #[error("The other computer's fleet did not admit this one")]
+    NotAdmitted,
     #[error(
         "The relay agent runs on the host, but no relay lets it listen; check the relays' listen tokens"
     )]
@@ -47,6 +49,8 @@ pub enum Error {
         "This host's SSH key is not checked; the fleet shares only hosts whose key is checked strictly"
     )]
     Unchecked,
+    #[error("The remote control daemon answered something else")]
+    Unexpected,
     #[error("Could not remove all fleet access on the host; some may remain")]
     Unscrubbed,
     #[error("The fleet cannot reach this kind of device")]

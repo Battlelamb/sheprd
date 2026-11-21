@@ -16,7 +16,9 @@ use std::{
 };
 
 mod addresses;
+mod computer_fleet;
 mod en_xa;
+mod fleet;
 mod hosts;
 mod keyboard;
 mod networks;
@@ -132,6 +134,7 @@ fn pairing_daemon(_: &Path, request: &Request) -> Result<Response, control::Erro
                 code: "428913".into(),
                 app: Some("https://other.example:8443".into()),
                 ssh: false,
+                fleet: None,
             })
         }
         Request::Pairing { .. } => Response::Pairing(PairingState::Waiting {
@@ -193,6 +196,7 @@ fn a_phone_scans_claims_and_is_allowed(cx: &mut TestAppContext) {
         code: "428913".into(),
         hosts: Vec::new(),
         share_github: true,
+        fleet: None,
     }));
     // A finished pairing is not cancelled on close.
     cx.simulate_keystrokes("escape");

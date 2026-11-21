@@ -10,16 +10,25 @@
 //!   reach.
 //! - [`removals`]: removals passed between daemons inside the relay
 //!   tunnel, so they land while every Sheprd window is shut.
+//! - [`joins`]: phones asking to join through this computer, waiting for a
+//!   person to admit them in Sheprd.
+//! - [`bluetooth`]: computers joining, or inviting this one, as they pair
+//!   over Bluetooth.
+//! - [`links`]: phones on this computer's API through the `Link`s they
+//!   signed.
 //! - [`scrub`]: forgetting the fleet, with every way it let someone in.
 //!
 //! Every change bumps [`Fleet::changed`]; `follow` then rewrites what the
 //! log grants, off the control thread.
 
 pub(crate) mod ask;
+pub(crate) mod bluetooth;
 mod error;
 pub(crate) mod grants;
 mod joining;
+pub(crate) mod joins;
 mod leaving;
+pub(crate) mod links;
 mod lock;
 mod me;
 mod plain;
@@ -120,6 +129,8 @@ pub(crate) struct Fleet {
     /// Removal exchanges other members dialed in for, at most
     /// `removals::CONCURRENT` at once.
     pub(crate) inbound: tokio::sync::Semaphore,
+    /// Phones waiting to join, memory only.
+    joins: Mutex<joins::Joins>,
     /// The fleet folder's lock, which the daemon holds for its life.
     _lock: Option<lock::Lock>,
     /// The last write of the fleet's files failed: what is held is ahead
@@ -245,6 +256,7 @@ impl Fleet {
             writing: Mutex::new(()),
             scrubbed: Mutex::new(None),
             inbound: tokio::sync::Semaphore::new(removals::CONCURRENT),
+            joins: Mutex::default(),
             _lock: lock,
             unsaved: AtomicBool::new(false),
             on_disk,
@@ -278,6 +290,12 @@ impl Fleet {
 
     pub(crate) fn inner(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The phones waiting to join. Lock it after [`Fleet::inner`], never
+    /// before.
+    pub(crate) fn joins(&self) -> MutexGuard<'_, joins::Joins> {
+        self.joins.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Members cut off now: those the log's live members removed in an
@@ -480,6 +498,16 @@ impl Fleet {
         let named = match &apply.fleet {
             Some(named) => Some(sync::fleet(named)?),
             None => ops.first().map(joining::fleet_of),
+        };
+        // With no log yet, a caller naming a fleet hands over that fleet
+        // alone: another fleet's history it carries, one this computer
+        // once signed a join for, say, never becomes this computer's log.
+        let ops = match (&apply.fleet, named) {
+            (Some(_), Some(named)) if self.inner().log.is_none() => ops
+                .into_iter()
+                .filter(|op| joining::fleet_of(op) == named)
+                .collect(),
+            _ => ops,
         };
         let refused = match self.receive_from(ops, &heads, now_ms) {
             Ok(refused) => refused,

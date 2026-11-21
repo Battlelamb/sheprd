@@ -42,3 +42,32 @@ fn fleet_requests_keep_their_wire_names() {
         json!({"response": "fleet", "answer": "status"})
     );
 }
+
+#[test]
+fn joins_keep_their_wire_names() {
+    use crate::control::fleet::{Kind, sync::Join};
+    assert_eq!(
+        serde_json::to_value(Request::Fleet(Box::new(Ask::Joins))).unwrap(),
+        json!({"request": "fleet", "ask": "joins"})
+    );
+    let answer = Response::Fleet(Box::new(Answer::Joins {
+        joins: vec![Join {
+            member: "m".into(),
+            name: "phone".into(),
+            kind: Kind::Phone,
+            bundle: "b".into(),
+            signature: "s".into(),
+            device: "iPhone".into(),
+            device_id: DeviceId("d1".into()),
+            received_ms: 5,
+        }],
+    }));
+    assert_eq!(
+        serde_json::to_value(&answer).unwrap(),
+        json!({"response": "fleet", "answer": "joins", "joins": [{
+            "member": "m", "name": "phone", "kind": "phone", "bundle": "b",
+            "signature": "s", "device": "iPhone", "device_id": "d1",
+            "received_ms": 5,
+        }]})
+    );
+}

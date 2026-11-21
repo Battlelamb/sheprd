@@ -93,15 +93,19 @@ enum NotifyKey {
         return try decode(kind: kind, body: data.dropFirst())
     }
 
-    /// Writes the App Group file for a key made before it existed.
+    /// Brings the App Group file in line with the keychain, which the app
+    /// can always read: writes it for a key made before the file existed,
+    /// and rewrites one left behind with an older key, as when writing it
+    /// failed after a new key was made.
     static func mirror() throws {
-        guard let file, !FileManager.default.fileExists(atPath: file.path) else { return }
+        guard let file else { return }
         var query = query()
         query[kSecReturnData as String] = true
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data else {
             return
         }
+        guard (try? Data(contentsOf: file)) != data else { return }
         try write(data)
     }
 
@@ -129,6 +133,9 @@ enum NotifyKey {
             stored = .software(key)
             data = Data([0]) + key.rawRepresentation
         }
+        // Without the old file, a failed write below leaves the widget no
+        // key rather than a stale one; `mirror` writes it again later.
+        if let file { try? FileManager.default.removeItem(at: file) }
         SecItemDelete(query() as CFDictionary)
         var add = query()
         add[kSecValueData as String] = data

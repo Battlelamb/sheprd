@@ -42,6 +42,9 @@ const STDERR_LIMIT: usize = 512;
 /// leaves no service at all. Five seconds bounds the wait.
 const SETTLE_ATTEMPTS: u32 = 20;
 const SETTLE_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
+/// How long a daemon asked to exit has to stop answering before the service
+/// manager starts the new one anyway.
+const EXIT_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// What the service runs: the daemon, its state, and the settings it serves
 /// with.
@@ -384,9 +387,14 @@ pub fn reconcile(
     send: impl Fn(&Request) -> Result<Response, crate::control::Error>,
     run: impl FnMut(&Step) -> Result<()>,
 ) -> Result<Outcome> {
-    reconcile_with_core(config, host, send, run, settle_delay, || {
-        sheprd_core_client::Endpoint::resolve(sheprd_client::login_env::var)
-    })
+    reconcile_with_core(
+        config,
+        host,
+        send,
+        run,
+        || exited(host),
+        || sheprd_core_client::Endpoint::resolve(sheprd_client::login_env::var),
+    )
 }
 
 fn reconcile_with_core(
@@ -394,7 +402,7 @@ fn reconcile_with_core(
     host: &Host,
     send: impl Fn(&Request) -> Result<Response, crate::control::Error>,
     mut run: impl FnMut(&Step) -> Result<()>,
-    mut wait: impl FnMut(),
+    mut exited: impl FnMut(),
     core_endpoint: impl FnOnce() -> sheprd_core_client::Result<sheprd_core_client::Endpoint>,
 ) -> Result<Outcome> {
     let installed = host.file.exists();
@@ -416,7 +424,7 @@ fn reconcile_with_core(
         return Ok(Outcome::Removed);
     }
     if write_definition(config, host, core_endpoint())? {
-        stop_running(&send, &mut wait);
+        stop_running(&send, &mut exited);
         for step in host.manager.load(&host.file) {
             run(&step)?;
         }
@@ -431,7 +439,7 @@ fn reconcile_with_core(
                 .as_ref()
                 .is_some_and(|version| *version != status.version) =>
         {
-            stop_running(&send, &mut wait);
+            stop_running(&send, &mut exited);
             for step in host.manager.reload(&host.file) {
                 run(&step)?;
             }
@@ -457,7 +465,7 @@ pub fn restart(
     send: impl Fn(&Request) -> Result<Response, crate::control::Error>,
     run: impl FnMut(&Step) -> Result<()>,
 ) -> Result<Outcome> {
-    restart_with_wait(config, host, send, run, settle_delay)
+    restart_with_wait(config, host, send, run, || exited(host))
 }
 
 fn restart_with_wait(
@@ -465,7 +473,7 @@ fn restart_with_wait(
     host: &Host,
     send: impl Fn(&Request) -> Result<Response, crate::control::Error>,
     mut run: impl FnMut(&Step) -> Result<()>,
-    mut wait: impl FnMut(),
+    mut exited: impl FnMut(),
 ) -> Result<Outcome> {
     if !config.enabled {
         return Ok(Outcome::Unchanged);
@@ -480,37 +488,67 @@ fn restart_with_wait(
     } else {
         host.manager.reload(&host.file)
     };
-    stop_running(&send, &mut wait);
+    stop_running(&send, &mut exited);
     for step in steps {
         run(&step)?;
     }
     Ok(Outcome::Started)
 }
 
-/// Asks whatever daemon answers the control endpoint to exit, and waits a
-/// bounded time for it to stop answering, before the service manager starts
-/// the new one. The manager restarts only the daemon it started: one it did
-/// not (an older release's, or one started by hand) would otherwise keep the
-/// port, and the new daemon would fail to bind it on every retry while the
-/// old one went on serving. A clean exit leaves a managed daemon down until
-/// the steps that follow start it.
+/// Asks whatever daemon answers the control endpoint to exit and, when it
+/// agrees, runs `exited` to wait for it to go, before the service manager
+/// starts the new one. The manager restarts only the daemon it started: one
+/// it did not (an older release's, or one started by hand) would otherwise
+/// keep the port, and the new daemon would fail to bind it on every retry
+/// while the old one went on serving. A clean exit leaves a managed daemon
+/// down until the steps that follow start it.
 fn stop_running(
     send: &impl Fn(&Request) -> Result<Response, crate::control::Error>,
-    mut wait: impl FnMut(),
+    exited: &mut impl FnMut(),
 ) {
     match send(&Request::Shutdown) {
-        Ok(Response::Done) => {}
-        Ok(_) => return,
+        Ok(Response::Done) => exited(),
+        Ok(_) => {}
         Err(error) => {
             tracing::debug!(%error, "No remote control daemon took the shutdown");
-            return;
         }
     }
-    for _ in 0..SETTLE_ATTEMPTS {
-        if send(&Request::Status).is_err() {
+}
+
+/// Waits for the daemon serving `host`'s state to stop accepting
+/// connections on its control endpoint, for at most [`EXIT_BUDGET`].
+fn exited(host: &Host) {
+    let address = crate::control::address(&host.state_dir);
+    wait_for_exit(
+        |limit| crate::control::answers(&address, limit),
+        std::time::Instant::now,
+        std::thread::sleep,
+    );
+}
+
+/// Polls `answers` until it reports no daemon, every [`SETTLE_DELAY`], until
+/// [`EXIT_BUDGET`] has passed by `now`. Each probe only connects, with no
+/// request, and is given no more than the time left, so a daemon that hangs
+/// while exiting cannot hold a restart past the budget.
+fn wait_for_exit(
+    mut answers: impl FnMut(std::time::Duration) -> bool,
+    mut now: impl FnMut() -> std::time::Instant,
+    mut sleep: impl FnMut(std::time::Duration),
+) {
+    let deadline = now() + EXIT_BUDGET;
+    loop {
+        let left = deadline.saturating_duration_since(now());
+        if left.is_zero() {
+            break;
+        }
+        if !answers(left.min(SETTLE_DELAY)) {
             return;
         }
-        wait();
+        let left = deadline.saturating_duration_since(now());
+        if left.is_zero() {
+            break;
+        }
+        sleep(left.min(SETTLE_DELAY));
     }
     tracing::warn!("The remote control daemon still answers after it was asked to exit");
 }

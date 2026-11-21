@@ -7,7 +7,7 @@ use crate::{
     web::{State, now_ms},
 };
 use sheprd_chat_protocol::{read_frame, write_frame};
-use sheprd_client::private_endpoint::{Connection, Listener};
+use sheprd_client::private_endpoint::Listener;
 use std::{
     io::{BufReader, BufWriter, Write},
     path::Path,
@@ -29,7 +29,7 @@ pub(crate) fn version() -> &'static str {
 
 /// Whether a daemon already serves `state_dir`: its control socket answers.
 pub(super) fn serving(state_dir: &Path) -> bool {
-    Connection::connect(&control::address(state_dir), PROBE_TIMEOUT).is_ok()
+    control::answers(&control::address(state_dir), PROBE_TIMEOUT)
 }
 
 pub(super) fn serve(

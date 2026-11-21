@@ -582,6 +582,11 @@ own setting is what revokes them then. Handles a phone replaces or drops in
 a later registration, such as an ended activity's, are not revoked: the push
 relay allows each phone only a few revocations a minute.
 
+`sheprd-remote-control push-status` prints the running daemon's answer to
+that request as JSON, or nothing when none answers, so Sheprd on another
+computer can show each linked host's push delivery: it runs the verb over
+SSH, as it runs `enroll`, without installing anything.
+
 The control socket's `push_status` request (`control::push`) answers with
 the mode (`off`, `own_key`, or `push_relay`) and how the last alert (a test
 push included) and the last Live Activity push went, each with its time

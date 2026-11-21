@@ -94,7 +94,6 @@ pub(super) fn output(reply: &Reply) -> crate::Result<Output> {
             let json = serde_json::json!({
                 "enabled": enabled,
                 "push_relay": push_relay,
-                "running": status.is_some(),
                 "status": status,
                 "error": error,
             });

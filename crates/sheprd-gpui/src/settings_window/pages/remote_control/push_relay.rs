@@ -57,8 +57,12 @@ impl SettingsWindow {
         cx.notify();
     }
 
-    /// The explanation's Turn on.
+    /// The explanation's Turn on. While another setting saves, the edit
+    /// would be refused, so the explanation stays open.
     pub(in crate::settings_window) fn confirm_push_relay(&mut self, cx: &mut Context<Self>) {
+        if self.busy() {
+            return;
+        }
         self.remote.push_relay.set(false, motion::now());
         self.save_preference(Preference::Remote(Edit::PushRelay(true)), cx);
         cx.notify();
@@ -111,7 +115,8 @@ impl SettingsWindow {
 
     /// What the push relay sees, never sees, and cannot do, as
     /// `docs/apns-relay-plan.md` words it, with Turn on and Cancel. While
-    /// folding away its buttons no longer act.
+    /// folding away its buttons no longer act, and Turn on waits while
+    /// another setting saves.
     fn push_relay_card(&self, live: bool, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = &self.theme;
         let heading = |text: String| div().font_weight(FontWeight::SEMIBOLD).child(text);
@@ -122,13 +127,14 @@ impl SettingsWindow {
                 .child(heading(title))
                 .child(self.control_note(body))
         };
+        let can_confirm = live && !self.busy();
         let confirm = ui::button(
             theme,
             "remote-push-relay-confirm",
             fl!("settings-push-relay-ask-confirm"),
-            live,
+            can_confirm,
         )
-        .when(live, |button| {
+        .when(can_confirm, |button| {
             button.on_click(cx.listener(|this, _, _, cx| this.confirm_push_relay(cx)))
         });
         let cancel = ui::button(

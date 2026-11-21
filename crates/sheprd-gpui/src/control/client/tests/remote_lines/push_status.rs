@@ -34,7 +34,7 @@ fn push_status_names_the_mode_and_each_last_push() {
     assert_eq!(output.json["status"]["mode"], "push_relay");
     assert_eq!(output.json["status"]["alert"]["outcome"], "delivered");
     assert_eq!(output.json["push_relay"], true);
-    assert_eq!(output.json["running"], true);
+    assert!(output.json.get("running").is_none());
 }
 
 #[test]
@@ -73,7 +73,6 @@ fn push_status_while_remote_control_is_off_or_down() {
         off.text,
         "Remote control is off; the push relay is off in Settings"
     );
-    assert_eq!(off.json["running"], false);
     let down = remote::output(&Reply::PushStatus {
         enabled: true,
         push_relay: true,
@@ -83,7 +82,7 @@ fn push_status_while_remote_control_is_off_or_down() {
     .unwrap();
     assert_eq!(
         down.text,
-        "Remote control is on but not running: could not reach the remote control daemon"
+        "Push status is unavailable: could not reach the remote control daemon"
     );
 }
 

@@ -127,3 +127,22 @@ fn the_dot_follows_the_most_recent_push() {
     };
     assert_eq!(last_worked(&status), Some(false));
 }
+
+#[gpui::test]
+fn turn_on_waits_while_another_setting_saves(cx: &mut TestAppContext) {
+    let (view, cx, edits) = page(cx);
+    click(cx, "remote-push-relay-toggle");
+    view.update(cx, |view, cx| {
+        view.saving = true;
+        cx.notify();
+    });
+    draw(cx);
+    click(cx, "remote-push-relay-confirm");
+    view.update(cx, |view, cx| {
+        // The edit would be refused, so the explanation stays to ask again.
+        assert!(view.remote.push_relay.is_open());
+        view.confirm_push_relay(cx);
+        assert!(view.remote.push_relay.is_open());
+    });
+    assert!(edits.lock().unwrap().is_empty());
+}

@@ -429,7 +429,13 @@ impl Supervisor {
             let (status, devices, push, sent, sent_prs, hosts, update_asked) = task.await;
             cx.update(|cx| {
                 let supervisor = cx.global_mut::<Self>();
-                let push_changed = push.is_some_and(|push| supervisor.push_polled(push));
+                let push_changed = match push {
+                    Some(push) => supervisor.push_polled(push),
+                    // A daemon that stopped answering no longer says how
+                    // its pushes leave it.
+                    None if status.is_err() => supervisor.push_status.take().is_some(),
+                    None => false,
+                };
                 if update_asked {
                     supervisor.updates.requested();
                 }

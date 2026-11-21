@@ -14,8 +14,10 @@ pub(super) fn text(
     let Some(status) = status else {
         return match (enabled, error) {
             (false, _) => format!("Remote control is off; the push relay is {setting} in Settings"),
-            (true, Some(error)) => format!("Remote control is on but not running: {error}"),
-            (true, None) => "Remote control is on but not running".to_owned(),
+            // No answer does not mean the daemon is down: one too old to
+            // know the request closes the connection too.
+            (true, Some(error)) => format!("Push status is unavailable: {error}"),
+            (true, None) => "Push status is unavailable".to_owned(),
         };
     };
     let now = crate::remote::now_ms();

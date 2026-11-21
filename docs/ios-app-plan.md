@@ -689,6 +689,11 @@ field order:
   keeps the last count from each computer and sets the badge to their sum.
 - `permission` appears only for a permission request, with at most four
   options in the agent's order.
+- `event` is the daemon's id for the notification decision (32 hex digits),
+  the same in every copy of it. The extension keeps the ids it showed in the
+  last two days (at most 128, `SeenAlerts`, in the App Group), and a copy
+  that arrives again replaces the first silently, so the phone shows and
+  buzzes once. Older daemons leave it out.
 - The privacy setting decides what `body` quotes.
 - `body` is shortened, ending in `…`, until the whole payload fits 4 KB.
 

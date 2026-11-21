@@ -31,7 +31,7 @@
 //! sealed `clear` tells the app to remove the chat's notifications.
 
 use super::{Error, Priority, Push, PushType, Result, payload::MAX_PAYLOAD};
-use crate::push::{Kind, Notification};
+use crate::push::{EventId, Kind, Notification};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use p256::PublicKey;
 use serde::{Deserialize, Serialize};
@@ -80,6 +80,11 @@ pub(crate) struct Sealed {
     /// so the app can show it came. Left out of every other push.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) test: Option<String>,
+    /// The notification decision's id ([`EventId`]), the same in every
+    /// copy of it: the phone's extension shows one it already showed only
+    /// in place of the first, silently. Older daemons leave it out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) event: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -116,6 +121,7 @@ impl Sealed {
                 }),
             wizz: notification.wizz,
             test: None,
+            event: Some(notification.event.as_str().to_owned()),
         }
     }
 
@@ -135,6 +141,7 @@ impl Sealed {
             permission: None,
             wizz: false,
             test: Some(id),
+            event: Some(EventId::new().as_str().to_owned()),
         }
     }
 }

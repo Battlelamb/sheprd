@@ -70,7 +70,9 @@ struct WorkspaceScreen: View {
                     Link(destination: url) { PullRequestRow(pullRequest: pullRequest) }.tint(.primary)
                 }
                 if workspace.branch != nil {
-                    RouteLink(.changes(key)) { ChangesRow(count: changedFiles) }
+                    RouteLink(.changes(key)) {
+                        ChangesRow(count: changedFiles, uncommitted: workspace.uncommitted ?? false)
+                    }
                 }
             }
             Section {
@@ -174,7 +176,8 @@ struct WorkspaceScreen: View {
         // Keyed on the whole status, so a link that comes back at another
         // address loads again: a phone waking from sleep still shows the
         // address it had, and the first try there fails.
-        .task(id: machine.status) {
+        // And when the computer's pencil comes or goes, so the count follows it.
+        .task(id: ChangesLoad(status: machine.status, uncommitted: workspace.uncommitted)) {
             guard isOnline(machine) else { return }
             while agents.isEmpty, !Task.isCancelled {
                 if let loaded = try? await model.fleet.call(key.device, { client, token in try await client.newOptions(bearer: token) }).agents {
@@ -648,14 +651,26 @@ private struct PullRequestRow: View {
     }
 }
 
-/// Opens the workspace's changes, saying how many files are uncommitted.
+/// When the workspace's uncommitted count is read again.
+private struct ChangesLoad: Equatable {
+    var status: LinkStatus
+    var uncommitted: Bool?
+}
+
+/// Opens the workspace's changes, saying how many files are uncommitted,
+/// with the desktop's pencil while there are any.
 private struct ChangesRow: View {
     var count: Int?
+    var uncommitted: Bool
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "plusminus").font(.system(size: 14, weight: .semibold))
-                .frame(width: 28, height: 28).background(.fill.secondary, in: .rect(cornerRadius: 28 * 0.28))
+            if uncommitted || (count ?? 0) > 0 {
+                UncommittedMark(size: 28)
+            } else {
+                Image(systemName: "plusminus").font(.system(size: 14, weight: .semibold))
+                    .frame(width: 28, height: 28).background(.fill.secondary, in: .rect(cornerRadius: 28 * 0.28))
+            }
             Text("Changes").frame(maxWidth: .infinity, alignment: .leading)
             if let count {
                 Text(count, format: .number).foregroundStyle(.secondary).monospacedDigit()

@@ -2701,7 +2701,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.3",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3062,7 +3062,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7397,8 +7397,8 @@ dependencies = [
 
 [[package]]
 name = "moonframe"
-version = "1.3.0"
-source = "git+https://github.com/moonframehq/moonframe?rev=67674cdb13fa058afeeed38b2d794d1e9fdf42cc#67674cdb13fa058afeeed38b2d794d1e9fdf42cc"
+version = "1.4.0"
+source = "git+https://github.com/moonframehq/moonframe?rev=1d35d12b4e77533b701a1e642cce663ad1ac9d33#1d35d12b4e77533b701a1e642cce663ad1ac9d33"
 dependencies = [
  "anstream",
  "anstyle",
@@ -7435,8 +7435,8 @@ dependencies = [
 
 [[package]]
 name = "moonframe-acp"
-version = "1.3.0"
-source = "git+https://github.com/moonframehq/moonframe?rev=67674cdb13fa058afeeed38b2d794d1e9fdf42cc#67674cdb13fa058afeeed38b2d794d1e9fdf42cc"
+version = "1.4.0"
+source = "git+https://github.com/moonframehq/moonframe?rev=1d35d12b4e77533b701a1e642cce663ad1ac9d33#1d35d12b4e77533b701a1e642cce663ad1ac9d33"
 dependencies = [
  "agent-client-protocol-schema",
  "libc",
@@ -7449,8 +7449,8 @@ dependencies = [
 
 [[package]]
 name = "moonframe-core"
-version = "1.3.0"
-source = "git+https://github.com/moonframehq/moonframe?rev=67674cdb13fa058afeeed38b2d794d1e9fdf42cc#67674cdb13fa058afeeed38b2d794d1e9fdf42cc"
+version = "1.4.0"
+source = "git+https://github.com/moonframehq/moonframe?rev=1d35d12b4e77533b701a1e642cce663ad1ac9d33#1d35d12b4e77533b701a1e642cce663ad1ac9d33"
 dependencies = [
  "chrono",
  "fluent-bundle",
@@ -7470,16 +7470,16 @@ dependencies = [
 
 [[package]]
 name = "moonframe-history"
-version = "1.3.0"
-source = "git+https://github.com/moonframehq/moonframe?rev=67674cdb13fa058afeeed38b2d794d1e9fdf42cc#67674cdb13fa058afeeed38b2d794d1e9fdf42cc"
+version = "1.4.0"
+source = "git+https://github.com/moonframehq/moonframe?rev=1d35d12b4e77533b701a1e642cce663ad1ac9d33#1d35d12b4e77533b701a1e642cce663ad1ac9d33"
 dependencies = [
  "tracing",
 ]
 
 [[package]]
 name = "moonframe-packages"
-version = "1.3.0"
-source = "git+https://github.com/moonframehq/moonframe?rev=67674cdb13fa058afeeed38b2d794d1e9fdf42cc#67674cdb13fa058afeeed38b2d794d1e9fdf42cc"
+version = "1.4.0"
+source = "git+https://github.com/moonframehq/moonframe?rev=1d35d12b4e77533b701a1e642cce663ad1ac9d33#1d35d12b4e77533b701a1e642cce663ad1ac9d33"
 dependencies = [
  "moonframe-core",
  "moonframe-providers",
@@ -7493,7 +7493,7 @@ dependencies = [
 [[package]]
 name = "moonframe-provider"
 version = "0.4.0"
-source = "git+https://github.com/moonframehq/moonframe?rev=67674cdb13fa058afeeed38b2d794d1e9fdf42cc#67674cdb13fa058afeeed38b2d794d1e9fdf42cc"
+source = "git+https://github.com/moonframehq/moonframe?rev=1d35d12b4e77533b701a1e642cce663ad1ac9d33#1d35d12b4e77533b701a1e642cce663ad1ac9d33"
 dependencies = [
  "serde",
  "serde_json",
@@ -7502,8 +7502,8 @@ dependencies = [
 
 [[package]]
 name = "moonframe-providers"
-version = "1.3.0"
-source = "git+https://github.com/moonframehq/moonframe?rev=67674cdb13fa058afeeed38b2d794d1e9fdf42cc#67674cdb13fa058afeeed38b2d794d1e9fdf42cc"
+version = "1.4.0"
+source = "git+https://github.com/moonframehq/moonframe?rev=1d35d12b4e77533b701a1e642cce663ad1ac9d33#1d35d12b4e77533b701a1e642cce663ad1ac9d33"
 dependencies = [
  "libc",
  "moonframe-core",
@@ -7517,8 +7517,8 @@ dependencies = [
 
 [[package]]
 name = "moonframe-store"
-version = "1.3.0"
-source = "git+https://github.com/moonframehq/moonframe?rev=67674cdb13fa058afeeed38b2d794d1e9fdf42cc#67674cdb13fa058afeeed38b2d794d1e9fdf42cc"
+version = "1.4.0"
+source = "git+https://github.com/moonframehq/moonframe?rev=1d35d12b4e77533b701a1e642cce663ad1ac9d33#1d35d12b4e77533b701a1e642cce663ad1ac9d33"
 dependencies = [
  "moonframe-core",
  "rusqlite",
@@ -7778,7 +7778,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7942,7 +7942,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 3.5.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -9765,7 +9765,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -10676,7 +10676,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -12875,7 +12875,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -14599,7 +14599,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

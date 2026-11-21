@@ -41,6 +41,33 @@ pub fn for_agents(state: &State, op: &Op) -> bool {
         .all(|target| state.tombstones.contains(target))
 }
 
+/// For each of `ops`, the members `removed_by` ([`Log::removed_by`]) says
+/// it removes that it does not name, at most
+/// [`super::removal::MAX_ALSO`]: what a daemon tells a plain host's agent
+/// beside the removals, which the agent cannot work out itself. Those
+/// beyond reach it in the access file.
+#[must_use]
+pub fn also(removed_by: &BTreeMap<OpId, BTreeSet<MemberId>>, ops: &[Op]) -> Vec<(OpId, MemberId)> {
+    ops.iter()
+        .filter_map(|op| {
+            let Body::Remove(remove) = op.body() else {
+                return None;
+            };
+            let named: Vec<&MemberId> = remove.targets().collect();
+            let reach = removed_by.get(&op.id())?;
+            Some(
+                reach
+                    .iter()
+                    .filter(move |member| !named.contains(member))
+                    .map(move |member| (op.id(), *member))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .flatten()
+        .take(super::removal::MAX_ALSO)
+        .collect()
+}
+
 /// Every removal the agent's `status --json` reports suspending for.
 pub fn asked(suspended: &BTreeMap<Id, Suspension>) -> Vec<Asked> {
     suspended

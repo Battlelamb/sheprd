@@ -1641,7 +1641,11 @@ accepted on this purpose.
   members its log removes with it beyond those it names (one a removed
   member admitted at the same time), in an `Also` message ahead of them.
   The agent suspends those in the sender's name too, like the removal's
-  own targets, until the next access file confirms or settles it. Each member's
+  own targets, until the next access file confirms or settles it. The
+  daemon keeps which members each agent took with each removal, so one
+  the agent holds is sent again once the log learns it takes more, and
+  it reads what each removal takes from the history before every
+  checkpoint too. Each member's
   keys carry the sequence number of its own latest rotation, which the
   fleet's state keeps (so a checkpoint carries it and a pruned log agrees
   with a whole one), so an agent never prefers keys a rotation replaced;

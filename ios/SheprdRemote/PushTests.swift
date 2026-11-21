@@ -21,10 +21,12 @@ final class PushTests {
 
     private(set) var status: [Fingerprint: Status] = [:]
     private let sessions: Sessions
+    private let tokens: ActivityTokens
     private let group = UserDefaults(suiteName: "group.so.pen.herdr.remote")
 
-    init(sessions: Sessions) {
+    init(sessions: Sessions, tokens: ActivityTokens) {
         self.sessions = sessions
+        self.tokens = tokens
     }
 
     func send(to computer: Computer) async {
@@ -62,8 +64,12 @@ final class PushTests {
             return
         case .refused where answer.reason == nil && answer.status == 403:
             // The push relay gives no reason; 403 is a handle it no longer
-            // takes, which the next registration replaces.
-            status[key] = .failed("The push relay no longer takes this phone's handle. Reopen the app to send a new one, then try again.")
+            // takes. The phone attests again and sends the computer new
+            // handles, as reusing the cached ones would fail the same way.
+            await tokens.pushRelayRejected(by: computer)
+            status[key] = .failed(tokens.pushRelay.lastError.map {
+                "The push relay no longer took this phone's handle, and getting a new one failed: \($0)"
+            } ?? "The push relay no longer took this phone's handle. A new one was sent to \(computer.name); try again.")
             return
         case .refused:
             let reason = answer.reason ?? "HTTP \(answer.status ?? 0)"

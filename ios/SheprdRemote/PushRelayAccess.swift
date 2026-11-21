@@ -34,9 +34,11 @@ final class PushRelayAccess {
         }
     }
 
-    /// What the app keeps: the credential, and the handles it made with
-    /// it, so they can be reused while their token lasts and revoked when
-    /// the setting goes off.
+    /// What the app keeps: the credential, and every handle it made that
+    /// the push relay may still take, so they can be reused while their
+    /// token lasts and revoked when the setting goes off. Handles made with
+    /// an earlier credential stay until that credential expires: a computer
+    /// that missed the newer registration still holds one.
     private struct Stored: Codable {
         var credential: PushRelayCredential?
         /// Newest last, at most `maxHandles`.
@@ -48,6 +50,9 @@ final class PushRelayAccess {
         /// is not kept beside its handle.
         let key: String
         let handle: String
+        /// When the credential it carries expires, after which the push
+        /// relay refuses it and it needs no revoking.
+        let expires: Date
     }
 
     private static let account = "push-relay"
@@ -63,6 +68,9 @@ final class PushRelayAccess {
     private(set) var lastError: String?
     private var stored: Stored
     private var attesting: Task<PushRelayCredential, any Error>?
+    /// The push relay refused a handle made with the current credential:
+    /// attest again before making more, rather than wait for renewal.
+    private var renewNow = false
 
     init() {
         stored = (try? Keychain.read(Self.account, group: nil))
@@ -78,7 +86,7 @@ final class PushRelayAccess {
     func usableCredential(at now: Date = Date()) async -> PushRelayCredential? {
         guard PushRelaySetting.isOn else { return nil }
         let current = stored.credential.flatMap { $0.environment == environment ? $0 : nil }
-        if let current, !current.needsRenewal(at: now) { return current }
+        if let current, !renewNow, !current.needsRenewal(at: now) { return current }
         do {
             let task = attesting ?? Task { try await attest() }
             attesting = task
@@ -86,7 +94,9 @@ final class PushRelayAccess {
             let credential = try await task.value
             // The setting may have gone off while attesting.
             guard PushRelaySetting.isOn else { return nil }
-            stored = Stored(credential: credential)
+            stored.credential = credential
+            stored.handles.removeAll { $0.expires <= now }
+            renewNow = false
             save()
             lastError = nil
             return credential
@@ -99,14 +109,31 @@ final class PushRelayAccess {
     /// The handle for `token` of `kind` under `credential`: the one made
     /// before, or a new one.
     func handle(for token: String, kind: PushRelayKind, credential: PushRelayCredential) -> String? {
+        // The setting may have gone off while a sync waited: a handle made
+        // now would miss `turnedOff`'s revocations.
+        guard PushRelaySetting.isOn else { return nil }
         let digest = SHA256.hash(data: Data("\(kind.rawValue)|\(token.lowercased())|\(credential.credential)".utf8))
         let key = Base64URL.encode(Data(digest))
         if let made = stored.handles.first(where: { $0.key == key }) { return made.handle }
         guard let handle = try? credential.handle(token: token, kind: kind) else { return nil }
-        stored.handles.append(Made(key: key, handle: handle))
-        stored.handles.removeFirst(max(0, stored.handles.count - Self.maxHandles))
+        stored.handles.append(Made(key: key, handle: handle, expires: credential.expires))
+        stored.handles.removeAll { $0.expires <= Date() }
+        let evicted = stored.handles.prefix(max(0, stored.handles.count - Self.maxHandles)).map(\.handle)
+        stored.handles.removeFirst(evicted.count)
         save()
+        // One forgotten while it still works could not be revoked later, so
+        // it is revoked now; the computer holding it has a newer one.
+        if !evicted.isEmpty {
+            let environment = credential.environment
+            Task { await revoke(evicted, in: environment) }
+        }
         return handle
+    }
+
+    /// The push relay refused a handle this phone made (a test push's 403):
+    /// the next sync attests again and sends new handles.
+    func rejected() {
+        renewNow = true
     }
 
     /// The setting went off: revokes every handle this phone made, so the
@@ -115,14 +142,21 @@ final class PushRelayAccess {
     /// relay could not be told about still stops when its credential runs
     /// out, at most 30 days on, and the computers get tokens instead.
     func turnedOff() async {
-        let made = stored.handles
+        let made = stored.handles.filter { $0.expires > Date() }.map(\.handle)
         let environment = stored.credential?.environment ?? environment
         stored = Stored()
+        renewNow = false
         try? Keychain.delete(Self.account, group: nil)
         lastError = nil
-        for handle in made {
+        await revoke(made, in: environment)
+    }
+
+    /// Revokes each of `handles`, stopping when the push relay limits this
+    /// phone.
+    private func revoke(_ handles: [String], in environment: PushRelayEnvironment) async {
+        for handle in handles {
             do {
-                let _: Empty = try await post(environment, "/v1/revoke", body: ["handle": handle.handle])
+                let _: Empty = try await post(environment, "/v1/revoke", body: ["handle": handle])
             } catch Failure.refused(status: 429, _) {
                 return
             } catch {

@@ -53,6 +53,9 @@ final class ActivityTokens {
     let pushRelay = PushRelayAccess()
     private let sessions: Sessions
     private var started = false
+    /// The sync running or last queued; each waits for the one before, so
+    /// one started under the other setting cannot finish after it.
+    private var syncing: Task<Void, Never>?
 
     init(sessions: Sessions) {
         self.sessions = sessions
@@ -69,6 +72,13 @@ final class ActivityTokens {
         }
         if !on { await pushRelay.turnedOff() }
         await sync()
+    }
+
+    /// The push relay refused a handle `computer` held: attests again and
+    /// sends it new handles.
+    func pushRelayRejected(by computer: Computer) async {
+        pushRelay.rejected()
+        await sync(only: computer.fingerprint)
     }
 
     /// Starts watching ActivityKit; safe to call more than once.
@@ -155,8 +165,22 @@ final class ActivityTokens {
     }
 
     /// Sends each paired computer (or only the one with CA `only`) its
-    /// tokens, or with the push relay on, handles for them.
+    /// tokens, or with the push relay on, handles for them. Syncs run one
+    /// at a time, in the order asked.
     func sync(only: Fingerprint? = nil) async {
+        let previous = syncing
+        let task = Task {
+            await previous?.value
+            await self.register(only: only)
+        }
+        syncing = task
+        await task.value
+    }
+
+    /// One sync. It stops when the push relay setting changes under it, so
+    /// no token goes out after it was turned on and no handle after it was
+    /// turned off; `pushRelayChanged` queues the sync for the new setting.
+    private func register(only: Fingerprint?) async {
         let viaPushRelay = PushRelaySetting.isOn
         // Attests first when needed; without a credential no handle can be
         // made, and no token goes out either while the push relay is on.
@@ -170,6 +194,7 @@ final class ActivityTokens {
             return .pushRelayHandle(handle, environment: credential.environment)
         }
         for computer in computers where only == nil || computer.fingerprint == only {
+            guard PushRelaySetting.isOn == viaPushRelay else { return }
             let activities = running.values
                 .filter { $0.attributes.fingerprint == computer.fingerprint }
                 .compactMap { running in
@@ -191,6 +216,7 @@ final class ActivityTokens {
             )
             do {
                 let session = try await sessions.session(for: computer)
+                guard PushRelaySetting.isOn == viaPushRelay else { return }
                 let answer = try await session.client.registerAPNs(registration, bearer: session.token)
                 delivery[computer.fingerprint] = switch answer.delivery {
                 case .ownKey: .ownKey

@@ -260,7 +260,7 @@ final class AppModel {
         let sessions = Sessions()
         self.sessions = sessions
         tokens = ActivityTokens(sessions: sessions)
-        pushTests = PushTests(sessions: sessions)
+        pushTests = PushTests(sessions: sessions, tokens: tokens)
         fleet = Fleet(sessions: sessions)
         hostLinks = HostLinks(sessions: sessions)
         fleetMembership = FleetMembership(sessions: sessions)

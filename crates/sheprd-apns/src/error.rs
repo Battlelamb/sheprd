@@ -43,6 +43,8 @@ pub enum Error {
         #[source]
         source: io::Error,
     },
+    #[error("a push for the relay must carry sealed content")]
+    NotSealed,
     #[error("could not open the sealed bytes")]
     Open,
     #[error("could not get random bytes to seal a notification")]

@@ -237,7 +237,12 @@ private struct ChatDocument: View {
         let tools: [Tool] = (turns.last ?? []).compactMap { entry in
             if case let .tool(tool) = entry.kind { tool } else { nil }
         }
-        let prompt: String? = if case let .user(text, _) = turns.last?.first?.kind { text } else { nil }
+        let prompt: String? = if case let .user(text, _) = turns.last?.first?.kind {
+            // A brief pins its goal alone, not a screenful.
+            if let id = turns.last?.first?.id, transcript.brief(id) != nil { BriefOutline(text).goal } else { PastedEnvelope.unwrap(text) }
+        } else {
+            nil
+        }
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 let hidden = max(turns.count - shownTurns, 0)
@@ -257,7 +262,11 @@ private struct ChatDocument: View {
                 ForEach(Array(turns.enumerated().dropFirst(hidden)), id: \.element.first?.id) { index, turn in
                     if index > hidden { Divider().padding(.vertical, 8) }
                     // Only the latest turn's prompt pins once scrolled past.
-                    ChatTurn(entries: turn, promptAbove: index == turns.count - 1 ? $promptAbove : nil)
+                    ChatTurn(
+                        entries: turn,
+                        promptAbove: index == turns.count - 1 ? $promptAbove : nil,
+                        brief: turn.first.flatMap { transcript.brief($0.id) }
+                    )
                 }
                 if !transcript.queued.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {

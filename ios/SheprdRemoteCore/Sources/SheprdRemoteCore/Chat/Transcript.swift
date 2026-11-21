@@ -53,6 +53,8 @@ public struct Transcript: Codable, Hashable, Sendable {
     public var activities: [AgentActivity] = []
     public var agent: String
     public var autoAccept = false
+    /// Prompts another agent wrote, oldest first.
+    public var briefs: [Brief] = []
     public var clients: UInt32 = 0
     public var commands: [SlashCommand] = []
     public var entries: [Entry] = []
@@ -75,7 +77,7 @@ public struct Transcript: Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case activities, agent, clients, commands, entries, harnesses, modes, options, permissions, plan, queued, session, status
-        case truncated, turn, usage
+        case truncated, turn, usage, briefs
         case autoAccept = "auto_accept"
         case readOnly = "read_only"
     }
@@ -85,6 +87,7 @@ public struct Transcript: Codable, Hashable, Sendable {
         activities = try c.decodeIfPresent([AgentActivity].self, forKey: .activities) ?? []
         agent = try c.decode(String.self, forKey: .agent)
         autoAccept = try c.decodeIfPresent(Bool.self, forKey: .autoAccept) ?? false
+        briefs = try c.decodeIfPresent([Brief].self, forKey: .briefs) ?? []
         clients = try c.decodeIfPresent(UInt32.self, forKey: .clients) ?? 0
         commands = try c.decodeIfPresent([SlashCommand].self, forKey: .commands) ?? []
         entries = try c.decodeIfPresent([Entry].self, forKey: .entries) ?? []

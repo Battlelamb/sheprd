@@ -20,8 +20,8 @@
 
 use super::{Fleet, Holder};
 use crate::control::fleet::{
-    Body, HostKind, Op, OpId, State, access,
-    removal::{MAX_FRAME, MAX_OPS, MAX_ROUNDS, Message, PURPOSE_REMOVAL},
+    Body, HostKind, MemberId, Op, OpId, State, access,
+    removal::{MAX_ALSO, MAX_FRAME, MAX_OPS, MAX_ROUNDS, Message, PURPOSE_REMOVAL},
 };
 use crate::desktop::record::Record;
 use std::{
@@ -147,11 +147,18 @@ fn rand_quarter() -> u8 {
     byte[0] % 2
 }
 
+/// What one peer is owed: the record to dial it at, the removals, and for
+/// a plain host's agent, the members the log removes with them that they
+/// do not name ([`Message::Also`]).
+type Owed = (Holder, Record, Vec<Op>, Vec<(OpId, MemberId)>);
+
 /// What each live computer member and plain host is owed: the removals
 /// the log holds that it has not said it holds, and the record to dial it
 /// at. A plain host is owed only the removals that took effect, since its
-/// agent acts on what it is sent without checking it.
-fn owed(fleet: &Fleet) -> Vec<(Holder, Record, Vec<Op>)> {
+/// agent acts on what it is sent without checking it, and with each the
+/// members the log removes with it beyond those it names: a member's
+/// daemon works those out from the log, an agent cannot.
+fn owed(fleet: &Fleet) -> Vec<Owed> {
     let inner = fleet.inner();
     let Some(log) = &inner.log else {
         return Vec::new();
@@ -180,8 +187,11 @@ fn owed(fleet: &Fleet) -> Vec<(Holder, Record, Vec<Op>)> {
             let record = record(state, &host, &member.bundle.name)?;
             let holder = Holder::Member(*id);
             let ops = unheld(&holder, &mut removals.iter());
-            Some((holder, record, ops))
+            Some((holder, record, ops, Vec::new()))
         });
+    // What each removal in effect removes; none when the log cannot say,
+    // and the access file then carries it.
+    let removed_by = log.removed_by().unwrap_or_default();
     let hosts = state
         .hosts
         .iter()
@@ -198,11 +208,39 @@ fn owed(fleet: &Fleet) -> Vec<(Holder, Record, Vec<Op>)> {
                 .iter()
                 .filter(|op| op.signer() == fleet.me() && access::for_agents(state, op));
             let ops = unheld(&holder, &mut effective);
-            Some((holder, record, ops))
+            let also = also(&removed_by, &ops);
+            Some((holder, record, ops, also))
         });
     members
         .chain(hosts)
-        .filter(|(_, _, ops)| !ops.is_empty())
+        .filter(|(_, _, ops, _)| !ops.is_empty())
+        .collect()
+}
+
+/// For each of `ops`, the members `removed_by` says it removes that it
+/// does not name, at most [`MAX_ALSO`]: those beyond reach the agent in
+/// the access file.
+pub(crate) fn also(
+    removed_by: &BTreeMap<OpId, std::collections::BTreeSet<MemberId>>,
+    ops: &[Op],
+) -> Vec<(OpId, MemberId)> {
+    ops.iter()
+        .filter_map(|op| {
+            let Body::Remove(remove) = op.body() else {
+                return None;
+            };
+            let named: Vec<&MemberId> = remove.targets().collect();
+            let reach = removed_by.get(&op.id())?;
+            Some(
+                reach
+                    .iter()
+                    .filter(move |member| !named.contains(member))
+                    .map(move |member| (op.id(), *member))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .flatten()
+        .take(MAX_ALSO)
         .collect()
 }
 
@@ -248,7 +286,7 @@ pub(crate) async fn flood(fleet: Arc<Fleet>) {
                 .await
                 .unwrap_or_default()
         };
-        for (peer, record, ops) in owed {
+        for (peer, record, ops, also) in owed {
             if busy.contains(&peer) || !backoff.due(&peer, now) {
                 continue;
             }
@@ -258,7 +296,7 @@ pub(crate) async fn flood(fleet: Arc<Fleet>) {
             busy.insert(peer);
             let (fleet, done) = (fleet.clone(), done_send.clone());
             tokio::spawn(async move {
-                let ok = tokio::time::timeout(SESSION, push(&fleet, peer, &record, ops))
+                let ok = tokio::time::timeout(SESSION, push(&fleet, peer, &record, ops, also))
                     .await
                     .is_ok_and(|ok| ok);
                 drop(permit);
@@ -269,7 +307,13 @@ pub(crate) async fn flood(fleet: Arc<Fleet>) {
 }
 
 /// One exchange with `peer`: whether it ended with the peer holding them.
-async fn push(fleet: &Arc<Fleet>, peer: Holder, record: &Record, ops: Vec<Op>) -> bool {
+async fn push(
+    fleet: &Arc<Fleet>,
+    peer: Holder,
+    record: &Record,
+    ops: Vec<Op>,
+    also: Vec<(OpId, MemberId)>,
+) -> bool {
     let state_dir = fleet.state_dir().to_owned();
     let Ok(Ok(keys)) =
         tokio::task::spawn_blocking(move || crate::desktop::keys::Keys::load_or_create(&state_dir))
@@ -289,6 +333,17 @@ async fn push(fleet: &Arc<Fleet>, peer: Holder, record: &Record, ops: Vec<Op>) -
     let io = &mut tunnel.io;
     if io.write_all(&opening).await.is_err() {
         return false;
+    }
+    // Ahead of the removals, for an agent: who they take out beyond those
+    // they name.
+    if !also.is_empty() {
+        let also = also
+            .into_iter()
+            .map(|(id, member)| (id, member.0))
+            .collect();
+        if write(io, &Message::Also(also)).await.is_err() {
+            return false;
+        }
     }
     let sent = Message::Removal(ops.iter().map(Op::encode).collect());
     if write(io, &sent).await.is_err() {

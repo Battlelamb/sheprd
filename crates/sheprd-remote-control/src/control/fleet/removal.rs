@@ -13,8 +13,8 @@
 use super::{MemberId, OpId, State};
 
 pub use sheprd_relay_agent::removal::{
-    CONCURRENT, MAX_FRAME, MAX_OPS, MAX_ROUNDS, PROOF_LEN, PURPOSE_REMOVAL, PURPOSE_SSH, SESSION,
-    prove,
+    CONCURRENT, MAX_ALSO, MAX_FRAME, MAX_OPS, MAX_ROUNDS, PROOF_LEN, PURPOSE_REMOVAL, PURPOSE_SSH,
+    SESSION, prove,
 };
 
 /// One message of a removal exchange.

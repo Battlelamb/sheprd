@@ -8,6 +8,9 @@ mod bonjour;
 mod control_socket;
 mod desktop;
 mod enroll;
+mod fleet;
+#[cfg(unix)]
+mod fleet_joins;
 mod github;
 mod idle;
 mod relay_enroll;

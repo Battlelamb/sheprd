@@ -14,6 +14,7 @@ pub mod changes;
 pub mod desktop;
 pub mod edited;
 pub mod favorites;
+pub mod fleet;
 pub mod github;
 pub mod host_relay;
 pub mod hosts;
@@ -126,6 +127,11 @@ pub enum Request {
         /// says otherwise, as an older Sheprd's never does.
         #[serde(default = "yes", skip_serializing_if = "is_yes")]
         share_github: bool,
+        /// The fleet the dialog's fleet line agreed to, hex, when it was
+        /// shown ticked: a computer that claimed joins it, or this computer
+        /// joins the claimant's. One the fleet no longer matches is refused.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fleet: Option<String>,
     },
     /// Closes the dialog's pairing; its token stops working.
     CancelPairing {
@@ -244,6 +250,10 @@ pub enum Request {
     /// `herdr-remote-control enroll` asks. Sheprd never sends it to its
     /// own daemon.
     Enroll(hosts::Enroll),
+    /// The fleet (`fleet::sync::Ask`): its state, founding it, admitting
+    /// and removing members, sharing hosts, and operations carried from
+    /// another member.
+    Fleet(Box<fleet::sync::Ask>),
     /// Where the app's updater stands, sent with each poll while a window
     /// runs it. Answered with whether a phone asked to update. `instance`
     /// names this run of the app: a request is only for the run a phone saw.
@@ -337,6 +347,7 @@ pub enum Response {
         revokes: Vec<hosts::HostRevoke>,
     },
     Enrolled(hosts::Enrolled),
+    Fleet(Box<fleet::sync::Answer>),
     Tags(tags::ComputerTags),
     Favorites(favorites::Favorites),
     Shortcuts(shortcuts::TextShortcuts),
@@ -557,6 +568,11 @@ pub enum PairingState {
         /// `~/.ssh/authorized_keys`, so the dialog says so.
         #[serde(default, skip_serializing_if = "is_no")]
         ssh: bool,
+        /// What that computer asked of the fleet beside pairing: to join
+        /// this computer's, or to bring this computer into its own
+        /// (`fleet::bluetooth`). The dialog says so, with a line to agree.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fleet: Option<fleet::bluetooth::Asked>,
     },
     Approved {
         device: DeviceId,

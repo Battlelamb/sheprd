@@ -2,6 +2,8 @@
 //! directory. Every change replaces the file atomically, private to this
 //! user; seeing a device is written at most once a minute.
 
+pub(crate) mod relay_keys;
+
 use super::{Error, NewDevice, PublicKey, Result, StoreOperation, links::Link};
 use crate::control::{self, DeviceId};
 use serde::{Deserialize, Serialize};
@@ -165,6 +167,7 @@ impl Devices {
         links: Vec<Link>,
         share_github: bool,
     ) -> Result<()> {
+        self.ensure_relay_free(&device.id, device.relay.as_ref())?;
         self.records.push(DeviceRecord {
             app: device.app,
             id: device.id,
@@ -288,13 +291,30 @@ impl Devices {
         keys: RelayKeys,
         now_ms: u64,
     ) -> Result<bool> {
-        let Some(record) = self.records.iter_mut().find(|record| &record.id == id) else {
+        self.replace_relay(id, Some(keys), now_ms)
+    }
+
+    /// Replaces the device's relay keys with `keys`, or drops them with
+    /// `None`, set at `now_ms`; whether it is paired. Keys another device
+    /// holds are refused ([`relay_keys`]). Blocking.
+    pub(crate) fn replace_relay(
+        &mut self,
+        id: &DeviceId,
+        keys: Option<RelayKeys>,
+        now_ms: u64,
+    ) -> Result<bool> {
+        let Some(index) = self.records.iter().position(|record| &record.id == id) else {
             return Ok(false);
         };
-        let before = (record.relay.replace(keys), record.relay_ms.replace(now_ms));
-        let index = self.records.iter().position(|record| &record.id == id);
+        self.ensure_relay_free(id, keys.as_ref())?;
+        let record = &mut self.records[index];
+        let set_ms = keys.is_some().then_some(now_ms);
+        let before = (
+            std::mem::replace(&mut record.relay, keys),
+            std::mem::replace(&mut record.relay_ms, set_ms),
+        );
         self.save_or_undo(|devices| {
-            if let Some(record) = index.and_then(|index| devices.records.get_mut(index)) {
+            if let Some(record) = devices.records.get_mut(index) {
                 (record.relay, record.relay_ms) = before;
             }
         })?;

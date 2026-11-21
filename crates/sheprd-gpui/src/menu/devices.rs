@@ -20,7 +20,7 @@ pub(super) mod picker;
 pub(super) mod rail;
 mod saved_warning;
 mod scope;
-mod setup;
+pub(crate) mod setup;
 mod wsl;
 
 pub(super) use add_device::Setup;

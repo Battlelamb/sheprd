@@ -13,10 +13,10 @@ ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW = (ROOT / ".github/workflows/ci.yml").read_text()
 SECTIONS = re.split(r"^  ([a-z-]+):\n", WORKFLOW.split("\njobs:\n", 1)[1], flags=re.M)
 JOBS = dict(zip(SECTIONS[1::2], SECTIONS[2::2]))
-PR_JOBS = ("zizmor", "commits", "checks", "windows", "windows-native", "build-macos", "website",
-           "checks-passed")
+PR_JOBS = ("zizmor", "commits", "checks", "windows", "windows-native", "build-macos", "relay-agent",
+           "website", "checks-passed")
 # Jobs that never run on main: the release workflow builds those targets.
-PR_ONLY_JOBS = ("build-macos",)
+PR_ONLY_JOBS = ("build-macos", "relay-agent")
 
 
 # The macOS jobs' runners, kept here so a change to them is deliberate.
@@ -72,6 +72,7 @@ class CiPolicy(unittest.TestCase):
             "needs.commits.outputs.code": "true",
             "needs.commits.outputs.full": "true",
             "needs.commits.outputs.macos_release": "true",
+            "needs.commits.outputs.relay_agent": "true",
             "needs.commits.outputs.website": "true",
             "needs.commits.outputs.windows": "true",
             "needs.commits.outputs.windows_native": "true",
@@ -187,7 +188,8 @@ class CiPolicy(unittest.TestCase):
                                  job not in ("checks", "windows"), (job, code))
         # The GUI tests and the macOS release builds follow their own inputs.
         for output, selected in (("windows_native", "windows-native"),
-                                 ("macos_release", "build-macos")):
+                                 ("macos_release", "build-macos"),
+                                 ("relay_agent", "relay-agent")):
             for value in ("false", ""):
                 context = self.context(**{f"needs.commits.outputs.{output}": value})
                 for job in PR_JOBS:
@@ -205,7 +207,8 @@ class CiPolicy(unittest.TestCase):
 
         def gate(code, checks, windows, native, commits, package_inputs="false", package="skipped",
                  event="push", macos=None, site_inputs="false", site="skipped", full="true",
-                 native_inputs=None, macos_inputs=None, zizmor="success", windows_scope=None):
+                 native_inputs=None, macos_inputs=None, zizmor="success", relay_inputs="false",
+                 relay="skipped", windows_scope=None):
             if windows_scope is None:
                 windows_scope = full
             if native_inputs is None:
@@ -223,7 +226,8 @@ class CiPolicy(unittest.TestCase):
                      "FULL": full, "WINDOWS_SCOPE": windows_scope,
                      "PACKAGE_INPUTS": package_inputs, "PACKAGE": package,
                      "EVENT": event, "MACOS_RELEASE": macos, "MACOS_INPUTS": macos_inputs,
-                     "SITE_INPUTS": site_inputs, "SITE": site, "ZIZMOR": zizmor},
+                     "SITE_INPUTS": site_inputs, "SITE": site, "ZIZMOR": zizmor,
+                     "RELAY_AGENT_INPUTS": relay_inputs, "RELAY_AGENT": relay},
             ).returncode == 0
 
         # A pull request needing every platform for macOS code leaves Windows
@@ -330,7 +334,7 @@ class CiPolicy(unittest.TestCase):
         self.assertEqual(re.findall(r"^    runs-on: (.+)$", WORKFLOW, re.M), [
             LINUX_GATE.replace("ubuntu-24.04", "ubuntu-latest"), LINUX_GATE, MACOS_CHECKS,
             "${{ matrix.runner }}", "${{ matrix.runner }}", "windows-2025",
-            LINUX_GATE, LINUX_GATE, "${{ matrix.runner }}", MACOS_RELEASE,
+            LINUX_GATE, LINUX_GATE, "${{ matrix.runner }}", "${{ matrix.runner }}", MACOS_RELEASE,
         ])
         for name in ("checks", "build-macos"):
             with self.subTest(job=name):
@@ -343,6 +347,7 @@ class CiPolicy(unittest.TestCase):
             "[macos-15, ubuntu-24.04, ubuntu-24.04-arm]",
             "[windows-2025, windows-11-arm]",
             "[windows-2025, windows-11-arm]",
+            "[ubuntu-24.04, ubuntu-24.04-arm, macos-15]",
         ])
         self.assertEqual(re.findall(r"^          - runner: (.+)$", WORKFLOW, re.M),
                          ["ubuntu-24.04", "ubuntu-24.04-arm"])

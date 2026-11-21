@@ -15,6 +15,11 @@ pub enum Error {
     Auth(#[from] crate::auth::Error),
     #[error(transparent)]
     Control(#[from] crate::control::Error),
+    #[error(transparent)]
+    Fleet(#[from] crate::control::fleet::Error),
+    #[cfg(feature = "server")]
+    #[error(transparent)]
+    FleetDaemon(#[from] crate::fleet::Error),
     #[cfg(feature = "server")]
     #[error(transparent)]
     Hub(#[from] crate::hub::Error),

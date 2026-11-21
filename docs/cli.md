@@ -241,6 +241,7 @@ not take it either.
 | `host tag ID [TAG...]` | Replace the tags that group a host in the sidebar and on paired phones; with no tags, clear them. Each computer's daemon keeps its own tags, so a host away gets the edit once it is back |
 | `host update [HOST]` | Ask in the app to update the Sheprd app running on an SSH or cloud host, by ID or label (default: your workspace's host), as its header's Update pill does; the user confirms there (see [Updating Sheprd on other machines](#updating-sheprd-on-other-machines)). Exits 4 with the reason when it offers no newer release, 5 when no connected host has that name, 6 while a dialog is open, 8 for this computer, which `update` covers |
 | `pr [status]\|checks\|comments\|open` | Your branch's pull request, on the window's selected host. `comments` needs your workspace focused. `status` also says where it sits in a GitHub stack and what merging there would do (`stack` in `--json`: its layers bottom first with a status word each, a `verdict` of `merged`, `ready`, `blocked`, or `unread` when a layer below it was not read, and for `blocked` the lowest layer read in the way and why), and its place in the merge queue (`queue`: `position`, `state`, `eta_seconds`); both are `null` when it is in none |
+| `pr create` | Open the Git popup on Create pull request for your focused local checkout. A core terminal must itself be the focused pane, not just share its workspace. The user confirms with a click; Enter cannot submit a command-opened popup, and changing checkouts cancels it. Only then does the existing native action push the branch and create the pull request using Sheprd's GitHub sign-in, with the latest commit's subject as its title. No `gh` login or exported token is needed. The command returns when the popup opens, not when a pull request is created; follow with `pr status` after confirmation. Exits 1 when signed out, not focused, already open, or still checking the checkout, 6 while another menu, dialog, or Git operation is open, 8 for unsupported remote/non-Git checkouts |
 | `pr merge` | Open the Git popup's merge dialog for your branch's pull request, which must be your focused workspace's. On a GitHub stack it lands the open pull requests below it too, bottom first, through GitHub's asynchronous merge API. Only the dialog opens: the user picks the method and confirms with a click, since Enter is ignored in a dialog a command opened, so a keystroke meant for a terminal cannot confirm it. Exits 1 with the reason when it is not open, a draft, already queued, or its stack is blocked (`The stack cannot merge yet: #1362 is checks failed`), 6 while a menu or dialog is open |
 | `pr queue add\|remove` | Open the confirmation that adds your branch's pull request (with the open layers of its stack below it) to its base branch's merge queue, or takes it out; the user confirms there. Exits 1 when the branch has no merge queue, or the pull request is already in it or not in it |
 | `pr quota` | Last reported GraphQL points used, limit, and remaining, plus rate-limit retry delays for the window's GitHub accounts. `--json` returns records merged by login: known observations are preferred, then the latest reset window and greatest usage within it; retry delays retain the longest pause. Usage is never summed across credentials. Unavailable quotas are `null`. No network request is made. |
@@ -466,6 +467,32 @@ sheprd remote relays token relay.example.org < ~/relay-token.txt
 sheprd remote relays token relay.example.org --clear
 ```
 
+### Fleet
+
+Your computers and phones as one fleet (`docs/relay-plan.md`, Fleet): a
+host added on one is reached from every other, each with its own keys.
+Every change is confirmed in Settings > Fleet; nothing is signed from the
+command line.
+
+| Command | What it does |
+| --- | --- |
+| `fleet [status]` | The fleet as this computer's daemon keeps it: its id, the members (computers and phones, who admitted each, which is this computer), the hosts (who added each, how many computers may reach each, and the `ssh` target this computer reaches it by when it may), members cut off by a removal whose history has not arrived, and members that signed in two places. Exits 4 when this computer is in no fleet, and 1, with the reason, when its daemon cannot be read |
+| `fleet members`, `fleet hosts` | One of those lists. JSON is `{"members": [...]}` or `{"hosts": [...]}` |
+| `fleet open` | Show Settings > Fleet, where a fleet is created, computers this Sheprd reaches are invited, and hosts are shared with the computers ticked |
+| `fleet remove MEMBER` | Ask in Settings > Fleet to remove a member, named by its ID from `fleet status` or its name (a name two members share is refused). The user picks why there: a compromised member takes the members and hosts it added with it |
+| `fleet remove-host HOST` | Ask in Settings > Fleet to remove a host everywhere, by its ID or name; the user confirms there |
+| `fleet scrub MACHINE` | Ask in Settings > Fleet to remove every way a fleet reaches a machine this Sheprd connects to, named by its device ID or name: `sheprd-remote-control fleet scrub` and `sheprd-relay-agent fleet scrub` over SSH, each when installed, remove its `sheprd-fleet:` lines and the agent's entries. The last resort for a host no member can reach or a fleet that is gone; nothing is signed, and the user confirms there |
+
+`--json` for `status` gives the daemon's view: `fleet`, `me`, `members`,
+`hosts` (each with `grants` and an optional `target`), `removed`,
+`suspended`, `equivocating`, `pending`, and `heads`. `remove`,
+`remove-host`, and `scrub` exit 5 when nothing of that name is there.
+
+```sh
+sheprd fleet status --json
+sheprd fleet remove "old laptop"
+```
+
 ### Mods
 
 | Command | What it does |
@@ -612,10 +639,10 @@ creating them in Settings does.
 
 Adding an SSH or local network device, or a nearby Sheprd over Bluetooth,
 has no command: the Add Device dialog runs it, and the other computer opens
-`remote pair`. Its setup workspace runs `sheprd __device-setup-attach SOCKET`,
-an internal helper that shows the setup the app runs (see the Native Shell
-README's "Local Network access"); it is not a command to call yourself, and
-the socket it names is single use.
+`remote pair`. On macOS and Linux, SSH setup stays in Add Device with native
+progress, confirmation buttons, and masked password responses. Its private
+terminal belongs to the app (see the Native Shell README's "Local Network
+access"); it creates no workspace or terminal tab.
 
 Herdr 1 scrollback search is not repeated here: `herdr pane read` covers it. Moving a
 window and capturing a whole window have no command because the app cannot

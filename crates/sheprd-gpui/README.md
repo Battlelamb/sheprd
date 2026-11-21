@@ -325,12 +325,10 @@ name, and port as `ssh -G` resolves them, so an SSH alias, `user@address`, and
 before anything else, so a second add from any window is refused while the
 first runs. The catalog file is read again right before `machine add` runs and
 right after: if another client saved the same host in between, the profile added
-second is removed, so exactly one remains. A terminal setup keeps the claim
-while it runs and releases it when it ends, saved or not, so a failed setup
-never locks the host out; if the setup workspace never runs, the claim is
-released after two minutes. Another client adding the host while a terminal
-setup runs can still create a duplicate. A host refused as already being added
-is still in another Add Device dialog or in a running "Set up" workspace.
+second is removed, so exactly one remains. Interactive setup keeps the claim
+while it runs and releases it when it ends, saved or not. Another client adding
+the host during interactive setup can still create a duplicate. A host refused
+as already being added is still in another Add Device dialog.
 
 Under the SSH target, **Nearby devices** suggests hosts to add. Opening the
 dialog starts one search, shown by a sliding bar, which lasts about ten seconds;
@@ -438,23 +436,30 @@ never installs or starts anything while checking:
 - Herdr missing: the dialog asks "Herdr was not detected on the host. Should we
   install it?" An outdated Herdr asks to update it instead.
 - SSH needs a prompt (unknown host key, password, passphrase), the check failed,
-  or saving without a terminal failed: the dialog offers to continue in a
-  terminal.
+  or saving without a terminal failed: the dialog offers to continue here.
 
-Accepting creates a new workspace on this device's Herdr and shows the setup
-there. The setup itself, `herdr machine add` (after `ssh-copy-id` when the host
-refused every key), runs as a child of this app on a terminal the app owns; the
-workspace's shell only runs `sheprd __device-setup-attach SOCKET`, which
-relays the pane's keys and size to it over a private, single-use socket in the
-app's state directory. It runs with your login `PATH` and agent, so it uses
-your own `ssh` (Homebrew's or any other), SSH config, and security key, exactly
-as a terminal would. Herdr handles SSH prompts, approval to install/update
-remote software, server startup, and saving the machine only after successful
-setup; complete any prompts in that workspace. The saved device appears
-automatically on the next catalog refresh. No credentials are collected by the
-GUI. Closing the workspace hangs the setup up, and so does quitting the app,
-since the setup belongs to it. Explicit-socket and development-catalog windows
-do not offer setup. Windows has no terminal setup yet: there the dialog names
+Accepting keeps setup inside **Add Device**: progress is plain text,
+installation and restart approvals have **Yes** and **No** buttons, and SSH
+passwords or passphrases use a masked response field. Enter sends a response;
+confirmations require a button click. Nothing is automatically approved. No
+workspace or terminal tab is created, and the selected device stays selected;
+setup works even when the local daemon is disconnected.
+
+The setup itself, `herdr machine add` (after `ssh-copy-id` when the host refused
+every key), still runs as this app's child on a private terminal, using the
+user's login `PATH`, SSH config, agent, and security key. Before installing, it
+adds `~/.local/bin` to the remote shell's PATH: zsh's `.zshenv`, bash's
+`.bashrc` and existing login profile, fish's `conf.d`, or `.profile` for other
+POSIX shells. Existing content and symlinks are preserved; repeated setup does
+not duplicate the entry. Bash's entry precedes interactive-only early returns,
+so non-interactive SSH commands see it too.
+
+Responses are not logged or saved; the field is cleared after sending.
+Output is bounded to one terminal viewport and terminal escapes cannot run UI
+actions or set the clipboard. Closing or cancelling the dialog hangs up setup,
+as does quitting the app. The saved device appears on the next catalog refresh.
+Explicit-socket and development-catalog windows do not offer setup.
+Windows has no terminal setup yet: there the dialog names
 what needs a terminal and asks you to run `herdr machine add TARGET` in one
 (see [Windows](#ssh-hosts)).
 
@@ -4466,6 +4471,19 @@ Ctrl+Shift+U is left unbound for
   Accounts are listed in `[github] accounts` with an `id` naming their credential
   entry (`github.com/account/<id>`, or `github-credentials-account-<id>`) and
   optional `owners`; **Remove account (D)** deletes the credential, then the entry.
+- GitHub Enterprise Server accounts read the repositories of a self-hosted
+  GitHub. In the GitHub panel, **Add Enterprise account (E)** asks for the
+  server's host (a port other than 443 goes after a colon) and a personal
+  access token in one form, and the server checks the token before it is saved; there is no browser
+  sign-in. No github.com sign-in is needed. A checkout whose remote is on that
+  host is read with the account listing its owner, else the first account on
+  that server, and never with a github.com credential; a server with no account
+  shows the sign-in prompt. HTTPS is verified against the system's trust store,
+  so a company CA installed on the computer is accepted. They are listed in
+  `[github] enterprise` with `server`, `id`, and optional `owners`
+  (credential `<server>/account/<id>`, or
+  `github-credentials-enterprise-<id>`), and count toward the same limit of
+  eight accounts. Vulnerability reports and avatars stay with github.com.
    Herdr does not give endpoint clients a workspace's checkout path, so every
     daemon version uses this worktree-registry path. No Git or HTTP requests run from menu-open or render paths.
   Opening the top-right Git/PR dropdown also queues a fresh lookup for the focused
@@ -5349,7 +5367,8 @@ GitHub sign-ins are kept in Windows Credential Manager, which plays the part
 of the Keychain and the Secret Service. Each account is one generic credential,
 `dev.herdr.gpui.github/github.com` for the main account,
 `dev.herdr.gpui.github/github.com/host/<device-id>` for a device's own, and
-`dev.herdr.gpui.github/github.com/account/<id>` for an additional account, holding
+`dev.herdr.gpui.github/github.com/account/<id>` for an additional account, and
+`dev.herdr.gpui.github/<server>/account/<id>` for a GitHub Enterprise Server one, holding
 exactly what the other keyrings hold: the device-flow token pair with its
 expiry, or only the GitHub CLI marker, never the CLI's token. Entries are
 persisted for your Windows account on this computer only

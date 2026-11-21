@@ -270,6 +270,8 @@ final class Fleet {
     /// again on leaving.
     func clearCache() {
         cache.clear()
+        // Followed chats no screen shows would be saved again on leaving.
+        for key in Array(chats.keys) where chatViewers[key] == nil { drop(key, saving: false) }
         let open = chats
         drafts.forget { open[$0] == nil }
     }
@@ -423,10 +425,12 @@ final class Fleet {
     }
 
     /// Lets go of a chat no screen shows, saving what it holds.
-    private func drop(_ key: PaneKey) {
+    /// Stops following a chat no screen shows, saving it for the next
+    /// opening unless its computer was forgotten and its cache cleared.
+    private func drop(_ key: PaneKey, saving: Bool = true) {
         guard let store = chats.removeValue(forKey: key) else { return }
         background.remove(key)
-        save(store)
+        if saving, machines.contains(where: { $0.id == key.device }) { save(store) }
         Task { await links[key.device]?.unwatch(.chat(pane: key.pane)) }
     }
 

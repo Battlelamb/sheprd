@@ -494,7 +494,7 @@ push relay (`apns::Delivery`), chosen at start and logged as `APNs pushes`:
 
 | Mode | When | What travels |
 | --- | --- | --- |
-| Off | `push_relay` off (the default) | Nothing through APNs; `POST /api/apns` answers 503 and alerts use Web Push |
+| Off | `push_relay` off (the default) | Nothing through APNs; `POST /api/apns` answers 503. The native app gets no notifications; alerts go by Web Push only to a browser app that subscribed |
 | Push relay | `[remote] push_relay = true` (`--push-relay`) | Through the Sheprd push relay, which holds the app's key (`docs/apns-relay-plan.md`). Every payload is sealed to the phone |
 
 The iOS app has one publisher, so only the push relay holds an APNs key for
@@ -509,8 +509,10 @@ daemon never sees the token inside. The app registers them with
 the two relays compiled in, `push.sheprd.org` and `push-sandbox.sheprd.org`;
 no device can name another host. An app from before the push relay still
 registers plain hex tokens: they are accepted and stored, and stored ones
-keep loading, so that app keeps registering and its Web Push keeps working,
-but nothing is ever sent to a token.
+keep loading, so that app keeps registering without errors, but nothing is
+ever sent to a token: that app gets no APNs push. The native app holds no
+Web Push subscription, so with the push relay off it gets no notifications;
+only a browser app the user installed and subscribed gets Web Push.
 
 Through the relay, a Live Activity's `content-state`, and `attributes` on a
 start, are each one `sealed` field (`apns::relayed`, info

@@ -195,7 +195,9 @@ passes untouched: a set the rules were tuned on stops measuring anything.
 Running the app on a device needs a paid Apple Developer account. Pushes
 are another matter: computers send them only through the Sheprd push relay,
 which holds the APNs key for the published app (`so.pen.herdr.remote`), so a
-copy signed by another team gets no APNs pushes, only Web Push.
+copy signed by another team gets no pushes. The app has no Web Push
+subscription of its own: Web Push reaches only the browser app, installed
+and subscribed separately.
 
 1. Set `DEVELOPMENT_TEAM` in `project.yml` (or in Xcode, Signing &
    Capabilities, for both targets).
@@ -283,12 +285,14 @@ for it (`docs/apns-relay-plan.md`). A computer's remote control daemon
 Live Activities and alerts to the phone and hands them to the push relay
 (`push.sheprd.org`, or `push-sandbox.sheprd.org` for Xcode builds), once the
 push relay is on in Sheprd's Settings > Remote control. With it off, the
-phone gets Web Push alone, and its token upload is answered 503.
+app gets no notifications from that computer, and its token upload is
+answered 503. Web Push is separate: only the browser app, installed and
+subscribed on its own, receives it.
 
 The relay reaches the phone through a handle the app seals to it, never a
 plain token. A computer still accepts and keeps the plain tokens an app from
-before the push relay registers, so that app keeps registering, but sends
-nothing to them.
+before the push relay registers, so that app keeps registering without
+errors, but sends nothing to them: that app gets no notifications.
 
 ## Live Activity detail
 

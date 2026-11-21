@@ -5,8 +5,8 @@
 //! Pushes go only through the push relay, which reaches handles alone. An
 //! app from before the relay still registers plain tokens: `POST /api/apns`
 //! takes them, and the device store keeps and loads them, so that app keeps
-//! registering and its Web Push keeps working, but nothing is ever sent to
-//! a token, and the daemon never posts to Apple.
+//! registering without errors, but nothing is ever sent to a token, and the
+//! daemon never posts to Apple. That app gets no APNs push.
 //!
 //! The device store and `POST /api/apns` write a token as hex, as before,
 //! and a handle as an object naming the relay environment its credential is

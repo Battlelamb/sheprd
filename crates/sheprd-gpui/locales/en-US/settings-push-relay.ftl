@@ -5,7 +5,7 @@
 
 settings-push-relay-title = Push through the Sheprd push relay
 settings-push-relay-description = Live Activities and alerts on a paired iPhone, sent through push.sheprd.org.
-settings-push-relay-note = Get Live Activities and alerts when you are away from this computer. Without the push relay, the phone gets web notifications only.
+settings-push-relay-note = Get Live Activities and alerts when you are away from this computer. Without the push relay, the iPhone app gets no notifications from this computer.
 
 # The confirmation before it turns on. Keep it true to what the push relay
 # does (docs/apns-relay-plan.md, "Opt-in").

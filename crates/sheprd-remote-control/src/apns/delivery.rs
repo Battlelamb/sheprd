@@ -4,8 +4,10 @@
 //! app's publisher, holds the key APNs takes for the app.
 //!
 //! The relay reaches only handles. A plain token, which an older app still
-//! sends, is kept with the device but reaches nothing, so such a phone
-//! gets Web Push. Every payload is sealed to the phone ([`SealedPush`]),
+//! sends, is kept with the device but reaches nothing: that app gets no
+//! APNs push. The native app has no Web Push subscription of its own; only
+//! a browser app the user installed and subscribed gets Web Push. Every
+//! payload is sealed to the phone ([`SealedPush`]),
 //! Live Activities included.
 //!
 //! A relay outage must not stall the notifier: once a relay could not be

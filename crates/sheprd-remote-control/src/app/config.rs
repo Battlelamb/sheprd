@@ -68,7 +68,8 @@ pub struct RemoteConfig {
     pub presence: bool,
     /// Whether iPhone alerts and Live Activities go through the Sheprd push
     /// relay, sealed (`docs/apns-relay-plan.md`, Opt-in). It is the only way
-    /// they leave this computer: off, the phone gets Web Push alone. Off by
+    /// they leave this computer: off, the iPhone app gets no notifications
+    /// from it, and only a subscribed browser app gets Web Push. Off by
     /// default.
     pub push_relay: bool,
     /// Relays the daemon listens on, so paired phones reach this computer

@@ -28,10 +28,16 @@ impl OrchestratorView {
         };
         // Before the page opens: another list's tab closes the open page.
         self.show_list(Tab::PullRequests, cx);
-        self.open_detail(key.clone(), cx);
+        // The row is rebuilt before the page opens, so the page reads the
+        // checkout the row shows: with two holding it, the one with a run.
         self.revealed = Some(key.clone());
         self.selected = Some(key.clone());
+        self.detail = Some(super::Detail {
+            key: key.clone(),
+            tab: super::DetailTab::Conversation,
+        });
         self.refresh_rows();
+        self.open_detail(key.clone(), cx);
         self.scroll
             .scroll_to_item(self.line_of(&key), ScrollStrategy::Center);
         cx.notify();

@@ -312,7 +312,7 @@ impl OrchestratorView {
                     .backends
                     .contains(&self.row_item(row).key.source.provider)
         };
-        let lists: Vec<Vec<ItemRow>> = self
+        let mut lists: Vec<Vec<ItemRow>> = self
             .repos
             .iter()
             .map(|repo| {
@@ -328,11 +328,7 @@ impl OrchestratorView {
                     if row.depth == 0 {
                         // Projects narrow by the item's own project on
                         // Azure DevOps, whoever listed it.
-                        // The revealed pull request is listed whatever
-                        // the pills pick.
-                        let item = self.row_item(row);
-                        parent_kept = revealed.is_some_and(|key| item.key.canonical() == key)
-                            || (backend(row) && self.picked(repo, item));
+                        parent_kept = backend(row) && self.picked(repo, self.row_item(row));
                     }
                     if parent_kept {
                         kept.push(*row);
@@ -341,6 +337,22 @@ impl OrchestratorView {
                 kept
             })
             .collect();
+        // The revealed pull request, when the pills hide it from every
+        // checkout, comes from the first listing it. One a picked checkout
+        // lists stays that checkout's row, which its open page reads.
+        let is_revealed =
+            |row: &ItemRow| revealed == Some(self.row_item(row).key.canonical().as_str());
+        if revealed.is_some()
+            && !lists.iter().flatten().any(is_revealed)
+            && let Some(row) = self
+                .repos
+                .iter()
+                .flat_map(|repo| &repo.pull_request_rows)
+                .find(|row| is_revealed(row))
+            && let Some(list) = lists.get_mut(row.repo)
+        {
+            list.push(*row);
+        }
         let merged = rows::merge(lists, |row| self.row_item(row), self.sort);
         let (merged, holders) = rows::dedupe(merged, |row| self.row_item(row).key.canonical());
         self.holders = holders;

@@ -138,11 +138,14 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
             code,
             hosts,
             share_github,
+            fleet,
         } => {
-            let answered = state
-                .auth()
-                .answer_with_hosts(&id, allow, &code, &hosts, share_github, now)
-                .map(Response::Pairing);
+            let answered = crate::fleet::bluetooth::answer(state, &id, allow, fleet, now, || {
+                state
+                    .auth()
+                    .answer_with_hosts(&id, allow, &code, &hosts, share_github, now)
+            })
+            .map(Response::Pairing);
             // An approved phone that sent relay keys reaches this computer
             // through them at once.
             if let (Ok(_), Some(relay)) = (&answered, &state.relay) {
@@ -160,8 +163,14 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
         Request::NearbyReveal { session, nonce } => {
             let origins = state.origins();
             let revealed = {
+                // Read before the auth lock: the two never nest.
+                let hint = state
+                    .fleet
+                    .as_deref()
+                    .and_then(crate::fleet::bluetooth::hint);
                 let mut auth = state.auth();
                 crate::relay::refresh_offer(state.relay.as_deref(), &mut auth);
+                auth.pairings().offer_hint(hint);
                 auth.nearby_reveal(&session, &nonce, &state.fingerprint, &origins, now)
                     .map(Response::NearbyRevealed)
             };
@@ -241,16 +250,28 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
             .host_relayed(&device, &relay, *outcome, now)
             .map(|()| Response::Done),
         Request::RelayEnroll(request) => return relay_enroll(state, &request, now),
-        Request::Revoke { device } => match state.auth().revoke(&device) {
-            Ok(true) => Ok(Response::Done),
-            Ok(false) => {
-                return Response::Error {
-                    code: ErrorCode::UnknownDevice,
-                    message: "no such device".into(),
-                };
+        Request::Fleet(ask) => return fleet(state, *ask, now),
+        Request::Revoke { device } => {
+            // Bound first, so the auth lock is released before the joins
+            // are locked: auth, released, then joins, never nested.
+            let revoked = state.auth().revoke(&device);
+            match revoked {
+                Ok(true) => {
+                    // A join it asked for ends with it.
+                    if let Some(fleet) = &state.fleet {
+                        fleet.joins().forget_device(&device);
+                    }
+                    Ok(Response::Done)
+                }
+                Ok(false) => {
+                    return Response::Error {
+                        code: ErrorCode::UnknownDevice,
+                        message: "no such device".into(),
+                    };
+                }
+                Err(error) => Err(error),
             }
-            Err(error) => Err(error),
-        },
+        }
         Request::Tags { offer } => {
             let Some(offer) = offer else {
                 return Response::Tags(state.tags.current());
@@ -379,6 +400,34 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
 /// Keeps a phone's relay keys carried here from another computer, and
 /// answers with this computer's relays, signed with its CA's key so the
 /// phone knows the answer is this computer's.
+/// Answers what Sheprd asks about the fleet; a failure is the fleet's
+/// own error text, which names the rule and nothing it carried.
+fn fleet(state: &State, ask: control::fleet::sync::Ask, now: u64) -> Response {
+    let Some(fleet) = &state.fleet else {
+        // A fleet that did not load is what a scrub clears.
+        if matches!(ask, control::fleet::sync::Ask::Scrub { .. }) {
+            return match crate::fleet::scrub::unloaded(state) {
+                Ok(()) => Response::Fleet(Box::new(control::fleet::sync::Answer::Done)),
+                Err(error) => Response::Error {
+                    code: ErrorCode::Other,
+                    message: error.to_string(),
+                },
+            };
+        }
+        return Response::Error {
+            code: ErrorCode::Unsupported,
+            message: "this computer could not load its fleet key".into(), // i18n: data
+        };
+    };
+    match crate::fleet::ask::answer(state, fleet, ask, now) {
+        Ok(answer) => Response::Fleet(Box::new(answer)),
+        Err(error) => Response::Error {
+            code: ErrorCode::Other,
+            message: error.to_string(),
+        },
+    }
+}
+
 fn relay_enroll(state: &State, request: &control::host_relay::Request, now: u64) -> Response {
     use control::host_relay::{Info, Outcome, Proof};
     let failed = |reason: &str| {

@@ -50,6 +50,9 @@ sheprd-remote.workspace         = true
 sheprd-relay = { features = ["signed-directory"], workspace = true }
 # Remote control without its server: the control protocol and `app`.
 sheprd-remote-control.workspace         = true
+# A plain host's relay agent without its runtime: its `status --json` and
+# the access file the app hands it (Settings > Fleet).
+sheprd-relay-agent.workspace            = true
 sheprd-updater.workspace        = true
 sheprd-traces.workspace         = true
 sheprd-usage.workspace          = true

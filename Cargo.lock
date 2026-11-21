@@ -11059,6 +11059,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sheprd-fleet-ffi"
+version = "0.1.0"
+dependencies = [
+ "p256 0.14.0",
+ "serde",
+ "serde_json",
+ "sheprd-remote-control",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "sheprd-github"
 version = "0.1.0"
 dependencies = [
@@ -11154,6 +11165,7 @@ dependencies = [
  "sheprd-mods",
  "sheprd-orchestrator",
  "sheprd-relay",
+ "sheprd-relay-agent",
  "sheprd-remote",
  "sheprd-remote-control",
  "sheprd-session",
@@ -11377,6 +11389,7 @@ dependencies = [
  "quinn",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "sheprd-relay",
  "sheprd-tunnel",
  "tempfile",
@@ -11459,6 +11472,7 @@ dependencies = [
  "sheprd-core-client",
  "sheprd-github",
  "sheprd-relay",
+ "sheprd-relay-agent",
  "sheprd-session",
  "sheprd-terminal",
  "sheprd-tunnel",

@@ -72,6 +72,7 @@ mod endpoint;
 mod error;
 mod fan_out;
 mod find;
+mod fleet;
 mod font_picker;
 mod fonts;
 mod github;

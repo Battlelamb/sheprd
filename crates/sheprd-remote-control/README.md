@@ -493,18 +493,23 @@ agent still has exactly one computer that alerts for it. The notifier's
 `own_session` test locks that path from the core's document to the alert.
 
 Pane ids are unique only on one computer, so every identifier a push
-service or the phone collapses or groups by names the computer too:
+service or the phone collapses or groups by is scoped to the computer:
 
 | Identifier | Value |
 | --- | --- |
-| APNs `apns-collapse-id` | The CA fingerprint's first 16 hex digits, `-`, and the chat's tag (`chat-{pane}`); a tag too long for APNs's 64 bytes is digested instead of cut |
-| APNs `thread-id` | `FINGERPRINT/pane`, the app's own `AlertKeys.thread(computer:pane:)` |
+| APNs `apns-collapse-id` | The pairing's scope, `-`, and the chat's tag (`chat-{pane}`); a tag too long for APNs's 64 bytes is digested instead of cut |
+| APNs `thread-id` | `scope/pane`; the app's extension replaces it with `AlertKeys.thread(computer:pane:)` once it opens the alert |
 | Web Push `Topic` | SHA-256 of the fingerprint and the tag, as 32 base64url characters |
 
-The same pane on two computers therefore never replaces or groups with the
-other's notification, while a newer push for one chat still replaces its
-older one. The sealed `computer` is what the app opens alerts and routes
-answers by, so older apps keep working.
+The scope (`apns::alert::scope`) is 16 hex digits of a SHA-256 over the
+notify key the phone gave this computer, which the phone makes for each
+computer. It is not the CA fingerprint: APNs and the push relay see a
+value that tells one phone's computers apart, but that names no computer
+and differs for the same computer on another phone. The same pane on two
+computers therefore never replaces or groups with the other's
+notification, while a newer push for one chat still replaces its older
+one. The app opens alerts and routes answers by the sealed `computer`, so
+older apps keep working.
 
 ### APNs delivery: off, own key, or relay
 

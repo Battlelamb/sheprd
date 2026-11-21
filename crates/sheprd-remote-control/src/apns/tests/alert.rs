@@ -3,7 +3,7 @@
 
 use crate::apns::{
     Priority, PushType,
-    alert::{MAX_OPTIONS, Sealed, collapse_id, push},
+    alert::{self, MAX_OPTIONS, Sealed, collapse_id, scope},
     payload::MAX_PAYLOAD,
     seal::{INFO, seal_with},
 };
@@ -93,6 +93,15 @@ fn question() -> Notification {
     }
 }
 
+/// `alert::push` to the test device, in its scope.
+pub(super) fn push(
+    sealed: Sealed,
+    tag: &str,
+    seal: impl Fn(&[u8]) -> crate::apns::Result<Vec<u8>>,
+) -> crate::apns::Result<crate::apns::Push> {
+    alert::push(sealed, &scope(&device().public_key()), tag, seal)
+}
+
 pub(super) fn json(bytes: &[u8]) -> Value {
     serde_json::from_slice(bytes).unwrap()
 }
@@ -107,9 +116,10 @@ fn a_question_shows_only_a_cover_to_apns() {
     let push = push(sealed.clone(), "chat-w1:p2", fixed_seal).unwrap();
     assert_eq!(push.push_type, PushType::Alert);
     assert_eq!(push.priority, Priority::High);
+    let scope = scope(&device().public_key());
     assert_eq!(
         push.collapse_id.as_deref(),
-        Some("9E92A0DF1CE0967E-chat-w1:p2")
+        Some(format!("{scope}-chat-w1:p2").as_str())
     );
     let payload = json(&push.body);
     assert_eq!(
@@ -117,7 +127,7 @@ fn a_question_shows_only_a_cover_to_apns() {
         json!({
             "alert": {"title": "Sheprd", "body": "New activity"},
             "mutable-content": 1,
-            "thread-id": format!("{COMPUTER}/w1:p2"),
+            "thread-id": format!("{scope}/w1:p2"),
             "interruption-level": "time-sensitive",
             "sound": "default",
         })
@@ -232,6 +242,7 @@ fn a_long_body_is_shortened_to_fit_apns() {
 #[test]
 fn the_collapse_id_stays_within_apns_limit_on_a_character_boundary() {
     let tag = format!("chat-{}", "é".repeat(40));
+    let scope = scope(&device().public_key());
     let push = push(
         Sealed::new(&question(), COMPUTER.to_owned(), 1),
         &tag,
@@ -240,15 +251,18 @@ fn the_collapse_id_stays_within_apns_limit_on_a_character_boundary() {
     .unwrap();
     let id = push.collapse_id.unwrap();
     assert!(id.len() <= 64);
-    assert!(id.starts_with("9E92A0DF1CE0967E-"), "names the computer");
+    assert!(
+        id.starts_with(&format!("{scope}-")),
+        "in the pairing's scope"
+    );
     assert!(!id.contains('é'), "a long tag is digested, not cut");
     let other = format!("chat-{}a", "é".repeat(40));
     assert_ne!(
-        collapse_id(COMPUTER, &tag),
-        collapse_id(COMPUTER, &other),
+        collapse_id(&scope, &tag),
+        collapse_id(&scope, &other),
         "tags sharing a long prefix stay apart"
     );
-    assert_eq!(id, collapse_id(COMPUTER, &tag), "stable");
+    assert_eq!(id, collapse_id(&scope, &tag), "stable");
 }
 
 /// `Fixtures/notify/alert.json`: the device key, the plaintext, and the

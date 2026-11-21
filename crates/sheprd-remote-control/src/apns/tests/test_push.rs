@@ -1,10 +1,10 @@
 //! The test push a phone asks for: sealed like any alert, urgent, in its
 //! own thread, and carrying the id the phone's extension records.
 
-use super::alert::{COMPUTER, device, fixed_seal, json, open};
+use super::alert::{COMPUTER, device, fixed_seal, json, open, push};
 use crate::apns::{
     Priority, PushType,
-    alert::{MAX_TEST_ID, Sealed, TEST_PANE, push, valid_test_id},
+    alert::{MAX_TEST_ID, Sealed, TEST_PANE, scope, valid_test_id},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde_json::{Value, json};
@@ -23,13 +23,13 @@ fn a_test_push_is_urgent_sealed_and_carries_its_id() {
     assert_eq!(push.push_type, PushType::Alert);
     assert_eq!(
         push.collapse_id.as_deref(),
-        Some(format!("9E92A0DF1CE0967E-test-{ID}").as_str())
+        Some(format!("{}-test-{ID}", scope(&device().public_key())).as_str())
     );
     let payload = json(&push.body);
     assert_eq!(payload["aps"]["alert"]["body"], "New activity");
     assert_eq!(
         payload["aps"]["thread-id"],
-        format!("{COMPUTER}/{TEST_PANE}")
+        format!("{}/{TEST_PANE}", scope(&device().public_key()))
     );
     assert!(!String::from_utf8(push.body.clone()).unwrap().contains(ID));
 

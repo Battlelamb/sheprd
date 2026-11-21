@@ -123,7 +123,7 @@ impl Delivery {
     }
 
     /// Sends `sealed`, sealed to `key`, to `recipient`, collapsing under
-    /// `tag` on its computer, at `now_ms`.
+    /// `tag` in the pairing's scope (`alert::scope`), at `now_ms`.
     pub(crate) async fn alert(
         &self,
         recipient: &Recipient,
@@ -132,9 +132,10 @@ impl Delivery {
         tag: &str,
         now_ms: u64,
     ) -> Sent {
+        let scope = alert::scope(key);
         match (self, recipient) {
             (Self::OwnKey(sender), Recipient::Token(token)) => {
-                let Ok(push) = alert::push(sealed, tag, |plaintext| {
+                let Ok(push) = alert::push(sealed, &scope, tag, |plaintext| {
                     Ok(seal::seal(key, plaintext, seal::INFO)?)
                 }) else {
                     return Sent::Unsent;
@@ -145,9 +146,9 @@ impl Delivery {
                 if relays.is_down(handle.environment(), now_ms) {
                     return Sent::Unreachable;
                 }
-                let clear = alert::clear(&sealed.computer, &sealed.pane, tag);
+                let clear = alert::clear(&scope, &sealed.pane, tag);
                 let Ok(push) = SealedPush::build(key, seal::INFO, &clear, |sealer| {
-                    alert::push(sealed, tag, |plaintext| Ok(sealer.seal(plaintext)?))
+                    alert::push(sealed, &scope, tag, |plaintext| Ok(sealer.seal(plaintext)?))
                 }) else {
                     return Sent::Unsent;
                 };

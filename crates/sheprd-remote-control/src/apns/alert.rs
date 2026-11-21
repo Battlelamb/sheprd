@@ -1,21 +1,24 @@
 //! Notifications for the native app, sealed to the device
 //! (`docs/ios-app-plan.md`, "Notifications, exactly"). APNs sees only a
-//! cover ("Sheprd", "New activity"), the computer and pane as the thread,
-//! and a collapse id; the app's Notification Service Extension opens
+//! cover ("Sheprd", "New activity"), a thread and a collapse id; the app's Notification Service Extension opens
 //! `sealed` and shows what is inside, with answer buttons for a permission
 //! request. The badge travels sealed too: it is this computer's count, and
 //! a phone paired with several shows their sum, so APNs must not set it
 //! alone.
 //!
 //! Pane ids are unique only on one computer, so the thread and the collapse
-//! id both name the computer: two computers' `w1:p2` never replace or group
-//! with each other, while a newer push for one chat still replaces its
-//! older one. The thread is the app's own (`AlertKeys.thread`), so a cover
-//! shown when the extension cannot open a push groups as an opened one.
+//! id both start with a [`scope`] for the pairing: two computers' `w1:p2`
+//! never replace or group with each other, while a newer push for one chat
+//! still replaces its older one. The scope is a digest of the notify key
+//! the phone gave this computer, which is its own for every computer, and
+//! not the computer's fingerprint: APNs and the push relay must not learn a
+//! name for the computer, nor tie one computer's pushes to two phones. The
+//! extension names the thread itself from the sealed `computer`
+//! (`AlertKeys.thread`); this one only groups covers it could not open.
 //!
 //! ```json
 //! { "aps": { "alert": { "title": "Sheprd", "body": "New activity" },
-//!            "mutable-content": 1, "thread-id": "AB12…(64 hex)/w1:p2",
+//!            "mutable-content": 1, "thread-id": "1f0c9a7e2b4d6e81/w1:p2",
 //!            "interruption-level": "time-sensitive", "sound": "default" },
 //!   "sealed": "BASE64URL" }
 //! ```
@@ -27,6 +30,7 @@
 use super::{Error, Priority, Push, PushType, Result, payload::MAX_PAYLOAD};
 use crate::push::{Kind, Notification};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use p256::PublicKey;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use sheprd_chat_protocol::PermissionOption;
@@ -37,9 +41,12 @@ pub(crate) const VERSION: u32 = 1;
 pub(crate) const MAX_OPTIONS: usize = 4;
 /// The longest `apns-collapse-id` APNs accepts, in bytes.
 const MAX_COLLAPSE_ID: usize = 64;
-/// Hex digits of the computer's fingerprint a collapse id starts with: 64
-/// bits of a hash already, which no two of one phone's computers share.
-const COMPUTER_PREFIX: usize = 16;
+/// Hex digits of a [`scope`]: 64 bits, which no two of one phone's
+/// computers share.
+const SCOPE_DIGITS: usize = 16;
+/// What a scope's digest starts with, so it is never another digest of the
+/// same key.
+const SCOPE_INFO: &[u8] = b"sheprd-alert-scope-v1";
 /// What APNs and a phone whose extension cannot open the payload show.
 pub(super) const COVER_TITLE: &str = "Sheprd";
 pub(super) const COVER_BODY: &str = "New activity";
@@ -171,22 +178,23 @@ struct Cover {
     body: &'static str,
 }
 
-/// The push for `sealed`, sealed by `seal`, collapsing under `tag` on its
-/// computer ([`collapse_id`]). The body is shortened until the payload fits APNs's 4 KB.
+/// The push for `sealed`, sealed by `seal`, collapsing under `tag` in
+/// `scope` ([`collapse_id`]). The body is shortened until the payload fits APNs's 4 KB.
 pub(crate) fn push(
     mut sealed: Sealed,
+    scope: &str,
     tag: &str,
     seal: impl Fn(&[u8]) -> Result<Vec<u8>>,
 ) -> Result<Push> {
     loop {
-        let body = outer(&sealed, &seal)?;
+        let body = outer(&sealed, scope, &seal)?;
         if body.len() <= MAX_PAYLOAD {
             // A test is waited for on the phone, so it may not wait either.
             let urgent =
                 (sealed.kind.asks() || sealed.wizz || sealed.kind == Kind::Test) && !sealed.clear;
             return Ok(Push {
                 body,
-                collapse_id: Some(collapse_id(&sealed.computer, tag)),
+                collapse_id: Some(collapse_id(scope, tag)),
                 priority: if urgent {
                     Priority::High
                 } else {
@@ -210,9 +218,13 @@ pub(crate) fn push(
 }
 
 /// The outer JSON for `sealed`.
-fn outer(sealed: &Sealed, seal: &impl Fn(&[u8]) -> Result<Vec<u8>>) -> Result<Vec<u8>> {
+fn outer(
+    sealed: &Sealed,
+    scope: &str,
+    seal: &impl Fn(&[u8]) -> Result<Vec<u8>>,
+) -> Result<Vec<u8>> {
     let plaintext = serde_json::to_vec(sealed)?;
-    let thread = thread_id(&sealed.computer, &sealed.pane);
+    let thread = thread_id(scope, &sealed.pane);
     let aps = if sealed.clear {
         Aps {
             alert: None,
@@ -262,39 +274,51 @@ fn shorten(text: &str, drop: usize) -> String {
     format!("{}{ELLIPSIS}", &base[..end])
 }
 
-/// The only text a push for `pane` on `computer` under `tag` carries
+/// The only text a push for `pane` in `scope` under `tag` carries
 /// unsealed: the cover, the thread, how it interrupts, and the collapse id.
 /// A push through the relay may carry nothing else in the clear
 /// (`sheprd_apns::SealedPush`).
-pub(crate) fn clear(computer: &str, pane: &str, tag: &str) -> [String; 7] {
+pub(crate) fn clear(scope: &str, pane: &str, tag: &str) -> [String; 7] {
     [
         COVER_TITLE.to_owned(),
         COVER_BODY.to_owned(),
-        thread_id(computer, pane),
+        thread_id(scope, pane),
         "time-sensitive".to_owned(),
         "active".to_owned(),
         "default".to_owned(),
-        collapse_id(computer, tag),
+        collapse_id(scope, tag),
     ]
 }
 
-/// The notification thread of `pane` on `computer`, as the app's
-/// `AlertKeys.thread(computer:pane:)` names it.
-pub(crate) fn thread_id(computer: &str, pane: &str) -> String {
-    format!("{computer}/{pane}")
+/// What a computer's alerts to one phone share in the clear, from `key`,
+/// the notify key the phone gave that computer: [`SCOPE_DIGITS`] hex digits
+/// of a digest, telling the phone's computers apart without naming any.
+pub(crate) fn scope(key: &PublicKey) -> String {
+    let mut hash = Sha256::new();
+    hash.update(SCOPE_INFO);
+    hash.update(key.to_sec1_bytes());
+    let digest = hash.finalize();
+    digest
+        .iter()
+        .take(SCOPE_DIGITS / 2)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
-/// The collapse id of `tag` on `computer`: the fingerprint's first
-/// [`COMPUTER_PREFIX`] hex digits, a dash, and `tag`, or, when that passes
-/// APNs's 64 bytes, a digest of `tag` instead, so no two long tags share a
-/// cut-off prefix.
-pub(crate) fn collapse_id(computer: &str, tag: &str) -> String {
-    let host: String = computer.chars().take(COMPUTER_PREFIX).collect();
-    let id = format!("{host}-{tag}");
+/// The notification thread of `pane` in `scope`.
+pub(crate) fn thread_id(scope: &str, pane: &str) -> String {
+    format!("{scope}/{pane}")
+}
+
+/// The collapse id of `tag` in `scope`: the scope, a dash, and `tag`, or,
+/// when that passes APNs's 64 bytes, a digest of `tag` instead, so no two
+/// long tags share a cut-off prefix.
+pub(crate) fn collapse_id(scope: &str, tag: &str) -> String {
+    let id = format!("{scope}-{tag}");
     if id.len() <= MAX_COLLAPSE_ID {
         return id;
     }
     let mut digest = URL_SAFE_NO_PAD.encode(Sha256::digest(tag.as_bytes()));
-    digest.truncate(MAX_COLLAPSE_ID - host.len() - 1);
-    format!("{host}-{digest}")
+    digest.truncate(MAX_COLLAPSE_ID.saturating_sub(scope.len() + 1));
+    format!("{scope}-{digest}")
 }

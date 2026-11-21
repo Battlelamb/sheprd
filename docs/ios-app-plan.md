@@ -652,15 +652,17 @@ through APNs and none through Web Push. APNs refusing the token
 (`BadDeviceToken`, `Unregistered`) drops `alert`.
 
 **A shown alert** is push type `alert`, topic the bundle id,
-`apns-collapse-id` the computer's fingerprint (first 16 hex digits) and the
-chat's tag (at most 64 bytes, digested when longer), and priority 10 for a
-question, 5 otherwise. Pane ids are unique only on one computer, so the
-collapse id and the thread name the computer: the same pane on two
-computers never replaces or groups with the other's.
+`apns-collapse-id` the pairing's scope and the chat's tag (at most 64
+bytes, digested when longer), and priority 10 for a question, 5 otherwise.
+Pane ids are unique only on one computer, so the collapse id and the thread
+start with the scope: 16 hex digits of a digest of the notify key the phone
+gave that computer, which tells the phone's computers apart without naming
+any to APNs or the push relay. The extension sets the shown thread from the
+sealed `computer` and `pane`.
 
 ```json
 { "aps": { "alert": { "title": "Sheprd", "body": "New activity" },
-           "mutable-content": 1, "thread-id": "FINGERPRINT/w1:p2",
+           "mutable-content": 1, "thread-id": "SCOPE/w1:p2",
            "interruption-level": "time-sensitive", "sound": "default" },
   "sealed": "BASE64URL" }
 ```

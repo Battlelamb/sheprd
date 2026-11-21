@@ -474,6 +474,25 @@ extension. For the simulator loop:
 - `-dumpNotifications YES` writes what was delivered, and opens each
   alert in the app as the extension would.
 
+### Notification filtering
+
+Each sealed alert carries the daemon's `event` id for the decision it
+copies. The extension keeps the ids it showed (`SeenAlerts`, App Group) and
+orders copies it handles at once (`AlertGate`), so a copy that arrives
+again, from a retry, a failover, or a second sender, shows once:
+
+- Without Apple's notification filtering entitlement, which is the case
+  today, the copy replaces the first one silently: no sound, and the first
+  is removed. One the person already dismissed comes back silently.
+- With it, the copy is dropped. The account holder requests
+  `com.apple.developer.usernotifications.filtering` for
+  `so.pen.herdr.remote.notifications` at
+  https://developer.apple.com/contact/request/notification-service . Once
+  Apple grants it, add the entitlement to the extension in `project.yml`
+  and set `SHEPRD_FILTERS_REPEATS` to `YES` there, in one change: a
+  provisioning profile without it fails signing, and the flag without it
+  would drop nothing.
+
 ## Around the system
 
 - **Widgets:**

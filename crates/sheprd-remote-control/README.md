@@ -484,8 +484,8 @@ coalesced by the throttle, or sent by another way after a failure. The
 sealed alert carries it as `event`, and the app's Notification Service
 Extension shows a copy it already showed only in place of the first, with
 no sound (`Fixtures/notify/repeat.json` holds such copies for both sides'
-tests). Dropping a copy outright would need Apple's notification filtering
-entitlement.
+tests). A build with Apple's notification filtering entitlement drops the
+copy instead (`ios/README.md`, Notification filtering).
 
 The app's badge counts agents that want the user (`web::attention`): those
 with a question, those Herdr reports blocked, and those that finished and

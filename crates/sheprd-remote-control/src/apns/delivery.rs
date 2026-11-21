@@ -101,14 +101,24 @@ impl Delivery {
         }
     }
 
+    /// As `POST /api/apns` tells the phone, so its Settings can say how
+    /// this computer delivers: `None` when it sends nothing. An older
+    /// daemon could also say `own_key`, which the phone reads as unknown.
+    pub(crate) fn wire_name(&self) -> Option<&'static str> {
+        match self {
+            Self::Off => None,
+            Self::Relay(_) => Some("push_relay"),
+        }
+    }
+
     /// Whether this mode can send to `recipient`: only the relay, and only
     /// to a handle. A plain token is never sent to.
     pub(crate) fn reaches(&self, recipient: &Recipient) -> bool {
         matches!((self, recipient), (Self::Relay(_), Recipient::Handle(_)))
     }
 
-    /// Sends `sealed`, sealed to `key`, to `recipient` under `tag` as its
-    /// collapse id, at `now_ms`.
+    /// Sends `sealed`, sealed to `key`, to `recipient`, collapsing under
+    /// `tag` in the pairing's scope (`alert::scope`), at `now_ms`.
     pub(crate) async fn alert(
         &self,
         recipient: &Recipient,
@@ -117,14 +127,15 @@ impl Delivery {
         tag: &str,
         now_ms: u64,
     ) -> Sent {
+        let scope = alert::scope(key);
         match (self, recipient) {
             (Self::Relay(relays), Recipient::Handle(handle)) => {
                 if relays.is_down(handle.environment(), now_ms) {
                     return Sent::Unreachable;
                 }
-                let clear = alert::clear(&sealed.pane, tag);
+                let clear = alert::clear(&scope, &sealed.pane, tag);
                 let Ok(push) = SealedPush::build(key, seal::INFO, &clear, |sealer| {
-                    alert::push(sealed, tag, |plaintext| Ok(sealer.seal(plaintext)?))
+                    alert::push(sealed, &scope, tag, |plaintext| Ok(sealer.seal(plaintext)?))
                 }) else {
                     return Sent::Unsent;
                 };

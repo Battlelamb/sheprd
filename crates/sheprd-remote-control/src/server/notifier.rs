@@ -469,7 +469,7 @@ fn send(state: &State, device: &DeviceId, notification: &Notification) {
         return;
     };
     let message = notification.message(waiting(state));
-    let delivery = Delivery::for_notification(notification);
+    let delivery = Delivery::for_notification(notification, &apns::computer_id(&state.fingerprint));
     if let Ok(Outcome::Gone) = sender.send(&subscription, &message, &delivery) {
         let _ = state.auth().devices_mut().set_push(device, None);
     }

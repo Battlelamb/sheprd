@@ -3,12 +3,12 @@
 //! for one chat replaces its older one, and nothing in the clear names the
 //! computer.
 
-use super::alert::{COMPUTER, device, fixed_seal, json};
+use super::alert::{COMPUTER, EVENT, device, fixed_seal, json};
 use crate::apns::{
     alert::{Sealed, clear, collapse_id, push, scope, thread_id},
     seal,
 };
-use crate::push::{Kind, Notification, Urgency};
+use crate::push::{EventId, Kind, Notification, Urgency};
 use p256::{PublicKey, SecretKey};
 use sheprd_apns::SealedPush;
 
@@ -21,6 +21,7 @@ fn asking(pane: &str) -> Notification {
     Notification {
         body: "Run tests?".to_owned(),
         clear: false,
+        event: EventId::fixed(EVENT),
         kind: Kind::Question,
         pane: pane.to_owned(),
         permission: None,

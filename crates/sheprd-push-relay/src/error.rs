@@ -7,6 +7,8 @@ pub enum Error {
     Apns(#[from] sheprd_apns::Error),
     #[error("{argument:?} is not a valid argument")]
     Argument { argument: OsString },
+    #[error(transparent)]
+    Attest(#[from] crate::attest::Error),
     #[error("could not listen on {address}")]
     Bind {
         address: SocketAddr,

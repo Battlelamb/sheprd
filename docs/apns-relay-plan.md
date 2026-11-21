@@ -88,6 +88,18 @@ credential**, valid for 30 days, matching the daemon's `device_idle_days`
 default. With it comes the relay's current public key, signed by an offline root
 key pinned in the app, so the relay key can be replaced without an app release.
 
+Built (`sheprd-push-relay`, `attest`): the app sends `POST /v1/challenge`, makes
+an App Attest key, attests it with the SHA-256 of the challenge's text as the
+client data hash, and sends `POST /v1/attest` with the key id, attestation, and
+challenge. The relay checks the chain to Apple's App Attest root, the nonce,
+the key and credential ids, the app (`TEAM_ID.so.pen.herdr.remote`), counter
+zero, and that the build's App Attest environment is this relay's: Xcode builds
+attest in development and push through the sandbox relay. It answers with the
+credential, its expiry, and the relay's key and key id. Challenges and device
+ids are derived from the credential secret, so none is stored: a device id is
+an HMAC of the key id. Each challenge is good for one attestation, remembered in
+memory until it expires, so a captured attestation cannot be sent again. The key is not yet signed by the offline root.
+
 ### 2. Make handles on the phone
 
 A handle is the push token and the credential, sealed to the relay's public key
@@ -438,10 +450,11 @@ first: the launch depends on it.
 **2. Extract and build.** Started. `sheprd-apns` is extracted with no behavior
 change, and `sheprd-push-relay` runs against a mock APNs, covering malformed
 handles, expiry, revocation, kind checks, limits, each APNs reply, and the test
-that no token or payload reaches disk or logs. Still to build, after spike 3: App
-Attest, `POST /v1/attest`, the signed relay key, and the `devices` table. Until
-then nothing issues credentials, so the relay cannot serve a real phone. Also
-still to add: the counters. Stores and `RelayClient` are built; the daemon uses
+that no token or payload reaches disk or logs. `POST /v1/challenge` and
+`POST /v1/attest` issue credentials to attested keys, checked against a test PKI
+and against an attestation from an iPhone. Still to build: the relay key signed
+by the offline root, renewal by assertion with the `devices` table (until then a
+phone attests a new key when its credential runs out), and the counters. Stores and `RelayClient` are built; the daemon uses
 the client once `Delivery` lands in phase 4.
 
 **3. Image and host.** Built: `crates/sheprd-push-relay/Dockerfile`,

@@ -2,6 +2,7 @@
 
 use crate::{
     Backend, Error, Options, Result,
+    attest::Verifier,
     credential::Issuer,
     handle::Keyring,
     limit::Rates,
@@ -59,6 +60,7 @@ async fn postgres(_: &Options) -> Result<()> {
 /// Everything the relay reads from its secrets directory, each checked as
 /// the relay uses it.
 pub(crate) struct Secrets {
+    attestations: Verifier,
     environment: Host,
     issuer: Issuer,
     keys: Keyring,
@@ -71,6 +73,8 @@ impl Secrets {
             path: dir.to_owned(),
         })?;
         let environment = config.host;
+        // The app App Attest names: the APNs topic is its bundle id.
+        let attestations = Verifier::apple(&format!("{}.{}", config.team_id, config.topic));
         let previous = dir.join("relay-key-previous.pem");
         let keys = Keyring::new(
             load_secret_key(&dir.join("relay-key.pem"))?,
@@ -83,6 +87,7 @@ impl Secrets {
         let issuer = Issuer::new(read_secret(&secret)?.expose_secret())
             .ok_or(Error::SecretSize { path: secret })?;
         Ok(Self {
+            attestations,
             environment,
             issuer,
             keys,
@@ -93,6 +98,7 @@ impl Secrets {
 
 async fn run(options: &Options, store: impl Store) -> Result<()> {
     let Secrets {
+        attestations,
         environment,
         issuer,
         keys,
@@ -105,6 +111,7 @@ async fn run(options: &Options, store: impl Store) -> Result<()> {
         keys,
         store.clone(),
         Rates::default(),
+        attestations,
     );
     let source = if options.behind_proxy {
         Source::Proxy

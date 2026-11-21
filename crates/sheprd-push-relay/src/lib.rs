@@ -11,7 +11,10 @@
 //! - The APNs topic and host come from the relay's own config, never from a
 //!   caller.
 //!
-//! - [`credential`]: what proves a device may push, valid for thirty days.
+//! - [`attest`]: App Attest, which a phone passes once per key to get a
+//!   credential.
+//! - [`credential`]: what proves a device may push, valid for thirty days,
+//!   and the challenges phones attest over.
 //! - [`handle`]: a token and credential sealed to the relay.
 //! - [`limit`]: rate limits, in memory.
 //! - [`store`]: revocations, the only state kept, in memory unless the
@@ -19,9 +22,12 @@
 //! - [`relay`]: the checks, in order, and the reply each one gives.
 //! - [`web`]: the HTTP API.
 //!
-//! Issuing credentials waits on App Attest (`docs/apns-relay-plan.md`,
-//! spike 3): nothing outside the tests calls [`credential::Issuer::issue`] yet.
+//! A phone asks `POST /v1/challenge`, attests a new key over it, and sends
+//! the attestation to `POST /v1/attest` for a credential and the relay's
+//! key. Renewing a credential with an assertion, and the relay key signed by
+//! an offline root, are still to come (`docs/apns-relay-plan.md`, phase 2).
 
+pub mod attest;
 pub mod credential;
 mod error;
 pub mod handle;

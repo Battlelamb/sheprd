@@ -2,7 +2,7 @@
 //! text, which can quote the request, never reaches a response or a log.
 
 use crate::{
-    relay::{Gateway, PushRequest, Relay, Reply, RevokeRequest},
+    relay::{AttestRequest, Gateway, Issued, PushRequest, Relay, Reply, RevokeRequest},
     store::Store,
 };
 use axum::{
@@ -43,6 +43,11 @@ struct Body {
     outcome: Reply,
 }
 
+#[derive(Serialize)]
+struct Challenge {
+    challenge: String,
+}
+
 impl IntoResponse for Reply {
     fn into_response(self) -> Response {
         let status = match self {
@@ -62,6 +67,8 @@ impl IntoResponse for Reply {
 pub fn router<G: Gateway, S: Store>(relay: Relay<G, S>, source: Source) -> Router {
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
+        .route("/v1/attest", post(attest::<G, S>))
+        .route("/v1/challenge", post(challenge::<G, S>))
         .route("/v1/push", post(push::<G, S>))
         .route("/v1/revoke", post(revoke::<G, S>))
         .layer(DefaultBodyLimit::max(MAX_BODY))
@@ -80,6 +87,28 @@ async fn push<G: Gateway, S: Store>(
         Ok(request) => shared.relay.push(source, request, now_ms).await,
         Err(reply) => reply,
     }
+}
+
+async fn challenge<G: Gateway, S: Store>(
+    State(shared): State<Arc<Shared<G, S>>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Json<Challenge>, Reply> {
+    let source = source(shared.source, peer, &headers);
+    let challenge = shared.relay.challenge(source, now_ms())?;
+    Ok(Json(Challenge { challenge }))
+}
+
+async fn attest<G: Gateway, S: Store>(
+    State(shared): State<Arc<Shared<G, S>>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<Issued>, Reply> {
+    let source = source(shared.source, peer, &headers);
+    let now_ms = now_ms();
+    let request = parsed::<AttestRequest, G, S>(&shared.relay, source, &body, now_ms)?;
+    shared.relay.attest(source, &request, now_ms).map(Json)
 }
 
 async fn revoke<G: Gateway, S: Store>(

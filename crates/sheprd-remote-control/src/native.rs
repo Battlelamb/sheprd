@@ -55,6 +55,10 @@ const INBOUND_QUEUE: usize = 16;
 const MAX_STREAMS: usize = 8;
 /// How often an idle socket is pinged, so proxies and NATs keep it.
 const PING_INTERVAL: Duration = Duration::from_secs(20);
+/// How long a socket may go without a frame from the phone, which
+/// answers every ping, before it is closed as a path that stopped
+/// carrying traffic: two pings unanswered, and some room for a slow pong.
+const QUIET_LIMIT: Duration = Duration::from_secs(45);
 
 /// This computer's home as the state holds it now, for `device`.
 fn home(state: &Shared, device: &DeviceId) -> Home {
@@ -146,9 +150,8 @@ pub(crate) async fn live(
 
 /// Carries messages between the socket and the session until either ends:
 /// the phone closes, sends a binary or oversized frame, or the session
-/// says `bye`. Logs how it ended and how long the phone had been quiet:
-/// a path that stopped carrying traffic shows as a socket quiet for more
-/// than a [`PING_INTERVAL`], as the phone answers every ping.
+/// says `bye`, or the phone stays quiet past [`QUIET_LIMIT`]. Logs how it
+/// ended and how long the phone had been quiet.
 async fn serve(mut socket: WebSocket, state: Shared, device: DeviceId, token: SecretString) {
     let _connected = Connected::new(state.clone(), device.clone());
     let (to_phone, mut outbound) = mpsc::channel(OUTBOUND_QUEUE);
@@ -197,6 +200,9 @@ async fn serve(mut socket: WebSocket, state: Shared, device: DeviceId, token: Se
                 }
             },
             _ = ping.tick() => {
+                if too_quiet(heard.elapsed()) {
+                    break Ending::Quiet;
+                }
                 if socket.send(Message::Ping(Default::default())).await.is_err() {
                     break Ending::SendFailed;
                 }
@@ -218,10 +224,16 @@ async fn serve(mut socket: WebSocket, state: Shared, device: DeviceId, token: Se
 enum Ending {
     Bye,
     PhoneClosed,
+    Quiet,
     ReadFailed,
     SendFailed,
     SessionEnded,
     Unreadable,
+}
+
+/// Whether a phone quiet for `quiet` has stopped answering pings.
+fn too_quiet(quiet: Duration) -> bool {
+    quiet > QUIET_LIMIT
 }
 
 async fn send(socket: &mut WebSocket, message: &ServerMessage) -> bool {

@@ -161,3 +161,13 @@ async fn a_device_with_too_many_streams_open_is_refused() {
         429
     );
 }
+
+/// The phone answers every ping, so a socket quiet for two of them is a
+/// path that stopped carrying traffic; one missed pong is not.
+#[test]
+fn a_socket_quiet_past_two_pings_is_closed() {
+    assert!(QUIET_LIMIT >= PING_INTERVAL * 2);
+    assert!(!too_quiet(PING_INTERVAL));
+    assert!(!too_quiet(QUIET_LIMIT));
+    assert!(too_quiet(QUIET_LIMIT + Duration::from_secs(1)));
+}

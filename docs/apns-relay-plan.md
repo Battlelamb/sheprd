@@ -501,7 +501,10 @@ Before phase 5 offers the relay to anyone, from issue #1056:
    Notification Service Extension already uses it, but a Secure Enclave
    operation during a widget render is untested. Measure memory, render time,
    and how a real payload fits 4,096 bytes after base64.
-3. **App Attest.** The details here came from general knowledge, because
+3. **App Attest.** Mostly done: on an iPhone, a development build attests and
+   asserts, and `ios/Spikes/attest-check.py` verifies both as the relay will
+   (`docs/ios-spikes.md`). Still open: a TestFlight build's environment. The
+   original question: the details here came from general knowledge, because
    Apple's page could not be read while writing this. Confirm the attestation
    flow, how a TestFlight build is identified, and how its App Attest
    environment relates to `aps-environment`. Decide what the simulator does,

@@ -4,13 +4,13 @@ import SwiftUI
 import UIKit
 import UserNotifications
 
-/// Three spikes on three tabs; each shows what it measured so a device run
+/// The spikes, one per tab; each shows what it measured so a device run
 /// can be read off the screen.
 @main
 struct SpikesApp: App {
     @UIApplicationDelegateAdaptor private var delegate: SpikeDelegate
     @State private var central = Central()
-    /// `-tab notify` or `-tab activity` opens that tab, for headless runs.
+    /// `-tab notify`, `-tab activity`, or `-tab attest` opens that tab, for headless runs.
     @State private var tab = UserDefaults.standard.string(forKey: "tab") ?? "bluetooth"
 
     var body: some Scene {
@@ -19,6 +19,7 @@ struct SpikesApp: App {
                 Tab("Bluetooth", systemImage: "dot.radiowaves.left.and.right", value: "bluetooth") { BluetoothTab(central: central) }
                 Tab("Notify", systemImage: "bell.badge", value: "notify") { NotifyTab() }
                 Tab("Activity", systemImage: "rectangle.badge.checkmark", value: "activity") { ActivityTab() }
+                Tab("Attest", systemImage: "checkmark.seal", value: "attest") { AttestTab() }
             }
             .task { central.start() }
         }

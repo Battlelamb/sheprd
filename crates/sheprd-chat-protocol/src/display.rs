@@ -1,5 +1,5 @@
-//! Short text for numbers both clients show the same way: durations, token
-//! counts, costs, and how a turn ended.
+//! Short text both clients show the same way: durations, token counts,
+//! costs, how a turn ended, and pasted text without its envelope.
 
 use crate::{Cost, TurnEnd, TurnSummary};
 
@@ -70,4 +70,39 @@ impl TurnSummary {
         }
         text
     }
+}
+
+/// Agents such as Claude wrap pasted text in a `<pasted_content id="…">`
+/// envelope, which reaches logs, titles, and replayed prompts. Shown, the
+/// text is what was pasted: `text` without a leading envelope, `text` itself
+/// when it has none, and `None` when nothing is left (blank, or only the
+/// envelope's tags). Ordinary markup inside the text is never touched.
+pub fn unwrap_paste(text: &str) -> Option<&str> {
+    const OPEN: &str = "<pasted_content";
+    const CLOSE: &str = "</pasted_content>";
+    let original = text;
+    let text = text.trim();
+    if text.is_empty() || text == CLOSE {
+        return None;
+    }
+    let Some(rest) = text.strip_prefix(OPEN) else {
+        return Some(original);
+    };
+    if rest
+        .chars()
+        .next()
+        .is_some_and(|c| c != '>' && !c.is_ascii_whitespace())
+    {
+        return Some(original);
+    }
+    // The opening tag's end, looked for in a bounded prefix: a cut-off tag
+    // is a marker with nothing to show.
+    let end = text
+        .as_bytes()
+        .iter()
+        .take(512)
+        .position(|byte| *byte == b'>')?;
+    let body = text[end + 1..].trim();
+    let body = body.strip_suffix(CLOSE).unwrap_or(body).trim();
+    (!body.is_empty()).then_some(body)
 }

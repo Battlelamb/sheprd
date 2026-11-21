@@ -3,6 +3,7 @@
 
 mod agents;
 pub mod assist;
+pub mod brief;
 mod change;
 pub mod display;
 mod endpoint;
@@ -18,6 +19,7 @@ mod settings;
 mod wire;
 
 pub use agents::{Agent, UnknownAgent};
+pub use brief::{Brief, MAX_BRIEFS};
 pub use change::Change;
 pub use endpoint::{
     AGENT_CHAT_ENV, ENDPOINT_ENV, EndpointId, TOKEN, endpoint_address, endpoint_dir,

@@ -99,3 +99,32 @@ fn settings_check_the_values_they_take() {
     let other: OptionCategory = serde_json::from_value(serde_json::json!("speed")).unwrap();
     assert_eq!(other, OptionCategory::Other);
 }
+
+#[test]
+fn pasted_text_shows_without_its_envelope() {
+    use crate::display::unwrap_paste;
+    assert_eq!(
+        unwrap_paste("<pasted_content id=\"0e15\">\nTask: ship it\n</pasted_content>"),
+        Some("Task: ship it")
+    );
+    // An envelope cut before its closing tag still shows its body.
+    assert_eq!(
+        unwrap_paste("<pasted_content id=\"0e15\">\nTask"),
+        Some("Task")
+    );
+    assert_eq!(unwrap_paste("<pasted_content id=\"9d74\">"), None);
+    assert_eq!(unwrap_paste("<pasted_content id=\"cut"), None);
+    assert_eq!(unwrap_paste("</pasted_content>"), None);
+    assert_eq!(
+        unwrap_paste("Fix <div> rendering"),
+        Some("Fix <div> rendering")
+    );
+    assert_eq!(
+        unwrap_paste("<pasted_content_example>"),
+        Some("<pasted_content_example>")
+    );
+    // Only a leading envelope: one later in the text is the person's words.
+    let quoted = "See <pasted_content>x</pasted_content>";
+    assert_eq!(unwrap_paste(quoted), Some(quoted));
+    assert_eq!(unwrap_paste("  "), None);
+}

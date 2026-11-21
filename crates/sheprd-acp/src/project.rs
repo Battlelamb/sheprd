@@ -158,6 +158,8 @@ impl Projector {
     pub(crate) fn prompt(&mut self, text: &str, files: usize) -> Change {
         self.close();
         let id = self.next_id();
+        // The file lines follow the text, so only text alone is unwrapped.
+        let text = if files == 0 { shown(text) } else { text };
         Change::Push {
             entry: Entry {
                 id,
@@ -203,7 +205,10 @@ impl Projector {
         });
         let text = bounded(text);
         let kind = match stream {
-            Stream::User => EntryKind::User { text, files: 0 },
+            Stream::User => EntryKind::User {
+                text: shown(&text).to_owned(),
+                files: 0,
+            },
             Stream::Agent => EntryKind::Agent { text },
             Stream::Thought => EntryKind::Thought { text },
         };
@@ -924,6 +929,12 @@ fn clip(have: usize, mut text: String) -> Option<String> {
     text.truncate(cut);
     text.push_str(TRUNCATED);
     Some(text)
+}
+
+/// A prompt as the chat shows it: without the envelope an agent wraps
+/// pasted text in, which the agent itself still receives.
+pub(crate) fn shown(text: &str) -> &str {
+    sheprd_chat_protocol::display::unwrap_paste(text).unwrap_or(text)
 }
 
 #[cfg(test)]

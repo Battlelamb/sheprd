@@ -13,6 +13,7 @@ mod recipient;
 mod redact;
 mod relayed;
 mod relayed_fixture;
+mod repeat;
 mod terminal;
 mod test_push;
 mod tokens;

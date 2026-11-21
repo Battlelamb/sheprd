@@ -13,7 +13,11 @@ use std::path::PathBuf;
 const ID: &str = "6F1D2C3B-0A4E-4F5D-9C8B-7A6E5D4C3B2A";
 
 fn test_push() -> Sealed {
-    Sealed::test(ID.to_owned(), COMPUTER.to_owned(), "Studio", 3)
+    Sealed {
+        // Fixed, for the fixture; a real one is random.
+        event: Some(super::alert::EVENT.to_owned()),
+        ..Sealed::test(ID.to_owned(), COMPUTER.to_owned(), "Studio", 3)
+    }
 }
 
 #[test]

@@ -478,6 +478,15 @@ relay's status alone, or `unreachable`), 503 when delivery is off, and 400
 when the phone registered no alert token or handle this mode reaches. The phone's extension records the id as it opens the alert, so
 the app can tell the user whether, and how fast, it arrived.
 
+Each notification decision gets an event id (`push::EventId`) that every
+copy of it carries: to each device, held while its owner is near,
+coalesced by the throttle, or sent by another way after a failure. The
+sealed alert carries it as `event`, and the app's Notification Service
+Extension shows a copy it already showed only in place of the first, with
+no sound (`Fixtures/notify/repeat.json` holds such copies for both sides'
+tests). Dropping a copy outright would need Apple's notification filtering
+entitlement.
+
 The app's badge counts agents that want the user (`web::attention`): those
 with a question, those Herdr reports blocked, and those that finished and
 nobody has opened on a phone or focused in a Herdr client. A background push

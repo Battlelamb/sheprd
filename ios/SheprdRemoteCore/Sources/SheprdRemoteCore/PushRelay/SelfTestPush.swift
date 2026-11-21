@@ -51,7 +51,7 @@ public enum SelfTestPush {
         guard validId(id) else { throw Failure.id }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        let plaintext = try encoder.encode(Plaintext(test: id))
+        let plaintext = try encoder.encode(Plaintext(test: id, event: id))
         let sealed = try NotificationSeal.seal(plaintext, to: device, info: NotificationSeal.info, ephemeral: ephemeral, nonce: nonce)
         let outer = Outer(aps: .init(), sealed: Base64URL.encode(sealed))
         let payload = try encoder.encode(outer)
@@ -113,6 +113,8 @@ public enum SelfTestPush {
         let title = SelfTestPush.title
         let body = SelfTestPush.body
         let test: String
+        /// Its own decision, as every alert's: the test's id serves.
+        let event: String
     }
 
     /// The daemon's outer payload for a test alert: the cover, mutable

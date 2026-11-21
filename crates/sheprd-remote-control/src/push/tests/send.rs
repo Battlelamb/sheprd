@@ -43,6 +43,7 @@ fn delivery_follows_the_notification() {
     let question = Notification {
         body: String::new(),
         clear: false,
+        event: EventId::new(),
         kind: Kind::Question,
         pane: "p".to_owned(),
         permission: None,

@@ -6,6 +6,12 @@ import UserNotifications
 /// so APNs only ever carried "Sheprd" and ciphertext, then shows the chat's
 /// title and text, groups it with the chat's other notifications, and
 /// gives it the actions its question or finished turn offers.
+///
+/// A copy of an alert it already showed (the same sealed `event`: a push
+/// delivered twice, or sent again another way) takes the first one's place
+/// silently, so the phone shows and buzzes once. Dropping it outright
+/// needs Apple's notification filtering entitlement, which the app does
+/// not have; without it an extension must deliver something.
 final class NotificationService: UNNotificationServiceExtension {
     override func didReceive(
         _ request: UNNotificationRequest,
@@ -51,23 +57,43 @@ final class NotificationService: UNNotificationServiceExtension {
         info[AlertKeys.pane] = alert.pane
         if let permission = alert.permission { info[AlertKeys.permission] = NSNumber(value: permission.id.value) }
         if alert.kind.isTerminal { info[AlertKeys.terminal] = true }
+        if let event = alert.event { info[AlertKeys.event] = event }
         content.userInfo = info
-        if alert.wizz {
+        let repeated = alert.event.map {
+            !SeenAlerts.firstSighting($0, at: Date(), in: UserDefaults(suiteName: "group.so.pen.herdr.remote"))
+        } ?? false
+        if repeated {
+            content.sound = nil
+            content.interruptionLevel = .passive
+        } else if alert.wizz {
             content.interruptionLevel = .timeSensitive
             if let sound = WizzSound.named() { content.sound = sound }
         }
         let presentation = alert.presentation
-        guard let category = presentation.category else {
+        if let category = presentation.category { content.categoryIdentifier = category }
+        guard repeated || presentation.category != nil else {
             contentHandler(content)
             return
         }
-        content.categoryIdentifier = category
         let deliver = UncheckedSendable(value: contentHandler)
         let finished = UncheckedSendable(value: content)
+        let event = repeated ? alert.event : nil
         Task {
-            await NotificationCategories.register(presentation)
+            if let event { await Self.removeShown(event) }
+            if presentation.category != nil { await NotificationCategories.register(presentation) }
             deliver.value(finished.value)
         }
+    }
+
+    /// Removes the notifications already shown for `event`, which the copy
+    /// arriving now replaces.
+    private static func removeShown(_ event: String) async {
+        let center = UNUserNotificationCenter.current()
+        let shown = await center.deliveredNotifications()
+        let ids = shown
+            .filter { $0.request.content.userInfo[AlertKeys.event] as? String == event }
+            .map(\.request.identifier)
+        if !ids.isEmpty { center.removeDeliveredNotifications(withIdentifiers: ids) }
     }
 
     /// A test push this phone sent itself through the push relay: its

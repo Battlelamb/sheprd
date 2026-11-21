@@ -7,7 +7,7 @@ use crate::apns::{
     payload::MAX_PAYLOAD,
     seal::{INFO, seal_with},
 };
-use crate::push::{Kind, Notification, Urgency};
+use crate::push::{EventId, Kind, Notification, Urgency};
 use aes_gcm::{Aes256Gcm, KeyInit as _, aead::Aead as _, aead::Payload};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use hkdf::Hkdf;
@@ -67,10 +67,14 @@ fn option(id: &str, kind: PermissionKind, name: &str) -> PermissionOption {
     }
 }
 
-fn question() -> Notification {
+/// The fixtures' event id, which the Swift tests read.
+pub(super) const EVENT: &str = "5d0c3e1f9a7b4c2d8e6f1a0b9c8d7e6f";
+
+pub(super) fn question() -> Notification {
     Notification {
         body: "Run `git push origin fix/mise`?\nherdr-gpui \u{b7} Fix mise discovery".to_owned(),
         clear: false,
+        event: EventId::fixed(EVENT),
         kind: Kind::Question,
         pane: "w1:p2".to_owned(),
         permission: Some(Permission {
@@ -186,6 +190,7 @@ fn a_clear_is_a_silent_background_push() {
     let notification = Notification {
         body: String::new(),
         clear: true,
+        event: EventId::new(),
         permission: None,
         title: String::new(),
         ..question()

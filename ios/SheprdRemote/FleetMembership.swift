@@ -306,7 +306,7 @@ final class FleetMembership {
         switch posted {
         case .nothing, .refused:
             settleLinks(status, refused: fresh)
-        case .taken, .unknown:
+        case .kept, .taken, .unknown:
             settleLinks(status)
         }
     }
@@ -478,6 +478,10 @@ final class FleetMembership {
         case nothing
         /// A computer took every operation.
         case taken
+        /// Signed and kept in the record, but the copy could not be
+        /// written: the next sync or signature takes them in and hands
+        /// them over, so they may still land.
+        case kept
         /// A computer refused some.
         case refused
         /// No computer answered: the copy keeps them, and the next sync with
@@ -531,14 +535,22 @@ final class FleetMembership {
             problem = Self.describe(error)
             return .nothing
         }
+        let sealed: (ops: [String], replica: FleetReplica)
         do {
             let signer = key.signer
-            let sealed = try await Self.background { try current.signing(drafts, with: signer.sign, at: .now) }
+            sealed = try await Self.background { try current.signing(drafts, with: signer.sign, at: .now) }
+        } catch {
+            problem = Self.describe(error)
+            return .nothing
+        }
+        do {
             // Kept before it is handed over, so the next draft follows it.
             try adopt(sealed.replica, signed: sealed.ops)
         } catch {
             problem = Self.describe(error)
-            return .nothing
+            // The record took them, though the copy did not: they still go.
+            let kept = self.record?.unconfirmed ?? []
+            return sealed.ops.allSatisfy(kept.contains) ? .kept : .nothing
         }
         for computer in candidates {
             guard let outcome = await syncNow(with: computer) else { continue }

@@ -2,6 +2,7 @@
 use super::*;
 
 mod core_routing;
+mod favorite;
 mod like;
 use crate::{
     control::protocol::{Caller, chat::Reply},

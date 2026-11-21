@@ -232,7 +232,9 @@ pub(super) fn display_name(name: &str) -> String {
         .map_or_else(|_| name.to_owned(), |agent| agent.display_name().to_owned())
 }
 
-#[cfg(test)]
+// Its tests reach a host through the `herdr` CLI, which only POSIX clients
+// script.
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 impl Sources {
     /// Sources holding `chats`, each named and askable or not, and
     /// `terminals`.

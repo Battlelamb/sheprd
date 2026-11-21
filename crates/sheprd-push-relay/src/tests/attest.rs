@@ -13,16 +13,19 @@ use sha2::{Digest as _, Sha256};
 pub(super) const DEVELOPMENT: [u8; 16] = *b"appattestdevelop";
 pub(super) const PRODUCTION: [u8; 16] = *b"appattest\0\0\0\0\0\0\0";
 const NONCE_OID: &[u64] = &[1, 2, 840, 113_635, 100, 8, 2];
+pub(super) const INTERMEDIATE: &str = "Test App Attestation CA 1";
 
 /// A root and intermediate that sign attestations, like Apple's.
 pub(super) struct Pki {
     pub(super) root: Vec<u8>,
-    intermediate: CertificateParams,
+    /// What the leaf names as its issuer; a test may rename it after the
+    /// intermediate is signed, so the names no longer link.
+    pub(super) intermediate: CertificateParams,
     intermediate_key: KeyPair,
     intermediate_der: Vec<u8>,
 }
 
-fn ca(name: &str, is_ca: bool) -> CertificateParams {
+pub(super) fn ca(name: &str, is_ca: bool) -> CertificateParams {
     let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
     params.distinguished_name.push(DnType::CommonName, name);
     if is_ca {
@@ -33,15 +36,20 @@ fn ca(name: &str, is_ca: bool) -> CertificateParams {
 
 impl Pki {
     pub(super) fn new() -> Self {
-        Self::with_intermediate_ca(true)
+        Self::with(
+            IsCa::Ca(BasicConstraints::Unconstrained),
+            ca(INTERMEDIATE, true),
+        )
     }
 
-    fn with_intermediate_ca(is_ca: bool) -> Self {
+    /// A PKI whose root is `root_ca` and whose intermediate is made from
+    /// `intermediate`.
+    pub(super) fn with(root_ca: IsCa, intermediate: CertificateParams) -> Self {
         let root_key = KeyPair::generate_for(&PKCS_ECDSA_P384_SHA384).unwrap();
-        let root_params = ca("Test App Attestation Root CA", true);
+        let mut root_params = ca("Test App Attestation Root CA", false);
+        root_params.is_ca = root_ca;
         let root = root_params.self_signed(&root_key).unwrap();
         let intermediate_key = KeyPair::generate_for(&PKCS_ECDSA_P384_SHA384).unwrap();
-        let intermediate = ca("Test App Attestation CA 1", is_ca);
         let intermediate_der = intermediate
             .signed_by(&intermediate_key, &CertIssuer::new(root_params, &root_key))
             .unwrap()
@@ -70,6 +78,8 @@ pub(super) struct Shape<'a> {
     /// The credential id, when it should differ from the key id.
     pub(super) credential: Option<KeyId>,
     pub(super) fmt: &'a str,
+    /// Whether the leaf claims to be a CA.
+    pub(super) leaf_ca: bool,
 }
 
 impl Default for Shape<'_> {
@@ -81,6 +91,7 @@ impl Default for Shape<'_> {
             counter: 0,
             credential: None,
             fmt: "apple-appattest",
+            leaf_ca: false,
         }
     }
 }
@@ -101,7 +112,7 @@ pub(super) fn attestation(pki: &Pki, shape: &Shape<'_>) -> (Vec<u8>, KeyId) {
     nonce.update(Sha256::digest(shape.challenge));
     let mut extension = vec![0x30, 0x24, 0xa1, 0x22, 0x04, 0x20];
     extension.extend_from_slice(&nonce.finalize());
-    let mut leaf = ca("leaf", false);
+    let mut leaf = ca("leaf", shape.leaf_ca);
     leaf.custom_extensions = vec![CustomExtension::from_oid_content(NONCE_OID, extension)];
     let issuer = CertIssuer::new(pki.intermediate.clone(), &pki.intermediate_key);
     let leaf = leaf.signed_by(&leaf_key, &issuer).unwrap().der().to_vec();
@@ -161,7 +172,7 @@ fn map(entries: &[(Vec<u8>, Vec<u8>)]) -> Vec<u8> {
     out
 }
 
-fn verify(pki: &Pki, shape: &Shape<'_>) -> Result<Attested, Error> {
+pub(super) fn verify(pki: &Pki, shape: &Shape<'_>) -> Result<Attested, Error> {
     let (object, key_id) = attestation(pki, shape);
     pki.verifier()
         .verify(&object, &key_id, &hash(b"challenge"), NOW_S)
@@ -268,7 +279,10 @@ fn only_a_chain_to_the_root_at_a_valid_time_is_taken() {
         Err(Error::Certificate)
     );
 
-    let not_ca = Pki::with_intermediate_ca(false);
+    let not_ca = Pki::with(
+        IsCa::Ca(BasicConstraints::Unconstrained),
+        ca(INTERMEDIATE, false),
+    );
     assert_eq!(verify(&not_ca, &Shape::default()), Err(Error::Chain));
 }
 

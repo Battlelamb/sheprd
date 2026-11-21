@@ -85,13 +85,31 @@ fn the_phone_refuses_before_signing_what_its_replay_refuses() {
 }
 
 #[test]
-fn a_draft_names_one_to_sixty_four_bodies() {
+fn a_draft_names_one_body_to_one_per_host_the_fleet_holds() {
     let fleet = Fleet::new();
     let log = log_of(&fleet.replica());
     assert_eq!(refused(&draft(&fleet, &log, json!([])))["kind"], "bounds");
     let host = json!({ "body": "host_remove", "host": fleet.host });
     let many = vec![host; MAX_BODIES + 1];
     assert_eq!(refused(&draft(&fleet, &log, json!(many)))["kind"], "bounds");
+}
+
+#[test]
+fn a_link_to_every_host_the_fleet_holds_is_one_draft() {
+    let fleet = Fleet::new();
+    let log = log_of(&fleet.replica());
+    let links: Vec<Value> = (0..MAX_BODIES)
+        .map(|n| {
+            let mut seed = [7u8; 32];
+            seed[30..].copy_from_slice(&u16::try_from(n).unwrap().to_be_bytes());
+            let key = SigningKey::from_slice(&seed).unwrap();
+            json!({ "body": "link", "host": fleet.host, "device_key": sync::text(&uncompressed(&key)) })
+        })
+        .collect();
+    let drafted = ok(&draft(&fleet, &log, json!(links)));
+    assert_eq!(drafted["drafts"].as_array().unwrap().len(), MAX_BODIES);
+    let sealed = ok(&seal(&fleet, &log, &sign_drafts(&drafted, &fleet.p.key)));
+    assert_eq!(sealed["applied"], MAX_BODIES);
 }
 
 #[test]

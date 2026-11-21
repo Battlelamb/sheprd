@@ -15,8 +15,9 @@ pub const MAX_SYNC_OPS: usize = 64;
 const MAX_CALL_OPS: usize = 4096;
 /// Heads one sync may name: a member daemon refuses more.
 const MAX_SYNC_HEADS: usize = 64;
-/// Operations one draft signs, under one Face ID.
-pub const MAX_BODIES: usize = 64;
+/// Operations one draft signs, under one Face ID: a link to every host
+/// the fleet can hold, as adding them all at once asks.
+pub const MAX_BODIES: usize = fleet::MAX_HOSTS;
 /// Heads one call names.
 const MAX_HEADS: usize = 1024;
 

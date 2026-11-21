@@ -41,6 +41,50 @@ final class FleetMembership {
         /// The phone's own line of operations: the last one signed, those
         /// no computer confirmed yet, and a refusal waiting to be settled.
         var chain: FleetChain?
+
+        init(
+            keyKind: Computer.KeyKind, keyData: Data, member: String, fleet: String, through: String,
+            admitted: Bool, relayDial: Data, relayTunnel: Data,
+            pendingLinks: [FleetPendingLink]? = nil, chain: FleetChain? = nil
+        ) {
+            self.keyKind = keyKind
+            self.keyData = keyData
+            self.member = member
+            self.fleet = fleet
+            self.through = through
+            self.admitted = admitted
+            self.relayDial = relayDial
+            self.relayTunnel = relayTunnel
+            self.pendingLinks = pendingLinks
+            self.chain = chain
+        }
+
+        /// Where the line was kept before it was one value.
+        private enum LegacyKeys: String, CodingKey { case unconfirmed, lastSigned }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            keyKind = try c.decode(Computer.KeyKind.self, forKey: .keyKind)
+            keyData = try c.decode(Data.self, forKey: .keyData)
+            member = try c.decode(String.self, forKey: .member)
+            fleet = try c.decode(String.self, forKey: .fleet)
+            through = try c.decode(String.self, forKey: .through)
+            admitted = try c.decode(Bool.self, forKey: .admitted)
+            relayDial = try c.decode(Data.self, forKey: .relayDial)
+            relayTunnel = try c.decode(Data.self, forKey: .relayTunnel)
+            pendingLinks = try c.decodeIfPresent([FleetPendingLink].self, forKey: .pendingLinks)
+            if let chain = try c.decodeIfPresent(FleetChain.self, forKey: .chain) {
+                self.chain = chain
+            } else {
+                // A record from before carries its line over, so the next
+                // operation still follows the last one signed.
+                let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+                let last = try legacy.decodeIfPresent(String.self, forKey: .lastSigned)
+                let unconfirmed = try legacy.decodeIfPresent([String].self, forKey: .unconfirmed)
+                chain = last == nil && unconfirmed == nil
+                    ? nil : FleetChain(legacyLast: last, unconfirmed: unconfirmed)
+            }
+        }
     }
 
     private(set) var record: Record?
@@ -357,7 +401,8 @@ final class FleetMembership {
     /// as the same bytes, until it applies or refuses them.
     private func confirm(_ status: API.FleetStatus, through computer: Computer) {
         if chain.refusalPending {
-            update { $0.resolve(next: status.next?.seq) }
+            // Only the computer that refused, or one past all of it.
+            update { $0.resolve(next: status.next?.seq, from: computer.device) }
         }
         let ops = chain.unconfirmedOps
         guard let last = ops.last, let next = status.next else { return }
@@ -373,7 +418,7 @@ final class FleetMembership {
             } catch FleetClientError.refused {
                 // Settled by the next fresh read, before anything new is
                 // signed.
-                if self.chain.unconfirmedOps == ops { update { $0.refused() } }
+                if self.chain.unconfirmedOps == ops { update { $0.refused(by: computer.device) } }
             } catch {
                 log.info("fleet: \(computer.name, privacy: .public) has not applied this phone's operations yet")
             }
@@ -456,8 +501,9 @@ final class FleetMembership {
             return .taken
         case let .refused(computer, count):
             // Refused by the fleet: what was posted is not followed until a
-            // fresh read says which of it applied (`check`).
-            update { $0.refused() }
+            // fresh read from that computer says which of it applied
+            // (`check`).
+            update { $0.refused(by: computer.device) }
             problem = Self.describe(FleetClientError.refused(count))
             return .refused(fresh: await check(computer))
         case let .failed(error):
@@ -544,7 +590,7 @@ final class FleetMembership {
         case let FleetClientError.refused(count): "The fleet refused \(count == 1 ? "it" : "\(count) of them")."
         case FleetClientError.unapplied: "Your computers have not applied it yet. This \(UIDevice.current.model) sends it again until one does."
         case FleetClientError.notKept: "This \(UIDevice.current.model) could not save it, so nothing was sent."
-        case FleetClientError.refusalUnresolved: "Your computers refused this \(UIDevice.current.model)'s last change. Reach one of them, then try again."
+        case FleetClientError.refusalUnresolved: "Your computers refused this \(UIDevice.current.model)'s last change. Reach the computer that refused it, then try again. This clears on its own once any of your computers has caught up with this \(UIDevice.current.model)'s changes."
         case RemoteError.status(429, _): "Too many devices are waiting to join. Try again in a few minutes."
         case RemoteError.status(404, _): "That computer's Sheprd does not know fleets yet. Update it first."
         default: error.localizedDescription

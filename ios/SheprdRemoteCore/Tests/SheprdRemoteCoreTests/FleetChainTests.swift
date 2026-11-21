@@ -31,12 +31,12 @@ struct FleetChainTests {
         // Sent again later, the next two: the fleet applies the first and
         // refuses the second.
         try chain.signed([ops[1], ops[2]])
-        chain.refused()
+        chain.refused(by: "studio")
         // Nothing is followed, or signed, until a fresh read says.
         #expect(chain.carried == nil)
         #expect(throws: FleetClientError.refusalUnresolved) { try chain.signed([ops[2]]) }
         // The read: the phone's next sequence number is past the applied one.
-        chain.resolve(next: ops[1].seq + 1)
+        chain.resolve(next: ops[1].seq + 1, from: "studio")
         #expect(chain.lastOp == ops[1])
         #expect(chain.carried == [ops[1]])
     }
@@ -49,12 +49,12 @@ struct FleetChainTests {
         chain.confirmed()
         // The next is refused, and the read after it fails: nothing known.
         try chain.signed([ops[1]])
-        chain.refused()
-        chain.resolve(next: nil)
+        chain.refused(by: "studio")
+        chain.resolve(next: nil, from: "studio")
         #expect(chain.refusalPending && chain.carried == nil)
         // A later read: only the first applied. A later action, through a
         // computer behind it, follows the first, never the refused one.
-        chain.resolve(next: ops[0].seq + 1)
+        chain.resolve(next: ops[0].seq + 1, from: "studio")
         #expect(chain.lastOp == ops[0])
         let behind = FleetClientTests.applying(API.FleetNext(fleet: Self.fleet, seq: ops[0].seq, parents: [String(repeating: "01", count: 32)]))
         let after = try #require(chain.carried)
@@ -75,15 +75,96 @@ struct FleetChainTests {
         // Through a computer that had the first: the post holds only the
         // second, which is refused.
         try chain.signed([ops[1]])
-        chain.refused()
-        chain.resolve(next: ops[1].seq)
+        chain.refused(by: "studio")
+        chain.resolve(next: ops[1].seq, from: "studio")
         #expect(chain.lastOp == ops[0])
         // Nothing of the phone's ever applied: nothing to follow.
         var fresh = FleetChain()
         try fresh.signed([ops[0]])
-        fresh.refused()
-        fresh.resolve(next: ops[0].seq)
+        fresh.refused(by: "studio")
+        fresh.resolve(next: ops[0].seq, from: "studio")
         #expect(fresh.lastOp == nil && fresh.carried == [])
+    }
+
+    @Test func onlyTheRefusingComputerSettlesARefusal() throws {
+        let signer = FleetClientTests.signer()
+        let ops = try Self.line(3, from: 3, signer: signer)
+        var chain = FleetChain()
+        try chain.signed([ops[0], ops[1]])
+        chain.confirmed()
+        try chain.signed([ops[2]])
+        chain.refused(by: "studio")
+        // A computer behind, which has not heard of the second yet, would
+        // name an older operation: it settles nothing, and lowers nothing.
+        chain.resolve(next: ops[1].seq, from: "laptop")
+        #expect(chain.refusalPending && chain.carried == nil)
+        // The computer that refused settles it.
+        chain.resolve(next: ops[2].seq, from: "studio")
+        #expect(!chain.refusalPending && chain.lastOp == ops[1])
+        // Another computer past every refused operation also may: they all
+        // applied there.
+        var past = FleetChain()
+        try past.signed([ops[0], ops[1], ops[2]])
+        past.refused(by: "studio")
+        past.resolve(next: ops[2].seq + 1, from: "laptop")
+        #expect(!past.refusalPending && past.lastOp == ops[2])
+    }
+
+    @Test func aRefusalWithNoComputerSettlesOnceAnyComputerIsPastIt() throws {
+        let signer = FleetClientTests.signer()
+        let ops = try Self.line(2, from: 3, signer: signer)
+        var chain = FleetChain()
+        try chain.signed(ops)
+        chain.refused(by: "studio")
+        // As kept before refusals named their computer.
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(chain)) as? [String: Any])
+        var refusal = try #require(object["refusal"] as? [String: Any])
+        refusal["computer"] = nil
+        object["refusal"] = refusal
+        var old = try JSONDecoder().decode(FleetChain.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(old.refusalPending)
+        // No read below the post settles it, from any computer.
+        for computer in ["studio", "laptop"] {
+            old.resolve(next: ops[1].seq, from: computer)
+            #expect(old.refusalPending && old.carried == nil)
+        }
+        // A read past every operation of it does.
+        old.resolve(next: ops[1].seq + 1, from: "laptop")
+        #expect(!old.refusalPending && old.lastOp == ops[1])
+    }
+
+    @Test func aRefusalWhoseComputerIsGoneSettlesOnceAnotherIsPastIt() throws {
+        let signer = FleetClientTests.signer()
+        let ops = try Self.line(3, from: 3, signer: signer)
+        var chain = FleetChain()
+        try chain.signed([ops[0]])
+        chain.confirmed()
+        try chain.signed([ops[1], ops[2]])
+        // Refused by a computer the phone no longer reaches: only others
+        // read now.
+        chain.refused(by: "gone")
+        for next in [ops[0].seq, ops[1].seq, ops[2].seq] {
+            chain.resolve(next: next, from: "laptop")
+            #expect(chain.refusalPending)
+        }
+        chain.resolve(next: ops[2].seq + 1, from: "laptop")
+        #expect(!chain.refusalPending && chain.lastOp == ops[2])
+    }
+
+    @Test func aLineKeptBeforeItWasOneValueCarriesOver() throws {
+        let signer = FleetClientTests.signer()
+        let ops = try Self.line(2, from: 3, signer: signer)
+        let encoded = try ops.map { Base64URL.encode(try $0.encode()) }
+        let chain = FleetChain(legacyLast: encoded[1], unconfirmed: [encoded[1]])
+        #expect(chain.lastOp == ops[1])
+        #expect(chain.unconfirmedOps == [ops[1]])
+        #expect(chain.carried == [ops[1]])
+        // Only the last one signed, all confirmed.
+        let confirmed = FleetChain(legacyLast: encoded[0], unconfirmed: nil)
+        #expect(confirmed.lastOp == ops[0] && confirmed.unconfirmedOps.isEmpty)
+        // Unreadable bytes are dropped, not followed.
+        let broken = FleetChain(legacyLast: "!", unconfirmed: ["AA"])
+        #expect(broken.lastOp == nil && broken.unconfirmedOps.isEmpty)
     }
 
     @Test func theLineIsKeptAcrossLaunches() throws {
@@ -91,7 +172,7 @@ struct FleetChainTests {
         let ops = try Self.line(2, from: 3, signer: signer)
         var chain = FleetChain()
         try chain.signed(ops)
-        chain.refused()
+        chain.refused(by: "studio")
         let decoded = try JSONDecoder().decode(FleetChain.self, from: JSONEncoder().encode(chain))
         #expect(decoded == chain && decoded.refusalPending)
     }

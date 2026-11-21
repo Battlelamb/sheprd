@@ -3,6 +3,7 @@
 use super::*;
 use crate::orchestrator::{
     PullRequest, Request, Timing,
+    service::PullRequestLookup,
     view::{RepoSpec, repo::Repo, rows::Tab},
 };
 use std::sync::Arc;
@@ -123,11 +124,22 @@ fn the_page_reads_the_checkout_the_revealed_row_shows(cx: &mut gpui::TestAppCont
             assert_eq!(view.repo_of(&key), Some(1));
 
             // Picking the other checkout moves the row there, and the page
-            // follows it.
+            // follows it, reading the pull request that checkout looked up.
+            let mut looked_up = crate::pull_request::fixture().unwrap();
+            looked_up.number = 8;
+            view.repos[0].snapshot.pull_request = Some(PullRequestLookup {
+                number: 8,
+                result: Arc::new(Ok(Some(looked_up))),
+            });
+            assert!(
+                view.pr.target().is_none(),
+                "the first checkout looked up nothing"
+            );
             view.projects = std::collections::HashSet::from(["test".to_owned()]);
             view.refresh_rows();
             assert_eq!(view.repo_of(&key), Some(0));
             assert_eq!(view.active, 0);
+            assert!(view.pr.target().is_some());
         })
     });
 }

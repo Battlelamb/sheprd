@@ -386,9 +386,15 @@ impl OrchestratorView {
         self.lines = lines;
         self.revision += 1;
         // A pill picked since may show the revealed pull request from
-        // another checkout: its open page follows its row.
+        // another checkout: its open page follows its row, and loads the
+        // pull request there.
         if let Some(key) = self.revealed.clone() {
+            let before = self.active;
             self.activate(&key);
+            if self.active != before {
+                self.reload_pull_request();
+                self.follow_pull_request();
+            }
         }
         if self.selected.is_none() || !self.selection_listed() {
             self.selected = self.keys().into_iter().next();

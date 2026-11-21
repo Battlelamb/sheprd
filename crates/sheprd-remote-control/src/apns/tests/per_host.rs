@@ -8,7 +8,7 @@ use crate::apns::{
     alert::{Sealed, clear, collapse_id, push, scope, thread_id},
     seal,
 };
-use crate::push::{Kind, Notification, Urgency};
+use crate::push::{EventId, Kind, Notification, Urgency};
 use p256::{PublicKey, SecretKey};
 use sheprd_apns::SealedPush;
 
@@ -21,6 +21,7 @@ fn asking(pane: &str) -> Notification {
     Notification {
         body: "Run tests?".to_owned(),
         clear: false,
+        event: EventId::new(),
         kind: Kind::Question,
         pane: pane.to_owned(),
         permission: None,
@@ -101,4 +102,38 @@ fn the_push_relay_accepts_the_scoped_thread_and_collapse_id() {
         })
     })
     .unwrap();
+}
+
+/// `Fixtures/notify/scope.json`: a notify key, its scope, a thread, and a
+/// short and a long collapse id, which the phone's own test push computes
+/// the same way (`AlertScope`). `HERDR_UPDATE_FIXTURES=1` rewrites it.
+#[test]
+fn the_scope_fixture_matches_what_the_phone_computes() {
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    let key = device().public_key();
+    let scope = scope(&key);
+    let long = format!("test-{}", "a".repeat(64));
+    let fixture = serde_json::json!({
+        "public_key": URL_SAFE_NO_PAD.encode(key.to_sec1_bytes()),
+        "scope": scope,
+        "thread": thread_id(&scope, "test"),
+        "collapse_ids": [
+            {"tag": "chat-w1:p2", "id": collapse_id(&scope, "chat-w1:p2")},
+            {"tag": long, "id": collapse_id(&scope, &long)},
+        ],
+    });
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../ios/SheprdRemoteCore/Tests/SheprdRemoteCoreTests/Fixtures/notify/scope.json");
+    if std::env::var_os("HERDR_UPDATE_FIXTURES").is_some() {
+        let text = format!("{}\n", serde_json::to_string_pretty(&fixture).unwrap());
+        std::fs::write(&path, text).unwrap();
+    }
+    let expected: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(
+        fixture,
+        expected,
+        "{} is out of date; run with HERDR_UPDATE_FIXTURES=1",
+        path.display()
+    );
 }

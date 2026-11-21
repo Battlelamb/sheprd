@@ -6,12 +6,9 @@
 //! package opens them and checks which show. `HERDR_UPDATE_FIXTURES=1`
 //! rewrites it.
 
-use super::alert::{EVENT, device, fixed_seal, json, open, question};
+use super::alert::{EVENT, device, fixed_seal, json, open, push, question};
 use crate::{
-    apns::{
-        Push,
-        alert::{Sealed, push},
-    },
+    apns::{Push, alert::Sealed},
     push::{EventId, Notification},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};

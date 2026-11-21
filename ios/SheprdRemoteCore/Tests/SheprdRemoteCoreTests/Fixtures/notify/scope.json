@@ -1,0 +1,15 @@
+{
+  "collapse_ids": [
+    {
+      "id": "da3e621ffd4d063c-chat-w1:p2",
+      "tag": "chat-w1:p2"
+    },
+    {
+      "id": "da3e621ffd4d063c-rL8OtUnfv_MWep0YbuyMkgxsl4nstqsCb8y3xwiOZNg",
+      "tag": "test-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "public_key": "BB4YUy_UdUwC8wQdnHXOszuD_9gax85P6ILMscmLxYlupGwxHE4v9A3ZajZT5uRURdMt_khuztdcepDGoYiBwKM",
+  "scope": "da3e621ffd4d063c",
+  "thread": "da3e621ffd4d063c/test"
+}

@@ -81,15 +81,20 @@ import Testing
     /// The request the push relay takes, and an outer payload shaped as the
     /// daemon's own test push (`Fixtures/notify/test.json`).
     @Test func theRequestMatchesThePushRelayAndTheDaemonsTestPush() throws {
-        let request = try SelfTestPush.request(id: Self.id, handle: "k.h", device: Self.own.publicKey)
+        let url = try #require(Bundle.module.url(forResource: "Fixtures/notify/test", withExtension: "json"))
+        let fixture = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        // The daemon's device key: the thread and collapse id are scoped by
+        // the key a push is sealed to, so the same key makes the same ones.
+        let encoded = try #require(fixture["device_private_key"] as? String)
+        let device = try P256.KeyAgreement.PrivateKey(rawRepresentation: #require(Base64URL.decode(encoded)))
+        let request = try SelfTestPush.request(id: Self.id, handle: "k.h", device: device.publicKey)
         let body = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: String])
         #expect(Set(body.keys) == ["collapse_id", "handle", "payload", "priority", "push_type"])
         #expect(body["push_type"] == "alert" && body["priority"] == "high" && body["handle"] == "k.h")
-        #expect(body["collapse_id"] == "test-\(Self.id)")
+        let scope = AlertScope.scope(device.publicKey)
+        #expect(body["collapse_id"] == AlertScope.collapseId(scope, tag: "test-\(Self.id)"))
         #expect(request.payload.utf8.count <= 4096)
 
-        let url = try #require(Bundle.module.url(forResource: "Fixtures/notify/test", withExtension: "json"))
-        let fixture = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
         let daemon = try #require(fixture["apns"] as? [String: Any])
         let ours = try Self.payload(request)
         #expect(Set(ours.keys) == Set(daemon.keys))
@@ -98,8 +103,8 @@ import Testing
         // The sealed side has the daemon's keys, less the badge.
         let plaintext = try #require(fixture["plaintext"] as? [String: Any])
         let opened = try NotificationSeal.open(
-            #require(Base64URL.decode(Self.sealed(request))), device: Self.own.publicKey
-        ) { try Self.own.sharedSecretFromKeyAgreement(with: $0) }
+            #require(Base64URL.decode(Self.sealed(request))), device: device.publicKey
+        ) { try device.sharedSecretFromKeyAgreement(with: $0) }
         let mine = try #require(JSONSerialization.jsonObject(with: opened) as? [String: Any])
         #expect(Set(mine.keys) == Set(plaintext.keys).subtracting(["badge"]))
     }
@@ -108,8 +113,10 @@ import Testing
     @Test func theLongestIdIsCutToTheCollapseIdLimit() throws {
         let id = String(repeating: "a", count: SelfTestPush.maxId)
         let request = try SelfTestPush.request(id: id, handle: "h", device: Self.own.publicKey)
-        #expect(request.collapseId.utf8.count == SelfTestPush.maxCollapseId)
-        #expect(request.collapseId.hasPrefix("test-aaaa"))
+        // Digested rather than cut, as the daemon's is, and in its scope.
+        #expect(request.collapseId.utf8.count <= 64)
+        #expect(request.collapseId.hasPrefix(AlertScope.scope(Self.own.publicKey) + "-"))
+        #expect(!request.collapseId.contains("aaaa"))
         // The full id still travels sealed, which the receipt is keyed by.
         let opened = try SelfTestPush.open(Self.sealed(request), device: Self.own.publicKey) {
             try Self.own.sharedSecretFromKeyAgreement(with: $0)

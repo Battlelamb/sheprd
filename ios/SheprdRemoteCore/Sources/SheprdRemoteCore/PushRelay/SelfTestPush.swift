@@ -19,8 +19,6 @@ public enum SelfTestPush {
     public static let body = "From this iPhone: the push relay reaches this phone."
     /// The longest test id, as the daemon bounds it (`MAX_TEST_ID`).
     static let maxId = 64
-    /// The longest `apns-collapse-id` APNs and the push relay take, in bytes.
-    static let maxCollapseId = 64
 
     /// `POST /v1/push` on the push relay (`crates/sheprd-push-relay/src/relay.rs`).
     public struct Request: Encodable, Equatable, Sendable {
@@ -53,12 +51,12 @@ public enum SelfTestPush {
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         let plaintext = try encoder.encode(Plaintext(test: id, event: id))
         let sealed = try NotificationSeal.seal(plaintext, to: device, info: NotificationSeal.info, ephemeral: ephemeral, nonce: nonce)
-        let outer = Outer(aps: .init(), sealed: Base64URL.encode(sealed))
+        // Scoped by the key it is sealed to, as a computer's alerts are.
+        let scope = AlertScope.scope(device)
+        let outer = Outer(aps: Aps(threadId: AlertScope.thread(scope, pane: pane)), sealed: Base64URL.encode(sealed))
         let payload = try encoder.encode(outer)
         return Request(
-            // Cut as the daemon cuts its tag; an id is ASCII, so a
-            // character is a byte.
-            collapseId: String("test-\(id)".prefix(maxCollapseId)),
+            collapseId: AlertScope.collapseId(scope, tag: "test-\(id)"),
             handle: handle,
             payload: String(decoding: payload, as: UTF8.self),
             // A test is waited for, so it may not wait either, as the daemon's.
@@ -129,7 +127,7 @@ public enum SelfTestPush {
         let interruptionLevel = "active"
         let mutableContent = 1
         let sound = "default"
-        let threadId = SelfTestPush.pane
+        let threadId: String
 
         enum CodingKeys: String, CodingKey {
             case alert

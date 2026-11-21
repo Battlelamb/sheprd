@@ -32,6 +32,8 @@ mod atomic;
 #[cfg(unix)]
 mod catch_up;
 #[cfg(unix)]
+mod earlier_shapes;
+#[cfg(unix)]
 mod flood;
 #[cfg(unix)]
 mod folding;

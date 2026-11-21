@@ -9,6 +9,7 @@ mod delivery;
 mod notify_key;
 mod pacer;
 mod payload;
+mod per_host;
 mod recipient;
 mod redact;
 mod relayed;

@@ -122,8 +122,8 @@ impl Delivery {
         )
     }
 
-    /// Sends `sealed`, sealed to `key`, to `recipient` under `tag` as its
-    /// collapse id, at `now_ms`.
+    /// Sends `sealed`, sealed to `key`, to `recipient`, collapsing under
+    /// `tag` on its computer, at `now_ms`.
     pub(crate) async fn alert(
         &self,
         recipient: &Recipient,
@@ -145,7 +145,7 @@ impl Delivery {
                 if relays.is_down(handle.environment(), now_ms) {
                     return Sent::Unreachable;
                 }
-                let clear = alert::clear(&sealed.pane, tag);
+                let clear = alert::clear(&sealed.computer, &sealed.pane, tag);
                 let Ok(push) = SealedPush::build(key, seal::INFO, &clear, |sealer| {
                     alert::push(sealed, tag, |plaintext| Ok(sealer.seal(plaintext)?))
                 }) else {

@@ -3,7 +3,7 @@
 
 use crate::apns::{
     Priority, PushType,
-    alert::{MAX_OPTIONS, Sealed, push},
+    alert::{MAX_OPTIONS, Sealed, collapse_id, push},
     payload::MAX_PAYLOAD,
     seal::{INFO, seal_with},
 };
@@ -107,14 +107,17 @@ fn a_question_shows_only_a_cover_to_apns() {
     let push = push(sealed.clone(), "chat-w1:p2", fixed_seal).unwrap();
     assert_eq!(push.push_type, PushType::Alert);
     assert_eq!(push.priority, Priority::High);
-    assert_eq!(push.collapse_id.as_deref(), Some("chat-w1:p2"));
+    assert_eq!(
+        push.collapse_id.as_deref(),
+        Some("9E92A0DF1CE0967E-chat-w1:p2")
+    );
     let payload = json(&push.body);
     assert_eq!(
         payload["aps"],
         json!({
             "alert": {"title": "Sheprd", "body": "New activity"},
             "mutable-content": 1,
-            "thread-id": "w1:p2",
+            "thread-id": format!("{COMPUTER}/w1:p2"),
             "interruption-level": "time-sensitive",
             "sound": "default",
         })
@@ -237,7 +240,15 @@ fn the_collapse_id_stays_within_apns_limit_on_a_character_boundary() {
     .unwrap();
     let id = push.collapse_id.unwrap();
     assert!(id.len() <= 64);
-    assert!(tag.starts_with(&id));
+    assert!(id.starts_with("9E92A0DF1CE0967E-"), "names the computer");
+    assert!(!id.contains('é'), "a long tag is digested, not cut");
+    let other = format!("chat-{}a", "é".repeat(40));
+    assert_ne!(
+        collapse_id(COMPUTER, &tag),
+        collapse_id(COMPUTER, &other),
+        "tags sharing a long prefix stay apart"
+    );
+    assert_eq!(id, collapse_id(COMPUTER, &tag), "stable");
 }
 
 /// `Fixtures/notify/alert.json`: the device key, the plaintext, and the

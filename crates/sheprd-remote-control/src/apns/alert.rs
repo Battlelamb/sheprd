@@ -1,14 +1,21 @@
 //! Notifications for the native app, sealed to the device
 //! (`docs/ios-app-plan.md`, "Notifications, exactly"). APNs sees only a
-//! cover ("Sheprd", "New activity") and the chat's pane as the thread; the
-//! app's Notification Service Extension opens `sealed` and shows what is
-//! inside, with answer buttons for a permission request. The badge travels
-//! sealed too: it is this computer's count, and a phone paired with several
-//! shows their sum, so APNs must not set it alone.
+//! cover ("Sheprd", "New activity"), the computer and pane as the thread,
+//! and a collapse id; the app's Notification Service Extension opens
+//! `sealed` and shows what is inside, with answer buttons for a permission
+//! request. The badge travels sealed too: it is this computer's count, and
+//! a phone paired with several shows their sum, so APNs must not set it
+//! alone.
+//!
+//! Pane ids are unique only on one computer, so the thread and the collapse
+//! id both name the computer: two computers' `w1:p2` never replace or group
+//! with each other, while a newer push for one chat still replaces its
+//! older one. The thread is the app's own (`AlertKeys.thread`), so a cover
+//! shown when the extension cannot open a push groups as an opened one.
 //!
 //! ```json
 //! { "aps": { "alert": { "title": "Sheprd", "body": "New activity" },
-//!            "mutable-content": 1, "thread-id": "w1:p2",
+//!            "mutable-content": 1, "thread-id": "AB12…(64 hex)/w1:p2",
 //!            "interruption-level": "time-sensitive", "sound": "default" },
 //!   "sealed": "BASE64URL" }
 //! ```
@@ -21,6 +28,7 @@ use super::{Error, Priority, Push, PushType, Result, payload::MAX_PAYLOAD};
 use crate::push::{Kind, Notification};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use sheprd_chat_protocol::PermissionOption;
 
 /// The sealed format's version.
@@ -29,6 +37,9 @@ pub(crate) const VERSION: u32 = 1;
 pub(crate) const MAX_OPTIONS: usize = 4;
 /// The longest `apns-collapse-id` APNs accepts, in bytes.
 const MAX_COLLAPSE_ID: usize = 64;
+/// Hex digits of the computer's fingerprint a collapse id starts with: 64
+/// bits of a hash already, which no two of one phone's computers share.
+const COMPUTER_PREFIX: usize = 16;
 /// What APNs and a phone whose extension cannot open the payload show.
 pub(super) const COVER_TITLE: &str = "Sheprd";
 pub(super) const COVER_BODY: &str = "New activity";
@@ -160,8 +171,8 @@ struct Cover {
     body: &'static str,
 }
 
-/// The push for `sealed`, sealed by `seal`, under `tag` as its collapse
-/// id. The body is shortened until the payload fits APNs's 4 KB.
+/// The push for `sealed`, sealed by `seal`, collapsing under `tag` on its
+/// computer ([`collapse_id`]). The body is shortened until the payload fits APNs's 4 KB.
 pub(crate) fn push(
     mut sealed: Sealed,
     tag: &str,
@@ -175,7 +186,7 @@ pub(crate) fn push(
                 (sealed.kind.asks() || sealed.wizz || sealed.kind == Kind::Test) && !sealed.clear;
             return Ok(Push {
                 body,
-                collapse_id: Some(collapse_id(tag)),
+                collapse_id: Some(collapse_id(&sealed.computer, tag)),
                 priority: if urgent {
                     Priority::High
                 } else {
@@ -201,6 +212,7 @@ pub(crate) fn push(
 /// The outer JSON for `sealed`.
 fn outer(sealed: &Sealed, seal: &impl Fn(&[u8]) -> Result<Vec<u8>>) -> Result<Vec<u8>> {
     let plaintext = serde_json::to_vec(sealed)?;
+    let thread = thread_id(&sealed.computer, &sealed.pane);
     let aps = if sealed.clear {
         Aps {
             alert: None,
@@ -218,7 +230,7 @@ fn outer(sealed: &Sealed, seal: &impl Fn(&[u8]) -> Result<Vec<u8>>) -> Result<Ve
             }),
             mutable_content: Some(1),
             content_available: None,
-            thread_id: Some(&sealed.pane),
+            thread_id: Some(&thread),
             interruption_level: Some(if sealed.kind.asks() || sealed.wizz {
                 "time-sensitive"
             } else {
@@ -250,27 +262,39 @@ fn shorten(text: &str, drop: usize) -> String {
     format!("{}{ELLIPSIS}", &base[..end])
 }
 
-/// The only text a push for `pane` under `tag` carries unsealed: the cover,
-/// the thread, how it interrupts, and the collapse id. A push through the
-/// relay may carry nothing else in the clear (`sheprd_apns::SealedPush`).
-pub(crate) fn clear(pane: &str, tag: &str) -> [String; 7] {
+/// The only text a push for `pane` on `computer` under `tag` carries
+/// unsealed: the cover, the thread, how it interrupts, and the collapse id.
+/// A push through the relay may carry nothing else in the clear
+/// (`sheprd_apns::SealedPush`).
+pub(crate) fn clear(computer: &str, pane: &str, tag: &str) -> [String; 7] {
     [
-        COVER_TITLE,
-        COVER_BODY,
-        pane,
-        "time-sensitive",
-        "active",
-        "default",
-        &collapse_id(tag),
+        COVER_TITLE.to_owned(),
+        COVER_BODY.to_owned(),
+        thread_id(computer, pane),
+        "time-sensitive".to_owned(),
+        "active".to_owned(),
+        "default".to_owned(),
+        collapse_id(computer, tag),
     ]
-    .map(str::to_owned)
 }
 
-/// `tag` cut to APNs's limit on a character boundary.
-fn collapse_id(tag: &str) -> String {
-    let mut end = tag.len().min(MAX_COLLAPSE_ID);
-    while !tag.is_char_boundary(end) {
-        end -= 1;
+/// The notification thread of `pane` on `computer`, as the app's
+/// `AlertKeys.thread(computer:pane:)` names it.
+pub(crate) fn thread_id(computer: &str, pane: &str) -> String {
+    format!("{computer}/{pane}")
+}
+
+/// The collapse id of `tag` on `computer`: the fingerprint's first
+/// [`COMPUTER_PREFIX`] hex digits, a dash, and `tag`, or, when that passes
+/// APNs's 64 bytes, a digest of `tag` instead, so no two long tags share a
+/// cut-off prefix.
+pub(crate) fn collapse_id(computer: &str, tag: &str) -> String {
+    let host: String = computer.chars().take(COMPUTER_PREFIX).collect();
+    let id = format!("{host}-{tag}");
+    if id.len() <= MAX_COLLAPSE_ID {
+        return id;
     }
-    tag[..end].to_owned()
+    let mut digest = URL_SAFE_NO_PAD.encode(Sha256::digest(tag.as_bytes()));
+    digest.truncate(MAX_COLLAPSE_ID - host.len() - 1);
+    format!("{host}-{digest}")
 }

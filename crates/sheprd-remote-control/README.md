@@ -484,6 +484,28 @@ nobody has opened on a phone or focused in a Herdr client. A background push
 moves it when the count changes, and iOS may delay or drop those, so the
 number is exact only once the app is open.
 
+### One sender per agent, one notification per chat
+
+A daemon pushes only for its own Herdr session's panes. A herdr-core lists
+other machines' spaces beside this one's, and the hub drops them (and any
+address with a `/`), so when several linked computers share a core each
+agent still has exactly one computer that alerts for it. The notifier's
+`own_session` test locks that path from the core's document to the alert.
+
+Pane ids are unique only on one computer, so every identifier a push
+service or the phone collapses or groups by names the computer too:
+
+| Identifier | Value |
+| --- | --- |
+| APNs `apns-collapse-id` | The CA fingerprint's first 16 hex digits, `-`, and the chat's tag (`chat-{pane}`); a tag too long for APNs's 64 bytes is digested instead of cut |
+| APNs `thread-id` | `FINGERPRINT/pane`, the app's own `AlertKeys.thread(computer:pane:)` |
+| Web Push `Topic` | SHA-256 of the fingerprint and the tag, as 32 base64url characters |
+
+The same pane on two computers therefore never replaces or groups with the
+other's notification, while a newer push for one chat still replaces its
+older one. The sealed `computer` is what the app opens alerts and routes
+answers by, so older apps keep working.
+
 ### APNs delivery: off, own key, or relay
 
 The native app's alerts and Live Activities go out one of three ways

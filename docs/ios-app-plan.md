@@ -652,12 +652,15 @@ through APNs and none through Web Push. APNs refusing the token
 (`BadDeviceToken`, `Unregistered`) drops `alert`.
 
 **A shown alert** is push type `alert`, topic the bundle id,
-`apns-collapse-id` the chat's tag (at most 64 bytes), and priority 10 for a
-question, 5 otherwise:
+`apns-collapse-id` the computer's fingerprint (first 16 hex digits) and the
+chat's tag (at most 64 bytes, digested when longer), and priority 10 for a
+question, 5 otherwise. Pane ids are unique only on one computer, so the
+collapse id and the thread name the computer: the same pane on two
+computers never replaces or groups with the other's.
 
 ```json
 { "aps": { "alert": { "title": "Sheprd", "body": "New activity" },
-           "mutable-content": 1, "thread-id": "w1:p2",
+           "mutable-content": 1, "thread-id": "FINGERPRINT/w1:p2",
            "interruption-level": "time-sensitive", "sound": "default" },
   "sealed": "BASE64URL" }
 ```
@@ -695,7 +698,7 @@ field order:
 ```
 
 Its plaintext has `"clear": true`, and the app removes the chat's
-notifications (`thread-id` = `pane`).
+notifications (those whose `computer` and `pane` match).
 
 **Live Activity buttons.** `content-state` also carries:
 - in the question phase, `permission` (the waiting permission's id) and

@@ -256,21 +256,37 @@ what was deferred to CI.
   runs workspace tests with default and all features, including headless UI and
   CLI tests, split like `checks` into parallel `default` and `all` legs. The
   `windows-native` job runs `live_gui` (the `test-gui` and `test-sidebar`
-  equivalents) against a pinned `herdr.exe`, and the release-mode performance
-  budget, on both Windows runners, on main and on pull requests that change
-  what the app is built from (`scripts/ci-changes.sh`), except the live-daemon test on
-  ARM64, where the emulated daemon ignores Enter; the optimized Windows build
-  and its installer run in `windows-package` when their inputs change, and in
+  equivalents) against a pinned `herdr.exe` on both Windows runners, with
+  every platform, when what the app is built from changes
+  (`scripts/ci-changes.sh`), except the live-daemon test on ARM64, where the
+  emulated daemon ignores Enter; its release-mode performance budget runs
+  on main and in the merge queue only. The optimized Windows build and its
+  installer run in `windows-package` when their inputs change, with every
+  platform, and in
   the release workflow, which only smoke-tests the CLI of the bytes it ships
   and requires CI to have passed on the commit. Keep the `cfg(unix)`/`cfg(windows)`
   split honest and say plainly what a platform cannot do instead of stubbing
   behavior that appears to work.
-- Pull requests run CI on `ubuntu-24.04` alone and lint and test only the
-  crates their changes reach (`scripts/ci-scope.py`). The merge queue, `main`,
+- Pull requests run the Linux checks and the macOS default-features leg,
+  and lint and test only the crates their changes reach
+  (`scripts/ci-scope.py`): on ARM64 for members' pull requests, whose runs
+  take our own machines, and on x86_64 otherwise. `main`, the merge queue,
   and a pull request that changes a platform `cfg` line or file, a
   dependency (any `Cargo.toml`, `Cargo.lock`) or the toolchain, or the CI
   selection itself, or carries the `windows`, `macos`, or `full-ci` label,
-  run every platform over the whole workspace.
+  run every platform over the whole workspace, except that such a pull
+  request runs Windows only for what a Windows build reads: not for macOS
+  files, `cfg` gates naming only macOS or Apple, or the `macos` label. The
+  Nix flake builds on pull requests only when the flake or the toolchain pin
+  changes, and on `main` and every release otherwise.
+- macOS jobs, and the ARM64 Linux legs, run on our own machines when the
+  repository variables `CI_MACOS_RUNNER` and `CI_LINUX_ARM_RUNNER` name their
+  labels (`docs/self-hosted-runners.md`), for
+  members' code only: `main`, the merge queue, and pull requests from
+  branches of this repository opened by its owner, members, or
+  collaborators. A fork's or a bot's pull request always uses hosted runners.
+  A runner that outlives its job keeps `target/` between runs
+  (`scripts/ci-clean-self-hosted.sh`).
 - A `cfg` gate is only proven on the platform it names. For changes that touch
   one, rely on the corresponding platform CI jobs: a macOS run cannot see a
   Linux-only gate, and neither can the Windows cross-check. Code inside an
@@ -310,6 +326,10 @@ just test-perf
 
 - Only commit, push, or create/update a PR when requested. Do not amend, force-push, discard changes, or clean up other worktrees without explicit authorization.
 - Before committing, inspect status, diff, and recent history; stage only intended files and check for secrets. Do not bypass hooks or signing when they fail.
+- Push with an upstream (`git push -u origin HEAD:refs/heads/NAME`, or
+  `git branch --set-upstream-to` afterwards). The app finds a checkout's pull
+  request through `branch.<name>.merge`, falling back to the local branch
+  name, so a branch pushed under another name without one shows no PR.
 - Use conventional commit subjects (`feat`, `fix`, `refactor`, `test`, `docs`, `chore`). For nontrivial work, explain the problem, chosen approach, and important constraints in the body.
 - Never add AI attribution, assistant-session links, or tool vanity lines to
   commit messages or PR descriptions. This includes `Co-Authored-By` trailers

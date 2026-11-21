@@ -58,6 +58,7 @@ class RelayAgentJob(unittest.TestCase):
                 ["bash", "-e", "-c", script], capture_output=True,
                 env={**os.environ, "CODE": "true", "RESULT": "success", "WINDOWS": "success",
                      "NATIVE": "skipped", "NATIVE_INPUTS": "false", "COMMITS": "success", "FULL": "true",
+                     "WINDOWS_SCOPE": "true",
                      "PACKAGE_INPUTS": "false", "PACKAGE": "skipped", "EVENT": event,
                      "MACOS_RELEASE": "skipped", "MACOS_INPUTS": "false", "SITE_INPUTS": "false",
                      "SITE": "skipped", "ZIZMOR": "success",

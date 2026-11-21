@@ -93,6 +93,39 @@ struct FleetConfirmTests {
         #expect(kept == kept.sorted())
     }
 
+    @Test func aComputerBehindGetsTheNextOperationAfterTheLastConfirmedOne() async throws {
+        let signer = FleetClientTests.signer()
+        // A confirms the phone's operation, then goes away before B hears
+        // of it.
+        let a = FleetClientTests.applying(Self.next(3))
+        let first = try await a.client.prepare([.hostRemove(Data(repeating: 4, count: 32))], as: signer, at: .now)
+        try await a.client.post(first)
+        let last = try #require(first.ops.last)
+        // Nothing waits unconfirmed, but the last one signed is kept and
+        // carried.
+        let carried = FleetClient.carried(unconfirmed: [], last: last)
+        #expect(carried == [last])
+        // B, behind, still drafts at 3: the next operation follows the last
+        // one (sequence plus one, it among the parents), and B gets it too.
+        let b = FleetClientTests.applying(Self.next(3))
+        let second = try await b.client.prepare(
+            [.hostRemove(Data(repeating: 5, count: 32))], as: signer, at: .now, after: carried
+        )
+        #expect(second.ops.count == 2 && second.ops[0] == last)
+        #expect(second.ops[1].seq == last.seq + 1)
+        #expect(second.ops[1].parents.contains(try last.id()))
+        try await b.client.post(second)
+        // A computer that heard of it drafts past it: nothing carried.
+        let current = FleetClientTests.applying(API.FleetNext(fleet: Self.fleet, seq: 4, parents: [try last.id().hexString]))
+        let third = try await current.client.prepare(
+            [.hostRemove(Data(repeating: 6, count: 32))], as: signer, at: .now, after: carried
+        )
+        #expect(third.ops.count == 1 && third.ops[0].seq == 4)
+        // Unconfirmed ones, when any, are what is carried, not only the last.
+        #expect(FleetClient.carried(unconfirmed: second.ops, last: last) == second.ops)
+        #expect(FleetClient.carried(unconfirmed: [], last: nil).isEmpty)
+    }
+
     @Test func nothingIsPostedUnlessItWasKept() async throws {
         let computer = FleetClientTests.applying(Self.next(3))
         let signed = try await computer.client.prepare([.hostRemove(Data(repeating: 4, count: 32))], as: FleetClientTests.signer(), at: .now)

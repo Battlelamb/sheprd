@@ -42,6 +42,11 @@ final class FleetMembership {
         /// applied (base64url): sent again until one does, and followed by
         /// any new ones, so none shares a sequence number with another.
         var unconfirmed: [String]?
+        /// The last operation this phone signed (base64url), kept after it
+        /// is confirmed: every new one follows it, whichever computer the
+        /// phone posts through, so a computer that has not heard of it yet
+        /// cannot hand the phone an older sequence number.
+        var lastSigned: String?
     }
 
     private(set) var record: Record?
@@ -340,14 +345,27 @@ final class FleetMembership {
         (record?.unconfirmed ?? []).compactMap { Base64URL.decode($0).flatMap { try? FleetLog.Op.decode($0) } }
     }
 
-    /// Keeps `ops` as unconfirmed, or forgets them all with none.
-    /// Whether they were kept.
+    /// The last operation this phone signed, confirmed or not.
+    private var lastSignedOp: FleetLog.Op? {
+        record?.lastSigned.flatMap(Base64URL.decode).flatMap { try? FleetLog.Op.decode($0) }
+    }
+
+    /// Makes `op` the operation new ones follow.
+    private func chain(after op: FleetLog.Op?) {
+        guard var record else { return }
+        record.lastSigned = (try? op?.encode()).flatMap { $0 }.map(Base64URL.encode)
+        if record != self.record { save(record) }
+    }
+
+    /// Keeps `ops` as unconfirmed, or forgets them all with none; the last
+    /// one signed stays either way. Whether they were kept.
     @discardableResult
     private func remember(_ ops: [FleetLog.Op]) -> Bool {
         guard var record else { return false }
         let encoded = ops.compactMap { try? $0.encode() }.map(Base64URL.encode)
         guard encoded.count == ops.count else { return false }
         record.unconfirmed = encoded.isEmpty ? nil : encoded
+        if let last = encoded.last { record.lastSigned = last }
         return record == self.record || save(record)
     }
 
@@ -367,6 +385,7 @@ final class FleetMembership {
                 try await client.post(FleetClient.Signed(ops: ops, heads: status.heads))
                 if self.unconfirmedOps == ops { remember([]) }
             } catch FleetClientError.refused {
+                // The next action learns which of them applied.
                 if self.unconfirmedOps == ops { remember([]) }
             } catch {
                 log.info("fleet: \(computer.name, privacy: .public) has not applied this phone's operations yet")
@@ -408,7 +427,10 @@ final class FleetMembership {
         // Signed once, by the first computer that answers its fleet: a post
         // whose answer is lost goes to the next computer as the same bytes.
         var signed: FleetClient.Signed?
-        let after = unconfirmedOps
+        // New operations follow the unconfirmed ones, or with none the last
+        // one signed: a computer behind it gets it again with them.
+        let before = lastSignedOp
+        let after = FleetClient.carried(unconfirmed: unconfirmedOps, last: before)
         let attempt = await FleetAttempt.first(candidates) { computer in
             let client = client(computer)
             if let signed {
@@ -438,10 +460,17 @@ final class FleetMembership {
             return .taken
         case let .refused(computer, count):
             // Refused by the fleet: carrying them would only block what
-            // follows.
+            // follows. A refused operation is void everywhere, so what new
+            // ones follow is the last of them the fleet applied, read back
+            // from the computer that refused the rest, else what came
+            // before them.
             remember([])
             problem = Self.describe(FleetClientError.refused(count))
-            return .refused(fresh: await check(computer))
+            let fresh = await check(computer)
+            if fresh, let next = status?.next {
+                chain(after: signed?.ops.last { $0.seq < next.seq } ?? before)
+            }
+            return .refused(fresh: fresh)
         case let .failed(error):
             problem = error.map(Self.describe)
             // Nothing signed means nothing posted; otherwise what was

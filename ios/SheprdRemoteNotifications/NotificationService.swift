@@ -79,6 +79,8 @@ final class NotificationService: UNNotificationServiceExtension {
         content.title = test.title
         content.body = test.body
         content.threadIdentifier = SelfTestPush.pane
+        // The payload asks for the default sound, as a computer's test does.
+        content.sound = .default
         return content
     }
 

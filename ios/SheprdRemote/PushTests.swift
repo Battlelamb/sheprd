@@ -23,6 +23,8 @@ final class PushTests {
 
     /// How long an accepted push may take before it counts as lost.
     static let patience: Duration = .seconds(30)
+    /// How long iOS may take to hand over a first notification token.
+    static let tokenPatience: Duration = .seconds(10)
 
     private(set) var status: [Fingerprint: Status] = [:]
     /// The test this phone sent itself, if any.
@@ -98,10 +100,8 @@ final class PushTests {
             ownStatus = .failed("This phone has no APNs key of its own, so it can only push itself through the push relay. Turn on Use the Push Relay above.")
             return
         }
-        guard let token = tokens.alert else {
-            ownStatus = .failed("This phone has no notification token yet. Allow notifications for Sheprd, then reopen the app.")
-            return
-        }
+        // `alertToken` says why when there is none.
+        guard let token = await alertToken() else { return }
         let relay = tokens.pushRelay
         guard let credential = await relay.usableCredential() else {
             ownStatus = .failed("The push relay has not let this phone in: \(relay.lastError ?? "turn the push relay off and on again.")")
@@ -135,6 +135,25 @@ final class PushTests {
         }
         ownStatus = .waiting
         ownStatus = await arrival(of: id, sent: started)
+    }
+
+    /// This phone's alert token. A phone that never paired was never asked
+    /// to show alerts, so it has none: this asks, as pairing does, and
+    /// waits briefly for iOS to hand the token over. `nil`, with the reason
+    /// in `ownStatus`, when there is none.
+    private func alertToken() async -> String? {
+        if let token = tokens.alert { return token }
+        guard await AppDelegate.enableAlerts() else {
+            ownStatus = .failed("Notifications are off for Sheprd. Allow them in the iPhone's Settings, then try again.")
+            return nil
+        }
+        let deadline = ContinuousClock.now + Self.tokenPatience
+        while ContinuousClock.now < deadline {
+            if let token = tokens.alert { return token }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        ownStatus = .failed("iOS has not given this phone a notification token yet. Check that it is online, then try again.")
+        return nil
     }
 
     /// Waits up to `patience` for test `id`, sent at `sent`, to arrive.

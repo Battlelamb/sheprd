@@ -104,6 +104,19 @@ import Testing
         #expect(Set(mine.keys) == Set(plaintext.keys).subtracting(["badge"]))
     }
 
+    /// The longest id still makes a collapse id the push relay takes.
+    @Test func theLongestIdIsCutToTheCollapseIdLimit() throws {
+        let id = String(repeating: "a", count: SelfTestPush.maxId)
+        let request = try SelfTestPush.request(id: id, handle: "h", device: Self.own.publicKey)
+        #expect(request.collapseId.utf8.count == SelfTestPush.maxCollapseId)
+        #expect(request.collapseId.hasPrefix("test-aaaa"))
+        // The full id still travels sealed, which the receipt is keyed by.
+        let opened = try SelfTestPush.open(Self.sealed(request), device: Self.own.publicKey) {
+            try Self.own.sharedSecretFromKeyAgreement(with: $0)
+        }
+        #expect(opened?.id == id)
+    }
+
     @Test func aBadIdIsNotSent() {
         for id in ["", String(repeating: "a", count: 65), "a b", "é"] {
             #expect(throws: SelfTestPush.Failure.id) {

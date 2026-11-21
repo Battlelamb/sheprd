@@ -19,6 +19,8 @@ public enum SelfTestPush {
     public static let body = "From this iPhone: the push relay reaches this phone."
     /// The longest test id, as the daemon bounds it (`MAX_TEST_ID`).
     static let maxId = 64
+    /// The longest `apns-collapse-id` APNs and the push relay take, in bytes.
+    static let maxCollapseId = 64
 
     /// `POST /v1/push` on the push relay (`crates/sheprd-push-relay/src/relay.rs`).
     public struct Request: Encodable, Equatable, Sendable {
@@ -54,7 +56,9 @@ public enum SelfTestPush {
         let outer = Outer(aps: .init(), sealed: Base64URL.encode(sealed))
         let payload = try encoder.encode(outer)
         return Request(
-            collapseId: "test-\(id)",
+            // Cut as the daemon cuts its tag; an id is ASCII, so a
+            // character is a byte.
+            collapseId: String("test-\(id)".prefix(maxCollapseId)),
             handle: handle,
             payload: String(decoding: payload, as: UTF8.self),
             // A test is waited for, so it may not wait either, as the daemon's.

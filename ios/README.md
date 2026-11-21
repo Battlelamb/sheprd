@@ -455,6 +455,9 @@ the phone: Apple sees only "Sheprd", "New activity", and ciphertext.
      `limited`, or `unavailable`.
    - With the push relay off, the row says the phone cannot push itself
      without it: there is no APNs key on the phone.
+   - A phone that never paired was never asked to show alerts, so it has
+     no alert token: the test asks then, as pairing does, and waits up to
+     10 seconds for iOS to hand the token over.
 
 A Live Activity in the question phase also offers up to three answers
 (never the "always" ones) as buttons that answer from the lock screen.

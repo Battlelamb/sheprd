@@ -330,6 +330,8 @@ impl SheprdWindow {
                     // as the window's own bubble is.
                     "unseen": self.activity.unseen(panel, counts.latest(panel)),
                     "id": panel_id(panel),
+                    // Sheprd's own icon, as its bar draws it.
+                    "icon": crate::icons::hosted::app_name(super::activity::icon(panel)),
                     "label": super::activity::label(panel).to_string(),
                 })
             })

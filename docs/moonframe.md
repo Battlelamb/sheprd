@@ -47,7 +47,7 @@ Everything around the terminals is Luau in `crates/sheprd-gpui/moonframe/app`:
 | --- | --- |
 | `main.luau` | The layout: where each part goes, the rule under the worktrees, over New and Menu and the agents, that shares the left pane's height between them (kept across launches; a double click shares it evenly again), and the device picker under them |
 | `mods/header/main.luau` | Back and Forward, while they fit the column (`navigation_in_header`); else Sheprd's title bar beside it shows them |
-| `mods/activity/main.luau` | The activity bar, with the sparkles above Settings |
+| `mods/activity/main.luau` | The activity bar, in Sheprd's own icons, with the sparkles above Settings |
 | `mods/worktrees/main.luau` | The left pane's head and worktree rows, linked worktrees under their checkout, drawn in the sidebar layout Sheprd's config names (`layout = "orca"`, `compact`, `minimal`, ...), and the sidebar toggle in its head, or over the rail of numbered tiles while the sidebar is folded. Dragging the column's edge out of the rail opens the sidebar too |
 | `mods/actions/main.luau` | New and Menu under the worktrees: a new worktree, and the command palette |
 | `mods/agents/main.luau` | The agents under the worktrees, in Sheprd's sort and the same layout |
@@ -100,7 +100,7 @@ shows in the log when one appears: `unknown key` names it.
 | `agents` | In Sheprd's sort: `name`, `kind` (`claude`, `codex`, ...), `status`, `state` (the status's word, when the agent's integration shows one), `title`, `pane`, `pane_name`, `workspace`, `workspace_label`, `tab`, `focused` |
 | `agent_sort` | `grouped` or `priority` |
 | `layout` | The configured sidebar layout's `name` and spacing: `padding`, `gap`, `row_padding`, `style_padding`, `child_indent`, `nest` (how far a device's rows step in under its header), `inset`, `spacing`, `radius`, `outline` (rounded highlights), `tree_lines`, `title_case`, `workspace_details`, `child_details`, `pr_counts` |
-| `panels`, `panel` | The activity panels (`id`, `label`, `count`, `unseen`) and the current one's `id` |
+| `panels`, `panel` | The activity panels (`id`, `label`, `icon`, `count`, `unseen`) and the current one's `id`. `icon` is Sheprd's own, the file its classic bar draws, as an `app-` name (`app-sessions`) that Moonframe loads from the assets Sheprd gives it: each `icons/NAME.svg` of Sheprd's is also `icons/app-NAME.svg` there |
 | `connected`, `status` | Whether the daemon answers, and what to say about it |
 | `section`, `sidebar_visible`, `status_bar_visible`, `details_visible`, `navigation_in_header` | What the window shows (`navigation_in_header`: whether Back and Forward fit the left column's header, as Sheprd's own window decides); `details_visible` follows the toggle at the end of the title bar, and the shell shows the details pane by it |
 | `usage` | The status bar's usage as Sheprd's own bar shows it, or `nil` while hidden or empty: `segments` (each provider's `id`, `name`, `locked`, `stale`, `meter` with `used` as a fraction and its `color`, `labels` with `text` and `color`, and `balance`), `busy`, `error`, and the words `unavailable` and `refresh_label` |

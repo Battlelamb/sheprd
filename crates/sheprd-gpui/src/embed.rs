@@ -160,9 +160,10 @@ fn forward_menu_actions(
     // keep-sorted end
 }
 
-/// The app's icons and other assets, for the host's application.
+/// The app's icons and other assets, for the host's application, with each
+/// icon also as the `app-` icon a Moonframe mod names.
 pub fn assets() -> impl gpui::AssetSource {
-    crate::icons::Icons
+    crate::icons::hosted::HostIcons
 }
 
 /// The main window as views for a host's layout; see [`Region`].

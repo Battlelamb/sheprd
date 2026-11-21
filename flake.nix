@@ -78,7 +78,7 @@
                 (lib.importTOML ./Cargo.lock).package
               ).source
           );
-          moonframeHash = "sha256-c4m2/uK5//f+FjDeLcGiBMYUrhoD7YukXVh9t+RdDI0=";
+          moonframeHash = "sha256-Pe7WMPgnEXCXldIHjls9e22H3r1arkEsVhSNCTNoQ5I=";
           moonframeSrc = pkgs.fetchgit {
             url = "https://github.com/moonframehq/moonframe";
             rev = moonframeRev;

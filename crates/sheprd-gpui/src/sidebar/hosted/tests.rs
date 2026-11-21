@@ -3,6 +3,7 @@ use gpui::TestAppContext;
 
 mod edge;
 mod focus;
+mod icons;
 mod nest;
 mod sidebar_size;
 

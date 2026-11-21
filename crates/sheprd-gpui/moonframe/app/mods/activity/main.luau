@@ -1,17 +1,6 @@
--- The activity bar: Sheprd's panels, with the counts it reports. Moonframe
--- draws only its bundled Lucide icons, so these are the nearest to Sheprd's
--- own (`assets/icons`): a robot for automations, a bead for tasks.
-local ICONS = {
-	automations = "bot",
-	issues = "circle-dot",
-	overview = "activity",
-	ports = "plug",
-	pull_requests = "git-pull-request",
-	security = "shield",
-	tasks = "git-commit-horizontal",
-	usage = "chart-line",
-	workspaces = "square-terminal",
-}
+-- The activity bar: Sheprd's panels, with the counts it reports, in Sheprd's
+-- own icons: each panel's comes with it (`icon`, an `app-` name Moonframe
+-- loads from Sheprd's assets), the same file Sheprd's own bar draws.
 
 -- A count as Sheprd's bar draws it: a pill over the icon's corner, in the
 -- accent while it holds something not yet seen, else muted, and `99+` past
@@ -82,7 +71,7 @@ return mod {
 		local theme = app.sheprd_theme or {}
 		local rows = {}
 		for _, panel in sheprd.panels do
-			table.insert(rows, button(panel.id, ICONS[panel.id] or "circle", panel.label, panel.count, panel.unseen == true, panel.id == sheprd.panel, { panel = panel.id }, theme))
+			table.insert(rows, button(panel.id, panel.icon, panel.label, panel.count, panel.unseen == true, panel.id == sheprd.panel, { panel = panel.id }, theme))
 		end
 		return ui.column {
 			class = "sheprd-activity",
@@ -113,7 +102,8 @@ return mod {
 					ui.mount "feedback",
 				},
 			} else false,
-			button("settings", "settings", "Settings", nil, false, false, { command = "settings" }, theme),
+			-- Sheprd's `icons/settings.svg`, as its own bar draws it.
+			button("settings", "app-settings", "Settings", nil, false, false, { command = "settings" }, theme),
 		}
 	end,
 }

@@ -117,6 +117,9 @@ public enum FleetClientError: Error, Equatable, Sendable {
     /// The signed operations could not be kept before posting, so nothing
     /// was posted.
     case notKept
+    /// The fleet refused a post and no fresh read has said yet which of it
+    /// applied: nothing new is signed until one does.
+    case refusalUnresolved
 }
 
 /// The fleet calls of one member computer, over a transport the app

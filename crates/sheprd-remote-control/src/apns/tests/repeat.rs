@@ -6,9 +6,12 @@
 //! package opens them and checks which show. `HERDR_UPDATE_FIXTURES=1`
 //! rewrites it.
 
-use super::alert::{EVENT, device, fixed_seal, json, open, push, question};
+use super::alert::{EVENT, device, fixed_seal, json, open, question};
 use crate::{
-    apns::{Push, alert::Sealed},
+    apns::{
+        Push,
+        alert::{Sealed, push, scope},
+    },
     push::{EventId, Notification},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -17,7 +20,13 @@ use std::path::PathBuf;
 
 fn sent(notification: &Notification, badge: u32) -> Push {
     let sealed = Sealed::new(notification, super::alert::COMPUTER.to_owned(), badge);
-    push(sealed, &notification.tag, fixed_seal).unwrap()
+    push(
+        sealed,
+        &scope(&device().public_key()),
+        &notification.tag,
+        fixed_seal,
+    )
+    .unwrap()
 }
 
 fn event(push: &Push) -> Value {

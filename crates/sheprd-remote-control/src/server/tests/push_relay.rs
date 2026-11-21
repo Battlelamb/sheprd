@@ -1,6 +1,6 @@
-//! A computer without an APNs key pushes through the Sheprd push relay
-//! unless `--no-push-relay` says not to; `--push-relay`, which service
-//! definitions written before carry, still parses.
+//! A computer pushes through the Sheprd push relay, the only way it pushes
+//! to an iPhone, unless `--no-push-relay` says not to; `--push-relay`,
+//! which service definitions written before carry, still parses.
 
 use super::{options::USAGE, *};
 

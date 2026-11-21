@@ -79,7 +79,11 @@ import Testing
     }
 
     /// The request the push relay takes, and an outer payload shaped as the
-    /// daemon's own test push (`Fixtures/notify/test.json`).
+    /// daemon's own test push (`Fixtures/notify/test.json`) in everything
+    /// but the scoped ids. A computer's thread and collapse id carry the
+    /// pairing's scope (`apns::alert::scope`), taken from the notify key
+    /// the phone gave that computer; a self test has no computer, so it
+    /// keeps the fixed thread `test` and the collapse id `test-ID`.
     @Test func theRequestMatchesThePushRelayAndTheDaemonsTestPush() throws {
         let request = try SelfTestPush.request(id: Self.id, handle: "k.h", device: Self.own.publicKey)
         let body = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: String])
@@ -93,18 +97,14 @@ import Testing
         let daemon = try #require(fixture["apns"] as? [String: Any])
         let ours = try Self.payload(request)
         #expect(Set(ours.keys) == Set(daemon.keys))
-        // The thread is scoped by the key each is sealed to, as the daemon
-        // scopes it; the rest of `aps` is the daemon's.
-        var oursAps = try #require(ours["aps"] as? [String: Any])
+        var ourAps = try #require(ours["aps"] as? [String: Any])
         var daemonAps = try #require(daemon["aps"] as? [String: Any])
-        #expect(oursAps.removeValue(forKey: "thread-id") as? String
-            == "\(SelfTestPush.scope(of: Self.own.publicKey))/\(SelfTestPush.pane)")
-        let fixtureText = try #require(fixture["device_private_key"] as? String)
-        let fixtureBytes = try #require(Base64URL.decode(fixtureText))
-        let fixtureKey = try P256.KeyAgreement.PrivateKey(rawRepresentation: fixtureBytes)
-        #expect(daemonAps.removeValue(forKey: "thread-id") as? String
-            == "\(SelfTestPush.scope(of: fixtureKey.publicKey))/\(SelfTestPush.pane)")
-        #expect(NSDictionary(dictionary: oursAps) == NSDictionary(dictionary: daemonAps))
+        #expect(ourAps["thread-id"] as? String == SelfTestPush.pane)
+        let daemonThread = try #require(daemonAps["thread-id"] as? String)
+        #expect(daemonThread.hasSuffix("/\(SelfTestPush.pane)") && daemonThread != SelfTestPush.pane)
+        ourAps["thread-id"] = nil
+        daemonAps["thread-id"] = nil
+        #expect(NSDictionary(dictionary: ourAps) == NSDictionary(dictionary: daemonAps))
         // The sealed side has the daemon's keys, less the badge.
         let plaintext = try #require(fixture["plaintext"] as? [String: Any])
         let opened = try NotificationSeal.open(

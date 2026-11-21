@@ -97,20 +97,19 @@ fn the_page_shows_how_pushes_leave_and_how_the_last_went(cx: &mut TestAppContext
 
 #[test]
 fn delivery_lines_name_the_mode_and_each_outcome() {
+    assert_eq!(delivery_line(None), "Shown while remote control runs.");
     assert_eq!(
-        delivery_line(None, true),
-        "Shown while remote control runs."
+        delivery_line(Some(&PushStatus::default())),
+        "Off: the push relay is off."
     );
-    let own = PushStatus {
-        mode: Mode::OwnKey,
+    let relayed = PushStatus {
+        mode: Mode::PushRelay,
         ..PushStatus::default()
     };
-    assert!(delivery_line(Some(&own), true).contains("wins over the push relay"));
-    assert!(!delivery_line(Some(&own), false).contains("push relay"));
-    assert_eq!(
-        delivery_line(Some(&PushStatus::default()), false),
-        "Off: there is no APNs key here, and the push relay is off."
-    );
+    assert_eq!(delivery_line(Some(&relayed)), "Through the push relay.");
+    // An older daemon that sent with its own APNs key says `own_key`.
+    let older: PushStatus = serde_json::from_str(r#"{"mode":"own_key"}"#).unwrap();
+    assert!(delivery_line(Some(&older)).contains("does not know"));
 
     assert_eq!(last_alert(None, 0), "No alert since the daemon started.");
     assert_eq!(

@@ -13,23 +13,14 @@ import Foundation
 public enum SelfTestPush {
     /// What a self test names in place of a computer's fingerprint.
     public static let sender = "this-phone"
-    /// The thread test pushes share (`TEST_PANE`), which names no chat.
+    /// The thread a self test goes in (`TEST_PANE`), which names no chat.
+    /// A computer's test push puts its pairing scope in front
+    /// (`scope/test`); a self test has no computer, so no scope.
     public static let pane = "test"
     public static let title = "Test push"
     public static let body = "From this iPhone: the push relay reaches this phone."
     /// The longest test id, as the daemon bounds it (`MAX_TEST_ID`).
     static let maxId = 64
-    /// What the daemon scopes an alert's thread by (`alert::scope`): the
-    /// first 16 hex digits of SHA-256 over `sheprd-alert-scope-v1` and the
-    /// notify key the alert is sealed to, uncompressed, so one phone's
-    /// threads from two computers never merge.
-    static func scope(of key: P256.KeyAgreement.PublicKey) -> String {
-        var hash = SHA256()
-        hash.update(data: Data("sheprd-alert-scope-v1".utf8))
-        hash.update(data: key.x963Representation)
-        return hash.finalize().prefix(8).map { String(format: "%02x", $0) }.joined()
-    }
-
     /// The longest `apns-collapse-id` APNs and the push relay take, in bytes.
     static let maxCollapseId = 64
 
@@ -64,7 +55,7 @@ public enum SelfTestPush {
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         let plaintext = try encoder.encode(Plaintext(test: id, event: id))
         let sealed = try NotificationSeal.seal(plaintext, to: device, info: NotificationSeal.info, ephemeral: ephemeral, nonce: nonce)
-        let outer = Outer(aps: .init(threadId: "\(scope(of: device))/\(pane)"), sealed: Base64URL.encode(sealed))
+        let outer = Outer(aps: .init(), sealed: Base64URL.encode(sealed))
         let payload = try encoder.encode(outer)
         return Request(
             // Cut as the daemon cuts its tag; an id is ASCII, so a
@@ -140,8 +131,7 @@ public enum SelfTestPush {
         let interruptionLevel = "active"
         let mutableContent = 1
         let sound = "default"
-        /// The test thread in the scope of the key the push is sealed to.
-        let threadId: String
+        let threadId = SelfTestPush.pane
 
         enum CodingKeys: String, CodingKey {
             case alert

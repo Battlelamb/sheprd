@@ -110,27 +110,72 @@ struct FleetChainTests {
         #expect(!past.refusalPending && past.lastOp == ops[2])
     }
 
-    @Test func aRefusalWithNoComputerSettlesOnceAnyComputerIsPastIt() throws {
+    /// A refusal as the version before kept it: no computer, no floor.
+    static func legacy(_ chain: FleetChain) throws -> FleetChain {
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(chain)) as? [String: Any])
+        var refusal = try #require(object["refusal"] as? [String: Any])
+        refusal["computer"] = nil
+        refusal["floor"] = nil
+        object["refusal"] = refusal
+        return try JSONDecoder().decode(FleetChain.self, from: JSONSerialization.data(withJSONObject: object))
+    }
+
+    @Test func aRefusalKeptByTheVersionBeforeSettlesFromAnyComputer() throws {
         let signer = FleetClientTests.signer()
         let ops = try Self.line(2, from: 3, signer: signer)
         var chain = FleetChain()
-        try chain.signed(ops)
+        try chain.signed([ops[0]])
+        chain.confirmed()
+        // The second is refused and never applies anywhere.
+        try chain.signed([ops[1]])
         chain.refused(by: "studio")
-        // As kept before refusals named their computer.
+        var old = try Self.legacy(chain)
+        #expect(old.refusalPending)
+        // A computer that has not caught up to what the post followed settles
+        // nothing, though the refusal names no computer and no floor: what it
+        // followed is the floor.
+        for next in [ops[0].seq - 1, ops[0].seq] {
+            old.resolve(next: next, from: "laptop")
+            #expect(old.refusalPending && old.carried == nil)
+        }
+        // Any computer's read past it settles it, as before: it follows what
+        // the post followed, never the refused one.
+        old.resolve(next: ops[1].seq, from: "laptop")
+        #expect(!old.refusalPending && old.lastOp == ops[0])
+        #expect(old.carried == [ops[0]])
+    }
+
+    @Test func aLaggingReadNeverTakesBackTheConfirmedFloor() throws {
+        let signer = FleetClientTests.signer()
+        let ops = try Self.line(2, from: 3, signer: signer)
+        // A confirms the first, refuses the second, and goes away.
+        var chain = FleetChain()
+        try chain.signed([ops[0]])
+        chain.confirmed()
+        try chain.signed([ops[1]])
+        chain.refused(by: "studio")
+        // B has not caught up to the first: its read settles nothing.
+        chain.resolve(next: ops[0].seq, from: "laptop")
+        #expect(chain.refusalPending && chain.carried == nil)
+        // Nor would it from a refusal naming no computer.
+        var unnamed = try Self.legacyKeepingFloor(chain)
+        unnamed.resolve(next: ops[0].seq, from: "laptop")
+        #expect(unnamed.refusalPending)
+        // One caught up to it, from the refusing computer: the first stays
+        // followed, and the next operation is the second sequence number.
+        chain.resolve(next: ops[1].seq, from: "studio")
+        #expect(!chain.refusalPending && chain.lastOp == ops[0])
+        unnamed.resolve(next: ops[1].seq, from: "laptop")
+        #expect(!unnamed.refusalPending && unnamed.lastOp == ops[0])
+    }
+
+    /// A refusal naming no computer, its floor kept.
+    static func legacyKeepingFloor(_ chain: FleetChain) throws -> FleetChain {
         var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(chain)) as? [String: Any])
         var refusal = try #require(object["refusal"] as? [String: Any])
         refusal["computer"] = nil
         object["refusal"] = refusal
-        var old = try JSONDecoder().decode(FleetChain.self, from: JSONSerialization.data(withJSONObject: object))
-        #expect(old.refusalPending)
-        // No read below the post settles it, from any computer.
-        for computer in ["studio", "laptop"] {
-            old.resolve(next: ops[1].seq, from: computer)
-            #expect(old.refusalPending && old.carried == nil)
-        }
-        // A read past every operation of it does.
-        old.resolve(next: ops[1].seq + 1, from: "laptop")
-        #expect(!old.refusalPending && old.lastOp == ops[1])
+        return try JSONDecoder().decode(FleetChain.self, from: JSONSerialization.data(withJSONObject: object))
     }
 
     @Test func aRefusalWhoseComputerIsGoneSettlesOnceAnotherIsPastIt() throws {

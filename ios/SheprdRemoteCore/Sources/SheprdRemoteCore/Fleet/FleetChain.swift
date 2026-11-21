@@ -18,6 +18,9 @@ public struct FleetChain: Codable, Equatable, Sendable {
     private var unconfirmed: [Data] = []
     /// What the unconfirmed operations follow when they do not carry it.
     private var base: Data?
+    /// The last operation a computer confirmed applying: the floor of the
+    /// line, which no read that lags behind it may take back.
+    private var floor: Data?
     private var refusal: Refusal?
 
     private struct Refusal: Codable, Equatable, Sendable {
@@ -26,8 +29,11 @@ public struct FleetChain: Codable, Equatable, Sendable {
         var base: Data?
         /// The device id of the computer that refused it: only a fresh read
         /// from it settles the refusal, as one that lags would name an
-        /// older sequence number than the fleet has.
+        /// older sequence number than the fleet has. None in a refusal kept
+        /// before refusals named their computer.
         var computer: String?
+        /// The last operation confirmed before it (`FleetChain.floor`).
+        var floor: Data?
     }
 
     public init() {}
@@ -71,6 +77,7 @@ public struct FleetChain: Codable, Equatable, Sendable {
     public mutating func confirmed() {
         unconfirmed = []
         base = nil
+        floor = last
     }
 
     /// The computer `computer` (a device id) refused some of the
@@ -80,7 +87,7 @@ public struct FleetChain: Codable, Equatable, Sendable {
     public mutating func refused(by computer: String) {
         guard !unconfirmed.isEmpty || refusal != nil else { return }
         if refusal == nil {
-            refusal = Refusal(ops: unconfirmed, base: base, computer: computer)
+            refusal = Refusal(ops: unconfirmed, base: base, computer: computer, floor: floor)
         }
         unconfirmed = []
         base = nil
@@ -91,22 +98,31 @@ public struct FleetChain: Codable, Equatable, Sendable {
     /// `next` is the phone's next sequence number there, past every
     /// operation of its that applied. The last of the refused post that
     /// applied, else what it followed, becomes what new operations follow.
-    /// A read from any other computer settles it only when it is past every
-    /// operation of the refused post, which then all applied; one behind
-    /// says nothing, and nothing is ever lowered by it. That rule alone
-    /// settles a refusal with no computer recorded (kept before refusals
-    /// named one), or whose computer the phone no longer reaches (removed
-    /// from the fleet, or forgotten here): it clears once any computer has
-    /// caught up past it. With no `next`, the refusal stays.
+    ///
+    /// - A read must be past the confirmed floor: one from a computer that
+    ///   has not caught up to what was confirmed says nothing, and the
+    ///   floor is never taken back, so no sequence number is signed twice.
+    /// - Past it, the computer that refused settles it, as does any computer
+    ///   when the refusal names none (kept before refusals did, as the
+    ///   version that kept it would have), or any computer past every
+    ///   operation of the refused post, which then all applied.
+    ///
+    /// With no `next`, the refusal stays.
     public mutating func resolve(next: UInt64?, from computer: String) {
         guard let refusal, let next else { return }
-        let newest = refusal.ops.compactMap { try? Fleet.Op.decode($0) }.map(\.seq).max() ?? 0
-        let fromRefuser = refusal.computer.map { $0 == computer } ?? false
+        let decode = { (data: Data) -> (UInt64, Data)? in (try? Fleet.Op.decode(data)).map { ($0.seq, data) } }
+        // The floor: the last operation confirmed before the refusal, or
+        // what the refused post followed, which the computer that drafted it
+        // had applied (a refusal kept by the version before has only that).
+        let floor = [refusal.floor, refusal.base].compactMap { $0.flatMap(decode) }.max { $0.0 < $1.0 }
+        if let floor, next <= floor.0 { return }
+        let newest = refusal.ops.compactMap(decode).map(\.0).max() ?? 0
+        let fromRefuser = refusal.computer.map { $0 == computer } ?? true
         guard fromRefuser || next > newest else { return }
-        let known = (refusal.ops + (refusal.base.map { [$0] } ?? [])).compactMap { data -> (UInt64, Data)? in
-            (try? Fleet.Op.decode(data)).map { ($0.seq, data) }
-        }
+        let known = (refusal.ops + [refusal.base, refusal.floor].compactMap { $0 }).compactMap(decode)
         last = known.filter { $0.0 < next }.max { $0.0 < $1.0 }?.1
+        // What the read shows applied is confirmed: the new floor.
+        self.floor = last
         self.refusal = nil
     }
 }

@@ -130,6 +130,9 @@ final class NotificationService: UNNotificationServiceExtension {
             .filter { $0.request.content.userInfo[AlertKeys.event] as? String == event }
             .map(\.request.identifier)
         guard ids.isEmpty else {
+            // What shows may itself be a late copy waiting to be taken
+            // back: this one replaces it and is taken back in its place.
+            if AlertSweep.retractIfPending(id, event: event) { return (content, nil, true) }
             center.removeDeliveredNotifications(withIdentifiers: ids)
             return (content, nil, false)
         }

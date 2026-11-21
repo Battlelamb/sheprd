@@ -37,6 +37,12 @@ public struct RetractedAlerts: Codable, Equatable, Sendable {
         if entries.count > Self.kept { entries.removeFirst(entries.count - Self.kept) }
     }
 
+    /// Whether a copy of `event` waits to be taken back: a copy of it now
+    /// on screen is then itself a late copy, and so is the next.
+    public func pending(_ event: String) -> Bool {
+        entries.contains { $0.event == event }
+    }
+
     /// Forgets any copy noted under `identifier`: another alert is about
     /// to be shown there, which no sweep may take back.
     public mutating func forget(_ identifier: String) {

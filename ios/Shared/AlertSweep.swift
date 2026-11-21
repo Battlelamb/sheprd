@@ -31,6 +31,18 @@ enum AlertSweep {
         RetractedAlerts.update(file: file) { $0.add(identifier, event: event, at: Date()) }
     }
 
+    /// Notes the copy shown as `identifier` for `event` when a copy of the
+    /// same event already waits to be taken back, in one hold; whether it
+    /// did. A copy that replaces a late copy is late too.
+    static func retractIfPending(_ identifier: String, event: String) -> Bool {
+        guard let file else { return false }
+        return RetractedAlerts.update(file: file) { retracted in
+            guard retracted.pending(event) else { return false }
+            retracted.add(identifier, event: event, at: Date())
+            return true
+        }
+    }
+
     /// Another alert is about to show as `identifier`: no noted copy there
     /// may be taken back now. Blocks while a sweep holds the list.
     static func willShow(_ identifier: String) {

@@ -36,6 +36,18 @@ import Testing
         #expect(retracted.take(shown: ["chat-w1:p2": "e1"], at: start).isEmpty)
     }
 
+    /// Two late copies of one dismissed alert: the second replaces the
+    /// first on screen and must be taken back too.
+    @Test func aCopyReplacingALateCopyIsLateToo() {
+        var retracted = RetractedAlerts()
+        retracted.add("chat-w1:p2", event: "e1", at: start)
+        #expect(retracted.pending("e1"))
+        #expect(!retracted.pending("e2"))
+        retracted.add("chat-w1:p2", event: "e1", at: start.addingTimeInterval(1))
+        #expect(retracted.entries.count == 1)
+        #expect(retracted.take(shown: ["chat-w1:p2": "e1"], at: start) == ["chat-w1:p2"])
+    }
+
     @Test func aCopyNotShownYetWaitsUntilItIsOrExpires() {
         var retracted = RetractedAlerts()
         retracted.add("x", event: "e1", at: start)

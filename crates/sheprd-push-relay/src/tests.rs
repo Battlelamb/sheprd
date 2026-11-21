@@ -19,6 +19,7 @@ use std::{
 };
 
 mod attest;
+mod attest_chain;
 mod attest_relay;
 mod challenge;
 mod check;

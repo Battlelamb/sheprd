@@ -3,11 +3,13 @@
 //! apps that connect to your server". A phone sends one attestation per key
 //! and gets a [`crate::credential`] for it.
 //!
-//! The steps, in order: the certificates chain to Apple's App Attest root;
-//! the leaf's nonce extension covers the authenticator data and the hash of
-//! the relay's challenge; the leaf's key hashes to the key id; the
-//! authenticator data names this app, counts zero, says which environment
-//! attested, and carries the same key id. The receipt Apple includes for
+//! The steps, in order: the certificates chain to Apple's App Attest root
+//! (names linked, each issuer a CA allowed to sign at its depth, the root
+//! self-signed, the leaf not a CA, all valid now); the leaf's nonce
+//! extension covers the authenticator data and the hash of the relay's
+//! challenge; the leaf's key hashes to the key id; the authenticator data
+//! names this app, counts zero, says which environment attested, and
+//! carries the same key id. The receipt Apple includes for
 //! fraud assessment is not used.
 
 mod cbor;
@@ -17,7 +19,11 @@ pub use error::Error;
 
 use sha2::{Digest as _, Sha256};
 use x509_parser::{
-    certificate::X509Certificate, oid_registry::Oid, prelude::FromDer as _, time::ASN1Time,
+    certificate::X509Certificate,
+    extensions::ParsedExtension,
+    oid_registry::{OID_X509_EXT_BASIC_CONSTRAINTS, Oid},
+    prelude::FromDer as _,
+    time::ASN1Time,
 };
 
 /// Apple App Attestation Root CA in DER, from
@@ -128,11 +134,12 @@ impl Verifier {
             .ok()
             .and_then(|now| ASN1Time::from_timestamp(now).ok())
             .ok_or(Error::Chain)?;
-        let signed = |child: &X509Certificate<'_>, parent: &X509Certificate<'_>| {
-            child.validity().is_valid_at(now)
-                && child.verify_signature(Some(parent.public_key())).is_ok()
-        };
-        if !signed(&leaf, &intermediate) || !signed(&intermediate, &root) || !intermediate.is_ca() {
+        // The root signs itself with one CA (the intermediate) below it.
+        let chained = issued_by(&root, &root, 1, now)
+            && issued_by(&intermediate, &root, 0, now)
+            && issued_by(&leaf, &intermediate, 0, now)
+            && !is_ca(&leaf);
+        if !chained {
             return Err(Error::Chain);
         }
 
@@ -184,6 +191,61 @@ impl Verifier {
             environment,
             public_key,
         })
+    }
+}
+
+/// Whether `child` is `parent`'s: the names link, `parent` may sign with
+/// `below` CAs under it, its key made the signature, and both certificates
+/// are valid at `now`. The same checks as `ios/Spikes/attest-check.py`.
+fn issued_by(
+    child: &X509Certificate<'_>,
+    parent: &X509Certificate<'_>,
+    below: u32,
+    now: ASN1Time,
+) -> bool {
+    child.issuer() == parent.subject()
+        && may_issue(parent, below)
+        && child.verify_signature(Some(parent.public_key())).is_ok()
+        && child.validity().is_valid_at(now)
+        && parent.validity().is_valid_at(now)
+}
+
+/// Whether `parent` may sign certificates with `below` CAs under it: it is
+/// a CA, its path length (if any) allows them, and its key usage (if any)
+/// includes signing certificates. A repeated or unreadable extension
+/// refuses: `basic_constraints` reads an unreadable one as absent, and
+/// `key_usage` fails on it.
+fn may_issue(parent: &X509Certificate<'_>, below: u32) -> bool {
+    let Ok(Some(constraints)) = parent.basic_constraints() else {
+        return false;
+    };
+    let constraints = constraints.value;
+    if !constraints.ca
+        || constraints
+            .path_len_constraint
+            .is_some_and(|length| below > length)
+    {
+        return false;
+    }
+    match parent.key_usage() {
+        Ok(None) => true,
+        Ok(Some(usage)) => usage.value.key_cert_sign(),
+        Err(_) => false,
+    }
+}
+
+/// Whether `certificate` may be a CA: anything but no basic constraints or
+/// one readable extension saying it is not. x509-parser's
+/// `basic_constraints` reads an unparsable extension as absent, so the
+/// extension is looked up by its OID instead.
+fn is_ca(certificate: &X509Certificate<'_>) -> bool {
+    match certificate.get_extension_unique(&OID_X509_EXT_BASIC_CONSTRAINTS) {
+        Ok(None) => false,
+        Ok(Some(extension)) => !matches!(
+            extension.parsed_extension(),
+            ParsedExtension::BasicConstraints(constraints) if !constraints.ca
+        ),
+        Err(_) => true,
     }
 }
 

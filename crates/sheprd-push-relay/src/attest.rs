@@ -17,14 +17,13 @@ pub use error::Error;
 
 use sha2::{Digest as _, Sha256};
 use x509_parser::{
-    certificate::X509Certificate, oid_registry::Oid, pem::parse_x509_pem, prelude::FromDer as _,
-    time::ASN1Time,
+    certificate::X509Certificate, oid_registry::Oid, prelude::FromDer as _, time::ASN1Time,
 };
 
-/// Apple App Attestation Root CA, from
+/// Apple App Attestation Root CA in DER, from
 /// <https://www.apple.com/certificateauthority/Apple_App_Attestation_Root_CA.pem>.
 /// SHA-256 fingerprint `1C:B9:82:3B:A2:8B:A6:AD:2D:33:A0:06:94:1D:E2:AE:4F:51:3E:F1:D4:E8:31:B9:F7:E0:FA:7B:62:42:C9:32`.
-pub(crate) const APPLE_ROOT_PEM: &[u8] = include_bytes!("attest/apple-app-attestation-root.pem");
+pub(crate) const APPLE_ROOT: &[u8] = include_bytes!("attest/apple-app-attestation-root.cer");
 
 /// The leaf certificate's extension holding the nonce.
 const NONCE_OID: &[u64] = &[1, 2, 840, 113_635, 100, 8, 2];
@@ -83,10 +82,7 @@ impl Verifier {
     /// For `app_id` (`TEAM_ID.bundle.id`), against Apple's root.
     #[must_use]
     pub fn apple(app_id: &str) -> Self {
-        let root = parse_x509_pem(APPLE_ROOT_PEM)
-            .map(|(_, pem)| pem.contents)
-            .unwrap_or_default();
-        Self::new(app_id, root)
+        Self::new(app_id, APPLE_ROOT.to_vec())
     }
 
     /// For `app_id`, against the root certificate `root_der`. Tests use

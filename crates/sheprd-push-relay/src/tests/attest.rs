@@ -3,7 +3,7 @@
 //! a real attestation; `real_attestation_from_a_phone` checks one by hand.
 
 use super::*;
-use crate::attest::{APPLE_ROOT_PEM, Attested, Environment, Error, KeyId};
+use crate::attest::{APPLE_ROOT, Attested, Environment, Error, KeyId};
 use rcgen::{
     BasicConstraints, CertificateParams, CustomExtension, DnType, IsCa, Issuer as CertIssuer,
     KeyPair, PKCS_ECDSA_P256_SHA256, PKCS_ECDSA_P384_SHA384,
@@ -304,8 +304,8 @@ fn malformed_cbor_is_refused_before_any_certificate_is_read() {
 
 #[test]
 fn apples_root_is_embedded() {
-    let (_, pem) = x509_parser::pem::parse_x509_pem(APPLE_ROOT_PEM).unwrap();
-    let root = pem.parse_x509().unwrap();
+    let (rest, root) = x509_parser::parse_x509_certificate(APPLE_ROOT).unwrap();
+    assert!(rest.is_empty());
     assert!(
         root.subject()
             .to_string()

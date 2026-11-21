@@ -12,9 +12,15 @@ final class NotificationService: UNNotificationServiceExtension {
         withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void
     ) {
         let content = (request.content.mutableCopy() as? UNMutableNotificationContent) ?? UNMutableNotificationContent()
-        guard let sealed = request.content.userInfo["sealed"] as? String,
-              let opened = try? NotifyKey.open(sealed)
-        else {
+        let sealed = request.content.userInfo["sealed"] as? String
+        // A computer's key first: what one opens is that computer's alert.
+        // Only what none opens may be this phone's own test push.
+        let opened = sealed.flatMap { try? NotifyKey.open($0) }
+        if opened == nil, let sealed, let test = try? NotifyKey.openSelfTest(sealed) {
+            contentHandler(Self.selfTest(test))
+            return
+        }
+        guard let opened else {
             // Not from a paired computer, or one this phone forgot. Only
             // the cover is shown, whatever the push said, with none of its
             // actions: opening the app shows what is really waiting.
@@ -62,6 +68,20 @@ final class NotificationService: UNNotificationServiceExtension {
             await NotificationCategories.register(presentation)
             deliver.value(finished.value)
         }
+    }
+
+    /// A test push this phone sent itself through the push relay: its
+    /// receipt for Settings, and its text, built fresh like the cover, so
+    /// it has no computer, chat, badge, or actions; a tap only opens the app.
+    private static func selfTest(_ test: SelfTestPush.Opened) -> UNNotificationContent {
+        PushTestReceipts.record(test.id, at: Date(), in: UserDefaults(suiteName: "group.so.pen.herdr.remote"))
+        let content = UNMutableNotificationContent()
+        content.title = test.title
+        content.body = test.body
+        content.threadIdentifier = SelfTestPush.pane
+        // The payload asks for the default sound, as a computer's test does.
+        content.sound = .default
+        return content
     }
 
     /// What every sealed alert says on the way here, built fresh so nothing

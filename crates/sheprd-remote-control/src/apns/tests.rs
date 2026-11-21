@@ -13,6 +13,7 @@ mod push_relay_revoke;
 mod recipient;
 mod redact;
 mod relayed;
+mod relayed_fixture;
 mod terminal;
 mod test_push;
 mod tokens;

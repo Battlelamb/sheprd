@@ -126,13 +126,17 @@ fn with_bearer(token: &str, mut request: HttpRequest<Body_>) -> HttpRequest<Body
 
 use axum::body::Body as Body_;
 
-async fn call(state: &Shared, token: &str, request: HttpRequest<Body_>) -> (StatusCode, Value) {
+pub(crate) async fn call(
+    state: &Shared,
+    token: &str,
+    request: HttpRequest<Body_>,
+) -> (StatusCode, Value) {
     let (status, _, body) = send(state, with_bearer(token, request)).await;
     (status, serde_json::from_str(&body).unwrap_or(Value::Null))
 }
 
 /// Admits `phone` as the person would in Sheprd.
-fn admit(state: &Shared, phone: &Phone) {
+pub(crate) fn admit(state: &Shared, phone: &Phone) {
     let (bundle, signature) = phone.join(&fleet_id(state));
     assert_eq!(
         ask(

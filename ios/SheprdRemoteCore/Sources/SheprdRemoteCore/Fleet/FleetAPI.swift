@@ -258,6 +258,8 @@ extension API {
 
     /// `POST /api/v2/fleet/sync`.
     public struct FleetSync: Encodable, Equatable, Sendable {
+        /// The fleet the phone syncs: a computer of another refuses it.
+        public let fleet: String
         public let heads: [String]
         public let ops: [String]
     }

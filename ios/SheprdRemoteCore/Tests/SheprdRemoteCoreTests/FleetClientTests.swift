@@ -4,9 +4,9 @@ import Synchronization
 import Testing
 @testable import SheprdRemoteCore
 
-/// The phone's side of the fleet: operations built on what a computer
-/// answered, checked against the daemon's vector (`web/tests/fleet.rs`,
-/// `phone_vector`), and the calls `FleetClient` makes.
+/// The phone's side of the fleet: an operation's bytes checked against the
+/// daemon's vector (`web/tests/fleet.rs`, `phone_vector`), and the calls
+/// `FleetClient` makes.
 struct FleetClientTests {
     /// Requests a fake computer saw, and what it answers.
     final class Computer: Sendable {
@@ -57,21 +57,6 @@ struct FleetClientTests {
 
     static let applied = Data(#"{"fleet":"09","heads":[],"ops":[],"refused":0}"#.utf8)
 
-    /// A computer that applies what it is posted: reads answer `next` until
-    /// a post, then the next sequence number after the last operation.
-    static func applying(_ next: API.FleetNext) -> Computer {
-        let current = Mutex(next)
-        return Computer { method, _, body in
-            guard method == "POST" else { return status(next: current.withLock { $0 }) }
-            let posted = try JSONDecoder().decode(Posted.self, from: body ?? Data())
-            let text = try #require(posted.ops.last)
-            let last = try Fleet.Op.decode(try #require(Base64URL.decode(text)))
-            let id = try last.id().hexString
-            current.withLock { $0 = API.FleetNext(fleet: next.fleet, seq: last.seq + 1, parents: [id]) }
-            return Data(#"{"fleet":"09","heads":["\#(id)"],"refused":0}"#.utf8)
-        }
-    }
-
     @Test func aLinkBuiltFromTheStatusIsTheDaemons() throws {
         let fixture = try FleetTests.fixture("phone")
         let next = try #require(fixture["next"] as? [String: Any])
@@ -112,49 +97,25 @@ struct FleetClientTests {
         #expect(try Fleet.Bundle.read(&reader) == bundle)
     }
 
-    @Test func operationsAreChainedSignedAndPosted() async throws {
-        let key = P256.Signing.PrivateKey()
-        let signer = Self.signer(key)
-        let next = API.FleetNext(fleet: String(repeating: "09", count: 32), seq: 4, parents: [String(repeating: "01", count: 32)])
-        let computer = Self.applying(next)
-        let hosts = [Data(repeating: 4, count: 32), Data(repeating: 5, count: 32)]
-        let device = P256.Signing.PrivateKey().publicKey.x963Representation
-        try await computer.client.sign(hosts.map { .link(host: $0, deviceKey: device) }, as: signer, at: .now)
-        let requests = computer.requests.withLock { $0 }
-        // Read, post, then read back to confirm they applied.
-        let read = "/api/v2/fleet?member=\(signer.member.hexString)"
-        #expect(requests.map(\.path) == [read, "/api/v2/fleet/sync", read])
-        let posted = try JSONDecoder().decode(Posted.self, from: try #require(requests[1].body))
-        #expect(posted.heads == [String(repeating: "01", count: 32)])
-        let ops = try posted.ops.map { try Fleet.Op.decode(try #require(Base64URL.decode($0))) }
-        #expect(ops.map(\.seq) == [4, 5])
-        #expect(ops[0].parents == [Data(repeating: 1, count: 32)])
-        #expect(ops[1].parents == [try ops[0].id()])
-        #expect(ops.allSatisfy { $0.verify(key: key.publicKey.compressedRepresentation) && $0.signer == signer.member })
-    }
+    struct Posted: Decodable { let fleet: String; let heads: [String]; let ops: [String] }
 
-    struct Posted: Decodable { let heads: [String]; let ops: [String] }
-
-    @Test func aPhoneThatIsNoMemberSignsNothing() async throws {
-        let computer = Computer { _, _, _ in Self.status(next: nil) }
-        await #expect(throws: FleetClientError.notMember) {
-            try await computer.client.sign([.hostRemove(Data(repeating: 4, count: 32))], as: Self.signer(), at: .now)
+    @Test func aSyncNamesItsFleetAndIsBounded() async throws {
+        let fleet = String(repeating: "09", count: 32)
+        let computer = Computer { _, _, _ in
+            Data(#"{"fleet":"\#(fleet)","heads":["01"],"ops":["b3A"],"refused":0,"more":true}"#.utf8)
         }
+        let answer = try await computer.client.sync(["b3A"], heads: ["02"], fleet: fleet)
+        #expect(answer.ops == ["b3A"] && answer.more)
+        let request = try #require(computer.requests.withLock { $0.first })
+        #expect(request.method == "POST" && request.path == "/api/v2/fleet/sync")
+        let posted = try JSONDecoder().decode(Posted.self, from: try #require(request.body))
+        #expect(posted.fleet == fleet && posted.heads == ["02"] && posted.ops == ["b3A"])
+        // More than one sync carries is refused before anything is sent.
+        let many = [String](repeating: "b3A", count: FleetClient.maxSyncOps + 1)
+        await #expect(throws: FleetError.bounds) { try await computer.client.sync(many, heads: [], fleet: fleet) }
+        let heads = [String](repeating: "01", count: FleetClient.maxSyncHeads + 1)
+        await #expect(throws: FleetError.bounds) { try await computer.client.sync([], heads: heads, fleet: fleet) }
         #expect(computer.requests.withLock { $0.count } == 1)
-        let none = Computer { _, _, _ in Data(#"{"heads":[]}"#.utf8) }
-        await #expect(throws: FleetClientError.noFleet) {
-            try await none.client.sign([.hostRemove(Data(repeating: 4, count: 32))], as: Self.signer(), at: .now)
-        }
-    }
-
-    @Test func aRefusedOperationIsAnError() async throws {
-        let next = API.FleetNext(fleet: String(repeating: "09", count: 32), seq: 1, parents: [String(repeating: "01", count: 32)])
-        let computer = Computer { method, _, _ in
-            method == "GET" ? Self.status(next: next) : Data(#"{"fleet":"09","heads":[],"refused":1}"#.utf8)
-        }
-        await #expect(throws: FleetClientError.refused(1)) {
-            try await computer.client.sign([.hostRemove(Data(repeating: 4, count: 32))], as: Self.signer(), at: .now)
-        }
     }
 
     @Test func aJoinCarriesTheBundleAndItsSignature() async throws {

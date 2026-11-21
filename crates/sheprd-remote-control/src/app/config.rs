@@ -12,7 +12,7 @@
 //! live_activities = "detailed" # or "generic": no chat names or steps
 //! device_idle_days = 30         # 0 never forgets a device
 //! presence = false             # hold phone alerts while its owner is at this Mac
-//! push_relay = true            # iPhone pushes through push.sheprd.org without an APNs key
+//! push_relay = true            # iPhone pushes through push.sheprd.org, the only way they go
 //! relays = ["https://relay.example.org"]  # reach this computer from any network
 //! github_hosts = ["ghe.example.com"]       # Enterprise Server hosts besides gh's
 //! ```
@@ -66,11 +66,13 @@ pub struct RemoteConfig {
     /// Whether paired iPhones near this Mac over Bluetooth hold their
     /// alerts while the desktop is in use (`herdr-nearby`, macOS only).
     pub presence: bool,
-    /// Whether iPhone alerts and Live Activities may go through the Sheprd
-    /// push relay, sealed, when this computer has no APNs key of its own
-    /// (`docs/apns-relay-plan.md`, Opt-in). On by default: nothing reaches
-    /// the push relay until a phone opts in and gives this computer
-    /// handles, so every linked computer pushes without a setting each.
+    /// Whether iPhone alerts and Live Activities go through the Sheprd push
+    /// relay, sealed (`docs/apns-relay-plan.md`, Opt-in). It is the only way
+    /// they leave this computer: off, the iPhone app gets no notifications
+    /// from it, and only a subscribed browser app gets Web Push. On by
+    /// default: nothing reaches the push relay until a phone opts in and
+    /// gives this computer handles, so every linked computer pushes without
+    /// a setting each.
     pub push_relay: bool,
     /// Relays the daemon listens on, so paired phones reach this computer
     /// from any network (`docs/relay-plan.md`); none by default.
@@ -344,8 +346,8 @@ pub enum Edit {
     Notifications(Privacy),
     Port(u16),
     Presence(bool),
-    /// Whether iPhone pushes may go through the push relay
-    /// (`push.sheprd.org`) on a computer without an APNs key.
+    /// Whether iPhone pushes go through the push relay
+    /// (`push.sheprd.org`), the only way they leave a computer.
     PushRelay(bool),
     /// The whole list, as Settings shows it after adding or removing one;
     /// each keeps its label.

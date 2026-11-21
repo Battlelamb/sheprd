@@ -117,7 +117,8 @@ import Testing
     @Test func readsTheDeliveryAComputerNames() throws {
         let decode = { (json: String) in try JSONDecoder().decode(API.APNsAnswer.self, from: Data(json.utf8)) }
         #expect(try decode(#"{"ok":true,"delivery":"push_relay"}"#).delivery == .pushRelay)
-        #expect(try decode(#"{"ok":true,"delivery":"own_key"}"#).delivery == .ownKey)
+        // An older computer that sent with its own APNs key.
+        #expect(try decode(#"{"ok":true,"delivery":"own_key"}"#).delivery == nil)
         #expect(try decode(#"{"ok":true,"delivery":null}"#).delivery == nil)
         #expect(try decode(#"{"ok":true}"#).delivery == nil)
         #expect(try decode(#"{"ok":true,"delivery":"pigeon"}"#).delivery == nil)

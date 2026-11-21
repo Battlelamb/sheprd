@@ -10,8 +10,9 @@ import SheprdRemoteCore
 ///
 /// With the push relay on (`PushRelaySetting`), each computer gets push
 /// relay handles instead of tokens (`PushRelayAccess`), and with them the
-/// notify key it seals Live Activity content to. Tokens go out only while
-/// it is off.
+/// notify key it seals Live Activity content to. Computers push only
+/// through the push relay, so with it off no token goes out at all: a
+/// computer would keep it and never send to it.
 ///
 /// A paired computer can put another computer's id in an activity it
 /// starts. That only makes the app hand the other computer a token for an
@@ -29,11 +30,11 @@ final class ActivityTokens {
     /// How a computer said it delivers pushes when it last took this
     /// phone's registration, for Settings.
     enum Delivery: Equatable {
-        case ownKey
         case pushRelay
         /// It answered that push is not set up there.
         case off
-        /// An older computer, which does not say.
+        /// An older computer, which does not say or names a mode this
+        /// phone does not know.
         case unknown
     }
 
@@ -70,7 +71,7 @@ final class ActivityTokens {
 
     /// The push relay setting changed. Off, the handles this phone made are
     /// revoked first; either way every computer then gets what it should
-    /// use, tokens or handles, which replace what it held.
+    /// use, handles or nothing, which replace what it held.
     func pushRelayChanged(to on: Bool) async {
         do {
             try NotifyKey.mirror()
@@ -189,8 +190,8 @@ final class ActivityTokens {
             .end(nil, dismissalPolicy: .immediate)
     }
 
-    /// Sends each paired computer (or only the one with CA `only`) its
-    /// tokens, or with the push relay on, handles for them, and answers
+    /// Sends each paired computer (or only the one with CA `only`) push
+    /// relay handles for its tokens while the push relay is on, and answers
     /// why each computer that did not take them did not. Syncs for one
     /// computer run one at a time, in the order asked, so one started under
     /// the other setting cannot finish after it; different computers do
@@ -233,8 +234,8 @@ final class ActivityTokens {
         guard PushRelaySetting.isOn == viaPushRelay else { return changed }
         guard let computer = computers.first(where: { $0.fingerprint == fingerprint }) else { return forgotten }
         let recipient = { (token: String?, kind: PushRelayKind) -> API.PushRecipient? in
-            guard let token else { return nil }
-            guard viaPushRelay else { return .token(token) }
+            // Without the push relay nothing reaches a token, so none goes out.
+            guard let token, viaPushRelay else { return nil }
             guard let credential, let handle = self.pushRelay.handle(for: token, kind: kind, credential: credential) else {
                 return nil
             }
@@ -246,19 +247,24 @@ final class ActivityTokens {
                 recipient(running.token, .activity).map { API.APNsRegistration.Activity(pane: running.attributes.pane, token: $0) }
             }
         let alert = recipient(alert, .alert)
-        // Each computer seals to its own key. Without one, alerts would
-        // arrive sealed to nobody: send neither, and the computer keeps
-        // using Web Push or nothing. Through the push relay, Live Activity
-        // content is sealed to it too.
+        // Each computer seals to its own notify key. Without one, alerts
+        // would arrive sealed to nobody: send neither, and the computer
+        // sends this phone nothing through APNs. Through the push relay,
+        // Live Activity content is sealed to it too.
         let needsKey = alert != nil || viaPushRelay
         let notifyKey = needsKey ? try? NotifyKey.loadOrCreate(for: computer.fingerprint).registered : nil
-        let registration = API.APNsRegistration(
-            pushToStart: recipient(pushToStart, .pushToStart),
-            activities: activities,
-            alert: notifyKey == nil ? nil : alert,
-            notifyKey: notifyKey,
-            genericActivities: UserDefaults.standard.bool(forKey: Self.genericSetting)
-        )
+        let generic = UserDefaults.standard.bool(forKey: Self.genericSetting)
+        // With the push relay off, the computer drops every handle it holds,
+        // so it stops pushing even if revoking them at the push relay failed.
+        let registration = viaPushRelay
+            ? API.APNsRegistration(
+                pushToStart: recipient(pushToStart, .pushToStart),
+                activities: activities,
+                alert: notifyKey == nil ? nil : alert,
+                notifyKey: notifyKey,
+                genericActivities: generic
+            )
+            : .pushRelayOff(genericActivities: generic)
         do {
             let relay = relayOrigin(computer.device).map { [$0] } ?? []
             let session = try await sessions.session(for: computer, fallback: relay)
@@ -267,7 +273,6 @@ final class ActivityTokens {
             let answer = try await session.client.registerAPNs(registration, bearer: session.token)
             unreached.remove(computer.fingerprint)
             delivery[computer.fingerprint] = switch answer.delivery {
-            case .ownKey: .ownKey
             case .pushRelay: .pushRelay
             case nil: .unknown
             }

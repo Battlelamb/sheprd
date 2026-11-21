@@ -2,8 +2,9 @@ import CryptoKit
 import Foundation
 
 /// A Live Activity's `attributes` or `content-state` as it arrives: plain,
-/// from a computer with its own APNs key, or one `sealed` field, from a
-/// computer pushing through the push relay
+/// from the app's own debug sample or a computer from before the push
+/// relay, or one `sealed` field, from a computer pushing through the push
+/// relay
 /// (`crates/sheprd-remote-control/src/apns/relayed.rs`), which only this
 /// phone's notify key for that computer opens.
 public enum ActivitySealable<Value: Codable & Hashable & Sendable>: Codable, Hashable, Sendable {
@@ -92,7 +93,8 @@ public enum SealedChatActivity {
     /// - Sealed attributes need sealed state, opened by the same computer's
     ///   key: a push that only some other party could have sent cannot
     ///   change what one computer's activity says.
-    /// - Plain attributes come from a computer with its own key. They are
+    /// - Plain attributes come from the debug sample, or a computer from
+    ///   before the push relay. They are
     ///   refused when `allowsPlain` is false, as while this phone uses the
     ///   push relay, which then holds its push-to-start token and could
     ///   otherwise start an activity with any text.

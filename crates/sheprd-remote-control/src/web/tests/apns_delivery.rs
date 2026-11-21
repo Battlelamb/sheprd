@@ -23,14 +23,7 @@ async fn delivery(apns: crate::apns::Delivery) -> serde_json::Value {
 }
 
 #[tokio::test]
-async fn the_answer_names_the_delivery() {
-    assert_eq!(
-        delivery(crate::apns::Delivery::OwnKey(Box::new(
-            crate::apns::sender_for_tests()
-        )))
-        .await,
-        "own_key"
-    );
+async fn the_answer_names_the_push_relay() {
     assert_eq!(
         delivery(crate::apns::Delivery::Relay(Box::new(
             crate::apns::Relays::new().unwrap()

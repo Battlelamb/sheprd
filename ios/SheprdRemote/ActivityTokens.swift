@@ -176,9 +176,10 @@ final class ActivityTokens {
         var queued: [(Fingerprint, Task<String?, Never>)] = []
         for computer in computers where only == nil || computer.fingerprint == only {
             let previous = syncing[computer.fingerprint]
+            let fingerprint = computer.fingerprint
             let task = Task {
                 _ = await previous?.value
-                return await self.register(computer)
+                return await self.register(fingerprint)
             }
             syncing[computer.fingerprint] = task
             queued.append((computer.fingerprint, task))
@@ -190,17 +191,23 @@ final class ActivityTokens {
         return failures
     }
 
-    /// Registers with one computer, answering why it failed, or `nil`. It
-    /// stops when the push relay setting changes under it, so no token goes
-    /// out after it was turned on and no handle after it was turned off;
-    /// `pushRelayChanged` queues the sync for the new setting.
-    private func register(_ computer: Computer) async -> String? {
-        let viaPushRelay = PushRelaySetting.isOn
+    /// Registers with the paired computer with CA `fingerprint`, answering
+    /// why it failed, or `nil`. It looks the computer up again after each
+    /// wait, so one forgotten meanwhile gets nothing and no notify key is
+    /// made again for it. It stops when the push relay setting changes
+    /// under it, so no token goes out after it was turned on and no handle
+    /// after it was turned off; `pushRelayChanged` queues the sync for the
+    /// new setting.
+    private func register(_ fingerprint: Fingerprint) async -> String? {
+        let forgotten = "This computer is no longer paired."
         let changed = "The push relay setting changed while registering."
+        guard computers.contains(where: { $0.fingerprint == fingerprint }) else { return forgotten }
+        let viaPushRelay = PushRelaySetting.isOn
         // Attests first when needed; without a credential no handle can be
         // made, and no token goes out either while the push relay is on.
         let credential = viaPushRelay ? await pushRelay.usableCredential() : nil
         guard PushRelaySetting.isOn == viaPushRelay else { return changed }
+        guard let computer = computers.first(where: { $0.fingerprint == fingerprint }) else { return forgotten }
         let recipient = { (token: String?, kind: PushRelayKind) -> API.PushRecipient? in
             guard let token else { return nil }
             guard viaPushRelay else { return .token(token) }
@@ -231,6 +238,7 @@ final class ActivityTokens {
         do {
             let session = try await sessions.session(for: computer)
             guard PushRelaySetting.isOn == viaPushRelay else { return changed }
+            guard computers.contains(where: { $0.fingerprint == fingerprint }) else { return forgotten }
             let answer = try await session.client.registerAPNs(registration, bearer: session.token)
             delivery[computer.fingerprint] = switch answer.delivery {
             case .ownKey: .ownKey

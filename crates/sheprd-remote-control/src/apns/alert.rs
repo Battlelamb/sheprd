@@ -1,10 +1,10 @@
 //! Notifications for the native app, sealed to the device
 //! (`docs/ios-app-plan.md`, "Notifications, exactly"). APNs sees only a
-//! cover ("Sheprd", "New activity"), a thread and a collapse id; the app's Notification Service Extension opens
-//! `sealed` and shows what is inside, with answer buttons for a permission
-//! request. The badge travels sealed too: it is this computer's count, and
-//! a phone paired with several shows their sum, so APNs must not set it
-//! alone.
+//! cover ("Sheprd", "New activity"), a thread and a collapse id; the app's
+//! Notification Service Extension opens `sealed` and shows what is inside,
+//! with answer buttons for a permission request. The badge travels sealed
+//! too: it is this computer's count, and a phone paired with several shows
+//! their sum, so APNs must not set it alone.
 //!
 //! Pane ids are unique only on one computer, so the thread and the collapse
 //! id both start with a [`scope`] for the pairing: two computers' `w1:p2`
@@ -14,7 +14,10 @@
 //! not the computer's fingerprint: APNs and the push relay must not learn a
 //! name for the computer, nor tie one computer's pushes to two phones. The
 //! extension names the thread itself from the sealed `computer`
-//! (`AlertKeys.thread`); this one only groups covers it could not open.
+//! (`AlertKeys.thread`). The outer thread groups only what iOS shows without
+//! running the extension, as when it runs out of time; a push the extension
+//! cannot open becomes a fresh cover with no thread, by design, so nothing
+//! of the push survives.
 //!
 //! ```json
 //! { "aps": { "alert": { "title": "Sheprd", "body": "New activity" },

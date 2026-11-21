@@ -203,6 +203,11 @@ impl OrchestratorView {
                 .iter()
                 .any(|repo| repo.key == *key && repo.outside_git())
         });
+        let open = self.detail.as_ref().map(|detail| &detail.key);
+        if self.revealed.as_ref() != open || self.tab != Tab::PullRequests {
+            self.revealed = None;
+        }
+        let revealed = self.revealed.as_deref();
         for (index, repo) in self.repos.iter_mut().enumerate() {
             let found = crate::orchestrator::naming::found_runs(
                 &repo.snapshot.items,
@@ -251,6 +256,20 @@ impl OrchestratorView {
                     let opened = authored.contains(&item.key.canonical());
                     self.yours
                         .holds(opened, rows::status_of(item, statuses), login)
+                });
+            }
+            if let Some(key) = revealed
+                && let Some(at) = items
+                    .iter()
+                    .position(|item| item.pull_request.is_some() && item.key.canonical() == key)
+                && !pulls.iter().any(|row| row.item == at)
+            {
+                pulls.push(ItemRow {
+                    repo: 0,
+                    item: at,
+                    depth: 0,
+                    children: None,
+                    run: runs.latest().get(key).copied(),
                 });
             }
             let mut tasks = if self.tab == Tab::Tasks {
@@ -309,7 +328,11 @@ impl OrchestratorView {
                     if row.depth == 0 {
                         // Projects narrow by the item's own project on
                         // Azure DevOps, whoever listed it.
-                        parent_kept = backend(row) && self.picked(repo, self.row_item(row));
+                        // The revealed pull request is listed whatever
+                        // the pills pick.
+                        let item = self.row_item(row);
+                        parent_kept = revealed.is_some_and(|key| item.key.canonical() == key)
+                            || (backend(row) && self.picked(repo, item));
                     }
                     if parent_kept {
                         kept.push(*row);

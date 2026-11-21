@@ -6,7 +6,11 @@ import Security
 /// key-agreement key where there is one (its device-bound blob is what the
 /// keychain holds), a software key on the simulator. Kept in the App
 /// Group's keychain access group so the Notification Service Extension can
-/// use the key the app made.
+/// use the key the app made, and also as a file in the App Group container:
+/// on a device the process that draws a Live Activity gets
+/// `errSecNotAvailable` from the keychain, and a Secure Enclave key's blob
+/// is only a handle this phone's Secure Enclave can use, so a file
+/// protected until first unlock holds it as safely.
 enum NotifyKey {
     enum Stored {
         case secureEnclave(SecureEnclave.P256.KeyAgreement.PrivateKey)
@@ -29,6 +33,18 @@ enum NotifyKey {
 
     enum Failure: Error {
         case keychain(OSStatus)
+        case both(keychain: OSStatus, file: String)
+    }
+
+    /// Where `loadAny` found the key, for the probe's report.
+    enum Source: String {
+        case keychain
+        case file
+    }
+
+    private static var file: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: SpikeIDs.appGroup)?
+            .appending(path: "notify-key.bin")
     }
 
     private static func query() -> [String: Any] {
@@ -50,8 +66,52 @@ enum NotifyKey {
         guard status == errSecSuccess, let data = result as? Data, let kind = data.first else {
             throw Failure.keychain(status)
         }
-        let body = data.dropFirst()
-        return kind == 1
+        return try decode(kind: kind, body: data.dropFirst())
+    }
+
+    /// The key from the keychain, or from the App Group file when the
+    /// keychain refuses this process.
+    static func loadAny() throws -> (Stored, Source)? {
+        let status: OSStatus
+        do {
+            guard let key = try load() else { return try loadFile().map { ($0, .file) } }
+            return (key, .keychain)
+        } catch let Failure.keychain(code) {
+            status = code
+        }
+        do {
+            return try loadFile().map { ($0, .file) }
+        } catch {
+            throw Failure.both(keychain: status, file: "\(error)")
+        }
+    }
+
+    private static func loadFile() throws -> Stored? {
+        guard let file, FileManager.default.fileExists(atPath: file.path) else { return nil }
+        let data = try Data(contentsOf: file)
+        guard let kind = data.first else { return nil }
+        return try decode(kind: kind, body: data.dropFirst())
+    }
+
+    /// Writes the App Group file for a key made before it existed.
+    static func mirror() throws {
+        guard let file, !FileManager.default.fileExists(atPath: file.path) else { return }
+        var query = query()
+        query[kSecReturnData as String] = true
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data else {
+            return
+        }
+        try write(data)
+    }
+
+    private static func write(_ data: Data) throws {
+        guard let file else { return }
+        try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    private static func decode(kind: UInt8, body: Data) throws -> Stored {
+        kind == 1
             ? .secureEnclave(try SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: body))
             : .software(try P256.KeyAgreement.PrivateKey(rawRepresentation: body))
     }
@@ -75,6 +135,7 @@ enum NotifyKey {
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         let status = SecItemAdd(add as CFDictionary, nil)
         guard status == errSecSuccess else { throw Failure.keychain(status) }
+        try write(data)
         return stored
     }
 }

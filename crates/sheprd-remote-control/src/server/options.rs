@@ -48,7 +48,7 @@ pub struct Options {
     pub port: u16,
     pub privacy: Privacy,
     /// Whether APNs pushes may go through the Sheprd push relay when there
-    /// is no APNs key in the state directory.
+    /// is no APNs key in the state directory: on unless `--no-push-relay`.
     pub push_relay: bool,
     /// The relays to listen on, so paired phones reach this computer from
     /// any network; none when empty.
@@ -222,10 +222,13 @@ Options:
                            (default detailed)
   --device-idle-days N     Forget devices unseen this long, 0 for never
                            (default 30)
-  --push-relay             Without an APNs key in the state directory, send
-                           iPhone alerts and Live Activities sealed through
-                           the Sheprd push relay (push.sheprd.org); an APNs
-                           key, when there is one, is used instead
+  --no-push-relay          Never send iPhone pushes through the Sheprd push
+                           relay (push.sheprd.org). By default a computer
+                           without an APNs key in the state directory sends
+                           alerts and Live Activities sealed through it, to
+                           phones that opted in; a key is used instead when
+                           there is one. --push-relay is accepted as the
+                           default
   --relay URL              Listen on this relay too, so paired phones reach
                            this computer from any network; repeatable
   --relay-name NAME        What the --relay before it is called, such as fra3
@@ -318,7 +321,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
     let mut bonjour = true;
     let mut github_cli = false;
     let mut github_hosts = Vec::new();
-    let mut push_relay = false;
+    let mut push_relay = true;
     let mut relays = Vec::new();
     while let Some(arg) = args.next() {
         let name = arg.to_str().unwrap_or_default().to_owned();
@@ -408,7 +411,9 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
             }
             "--no-bonjour" => bonjour = false,
             "--github-cli" => github_cli = true,
+            // Service definitions written while it was off by default.
             "--push-relay" => push_relay = true,
+            "--no-push-relay" => push_relay = false,
             "--github-host" => {
                 let host = text(value("--github-host")?, "--github-host")?;
                 if !crate::control::github::valid_host(&host) {

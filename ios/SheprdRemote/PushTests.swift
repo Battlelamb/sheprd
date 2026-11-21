@@ -46,12 +46,13 @@ final class PushTests {
         let started = Date()
         let answer: API.PushTestAnswer
         do {
-            let session = try await sessions.session(for: computer)
+            let relay = tokens.relayOrigin(computer.device).map { [$0] } ?? []
+            let session = try await sessions.session(for: computer, fallback: relay)
             answer = try await session.client.sendTestPush(id: id, bearer: session.token)
         } catch RemoteError.status(503, _) {
             status[key] = .failed(PushRelaySetting.isOn
                 ? "\(computer.name) has the push relay off and no APNs key. Turn on the push relay in Sheprd's Remote control settings there."
-                : "\(computer.name) has no APNs key, so it cannot send this phone notifications. Turn on the push relay here and on the computer.")
+                : "\(computer.name) has no APNs key, so it cannot send this phone notifications. Turn on the push relay here, and check it is not turned off in Sheprd's Remote control settings there.")
             return
         } catch let RemoteError.status(400, text) where text.contains("not registered") {
             status[key] = .failed(PushRelaySetting.isOn

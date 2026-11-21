@@ -20,7 +20,7 @@ struct PushRelaySection: View {
 
     What it cannot do: connect to your computer, run anything, or answer for you. Tokens are not stored or logged.
 
-    Apple also sees the push token, timing, and size of every push. The computer must have the push relay on too, in Sheprd's Remote control settings.
+    Apple also sees the push token, timing, and size of every push. Computers are ready for it unless it was turned off in Sheprd's Remote control settings there.
     """
 
     var body: some View {
@@ -37,7 +37,11 @@ struct PushRelaySection: View {
                 }
             ))
             ForEach(model.computers) { computer in
-                LabeledContent(model.displayName(computer), value: Self.label(model.tokens.delivery[computer.fingerprint], pushRelay: pushRelay))
+                LabeledContent(model.displayName(computer), value: Self.label(
+                    model.tokens.delivery[computer.fingerprint],
+                    reached: !model.tokens.unreached.contains(computer.fingerprint),
+                    pushRelay: pushRelay
+                ))
             }
             if pushRelay, let error = model.tokens.pushRelay.lastError {
                 Text(error).font(.footnote).foregroundStyle(.secondary)
@@ -65,9 +69,13 @@ struct PushRelaySection: View {
         }
     }
 
-    /// How one computer delivers, as far as its last answer said.
-    static func label(_ delivery: ActivityTokens.Delivery?, pushRelay: Bool) -> String {
-        switch delivery {
+    /// How one computer delivers, as far as its last answer said, and
+    /// whether the last registration reached it.
+    static func label(_ delivery: ActivityTokens.Delivery?, reached: Bool, pushRelay: Bool) -> String {
+        if !reached {
+            return "Not reached; tried again when online"
+        }
+        return switch delivery {
         case .pushRelay: pushRelay ? "Push relay" : "Push relay, off here"
         case .ownKey: pushRelay ? "Own APNs key, which needs the push relay off" : "Own APNs key"
         case .off: "No push set up"

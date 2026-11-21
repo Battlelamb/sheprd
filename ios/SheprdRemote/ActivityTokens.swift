@@ -50,6 +50,13 @@ final class ActivityTokens {
 
     /// The paired computers, kept current by the app model.
     var computers: [Computer] = []
+    /// The relay proxy address for a computer's device id, while one
+    /// listens: a fleet member or linked host may answer only through it.
+    @ObservationIgnored var relayOrigin: (String) -> String? = { _ in nil }
+    /// Computers the last registration did not reach. Each is registered
+    /// again once it comes online (`online`), so a computer away when a
+    /// token or the push relay setting changed still gets them.
+    private(set) var unreached: Set<Fingerprint> = []
     let pushRelay = PushRelayAccess()
     private let sessions: Sessions
     private var started = false
@@ -80,6 +87,13 @@ final class ActivityTokens {
     func pushRelayRejected(by computer: Computer) async -> String? {
         pushRelay.rejected()
         return await sync(only: computer.fingerprint)[computer.fingerprint]
+    }
+
+    /// `computer` is online again: registers with it when the last try
+    /// did not reach it.
+    func online(_ computer: Computer) {
+        guard unreached.contains(computer.fingerprint) else { return }
+        Task { await sync(only: computer.fingerprint) }
     }
 
     /// Starts watching ActivityKit; safe to call more than once.
@@ -236,10 +250,12 @@ final class ActivityTokens {
             genericActivities: UserDefaults.standard.bool(forKey: Self.genericSetting)
         )
         do {
-            let session = try await sessions.session(for: computer)
+            let relay = relayOrigin(computer.device).map { [$0] } ?? []
+            let session = try await sessions.session(for: computer, fallback: relay)
             guard PushRelaySetting.isOn == viaPushRelay else { return changed }
             guard computers.contains(where: { $0.fingerprint == fingerprint }) else { return forgotten }
             let answer = try await session.client.registerAPNs(registration, bearer: session.token)
+            unreached.remove(computer.fingerprint)
             delivery[computer.fingerprint] = switch answer.delivery {
             case .ownKey: .ownKey
             case .pushRelay: .pushRelay
@@ -256,10 +272,12 @@ final class ActivityTokens {
             // A computer with no push set up. Nothing is wrong, and the
             // session is good: it answered.
             delivery[computer.fingerprint] = .off
+            unreached.remove(computer.fingerprint)
             lastError = nil
             return nil
         } catch {
             await sessions.forget(computer)
+            unreached.insert(computer.fingerprint)
             let failure = "\(computer.name) (\(computer.fingerprint.hex.prefix(8))): \(error.localizedDescription)"
             lastError = failure
             return failure

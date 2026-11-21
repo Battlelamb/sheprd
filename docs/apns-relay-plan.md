@@ -202,14 +202,19 @@ the app lets the credential expire, and APNs reports the tokens gone.
 
 ## Opt-in
 
-Relay delivery is off by default. A daemon with no relay setting makes no
-connection to the relay, and the iOS app makes no attest call until the user
-turns it on.
+Relay delivery starts with the phone. The iOS app makes no attest call and
+gives out no handle until the user turns it on, and a daemon connects to the
+relay only to deliver to a handle a phone gave it, so until then nothing
+reaches the relay from either side.
 
 The choice is made in two places, because each side holds something different:
 
-- **Sheprd**, Remote Control settings: `push_relay = false` in `[remote]`, for
-  each computer. This allows content to leave that computer.
+- **Sheprd**, Remote Control settings: `push_relay` in `[remote]`, for each
+  computer. It is on by default, so every computer the phone is paired with,
+  linked hosts and fleet members included, pushes once the phone opts in,
+  without a setting to find on each machine. Turning it off
+  (`push_relay = false`, `--no-push-relay`) keeps content from leaving that
+  computer through the relay even for a phone that opted in.
 - **iOS app**, Settings > Live Activities: this allows the phone to attest and
   give out handles. When the user first pairs, or when a paired computer has
   the relay on, the app offers this with the same explanation.

@@ -2020,7 +2020,7 @@ dependencies = [
  "alsa",
  "coreaudio-rs",
  "dasp_sample",
- "jni",
+ "jni 0.21.1",
  "js-sys",
  "libc",
  "mach2 0.5.0",
@@ -6521,6 +6521,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "jni"
+version = "0.22.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5efd9a482cf3a427f00d6b35f14332adc7902ce91efb778580e180ff90fa3498"
+dependencies = [
+ "cfg-if",
+ "combine",
+ "jni-macros",
+ "jni-sys 0.4.1",
+ "log",
+ "simd_cesu8",
+ "thiserror 2.0.21",
+ "walkdir",
+ "windows-link 0.2.1",
+]
+
+[[package]]
+name = "jni-macros"
+version = "0.22.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a00109accc170f0bdb141fed3e393c565b6f5e072365c3bd58f5b062591560a3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "rustc_version",
+ "simd_cesu8",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "jni-sys"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6748,7 +6778,7 @@ dependencies = [
  "html5ever 0.29.1",
  "http",
  "javascriptcore-rs",
- "jni",
+ "jni 0.21.1",
  "kuchikiki",
  "libc",
  "ndk",
@@ -10736,6 +10766,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustls-platform-verifier"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1167586491e2b18b8bfbb293e8180ec17c201c4f076d7cb3070ca964e7598f98"
+dependencies = [
+ "core-foundation 0.10.0",
+ "core-foundation-sys",
+ "jni 0.22.4",
+ "log",
+ "once_cell",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-platform-verifier-android",
+ "rustls-webpki",
+ "security-framework",
+ "security-framework-sys",
+ "webpki-root-certs",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rustls-platform-verifier-android"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eec689c0bc40ff2458a5977b6619cb718087084a18e02a131c599b62d05e1a5f"
+
+[[package]]
 name = "rustls-webpki"
 version = "0.103.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11513,6 +11570,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "sheprd-dashboard"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.23.1",
+ "futures-util",
+ "getrandom 0.4.3",
+ "hmac 0.13.0",
+ "http-body-util",
+ "percent-encoding",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "thiserror 2.0.21",
+ "tokio",
+ "tower",
+ "tracing",
+]
+
+[[package]]
 name = "sheprd-diagnostics"
 version = "0.1.0"
 dependencies = [
@@ -11525,6 +11602,17 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "sheprd-fleet-ffi"
+version = "0.1.0"
+dependencies = [
+ "p256 0.14.0",
+ "serde",
+ "serde_json",
+ "sheprd-remote-control",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -11623,9 +11711,11 @@ dependencies = [
  "sheprd-mods",
  "sheprd-orchestrator",
  "sheprd-relay",
+ "sheprd-relay-agent",
  "sheprd-remote",
  "sheprd-remote-control",
  "sheprd-session",
+ "sheprd-terminal",
  "sheprd-traces",
  "sheprd-updater",
  "sheprd-usage",
@@ -11780,9 +11870,11 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
+ "getrandom 0.4.3",
  "hmac 0.13.0",
  "http-body-util",
  "p256 0.14.0",
+ "rcgen",
  "rusqlite",
  "rustls",
  "secrecy",
@@ -11790,6 +11882,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "sheprd-apns",
+ "sheprd-dashboard",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -11799,6 +11892,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "webpki-roots",
+ "x509-parser",
 ]
 
 [[package]]
@@ -11811,10 +11905,8 @@ dependencies = [
  "ed25519-dalek",
  "futures-util",
  "getrandom 0.4.3",
- "hmac 0.13.0",
  "http-body-util",
  "p256 0.14.0",
- "percent-encoding",
  "pgp",
  "quinn",
  "rcgen",
@@ -11823,6 +11915,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
+ "sheprd-dashboard",
  "sheprd-tunnel",
  "thiserror 2.0.21",
  "tokio",
@@ -11845,6 +11938,7 @@ dependencies = [
  "quinn",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "sheprd-relay",
  "sheprd-tunnel",
  "tempfile",
@@ -11927,6 +12021,7 @@ dependencies = [
  "sheprd-core-client",
  "sheprd-github",
  "sheprd-relay",
+ "sheprd-relay-agent",
  "sheprd-session",
  "sheprd-terminal",
  "sheprd-tunnel",
@@ -12154,6 +12249,16 @@ name = "simd-adler32"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
+
+[[package]]
+name = "simd_cesu8"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11031e251abf8611c80f460e19dbdeb54a66db918e49c65a7065b46ac7aec520"
+dependencies = [
+ "rustc_version",
+ "simdutf8",
+]
 
 [[package]]
 name = "simd_helpers"
@@ -13789,6 +13894,7 @@ dependencies = [
  "percent-encoding",
  "rustls",
  "rustls-pki-types",
+ "rustls-platform-verifier",
  "ureq-proto",
  "utf8-zero",
  "webpki-roots",
@@ -14312,6 +14418,15 @@ dependencies = [
  "pkg-config",
  "soup3-sys",
  "system-deps",
+]
+
+[[package]]
+name = "webpki-root-certs"
+version = "1.0.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "293198dcebfb821155b5092ab94b5a82ff180eddd7241df3bd6e66a4ffd1a585"
+dependencies = [
+ "rustls-pki-types",
 ]
 
 [[package]]

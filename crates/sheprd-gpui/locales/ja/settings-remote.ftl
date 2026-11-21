@@ -3,7 +3,7 @@
 # saves on each SSH host.
 
 settings-remote-health-updating = サービスを更新中…
-settings-remote-health-off = オフ。オンにすると、ネットワーク上で HTTPS 経由で（Tailscale の実行中は Tailscale 経由でも）チャットを提供するユーザーサービスがインストールされます。
+settings-remote-health-off = オフ。オンにすると、ネットワーク上で HTTPS 経由で（Tailscale の実行中は Tailscale 経由でも、「リレー」でリレーを追加した後はリレー経由でも）チャットを提供するユーザーサービスがインストールされます。
 settings-remote-health-starting = 起動中…
 settings-remote-health-running = ポート { $port } で実行中 · デバイス { $devices } 台、{ $connected } 台が接続中
 settings-remote-health-running-alone = ポート { $port } で実行中 · デバイス { $devices } 台、{ $connected } 台が接続中 · Herdr は実行されていません

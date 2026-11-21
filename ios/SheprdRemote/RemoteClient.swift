@@ -248,6 +248,24 @@ final class RemoteClient: Sendable {
         try await send("POST", "/api/v2/hosts/relay", body: request, bearer: bearer)
     }
 
+    // MARK: Fleet
+
+    /// A fleet call (`FleetClient`): JSON in, the answer's bytes out.
+    func fleetCall(_ method: String, _ path: String, body: Data?, bearer: String) async throws -> Data {
+        guard let url = URL(string: origin + path) else { throw RemoteError.unreachable }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.httpBody = body
+        if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw RemoteError.notHTTP }
+        guard (200..<300).contains(http.statusCode) else {
+            throw RemoteError.status(http.statusCode, Refusal.text(status: http.statusCode, body: data))
+        }
+        return data
+    }
+
     // MARK: Tags
 
     /// Offers this phone's copy of the computer's tags; answers those that
@@ -523,8 +541,13 @@ final class RemoteClient: Sendable {
         )
     }
 
-    func registerAPNs(_ registration: API.APNsRegistration, bearer: String) async throws {
-        let _: EmptyAnswer = try await send("POST", "/api/apns", body: registration, bearer: bearer)
+    func registerAPNs(_ registration: API.APNsRegistration, bearer: String) async throws -> API.APNsAnswer {
+        try await send("POST", "/api/apns", body: registration, bearer: bearer)
+    }
+
+    /// Asks the computer to send this phone a sealed test alert carrying `id`.
+    func sendTestPush(id: String, bearer: String) async throws -> API.PushTestAnswer {
+        try await send("POST", "/api/apns/test", body: API.PushTestRequest(id: id), bearer: bearer)
     }
 
     /// Writes what only this phone saw to the computer's `daemon.log`. The
@@ -631,12 +654,10 @@ actor Sessions {
     private var reached: [String: String] = [:]
 
     /// A token from the first of the computer's addresses that answers,
-    /// trying the last one that did first.
-    func session(for computer: Computer) async throws -> (client: RemoteClient, token: String) {
-        var origins = computer.origins
-        if let last = reached[computer.device], let index = origins.firstIndex(of: last) {
-            origins.insert(origins.remove(at: index), at: 0)
-        }
+    /// trying the last one that did first, then `fallback`: its relay
+    /// proxy's, for a computer the phone may reach only through a relay.
+    func session(for computer: Computer, fallback: [String] = []) async throws -> (client: RemoteClient, token: String) {
+        let origins = computer.sessionOrigins(last: reached[computer.device], fallback: fallback)
         let minted = try await mint(computer, at: origins, round: computer.device)
         return (minted.client, minted.token)
     }

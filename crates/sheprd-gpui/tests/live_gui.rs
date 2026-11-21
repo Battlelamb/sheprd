@@ -102,7 +102,41 @@ fn native_notifications() {
 #[test]
 #[ignore = "requires active native desktop; a page in the window, no daemon"]
 fn native_pages() {
+    #[cfg(windows)]
+    warm_webview2();
     native_fixture(Fixture::Pages);
+}
+
+/// Reads every file of the installed WebView2 runtime once, so the pages
+/// check times the app rather than the runner's disk. A fresh Windows runner
+/// reads its image's files slowly the first time: the runtime, about 950 MB,
+/// takes over a minute, and the first page WebView2 starts there took from 5
+/// to over 60 seconds to build, while every later one took about a second.
+/// Read beforehand, the first page builds in about a second too.
+#[cfg(windows)]
+fn warm_webview2() {
+    let Some(root) = std::env::var_os("ProgramFiles(x86)") else {
+        return;
+    };
+    let started = Instant::now();
+    let mut pending = vec![Path::new(&root).join(r"Microsoft\EdgeWebView\Application")];
+    let mut bytes = 0;
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for path in entries.flatten().map(|entry| entry.path()) {
+            if path.is_dir() {
+                pending.push(path);
+            } else if let Ok(mut file) = fs::File::open(&path) {
+                bytes += std::io::copy(&mut file, &mut std::io::sink()).unwrap_or(0);
+            }
+        }
+    }
+    eprintln!(
+        "PAGES read {bytes} bytes of the WebView2 runtime in {:?}",
+        started.elapsed()
+    );
 }
 
 #[cfg(target_os = "linux")]

@@ -30,6 +30,7 @@ The native app for Sheprd's remote control (`docs/ios-app-plan.md`).
 | --- | --- |
 | `project.yml` | XcodeGen spec for the `SheprdRemote` app and the `SheprdRemoteWidgets` extension: iOS 26, Swift 6 with complete concurrency checking, iPhone and iPad |
 | `SheprdRemoteCore/` | Swift package with no UIKit: the transcript model and its reducer, the v2 API's messages, `ComputerLink` (address racing, resubscription, backoff), pairing links, fingerprints, session signatures, sealed notifications |
+| `SheprdRemoteCore/Sources/SheprdFleetLog/` | The phone's own copy of the fleet log: replayed and checked by the Rust `sheprd-fleet-ffi` crate, linked as `SheprdFleetFFI` (`tools/build-fleet-ffi.sh` builds it, `just ios-test` and `just ios-build` run it first), drafts checked before Face ID, and sync with any computer of the fleet. Linked by the app alone |
 | `SheprdRemoteCore/Sources/SheprdGitHub/` | The phone's GitHub client, its own target over `SheprdRemoteCore` (never the reverse) and linked by the app alone: hosts, leased and signed-in tokens, the GraphQL and REST reads, pull requests, checks, and their logs |
 | `SheprdRemoteCore/Sources/SheprdNearby/` | Nearby pairing over Bluetooth: the offer exchange, framing, the short code, and the sightings the scan keeps; the radio is in `SheprdRemote/Nearby/`. Over `SheprdRemoteCore`, linked by the app alone |
 | `SheprdRemoteCore/Sources/SheprdRelay/` | Reaching a computer through Sheprd relays: dial proofs, sessions, the local proxy, racing, nearness, and the saved list. Over `SheprdRemoteCore` and `SheprdTunnel`, linked by the app alone; the saved `RelayRecord` itself stays in Core |
@@ -47,7 +48,12 @@ The native app for Sheprd's remote control (`docs/ios-app-plan.md`).
 
 Requires Xcode 27 or later (App Store uploads need the iOS 27 SDK) and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
+Building the app or the package needs the fleet log library from Rust
+first, with the pinned toolchain (`rust-toolchain.toml`); `just ios-test` and
+`just ios-build` build it.
+
 ```sh
+just ios-fleet-ffi # the fleet log library (ios/tools/build-fleet-ffi.sh)
 just ios-test      # Swift package tests on the Mac, no simulator
 just ios-build     # unsigned simulator build of the app and its extensions
 just ios-generate  # then open ios/SheprdRemote.xcodeproj
@@ -268,10 +274,64 @@ there. The code comes from a commitment-based exchange
 (`docs/ios-app-plan.md`, "Nearby pairing, exactly"), so it also vouches
 for the CA fingerprint the claim then pins.
 
+## Push relay
+
+A TestFlight or App Store install cannot use a computer's own APNs key:
+Apple takes pushes for this app only from Sheprd's. The Sheprd push relay
+(`crates/sheprd-push-relay`, `docs/apns-relay-plan.md`) holds that key and
+forwards pushes, sealed so it reads none of them. The app turns it on at
+launch, after a new install or a reinstall, unless the user turned it off in
+Settings > Push Relay, which also shows what the push relay sees. Computers
+are ready by default too (`push_relay` in `[remote]`, which a user may turn
+off per computer), so every paired computer pushes through it.
+
+How a computer delivers this phone's pushes:
+
+| Mode | Computer | Phone sends | What travels |
+| --- | --- | --- | --- |
+| Off | No APNs key, `push_relay = false` | Tokens, answered 503 | Nothing through APNs; Web Push only |
+| Own key | `STATE_DIR/apns/AuthKey.p8` (below) | Tokens, with the push relay off here | Straight to Apple. Alerts sealed, Live Activities plain |
+| Push relay | No key, `push_relay` on (the default) | Handles, with the push relay on here | Through push.sheprd.org. Alerts and Live Activities sealed |
+
+Settings shows each computer's mode, as it answered the last
+registration (older computers do not say).
+
+- **Attesting.** On first use the app asks the push relay for a challenge,
+  attests a new App Attest key over the challenge's SHA-256, and gets a
+  credential for 30 days and the push relay's key (`PushRelayAccess`). The
+  credential is kept in the app's own keychain item, which the extensions
+  cannot read, and the app attests again a week before it runs out, the
+  next time it syncs. Renewal by assertion is not built yet.
+- **Handles.** Each token becomes a handle made on the phone: the token,
+  its kind, the credential, and a random id, sealed to the push relay's key
+  (`PushRelayCredential.handle`). Computers hold handles and never see a
+  token. While the push relay is on, no token is sent, and the notify key
+  goes to every computer, since Live Activity content is sealed to it.
+- **Live Activities.** The computer seals `attributes` and `content-state`.
+  The widget extension cannot read the keychain on a locked phone, so while
+  the push relay is on the app also keeps the notify keys in an App Group
+  file protected until first unlock, which the widget opens them with
+  (`docs/ios-spikes.md`). Attributes count only when opened by the key of
+  the computer they name. Anything that does not open, and any plain
+  content while the push relay is on, shows a fixed "Sheprd" activity with
+  no buttons (`SealedCover`). The debug sample activity is plain, so it
+  shows that cover while the push relay is on.
+- **Turning it off** revokes every handle the phone made, forgets the
+  credential, removes the App Group key file, and sends tokens again.
+- **Environments.** Xcode builds attest in App Attest's development
+  environment and use `push-sandbox.sheprd.org`; TestFlight and App Store
+  builds attest in production and use `push.sheprd.org`. The app tells them
+  apart by `aps-environment` in its embedded provisioning profile, which
+  distribution builds do not carry. Each push relay refuses the other's
+  builds. The simulator has no App Attest, so the push relay cannot be used
+  there.
+
 ## APNs key for the daemon
 
-The daemon (`sheprd-remote-control`) sends Live Activity pushes with your own
-APNs token key. Without it everything else works, and the app's token upload
+For a copy of the app you sign yourself, the daemon
+(`sheprd-remote-control`) can send pushes with your own APNs token key
+instead of the push relay. Turn the push relay off in the app's Settings to
+use it. Without it everything else works, and the app's token upload
 is answered 503.
 
 1. **Create the key.** In the Apple Developer site, go to Certificates,
@@ -369,6 +429,38 @@ the phone: Apple sees only "Sheprd", "New activity", and ciphertext.
    push that removes the chat's notifications. Badges show the questions
    waiting.
 
+5. **Test push.** Settings > Notifications > Send Test Push from a computer
+   asks it (`POST /api/apns/test`) for one sealed alert carrying a random
+   id. The extension records the id in the App Group as it opens the alert
+   (`PushTestReceipts`), and Settings shows "Arrived in N s", or where it
+   stopped: no APNs key on the computer, no alert token from this phone yet,
+   what APNs refused, or nothing within 30 seconds. A tap on it only opens
+   the app.
+6. **Test push from this iPhone.** With the push relay on, Settings >
+   Notifications > Send Test Push from This iPhone needs no computer online.
+   The phone makes (or reuses) a push relay handle for its own alert token
+   and posts a test alert to `POST /v1/push` on this build's push relay
+   (`push-sandbox.sheprd.org` for Xcode builds, `push.sheprd.org`
+   otherwise), shaped like a computer's test push: the same cover,
+   `mutable-content`, thread `test`, and `sealed` field under the same seal.
+   - It is sealed to a key of the phone's own (`NotifyKey.own`), kept in
+     its own keychain item and never given to a computer, and names
+     `this-phone` as its computer, which is no fingerprint.
+   - The extension tries the computers' keys first. Only an alert none of
+     them opens is tried with the phone's own key, and it shows only if it
+     is exactly a self test (`SelfTestPush.open`): a test id, no badge,
+     permission, wizz, or clear. It records the id and shows the text with
+     no computer, chat, or actions.
+   - Settings then waits for the receipt as above. A push relay answer
+     other than `delivered` says where it stopped: an expired credential or
+     a refused handle (the next try attests again), a stale token (`gone`),
+     `limited`, or `unavailable`.
+   - With the push relay off, the row says the phone cannot push itself
+     without it: there is no APNs key on the phone.
+   - A phone that never paired was never asked to show alerts, so it has
+     no alert token: the test asks then, as pairing does, and waits up to
+     10 seconds for iOS to hand the token over.
+
 A Live Activity in the question phase also offers up to three answers
 (never the "always" ones) as buttons that answer from the lock screen.
 Any computer can start an activity that names another computer's chat.
@@ -382,6 +474,25 @@ extension. For the simulator loop:
   App Group, where a script can seal a payload to it.
 - `-dumpNotifications YES` writes what was delivered, and opens each
   alert in the app as the extension would.
+
+### Notification filtering
+
+Each sealed alert carries the daemon's `event` id for the decision it
+copies. The extension keeps the ids it showed (`SeenAlerts`, App Group) and
+orders copies it handles at once (`AlertGate`), so a copy that arrives
+again, from a retry, a failover, or a second sender, shows once:
+
+- Without Apple's notification filtering entitlement, which is the case
+  today, the copy replaces the first one silently: no sound, and the first
+  is removed. One the person already dismissed comes back silently.
+- With it, the copy is dropped. The account holder requests
+  `com.apple.developer.usernotifications.filtering` for
+  `so.pen.herdr.remote.notifications` at
+  https://developer.apple.com/contact/request/notification-service . Once
+  Apple grants it, add the entitlement to the extension in `project.yml`
+  and set `SHEPRD_FILTERS_REPEATS` to `YES` there, in one change: a
+  provisioning profile without it fails signing, and the flag without it
+  would drop nothing.
 
 ## Around the system
 

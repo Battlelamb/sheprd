@@ -12,6 +12,7 @@
 //! live_activities = "detailed" # or "generic": no chat names or steps
 //! device_idle_days = 30         # 0 never forgets a device
 //! presence = false             # hold phone alerts while its owner is at this Mac
+//! push_relay = true            # iPhone pushes through push.sheprd.org without an APNs key
 //! relays = ["https://relay.example.org"]  # reach this computer from any network
 //! github_hosts = ["ghe.example.com"]       # Enterprise Server hosts besides gh's
 //! ```
@@ -65,6 +66,12 @@ pub struct RemoteConfig {
     /// Whether paired iPhones near this Mac over Bluetooth hold their
     /// alerts while the desktop is in use (`herdr-nearby`, macOS only).
     pub presence: bool,
+    /// Whether iPhone alerts and Live Activities may go through the Sheprd
+    /// push relay, sealed, when this computer has no APNs key of its own
+    /// (`docs/apns-relay-plan.md`, Opt-in). On by default: nothing reaches
+    /// the push relay until a phone opts in and gives this computer
+    /// handles, so every linked computer pushes without a setting each.
+    pub push_relay: bool,
     /// Relays the daemon listens on, so paired phones reach this computer
     /// from any network (`docs/relay-plan.md`); none by default.
     pub relays: Vec<Relay>,
@@ -86,6 +93,7 @@ impl Default for RemoteConfig {
             notifications: Privacy::default(),
             port: DEFAULT_PORT,
             presence: false,
+            push_relay: true,
             relays: Vec::new(),
             // keep-sorted end
         }
@@ -336,6 +344,9 @@ pub enum Edit {
     Notifications(Privacy),
     Port(u16),
     Presence(bool),
+    /// Whether iPhone pushes may go through the push relay
+    /// (`push.sheprd.org`) on a computer without an APNs key.
+    PushRelay(bool),
     /// The whole list, as Settings shows it after adding or removing one;
     /// each keeps its label.
     Relays(Vec<Relay>),
@@ -372,6 +383,7 @@ impl Edit {
             Self::Port(0) => return Err(Error::Port),
             Self::Port(port) => ("port", i64::from(port).into()),
             Self::Presence(on) => ("presence", on.into()),
+            Self::PushRelay(on) => ("push_relay", on.into()),
             Self::Relays(relays) => {
                 // Written as the daemon names them, each once, so the
                 // list matches the relays its status reports.

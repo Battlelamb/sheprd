@@ -283,18 +283,22 @@ ios-generate:
     cd ios && xcodegen -q
     python3 ios/tools/test_branding.py
 
+# The fleet log library the app links, built from Rust (ios/tools/build-fleet-ffi.sh).
+ios-fleet-ffi:
+    sh ios/tools/build-fleet-ffi.sh
+
 # Swift package tests, against the fixtures the daemon's Rust tests write.
-ios-test:
+ios-test: ios-fleet-ffi
     PYTHONDONTWRITEBYTECODE=1 python3 ios/tools/test_testflight_notes.py
     PYTHONDONTWRITEBYTECODE=1 python3 ios/tools/test_signing.py
     cd ios/SheprdRemoteCore && swift test
 
 # Unsigned build of the app and its extensions for the simulator.
-ios-build: ios-generate
+ios-build: ios-fleet-ffi ios-generate
     cd ios && xcodebuild -project SheprdRemote.xcodeproj -scheme SheprdRemote -destination 'generic/platform=iOS Simulator' -derivedDataPath build CODE_SIGNING_ALLOWED=NO -quiet build
 
 # Archive and upload to TestFlight, taking the key from `pass` when unset.
-ios-testflight:
+ios-testflight: ios-fleet-ffi
     #!/usr/bin/env bash
     set -euo pipefail
     # CI sets these from the `testflight` environment's secrets; here what

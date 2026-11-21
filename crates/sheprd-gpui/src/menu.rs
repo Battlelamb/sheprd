@@ -62,6 +62,8 @@ mod worktree_open_tests;
 #[cfg(test)]
 mod worktree_tests;
 
+#[cfg(test)]
+pub(crate) use github::AdditionalAccount;
 #[cfg(any(windows, test, feature = "integration-test"))]
 pub(crate) use state::Cover;
 pub(crate) use {

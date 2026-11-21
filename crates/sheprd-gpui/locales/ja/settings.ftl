@@ -96,7 +96,7 @@ settings-lead-integrations = Herdr が起動・追跡できるエージェント
 settings-lead-plugins = プラグインが報告する内容をサイドバーに表示します。
 settings-lead-cloud-devices = クラウドアカウントからマシンを作成し、デバイスとして使用します。
 settings-lead-machines = タブ内で動作する Mac です。タブを閉じても一時停止するまで動作し続け、アプリを終了すると状態が保存されます。
-settings-lead-remote-control = ネットワーク上の HTTPS または Tailscale 経由で、スマートフォンからチャットを使用できます。
+settings-lead-remote-control = スマートフォンからこのコンピュータのチャット、ターミナル、通知を、ネットワーク、Tailscale、またはリレー経由で使用できます。Fleet はこの機能の上で動作します。
 settings-lead-configuration = これらの設定の元になるファイルです。保存した編集は自動的に再読み込みされます。
 
 ## Rows, in catalog order: each title, then its description.

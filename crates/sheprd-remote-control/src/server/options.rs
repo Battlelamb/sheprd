@@ -47,6 +47,9 @@ pub struct Options {
     pub live_activities: ActivityDetail,
     pub port: u16,
     pub privacy: Privacy,
+    /// Whether APNs pushes may go through the Sheprd push relay when there
+    /// is no APNs key in the state directory: on unless `--no-push-relay`.
+    pub push_relay: bool,
     /// The relays to listen on, so paired phones reach this computer from
     /// any network; none when empty.
     pub relays: Vec<Relay>,
@@ -112,6 +115,11 @@ pub enum Invocation {
     RelayEnroll {
         state_dir: Option<PathBuf>,
     },
+    /// Prints the running daemon's push status as JSON, or nothing when
+    /// none answers (`app::push_status`).
+    PushStatus {
+        state_dir: Option<PathBuf>,
+    },
     /// Revokes a device that other computer enrolled.
     Revoke {
         state_dir: Option<PathBuf>,
@@ -145,6 +153,8 @@ pub enum Invocation {
     DesktopPair {
         state_dir: Option<PathBuf>,
         name: String,
+        /// From a pairing link on stdin, not over Bluetooth.
+        link: bool,
     },
     /// Carries `ssh` to a machine added over Bluetooth, `r-ID.sheprd.invalid`,
     /// through its relays: its `ProxyCommand`.
@@ -152,8 +162,29 @@ pub enum Invocation {
         state_dir: Option<PathBuf>,
         host: String,
     },
+    /// The fleet's halves Sheprd runs over SSH (`crate::fleet`).
+    Fleet {
+        state_dir: Option<PathBuf>,
+        action: FleetAction,
+    },
     Help,
     Version,
+}
+
+/// What `fleet` does.
+#[derive(Debug, Eq, PartialEq)]
+pub enum FleetAction {
+    /// Takes `control::fleet::sync::Apply` on standard input and prints
+    /// what came of it, with what the caller lacks.
+    Apply,
+    /// Prints this computer's bundle signed for the fleet with this id, for
+    /// the member about to admit it.
+    Bundle { fleet: String },
+    /// Prints this computer as a Sheprd host, its record signed by its
+    /// certificate authority, for the member about to share it.
+    Intro,
+    /// Forgets the fleet here and the lines and records it wrote.
+    Scrub,
 }
 
 pub const USAGE: &str = "\
@@ -161,11 +192,16 @@ Usage: sheprd-remote-control serve --state-dir DIR [options]
        sheprd-remote-control enroll [--state-dir DIR] < REQUEST.json
        sheprd-remote-control revoke --device ID [--state-dir DIR]
        sheprd-remote-control relay-enroll [--state-dir DIR] < REQUEST.json
+       sheprd-remote-control push-status [--state-dir DIR]
        sheprd-remote-control tags [--offer] [--state-dir DIR] [< TAGS.json]
        sheprd-remote-control shortcuts [--offer] [--state-dir DIR] [< SHORTCUTS.json]
        sheprd-remote-control favorites [--offer] [--state-dir DIR] [< CHANGE.json]
        sheprd-remote-control relays [--offer] [--state-dir DIR] [< RELAYS.json]
-       sheprd-remote-control desktop-pair --name NAME [--state-dir DIR]
+       sheprd-remote-control fleet apply [--state-dir DIR] < APPLY.json
+       sheprd-remote-control fleet bundle --fleet ID [--state-dir DIR]
+       sheprd-remote-control fleet intro [--state-dir DIR]
+       sheprd-remote-control fleet scrub [--state-dir DIR]
+       sheprd-remote-control desktop-pair --name NAME [--link] [--state-dir DIR]
        sheprd-remote-control relay-connect [--state-dir DIR] HOST
 
 Serves this computer's Herdr chats to paired phones over HTTPS. Sheprd
@@ -194,6 +230,13 @@ Options:
                            (default detailed)
   --device-idle-days N     Forget devices unseen this long, 0 for never
                            (default 30)
+  --no-push-relay          Never send iPhone pushes through the Sheprd push
+                           relay (push.sheprd.org). By default a computer
+                           without an APNs key in the state directory sends
+                           alerts and Live Activities sealed through it, to
+                           phones that opted in; a key is used instead when
+                           there is one. --push-relay is accepted as the
+                           default
   --relay URL              Listen on this relay too, so paired phones reach
                            this computer from any network; repeatable
   --relay-name NAME        What the --relay before it is called, such as fra3
@@ -212,13 +255,27 @@ daemon when it does not run and prints this computer's answer as JSON.
 relay-enroll keeps a phone's relay keys, signed with its own key here, so
 the phone reaches this computer through its relays, and prints the outcome
 as JSON; it needs the daemon running.
+push-status prints how the daemon running here sends iPhone pushes, as
+JSON (its mode, and how the last alert and Live Activity push went), so
+Sheprd on another computer can show it; it prints nothing when no daemon
+answers.
 relays --offer takes {\"source\", \"relays\"}, the relays Sheprd on
 another computer listens on, replacing what that computer shared before:
 the daemon listens on them too, beside its own [remote] relays.
 desktop-pair adds a nearby Sheprd that is on another network: Sheprd
 runs it and carries its Bluetooth frames as JSON lines on stdio. The
 other computer is then reached through its relays, and relay-connect is
-the ProxyCommand ssh runs for it.
+the ProxyCommand ssh runs for it. With --link, it adds a Sheprd on any
+network from a pairing link that computer's Pair device copied, read as
+the first JSON line on stdin, never from the command line.
+fleet apply and fleet bundle are the fleet's halves Sheprd on another
+computer runs here over SSH: apply takes signed fleet operations and
+prints what this computer holds that the caller lacks; bundle prints this
+computer's keys, signed, for the member about to admit it; intro prints
+this computer as a host, signed by its certificate authority, for a
+member about to share it; scrub forgets the fleet here, with the
+authorized_keys lines and relay records it wrote, without signing
+anything: for a computer the fleet removed, or a fleet that is gone.
 Their state directory defaults to the one Sheprd on this computer uses.
 ";
 
@@ -231,6 +288,13 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
         Some("relay-enroll") => {
             return parse_host(true, args).map(|invocation| match invocation {
                 Invocation::Enroll { state_dir } => Invocation::RelayEnroll { state_dir },
+                other => other,
+            });
+        }
+        // `--state-dir` alone too.
+        Some("push-status") => {
+            return parse_host(true, args).map(|invocation| match invocation {
+                Invocation::Enroll { state_dir } => Invocation::PushStatus { state_dir },
                 other => other,
             });
         }
@@ -258,6 +322,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
                 offer,
             });
         }
+        Some("fleet") => return parse_fleet(args),
         Some(verb @ ("desktop-pair" | "relay-connect")) => {
             return parse_desktop(verb == "desktop-pair", args);
         }
@@ -277,6 +342,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
     let mut bonjour = true;
     let mut github_cli = false;
     let mut github_hosts = Vec::new();
+    let mut push_relay = true;
     let mut relays = Vec::new();
     while let Some(arg) = args.next() {
         let name = arg.to_str().unwrap_or_default().to_owned();
@@ -366,6 +432,9 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
             }
             "--no-bonjour" => bonjour = false,
             "--github-cli" => github_cli = true,
+            // Service definitions written while it was off by default.
+            "--push-relay" => push_relay = true,
+            "--no-push-relay" => push_relay = false,
             "--github-host" => {
                 let host = text(value("--github-host")?, "--github-host")?;
                 if !crate::control::github::valid_host(&host) {
@@ -416,6 +485,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
         live_activities,
         port,
         privacy,
+        push_relay,
         relays,
         state_dir: state_dir.ok_or(ParseError::NoStateDir)?,
         wsl_catalog,
@@ -470,13 +540,13 @@ fn parse_host(
     })
 }
 
-/// `desktop-pair --name NAME [--state-dir DIR]` and
+/// `desktop-pair --name NAME [--link] [--state-dir DIR]` and
 /// `relay-connect [--state-dir DIR] HOST`.
 fn parse_desktop(
     pair: bool,
     mut args: impl Iterator<Item = OsString>,
 ) -> Result<Invocation, ParseError> {
-    let (mut state_dir, mut name, mut host) = (None, None, None);
+    let (mut state_dir, mut name, mut host, mut link) = (None, None, None, false);
     while let Some(arg) = args.next() {
         let text = arg.to_str().unwrap_or_default().to_owned();
         match text.as_str() {
@@ -493,6 +563,7 @@ fn parse_desktop(
                         .map_err(|_| ParseError::Value { option: "--name" })?,
                 );
             }
+            "--link" if pair => link = true,
             "-h" | "--help" => return Ok(Invocation::Help),
             _ if !pair && host.is_none() && !text.starts_with('-') && !text.is_empty() => {
                 host = Some(text);
@@ -504,12 +575,56 @@ fn parse_desktop(
         return Ok(Invocation::DesktopPair {
             state_dir,
             name: name.ok_or(ParseError::Missing("--name"))?,
+            link,
         });
     }
     Ok(Invocation::RelayConnect {
         state_dir,
         host: host.ok_or(ParseError::Missing("HOST"))?,
     })
+}
+
+/// `fleet apply|bundle [--fleet ID] [--state-dir DIR]`.
+fn parse_fleet(mut args: impl Iterator<Item = OsString>) -> Result<Invocation, ParseError> {
+    let verb = args
+        .next()
+        .and_then(|verb| verb.to_str().map(str::to_owned))
+        .ok_or(ParseError::Missing("apply, bundle, intro, or scrub"))?;
+    let (mut state_dir, mut fleet) = (None, None);
+    while let Some(arg) = args.next() {
+        let name = arg.to_str().unwrap_or_default().to_owned();
+        match name.as_str() {
+            "--state-dir" => {
+                state_dir = Some(PathBuf::from(
+                    args.next().ok_or(ParseError::Missing("--state-dir"))?,
+                ));
+            }
+            "--fleet" => {
+                let id = args.next().ok_or(ParseError::Missing("--fleet"))?;
+                fleet = Some(
+                    id.to_str()
+                        .filter(|id| {
+                            id.len() == 64 && id.bytes().all(|byte| byte.is_ascii_hexdigit())
+                        })
+                        .ok_or(ParseError::Value { option: "--fleet" })?
+                        .to_owned(),
+                );
+            }
+            "-h" | "--help" => return Ok(Invocation::Help),
+            _ => return Err(ParseError::Unknown(name)),
+        }
+    }
+    let action = match verb.as_str() {
+        "apply" if fleet.is_none() => FleetAction::Apply,
+        "intro" if fleet.is_none() => FleetAction::Intro,
+        "scrub" if fleet.is_none() => FleetAction::Scrub,
+        "bundle" => FleetAction::Bundle {
+            fleet: fleet.ok_or(ParseError::Missing("--fleet"))?,
+        },
+        "-h" | "--help" => return Ok(Invocation::Help),
+        _ => return Err(ParseError::Unknown(verb)),
+    };
+    Ok(Invocation::Fleet { state_dir, action })
 }
 
 /// `tags`, `shortcuts`, `favorites`, or `relays`, then `[--offer] [--state-dir DIR]`, as `made`.

@@ -68,6 +68,15 @@ struct SettingsView: View {
             }
             Section {
                 NavigationLink {
+                    FleetSettingsView().makesRoomForConnectionToast()
+                } label: {
+                    LabeledContent("Fleet", value: fleetSummary)
+                }
+            } footer: {
+                Text("Your computers and phones, and the hosts they share. Joining lets this \(UIDevice.current.model) control all of them.")
+            }
+            Section {
+                NavigationLink {
                     RelaysView().makesRoomForConnectionToast()
                 } label: {
                     LabeledContent("Relays", value: "\(model.savedRelays.relays.count)")
@@ -124,6 +133,28 @@ struct SettingsView: View {
                     let layout = model.termKeys.layout
                     LabeledContent("Terminal Keys", value: "\(layout.top.count + layout.bottom.count)")
                 }
+            }
+            PushRelaySection()
+            Section {
+                SelfTestPushRow()
+                ForEach(model.computers) { computer in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Button {
+                            Task { await model.pushTests.send(to: computer) }
+                        } label: {
+                            Label("Send Test Push from \(computer.name)", systemImage: "bell.badge")
+                        }
+                        if let status = model.pushTests.status[computer.fingerprint] {
+                            Text(PushTests.text(status))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } header: {
+                Text("Notifications")
+            } footer: {
+                Text("Sends this phone a sealed notification now, from a computer or from this phone through the push relay, and shows whether it arrived.")
             }
             Section {
                 if !ActivityAuthorizationInfo().areActivitiesEnabled {
@@ -200,6 +231,16 @@ struct SettingsView: View {
         .navigationDestination(isPresented: $showingGitHub) { GitHubSettingsView().makesRoomForConnectionToast() }
         .task { if UserDefaults.standard.bool(forKey: "openGitHub") { showingGitHub = true } }
         #endif
+    }
+
+    /// Where this phone stands with the fleet, beside its row.
+    private var fleetSummary: String {
+        let membership = model.fleetMembership
+        if membership.admitted {
+            let count = membership.status?.view?.members.count ?? 0
+            return count == 1 ? "1 member" : "\(count) members"
+        }
+        return membership.record == nil ? "Not joined" : "Waiting"
     }
 }
 

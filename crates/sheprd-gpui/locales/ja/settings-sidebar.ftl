@@ -4,7 +4,7 @@
 settings-sidebar-section-layout = レイアウト
 settings-sidebar-section-spacing = 間隔
 settings-sidebar-activity-bar-title = アクティビティバーを表示
-settings-sidebar-activity-bar-hint = ウインドウの左端にあるアイコンの列です。ワークスペース、概要、プルリクエスト、Issue、セキュリティ、オートメーション、ポート、使用量、トレースを切り替えます。
+settings-sidebar-activity-bar-hint = ウインドウの左端にあるアイコンの列です。「Workspaces」「Overview」「Pull requests」「Issues」「Security」「Automations」「Ports」「Usage」「Traces」を切り替えます。
 settings-sidebar-automations-title = オートメーションを表示
 settings-sidebar-ports-count-title = 「Ports」にサーバー数を表示
 settings-sidebar-ports-count-hint = このコンピュータで実行中のサーバーの数を、アクティビティバーの「Ports」アイコンに表示します。オンの場合、「Ports」セクションが閉じている間、Sheprd は 30 秒ごとにこのコンピュータのポートを一覧取得します。

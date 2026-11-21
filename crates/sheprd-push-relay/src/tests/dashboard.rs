@@ -138,6 +138,8 @@ async fn a_login_opens_the_stats() {
 #[cfg(unix)]
 #[test]
 fn the_token_file_is_optional_but_must_be_private_and_long() {
+    // Only this Unix test reads the token file: imported here, Windows
+    // builds of the tests have no unused import.
     use crate::serve::read_dashboard_token;
     use std::os::unix::fs::PermissionsExt as _;
     let dir = tempfile::tempdir().unwrap();

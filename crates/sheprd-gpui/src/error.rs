@@ -174,6 +174,8 @@ pub enum Error {
     LinkedFileMissing { path: PathBuf },
     #[error(transparent)]
     LinkHandlers(#[from] crate::link_handlers::Error),
+    #[error(transparent)]
+    LinkInput(#[from] crate::control::link_input::Error),
     #[error("This link names a file on another computer, {host}. It is not opened from here.")]
     LinkOnAnotherHost { host: String },
     #[error(transparent)]

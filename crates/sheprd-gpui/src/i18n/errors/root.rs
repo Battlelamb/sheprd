@@ -107,6 +107,7 @@ impl Localize for Error {
                 fl!("error-linked-file-missing", path = path(file))
             }
             Self::LinkHandlers(error) => error.localize(),
+            Self::LinkInput(error) => error.localize(),
             Self::LinkOnAnotherHost { host } => {
                 fl!("error-link-on-another-host", host = host.as_str())
             }

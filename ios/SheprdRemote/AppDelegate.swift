@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUser
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         AppLock.migrate()
+        PushRelaySetting.applyDefault()
         AppModel.current = model
         UNUserNotificationCenter.current().delegate = self
         Task { await NotificationCategories.register(.finished) }
@@ -28,8 +29,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUser
     }
 
     /// Asks once to show alerts, then registers for the APNs token the
-    /// paired computers seal alerts to.
-    static func enableAlerts() async {
+    /// paired computers seal alerts to. Whether alerts are allowed.
+    @discardableResult
+    static func enableAlerts() async -> Bool {
         let center = UNUserNotificationCenter.current()
         var options: UNAuthorizationOptions = [.alert, .badge, .sound]
         #if DEBUG
@@ -38,6 +40,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUser
         #endif
         let granted = (try? await center.requestAuthorization(options: options)) ?? false
         if granted { UIApplication.shared.registerForRemoteNotifications() }
+        return granted
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {

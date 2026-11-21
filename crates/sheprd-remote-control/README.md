@@ -478,11 +478,47 @@ relay's status alone, or `unreachable`), 503 when delivery is off, and 400
 when the phone registered no alert token or handle this mode reaches. The phone's extension records the id as it opens the alert, so
 the app can tell the user whether, and how fast, it arrived.
 
+Each notification decision gets an event id (`push::EventId`) that every
+copy of it carries: to each device, held while its owner is near,
+coalesced by the throttle, or sent by another way after a failure. The
+sealed alert carries it as `event`, and the app's Notification Service
+Extension shows a copy it already showed only in place of the first, with
+no sound (`Fixtures/notify/repeat.json` holds such copies for both sides'
+tests). A build with Apple's notification filtering entitlement drops the
+copy instead (`ios/README.md`, Notification filtering).
+
 The app's badge counts agents that want the user (`web::attention`): those
 with a question, those Herdr reports blocked, and those that finished and
 nobody has opened on a phone or focused in a Herdr client. A background push
 moves it when the count changes, and iOS may delay or drop those, so the
 number is exact only once the app is open.
+
+### One sender per agent, one notification per chat
+
+A daemon pushes only for its own Herdr session's panes. A herdr-core lists
+other machines' spaces beside this one's, and the hub drops them (and any
+address with a `/`), so when several linked computers share a core each
+agent still has exactly one computer that alerts for it. The notifier's
+`own_session` test locks that path from the core's document to the alert.
+
+Pane ids are unique only on one computer, so every identifier a push
+service or the phone collapses or groups by is scoped to the computer:
+
+| Identifier | Value |
+| --- | --- |
+| APNs `apns-collapse-id` | The pairing's scope, `-`, and the chat's tag (`chat-{pane}`); a tag too long for APNs's 64 bytes is digested instead of cut |
+| APNs `thread-id` | `scope/pane`; the app's extension replaces it with `AlertKeys.thread(computer:pane:)` once it opens the alert |
+| Web Push `Topic` | SHA-256 of the fingerprint and the tag, as 32 base64url characters |
+
+The scope (`apns::alert::scope`) is 16 hex digits of a SHA-256 over the
+notify key the phone gave this computer, which the phone makes for each
+computer. It is not the CA fingerprint: APNs and the push relay see a
+value that tells one phone's computers apart, but that names no computer
+and differs for the same computer on another phone. The same pane on two
+computers therefore never replaces or groups with the other's
+notification, while a newer push for one chat still replaces its older
+one. The app opens alerts and routes answers by the sealed `computer`, so
+older apps keep working.
 
 ### APNs delivery: off, own key, or relay
 
@@ -491,16 +527,17 @@ The native app's alerts and Live Activities go out one of three ways
 
 | Mode | When | What travels |
 | --- | --- | --- |
-| Off | No APNs key and `push_relay` off (the default) | Nothing through APNs; `POST /api/apns` answers 503 and alerts use Web Push |
+| Off | No APNs key and `push_relay = false` (`--no-push-relay`) | Nothing through APNs; `POST /api/apns` answers 503 and alerts use Web Push |
 | Own key | `STATE_DIR/apns/AuthKey.p8` and `config.json` exist | Straight to Apple with the user's key, for an app they sign themselves. Alerts sealed, Live Activities in plain text |
-| Relay | No key, and `[remote] push_relay = true` (`--push-relay`) | Through the Sheprd push relay, which holds the app's key (`docs/apns-relay-plan.md`). Every payload is sealed to the phone |
+| Relay | No key, and `[remote] push_relay` on (the default) | Through the Sheprd push relay, which holds the app's key (`docs/apns-relay-plan.md`). Every payload is sealed to the phone |
 
 The own key wins when both are set up. Each mode reaches only its own
 recipients: a key reaches hex tokens, the relay reaches handles, which the
 phone sealed to the relay so this daemon never sees the token inside. The
 app registers either with `POST /api/apns`, a handle in place of a token as
 `{"handle": "KEYID.BASE64URL", "environment": "production"}` (`sandbox` for
-Xcode builds). The environment picks one of the two relays compiled in,
+Xcode builds). The answer names the mode, `"delivery": "own_key"` or
+`"push_relay"`, which the app's Settings shows per computer. The environment picks one of the two relays compiled in,
 `push.sheprd.org` and `push-sandbox.sheprd.org`; no device can name another
 host.
 
@@ -524,6 +561,38 @@ for a minute
 (`apns::delivery::OUTAGE_MS`): alerts go by Web Push where the device
 subscribed, as any alert APNs did not take does, and activity updates are
 dropped rather than queued.
+
+Unpairing a phone revokes its push relay handles at the push relay
+(`apns::push_relay_revoke`), so the copies this computer held stop working
+before their credentials run out. Every way a device goes counts: Sheprd's
+Revoke and `sheprd-remote-control revoke` (both through the running
+daemon's control socket), a host replacing a phone it enrolled, the fleet
+taking devices away, and `--device-idle-days` expiry. The handles are read from the
+device's record just before it goes and queued without waiting, so the
+unpair never waits on or fails with the push relay. At most 64 unpaired
+devices wait and four revocations run at once, each with the client's own
+few tries and none after; while a push relay is out, its revocations are
+dropped, and a lost one still ends when its credential does. The log names
+no handle or device. Only push relay mode revokes: with the user's own key,
+or with `push_relay` turned off, the daemon makes no connection to the push
+relay, and stored handles are kept unused (turning `push_relay` back on
+reaches them again without the phone registering); turning off the phone's
+own setting is what revokes them then. Handles a phone replaces or drops in
+a later registration, such as an ended activity's, are not revoked: the push
+relay allows each phone only a few revocations a minute.
+
+`sheprd-remote-control push-status` prints the running daemon's answer to
+that request as JSON, or nothing when none answers, so Sheprd on another
+computer can show each linked host's push delivery: it runs the verb over
+SSH, as it runs `enroll`, without installing anything.
+
+The control socket's `push_status` request (`control::push`) answers with
+the mode (`off`, `own_key`, or `push_relay`) and how the last alert (a test
+push included) and the last Live Activity push went, each with its time
+(`apns::Ledger`). It is kept in memory, so a restart, as every change of
+mode is, starts it empty, and it names no token, handle, or device. Sheprd
+shows it in Settings > Remote control beside the push relay switch, and
+`sheprd remote push-status` prints it.
 
 ## Empty chats
 

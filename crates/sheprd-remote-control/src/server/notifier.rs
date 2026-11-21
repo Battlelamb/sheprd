@@ -431,6 +431,7 @@ async fn send_alert(state: &Arc<State>, device: &DeviceId, notification: &Notifi
         .apns
         .alert(&recipient, &key, sealed, &notification.tag, now_ms())
         .await;
+    state.pushes.record(apns::Kind::Alert, &sent, now_ms());
     if sent == Sent::Gone {
         let state = state.clone();
         let device = device.clone();
@@ -468,7 +469,7 @@ fn send(state: &State, device: &DeviceId, notification: &Notification) {
         return;
     };
     let message = notification.message(waiting(state));
-    let delivery = Delivery::for_notification(notification);
+    let delivery = Delivery::for_notification(notification, &apns::computer_id(&state.fingerprint));
     if let Ok(Outcome::Gone) = sender.send(&subscription, &message, &delivery) {
         let _ = state.auth().devices_mut().set_push(device, None);
     }

@@ -101,6 +101,14 @@ impl Delivery {
         Ok(Self::Off)
     }
 
+    /// The push relays, when pushes go through them.
+    pub(crate) fn push_relays(&self) -> Option<&Relays> {
+        match self {
+            Self::Relay(relays) => Some(relays),
+            Self::Off | Self::OwnKey(_) => None,
+        }
+    }
+
     pub(crate) fn is_off(&self) -> bool {
         matches!(self, Self::Off)
     }
@@ -114,6 +122,16 @@ impl Delivery {
         }
     }
 
+    /// As `POST /api/apns` tells the phone, so its Settings can say how
+    /// this computer delivers: `None` when it sends nothing.
+    pub(crate) fn wire_name(&self) -> Option<&'static str> {
+        match self {
+            Self::Off => None,
+            Self::OwnKey(_) => Some("own_key"),
+            Self::Relay(_) => Some("push_relay"),
+        }
+    }
+
     /// Whether this mode can send to `recipient`.
     pub(crate) fn reaches(&self, recipient: &Recipient) -> bool {
         matches!(
@@ -122,8 +140,8 @@ impl Delivery {
         )
     }
 
-    /// Sends `sealed`, sealed to `key`, to `recipient` under `tag` as its
-    /// collapse id, at `now_ms`.
+    /// Sends `sealed`, sealed to `key`, to `recipient`, collapsing under
+    /// `tag` in the pairing's scope (`alert::scope`), at `now_ms`.
     pub(crate) async fn alert(
         &self,
         recipient: &Recipient,
@@ -132,9 +150,10 @@ impl Delivery {
         tag: &str,
         now_ms: u64,
     ) -> Sent {
+        let scope = alert::scope(key);
         match (self, recipient) {
             (Self::OwnKey(sender), Recipient::Token(token)) => {
-                let Ok(push) = alert::push(sealed, tag, |plaintext| {
+                let Ok(push) = alert::push(sealed, &scope, tag, |plaintext| {
                     Ok(seal::seal(key, plaintext, seal::INFO)?)
                 }) else {
                     return Sent::Unsent;
@@ -145,9 +164,9 @@ impl Delivery {
                 if relays.is_down(handle.environment(), now_ms) {
                     return Sent::Unreachable;
                 }
-                let clear = alert::clear(&sealed.pane, tag);
+                let clear = alert::clear(&scope, &sealed.pane, tag);
                 let Ok(push) = SealedPush::build(key, seal::INFO, &clear, |sealer| {
-                    alert::push(sealed, tag, |plaintext| Ok(sealer.seal(plaintext)?))
+                    alert::push(sealed, &scope, tag, |plaintext| Ok(sealer.seal(plaintext)?))
                 }) else {
                     return Sent::Unsent;
                 };
@@ -239,6 +258,21 @@ impl Relays {
         self.relay(host)
             .down_until_ms
             .fetch_max(now_ms.saturating_add(OUTAGE_MS), Ordering::Relaxed);
+    }
+
+    /// Asks the push relay `handle` names to refuse it from now on, or
+    /// gives up at once while that push relay is out: revoking is best effort, and the
+    /// handle's credential runs out on its own.
+    pub(crate) async fn revoke(&self, handle: &Handle, now_ms: u64) -> RelayOutcome {
+        let host = handle.environment();
+        if self.is_down(host, now_ms) {
+            return RelayOutcome::Unavailable;
+        }
+        let outcome = self.relay(host).client.revoke(handle.secret()).await;
+        if outcome == RelayOutcome::Unavailable {
+            self.mark_down(host, now_ms);
+        }
+        outcome
     }
 
     /// Sends `push` to the relay `handle` names, or drops it while that

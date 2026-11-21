@@ -21,8 +21,8 @@ pub(crate) mod agent;
 pub(crate) mod bluetooth;
 mod error;
 pub(crate) mod flows;
-pub(crate) mod plain;
 pub(crate) mod joins;
+pub(crate) mod plain;
 mod remote;
 pub(crate) mod saved;
 

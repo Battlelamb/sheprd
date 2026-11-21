@@ -111,6 +111,7 @@ pub(crate) use server_keys::ActiveServerKeymap;
 pub(crate) struct SheprdWindow {
     // keep-sorted start
     pub(crate) _activation: Subscription,
+    pub(crate) _agent_favorites: Subscription,
     pub(crate) _appearance: Subscription,
     pub(crate) _browser_tabs: Subscription,
     pub(crate) _device_tags: Subscription,
@@ -130,6 +131,8 @@ pub(crate) struct SheprdWindow {
     pub(crate) active: bool,
     /// The activity bar's panel and filter.
     pub(crate) activity: sidebar::Activity,
+    /// Every device's favorite agents, as their daemons last answered.
+    pub(crate) agent_favorites: std::sync::Arc<crate::agent_favorites::Sets>,
     /// The coordinator group the agents panel is narrowed to, by name: a
     /// group outlives its coordinator's pane. None lists every group.
     pub(crate) agent_group: Option<String>,

@@ -6,6 +6,7 @@
 mod about;
 mod accessibility;
 mod actions;
+mod agent_favorites;
 mod agent_notes;
 mod agent_skill;
 mod ago;

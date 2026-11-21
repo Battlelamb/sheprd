@@ -17,6 +17,9 @@ impl Localize for app::Error {
             }
             Self::Control(error) => error.localize(),
             Self::Enroll(error) => error.localize(),
+            Self::Favorites(app::favorites::Error::Pane { pane }) => {
+                fl!("error-remote-control-favorite-pane", pane = pane.as_str())
+            }
             Self::GitHubHost { host } => {
                 fl!("error-remote-control-github-host", host = host.as_str())
             }

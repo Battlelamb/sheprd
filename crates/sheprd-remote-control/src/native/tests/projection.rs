@@ -36,6 +36,7 @@ fn project(summaries: HashMap<String, Summary>, pull_requests: &PullRequests) ->
         checkouts: &Default::default(),
         recognized: &Default::default(),
         computer: "Studio",
+        favorites: &Default::default(),
         fingerprint: "FP",
         layout: &layout(EndpointId::random()),
         load: None,

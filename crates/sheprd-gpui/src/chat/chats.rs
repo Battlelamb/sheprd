@@ -534,6 +534,19 @@ impl ChatPane {
         }
     }
 
+    /// The fold over the turns a continued conversation brought, if any.
+    pub(crate) fn earlier(&self) -> Option<super::earlier::Earlier> {
+        super::earlier::earlier(self.session.transcript(), &self.expanded)
+    }
+
+    /// Opens the turns a continued conversation brought, or folds them
+    /// again, then measures every row up to the header once more.
+    pub(crate) fn toggle_earlier(&mut self, fold: super::earlier::Earlier) {
+        self.toggle_expanded(fold.divider);
+        let rows = fold.start + 1;
+        super::glide::splice_in_place(&self.list, 0..rows, rows);
+    }
+
     /// Opens a folded card or folds an open one, then redraws it.
     pub(crate) fn toggle_expanded(&mut self, id: EntryId) {
         if !self.expanded.remove(&id) {

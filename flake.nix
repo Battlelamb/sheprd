@@ -78,7 +78,7 @@
                 (lib.importTOML ./Cargo.lock).package
               ).source
           );
-          moonframeHash = "sha256-zrDXz/pJ2jP+js+GbiAvJg/XPApOOieiq97w6IMpnfw=";
+          moonframeHash = "sha256-c4m2/uK5//f+FjDeLcGiBMYUrhoD7YukXVh9t+RdDI0=";
           moonframeSrc = pkgs.fetchgit {
             url = "https://github.com/moonframehq/moonframe";
             rev = moonframeRev;
@@ -111,7 +111,9 @@
             lockFile = ./Cargo.lock;
             # All Moonframe crates share this pinned Git checkout, including
             # when the optional feature is off and Cargo only vendors it.
-            outputHashes."moonframe-1.3.0" = moonframeHash;
+            outputHashes."moonframe-1.4.0" = moonframeHash;
+            # Sheprd's AccessKit fork, pinned in Cargo.toml's [patch.crates-io].
+            outputHashes."accesskit_macos-0.26.3" = "sha256-aBhgu63Zq/jiEEW/Tu0iiQr3srZfTjLMnAgohTMqUUk=";
           };
           # Moonframe's crates compile in files from the root of its repository
           # (the Luau types, its app, assets, skills, toolchain file) by paths

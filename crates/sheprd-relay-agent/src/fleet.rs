@@ -590,13 +590,15 @@ impl Held {
 }
 
 /// When `merged` would need more dial keys than a relay takes, holds back
-/// what it adds beside `held`: members `held` lacked are left out, and a
-/// member whose dial key changed takes its new keys, the old pair gone as
-/// a rotation always removes it, but waits in `crowded` until there is
-/// room: old keys are never kept, and the fleet's allow is left as the
-/// log decided. Removals, denials, and suspensions stay. Once everything
-/// fits, no one waits. The refusal, to report once the rest is applied;
-/// none when it fits.
+/// what does not fit, slot by slot: enrolled desktops and members whose
+/// key is unchanged and not waiting keep theirs; then, in order, members
+/// that rotated while working, then members already waiting (`crowded`),
+/// take what room is left, and members new here come in only if all of
+/// them fit. A member held back that the agent knew waits in `crowded`,
+/// its old pair gone as a rotation always removes it, until there is
+/// room; those new here are left out of the file until a later one, and
+/// the error says so. Removals and denials always apply. A rotation that needs no
+/// extra slot, its old one freed, is never held back for another's wait.
 fn hold_back_additions(
     held: Option<&Access>,
     merged: &mut Access,
@@ -609,25 +611,60 @@ fn hold_back_additions(
         return None;
     };
     let before = |id: &Id| held.and_then(|held| held.members.get(id));
-    let added: Vec<Id> = merged
+    let waiting = |id: &Id, member: &Member| {
+        crowded.contains(id) || before(id).is_none_or(|old| old.dial != member.dial)
+    };
+    // The slots held already: desktops, and members neither rotating
+    // nor waiting.
+    let mut keys: BTreeSet<Key> = desktops.entries().iter().map(|entry| entry.dial).collect();
+    keys.extend(
+        merged
+            .members
+            .iter()
+            .filter(|(id, member)| !waiting(id, member))
+            .map(|(_, member)| member.dial),
+    );
+    // Then those that need one, working members first.
+    let mut wanting: Vec<(u8, Id)> = merged
         .members
         .iter()
-        .filter(|(id, member)| before(id).is_none_or(|old| old.dial != member.dial))
-        .map(|(id, _)| *id)
+        .filter(|(id, member)| waiting(id, member))
+        .map(|(id, _)| {
+            let rank = match (before(id).is_some(), crowded.contains(id)) {
+                (true, false) => 0,
+                (true, true) => 1,
+                (false, _) => 2,
+            };
+            (rank, *id)
+        })
         .collect();
-    if added.is_empty() {
-        // Nothing here adds a key: what was held was already over, and
-        // what this file changes only takes access away.
-        return None;
-    }
-    for id in added {
-        if before(&id).is_some() {
-            crowded.insert(id);
+    wanting.sort_unstable();
+    let mut still = BTreeSet::new();
+    let mut new = Vec::new();
+    for (rank, id) in wanting {
+        let Some(dial) = merged.members.get(&id).map(|member| member.dial) else {
+            continue;
+        };
+        if rank == 2 {
+            new.push((id, dial));
+        } else if keys.contains(&dial) || keys.len() < MAX_DIAL_KEYS {
+            keys.insert(dial);
         } else {
-            merged.members.remove(&id);
+            still.insert(id);
         }
     }
-    Some(error)
+    // Members new here come in together or wait for a later file
+    // together, so what a file grants never depends on id order.
+    let new_keys: BTreeSet<Key> = new.iter().map(|(_, dial)| *dial).collect();
+    let left_out = keys.union(&new_keys).count() > MAX_DIAL_KEYS;
+    if left_out {
+        for (id, _) in &new {
+            merged.members.remove(id);
+        }
+    }
+    let refused = left_out || !still.is_empty();
+    *crowded = still;
+    refused.then_some(error)
 }
 
 /// Whether every enrolled desktop and every member of `access` fits in

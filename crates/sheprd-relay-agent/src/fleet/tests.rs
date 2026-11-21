@@ -13,6 +13,7 @@ mod crowded_save;
 mod paused;
 mod refused;
 mod report_size;
+mod rotation_room;
 mod scrub_lines;
 mod snapshot;
 mod stored_size;

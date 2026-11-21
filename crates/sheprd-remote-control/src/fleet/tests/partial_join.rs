@@ -31,6 +31,7 @@ async fn a_history_in_parts_joins_once_it_admits() {
         fleet: Some(fleet.clone()),
         heads,
         ops: sync::encode_ops(ops),
+        ..Apply::default()
     };
     let applied = b.fleet.apply(&part(first, Vec::new()), now_ms()).unwrap();
     assert_eq!(applied.fleet, fleet);
@@ -41,16 +42,16 @@ async fn a_history_in_parts_joins_once_it_admits() {
     assert!(grants::dial_keys(&b.fleet).is_empty());
     // The rest arrives after a restart, as `fleet apply` with no daemon.
     let again = Fleet::load(b.dir.path(), now_ms()).unwrap();
-    assert!(again.inner().joining.is_some());
+    assert_eq!(again.inner().joining.len(), 1);
     let applied = again.apply(&part(rest, applied.heads), now_ms()).unwrap();
     assert_eq!(applied.refused, 0);
     let inner = again.inner();
-    assert!(inner.joining.is_none());
+    assert!(inner.joining.is_empty());
     assert_eq!(
         inner.log.as_ref().unwrap().heads(),
         a.fleet.inner().log.as_ref().unwrap().heads()
     );
-    assert!(!b.dir.path().join("fleet/joining.bin").exists());
+    assert!(!b.dir.path().join("fleet/joining").exists());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -62,6 +63,7 @@ async fn a_history_that_never_admits_grants_nothing() {
         fleet: Some(a.view().fleet),
         heads: Vec::new(),
         ops: sync::encode_ops(&a.ops()),
+        ..Apply::default()
     };
     // Answered from the history so far, so the rest can come; still no
     // fleet here.

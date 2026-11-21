@@ -1,4 +1,5 @@
-//! `chat status`, `chat shortcuts`, `chat show`, `chat hide`, and `chat toggle`.
+//! `chat status`, `chat shortcuts`, `chat favorite`, `chat show`, `chat hide`,
+//! and `chat toggle`.
 use crate::control::protocol::{Call, ErrorCode, Response, chat::ChatOp};
 use gpui::App;
 
@@ -113,6 +114,40 @@ pub(super) fn serve(call: Call<ChatOp>, cx: &mut App) -> Response {
                     shortcuts,
                     updated_ms: list.updated_ms,
                     complete,
+                },
+            }
+        }),
+        ChatOp::Favorite { switch, pane } => in_window(&caller, cx, |view, window, cx| {
+            // A focused herdr-core terminal counts without a chat view: it
+            // is nobody's Herdr pane.
+            let pane = pane
+                .or_else(|| callers_pane(&caller))
+                .or_else(|| view.focused_core_key(window, cx))
+                .or_else(|| {
+                    view.live
+                        .snapshot
+                        .as_ref()
+                        .and_then(|snapshot| snapshot.focused_pane_id.clone())
+                });
+            let Some(pane) = pane else {
+                return Response::error(ErrorCode::InvalidRequest, "Name a pane with --pane");
+            };
+            let Some(starred) = view.starred_pane(&pane) else {
+                return not_found(format!("Pane {pane} runs no agent this window can star"));
+            };
+            let favorite = switch.apply(starred.favorite);
+            if favorite != starred.favorite {
+                crate::agent_favorites::AgentFavorites::set(
+                    cx,
+                    &starred.endpoint,
+                    starred.key,
+                    favorite,
+                );
+            }
+            Response::Chat {
+                reply: Reply::Favorite {
+                    pane_id: pane,
+                    favorite,
                 },
             }
         }),

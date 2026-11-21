@@ -124,7 +124,7 @@ pub(super) fn claim_saved(target: &str, session: &str) -> Result<Claim> {
 /// Forget a saved device with `herdr machine remove`. The CLI only edits the
 /// local catalog; it never connects, so the host's own Herdr keeps running.
 /// Blocks on a process: call it from the background executor.
-pub(super) fn remove(id: &str) -> Result<()> {
+pub(crate) fn remove(id: &str) -> Result<()> {
     remove_with(crate::daemon::executable().as_os_str(), id)
 }
 

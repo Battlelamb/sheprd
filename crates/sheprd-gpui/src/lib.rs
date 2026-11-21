@@ -6,6 +6,7 @@
 mod about;
 mod accessibility;
 mod actions;
+mod agent_favorites;
 mod agent_notes;
 mod agent_skill;
 mod ago;
@@ -71,6 +72,7 @@ mod endpoint;
 mod error;
 mod fan_out;
 mod find;
+mod fleet;
 mod font_picker;
 mod fonts;
 mod github;

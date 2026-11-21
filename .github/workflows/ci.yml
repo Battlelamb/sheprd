@@ -80,6 +80,7 @@ jobs:
       full: ${{ steps.scope.outputs.full }}
       gpui: ${{ steps.scope.outputs.gpui }}
       macos_release: ${{ steps.changes.outputs.macos_release }}
+      relay_agent: ${{ steps.changes.outputs.relay_agent }}
       website: ${{ steps.changes.outputs.website }}
       windows_native: ${{ steps.changes.outputs.windows_native }}
       windows_package: ${{ steps.changes.outputs.windows_package }}
@@ -478,7 +479,7 @@ jobs:
   # the run selected.
   checks-passed:
     name: Format, lint, and test
-    needs: [checks, windows, windows-native, windows-package, build-macos, commits, website, zizmor]
+    needs: [checks, windows, windows-native, windows-package, build-macos, relay-agent, commits, website, zizmor]
     if: >-
       always() &&
       github.event.pull_request.draft != true &&
@@ -500,6 +501,8 @@ jobs:
           PACKAGE: ${{ needs.windows-package.result }}
           MACOS_RELEASE: ${{ needs.build-macos.result }}
           MACOS_INPUTS: ${{ needs.commits.outputs.macos_release }}
+          RELAY_AGENT: ${{ needs.relay-agent.result }}
+          RELAY_AGENT_INPUTS: ${{ needs.commits.outputs.relay_agent }}
           EVENT: ${{ github.event_name }}
           COMMITS: ${{ needs.commits.result }}
           CODE: ${{ needs.commits.outputs.code }}
@@ -540,6 +543,13 @@ jobs:
             test "$MACOS_RELEASE" = success || exit 1
           else
             test "$MACOS_RELEASE" = skipped || exit 1
+          fi
+          # The relay agent builds run before merge when their inputs change.
+          if [ "$RELAY_AGENT_INPUTS" = true ] &&
+             { [ "$EVENT" = pull_request ] || [ "$EVENT" = merge_group ]; }; then
+            test "$RELAY_AGENT" = success || exit 1
+          else
+            test "$RELAY_AGENT" = skipped || exit 1
           fi
           if [ "$PACKAGE_INPUTS" = true ]; then
             test "$PACKAGE" = success || exit 1
@@ -602,6 +612,46 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
         run: cargo test --locked --release -p sheprd-gpui --test cli --target "$TARGET"
+
+  # sheprd-relay-agent as each release builds it for the machines Sheprd
+  # shares as a fleet's plain host (scripts/release/build-agent.sh), before
+  # merge only and when what it is built from changes (`scripts/ci-changes.sh`).
+  # A pull request builds the x86_64 Linux one; one that needs every
+  # platform, and the merge queue, also build the aarch64 Linux one and both
+  # Macs' on one macOS runner. The release workflow builds all four anyway.
+  relay-agent:
+    if: >-
+      needs.commits.outputs.relay_agent == 'true' &&
+      (github.repository == 'sheprd-labs/sheprd' || github.repository == 'penso/herdr-gpui') &&
+      (github.event_name == 'pull_request' || github.event_name == 'merge_group')
+    name: Relay agent (${{ matrix.runner }})
+    needs: commits
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
+        exclude: ${{ fromJSON(needs.commits.outputs.full != 'true' && '[{"runner":"macos-15"},{"runner":"ubuntu-24.04-arm"}]' || '[]') }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup show
+      # Linux builds its own architecture's static agent; macOS builds
+      # both thin ones, the x86_64 one cross-compiled.
+      - name: Build sheprd-relay-agent as a release does
+        run: |
+          if [ "$(uname -s)" = Darwin ]; then
+            targets="aarch64-apple-darwin x86_64-apple-darwin"
+          else
+            targets="$(uname -m)-unknown-linux-musl"
+          fi
+          for target in $targets; do
+            bash scripts/release/build-agent.sh "$target" "$RUNNER_TEMP/sheprd-relay-agent-$target"
+          done
 
   # The macOS release builds and their release-mode CLI suite, before merge
   # only and when what they depend on changes (`scripts/ci-changes.sh`): in

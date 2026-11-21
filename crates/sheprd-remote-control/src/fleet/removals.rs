@@ -1,5 +1,5 @@
-//! Removals passed between daemons inside the relay tunnel
-//! (`docs/relay-plan.md`, Removals between daemons;
+//! Removals passed between daemons, and to plain hosts' agents, inside the
+//! relay tunnel (`docs/relay-plan.md`, Removals between daemons;
 //! `control::fleet::removal` for the wire).
 //!
 //! A daemon that holds a removal some live computer member has not said
@@ -9,12 +9,18 @@
 //! one does the same, so a removal floods the fleet in about two hops,
 //! with no Sheprd running anywhere.
 //!
+//! Plain hosts get the removals that took effect the same way, each from
+//! the member that signed it: their agent checks no signature, so it takes
+//! a removal only in the dialing member's own name, only suspends the
+//! targets until Sheprd's next access file settles it, and answers `Held`
+//! at once.
+//!
 //! A daemon taking a removal whose history has not arrived suspends its
 //! targets at once (`Fleet::suspended`), then asks for the history.
 
-use super::Fleet;
+use super::{Fleet, Holder};
 use crate::control::fleet::{
-    Body, MemberId, Op, OpId,
+    Body, HostKind, Log, MemberId, Op, OpId, State, access,
     removal::{MAX_FRAME, MAX_OPS, MAX_ROUNDS, Message, PURPOSE_REMOVAL},
 };
 use crate::desktop::record::Record;
@@ -28,10 +34,7 @@ use tokio::{
     sync::Semaphore,
 };
 
-/// How long one exchange may take, either way.
-pub(crate) const SESSION: Duration = Duration::from_secs(30);
-/// Exchanges at once, each way.
-pub(crate) const CONCURRENT: usize = 8;
+pub(crate) use crate::control::fleet::removal::{CONCURRENT, SESSION};
 const FIRST_RETRY: Duration = Duration::from_secs(5);
 const LAST_RETRY: Duration = Duration::from_secs(10 * 60);
 
@@ -54,6 +57,11 @@ pub(crate) async fn serve(
 }
 
 async fn exchange_in(fleet: &Arc<Fleet>, io: &mut (impl AsyncRead + AsyncWrite + Unpin)) {
+    // The fleet this exchange serves: what it passes goes into that one
+    // only, never into a fleet joined since, or none after a scrub.
+    let Some(serving) = fleet.inner().log.as_ref().map(Log::fleet) else {
+        return;
+    };
     let mut received: Vec<OpId> = Vec::new();
     for round in 0..=MAX_ROUNDS {
         let Ok(Message::Removal(ops)) = read(io).await else {
@@ -75,7 +83,7 @@ async fn exchange_in(fleet: &Arc<Fleet>, io: &mut (impl AsyncRead + AsyncWrite +
         // A removal not saved is not acknowledged: the dialer keeps it and
         // sends it again, and that later exchange saves it.
         let Ok(Some(wanted)) = tokio::task::spawn_blocking(move || {
-            if let Err(error) = taken.receive(ops, crate::web::now_ms()) {
+            if let Err(error) = taken.receive_in(serving, ops, crate::web::now_ms()) {
                 tracing::warn!(error = %error, "could not keep removals another member passed");
                 return None;
             }
@@ -114,15 +122,15 @@ async fn exchange_in(fleet: &Arc<Fleet>, io: &mut (impl AsyncRead + AsyncWrite +
 /// Each peer's next try, with its delay so far.
 #[derive(Debug, Default)]
 struct Backoff {
-    next: BTreeMap<MemberId, (Instant, Duration)>,
+    next: BTreeMap<Holder, (Instant, Duration)>,
 }
 
 impl Backoff {
-    fn due(&self, peer: &MemberId, now: Instant) -> bool {
+    fn due(&self, peer: &Holder, now: Instant) -> bool {
         self.next.get(peer).is_none_or(|(at, _)| *at <= now)
     }
 
-    fn failed(&mut self, peer: MemberId, now: Instant) {
+    fn failed(&mut self, peer: Holder, now: Instant) {
         let delay = self
             .next
             .get(&peer)
@@ -133,7 +141,7 @@ impl Backoff {
         self.next.insert(peer, (now + delay + jitter, delay));
     }
 
-    fn done(&mut self, peer: &MemberId) {
+    fn done(&mut self, peer: &Holder) {
         self.next.remove(peer);
     }
 }
@@ -144,9 +152,18 @@ fn rand_quarter() -> u8 {
     byte[0] % 2
 }
 
-/// What each live computer member is owed: the removals the log holds
-/// that it has not said it holds, and the record to dial it at.
-fn owed(fleet: &Fleet) -> Vec<(MemberId, Record, Vec<Op>)> {
+/// What one peer is owed: the record to dial it at, the removals, and for
+/// a plain host's agent, the members the log removes with them that they
+/// do not name ([`Message::Also`]).
+pub(super) type Owed = (Holder, Record, Vec<Op>, Vec<(OpId, MemberId)>);
+
+/// What each live computer member and plain host is owed: the removals
+/// the log holds that it has not said it holds, and the record to dial it
+/// at. A plain host is owed only the removals that took effect, since its
+/// agent acts on what it is sent without checking it, and with each the
+/// members the log removes with it beyond those it names: a member's
+/// daemon works those out from the log, an agent cannot.
+pub(super) fn owed(fleet: &Fleet) -> Vec<Owed> {
     let inner = fleet.inner();
     let Some(log) = &inner.log else {
         return Vec::new();
@@ -159,46 +176,101 @@ fn owed(fleet: &Fleet) -> Vec<(MemberId, Record, Vec<Op>)> {
         return Vec::new();
     }
     let state = log.state();
-    state
+    let unheld = |holder: &Holder, ops: &mut dyn Iterator<Item = &&Op>| -> Vec<Op> {
+        let held = inner.held.get(holder);
+        ops.filter(|op| held.is_none_or(|held| !held.contains(&op.id())))
+            .take(MAX_OPS)
+            .map(|op| (*op).clone())
+            .collect()
+    };
+    let members = state
         .members
         .iter()
         .filter(|(id, member)| **id != fleet.me() && member.bundle.host.is_some())
         .filter_map(|(id, member)| {
             let host = member.bundle.host.as_ref()?.id().ok()?;
-            let record = &state.hosts.get(&host)?.record;
-            let held = inner.held.get(id);
-            let ops: Vec<Op> = removals
+            let record = record(state, &host, &member.bundle.name)?;
+            let holder = Holder::Member(*id);
+            let ops = unheld(&holder, &mut removals.iter());
+            Some((holder, record, ops, Vec::new()))
+        });
+    // What each removal in effect removes; none when the log cannot say,
+    // and the access file then carries it.
+    let removed_by = log.removed_by().unwrap_or_default();
+    let hosts = state
+        .hosts
+        .iter()
+        // A held host's agent too: removals reach it while its access is
+        // paused.
+        .filter(|(_, host)| host.intro.kind == HostKind::Agent)
+        .filter_map(|(id, host)| {
+            let record = record(state, id, &host.intro.name)?;
+            let holder = Holder::Host(*id);
+            // An agent suspends only in the dialing member's own name, so
+            // it is passed only this computer's removals; the others reach
+            // it in the access file.
+            let effective: Vec<&Op> = removals
                 .iter()
-                .filter(|op| held.is_none_or(|held| !held.contains(&op.id())))
+                .copied()
+                .filter(|op| op.signer() == fleet.me() && access::for_agents(state, op))
+                .collect();
+            // A removal the agent holds is owed again once it takes a
+            // member the agent was not told of: one admitted with a
+            // removed member, whose admission arrived after.
+            let took = inner.held_also.get(id);
+            let grew: Vec<OpId> = access::also(
+                &removed_by,
+                &effective.iter().map(|op| (*op).clone()).collect::<Vec<_>>(),
+            )
+            .into_iter()
+            .filter(|(removal, member)| {
+                !took
+                    .and_then(|took| took.get(removal))
+                    .is_some_and(|took| took.contains(member))
+            })
+            .map(|(removal, _)| removal)
+            .collect();
+            let held = inner.held.get(&holder);
+            let ops: Vec<Op> = effective
+                .iter()
+                .filter(|op| {
+                    held.is_none_or(|held| !held.contains(&op.id())) || grew.contains(&op.id())
+                })
                 .take(MAX_OPS)
                 .map(|op| (*op).clone())
                 .collect();
-            (!ops.is_empty()).then(|| {
-                (
-                    *id,
-                    Record {
-                        computer: member.bundle.name.clone(),
-                        identity: record.identity.clone(),
-                        relays: record.relays.clone(),
-                        route: record.route.clone(),
-                        fleet: true,
-                        host: None,
-                        opening: true,
-                    },
-                    ops,
-                )
-            })
-        })
+            let also = access::also(&removed_by, &ops);
+            Some((holder, record, ops, also))
+        });
+    members
+        .chain(hosts)
+        .filter(|(_, _, ops, _)| !ops.is_empty())
         .collect()
 }
 
-/// Passes removals to every live computer member that has not said it
-/// holds them, for the life of the daemon.
+/// The record to dial host `host` at, from its signed self-record.
+fn record(state: &State, host: &crate::control::fleet::HostId, name: &str) -> Option<Record> {
+    let record = &state.hosts.get(host)?.record;
+    Some(Record {
+        computer: name.to_owned(),
+        identity: record.identity.clone(),
+        relays: record.relays.clone(),
+        route: record.route.clone(),
+        fleet: true,
+        host: None,
+        // Members and plain hosts' agents both read the purpose byte and
+        // proof first.
+        opening: true,
+    })
+}
+
+/// Passes removals to every live computer member and plain host that has
+/// not said it holds them, for the life of the daemon.
 pub(crate) async fn flood(fleet: Arc<Fleet>) {
     let mut changed = fleet.watch();
     let mut backoff = Backoff::default();
     let outbound = Arc::new(Semaphore::new(CONCURRENT));
-    let (done_send, mut done) = tokio::sync::mpsc::channel::<(MemberId, bool)>(64);
+    let (done_send, mut done) = tokio::sync::mpsc::channel::<(Holder, bool)>(64);
     let mut busy = std::collections::BTreeSet::new();
     let mut tick = tokio::time::interval(FIRST_RETRY);
     loop {
@@ -218,7 +290,7 @@ pub(crate) async fn flood(fleet: Arc<Fleet>) {
                 .await
                 .unwrap_or_default()
         };
-        for (peer, record, ops) in owed {
+        for (peer, record, ops, also) in owed {
             if busy.contains(&peer) || !backoff.due(&peer, now) {
                 continue;
             }
@@ -228,7 +300,7 @@ pub(crate) async fn flood(fleet: Arc<Fleet>) {
             busy.insert(peer);
             let (fleet, done) = (fleet.clone(), done_send.clone());
             tokio::spawn(async move {
-                let ok = tokio::time::timeout(SESSION, push(&fleet, peer, &record, ops))
+                let ok = tokio::time::timeout(SESSION, push(&fleet, peer, &record, ops, also))
                     .await
                     .is_ok_and(|ok| ok);
                 drop(permit);
@@ -239,7 +311,13 @@ pub(crate) async fn flood(fleet: Arc<Fleet>) {
 }
 
 /// One exchange with `peer`: whether it ended with the peer holding them.
-async fn push(fleet: &Arc<Fleet>, peer: MemberId, record: &Record, ops: Vec<Op>) -> bool {
+async fn push(
+    fleet: &Arc<Fleet>,
+    peer: Holder,
+    record: &Record,
+    ops: Vec<Op>,
+    also: Vec<(OpId, MemberId)>,
+) -> bool {
     let state_dir = fleet.state_dir().to_owned();
     let Ok(Ok(keys)) =
         tokio::task::spawn_blocking(move || crate::desktop::keys::Keys::load_or_create(&state_dir))
@@ -259,6 +337,14 @@ async fn push(fleet: &Arc<Fleet>, peer: MemberId, record: &Record, ops: Vec<Op>)
     let io = &mut tunnel.io;
     if io.write_all(&opening).await.is_err() {
         return false;
+    }
+    // Ahead of the removals, for an agent: who they take out beyond those
+    // they name.
+    if !also.is_empty() {
+        let pairs = also.iter().map(|(id, member)| (*id, member.0)).collect();
+        if write(io, &Message::Also(pairs)).await.is_err() {
+            return false;
+        }
     }
     let sent = Message::Removal(ops.iter().map(Op::encode).collect());
     if write(io, &sent).await.is_err() {
@@ -285,7 +371,7 @@ async fn push(fleet: &Arc<Fleet>, peer: MemberId, record: &Record, ops: Vec<Op>)
                 let ids = acknowledged(&ops, ids);
                 let all = ops.iter().all(|op| ids.contains(&op.id()));
                 let fleet = fleet.clone();
-                let _ = tokio::task::spawn_blocking(move || fleet.held(peer, ids)).await;
+                let _ = tokio::task::spawn_blocking(move || fleet.held(peer, ids, also)).await;
                 drop(connection);
                 return all;
             }
@@ -316,7 +402,7 @@ async fn read(io: &mut (impl AsyncRead + Unpin)) -> crate::control::fleet::Resul
     io.read_exact(&mut bytes)
         .await
         .map_err(|_| crate::control::fleet::Error::Encoding)?;
-    Message::decode(&bytes)
+    Ok(Message::decode(&bytes)?)
 }
 
 async fn write(

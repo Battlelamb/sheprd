@@ -9,7 +9,7 @@ fn fill(node: &Node) {
     let mut inner = node.fleet.inner();
     let log = inner.log.as_mut().unwrap();
     let me = node.fleet.me();
-    let host = grants::own_host(log.state(), &me).unwrap();
+    let host = grants::own_host(log.state(), &me, None).unwrap();
     let first = log.draft(me, now_ms(), Body::Checkpoint(Default::default()));
     let mut parents = first.parents.clone();
     let mut ops = Vec::new();

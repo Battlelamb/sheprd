@@ -298,6 +298,37 @@ impl Log {
         }
     }
 
+    /// Drafts one operation per body for `signer`, each on the one before,
+    /// and checks that each would apply once `signer` signs it: every rule
+    /// but the signature, on a copy of this log that is then dropped. A
+    /// member that keeps its own log asks this before its owner signs, so
+    /// it never signs what its own replay refuses.
+    pub fn drafts(
+        &self,
+        signer: MemberId,
+        issued_ms: u64,
+        bodies: Vec<Body>,
+        now_ms: u64,
+    ) -> Result<Vec<Unsigned>> {
+        let mut copy = self.clone();
+        let mut drafted = Vec::with_capacity(bodies.len());
+        for body in bodies {
+            let unsigned = copy.draft(signer, issued_ms, body);
+            // A placeholder signature, never checked: `settle` presumes it.
+            let op = Op::decode(&[unsigned.encode()?.as_slice(), &[0; 64]].concat())?;
+            let id = op.id();
+            if copy.admissible(&op, now_ms)? != Inserted::Pending {
+                return Err(Error::Invalid);
+            }
+            copy.ops.insert(id, op);
+            if let Some(error) = copy.settle(&[id], true)?.remove(&id) {
+                return Err(error);
+            }
+            drafted.push(unsigned);
+        }
+        Ok(drafted)
+    }
+
     /// The highest `rev` of any `Access` that `parents` and their
     /// ancestors hold, or the base's.
     fn access_floor(&self, parents: &[OpId]) -> u64 {
@@ -393,7 +424,7 @@ impl Log {
             }
         }
         self.bound();
-        let refused = match self.settle(&added) {
+        let refused = match self.settle(&added, false) {
             Ok(refused) => refused,
             Err(error) => {
                 // The log cannot take these at all (full): put it back as
@@ -415,6 +446,40 @@ impl Log {
             results.push((id, result));
         }
         results
+    }
+
+    /// Every removal in effect among the operations held, with every
+    /// member it removes under the log's rules: those it names, and those
+    /// it takes with them, such as a member one it removes admitted at the
+    /// same time. A fold starts at the last checkpoint every operation has
+    /// seen or was seen by, so the removals before each such checkpoint
+    /// are read from the history up to it, which settled them: none is
+    /// lost behind a later checkpoint. A log pruned to a checkpoint holds
+    /// no removal from before it to pass on, and every removal after it
+    /// has seen every admission the checkpoint settled.
+    pub fn removed_by(&self) -> Result<BTreeMap<OpId, std::collections::BTreeSet<MemberId>>> {
+        let graph = self.graph()?;
+        let folder = self.folder(&graph)?;
+        let mut removed_by = BTreeMap::new();
+        let mut set = Bits::full(graph.len());
+        loop {
+            let members = folder.members(&set);
+            for (&position, reach) in &members.removals {
+                removed_by
+                    .entry(graph.order[position].id())
+                    .or_insert_with(|| reach.clone());
+            }
+            let Some(at) = folder.barrier(&set) else {
+                break;
+            };
+            // The history the checkpoint settled: its strict ancestors.
+            let before = graph.ancestors[at].clone();
+            if before.iter().next().is_none() {
+                break;
+            }
+            set = before;
+        }
+        Ok(removed_by)
     }
 
     /// The state of the history of `id`, which a checkpoint at `id` names
@@ -567,8 +632,14 @@ impl Log {
 
     /// Checks the operations just `added`, removes those refused and their
     /// descendants, and folds. Says why each was refused.
-    fn settle(&mut self, added: &[OpId]) -> Result<BTreeMap<OpId, Error>> {
-        let mut refused = self.forged(added);
+    /// With `presumed`, their signatures are taken as checked: only for
+    /// [`Log::drafts`], on a copy that is dropped.
+    fn settle(&mut self, added: &[OpId], presumed: bool) -> Result<BTreeMap<OpId, Error>> {
+        let mut refused = if presumed {
+            BTreeMap::new()
+        } else {
+            self.forged(added)
+        };
         self.signed = added
             .iter()
             .filter(|id| !refused.contains_key(*id))

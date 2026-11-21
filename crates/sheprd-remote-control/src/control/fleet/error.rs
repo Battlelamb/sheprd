@@ -3,6 +3,8 @@
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum Error {
     // keep-sorted start
+    #[error(transparent)]
+    Access(#[from] sheprd_relay_agent::access::Error),
     #[error("a fleet operation is over its bounds")]
     Bounds,
     #[error("a checkpoint does not match the state its history computes")]
@@ -23,6 +25,8 @@ pub enum Error {
     ParentMissing,
     #[error("a fleet member may not sign this operation")]
     Permission,
+    #[error(transparent)]
+    Removal(#[from] sheprd_relay_agent::removal::Error),
     #[error("an access rev is not one above the highest its history holds")]
     Rev,
     #[error("a host's record is not signed by the key that pins it")]

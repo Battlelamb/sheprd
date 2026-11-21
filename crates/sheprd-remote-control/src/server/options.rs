@@ -123,6 +123,12 @@ pub enum Invocation {
         state_dir: Option<PathBuf>,
         offer: bool,
     },
+    /// Reads this computer's favorite agents, making the change
+    /// (`control::favorites::Change`) given on standard input, if any.
+    Favorites {
+        state_dir: Option<PathBuf>,
+        offer: bool,
+    },
     /// Reads this computer's text shortcuts, offering any given on standard
     /// input.
     Shortcuts {
@@ -164,6 +170,11 @@ pub enum FleetAction {
     /// Prints this computer's bundle signed for the fleet with this id, for
     /// the member about to admit it.
     Bundle { fleet: String },
+    /// Prints this computer as a Sheprd host, its record signed by its
+    /// certificate authority, for the member about to share it.
+    Intro,
+    /// Forgets the fleet here and the lines and records it wrote.
+    Scrub,
 }
 
 pub const USAGE: &str = "\
@@ -173,9 +184,12 @@ Usage: sheprd-remote-control serve --state-dir DIR [options]
        sheprd-remote-control relay-enroll [--state-dir DIR] < REQUEST.json
        sheprd-remote-control tags [--offer] [--state-dir DIR] [< TAGS.json]
        sheprd-remote-control shortcuts [--offer] [--state-dir DIR] [< SHORTCUTS.json]
+       sheprd-remote-control favorites [--offer] [--state-dir DIR] [< CHANGE.json]
        sheprd-remote-control relays [--offer] [--state-dir DIR] [< RELAYS.json]
        sheprd-remote-control fleet apply [--state-dir DIR] < APPLY.json
        sheprd-remote-control fleet bundle --fleet ID [--state-dir DIR]
+       sheprd-remote-control fleet intro [--state-dir DIR]
+       sheprd-remote-control fleet scrub [--state-dir DIR]
        sheprd-remote-control desktop-pair --name NAME [--state-dir DIR]
        sheprd-remote-control relay-connect [--state-dir DIR] HOST
 
@@ -233,7 +247,11 @@ the ProxyCommand ssh runs for it.
 fleet apply and fleet bundle are the fleet's halves Sheprd on another
 computer runs here over SSH: apply takes signed fleet operations and
 prints what this computer holds that the caller lacks; bundle prints this
-computer's keys, signed, for the member about to admit it.
+computer's keys, signed, for the member about to admit it; intro prints
+this computer as a host, signed by its certificate authority, for a
+member about to share it; scrub forgets the fleet here, with the
+authorized_keys lines and relay records it wrote, without signing
+anything: for a computer the fleet removed, or a fleet that is gone.
 Their state directory defaults to the one Sheprd on this computer uses.
 ";
 
@@ -247,6 +265,12 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
             return parse_host(true, args).map(|invocation| match invocation {
                 Invocation::Enroll { state_dir } => Invocation::RelayEnroll { state_dir },
                 other => other,
+            });
+        }
+        Some("favorites") => {
+            return parse_edited(args, |state_dir, offer| Invocation::Favorites {
+                state_dir,
+                offer,
             });
         }
         Some("relays") => {
@@ -527,7 +551,7 @@ fn parse_fleet(mut args: impl Iterator<Item = OsString>) -> Result<Invocation, P
     let verb = args
         .next()
         .and_then(|verb| verb.to_str().map(str::to_owned))
-        .ok_or(ParseError::Missing("apply or bundle"))?;
+        .ok_or(ParseError::Missing("apply, bundle, intro, or scrub"))?;
     let (mut state_dir, mut fleet) = (None, None);
     while let Some(arg) = args.next() {
         let name = arg.to_str().unwrap_or_default().to_owned();
@@ -554,6 +578,8 @@ fn parse_fleet(mut args: impl Iterator<Item = OsString>) -> Result<Invocation, P
     }
     let action = match verb.as_str() {
         "apply" if fleet.is_none() => FleetAction::Apply,
+        "intro" if fleet.is_none() => FleetAction::Intro,
+        "scrub" if fleet.is_none() => FleetAction::Scrub,
         "bundle" => FleetAction::Bundle {
             fleet: fleet.ok_or(ParseError::Missing("--fleet"))?,
         },
@@ -563,7 +589,7 @@ fn parse_fleet(mut args: impl Iterator<Item = OsString>) -> Result<Invocation, P
     Ok(Invocation::Fleet { state_dir, action })
 }
 
-/// `tags`, `shortcuts`, or `relays`, then `[--offer] [--state-dir DIR]`, as `made`.
+/// `tags`, `shortcuts`, `favorites`, or `relays`, then `[--offer] [--state-dir DIR]`, as `made`.
 fn parse_edited(
     mut args: impl Iterator<Item = OsString>,
     made: fn(Option<PathBuf>, bool) -> Invocation,

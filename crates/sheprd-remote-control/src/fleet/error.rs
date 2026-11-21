@@ -3,6 +3,8 @@ pub enum Error {
     // keep-sorted start
     #[error(transparent)]
     Auth(#[from] crate::auth::Error),
+    #[error(transparent)]
+    Bluetooth(#[from] super::bluetooth::Error),
     #[error("the fleet's files are busy: another update, or the daemon starting, holds them")]
     Busy,
     #[error(transparent)]
@@ -11,8 +13,16 @@ pub enum Error {
     Daemon(String),
     #[error(transparent)]
     Desktop(#[from] crate::desktop::Error),
+    #[error("the fleet no longer holds that host")]
+    HostRemoved,
     #[error("this computer is in a fleet already; leave it first")]
     InFleet,
+    #[error(transparent)]
+    Joins(#[from] super::joins::Error),
+    #[error("the log handed over is larger than this computer keeps")]
+    JoinTooLarge,
+    #[error(transparent)]
+    Links(#[from] super::links::Error),
     #[error(transparent)]
     Log(#[from] crate::control::fleet::Error),
     #[error("this computer cannot sign with its certificate authority")]
@@ -27,6 +37,8 @@ pub enum Error {
     NotApplied,
     #[error("that bundle is not this computer's")]
     NotMine,
+    #[error("this computer is in another fleet")]
+    OtherFleet,
     #[error("the fleet's peers file does not read")]
     Peers,
     #[error(transparent)]

@@ -397,6 +397,7 @@ what Sheprd shows or keeps.
 | Run a command inside a running virtual Mac (build, test, install an app) | `sheprd machine exec NAME --cwd ~/app -- xcodebuild test` |
 | Test a Mac app's UI in a virtual Mac: look at its screen, then click, type, or press keys | `sheprd machine screenshot NAME /tmp/s.png`, `sheprd machine click NAME X Y`, `sheprd machine type NAME TEXT`, `sheprd machine key NAME cmd+s` |
 | Check remote control and its daemon-host network interfaces, or pair a phone (Tailscale preferred; optionally choose an origin from status) | `sheprd remote status`, `sheprd remote pair [--address HTTPS_ORIGIN]` |
+| See the user's fleet of computers and phones and which hosts each reaches, or ask to remove one (the user confirms in Settings > Fleet) | `sheprd fleet status --json`, `sheprd fleet remove MEMBER` |
 | Keep this computer's listen token for a private relay (piped on stdin, never an argument), or forget it | `sheprd remote relays token ENDPOINT < FILE`, `sheprd remote relays token ENDPOINT --clear` |
 | Keep the machine awake during a long job | `sheprd caffeine on --for 2h` |
 | Check whether the app runs, and which windows and hosts it has | `sheprd status` |

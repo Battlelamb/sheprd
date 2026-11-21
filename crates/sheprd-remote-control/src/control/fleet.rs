@@ -30,6 +30,8 @@
 //! and the iOS app's Swift copy is checked against the vectors
 //! `tests/vectors.rs` writes.
 
+pub mod access;
+pub mod bluetooth;
 mod body;
 mod error;
 mod fold;
@@ -38,6 +40,7 @@ mod hosts;
 mod log;
 mod membership;
 mod op;
+pub mod phone;
 pub mod removal;
 mod routes;
 pub mod saved;
@@ -60,6 +63,8 @@ use sha2::{Digest, Sha256};
 
 /// What every signed message starts with, before its own suffix.
 pub const DOMAIN: &[u8] = b"sheprd-fleet-v1";
+/// Members one removal names beside its target.
+pub const MAX_ALSO_MEMBERS: usize = 16;
 /// Live computer members at once.
 pub const MAX_COMPUTERS: usize = 16;
 /// Live phone members at once.
@@ -119,6 +124,18 @@ macro_rules! ids {
         impl std::fmt::Debug for $name {
             fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(formatter, "{}({})", stringify!($name), self.short())
+            }
+        }
+
+        impl From<[u8; 32]> for $name {
+            fn from(bytes: [u8; 32]) -> Self {
+                Self(bytes)
+            }
+        }
+
+        impl From<$name> for [u8; 32] {
+            fn from(id: $name) -> Self {
+                id.0
             }
         }
 

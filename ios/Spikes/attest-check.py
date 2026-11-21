@@ -4,7 +4,9 @@
 #     --domain-identifier so.pen.herdr-spikes --source Documents/attest.json --destination attest.json
 #   curl -O https://www.apple.com/certificateauthority/Apple_App_Attestation_Root_CA.pem
 #   uv run --no-project --with cryptography --with cbor2 python -I ios/Spikes/attest-check.py \
-#     attest.json Apple_App_Attestation_Root_CA.pem TEAMID.so.pen.herdr-spikes
+#     attest.json Apple_App_Attestation_Root_CA.pem TEAMID.so.pen.herdr-spikes [UNIX_SECONDS]
+# The optional time checks the certificates then rather than now: Apple's
+# leaf is good for three days. Exits 1 when any check fails.
 import base64, hashlib, json, struct, sys, datetime
 import cbor2
 from cryptography import x509
@@ -22,20 +24,54 @@ results = []
 att = cbor2.loads(b("attestation"))
 results.append(ok("format is apple-appattest", att["fmt"] == "apple-appattest"))
 cred, inter = [x509.load_der_x509_certificate(c) for c in att["attStmt"]["x5c"]]
-now = datetime.datetime.now(datetime.timezone.utc)
-def signed_by(child, parent):
+now = (
+    datetime.datetime.fromtimestamp(int(sys.argv[4]), datetime.timezone.utc)
+    if len(sys.argv) > 4
+    else datetime.datetime.now(datetime.timezone.utc)
+)
+
+def extension(cert, kind):
+    try:
+        return cert.extensions.get_extension_for_class(kind).value
+    except x509.ExtensionNotFound:
+        return None
+
+def valid_now(cert):
+    return cert.not_valid_before_utc <= now <= cert.not_valid_after_utc
+
+def may_issue(parent, below):
+    """Whether `parent` may sign certificates with `below` CAs under it."""
+    constraints = extension(parent, x509.BasicConstraints)
+    if constraints is None or not constraints.ca:
+        return False
+    if constraints.path_length is not None and below > constraints.path_length:
+        return False
+    usage = extension(parent, x509.KeyUsage)
+    return usage is None or usage.key_cert_sign
+
+def issued_by(child, parent, below):
+    """The whole link: names, the parent's right to sign, the signature, and
+    both certificates' dates."""
+    if child.issuer != parent.subject or not may_issue(parent, below):
+        return False
     try:
         parent.public_key().verify(child.signature, child.tbs_certificate_bytes, ec.ECDSA(child.signature_hash_algorithm))
-        return child.not_valid_before_utc <= now <= child.not_valid_after_utc
     except Exception as e:
-        print("   ", e); return False
-results.append(ok("credential cert signed by intermediate", signed_by(cred, inter)))
-results.append(ok("intermediate signed by Apple App Attest root", signed_by(inter, root)))
+        print("   ", e)
+        return False
+    return valid_now(child) and valid_now(parent)
+
+results.append(ok("root is self-signed and valid", issued_by(root, root, 1)))
+results.append(ok("intermediate issued by Apple App Attest root", issued_by(inter, root, 0)))
+results.append(ok("credential cert issued by intermediate", issued_by(cred, inter, 0)))
+cred_constraints = extension(cred, x509.BasicConstraints)
+results.append(ok("credential cert is not a CA", cred_constraints is None or not cred_constraints.ca))
 
 auth = att["authData"]
 nonce = hashlib.sha256(auth + hashlib.sha256(challenge).digest()).digest()
 ext = cred.extensions.get_extension_for_oid(x509.ObjectIdentifier("1.2.840.113635.100.8.2")).value.value
-results.append(ok("nonce in certificate matches the challenge", ext.endswith(nonce)))
+# DER: SEQUENCE { [1] { OCTET STRING (32) nonce } }, exactly.
+results.append(ok("nonce in certificate matches the challenge", ext == bytes.fromhex("3024a1220420") + nonce))
 
 pub = cred.public_key()
 point = pub.public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
@@ -62,3 +98,4 @@ results.append(ok("assertion rpIdHash matches", a_auth[:32] == auth[:32]))
 a_counter = struct.unpack(">I", a_auth[33:37])[0]
 results.append(ok(f"assertion counter {a_counter} > attestation counter", a_counter > counter))
 print("ALL PASS" if all(results) else "SOME FAILED")
+sys.exit(0 if all(results) else 1)

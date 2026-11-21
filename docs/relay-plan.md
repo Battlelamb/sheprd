@@ -1024,10 +1024,14 @@ Sheprd A ─ssh─▶ sheprd-remote-control relay-connect ──QUIC──▶ re
 
 1. **B** opens Remote control > Pair device (or `sheprd remote pair`). Its
    Bluetooth helper advertises as it does for phones.
-2. **A** opens Add Device > Nearby Sheprd (macOS only for now). Its helper
-   scans as a central (`macos/sheprd-nearby/Central.swift`), connects to
-   each computer it finds to read `info`, and lists those that name
-   themselves, which only happens while Pair device is open.
+2. **A** opens Add Device > Nearby Sheprd. Its helper scans as a central
+   (`macos/sheprd-nearby/Central.swift` on macOS; on Linux and Windows
+   `crates/sheprd-nearby`'s `central`, over BlueZ's `Adapter1`, `Device1`,
+   and `GattCharacteristic1`, or WinRT's `BluetoothLEAdvertisementWatcher`
+   and `GattDeviceService`), connects to each computer it finds to read
+   `info`, and lists those that name themselves, which only happens while
+   Pair device is open. All three speak the same lines on stdio, so Sheprd
+   drives them alike.
 3. Picking one starts `sheprd-remote-control desktop-pair` (`desktop`),
    which runs a phone's side of nearby pairing over the same `pair`
    characteristic, with Sheprd carrying its frames on stdio
@@ -1116,9 +1120,65 @@ computers in one fleet, whichever of them was in it (Fleet, Joining):
 - From then on both are members, each a host of the other through the
   relays, with every host the fleet shares (phase 2's grants).
 
-Not yet: Linux and Windows helpers that scan, sharing a relay record
-when B's relays change, and racing the relays. As with SSH machines,
-`git` and a typed `ssh` do not use the proxy.
+Not yet: sharing a relay record when B's relays change, and racing the
+relays. As with SSH machines, `git` and a typed `ssh` do not use the
+proxy. The Linux and Windows scanning is compile-checked and its state
+machine tested without a radio; it has not yet been tried between two
+real computers.
+
+### Measuring Bluetooth as a transport
+
+**Harness built; nothing measured yet.** Bluetooth stays a way to pair
+and to prove nearness. Carrying SSH over it, as a last resort when two
+computers side by side share no network, is not proposed, and is
+proposed only from measurements on real hardware. Until a run meets the
+bar below at 5 m, it stays unproposed; if none does, the result is
+written here and the idea dropped.
+
+**The bar:** at least 64 KB/s both ways (1 KB = 1000 bytes), with a p95
+echo round trip under 150 ms, at 5 m through one wall.
+
+`sheprd-nearby bench` (`crates/sheprd-nearby/src/bench.rs`) measures it
+over the nearby service's `pair` characteristic, the path pairing uses:
+writes with response one way, notifications the other, with the same
+framing. Each side drives the helper's own peripheral or central
+in-process, standing in for Sheprd. On one computer:
+
+```sh
+sheprd-nearby bench serve --name bench-b
+```
+
+It advertises like an open Pair device dialog (so a Sheprd nearby lists
+it while it runs) and answers until stopped. On the other:
+
+```sh
+sheprd-nearby bench run --name bench-b --label "5 m, one wall, Linux to Windows" \
+    --echoes 100 --bytes 262144 --minutes 10
+```
+
+`run` finds `bench-b`, connects, and prints one JSON report on standard
+output (progress goes to standard error):
+
+- `echo`: round trips of 64-byte messages, sent one at a time, with
+  `p50_ms`, `p95_ms`, `min_ms`, `max_ms`, and how many were `lost`
+  (no answer in 5 s).
+- `upload`: `bytes` written in messages of 4095 bytes, timed until the serving side
+  says how many arrived, and `kb_per_s`.
+- `download`: the same amount asked for and notified back, timed to the
+  last byte.
+- `stability`: one echo a second for `--minutes` (10 by default; 0 skips
+  it), with `disconnects` (each followed by finding the computer again)
+  and the round trips over the whole run.
+- `bar`: the thresholds above and whether this run `met` them: every byte
+  arrived both ways at 64 KB/s or more, no echo was lost, no disconnection,
+  and both p95s under 150 ms. The distance is only what `--label` says.
+
+`bench` runs on Linux and Windows, where `sheprd-nearby` is the helper.
+The pairs to measure are macOS–macOS, macOS–Linux, and Windows over
+GATT, each at 1 m and at 5 m through one wall; the macOS pairs need the
+same two modes in the Swift helper, which are not built yet. Windows
+gives apps no LE L2CAP channel API, so GATT is all it can offer; an
+L2CAP run on macOS and Linux, faster on paper, would need its own mode.
 
 ## Fleet
 

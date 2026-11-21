@@ -122,8 +122,8 @@ impl SheprdWindow {
             .flex_col()
             .gap(px(2.));
         let note = |text: String| div().text_color(rgb(theme.muted)).child(text);
-        if !cfg!(target_os = "macos") {
-            return list.child(note(fl!("devices-nearby-macos-only")));
+        if !crate::remote::nearby::SCANS {
+            return list.child(note(fl!("devices-nearby-platform-unsupported")));
         }
         match setup.radio {
             Some(Radio::Off) => return list.child(note(fl!("devices-nearby-bluetooth-off"))),

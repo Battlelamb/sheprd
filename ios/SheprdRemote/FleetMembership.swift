@@ -46,9 +46,11 @@ final class FleetMembership {
         var relayTunnel: Data
         /// Device keys made for hosts whose `Link` may not have landed yet.
         var pendingLinks: [FleetPendingLink]?
-        /// From before the phone kept its own copy of the log: operations
-        /// it signed that no computer confirmed (base64url). Taken into the
-        /// copy once it exists, which hands them over, then dropped.
+        /// Operations this phone signed that its saved copy may not hold
+        /// (base64url): signed before it kept a copy, or kept here with
+        /// their sequence numbers because the copy could not be written.
+        /// Taken into the copy at the next sync, or the next signature, and
+        /// dropped once a copy holding them is on disk.
         var unconfirmed: [String]?
         /// The highest sequence number this phone ever signed, kept apart
         /// from its copy: nothing is signed at or below it, so a copy that
@@ -379,7 +381,8 @@ final class FleetMembership {
         let fleet = record.fleet, me = record.member
         do {
             let opened = try await Self.background { try FleetReplica.open(fleet: fleet, me: me, log: saved, at: .now) }
-            try adopt(opened)
+            // It may lack what the record keeps; the next sync or signature takes that in.
+            try adopt(opened, holdsKept: false)
         } catch {
             damaged = true
             salvaged = (try? await Self.background { try FleetReplica.salvage(me: me, log: saved) }) ?? []
@@ -428,10 +431,15 @@ final class FleetMembership {
 
     /// Keeps `new` as the copy: written before anything relies on it. The
     /// record goes first: the highest sequence number the copy says this
-    /// phone signed is in the Keychain before the copy holding it is on
-    /// disk, let alone handed to a computer. Throws, keeping nothing, when
-    /// either cannot be written.
-    private func adopt(_ new: FleetReplica, through computer: Computer? = nil) throws {
+    /// phone signed, and the operations just `signed`, are in the Keychain
+    /// before the copy holding them is on disk, let alone handed to a
+    /// computer. Should the copy then fail to write, the record still holds
+    /// them, and the next sync or signature takes them in again, so no
+    /// number is burned on an operation nobody kept. Throws when either
+    /// cannot be written.
+    private func adopt(
+        _ new: FleetReplica, signed: [String] = [], holdsKept: Bool = true, through computer: Computer? = nil
+    ) throws {
         guard var record, new.fleet == record.fleet, new.me == record.member else { return }
         if new.status.join == .member { record.admitted = true }
         if let computer { record.through = computer.device }
@@ -439,12 +447,29 @@ final class FleetMembership {
         if let next = new.status.next, next.seq > 1 {
             record.signedSeq = max(record.signedSeq ?? 0, next.seq - 1)
         }
-        record.unconfirmed = nil
+        if !signed.isEmpty { record.unconfirmed = (record.unconfirmed ?? []) + signed }
         if record != self.record, !save(record) { throw FleetMembershipError.notKept }
         try store.write(new.log)
         replica = new
+        // The copy on disk holds them now (a sync or signature takes them
+        // in first). A failed save here only means taking them in again,
+        // which changes nothing.
+        if holdsKept, record.unconfirmed != nil {
+            record.unconfirmed = nil
+            _ = save(record)
+        }
         route(new.status)
         settleLinks(new.status)
+    }
+
+    /// Takes into the copy what this phone signed that its saved copy may
+    /// not hold, without a computer: kept in the record because the copy
+    /// could not be written. Runs before drafting, so the next draft
+    /// follows them.
+    private func carryKept() async throws {
+        guard let carried = record?.unconfirmed, !carried.isEmpty, let current = replica else { return }
+        let merged = try await Self.background { try current.applying(carried, at: .now) }
+        try adopt(merged)
     }
 
     /// How signing and posting ended.
@@ -476,6 +501,12 @@ final class FleetMembership {
         defer { busy = false }
         // Drafted on the newest heads a computer has, when one answers.
         for computer in candidates where await syncNow(with: computer) != nil { break }
+        do {
+            try await carryKept()
+        } catch {
+            problem = Self.describe(error)
+            return .nothing
+        }
         guard let current = replica else {
             problem = "This \(UIDevice.current.model) has no copy of the fleet yet. Connect to one of its computers first."
             return .nothing
@@ -489,7 +520,7 @@ final class FleetMembership {
         }
         // A copy missing some of what this phone signed would reuse a
         // sequence number, which the fleet takes for a stolen key.
-        guard let first = drafts.first, first.seq > (record.signedSeq ?? 0) else {
+        guard let first = drafts.first, first.seq > (self.record?.signedSeq ?? record.signedSeq ?? 0) else {
             problem = "This \(UIDevice.current.model)'s copy of the fleet lacks something it signed. Connect to a computer of your fleet that has it, then try again."
             return .nothing
         }
@@ -502,9 +533,9 @@ final class FleetMembership {
         }
         do {
             let signer = key.signer
-            let sealed = try await Self.background { try current.signing(drafts, with: signer.sign, at: .now).replica }
+            let sealed = try await Self.background { try current.signing(drafts, with: signer.sign, at: .now) }
             // Kept before it is handed over, so the next draft follows it.
-            try adopt(sealed)
+            try adopt(sealed.replica, signed: sealed.ops)
         } catch {
             problem = Self.describe(error)
             return .nothing

@@ -227,14 +227,17 @@ impl<R: FnMut(Update)> Session<R> {
                 ..project::session(&id, &self.config.cwd)
             }),
         });
-        if let Some(modes) = modes {
-            self.emit(Change::Modes {
-                modes: Some(project::modes(modes)),
-            });
+        // The session's answer replaces whatever the chat showed while it
+        // started, the agent's known settings included, even when it
+        // offers none.
+        let modes = modes.map(project::modes);
+        if self.transcript.modes != modes {
+            self.emit(Change::Modes { modes });
         }
-        if !options.is_empty() {
+        if self.transcript.options != options {
             self.emit(Change::Options { options });
         }
+        self.learn(loaded);
         self.projector.close();
         self.hand_over(loaded);
         self.status(Status::Idle);
@@ -242,6 +245,7 @@ impl<R: FnMut(Update)> Session<R> {
             // A continued session keeps its own settings.
             self.config.settings = None;
         }
+        self.carry_deferred();
         self.carry_next();
         self.next_queued();
     }

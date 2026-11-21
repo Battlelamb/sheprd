@@ -88,6 +88,14 @@ pub fn decode(bytes: &[u8], now_ms: u64) -> Result<Log> {
             Log::found(ops.swap_remove(found))?
         }
     };
+    // Read as of the latest date the file holds, or now if later: every
+    // operation in it passed the skew check when it arrived, and a clock
+    // set back since must not drop any, least of all this device's own,
+    // whose sequence numbers its next operation would then reuse.
+    let at = ops
+        .iter()
+        .map(|op| op.unsigned().issued_ms)
+        .fold(now_ms, u64::max);
     // Parents first, a pool's worth at a time: each batch applies whole,
     // so the bounded pool of operations waiting for their parents never
     // has to drop history the file holds. What no longer checks out is
@@ -95,9 +103,46 @@ pub fn decode(bytes: &[u8], now_ms: u64) -> Result<Log> {
     let mut ops = parents_first(ops).into_iter().peekable();
     while ops.peek().is_some() {
         let batch: Vec<Op> = ops.by_ref().take(MAX_PENDING).collect();
-        let _ = log.insert_all(batch, now_ms);
+        let _ = log.insert_all(batch, at);
     }
     Ok(log)
+}
+
+/// The operations `bytes` hold, read for their shape alone, as far as
+/// the file can be read: no signature is checked, so they are only ever
+/// handed to a log that checks them. What a device keeps of a copy that no
+/// longer checks out, so the operations it signed and no peer holds yet
+/// are not lost when it starts its copy again.
+#[must_use]
+pub fn salvage(bytes: &[u8]) -> Vec<Op> {
+    let mut ops = Vec::new();
+    if bytes.len() > MAX_SAVED {
+        return ops;
+    }
+    let Some(mut rest) = bytes.strip_prefix(MAGIC) else {
+        return ops;
+    };
+    let Some((&flag, after)) = rest.split_first() else {
+        return ops;
+    };
+    rest = after;
+    if flag == 1 {
+        let root = take(&mut rest, super::MAX_OP).and_then(Op::decode);
+        if take(&mut rest, MAX_STATE).is_err() {
+            return ops;
+        }
+        ops.extend(root);
+    }
+    let Ok(count) = array(&mut rest).map(u32::from_be_bytes) else {
+        return ops;
+    };
+    for _ in 0..count.min(u32::try_from(MAX_HELD).unwrap_or(u32::MAX)) {
+        let Ok(op) = take(&mut rest, super::MAX_OP) else {
+            break;
+        };
+        ops.extend(Op::decode(op));
+    }
+    ops
 }
 
 /// `ops` ordered so each comes after every parent among them; those whose

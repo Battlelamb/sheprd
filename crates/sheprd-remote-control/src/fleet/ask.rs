@@ -38,6 +38,22 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
                 signature: sync::text(&signature.to_bytes()),
             })
         }
+        Ask::Joining { fleet: id, pairing } => {
+            if fleet.in_fleet()? {
+                return Err(Error::InFleet);
+            }
+            let id = sync::fleet(&id)?;
+            let pairing: [u8; 32] = sync::bytes(&pairing)?
+                .try_into()
+                .map_err(|_| crate::control::fleet::Error::Encoding)?;
+            let bundle = me::bundle(state, fleet, now_ms)?;
+            Ok(Answer::Joining(crate::control::fleet::bluetooth::joining(
+                fleet.key(),
+                &id,
+                &pairing,
+                &bundle,
+            )?))
+        }
         Ask::Admit {
             bundle,
             signature,
@@ -56,6 +72,10 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             if admitted {
                 return Ok(Answer::Done);
             }
+            let member = bundle.id();
+            // Auth, released, then joins: the two locks never nest.
+            let paired = paired(state);
+            fleet.joins().admissible(&member, &paired)?;
             let joiner_signature = sync::bytes(&signature)?
                 .try_into()
                 .map_err(|_| crate::control::fleet::Error::JoinSignature)?;
@@ -67,6 +87,7 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
                 }),
                 now_ms,
             )?;
+            fleet.joins().admitted(&member);
             Ok(Answer::Done)
         }
         Ask::Remove {
@@ -216,7 +237,19 @@ pub(crate) fn answer(state: &State, fleet: &Fleet, ask: Ask, now_ms: u64) -> Res
             }
             Ok(Answer::Applied(applied))
         }
+        Ask::Joins => {
+            let paired = paired(state);
+            Ok(Answer::Joins {
+                joins: fleet.joins().list(now_ms, &paired),
+            })
+        }
     }
+}
+
+/// The devices paired here now, read before the joins are locked so the
+/// two locks never nest.
+fn paired(state: &State) -> std::collections::HashSet<crate::control::DeviceId> {
+    state.auth().devices().ids().cloned().collect()
 }
 
 fn access(

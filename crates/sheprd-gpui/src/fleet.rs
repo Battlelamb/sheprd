@@ -15,8 +15,10 @@
 //! with the certificate authority of one of the fleet's computers or
 //! Sheprd hosts goes on; any other is left alone.
 
+pub(crate) mod bluetooth;
 mod error;
 pub(crate) mod flows;
+pub(crate) mod joins;
 mod remote;
 pub(crate) mod saved;
 
@@ -140,10 +142,18 @@ pub(crate) struct Fleet {
     /// Fleet hosts the last update could not save as devices.
     unsaved: Option<saved::Unsaved>,
     error: Option<String>,
+    /// Why the fleet's part of a Bluetooth pairing failed: kept apart from
+    /// `error`, which the next good read clears, until a pairing's fleet
+    /// step succeeds.
+    pairing_error: Option<String>,
     windows: HashMap<EntityId, Reached>,
     links: HashMap<String, Link>,
     /// Machines an invitation or share runs for.
     acting: BTreeSet<String>,
+    /// Phones approved at pairing with Also add to your fleet, by when.
+    expected: joins::Expected,
+    /// Joins waiting for a person.
+    joins: Vec<sheprd_remote_control::control::fleet::sync::Join>,
 }
 
 impl Global for Fleet {}
@@ -156,6 +166,19 @@ impl Fleet {
     /// The fleet as this computer's daemon last said.
     pub(crate) fn view(cx: &App) -> Option<&View> {
         cx.try_global::<Self>()?.view.as_ref()
+    }
+
+    /// This computer's fleet, while it is a member.
+    pub(crate) fn member_of(cx: &App) -> Option<String> {
+        cx.try_global::<Self>()?.member_fleet().map(str::to_owned)
+    }
+
+    fn member_fleet(&self) -> Option<&str> {
+        let view = self.view.as_ref()?;
+        view.members
+            .iter()
+            .any(|member| member.id == view.me)
+            .then_some(view.fleet.as_str())
     }
 
     /// Whether the daemon has answered at least once.
@@ -176,7 +199,8 @@ impl Fleet {
 
     /// The last failure to show, if any.
     pub(crate) fn error(cx: &App) -> Option<String> {
-        cx.try_global::<Self>()?.error.clone()
+        let fleet = cx.try_global::<Self>()?;
+        fleet.error.clone().or_else(|| fleet.pairing_error.clone())
     }
 
     /// Every machine a window reaches now, by id.
@@ -248,7 +272,7 @@ impl Fleet {
         if !this.asking
             && this
                 .asked
-                .is_none_or(|asked| now.duration_since(asked) >= VIEW)
+                .is_none_or(|asked| now.duration_since(asked) >= this.pace())
         {
             Self::refresh(cx);
         }
@@ -297,7 +321,11 @@ impl Fleet {
                     Ok(_) => Err(None),
                     Err(error) => Err(Some(error.to_string())),
                 };
+                let member = matches!(&view, Ok(Some(view)) if view.members.iter().any(|member| member.id == view.me));
                 let changed = cx.update_global::<Self, _>(|this, _| this.answered(read, view));
+                if member {
+                    Self::read_joins(cx);
+                }
                 if changed {
                     saved::keep(cx);
                     Self::tick(cx);
@@ -352,6 +380,15 @@ impl Fleet {
             if other || shared_again {
                 link.restart();
             }
+        }
+    }
+
+    /// What became of the fleet's part of a Bluetooth pairing: a failure
+    /// stays in Settings > Fleet until a later one succeeds, whatever the
+    /// daemon's reads say meanwhile.
+    pub(crate) fn pairing_done(cx: &mut App, failure: Option<String>) {
+        if cx.has_global::<Self>() {
+            cx.update_global::<Self, _>(|this, _| this.pairing_error = failure);
         }
     }
 

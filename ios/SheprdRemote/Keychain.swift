@@ -50,6 +50,12 @@ enum Keychain {
         guard status == errSecSuccess else { throw Failure.status(status) }
     }
 
+    /// Removes an item; one that is not there is not an error.
+    static func delete(_ account: String) throws {
+        let status = SecItemDelete(query(account) as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else { throw Failure.status(status) }
+    }
+
     /// Moves an item saved before the App Group held it: copied into the
     /// group first, then removed from its old group by name, so a failure
     /// between the two leaves a copy rather than none.

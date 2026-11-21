@@ -18,6 +18,7 @@ use sheprd_remote_control::control::fleet::{
 };
 use std::collections::BTreeSet;
 
+mod joins;
 mod scrub;
 
 /// The page's state while it shows.
@@ -33,6 +34,8 @@ pub(in crate::settings_window) struct FleetPage {
     sharing: Option<(String, BTreeSet<String>)>,
     /// The machine whose Remove fleet access waits for confirmation.
     scrubbing: Option<String>,
+    /// The joining member whose Admit waits for confirmation.
+    admitting: Option<String>,
     /// The last failure, for a person.
     error: Option<String>,
 }
@@ -180,6 +183,12 @@ impl SettingsWindow {
                         .control(forget),
                 )
                 .children(self.fleet_scrub_only(cx));
+        }
+        let joins = self.fleet_joins(&view, cx);
+        if !joins.is_empty() {
+            page = page
+                .child(ui::section(theme, &fl!("settings-fleet-joins"), None))
+                .children(joins);
         }
         page = page
             .child(ui::section(theme, &fl!("settings-fleet-members"), None))
@@ -646,6 +655,7 @@ impl SettingsWindow {
                 this.fleet.inviting = None;
                 this.fleet.sharing = None;
                 this.fleet.scrubbing = None;
+                this.fleet.admitting = None;
                 cx.notify();
             },
         ))

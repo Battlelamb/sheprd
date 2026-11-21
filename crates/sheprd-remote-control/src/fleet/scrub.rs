@@ -1,14 +1,15 @@
 //! `fleet scrub`: forgets the fleet here, without signing anything, with
 //! every way it let someone in: the pairings of desktops whose keys
-//! members proved, the members' `authorized_keys` lines, and the relay
-//! records it wrote. The fleet key stays.
+//! members proved, the phones its links admitted to the API, the members'
+//! `authorized_keys` lines, and the relay records it wrote. The fleet key
+//! stays.
 //!
 //! It fails closed: it answers only once access is gone, and what it could
 //! not read (a damaged peers file, whose proven keys it could not revoke)
 //! stays on disk and is reported, so asking again finishes the job. A
 //! damaged log or record list never stops the rest.
 
-use super::{Fleet, Result, grants, store};
+use super::{Fleet, Result, grants, links, store};
 use crate::ssh_access::{self, AuthorizedKeys};
 use crate::web::State;
 use std::path::Path;
@@ -23,6 +24,7 @@ pub(crate) fn live(state: &State, fleet: &Fleet, session: Option<u16>) -> Result
     for tunnel in fleet.proven_keys() {
         grants::supersede(state, &tunnel)?;
     }
+    links::forget(&mut state.auth(), fleet.state_dir())?;
     // Access goes even when a file stays; the failure is still reported.
     // Located before anything goes: a scrub that cannot find the lines
     // it must remove says so rather than leave them.
@@ -41,7 +43,7 @@ pub(crate) fn unloaded(state: &State) -> Result<()> {
         for tunnel in tunnels {
             grants::supersede(state, tunnel)?;
         }
-        Ok(())
+        Ok(links::forget(&mut state.auth(), &state_dir)?)
     })
 }
 
@@ -49,14 +51,13 @@ pub(crate) fn unloaded(state: &State) -> Result<()> {
 pub(crate) fn offline(state_dir: &Path) -> Result<()> {
     let keys = located(None, AuthorizedKeys::of_user)?;
     on_disk(state_dir, keys.as_ref(), |tunnels| {
-        if tunnels.is_empty() {
-            return Ok(());
-        }
+        // Read whether or not members proved keys: phones the fleet's
+        // links admitted go too.
         let mut auth = crate::auth::Auth::load(state_dir, crate::auth::Limits::default())?;
         for tunnel in tunnels {
             grants::revoke_paired(&mut auth, keys.as_ref(), tunnel)?;
         }
-        Ok(())
+        Ok(links::forget(&mut auth, state_dir)?)
     })
 }
 

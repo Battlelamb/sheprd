@@ -78,6 +78,14 @@ public struct Home: Codable, Hashable, Sendable {
     /// Whether the computer runs a Sheprd too old for this app.
     public var needsUpdate: Bool { (api ?? 0) < Self.requiredAPI }
 
+    /// The `api` from which a chat followed in the background is not
+    /// marked seen (`LiveRequest.subscribe`).
+    public static let backgroundChatsAPI = 2
+
+    /// Whether the phone may follow chats no screen shows: older computers
+    /// would count what finishes in them as seen.
+    public var followsInBackground: Bool { (api ?? 0) >= Self.backgroundChatsAPI }
+
     /// CPU and memory in whole percentages, 0 to 100. Older computers
     /// send neither `cores` nor `load5Tenths`, and a computer whose OS
     /// keeps no load average leaves that out.

@@ -4,6 +4,8 @@ use sheprd_chat_protocol::{EndpointId, PermissionId};
 use sheprd_client::protocol::AgentStatus;
 
 mod agent_name;
+#[cfg(unix)]
+mod background_chat;
 mod chat_title;
 mod create;
 mod create_start;

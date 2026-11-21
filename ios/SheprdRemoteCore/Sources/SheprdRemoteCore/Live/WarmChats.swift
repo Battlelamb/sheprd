@@ -23,6 +23,17 @@ public struct WarmChats<Key: Hashable & Sendable>: Sendable {
     public static var lingers: TimeInterval { 60 }
     /// How many listed chats are followed; each streams its changes.
     public static var listed: Int { 4 }
+    /// The views one live socket follows at most (`MAX_VIEWS` in the
+    /// daemon's `native/live.rs`): home, the screens, and these.
+    public static var viewsPerLink: Int { 8 }
+
+    /// The background chats a computer has room for while `shown` views
+    /// (chats and terminals) are on screens: what its socket follows
+    /// besides home and those, less one kept for the next screen to open,
+    /// so opening one is never refused for these.
+    public static func room(shown: Int) -> Int {
+        max(0, viewsPerLink - 1 - shown - 1)
+    }
 
     /// When each chat left lingers until.
     private var left: [Key: Date] = [:]
@@ -35,19 +46,33 @@ public struct WarmChats<Key: Hashable & Sendable>: Sendable {
     }
 
     /// The chats to follow at `now` among those `listed`: the ones left
-    /// that still linger, while listed, and the busiest and most recently
-    /// answered. A chat no longer listed, as on a forgotten computer, is
-    /// not followed.
-    public mutating func keys(_ listed: [Listed], at now: Date) -> Set<Key> {
-        left = left.filter { $0.value > now }
+    /// that still linger, most recently left first, then the busiest and
+    /// most recently answered, each while its computer (`group`) has
+    /// `room` for it. A chat no longer listed, as on a forgotten
+    /// computer, is not followed.
+    public mutating func keys<Group: Hashable>(
+        _ listed: [Listed],
+        at now: Date,
+        room: [Group: Int],
+        in group: (Key) -> Group
+    ) -> Set<Key> {
         let known = Set(listed.map(\.key))
-        left = left.filter { known.contains($0.key) }
+        left = left.filter { $0.value > now && known.contains($0.key) }
+        let lingering = left.sorted { $0.value > $1.value }.map(\.key)
         let picked = listed.sorted { a, b in
             if a.busy != b.busy { return a.busy }
             return (a.lastAnswer ?? .distantPast) > (b.lastAnswer ?? .distantPast)
         }
         .prefix(Self.listed)
         .map(\.key)
-        return Set(picked).union(left.keys)
+        var room = room
+        var kept = Set<Key>()
+        for key in lingering + picked where !kept.contains(key) {
+            let free = room[group(key), default: 0]
+            guard free > 0 else { continue }
+            room[group(key)] = free - 1
+            kept.insert(key)
+        }
+        return kept
     }
 }

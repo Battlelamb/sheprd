@@ -275,6 +275,7 @@ fn client_messages_match_the_swift_fixtures() {
             view: View::Home,
             since: None,
             size: None,
+            background: false,
         },
     );
     check(
@@ -283,6 +284,16 @@ fn client_messages_match_the_swift_fixtures() {
             view: View::Chat { pane: "p1".into() },
             since: Some(cursor(41)),
             size: None,
+            background: false,
+        },
+    );
+    check(
+        "subscribe_chat_background",
+        &ClientMessage::Subscribe {
+            view: View::Chat { pane: "p1".into() },
+            since: Some(cursor(41)),
+            size: None,
+            background: true,
         },
     );
     check(
@@ -291,6 +302,7 @@ fn client_messages_match_the_swift_fixtures() {
             view: View::Term { pane: "p2".into() },
             since: None,
             size: None,
+            background: false,
         },
     );
     check(
@@ -299,6 +311,7 @@ fn client_messages_match_the_swift_fixtures() {
             view: View::Term { pane: "p2".into() },
             since: None,
             size: Some(TermSize { cols: 46, rows: 30 }),
+            background: false,
         },
     );
     check(
@@ -342,6 +355,7 @@ fn every_fixture_reads_back_as_what_wrote_it() {
     for name in [
         "subscribe_home",
         "subscribe_chat",
+        "subscribe_chat_background",
         "subscribe_term",
         "subscribe_term_sized",
         "term_scroll",

@@ -164,13 +164,18 @@ fn handle(
     message: ClientMessage,
     outbound: &Outbound,
 ) -> Option<Refusal> {
-    let (view, since, size) = match message {
+    let (view, since, size, background) = match message {
         ClientMessage::Unsubscribe { view } => {
             tracing::debug!(?view, "a phone stopped following a view");
             views.stop(&view);
             return None;
         }
-        ClientMessage::Subscribe { view, since, size } => (view, since, size),
+        ClientMessage::Subscribe {
+            view,
+            since,
+            size,
+            background,
+        } => (view, since, size, background),
         ClientMessage::TermScroll { pane, lines } => {
             let refused = |message| Some((message, Some(View::Term { pane: pane.clone() })));
             if lines == 0 {
@@ -200,7 +205,8 @@ fn handle(
             let Some(link) = layout.chat(&pane).and_then(|_| state.hub.chat(&pane)) else {
                 return Some(("no such chat", Some(view)));
             };
-            let watching = Watching::new(&state, &pane);
+            // Only a chat a screen shows marks what finishes in it seen.
+            let watching = (!background).then(|| Watching::new(&state, &pane));
             views.start(view, async move {
                 let _watching = watching;
                 follow_chat(state, link, since, out).await;

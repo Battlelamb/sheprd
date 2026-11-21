@@ -21,7 +21,8 @@ use std::collections::HashMap;
 /// What this daemon offers phones. Raised when the phone starts to rely on
 /// something new; `Home.requiredAPI` in `SheprdRemoteCore` is what the
 /// phone asks for. 1: chats take a `start`, and `/api/v2/update` exists.
-pub(crate) const API_LEVEL: u32 = 1;
+/// 2: a chat subscribed `background` does not mark what finishes seen.
+pub(crate) const API_LEVEL: u32 = 2;
 
 /// Every workspace of this computer, with its chats and terminal tabs.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -15,6 +15,7 @@ pub(super) fn term(size: Option<TermSize>) -> ClientMessage {
         view: View::Term { pane: "p2".into() },
         since: None,
         size,
+        background: false,
     }
 }
 

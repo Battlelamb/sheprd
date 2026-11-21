@@ -89,6 +89,14 @@ struct WireTests {
                 since: Cursor(epoch: UUID(uuidString: "01234567-89ab-cdef-0123-456789abcdef")!, seq: 41)
             )
         ),
+        (
+            "subscribe_chat_background",
+            LiveRequest.subscribe(
+                .chat(pane: "p1"),
+                since: Cursor(epoch: UUID(uuidString: "01234567-89ab-cdef-0123-456789abcdef")!, seq: 41),
+                background: true
+            )
+        ),
     ])
     func encodesRequestsAsTheDaemonReadsThem(name: String, request: LiveRequest) throws {
         let expected = try JSONSerialization.jsonObject(with: Self.fixture(name)) as? NSDictionary

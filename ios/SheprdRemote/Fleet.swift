@@ -102,6 +102,8 @@ final class Fleet {
     @ObservationIgnored private var termViewers: [PaneKey: Int] = [:]
     /// Chats followed with no screen showing them, so they open current.
     @ObservationIgnored private var warmth = WarmChats<PaneKey>()
+    /// The followed chats subscribed in the background, not marked seen.
+    @ObservationIgnored private var backgrounded: Set<PaneKey> = []
     /// One client per computer, kept while its address and CA stay.
     @ObservationIgnored private var clients: [String: RemoteClient] = [:]
     /// Each computer's relay proxy while its link runs (`RelayProxy`).
@@ -378,7 +380,9 @@ final class Fleet {
     /// Opens a chat, current at once when it was followed (`WarmChats`).
     func openChat(_ key: PaneKey) -> ChatStore {
         chatViewers[key, default: 0] += 1
-        return follow(key)
+        // Background chats give up the room this one takes first.
+        rewarm()
+        return follow(key, background: false)
     }
 
     func closeChat(_ store: ChatStore) {
@@ -392,12 +396,17 @@ final class Fleet {
         }
     }
 
-    private func follow(_ key: PaneKey) -> ChatStore {
-        if let open = chats[key] { return open }
-        let store = ChatStore(key: key, cached: cache.chat(key.device, pane: key.pane))
+    /// Follows a chat, in the `background` while no screen shows it, so
+    /// what finishes in it is not marked seen; a chat followed already is
+    /// subscribed again when that changes.
+    private func follow(_ key: PaneKey, background: Bool) -> ChatStore {
+        let open = chats[key]
+        if let open, backgrounded.contains(key) == background { return open }
+        let store = open ?? ChatStore(key: key, cached: cache.chat(key.device, pane: key.pane))
         chats[key] = store
+        if background { backgrounded.insert(key) } else { backgrounded.remove(key) }
         let since = store.cursor
-        Task { await links[key.device]?.watch(.chat(pane: key.pane), since: since) }
+        Task { await links[key.device]?.watch(.chat(pane: key.pane), since: since, background: background) }
         return store
     }
 
@@ -406,28 +415,71 @@ final class Fleet {
         cache.save(chat: transcript, cursor: store.cursor, device: store.key.device, pane: store.key.pane)
     }
 
-    /// Follows the chats `WarmChats` picks and lets go of the rest no
+    /// Follows the chats `WarmChats` picks, within the room each
+    /// computer's socket has beside the screens, and lets go of the rest no
     /// screen shows, saving what they hold for the next opening, unless
-    /// their computer was forgotten and its cache cleared.
+    /// their computer was forgotten and its cache cleared. Computers too
+    /// old to follow a chat without marking it seen have no room.
     private func rewarm() {
-        let listed = chatItems.map { WarmChats.Listed(key: $0.key, busy: $0.working || $0.needsYou, lastAnswer: $0.lastAnswer) }
-        let wanted = warmth.keys(listed, at: .now)
-        for key in wanted { _ = follow(key) }
-        let known = Set(machines.map(\.id))
-        for (key, store) in chats where chatViewers[key] == nil && !wanted.contains(key) {
-            if known.contains(key.device) { save(store) }
-            unfollow(key)
+        let listed = chatItems
+            .filter { chatViewers[$0.key] == nil }
+            .map { WarmChats.Listed(key: $0.key, busy: $0.working || $0.needsYou, lastAnswer: $0.lastAnswer) }
+        let shown = Set(chatViewers.keys).map(\.device) + Set(termViewers.keys).map(\.device)
+        let counts = Dictionary(shown.map { ($0, 1) }, uniquingKeysWith: +)
+        let room = Dictionary(uniqueKeysWithValues: machines.filter { $0.home?.followsInBackground == true }.map {
+            ($0.id, WarmChats<PaneKey>.room(shown: counts[$0.id, default: 0]))
+        })
+        let wanted = warmth.keys(listed, at: .now, room: room) { $0.device }
+        // Let go first, so the socket has room for what follows.
+        for key in Array(chats.keys) where chatViewers[key] == nil && !wanted.contains(key) {
+            letGo(key)
         }
+        for key in wanted { _ = follow(key, background: true) }
+    }
+
+    /// Stops following a chat no screen shows, saving it unless its
+    /// computer was forgotten.
+    private func letGo(_ key: PaneKey) {
+        guard let store = chats[key] else { return }
+        if machines.contains(where: { $0.id == key.device }) { save(store) }
+        unfollow(key)
     }
 
     private func unfollow(_ key: PaneKey) {
         chats[key] = nil
+        backgrounded.remove(key)
         Task { await links[key.device]?.unwatch(.chat(pane: key.pane)) }
+    }
+
+    /// A computer refused a view a screen shows, perhaps for want of room:
+    /// lets go of its background chats and asks again, once, if any were.
+    private func makeRoom(for view: LiveView, on device: String) {
+        let shown = switch view {
+        case let .chat(pane): chatViewers[PaneKey(device: device, pane: pane)] != nil
+        case let .term(pane): termViewers[PaneKey(device: device, pane: pane)] != nil
+        case .home: false
+        }
+        let background = chats.keys.filter { $0.device == device && chatViewers[$0] == nil }
+        guard shown, !background.isEmpty, let link = links[device] else { return }
+        for key in background {
+            if let store = chats[key] { save(store) }
+            chats[key] = nil
+            backgrounded.remove(key)
+        }
+        let since: Cursor? = if case let .chat(pane) = view { chats[PaneKey(device: device, pane: pane)]?.cursor } else { nil }
+        let size: TermSize? = if case let .term(pane) = view { terms[PaneKey(device: device, pane: pane)]?.size } else { nil }
+        // One task, so the computer drops them before the view is asked again.
+        Task {
+            for key in background { await link.unwatch(.chat(pane: key.pane)) }
+            await link.watch(view, since: since, size: size)
+        }
     }
 
     func openTerm(_ key: PaneKey) -> TermStore {
         termViewers[key, default: 0] += 1
         if let open = terms[key] { return open }
+        // Background chats give up the room this one takes first.
+        rewarm()
         let store = TermStore(key: key)
         terms[key] = store
         let status = machines.first { $0.id == key.device }.map { String(describing: $0.status) } ?? "not paired"
@@ -479,6 +531,7 @@ final class Fleet {
         guard terms[store.key] === store, Self.release(store.key, from: &termViewers) else { return }
         terms[store.key] = nil
         Task { await links[store.key.device]?.unwatch(.term(pane: store.key.pane)) }
+        rewarm()
     }
 
     /// One view of `key` closed; whether it was the last.
@@ -717,11 +770,11 @@ final class Fleet {
         links[computer.device] = link
         startRelay(computer)
         let device = computer.device
-        let watching = chats.filter { $0.key.device == device }.map { ($0.key.pane, $0.value.cursor) }
+        let watching = chats.filter { $0.key.device == device }.map { ($0.key.pane, $0.value.cursor, backgrounded.contains($0.key)) }
         let terminals = terms.filter { $0.key.device == device }.map { ($0.key.pane, $0.value.size) }
         readers[device] = Task {
             await link.watch(.home)
-            for (pane, cursor) in watching { await link.watch(.chat(pane: pane), since: cursor) }
+            for (pane, cursor, background) in watching { await link.watch(.chat(pane: pane), since: cursor, background: background) }
             for (pane, size) in terminals { await link.watch(.term(pane: pane), size: size) }
             await link.start()
             for await update in link.updates {
@@ -888,6 +941,7 @@ final class Fleet {
             if case let .term(pane) = view, let store = terms[PaneKey(device: device, pane: pane)], store.screen == nil {
                 store.problem = message
             }
+            makeRoom(for: view, on: device)
         case let .event(.reload(.term(pane))):
             log.notice("\(self.machines[index].computer.name, privacy: .public) reloads terminal \(pane, privacy: .public)")
         case let .event(.termScreen(screen)):
@@ -904,7 +958,8 @@ final class Fleet {
             pending.settle(store.key) { shown($0) }
             if store.diverged, !before {
                 // A change that did not fit: start over from a snapshot.
-                Task { await links[device]?.watch(.chat(pane: pane), since: nil) }
+                let background = backgrounded.contains(store.key)
+                Task { await links[device]?.watch(.chat(pane: pane), since: nil, background: background) }
             }
         }
     }

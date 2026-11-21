@@ -17,6 +17,7 @@ fn every_view_subscribes_and_unsubscribes() {
             view: View::Home,
             since: None,
             size: None,
+            background: false,
         })
     );
     assert_eq!(
@@ -25,6 +26,7 @@ fn every_view_subscribes_and_unsubscribes() {
             view: View::Term { pane: "p2".into() },
             since: None,
             size: None,
+            background: false,
         })
     );
     assert_eq!(

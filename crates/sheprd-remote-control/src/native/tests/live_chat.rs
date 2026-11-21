@@ -60,7 +60,10 @@ fn serve_chat(listener: UnixListener, cursor: Cursor, burst: std_mpsc::Receiver<
 
 /// A session on a hub linked to the chat program, once the hub holds its
 /// snapshot.
-async fn linked(dir: &std::path::Path, cursor: Cursor) -> (Session, std_mpsc::Sender<()>) {
+pub(super) async fn linked(
+    dir: &std::path::Path,
+    cursor: Cursor,
+) -> (Session, std_mpsc::Sender<()>) {
     let endpoint = EndpointId::random();
     let (burst, bursts) = std_mpsc::channel();
     let socket = sheprd_chat_protocol::endpoint_path(dir, &endpoint);
@@ -82,6 +85,7 @@ fn chat(since: Option<Cursor>) -> ClientMessage {
         view: View::Chat { pane: "p1".into() },
         since,
         size: None,
+        background: false,
     }
 }
 

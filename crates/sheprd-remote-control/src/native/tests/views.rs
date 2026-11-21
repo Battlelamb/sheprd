@@ -25,6 +25,7 @@ fn subscribe(view: View) -> ClientMessage {
         view,
         since: None,
         size: None,
+        background: false,
     }
 }
 

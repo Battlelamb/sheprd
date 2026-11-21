@@ -122,6 +122,25 @@ struct LinkTests {
         await link.stop()
     }
 
+    @Test func resubscribesABackgroundChatInTheBackground() async {
+        let computer = FakeComputer()
+        await computer.setPing("https://lan", mac)
+        let link = ComputerLink(fingerprint: mac, origins: ["https://lan"], io: await computer.io())
+        await link.watch(.chat(pane: "p1"), since: Cursor(epoch: epoch, seq: 4), background: true)
+        await link.start()
+        await until { await computer.sent.count == 1 }
+        #expect(await computer.sent.last == .subscribe(.chat(pane: "p1"), since: Cursor(epoch: epoch, seq: 4), background: true))
+        await computer.drop()
+        await link.networkChanged()
+        await until { await computer.sent.count == 2 }
+        #expect(await computer.sent.last == .subscribe(.chat(pane: "p1"), since: Cursor(epoch: epoch, seq: 4), background: true))
+        // Shown on a screen: watched again without it.
+        await link.watch(.chat(pane: "p1"), since: Cursor(epoch: epoch, seq: 4))
+        await until { await computer.sent.count == 3 }
+        #expect(await computer.sent.last == .subscribe(.chat(pane: "p1"), since: Cursor(epoch: epoch, seq: 4)))
+        await link.stop()
+    }
+
     @Test func dropsChangesAfterAGapAndAsksAgain() async {
         let computer = FakeComputer()
         await computer.setPing("https://lan", mac)

@@ -131,7 +131,7 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
 
 ```json
 {
-  "api": 1,
+  "api": 2,
   "computer": "MacBook Pro",
   "fingerprint": "64 uppercase hex",
   "connected": true,
@@ -226,12 +226,20 @@ The phone sends:
 ```json
 {"type": "subscribe", "view": "home"}
 {"type": "subscribe", "view": "chat", "pane": "p1", "since": {"epoch": "uuid", "seq": 41}}
+{"type": "subscribe", "view": "chat", "pane": "p1", "since": {"epoch": "uuid", "seq": 41}, "background": true}
 {"type": "subscribe", "view": "term", "pane": "p2", "size": {"cols": 46, "rows": 30}}
 {"type": "unsubscribe", "view": "chat", "pane": "p1"}
 {"type": "term_scroll", "pane": "p2", "lines": 3}
 ```
 
 `since` is optional: the cursor of the transcript the phone has cached.
+
+`background` is optional and only read for `chat` (`api` 2 and later): the
+phone keeps the chat current with no screen showing it, so a reply that
+finishes in it is not marked seen and still counts in `waiting`.
+Subscribing to the same chat again without it marks it shown, and with it
+again stops doing so. Background chats count toward the eight views a
+socket follows; the phone keeps room for the ones its screens open.
 
 `size` is optional and only read for `term`: the columns and rows the
 phone draws. While the view runs, the daemon holds a direct terminal

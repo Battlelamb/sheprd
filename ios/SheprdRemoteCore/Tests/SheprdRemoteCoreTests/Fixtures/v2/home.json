@@ -1,7 +1,7 @@
 {
   "type": "home",
   "home": {
-    "api": 1,
+    "api": 2,
     "computer": "MacBook Pro",
     "fingerprint": "ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB",
     "connected": true,

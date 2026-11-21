@@ -86,6 +86,8 @@ pub enum Error {
     Random(#[source] getrandom::Error),
     #[error("too many requests; try again shortly")]
     RateLimited,
+    #[error("another device already uses these relay keys; make new ones")]
+    RelayKeysTaken,
     #[error(transparent)]
     SshAccess(#[from] crate::ssh_access::Error),
     #[error("could not {operation} {}", path.display())]
@@ -312,6 +314,8 @@ pub(crate) struct Auth {
     /// Where desktops paired with an SSH key are let in; `None` refuses
     /// them (`set_ssh_access`).
     ssh_access: Option<SshAccess>,
+    /// The state directory the devices were read from.
+    state_dir: PathBuf,
 }
 
 impl Auth {
@@ -342,6 +346,7 @@ impl Auth {
             revoked: watch::Sender::new(0),
             sessions: Sessions::default(),
             ssh_access: None,
+            state_dir: state_dir.to_owned(),
         })
     }
 
@@ -365,6 +370,11 @@ impl Auth {
         self.ssh_access = Some(access);
     }
 
+    /// The state directory the devices were read from.
+    pub(crate) fn state_dir(&self) -> &Path {
+        &self.state_dir
+    }
+
     /// Where desktops are let in, when they can be.
     pub(crate) fn ssh_access(&self) -> Result<&SshAccess> {
         self.ssh_access
@@ -382,6 +392,12 @@ impl Auth {
             return Ok(None);
         }
         Ok(Some(Login::here(&self.ssh_access()?.host_key_dir)?))
+    }
+
+    /// The open pairing, for what a desktop's claim asks of the fleet
+    /// (`fleet::bluetooth`).
+    pub(crate) fn pairings(&mut self) -> &mut Pairings {
+        &mut self.pairings
     }
 
     /// Keeps the SSH key a desktop sent with `claim`.
@@ -504,7 +520,9 @@ impl Auth {
         }
         let token = random_bytes::<SECRET_LEN>()?;
         let relay = self.relay_offer.as_ref();
-        let (revealed, code) = started.reveal(nonce, fingerprint, &token, origins, relay)?;
+        let fleet = self.pairings.take_hint();
+        let (revealed, code) =
+            started.reveal(nonce, fingerprint, &token, origins, relay, fleet.as_ref())?;
         self.pairings.set_nearby(&token, code, now_ms)?;
         if relay.is_some() {
             self.relay_pairing = Some(token);
@@ -821,6 +839,7 @@ impl Auth {
         self.devices.add_with(
             NewDevice {
                 app: None,
+                fleet: None,
                 id: id.clone(),
                 name,
                 public_key,

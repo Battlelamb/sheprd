@@ -152,6 +152,94 @@ impl Log {
         self.pending.len()
     }
 
+    /// The checkpoint the log was pruned to and the state it names, as
+    /// the log is saved.
+    #[must_use]
+    pub fn base(&self) -> Option<(&Op, &State)> {
+        self.root.as_ref().map(|root| (root, &self.base))
+    }
+
+    /// What a peer whose heads are `heads` lacks: every operation held
+    /// that is neither one of them nor an ancestor of one, in graph order,
+    /// so the peer can apply them as they come. Heads this log does not
+    /// know are passed over, so the peer may get what it already has.
+    #[must_use]
+    pub fn missing_for(&self, heads: &[OpId]) -> Vec<&Op> {
+        let Ok(graph) = self.graph() else {
+            return self.ops.values().collect();
+        };
+        let mut known = Bits::new(graph.len());
+        for head in heads {
+            if let Some(&position) = graph.index.get(head) {
+                known.union(&graph.ancestors[position]);
+                known.insert(position);
+            }
+        }
+        (0..graph.len())
+            .filter(|position| !known.contains(*position))
+            .map(|position| graph.order[position])
+            .collect()
+    }
+
+    /// Removals waiting for their parents whose signature already checks
+    /// out against a live member's key: what a daemon suspends at once,
+    /// before their history arrives (`docs/relay-plan.md`, Removals
+    /// between daemons). Each, with its targets.
+    #[must_use]
+    pub fn pending_removals(&self) -> Vec<(&Op, Vec<MemberId>)> {
+        self.pending
+            .values()
+            .filter_map(|(op, _)| {
+                let Body::Remove(remove) = op.body() else {
+                    return None;
+                };
+                let signer = self.state.members.get(&op.signer())?;
+                op.verify(&signer.bundle.verifying_key().ok()?).ok()?;
+                let targets = remove
+                    .targets()
+                    .filter(|target| self.state.members.contains_key(target))
+                    .copied()
+                    .collect::<Vec<_>>();
+                (!targets.is_empty()).then_some((op, targets))
+            })
+            .collect()
+    }
+
+    /// The parents operations waiting in the pending pool need, that
+    /// neither the log nor the pool holds: what to ask a peer for.
+    #[must_use]
+    pub fn wanted(&self) -> Vec<OpId> {
+        let mut wanted: Vec<OpId> = self
+            .pending
+            .values()
+            .flat_map(|(op, _)| op.parents().iter().copied())
+            .filter(|parent| !self.present(parent) && !self.waiting(parent))
+            .collect();
+        wanted.sort_unstable();
+        wanted.dedup();
+        wanted
+    }
+
+    /// Who signed a removal of `member` among the operations held, whether
+    /// or not it took effect.
+    #[must_use]
+    pub fn removers(&self, member: &MemberId) -> Vec<MemberId> {
+        self.ops
+            .values()
+            .filter(|op| match op.body() {
+                Body::Remove(remove) => remove.targets().any(|target| target == member),
+                _ => false,
+            })
+            .map(Op::signer)
+            .collect()
+    }
+
+    /// Whether `member` is live in this log.
+    #[must_use]
+    pub fn is_member(&self, member: &MemberId) -> bool {
+        self.state.members.contains_key(member)
+    }
+
     /// An operation for `signer` to sign next: on the heads, with the
     /// next sequence number.
     ///
@@ -208,6 +296,37 @@ impl Log {
             parents,
             body,
         }
+    }
+
+    /// Drafts one operation per body for `signer`, each on the one before,
+    /// and checks that each would apply once `signer` signs it: every rule
+    /// but the signature, on a copy of this log that is then dropped. A
+    /// member that keeps its own log asks this before its owner signs, so
+    /// it never signs what its own replay refuses.
+    pub fn drafts(
+        &self,
+        signer: MemberId,
+        issued_ms: u64,
+        bodies: Vec<Body>,
+        now_ms: u64,
+    ) -> Result<Vec<Unsigned>> {
+        let mut copy = self.clone();
+        let mut drafted = Vec::with_capacity(bodies.len());
+        for body in bodies {
+            let unsigned = copy.draft(signer, issued_ms, body);
+            // A placeholder signature, never checked: `settle` presumes it.
+            let op = Op::decode(&[unsigned.encode()?.as_slice(), &[0; 64]].concat())?;
+            let id = op.id();
+            if copy.admissible(&op, now_ms)? != Inserted::Pending {
+                return Err(Error::Invalid);
+            }
+            copy.ops.insert(id, op);
+            if let Some(error) = copy.settle(&[id], true)?.remove(&id) {
+                return Err(error);
+            }
+            drafted.push(unsigned);
+        }
+        Ok(drafted)
     }
 
     /// The highest `rev` of any `Access` that `parents` and their
@@ -305,7 +424,7 @@ impl Log {
             }
         }
         self.bound();
-        let refused = match self.settle(&added) {
+        let refused = match self.settle(&added, false) {
             Ok(refused) => refused,
             Err(error) => {
                 // The log cannot take these at all (full): put it back as
@@ -327,6 +446,40 @@ impl Log {
             results.push((id, result));
         }
         results
+    }
+
+    /// Every removal in effect among the operations held, with every
+    /// member it removes under the log's rules: those it names, and those
+    /// it takes with them, such as a member one it removes admitted at the
+    /// same time. A fold starts at the last checkpoint every operation has
+    /// seen or was seen by, so the removals before each such checkpoint
+    /// are read from the history up to it, which settled them: none is
+    /// lost behind a later checkpoint. A log pruned to a checkpoint holds
+    /// no removal from before it to pass on, and every removal after it
+    /// has seen every admission the checkpoint settled.
+    pub fn removed_by(&self) -> Result<BTreeMap<OpId, std::collections::BTreeSet<MemberId>>> {
+        let graph = self.graph()?;
+        let folder = self.folder(&graph)?;
+        let mut removed_by = BTreeMap::new();
+        let mut set = Bits::full(graph.len());
+        loop {
+            let members = folder.members(&set);
+            for (&position, reach) in &members.removals {
+                removed_by
+                    .entry(graph.order[position].id())
+                    .or_insert_with(|| reach.clone());
+            }
+            let Some(at) = folder.barrier(&set) else {
+                break;
+            };
+            // The history the checkpoint settled: its strict ancestors.
+            let before = graph.ancestors[at].clone();
+            if before.iter().next().is_none() {
+                break;
+            }
+            set = before;
+        }
+        Ok(removed_by)
     }
 
     /// The state of the history of `id`, which a checkpoint at `id` names
@@ -479,8 +632,14 @@ impl Log {
 
     /// Checks the operations just `added`, removes those refused and their
     /// descendants, and folds. Says why each was refused.
-    fn settle(&mut self, added: &[OpId]) -> Result<BTreeMap<OpId, Error>> {
-        let mut refused = self.forged(added);
+    /// With `presumed`, their signatures are taken as checked: only for
+    /// [`Log::drafts`], on a copy that is dropped.
+    fn settle(&mut self, added: &[OpId], presumed: bool) -> Result<BTreeMap<OpId, Error>> {
+        let mut refused = if presumed {
+            BTreeMap::new()
+        } else {
+            self.forged(added)
+        };
         self.signed = added
             .iter()
             .filter(|id| !refused.contains_key(*id))

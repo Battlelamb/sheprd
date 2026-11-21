@@ -288,7 +288,7 @@ impl<'g, 'a> Folder<'g, 'a> {
                 let id = admit.bundle.id();
                 if members.live.contains_key(&id)
                     || members.tombstones.contains(&id)
-                    || host_taken(members, &admit.bundle, id)
+                    || taken(members, &admit.bundle, id)
                 {
                     return Err(Error::Invalid);
                 }
@@ -330,7 +330,7 @@ impl<'g, 'a> Folder<'g, 'a> {
                 if bundle.key != current.bundle.key || bundle.kind != kind {
                     return Err(Error::Permission);
                 }
-                if host_taken(members, bundle, op.signer()) {
+                if taken(members, bundle, op.signer()) {
                     return Err(Error::Invalid);
                 }
                 Ok(())
@@ -396,6 +396,7 @@ impl<'g, 'a> Folder<'g, 'a> {
                             bundle: bundle.clone(),
                             admitted_by: None,
                             seq: 0,
+                            rotated: 0,
                         },
                     );
                 }
@@ -426,6 +427,7 @@ impl<'g, 'a> Folder<'g, 'a> {
                             bundle: admit.bundle.clone(),
                             admitted_by: Some(op.signer()),
                             seq: 0,
+                            rotated: 0,
                         });
                     }
                 }
@@ -442,6 +444,7 @@ impl<'g, 'a> Folder<'g, 'a> {
                         claims.push(position);
                         members.bundles.insert(position);
                         member.bundle = bundle.clone();
+                        member.rotated = op.unsigned().seq;
                     } else if let Some(host) = unseated.get_mut(&op.signer())
                         && let Some(id) = host_id(bundle)
                         && *host != id
@@ -721,16 +724,19 @@ fn host_id(bundle: &super::Bundle) -> Option<super::HostId> {
     bundle.host.as_ref().and_then(|intro| intro.id().ok())
 }
 
-/// Whether another live member already names the host `bundle` names: a
-/// copied intro, perhaps with another user to log in as.
-fn host_taken(members: &Members, bundle: &super::Bundle, own: MemberId) -> bool {
-    let Some(id) = host_id(bundle) else {
-        return false;
-    };
-    members
-        .live
-        .iter()
-        .any(|(member, other)| *member != own && host_id(&other.bundle) == Some(id))
+/// Whether another live member already holds a key or the host `bundle`
+/// names: its tunnel key, its dial key, or its own host (a copied intro,
+/// perhaps with another user to log in as). Keys are public, so a bundle
+/// naming another member's would make that member's sessions look like
+/// its own.
+fn taken(members: &Members, bundle: &super::Bundle, own: MemberId) -> bool {
+    let host = host_id(bundle);
+    members.live.iter().any(|(member, other)| {
+        *member != own
+            && (other.bundle.tunnel == bundle.tunnel
+                || other.bundle.dial == bundle.dial
+                || host.is_some_and(|host| host_id(&other.bundle) == Some(host)))
+    })
 }
 
 /// The members an operation removes; none unless it is a removal.

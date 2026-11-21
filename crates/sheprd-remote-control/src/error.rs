@@ -19,6 +19,9 @@ pub enum Error {
     Fleet(#[from] crate::control::fleet::Error),
     #[cfg(feature = "server")]
     #[error(transparent)]
+    FleetDaemon(#[from] crate::fleet::Error),
+    #[cfg(feature = "server")]
+    #[error(transparent)]
     Hub(#[from] crate::hub::Error),
     #[error("remote control I/O failed")]
     Io(#[from] io::Error),

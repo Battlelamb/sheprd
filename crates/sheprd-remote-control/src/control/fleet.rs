@@ -30,6 +30,8 @@
 //! and the iOS app's Swift copy is checked against the vectors
 //! `tests/vectors.rs` writes.
 
+pub mod access;
+pub mod bluetooth;
 mod body;
 mod error;
 mod fold;
@@ -38,8 +40,13 @@ mod hosts;
 mod log;
 mod membership;
 mod op;
+pub mod phone;
+pub mod removal;
 mod routes;
+pub mod saved;
 mod state;
+pub mod sync;
+mod view;
 mod wire;
 
 pub use body::{
@@ -50,11 +57,14 @@ pub use error::{Error, Result};
 pub use log::{Inserted, Log};
 pub use op::{Op, Unsigned};
 pub use state::{AccessRegister, Host, Member, State};
+pub use view::{HostView, MemberView, View};
 
 use sha2::{Digest, Sha256};
 
 /// What every signed message starts with, before its own suffix.
 pub const DOMAIN: &[u8] = b"sheprd-fleet-v1";
+/// Members one removal names beside its target.
+pub const MAX_ALSO_MEMBERS: usize = 16;
 /// Live computer members at once.
 pub const MAX_COMPUTERS: usize = 16;
 /// Live phone members at once.
@@ -103,11 +113,29 @@ macro_rules! ids {
             pub fn short(&self) -> String {
                 hex(&self.0[..8])
             }
+
+            /// Reads 64 hex digits, in either case.
+            #[must_use]
+            pub fn from_hex(text: &str) -> Option<Self> {
+                from_hex(text).map(Self)
+            }
         }
 
         impl std::fmt::Debug for $name {
             fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(formatter, "{}({})", stringify!($name), self.short())
+            }
+        }
+
+        impl From<[u8; 32]> for $name {
+            fn from(bytes: [u8; 32]) -> Self {
+                Self(bytes)
+            }
+        }
+
+        impl From<$name> for [u8; 32] {
+            fn from(id: $name) -> Self {
+                id.0
             }
         }
 
@@ -130,6 +158,17 @@ ids! {
     /// An operation: the SHA-256 of its signed bytes, without the
     /// signature, so a re-encoded signature names the same operation.
     OpId;
+}
+
+fn from_hex(text: &str) -> Option<[u8; 32]> {
+    if text.len() != 64 || !text.is_ascii() {
+        return None;
+    }
+    let mut bytes = [0; 32];
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&text[index * 2..index * 2 + 2], 16).ok()?;
+    }
+    Some(bytes)
 }
 
 fn hex(bytes: &[u8]) -> String {

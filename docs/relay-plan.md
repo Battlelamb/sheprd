@@ -935,6 +935,15 @@ daemon is.
   keys when they are missing, so enrolling reads the route before the
   agent first runs. Still to come: the service units, the WebSocket
   fallback, and `"default"` (Sheprd's signed list).
+- **Fleet** (Fleet, Spreading a host): `fleet apply` merges the access
+  file Sheprd computes and writes the fleet's `authorized_keys` lines;
+  members are admitted from that file, not from `authorized`, which stays
+  the list of desktops enrolled one by one; members' sessions start with
+  a purpose byte, so they also pass removals. `status --json` reports the
+  fleet, the access file's digest, and what is suspended. The crate's
+  library without its default `runtime` feature holds the access file,
+  the removal frames, and the `authorized_keys` lines, with no Tokio, and
+  `sheprd-remote-control` depends on it for them.
 
 **`sheprd relay connect`.** A mode of the `sheprd` executable that SSH
 runs as its `ProxyCommand`, parsed before GPUI starts, as the setup relay's
@@ -1063,6 +1072,50 @@ through. B's daemon admits that tunnel key, sees that the device has an
 SSH key, splices the session to its SSH server instead of serving the
 API, and marks the device seen.
 
+**Joining the fleet in the same step** (built). Pairing leaves both
+computers in one fleet, whichever of them was in it (Fleet, Joining):
+
+- B names its fleet in the sealed offer while it is a live computer
+  member (`fleet::bluetooth::hint`: the id, and its computer and host
+  counts for the words, never trusted).
+- Once both screens show the code, A's page knows both fleets and the
+  child waits for its choice (`PairInput::Claim`) before it claims:
+
+  | A | B | A's page offers | The claim carries |
+  | --- | --- | --- | --- |
+  | In fleet F | In none | Add to fleet, or Pair only | `Invite(F)` |
+  | In none | In fleet G | Join fleet, or Pair only | `Join`: A's bundle for G |
+  | In none | In none | Create a fleet, or Pair only | `Invite` of the fleet A just founded |
+  | In F | In F | Says so | Nothing |
+  | In F | In G | Says B is in another fleet | `Invite(F)`, which B shows and cannot take |
+
+- A `Join` is A's bundle with its join signature, as an `Admit` carries
+  it, and a second signature by the same fleet key over the fleet, the
+  pairing's token hashed (`bluetooth::pairing_digest`), and the bundle
+  (`bluetooth::binding_message`). A's daemon makes both
+  (`Ask::Joining`), since the child holds no fleet key. B checks a
+  `Join` before it spends the token, and reads none of it for a claim
+  whose token it does not hold: the binding against this token, the
+  join signature for its own fleet, no tombstone, and the bundle's dial,
+  tunnel, and SSH keys equal to the very keys the claim carries. A
+  bundle copied from a log, or from another pairing, never binds.
+- B's dialog says what Allow does: "Also add Laptop to your fleet", or
+  "Join Laptop's fleet", a switch ticked by default; or a note when
+  both are in that fleet, or when B is in another, where Allow pairs
+  only. Allow sends the fleet the switch showed (`Approve.fleet`), and
+  the daemon acts only when it still matches: it signs `Admit`
+  (`Method::Bluetooth`), or its own bundle for A's fleet, bound to the
+  token (`ApprovedFleet::Joining`). The claim reads as waiting until
+  that is done, so A never takes the approval without the fleet's part.
+- A's child checks the answer before Sheprd sees it: a bundle must check
+  for A's fleet and this token and name the certificate authority,
+  route, and tunnel identity the code covered. Then, over the SSH the
+  pairing opened, A's Sheprd admits B and hands the log over, as Invite
+  does, or takes B's log, which A's daemon keeps only because it admits
+  A. A failure there shows in Settings > Fleet; the two stay paired.
+- From then on both are members, each a host of the other through the
+  relays, with every host the fleet shares (phase 2's grants).
+
 Not yet: Linux and Windows helpers that scan, sharing a relay record
 when B's relays change, and racing the relays. As with SSH machines,
 `git` and a typed `ssh` do not use the proxy.
@@ -1135,7 +1188,7 @@ Three options were weighed.
 
 **Fleet keys.** Every member makes a P-256 signing key when it joins.
 
-- **Computers:** the daemon keeps it in `STATE_DIR/fleet/key.pem` (0600),
+- **Computers:** the daemon keeps it in `STATE_DIR/fleet/key` (0600),
   beside the certificate authority's key.
 - **Phones:** it lives in the Secure Enclave with `userPresence`, so every
   signature asks for Face ID or the passcode. P-256 is what the Secure
@@ -1372,6 +1425,7 @@ When two edits to the same thing are concurrent, the safer outcome wins:
 | A member added and removed | Removed. Tombstones win. |
 | A host updated and removed | Removed, a computer's own host included. A computer that leaves or names another host takes the host it named with it, as a removal there would, even when another member added it too. An addition made after seeing the removal brings it back (for a computer's own host, a `Rotate` naming it), and the host starts over from that addition: exclusions, links, records, and routes from before it are gone. |
 | `Access` allow and deny, concurrent | Deny. Otherwise the one that descends from the other wins. An `Access` whose `rev` is not one above the highest `rev` of any `Access` its history holds is refused, so no single operation can put the register out of a later deny's reach. One floor for every host and member is kept whole in a checkpoint, and one voided later still set the floor its descendants signed on, so a deny that saw it stays a deny. |
+| A bundle naming another member's tunnel or dial key | Refused, as a copied host is: keys are public, and a member naming another's would make that member's sessions look like its own. Two members admitted concurrently with one key are both refused at the tunnel, and a paired phone's key always reaches the API. |
 | Two members naming one host as their own | A copied intro: the host is held. An `Admit` or `Rotate` naming the host of a member live in its history is refused outright. A member naming an added host is the same machine joining only when the account and SSH host keys match; otherwise the host is held, whether the addition came before the member's bundle or concurrently with it. Only a `HostAdd` that saw the bundle that first named the host is ignored (a `Rotate` that keeps the host keeps that claim), so no member can hold another's host by adding a copy, and no bundle can take over an added host by racing it. |
 | Two self-records | The higher `rev`. Equal `rev` with different content flags the host and keeps the one seen first. |
 | Two hosts naming one relay route | The host that claimed it first owns it, whether its intro or a verified record of its own claimed it. A host added with a route another host owns is held; a verified record naming one does not count and flags its host, and a record that does not verify changes nothing. A host keeps its intro's route, and the route its record names; a route it moves off is free again. The state keeps who owns each route, so a pruned log decides as the whole one. |
@@ -1422,20 +1476,60 @@ sequenceDiagram
    writes its `ssh_access` lines and admits the members' tunnel keys.
 3. **H is a plain SSH machine.** The dialog also says "Installs
    sheprd-relay-agent on H". A installs or updates it over its working
-   SSH session (Enrolling), then runs `sheprd-relay-agent fleet apply`
+   SSH session (Enrolling), on A's relays, forwarding to the port the
+   host's SSH server took that session on (`SSH_CONNECTION`, 22 when it
+   does not say): a private relay's listen token
+   goes over the session's input into a file in the agent's state
+   directory readable by that account alone, passed with `--token-file`,
+   and the share waits until a relay lets the agent listen. A then runs
+   `sheprd-relay-agent fleet apply`
    with an **access file** computed from the log:
-   - the fleet id, which pins the account to this fleet;
-   - per allowed member: its dial, tunnel, and SSH keys, and the
-     `Access` `rev`;
-   - every removed member id.
+   - the fleet id, which pins the account to this fleet: a file for
+     another fleet is refused, naming the fleet that holds it;
+   - per computer member: its fleet, dial, tunnel, and SSH keys, its name,
+     whether it is allowed, and the `Access` `rev` (0 until set). A
+     member whose SSH key is not Ed25519 is listed without one, so its
+     deny and the retiring of its older keys still land, and it never
+     reaches SSH;
+   - every removed member id;
+   - `settled`: of the removals the agent reported suspending for, those
+     the log holds.
 
-   The agent keeps what it was given and merges each new file into it:
-   removed ids are kept forever and never readmitted, and per member the
-   higher `rev` wins. So a member that has not yet heard of a removal
-   cannot undo it there. The agent writes `authorized` and the
-   `authorized_keys` lines the way `ssh_access` does: atomically,
-   refusing a linked file, and touching only lines with its own tag. It
-   then names the dial keys to its relays. A plain host trusts the SSH
+   The file is JSON with ids and keys in base64url, so 32 members and
+   1,024 removed ids fit its 72 KiB (`sheprd_relay_agent::access`;
+   `control::fleet::access::compute` makes it from the log). The agent
+   keeps what it was given and merges each new file into it: removed ids
+   are kept forever and never readmitted, and per member the higher `rev`
+   wins, a deny winning a tie. So a member that has not yet heard of a
+   removal cannot undo it there. A file that does not read or check out
+   fails closed: the agent removes the fleet's `authorized_keys` lines,
+   admits no member (`refused` in its state directory and its report)
+   until a good file arrives, and `fleet apply` exits with the error;
+   it never goes on granting from the file held before. The refusal
+   needs nothing else to read: it finds the lines by the held file's
+   fleet id alone, or removes every fleet line when even that does not
+   read, and a running agent whose fleet files stop reading shuts the
+   fleet's members out, keeping the cut-offs it last read. A held host
+   (two members added it with keys that disagree) gets a `paused` file:
+   every member is still named with the allow its `Access` register
+   gives, so removals, denials, and rotations land, a hold never reads
+   as a deny the agent would keep after it lifts, and a denied member
+   still suspends only denied ones; daemons still pass it removals, but
+   no member reaches SSH until a person picks the keys. A suspension
+   keeps its member's key pairs in `suspended`, so a desktop with them
+   stays cut off whatever becomes of the access file: up to 18 of them,
+   past which the suspension lasts until the member's removal and the
+   pairs an enrolled desktop has go to `revoked`, at most one per
+   desktop. No file is written past what loading reads back. Members are admitted from that file:
+   denied ones only to pass removals, allowed ones to SSH too. The agent
+   writes the `authorized_keys` lines the way `ssh_access` does, with the
+   same shared code: atomically, refusing a linked file, and touching
+   only lines with its own fleet's tag. A member removed for good also
+   cuts off, without forgetting, any `authorized` line with both its
+   keys. It then names the dial keys
+   to its relays. `status --json` and `fleet apply` report the fleet and
+   the digest of the merged file, which Sheprd compares with the file it
+   would write to see a host that is behind. A plain host trusts the SSH
    session that wrote the file, as it does today for everything else.
 4. **Every other computer member** gets the operations from Sheprd's
    sharing worker, which runs `fleet apply` over SSH on each member it
@@ -1558,7 +1652,12 @@ while every Sheprd window is shut.
 **The message.** It travels inside the existing end-to-end tunnel,
 directly or through a relay. A new purpose byte after the handshake,
 `removal`, sits beside the SSH splice a desktop's session gets today.
-After it, one framed exchange:
+Every purpose byte is followed by a proof: the member's fleet key
+signing the tunnel's handshake hash. The handshake proves only the
+tunnel key, which is public and which any member's bundle can name, so
+only a proven session ties a tunnel key to a member (and to a desktop
+paired one by one with it, which the member's removal then revokes).
+A session without a valid proof ends. After it, one framed exchange:
 
 ```text
 → Removal { fleet, ops[..64] }   // the Remove ops, and the ancestors the peer asked for
@@ -1579,16 +1678,68 @@ accepted on this purpose.
 - Each receiver that did not hold it already does the same, so a
   removal floods the fleet in about two hops. It sends each `Remove` to
   each peer until that peer answers `Held`, then never again.
-- Plain hosts get it too. An agent takes `removal` from the member
-  tunnel keys in its access file. It checks no signatures, so it only
-  **suspends** the target: it removes that member's `authorized` entry
-  and `authorized_keys` line, and keeps the id in a suspended list. That
-  holds when the sender is a member it admits and the target is any
-  member but the sender.
+- Plain hosts get it too. Every daemon dials each plain host in its
+  state from the host's record, and sends it the removals it signed
+  itself that removed every member they name (a voided removal may name
+  a member another removal took, beside one still live), each with the
+  members its log removes with it beyond those it names (one a removed
+  member admitted at the same time), in an `Also` message ahead of them.
+  The agent suspends those in the sender's name too, like the removal's
+  own targets, until the next access file confirms or settles it. The
+  daemon keeps which members each agent took with each removal, so one
+  the agent holds is sent again once the log learns it takes more, and
+  it reads what each removal takes from the history before every
+  checkpoint too. Each member's
+  keys carry the sequence number of its own latest rotation, which the
+  fleet's state keeps (so a checkpoint carries it and a pruned log agrees
+  with a whole one), so an agent never prefers keys a rotation replaced;
+  rotations competing at one number break the tie on the hash of the
+  bundle. A rotation that does not fit in the relay's dial keys still
+  takes the old pair away, and the member's new keys wait (`crowded`,
+  kept apart from the fleet's allow and deny) until there is room, when
+  the same file applied again lets it in: `status --json` lists those
+  members, and Sheprd applies the file again while any wait. They come
+  last on the relay, so they never take another member's place, and an
+  `authorized_keys` line the agent did not write stays byte for byte. Every member session to
+  an agent, SSH or removal, carries the member's fleet key signing the
+  tunnel handshake hash after the purpose byte, checked against the fleet
+  key in the access file; a session whose proof is missing or wrong ends.
+  An agent takes `removal`
+  from the member tunnel keys in its access file. It checks no
+  operation's signature and wants no parents, so it only **suspends** the target:
+  it stops admitting that member's keys (and any enrolled desktop with
+  both of them), removes its `authorized_keys` line, and
+  keeps the id in a suspended list with the removals that named it.
+  That holds when the sender is a member it admits, the removal names
+  the sender as its signer, the target is any member but the sender,
+  and, for a sender denied SSH on that host, the target is denied too.
+  It answers `Held` with every removal of its fleet it took, acted on or
+  not; the others reach it in the access file.
 - The next access file, computed over SSH from the signed log, settles
   it. A confirmed removal becomes a permanent tombstone. A removal the
   log voids, such as one from a member that was itself removed first, is
-  lifted.
+  lifted: each file's `settled` names removals the member was suspended
+  for that no longer stand, the agent forgets each as it is settled, and
+  the suspension lifts once none is left and the log still lists the
+  member. A removal stands no longer when the log holds it, or, when the
+  log does not hold it and is not waiting for it: once its signer or
+  target is no member, once the log holds a later operation of its
+  signer (the signer never made it), or once the daemon has seen it
+  reported unknown in 3 syncs over at least an hour (`fleet/peers.json`),
+  and at the latest after the week a daemon keeps its own unconfirmed
+  suspensions. The agent reports each removal's signer and sequence
+  number for this, so a member cannot keep another suspended by naming
+  removal ids that do not exist.
+- An enrolled desktop (`authorized`) with both keys of a member fails
+  closed with it: cut off while the member is suspended, and after its
+  removal. Sessions are matched by their dial and tunnel keys together,
+  the same way everywhere, so a suspended member's pair is never let in
+  as a desktop, and a desktop sharing only one key with it still is. A
+  desktop is never forgotten because of a member: a member may name any
+  desktop's public keys, and no session proves a desktop is that member.
+  One a removed member named stays enrolled, cut off, and listed in
+  `status --json` (`revoked`), so a person can enroll it again with
+  `authorize`.
 - A suspension the agent cannot settle stays in place. Settings > Fleet
   lists it, so a member can only ever take access away on an agent this
   way, never give it.
@@ -1600,10 +1751,25 @@ history still acts on it at once, to fail closed:
   knows, and the target is a member, it suspends the target's grants
   before asking for any missing parents.
 - Once the parents arrive, the full rules (Validity and conflicts)
-  either make the suspension permanent or lift it.
-- A suspension whose history never arrives, within 1 hour of the last
-  attempt, is kept and listed in Settings > Fleet as "suspended,
-  unconfirmed" rather than lifted.
+  either make the suspension permanent or lift it. The receiver keeps
+  the removal itself with the suspension, so it checks it again when its
+  history arrives after the removal left the pending pool, or after a
+  restart; only a refusal the history proves lifts it, never a full log.
+- A suspension whose history has not arrived is kept, and listed in
+  Settings > Fleet as "suspended, unconfirmed", while the removal's
+  signer is still a member and for at most 7 days: any member that
+  syncs brings the history long before, so only a removal whose history
+  does not exist outlives it. A removal that cannot be checked yet never
+  cuts off the computer receiving it.
+- What a receiver keeps is bounded: a live member's sixteen newest
+  removals are kept apart, each settled by its own history (refused, never
+  merely dropped for room); older ones, and all of a member no longer
+  live, fold per signer and target: four by id, each with what it named
+  and settled by its own history, then an overflow that keeps the latest
+  arrival and each member named with the latest arrival naming it, which
+  time alone ends. A name ends with the removals that gave it, and the
+  signer rule is the same as for each removal on its own. Acknowledgments count only removals sent in
+  that exchange and still held, at most 2,048 per peer.
 
 That last case is only a member removing another member, which any
 member can do anyway.
@@ -1655,8 +1821,9 @@ Then, with no other prompt:
 - **Each daemon** that hears of it removes the member's `ssh_access`
   lines, stops naming its dial key to relays (the relays end its sessions
   at once), and forgets its tunnel key.
-- **Each agent** does the same with `authorized` and `authorized_keys`
-  when a member daemon passes it the removal (Removals between daemons),
+- **Each agent** stops admitting the member and removes its
+  `authorized_keys` line when a member daemon passes it the removal
+  (Removals between daemons),
   or when its access file arrives, whichever is first.
 - **Each member** drops the removed member's records. Phones get a push.
 - **Backdated operations** the remover had not seen are void (rule 7).
@@ -1686,16 +1853,20 @@ all of them. It needs no fleet key, because it only removes access.
 | One `fleet apply` or sync message | 256 KiB and 64 operations. More takes several rounds. |
 | Operations waiting for parents | 256 per peer, dropped after 1 hour. Copies of one operation with different signatures wait side by side, and the one whose signature checks out is kept, so a damaged copy cannot keep out the genuine one. |
 | Pending joins | 8 at once, each valid for 10 minutes |
-| Agent access file | 64 KiB |
+| Agent access file | 72 KiB: 32 members, 1,024 removed ids, and 64 settled removals; the copy the agent keeps adds 32 KiB for 8 former key pairs per member; 8 removals remembered per suspended member, past which only its removal settles it; enrolled desktops and fleet members together within a relay's 64 dial keys, what would crowd one out waits: a file applies its removals and denials and refuses only its additions, and `authorize` refuses |
 | `removal` sessions | 8 out and 8 in at once, 30 seconds each; 64 operations and 256 KiB per message; 4 `Want` rounds; retries from 5 seconds to 10 minutes |
 
 ### Storage and logs
 
-- **Computers:** `STATE_DIR/fleet/key.pem` holds the key,
+- **Computers:** `STATE_DIR/fleet/key` holds the key,
   `STATE_DIR/fleet/log.bin` the operations (written atomically), and
   `STATE_DIR/fleet/peers.json` each peer's last heads and backoff. All
   three are 0600.
-- **Agents:** the access file sits in the agent's state directory, 0600.
+- **Agents:** the merged access file (`fleet`) and the suspensions
+  (`suspended`) sit in the agent's state directory, 0600, beside `lines`,
+  the fleet whose `authorized_keys` lines the agent may have written,
+  kept before any is: a scrub or a refusal removes them from it even when
+  no access file was saved, and every fleet line when it does not read.
 - **Phones:** the key is in the Secure Enclave, and the log in the app
   group container under complete file protection.
 - **Logs:** nothing beyond counts and short ids. No route, relay,
@@ -1779,8 +1950,12 @@ without an approval.
     step for it.
   - **Computers paired over Bluetooth** (#1389 `sheprd-desktop:`
     devices): each gets a join invite, and still needs its own approval,
-    because the old pairing granted one direction only. Once it joins,
-    its `sheprd-desktop:` line is replaced by a `sheprd-fleet:` line.
+    because the old pairing granted one direction only. Once it joins
+    and first opens SSH here through the fleet, which proves it holds
+    the member's tunnel key, its `sheprd-desktop:` pairing is revoked and
+    the `sheprd-fleet:` line stands alone, so removing it from the fleet
+    removes every way in it had. Until then the pairing stays, as the
+    person here made it, and Remote control's device list revokes it.
   - **Paired phones:** each is offered to join on the phone. The
     computer's Allow happened at pairing, so the phone's confirmation is
     what remains.
@@ -1863,42 +2038,276 @@ manual multi-machine and phone steps left unticked in its QA list.
    - **Pure tests:** replay, reorder, forged signer, removed signer,
      backdating, concurrent removal and counter-removal, deny over
      allow, equivocation, checkpoints, and every bound.
-2. **Daemons, members, and sync:**
-   - **The daemon:** the fleet key and store, `fleet apply` and
-     `POST /api/v2/fleet/sync`, members as hosts of each other through
-     `ssh_access` with `sheprd-fleet:` lines, and direct tunnels on the
-     existing listener.
-   - **Joining:** creating a fleet, and joining over SSH and over
-     Bluetooth (the claim carries the joiner's bundle and signature).
-   - **Sheprd:** `relay_sharing` running `fleet apply`, and owed
-     delivery.
+2. **Daemons, members, and sync** (built):
+   - **The daemon** (`crate::fleet`): the fleet key and store
+     (`fleet/key`, `fleet/log.bin`, `fleet/peers.json`), the control
+     socket's `Request::Fleet`, `sheprd-remote-control fleet apply` and
+     `fleet bundle` over SSH (apply writes the log itself when no daemon
+     runs, holding `fleet/lock`, which the daemon holds for its life, so
+     two updates or one and a starting daemon never drop each other's
+     operations), and members as hosts of each other through `ssh_access`
+     with `sheprd-fleet:FLEET:MEMBER` lines, their dial keys on the
+     relays, and their tunnel keys admitted. `relay-connect` sends a
+     purpose byte and the fleet-key proof to a member's own host, and
+     nothing before SSH to any other host the fleet shares; a desktop
+     paired over Bluetooth that is also a member keeps its record and its
+     session as before, as the member once a proven session showed its
+     key is the member's.
+   - **Joining over SSH:** creating a fleet, `fleet bundle` on the
+     joiner, `Admit` on the member, and the log handed over; a daemon
+     with no fleet takes a log only when it admits this computer (or,
+     phase 3, shares it as a host), keeping a history too large for one
+     `fleet apply` in `fleet/joining/FLEET.bin`, one per fleet and at
+     most 4, granting nothing, and answering its heads so the member
+     sends the rest.
+   - **Own record:** every 10 minutes the daemon signs a `HostSeen` with
+     its certificate authority when its relays, route, tunnel identity,
+     or SSH host keys moved.
    - **Removals between daemons:** the `removal` tunnel purpose, the
-     flood with `Held`, suspend-then-confirm, and its bounds and
+     flood with `Held` (sent only once the removal is saved),
+     suspend-then-confirm (`fleet/peers.json` keeps
+     suspensions whose history has not arrived), and its bounds and
      retries.
-   - **End-to-end tests on loopback relays:** spreading to N members, a
-     member joining late, a member away during an update, a removal
-     reaching every daemon with no Sheprd running, a removal whose
-     history arrives late, replay, a forged operation, and a member
-     excluded from a host.
-3. **Sheprd's side:**
-   - **Interface:** Settings > Fleet; the join, share, and remove
-     dialogs; Fleet hosts in the worktree listing and Devices.
-   - **Records:** relay records and `known_hosts.d` from signed records,
-     and `HostSeen` updates.
-   - **Paths:** `relay-connect`'s race and `desktop/paths`, shown in the
-     host indicator.
-   - **Command line:** `sheprd fleet`, `docs/cli.md`, and the skill.
+   - **End-to-end tests on loopback relays** (`fleet/tests`): three
+     members reaching one another over SSH, a member excluded from a
+     host, a removal ending a live session, a removal reaching every
+     daemon with no Sheprd running, a member away during a removal, a
+     removal whose history arrives late, replay, and a forged
+     operation.
+   - **Moved:** joining over Bluetooth needs the join dialog, so it
+     comes with phase 3; `relay_sharing` running `fleet apply` is
+     Sheprd's side, phase 3; `POST /api/v2/fleet/sync` comes with the
+     phones, phase 5; direct tunnels on the daemon's listener come with
+     `relay-connect`'s race, phase 3.
+3. **Sheprd's side** (built, first cut):
+   - **Settings > Fleet:** creating a fleet; members with who admitted
+     each, and Remove (or Leave) asking why, a compromised member taking
+     the members and hosts it added with it; hosts with who added each,
+     a switch per computer allowed on it, and Remove everywhere; and the
+     machines this Sheprd reaches, each with Invite (it joins: its own
+     bundle over SSH, `Admit` here, the log handed over) or Share (its
+     CA-signed `fleet intro` over SSH, with the computers ticked, then
+     the log handed over: a Sheprd host that is not a member takes a log
+     that shares it, by its certificate authority's host id, once it
+     holds every head of the member handing it over, so the denials
+     signed with the share have arrived, and lets in the computers
+     allowed there). A log larger than one answer is handed
+     over one answer at a time through the same `Fleet::apply` as sync and
+     `fleet apply` with no daemon: the joining daemon keeps each fleet's
+     history apart and answers its heads, so two handovers at once never
+     take each other's parts. A shared Sheprd host is no
+     member and cannot sign its own record, so a member syncing it reads
+     its `fleet intro` and carries a newer CA-signed record into the log
+     as a `HostSeen` (`Ask::Seen`). A computer that left, or was removed,
+     keeps the log until a live computer member holds its removal (or
+     none is left), then forgets the fleet and may found or join
+     another, and Sheprd forgets the devices that fleet saved. A host a
+     `HostRemove` or a removal's `also_hosts` took out still proves
+     itself to syncing members (`Ask::RemovedHosts`), and is handed only
+     its removal and that removal's ancestors it lacks
+     (`Ask::RemovalFor`), never the log made after or beside it; it then
+     stops letting the fleet in and forgets the fleet. Once it holds its
+     removal, or answers as an outsider, Sheprd stops syncing it. A
+     removed member's own host is reached through the member's removal.
+     `fleet remove` and `fleet remove-host` resolve names against the
+     daemon's current view. A compromised member's removal names at most
+     16 members beside it; the members it admitted past those are removed
+     by further removals in the same confirmation.
+     Members cut off by an unconfirmed removal, and members that signed
+     in two places, show at the top. Removing a member, removing a host,
+     inviting, and sharing ask first, on the page, by a second click;
+     creating a fleet is its own button on an empty page, and each
+     computer's access switch acts at once, as switches do.
+   - **Sync** (`crate::fleet`): Sheprd syncs the log with every machine a
+     window reaches, as `relay_sharing` offers relays: it asks the
+     machine for what this computer lacks, naming no fleet and sending
+     only this computer's heads and a nonce, which the machine signs with
+     its certificate authority; only an answer for this fleet proven by
+     one of its computers or Sheprd hosts goes on, so a machine outside
+     it gets nothing. Then this computer's daemon says what the machine
+     lacks, and Sheprd sends that, one answer at a time in both
+     directions. A
+     machine in the fleet is synced at once when this computer's heads
+     move and every 10 minutes; one outside it every hour. A daemon
+     refuses an `apply` naming another fleet.
+   - **Devices:** each fleet host this computer may reach is kept as a
+     saved device, `USER@r-ID.sheprd.invalid`, and forgotten when the
+     fleet no longer lets it in; devices a person saved are never
+     touched.
+   - **Command line:** `sheprd fleet [status|members|hosts|open]`, and
+     `fleet remove MEMBER` and `fleet remove-host HOST`, which open the
+     page asking; `docs/cli.md` and the skill.
+   - **Phones joining:** Settings > Fleet lists the joins the daemon
+     keeps (`Ask::Joins`) under Waiting to join, and admits one on a
+     second click. The pairing dialog's line, ticked by default, admits
+     the phone it approved, matched by the daemon's device id, when that
+     phone asks to join within ten minutes; no other join is admitted
+     through it.
+   - **Joining over Bluetooth** (built): picking a nearby Sheprd,
+     comparing the code, and Allow on the other computer leave both in
+     one fleet, whichever was in it, or found one from Add Device; the
+     claim's bundle is bound to the pairing's token (Adding a nearby
+     Sheprd from another network, Joining the fleet in the same step).
+   - **Left:** `relay-connect`'s race with direct tunnels and
+     `desktop/paths` for the host indicator, history, and native
+     screenshots.
 4. **`sheprd-relay-agent` in Sheprd:** install and update over SSH,
    service units, the access file and `fleet apply`, writing
    `authorized_keys` from it, `--direct` behind its own dialog, and the
    `removal` purpose with its suspended list. Loopback tests as in
    phase 2, with an agent host, including a suspension the next access
    file confirms and one it lifts.
+   - **Built (the agent's half):** the access file, its merge and digest
+     (`sheprd_relay_agent::access`, without the agent's runtime);
+     `control::fleet::access::compute` from the log; `fleet apply` and the
+     fleet in `status --json`; the `authorized_keys` lines, shared with
+     `ssh_access`; the `removal` purpose with the agent's `suspended`
+     file, settled by the next access file; daemons flooding removals that
+     took effect to plain hosts, with `Held` kept per host in
+     `fleet/peers.json`. Tests: the merge, bounds, and lines; the agent on
+     a loopback relay (an allowed member reaching SSH, a denied one not, a
+     removal suspending at once, the next file confirming it, and one
+     lifting a suspension the log voided); and a member's daemon passing
+     a removal to a real agent with no Sheprd running.
+   - **Built (Sheprd's half):** Settings > Fleet lists a machine with no
+     Sheprd daemon and no agent of this fleet as one that can be shared as
+     a plain host. "Share as a plain host" asks first, with the computers
+     to allow and a line saying the agent is installed; on confirm, over
+     the app's own SSH (`fleet::plain`, `fleet::agent`), Sheprd copies the
+     agent build for the host's platform (`fleet::agent::build`, below),
+     unless the host holds the same bytes; writes and restarts a systemd user unit (with
+     lingering asked for) or a launchd agent (in the account's
+     graphical session when it is logged in at the screen, else its user
+     domain, so a Mac reached only over SSH runs it too) running `run` on this
+     computer's relays (its own host record's); reads `status --json`,
+     which now carries the SSH host keys; keeps only keys this computer's
+     known hosts list for the target (`sheprd_client::known_host_keys`),
+     the first of which must be one; and has the daemon add an `Agent`
+     intro (`verified: KnownHosts`) with the denies. Then, and on every
+     sync of a machine with no daemon, it reads the agent's status, finds
+     the fleet host by its first trusted key (`HostId::plain`), asks the
+     daemon for the access file (`Ask::AgentAccess`, which computes it so
+     the log never leaves the daemon, settling the reported suspensions),
+     and runs `fleet apply` when the digest differs or something settles.
+   - **Built (agent builds):** every release ships `sheprd-relay-agent`
+     for Linux `x86_64` and `aarch64` (static musl) and macOS `arm64` and
+     `x86_64` (thin, macOS 11 and later, signed with the release's
+     Developer ID), built by `scripts/release/build-agent.sh` and listed
+     in their own Ed25519-signed manifest (schema 6,
+     `host-agent-manifest.json`), packed first in one release asset,
+     `sheprd-relay-agent-VERSION.tar.gz`, as the host builds' `sheprd-acp`
+     are. The installer reads the host's `uname -sm` and refuses a platform
+     with no agent (Windows, the BSDs, 32-bit or RISC-V Linux) with a
+     localized "A plain host runs Linux or macOS on x86_64 or ARM64; this
+     host reports PLATFORM" before anything is copied. A release then
+     downloads the archive into a new private folder each time it shares
+     a host, uses the build only if the manifest's signature (by the key
+     the app embeds), schema, version, name, size, and SHA-256 all check,
+     copies only that build (never a program on `PATH`, a file beside the
+     app, or one kept from before), and removes the folder. The host checks the
+     copy's SHA-256 before it moves it into place and runs it. A
+     development build copies the agent beside its executable to a host of
+     its kind, else `relay-agent/TRIPLE/` there; never one from `PATH`. CI builds all four only
+     when the agent's inputs change (`relay_agent` in
+     `scripts/ci-changes.sh`): the `x86_64` Linux one on a pull request,
+     the others when every platform runs. The agent has no Windows build:
+     its service and installer are POSIX shell with systemd or launchd,
+     and its private files rely on Unix modes.
+   - **Left:** uninstalling the agent after "Remove everywhere"; `--direct`, which stays off and is not
+     built yet. A member's rotated keys at an unchanged `rev` take the
+     newer file's keys, as the agent cannot order them otherwise.
 5. **iOS:** joining at pairing, admitting a computer from the phone, the
    Secure Enclave key, sync, offers and `Link`, removing from the phone,
    pushes, and Settings > Fleet. Swift tests against phase 1's vectors.
-6. **Migration:** the lists in "Create a fleet", replacing
-   `sheprd-desktop:` lines, and `sheprd fleet scrub`.
+   - **Built, the daemon:** `GET /api/v2/fleet` (the view, heads, and a
+     live member's next sequence number and parents, and for each Sheprd
+     host it linked, that host's latest record with its CA's certificate
+     and signature, which the phone checks itself),
+     `POST /api/v2/fleet/sync` (64 operations, 256 KiB), and
+     `POST /api/v2/fleet/join`, kept in memory (8, 10 minutes) for
+     Sheprd's `Ask::Joins` and admitted only by `Ask::Admit`.
+     `fleet::links` admits a phone's linked key as an API device with an
+     id derived from the key, with the dial and tunnel keys of the
+     phone's own bundle as its relay keys, so the relays let it through
+     at once; a `Rotate` moves them, and they go with the device. Keys
+     another device or member holds, or a member proved here, are never
+     set, and keys the phone later sends itself stay. `Devices` holds each
+     relay key on one record only and refuses every clash, a fleet
+     device's keys included: posting public keys proves nothing about
+     holding them.
+   - **Built, the phone:** `FleetClient` in `SheprdRemoteCore`, checked
+     against a new phone vector; a Secure Enclave key with user presence
+     (a software key in the simulator only); "Join" after pairing with a
+     computer in a fleet; Settings > Fleet with members, hosts and their
+     paths, and removals with Face ID; and the offer card, which signs
+     one `Link` per Sheprd host and keeps each as a computer with a relay
+     record (its route, relays, and identity, from the host's own record
+     once the phone checked its CA's signature against the host id it
+     pins, with the bundle's relay keys, kept in the Keychain; a later
+     checked record replaces it only when its `rev` is higher), so
+     the relay race reaches it as it reaches computers paired directly.
+   - **Built, the phone's own log** (`crates/sheprd-fleet-ffi`, linked
+     as `SheprdFleetLog`): the phone replays its copy with the very Rust
+     code computers run, built for iOS behind a two-function C interface
+     that takes JSON and keeps nothing between calls
+     (`ios/tools/build-fleet-ffi.sh`), so the two can never disagree on a
+     rule. The copy lives in the app group's container (`Fleet/log.bin`,
+     complete file protection, written atomically) and every call reads it
+     back through `saved::decode`, checking every operation again.
+     - **Starting it:** only from the operation that founded the fleet the
+       phone joined, whose hash is the fleet id it signed its join for, so
+       no computer can hand it another fleet's history or a forged one.
+     - **Sync:** `POST /api/v2/fleet/sync` with any computer of the fleet
+       it reaches, paired directly or linked through the fleet (the
+       linked Sheprd hosts and computer members in its own copy), the one
+       last reached first: it takes what that computer has, then hands
+       over what it lacks, the phone's own operations among them. The
+       request names the fleet, which another fleet's computer refuses.
+       The computer that introduced the phone may be gone.
+     - **Signing:** the phone drafts on its own heads and sequence
+       (`Log::drafts`), and every rule but the signature is checked on a
+       throwaway copy first, so what its replay would refuse is refused
+       before Face ID. The signed operations must then apply to its copy
+       (`seal`), which is written before any computer sees them, so the
+       next draft always follows them and nothing is signed twice. Syncs
+       and signatures run one at a time, and a copy locked away (the
+       phone is locked) is never replaced by one rebuilt from a computer.
+       A copy that no longer checks out is read again from a computer,
+       from the founding operation on.
+     - **What it shows:** members, hosts, links, routes, and whether this
+       phone was removed come from its own copy; a computer's answer only
+       says where a join stands and when to sync.
+     - **Next:** admitting a computer from the phone falls out of this: a
+       computer's bundle and join signature over Nearby pairing, an
+       `Admit` drafted and checked on the phone's copy.
+   - **Left:** admitting a computer from the phone; pushes; and history.
+     Once checkpoints prune the log, a sync must also carry the
+     checkpoint's state, as a joining computer's handover does, for a
+     phone that starts a copy. A
+     phone's bundle relay keys are set before it proves the tunnel key:
+     the relays must name the dial key before it can dial at all.
+6. **Migration and scrub** (built):
+   - **`fleet scrub`:** `sheprd-remote-control fleet scrub` forgets the
+     fleet on a computer, with the `authorized_keys` lines and relay
+     records it wrote, whether its daemon runs or not;
+     `sheprd-relay-agent fleet scrub` does the same for an agent. Sheprd
+     runs both over SSH from Settings > Fleet's Remove fleet access, and
+     `sheprd fleet scrub MACHINE` opens that confirmation, which
+     Settings > Fleet shows whether or not this computer is in a fleet.
+     Neither signs anything: they only take access away. A scrub fails
+     closed: it answers only once the lines and records are gone, a
+     damaged log or record list does not stop it, and a peers file it
+     cannot read stays and is reported, as does a failure on either
+     program, so asking again finishes the job.
+   - **Removed computers:** Settings > Fleet says so, and Forget the
+     fleet scrubs it here.
+   - **Desktops paired one by one:** once a member's device opens SSH
+     through the fleet, its pairing is superseded; a removed member's
+     pairings go with it (phase 2).
+   - **Bringing existing machines in:** saved devices, cloud machines,
+     and computers paired over Bluetooth show under Machines this Sheprd
+     reaches, to Share or Invite; paired phones join from the phone
+     (phase 5). Nothing is spread without that step.
 7. **Bluetooth on Linux and Windows:** scanning in `crates/sheprd-nearby`,
    then the transport measurement and its verdict here.
 

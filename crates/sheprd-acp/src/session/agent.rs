@@ -220,17 +220,24 @@ impl<R: FnMut(Update)> Session<R> {
         };
         self.ready = true;
         (self.report)(Update::Opened(id.0.to_string()));
+        let continued = self.continued(loaded);
         self.emit(Change::Session {
-            session: Some(project::session(&id, &self.config.cwd)),
+            session: Some(sheprd_chat_protocol::SessionInfo {
+                continued,
+                ..project::session(&id, &self.config.cwd)
+            }),
         });
-        if let Some(modes) = modes {
-            self.emit(Change::Modes {
-                modes: Some(project::modes(modes)),
-            });
+        // The session's answer replaces whatever the chat showed while it
+        // started, the agent's known settings included, even when it
+        // offers none.
+        let modes = modes.map(project::modes);
+        if self.transcript.modes != modes {
+            self.emit(Change::Modes { modes });
         }
-        if !options.is_empty() {
+        if self.transcript.options != options {
             self.emit(Change::Options { options });
         }
+        self.learn(loaded);
         self.projector.close();
         self.hand_over(loaded);
         self.status(Status::Idle);
@@ -238,8 +245,45 @@ impl<R: FnMut(Update)> Session<R> {
             // A continued session keeps its own settings.
             self.config.settings = None;
         }
+        self.carry_deferred();
         self.carry_next();
         self.next_queued();
+    }
+
+    /// The notice under the conversation a continued session brought with
+    /// it, which the chat's first session places as it opens and every
+    /// later one, after a switch of agent too, keeps. A chat whose first
+    /// session is new, or brought nothing, has none.
+    fn continued(&mut self, loaded: bool) -> Option<sheprd_chat_protocol::EntryId> {
+        if let Some(divider) = self.divider {
+            return divider;
+        }
+        let divider = self.place_divider(loaded);
+        self.divider = Some(divider);
+        divider
+    }
+
+    fn place_divider(&mut self, loaded: bool) -> Option<sheprd_chat_protocol::EntryId> {
+        let brought = self.transcript.entries.iter().any(|entry| {
+            matches!(
+                entry.kind,
+                sheprd_chat_protocol::EntryKind::User { .. }
+                    | sheprd_chat_protocol::EntryKind::Agent { .. }
+            )
+        });
+        if !loaded || !brought {
+            return None;
+        }
+        let notice = self.projector.notice(
+            NoticeLevel::Info,
+            format!("Continued from {}'s earlier session", self.config.agent),
+        );
+        let Change::Push { entry } = &notice else {
+            return None;
+        };
+        let id = entry.id;
+        self.emit(notice);
+        Some(id)
     }
 
     /// The agent that took over opened its session: prepare what it is

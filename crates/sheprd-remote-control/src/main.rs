@@ -5,10 +5,10 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 use sheprd_remote_control::{
-    app::{enroll, relay_enroll, shortcuts, tags},
-    control::DeviceId,
-    desktop,
-    server::{self, Invocation},
+    app::{enroll, favorites, relay_enroll, shortcuts, tags},
+    control::{self, DeviceId},
+    desktop, fleet,
+    server::{self, FleetAction, Invocation},
     shared_relays,
 };
 use std::{io::Read, path::PathBuf, process::ExitCode};
@@ -40,9 +40,15 @@ fn main() -> ExitCode {
                 print_json(&relays(state_dir, offer)?)
             });
         }
+        Ok(Invocation::Favorites { state_dir, offer }) => {
+            return host(state_dir, |state_dir| {
+                let change = read_offer(offer, MAX_INPUT)?;
+                print_json(&favorites::exchange(state_dir, change)?)
+            });
+        }
         Ok(Invocation::Shortcuts { state_dir, offer }) => {
             return host(state_dir, |state_dir| {
-                let limit = sheprd_remote_control::control::shortcuts::MAX_WIRE_BYTES as u64;
+                let limit = control::shortcuts::MAX_WIRE_BYTES as u64;
                 let offer = read_offer(offer, limit)?;
                 print_json(&shortcuts::exchange(state_dir, offer)?)
             });
@@ -51,6 +57,29 @@ fn main() -> ExitCode {
             return host(state_dir, |state_dir| {
                 let offer = read_offer(offer, MAX_INPUT)?;
                 print_json(&tags::exchange(state_dir, offer)?)
+            });
+        }
+        Ok(Invocation::Fleet { state_dir, action }) => {
+            return host(state_dir, |state_dir| match action {
+                FleetAction::Apply => {
+                    let limit = control::fleet::sync::MAX_REQUEST_BYTES as u64;
+                    let mut text = String::new();
+                    std::io::stdin().take(limit).read_to_string(&mut text)?;
+                    let apply = serde_json::from_str(&text).map_err(std::io::Error::from)?;
+                    print_json(&fleet::run_apply(state_dir, apply)?)
+                }
+                FleetAction::Bundle { fleet: id } => {
+                    let ask = control::fleet::sync::Ask::Bundle { fleet: id };
+                    print_json(&fleet::run_ask(state_dir, ask)?)
+                }
+                FleetAction::Intro => print_json(&fleet::run_ask(
+                    state_dir,
+                    control::fleet::sync::Ask::Intro,
+                )?),
+                FleetAction::Scrub => {
+                    fleet::run_scrub(state_dir)?;
+                    print_json(&serde_json::json!({ "scrubbed": true }))
+                }
             });
         }
         Ok(Invocation::DesktopPair { state_dir, name }) => {
@@ -128,7 +157,7 @@ fn run_enroll(state_dir: &std::path::Path) -> sheprd_remote_control::Result<()> 
 /// listens on; either way, its own relays and the shared ones.
 fn relays(
     state_dir: &std::path::Path,
-    offer: Option<sheprd_remote_control::control::relays::Offer>,
+    offer: Option<control::relays::Offer>,
 ) -> sheprd_remote_control::Result<serde_json::Value> {
     let relays = match offer {
         Some(offer) => shared_relays::share(state_dir, offer)?,

@@ -12,7 +12,7 @@ mod notifier;
 mod options;
 
 pub use crate::push::Privacy;
-pub use options::{Certificate, Invocation, Options, ParseError, Relay, USAGE, parse};
+pub use options::{Certificate, FleetAction, Invocation, Options, ParseError, Relay, USAGE, parse};
 
 use crate::{
     Result,
@@ -123,6 +123,11 @@ pub async fn run(options: Options) -> Result<()> {
         }
         Err(error) => return Err(error.into()),
     };
+    // A second daemon on this state directory stops here, before it
+    // changes anything the running one keeps.
+    let keys = auth.ssh_access().ok().map(|access| &access.keys);
+    let fleet =
+        crate::fleet::Fleet::for_daemon(&options.state_dir, web::now_ms(), keys)?.map(Arc::new);
     let state = Arc::new(State {
         apns,
         apps,
@@ -131,7 +136,9 @@ pub async fn run(options: Options) -> Result<()> {
         changes: Default::default(),
         computer: options::computer_name(),
         connected: Mutex::new(HashMap::new()),
+        favorites: web::Favorites::load(crate::app::favorites::file(&options.state_dir)),
         fingerprint,
+        fleet,
         github: crate::native::changes::github::Reader::new(options.github_cli),
         hub,
         lending: crate::native::github::Lending::new(
@@ -174,6 +181,11 @@ pub async fn run(options: Options) -> Result<()> {
     // pictures.
     state.uploads.remove_leftovers();
     tokio::spawn(notifier::run(state.clone()));
+    tokio::spawn(crate::fleet::grants::follow(state.clone()));
+    if let Some(fleet) = state.fleet.clone() {
+        tokio::spawn(crate::fleet::removals::flood(fleet));
+    }
+    tokio::spawn(web::follow_favorite_boot(state.clone()));
     tokio::spawn(crate::native::github::checkouts::follow(state.clone()));
     tokio::spawn(crate::native::previews::follow(state.clone()));
     tokio::spawn(crate::native::github::follow_gh_hosts(state.clone()));

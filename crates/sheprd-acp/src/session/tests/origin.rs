@@ -197,10 +197,12 @@ fn a_replayed_conversation_hides_its_notes_and_counts_them_told() {
         ));
     }
     harness.respond(load["id"].as_i64().unwrap(), json!({}));
+    // The notice under the replayed conversation is the chat's own.
     let texts: Vec<_> = harness
         .transcript()
         .entries
         .iter()
+        .filter(|entry| !matches!(entry.kind, EntryKind::Notice { .. }))
         .filter_map(|entry| entry.kind.text())
         .collect();
     assert_eq!(texts, ["earlier"]);

@@ -391,14 +391,9 @@ fn id(address: &str) -> String {
     id
 }
 
-/// A pane's id. Addresses survive a core restart but start over when its
-/// state is wiped, which also gives the core a new id: naming the core
-/// keeps an open phone view from landing on an unrelated new terminal.
+/// A pane's id, which favorites share (`control::favorites::core_pane`).
 fn pane_id(boot: &str, address: &str) -> String {
-    let tag = boot.bytes().fold(0x811c_9dc5_u32, |hash, byte| {
-        (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
-    });
-    format!("{PREFIX}{tag:08x}-{}", &id(address)[PREFIX.len()..])
+    crate::control::favorites::core_pane(boot, address)
 }
 
 pub(super) fn owns(params: &Value) -> bool {

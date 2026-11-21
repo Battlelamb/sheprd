@@ -3,10 +3,11 @@
 //! malformed body never reaches the fold.
 
 use super::{
-    DOMAIN, Error, HostId, MAX_HOSTS, MemberId, Result, sha256,
+    DOMAIN, Error, HostId, MAX_ALSO_MEMBERS, MAX_HOSTS, MemberId, Result, sha256,
     wire::{Reader, Writer},
 };
 use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
+use serde::{Deserialize, Serialize};
 
 /// A P-256 public key, SEC1 compressed.
 pub type PublicKey = [u8; 33];
@@ -30,13 +31,15 @@ const MAX_DIRECT: usize = 8;
 const MAX_ADDRESS: usize = 128;
 const MAX_HOST_KEYS: usize = 4;
 const MAX_HOST_KEY: usize = 1024;
-const MAX_ALSO_MEMBERS: usize = 16;
 const MAX_DEVICE_KEY: usize = 65;
 
 macro_rules! byte_enum {
     ($(#[$meta:meta])* $name:ident { $($variant:ident = $value:literal,)* }) => {
         $(#[$meta])*
-        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+        #[derive(
+            Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
+        )]
+        #[serde(rename_all = "snake_case")]
         pub enum $name { $($variant = $value,)* }
 
         impl $name {
@@ -101,6 +104,21 @@ impl Bundle {
     #[must_use]
     pub fn id(&self) -> MemberId {
         MemberId(sha256(&[&self.key]))
+    }
+
+    /// Its canonical bytes, as an `Admit` carries it.
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        let mut writer = Writer::new();
+        self.write(&mut writer)?;
+        Ok(writer.into_bytes())
+    }
+
+    /// Reads a bundle from [`Bundle::to_bytes`], strictly.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let mut reader = Reader::new(bytes);
+        let bundle = Self::read(&mut reader)?;
+        reader.finish()?;
+        Ok(bundle)
     }
 
     pub(super) fn verifying_key(&self) -> Result<VerifyingKey> {
@@ -216,6 +234,21 @@ pub struct HostIntro {
 }
 
 impl HostIntro {
+    /// Its canonical bytes, as a `HostAdd` carries it.
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        let mut writer = Writer::new();
+        self.write(&mut writer)?;
+        Ok(writer.into_bytes())
+    }
+
+    /// Reads an intro from [`HostIntro::to_bytes`], strictly.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let mut reader = Reader::new(bytes);
+        let intro = Self::read(&mut reader)?;
+        reader.finish()?;
+        Ok(intro)
+    }
+
     /// The host's id: its CA's fingerprint, or for a plain host the hash
     /// of its first SSH host key.
     pub fn id(&self) -> Result<HostId> {
@@ -223,7 +256,7 @@ impl HostIntro {
             Some(ca) => Ok(HostId(ca.fingerprint())),
             None => {
                 let first = self.record.ssh_host_keys.first().ok_or(Error::Invalid)?;
-                Ok(HostId(sha256(&[DOMAIN, HOST, first.as_bytes()])))
+                Ok(HostId::plain(first))
             }
         }
     }
@@ -231,7 +264,7 @@ impl HostIntro {
     /// Whether `record` is this host's word: signed by its CA when it has
     /// one. A plain host's record is vouched for by the member that read
     /// it, so `signature` must be absent.
-    pub(super) fn vouches(&self, record: &SelfRecord, signature: Option<&RawSignature>) -> bool {
+    pub fn vouches(&self, record: &SelfRecord, signature: Option<&RawSignature>) -> bool {
         match (&self.ca, signature) {
             (Some(ca), Some(signature)) => {
                 let (Ok(key), Ok(signature), Some(message)) = (
@@ -641,4 +674,14 @@ fn ssh_key(text: &str, max: usize) -> Result<()> {
         return Err(Error::Invalid);
     }
     Ok(())
+}
+
+impl HostId {
+    /// A plain host's id: the hash of its first SSH host key, `TYPE
+    /// BASE64`, as its intro computes it. Sheprd finds an agent host among
+    /// the machines it reaches by it.
+    #[must_use]
+    pub fn plain(ssh_host_key: &str) -> Self {
+        Self(sha256(&[DOMAIN, HOST, ssh_host_key.as_bytes()]))
+    }
 }

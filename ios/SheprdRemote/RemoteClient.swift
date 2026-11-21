@@ -248,12 +248,44 @@ final class RemoteClient: Sendable {
         try await send("POST", "/api/v2/hosts/relay", body: request, bearer: bearer)
     }
 
+    // MARK: Fleet
+
+    /// A fleet call (`FleetClient`): JSON in, the answer's bytes out.
+    func fleetCall(_ method: String, _ path: String, body: Data?, bearer: String) async throws -> Data {
+        guard let url = URL(string: origin + path) else { throw RemoteError.unreachable }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.httpBody = body
+        if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw RemoteError.notHTTP }
+        guard (200..<300).contains(http.statusCode) else {
+            throw RemoteError.status(http.statusCode, Refusal.text(status: http.statusCode, body: data))
+        }
+        return data
+    }
+
     // MARK: Tags
 
     /// Offers this phone's copy of the computer's tags; answers those that
     /// stand, which are the computer's own if it heard of a later edit.
     func offerTags(_ tags: Home.Tags, bearer: String) async throws -> Home.Tags {
         try await send("PUT", "/api/v2/tags", body: tags, bearer: bearer)
+    }
+
+    // MARK: Favorites
+
+    /// Stars or unstars the agent in `pane`; the computer's homes mark it.
+    /// An older computer answers 404.
+    func setFavorite(_ favorite: Bool, pane: String, bearer: String) async throws {
+        struct Change: Encodable {
+            let pane: String
+            let favorite: Bool
+        }
+        let _: EmptyAnswer = try await send(
+            "POST", "/api/v2/favorites", body: Change(pane: pane, favorite: favorite), bearer: bearer
+        )
     }
 
     // MARK: Text shortcuts

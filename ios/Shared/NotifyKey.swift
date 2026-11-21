@@ -20,6 +20,12 @@ import Security
 /// handle only this phone's Secure Enclave can use, so the file holds
 /// nothing a keychain item would protect better; the simulator's software
 /// keys are the exception, and are test keys.
+///
+/// One more key is this phone's own (`own`), kept in its own keychain item
+/// and never given to a computer: the phone seals the test pushes it sends
+/// itself through the push relay to it (`SelfTestPush`). It is never among
+/// the computers' keys, so nothing it opens counts as from a computer, and
+/// what it opens is taken only as a self test, which has no actions.
 enum NotifyKey {
     static let group = "group.so.pen.herdr.remote"
 
@@ -79,13 +85,36 @@ enum NotifyKey {
         return nil
     }
 
+    /// Opens a self test (`SelfTestPush`) with this phone's own key. `nil`
+    /// when there is no such key yet, or it does not open as a self test.
+    static func openSelfTest(_ sealed: String) throws -> SelfTestPush.Opened? {
+        guard let key = try loadOwn() else { return nil }
+        return try? SelfTestPush.open(sealed, device: key.publicKey, agree: { try key.agree($0) })
+    }
+
+    /// This phone's own key, which self tests are sealed to, made on first use.
+    static func own() throws -> Stored {
+        if let key = try loadOwn() { return key }
+        let key = try newKey()
+        try write(key.data, to: query(ownAccount))
+        return key
+    }
+
+    private static func loadOwn() throws -> Stored? {
+        try read(query(ownAccount)).map(Stored.init)
+    }
+
+    private static func newKey() throws -> Stored {
+        SecureEnclave.isAvailable
+            ? .secureEnclave(try SecureEnclave.P256.KeyAgreement.PrivateKey())
+            : .software(P256.KeyAgreement.PrivateKey())
+    }
+
     /// The key alerts from `computer` are sealed to, made on first use.
     static func loadOrCreate(for computer: Fingerprint) throws -> Stored {
         var keys = try loadAll()
         if let key = keys[computer] { return key }
-        let key: Stored = SecureEnclave.isAvailable
-            ? .secureEnclave(try SecureEnclave.P256.KeyAgreement.PrivateKey())
-            : .software(P256.KeyAgreement.PrivateKey())
+        let key = try newKey()
         keys[computer] = key
         try save(keys)
         return key
@@ -115,23 +144,32 @@ enum NotifyKey {
         try save(keys)
     }
 
-    private static func query() -> [String: Any] {
+    /// The computers' keys' item.
+    private static let account = "notify-keys"
+    /// This phone's own key's item, apart, so it is never a computer's.
+    private static let ownAccount = "notify-own-key"
+
+    private static func query(_ account: String = account) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "so.pen.herdr.remote",
-            kSecAttrAccount as String: "notify-keys",
+            kSecAttrAccount as String: account,
             kSecAttrAccessGroup as String: group,
         ]
     }
 
     static func loadAll() throws -> [Fingerprint: Stored] {
-        var query = query()
+        try read(query()).map(decode) ?? [:]
+    }
+
+    private static func read(_ query: [String: Any]) throws -> Data? {
+        var query = query
         query[kSecReturnData as String] = true
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status != errSecItemNotFound else { return [:] }
+        guard status != errSecItemNotFound else { return nil }
         guard status == errSecSuccess, let data = result as? Data else { throw Failure.keychain(status) }
-        return try decode(data)
+        return data
     }
 
     private static var file: URL? {
@@ -179,18 +217,21 @@ enum NotifyKey {
 
     private static func save(_ keys: [Fingerprint: Stored]) throws {
         let data = try encoded(keys)
+        try write(data, to: query())
+        try writeFile(data)
+    }
+
+    private static func write(_ data: Data, to query: [String: Any]) throws {
         let attributes: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
-        let status = SecItemUpdate(query() as CFDictionary, attributes as CFDictionary)
+        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
         if status == errSecItemNotFound {
-            let added = SecItemAdd(query().merging(attributes) { $1 } as CFDictionary, nil)
+            let added = SecItemAdd(query.merging(attributes) { $1 } as CFDictionary, nil)
             guard added == errSecSuccess else { throw Failure.keychain(added) }
-            try writeFile(data)
             return
         }
         guard status == errSecSuccess else { throw Failure.keychain(status) }
-        try writeFile(data)
     }
 }

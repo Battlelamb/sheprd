@@ -151,6 +151,18 @@ final class PushRelayAccess {
         await revoke(made, in: environment)
     }
 
+    /// Posts `request` (a self test, `SelfTestPush`) to this build's push
+    /// relay and reads its answer. Throws only when the push relay could
+    /// not be reached or answered something unreadable.
+    func push(_ request: SelfTestPush.Request) async throws -> PushRelayOutcome {
+        do {
+            let answer: Outcome = try await post(environment, "/v1/push", body: request)
+            return PushRelayOutcome(status: 200, outcome: answer.outcome)
+        } catch let Failure.refused(status, outcome) {
+            return PushRelayOutcome(status: status, outcome: outcome)
+        }
+    }
+
     /// Revokes each of `handles`, stopping when the push relay limits this
     /// phone.
     private func revoke(_ handles: [String], in environment: PushRelayEnvironment) async {
@@ -207,7 +219,7 @@ final class PushRelayAccess {
     private func post<Answer: Decodable>(
         _ environment: PushRelayEnvironment,
         _ path: String,
-        body: [String: String]
+        body: some Encodable
     ) async throws -> Answer {
         guard let url = environment.url(path) else { throw Failure.malformed }
         var request = URLRequest(url: url, timeoutInterval: 20)

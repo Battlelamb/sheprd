@@ -135,30 +135,26 @@ struct SettingsView: View {
                 }
             }
             PushRelaySection()
-            if !model.computers.isEmpty {
-                Section {
-                    ForEach(model.computers) { computer in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Button {
-                                Task { await model.pushTests.send(to: computer) }
-                            } label: {
-                                Label(
-                                    model.computers.count > 1 ? "Send Test Push from \(computer.name)" : "Send Test Push",
-                                    systemImage: "bell.badge"
-                                )
-                            }
-                            if let status = model.pushTests.status[computer.fingerprint] {
-                                Text(PushTests.text(status))
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
+            Section {
+                SelfTestPushRow()
+                ForEach(model.computers) { computer in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Button {
+                            Task { await model.pushTests.send(to: computer) }
+                        } label: {
+                            Label("Send Test Push from \(computer.name)", systemImage: "bell.badge")
+                        }
+                        if let status = model.pushTests.status[computer.fingerprint] {
+                            Text(PushTests.text(status))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
                         }
                     }
-                } header: {
-                    Text("Notifications")
-                } footer: {
-                    Text("Asks the computer to send this phone a sealed notification now, and shows whether it arrived.")
                 }
+            } header: {
+                Text("Notifications")
+            } footer: {
+                Text("Sends this phone a sealed notification now, from a computer or from this phone through the push relay, and shows whether it arrived.")
             }
             Section {
                 if !ActivityAuthorizationInfo().areActivitiesEnabled {

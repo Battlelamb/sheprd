@@ -5,6 +5,11 @@ import SheprdRemoteCore
 /// alert (`POST /api/apns/test`), then waits for the Notification Service
 /// Extension to record its arrival (`PushTestReceipts`). Says where it
 /// stopped: the computer, APNs, or the phone.
+///
+/// With the push relay on, the phone can also test itself with no computer
+/// online (`sendFromThisPhone`): it seals a test to its own key
+/// (`SelfTestPush`), posts it to the push relay through a handle for its
+/// own alert token, and waits for the same receipt.
 @MainActor
 @Observable
 final class PushTests {
@@ -20,6 +25,8 @@ final class PushTests {
     static let patience: Duration = .seconds(30)
 
     private(set) var status: [Fingerprint: Status] = [:]
+    /// The test this phone sent itself, if any.
+    private(set) var ownStatus: Status?
     private let sessions: Sessions
     private let tokens: ActivityTokens
     private let group = UserDefaults(suiteName: "group.so.pen.herdr.remote")
@@ -79,15 +86,67 @@ final class PushTests {
             status[key] = .failed("\(computer.name) could not reach APNs or the push relay.")
             return
         }
+        status[key] = await arrival(of: id, sent: started)
+    }
+
+    /// Sends this phone a test push through the push relay, with no
+    /// computer involved, and waits for it as `send(to:)` does.
+    func sendFromThisPhone() async {
+        guard ownStatus != .sending, ownStatus != .waiting else { return }
+        ownStatus = .sending
+        guard PushRelaySetting.isOn else {
+            ownStatus = .failed("This phone has no APNs key of its own, so it can only push itself through the push relay. Turn on Use the Push Relay above.")
+            return
+        }
+        guard let token = tokens.alert else {
+            ownStatus = .failed("This phone has no notification token yet. Allow notifications for Sheprd, then reopen the app.")
+            return
+        }
+        let relay = tokens.pushRelay
+        guard let credential = await relay.usableCredential() else {
+            ownStatus = .failed("The push relay has not let this phone in: \(relay.lastError ?? "turn the push relay off and on again.")")
+            return
+        }
+        guard let handle = relay.handle(for: token, kind: .alert, credential: credential) else {
+            ownStatus = .failed("Could not make a push relay handle for this phone's notification token.")
+            return
+        }
+        let id = UUID().uuidString
+        let request: SelfTestPush.Request
+        do {
+            request = try SelfTestPush.request(id: id, handle: handle, device: NotifyKey.own().publicKey)
+        } catch {
+            ownStatus = .failed("Could not seal the test to this phone's own key: \(error.localizedDescription)")
+            return
+        }
+        let started = Date()
+        let outcome: PushRelayOutcome
+        do {
+            outcome = try await relay.push(request)
+        } catch {
+            ownStatus = .failed("Could not reach the push relay: \(error.localizedDescription)")
+            return
+        }
+        if let failure = outcome.failure {
+            // The next try attests again rather than reuse what failed.
+            if outcome.needsNewCredential { relay.rejected() }
+            ownStatus = .failed(failure)
+            return
+        }
+        ownStatus = .waiting
+        ownStatus = await arrival(of: id, sent: started)
+    }
+
+    /// Waits up to `patience` for test `id`, sent at `sent`, to arrive.
+    private func arrival(of id: String, sent: Date) async -> Status {
         let deadline = ContinuousClock.now + Self.patience
         while ContinuousClock.now < deadline {
             if let arrival = PushTestReceipts.arrival(of: id, in: group) {
-                status[key] = .arrived(seconds: arrival.timeIntervalSince(started))
-                return
+                return .arrived(seconds: arrival.timeIntervalSince(sent))
             }
             try? await Task.sleep(for: .milliseconds(250))
         }
-        status[key] = .failed("APNs took it, but it did not arrive within 30 seconds. Check that notifications are on for Sheprd and Focus allows them.")
+        return .failed("APNs took it, but it did not arrive within 30 seconds. Check that notifications are on for Sheprd and Focus allows them.")
     }
 
     /// The line Settings shows under a computer's button.

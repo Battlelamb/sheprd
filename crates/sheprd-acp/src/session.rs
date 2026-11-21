@@ -655,6 +655,8 @@ pub(crate) fn entry_size(entry: &sheprd_chat_protocol::Entry) -> usize {
                     .sum::<usize>()
         }
         EntryKind::Turn(_) => 32,
+        // What went ahead of the person's words travels with them.
+        EntryKind::User { text, note, .. } => text.len() + note.as_ref().map_or(0, String::len),
         kind => kind.text().map_or(0, str::len),
     }
 }

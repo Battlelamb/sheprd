@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::context::{Facts, Prompts};
+use sheprd_chat_protocol::{Entry, EntryId};
 
 fn started(config: Config) -> Harness {
     let mut harness = harness_with(config);
@@ -105,4 +106,33 @@ fn a_replayed_note_goes_with_the_words_after_it_only() {
             ("second".to_owned(), None),
         ]
     );
+}
+
+fn noted(id: u64, size: usize) -> Entry {
+    Entry {
+        id: EntryId(id),
+        kind: EntryKind::User {
+            text: "hi".to_owned(),
+            files: 0,
+            note: Some("n".repeat(size)),
+        },
+    }
+}
+
+#[test]
+fn a_note_counts_toward_both_byte_budgets() {
+    let entry = noted(0, 1000);
+    assert_eq!(entry_size(&entry), 1002);
+    assert_eq!(
+        change_size(&Change::Push {
+            entry: entry.clone()
+        }),
+        1002
+    );
+    // Notes alone, the words being short, still push old entries out.
+    let entries: Vec<_> = (0..40).map(|id| noted(id, 64 * 1024)).collect();
+    let keep = keep_from(&entries);
+    assert!(keep > 0);
+    let kept: usize = entries[keep..].iter().map(entry_size).sum();
+    assert!(kept <= MAX_TRANSCRIPT_TEXT, "{kept}");
 }

@@ -11,6 +11,9 @@ use sheprd_chat_protocol::{Entry, EntryKind};
 
 /// Characters of a note drawn; the copy button takes it whole.
 const MAX_SHOWN: usize = 64 * 1024;
+/// Lines of a note drawn, each its own element, so a note of blank lines
+/// costs no more to draw than one of text.
+const MAX_LINES: usize = 1000;
 
 impl SheprdWindow {
     /// The header button that turns "As sent" on and off.
@@ -132,12 +135,13 @@ impl SheprdWindow {
 }
 
 /// The note's lines with what untrusted text may not hold taken out, up to
-/// [`MAX_SHOWN`] characters in all; a blank line keeps its height.
+/// [`MAX_LINES`] lines and [`MAX_SHOWN`] characters in all, then "…" when
+/// more was left; a blank line keeps its height.
 fn lines(note: &str) -> Vec<String> {
     let mut left = MAX_SHOWN;
     let mut shown = Vec::new();
     for line in note.lines() {
-        if left == 0 {
+        if left == 0 || shown.len() == MAX_LINES {
             shown.push("…".to_owned());
             break;
         }

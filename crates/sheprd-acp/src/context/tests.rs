@@ -254,6 +254,48 @@ fn hiding_notes_keeps_them_apart_from_the_persons_words_and_drops_empty_messages
 }
 
 #[test]
+fn a_note_kept_as_its_own_message_goes_to_the_words_right_after_it() {
+    use sheprd_chat_protocol::{Entry, EntryId, EntryKind, Transcript};
+    let user = |id, text: &str, note: Option<&str>| Entry {
+        id: EntryId(id),
+        kind: EntryKind::User {
+            text: text.to_owned(),
+            files: 0,
+            note: note.map(str::to_owned),
+        },
+    };
+    let first = note::wrap(None, "x\n");
+    let second = note::wrap(None, "y\n");
+    let mut transcript = Transcript::new("Claude".to_owned());
+    transcript.entries = vec![
+        user(1, &first, None),
+        user(2, "first", None),
+        user(3, &second, None),
+        Entry {
+            id: EntryId(4),
+            kind: EntryKind::Agent {
+                text: "ok".to_owned(),
+            },
+        },
+        user(5, "second", None),
+    ];
+    hide(&mut transcript);
+    assert_eq!(
+        transcript.entries,
+        vec![
+            user(2, "first", Some(&first)),
+            Entry {
+                id: EntryId(4),
+                kind: EntryKind::Agent {
+                    text: "ok".to_owned(),
+                },
+            },
+            user(5, "second", None),
+        ]
+    );
+}
+
+#[test]
 fn a_phone_is_told_to_attach_pictures_rather_than_give_paths() {
     let text = describe(PHONE);
     assert!(text.contains("cannot open files or folders"));

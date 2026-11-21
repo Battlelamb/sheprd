@@ -9,15 +9,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
-    /// No APNs key and no push relay: phones get Web Push only.
+    /// The push relay is off: phones get Web Push only.
     #[default]
     Off,
-    /// The user's own APNs key, straight to Apple. It wins over the push relay.
-    OwnKey,
     /// Through the Sheprd push relay (`push.sheprd.org`), sealed to the
-    /// phone.
+    /// phone. The only way pushes leave a daemon.
     PushRelay,
-    /// A mode this Sheprd does not know, from a newer daemon.
+    /// A mode this Sheprd does not know: from a newer daemon, or `own_key`
+    /// from an older one that sent straight to Apple with its own key.
     #[serde(other)]
     Other,
 }
@@ -47,18 +46,19 @@ pub struct Last {
 #[serde(rename_all = "snake_case", tag = "outcome")]
 pub enum Outcome {
     Delivered,
-    /// The phone's token or handle no longer works and was forgotten; the
-    /// app registers again when it opens.
+    /// The phone's handle no longer works and was forgotten; the app
+    /// registers again when it opens.
     Gone,
     /// Too many pushes for that phone for now.
     Limited,
-    /// Refused, with APNs's status and reason; the push relay gives none.
+    /// Refused, with the push relay's status. A daemon from before the
+    /// push relay could add APNs's reason, so it still reads.
     Refused {
         status: u16,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
-    /// APNs or the push relay could not be reached.
+    /// The push relay could not be reached.
     Unreachable,
     /// The push could not be built or sealed, so nothing went out.
     Unsent,

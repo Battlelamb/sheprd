@@ -19,8 +19,7 @@
 //! with its credential. The log names no handle and no device.
 //!
 //! Only a daemon whose pushes go through the push relay revokes: one with
-//! its own key, or with `push_relay` off, makes no connection to the push
-//! relay, and its devices' handles are simply never used. A device's
+//! `push_relay` off makes no connection to the push relay, and its devices' handles are simply never used. A device's
 //! handles replaced or dropped by its next registration are not revoked
 //! either: the phone makes them, may hand them out again, and the push
 //! relay allows each device only a few revocations a minute.

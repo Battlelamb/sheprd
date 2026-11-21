@@ -46,10 +46,11 @@ fn a_newer_daemons_mode_and_outcome_still_read() {
     assert_eq!(status.mode, Mode::Other);
     assert_eq!(status.alert, None);
     assert_eq!(status.live_activity.unwrap().outcome, Outcome::Other);
+    // An older daemon still sending with its own key.
     assert_eq!(
         serde_json::from_value::<PushStatus>(json!({"mode": "own_key"})).unwrap(),
         PushStatus {
-            mode: Mode::OwnKey,
+            mode: Mode::Other,
             ..PushStatus::default()
         }
     );

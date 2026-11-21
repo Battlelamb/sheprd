@@ -51,13 +51,13 @@ final class PushTests {
             answer = try await session.client.sendTestPush(id: id, bearer: session.token)
         } catch RemoteError.status(503, _) {
             status[key] = .failed(PushRelaySetting.isOn
-                ? "\(computer.name) has the push relay off and no APNs key. Turn on the push relay in Sheprd's Remote control settings there."
-                : "\(computer.name) has no APNs key, so it cannot send this phone notifications. Turn on the push relay here, and check it is not turned off in Sheprd's Remote control settings there.")
+                ? "\(computer.name) has the push relay off. Turn it on in Sheprd's Remote control settings there."
+                : "\(computer.name) cannot push to this phone while the push relay is off here. Turn it on here, and check it is not turned off in Sheprd's Remote control settings there.")
             return
         } catch let RemoteError.status(400, text) where text.contains("not registered") {
             status[key] = .failed(PushRelaySetting.isOn
-                ? "\(computer.name) has no push relay handle from this phone that it can use. Allow notifications for Sheprd and reopen the app; a computer with its own APNs key needs the push relay off here."
-                : "This phone has not given \(computer.name) its notification token yet. Allow notifications for Sheprd, then reopen the app. A computer using the push relay needs it on here too.")
+                ? "\(computer.name) has no push relay handle from this phone that it can use. Allow notifications for Sheprd and reopen the app."
+                : "\(computer.name) pushes only through the push relay, which is off here. Turn it on above.")
             return
         } catch {
             status[key] = .failed("Could not ask \(computer.name): \(error.localizedDescription)")

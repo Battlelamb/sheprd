@@ -13,7 +13,8 @@ use sheprd_remote_control::{
 };
 use std::{io::Read, path::PathBuf, process::ExitCode};
 
-/// The largest `enroll` request read: a key, names, and APNs files.
+/// The largest `enroll` request read: a key and names, or, from an older
+/// Sheprd, those and its APNs files, which are ignored.
 const MAX_INPUT: u64 = 64 * 1024;
 
 fn main() -> ExitCode {

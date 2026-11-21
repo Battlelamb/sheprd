@@ -201,10 +201,18 @@ fn check_approval_host() -> Approval {
     })
 }
 
-/// The real restart: this user's host.
+/// The real restart: this user's host, and the daemon answering its address.
 fn restart_host(config: &RemoteConfig) -> crate::Result<Outcome> {
-    let host = super::host(super::state_dir()?)?;
-    service::restart(config, &host, service::run).map_err(Into::into)
+    let state_dir = super::state_dir()?;
+    let address = control::address(&state_dir);
+    let host = super::host(state_dir)?;
+    service::restart(
+        config,
+        &host,
+        |request| control::request(&address, request),
+        service::run,
+    )
+    .map_err(Into::into)
 }
 
 /// The firewall check after a service change: only a running service has

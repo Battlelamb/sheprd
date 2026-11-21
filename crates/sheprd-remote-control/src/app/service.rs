@@ -384,7 +384,7 @@ pub fn reconcile(
     send: impl Fn(&Request) -> Result<Response, crate::control::Error>,
     run: impl FnMut(&Step) -> Result<()>,
 ) -> Result<Outcome> {
-    reconcile_with_core(config, host, send, run, || {
+    reconcile_with_core(config, host, send, run, settle_delay, || {
         sheprd_core_client::Endpoint::resolve(sheprd_client::login_env::var)
     })
 }
@@ -394,6 +394,7 @@ fn reconcile_with_core(
     host: &Host,
     send: impl Fn(&Request) -> Result<Response, crate::control::Error>,
     mut run: impl FnMut(&Step) -> Result<()>,
+    mut wait: impl FnMut(),
     core_endpoint: impl FnOnce() -> sheprd_core_client::Result<sheprd_core_client::Endpoint>,
 ) -> Result<Outcome> {
     let installed = host.file.exists();
@@ -415,6 +416,7 @@ fn reconcile_with_core(
         return Ok(Outcome::Removed);
     }
     if write_definition(config, host, core_endpoint())? {
+        stop_running(&send, &mut wait);
         for step in host.manager.load(&host.file) {
             run(&step)?;
         }
@@ -429,6 +431,7 @@ fn reconcile_with_core(
                 .as_ref()
                 .is_some_and(|version| *version != status.version) =>
         {
+            stop_running(&send, &mut wait);
             for step in host.manager.reload(&host.file) {
                 run(&step)?;
             }
@@ -446,11 +449,23 @@ fn reconcile_with_core(
 
 /// Restarts the daemon from the program `host` names, as Settings' Restart
 /// does after the binary beside the app was rebuilt or updated. The
-/// definition is rewritten first when it changed. Off, nothing runs.
+/// definition is rewritten first when it changed, and whatever daemon
+/// answers is asked to stop first. Off, nothing runs.
 pub fn restart(
     config: &RemoteConfig,
     host: &Host,
+    send: impl Fn(&Request) -> Result<Response, crate::control::Error>,
+    run: impl FnMut(&Step) -> Result<()>,
+) -> Result<Outcome> {
+    restart_with_wait(config, host, send, run, settle_delay)
+}
+
+fn restart_with_wait(
+    config: &RemoteConfig,
+    host: &Host,
+    send: impl Fn(&Request) -> Result<Response, crate::control::Error>,
     mut run: impl FnMut(&Step) -> Result<()>,
+    mut wait: impl FnMut(),
 ) -> Result<Outcome> {
     if !config.enabled {
         return Ok(Outcome::Unchanged);
@@ -465,10 +480,43 @@ pub fn restart(
     } else {
         host.manager.reload(&host.file)
     };
+    stop_running(&send, &mut wait);
     for step in steps {
         run(&step)?;
     }
     Ok(Outcome::Started)
+}
+
+/// Asks whatever daemon answers the control endpoint to exit, and waits a
+/// bounded time for it to stop answering, before the service manager starts
+/// the new one. The manager restarts only the daemon it started: one it did
+/// not (an older release's, or one started by hand) would otherwise keep the
+/// port, and the new daemon would fail to bind it on every retry while the
+/// old one went on serving. A clean exit leaves a managed daemon down until
+/// the steps that follow start it.
+fn stop_running(
+    send: &impl Fn(&Request) -> Result<Response, crate::control::Error>,
+    mut wait: impl FnMut(),
+) {
+    match send(&Request::Shutdown) {
+        Ok(Response::Done) => {}
+        Ok(_) => return,
+        Err(error) => {
+            tracing::debug!(%error, "No remote control daemon took the shutdown");
+            return;
+        }
+    }
+    for _ in 0..SETTLE_ATTEMPTS {
+        if send(&Request::Status).is_err() {
+            return;
+        }
+        wait();
+    }
+    tracing::warn!("The remote control daemon still answers after it was asked to exit");
+}
+
+fn settle_delay() {
+    std::thread::sleep(SETTLE_DELAY);
 }
 
 /// Writes the service definition for `config` unless the file already
@@ -501,12 +549,7 @@ fn write_definition(
 /// Runs one manager command through `sheprd_client::new_command`; a step
 /// that settles is tried again, a bounded number of times, while it fails.
 pub fn run(step: &Step) -> Result<()> {
-    settle(
-        step,
-        SETTLE_ATTEMPTS,
-        || run_once(step),
-        || std::thread::sleep(SETTLE_DELAY),
-    )
+    settle(step, SETTLE_ATTEMPTS, || run_once(step), settle_delay)
 }
 
 /// Tries `once` up to `attempts` times when `step` settles, waiting between

@@ -525,6 +525,7 @@ fn a_failed_load_is_reported_with_its_cause() {
 mod github;
 mod release;
 mod restart;
+mod stray;
 mod update;
 
 #[test]

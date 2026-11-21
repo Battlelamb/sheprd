@@ -46,6 +46,8 @@ pub(crate) enum Kind {
     TerminalAsking,
     /// An agent in a plain terminal finished what it was doing.
     TerminalDone,
+    /// One the user sent from the phone to see notifications arrive.
+    Test,
     TurnEnded,
     // keep-sorted end
 }

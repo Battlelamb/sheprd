@@ -9,6 +9,7 @@ pub(crate) use control::version;
 mod listener;
 mod live;
 mod notifier;
+pub(crate) use notifier::forget;
 mod options;
 
 pub use crate::push::Privacy;

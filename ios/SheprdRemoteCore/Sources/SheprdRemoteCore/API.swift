@@ -90,6 +90,26 @@ public enum API {
         }
     }
 
+    /// `POST /api/apns/test`: asks a computer to send one sealed test alert
+    /// now, carrying `id`.
+    public struct PushTestRequest: Encodable, Equatable, Sendable {
+        public let id: String
+        public init(id: String) { self.id = id }
+    }
+
+    /// What APNs told the computer about a test push.
+    public struct PushTestAnswer: Decodable, Equatable, Sendable {
+        public enum Outcome: String, Decodable, Sendable {
+            case delivered, gone, limited, refused, unreachable
+        }
+
+        public let outcome: Outcome
+        /// For `refused`: APNs's HTTP status and its reason, one of Apple's
+        /// fixed names such as `BadDeviceToken`.
+        public let status: Int?
+        public let reason: String?
+    }
+
     /// `POST /api/apns`: the app's push-to-start token and one token per
     /// Live Activity it shows for that computer, all lowercase hex. The
     /// daemon replaces its list of activities with this one.

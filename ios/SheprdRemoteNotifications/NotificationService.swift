@@ -32,6 +32,14 @@ final class NotificationService: UNNotificationServiceExtension {
         }
         var info = content.userInfo
         info["sealed"] = nil
+        if let test = alert.test {
+            // A test from Settings: the app waits for this receipt. It names
+            // no chat, so a tap only opens the app.
+            PushTestReceipts.record(test, at: Date(), in: UserDefaults(suiteName: "group.so.pen.herdr.remote"))
+            content.userInfo = info
+            contentHandler(content)
+            return
+        }
         // The computer whose key opened it, which actions then reach.
         info[AlertKeys.computer] = opened.computer.hex
         info[AlertKeys.pane] = alert.pane

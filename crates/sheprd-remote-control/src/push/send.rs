@@ -64,6 +64,8 @@ impl Delivery {
             (true, _) => 60 * 60,
             (false, Kind::Question | Kind::TerminalAsking) => 24 * 60 * 60,
             (false, Kind::Error | Kind::TerminalDone | Kind::TurnEnded) => 60 * 60,
+            // A test the user waits for on the phone: late is a failure.
+            (false, Kind::Test) => 60,
         };
         Self {
             topic: Some(Topic::from_tag(&notification.tag)),

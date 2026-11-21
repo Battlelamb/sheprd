@@ -51,6 +51,7 @@ mod term_files;
 #[cfg(unix)]
 mod term_history;
 mod terminal;
+mod test_push;
 mod typed;
 mod update;
 mod uploads;

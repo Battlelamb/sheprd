@@ -647,9 +647,11 @@ stored value when present and keeps it when absent.
 
 `notify_key` is base64url without padding of the 65-byte uncompressed P-256
 point the app opens alerts with. Anything else is refused. A device with
-both, on a daemon with the user's APNs key, gets every chat notification
-through APNs and none through Web Push. APNs refusing the token
-(`BadDeviceToken`, `Unregistered`) drops `alert`.
+both, on a daemon with the push relay on, gets every chat notification
+through APNs and none through Web Push. Since computers push only through the
+push relay (`docs/apns-relay-plan.md`), `alert` is a relay handle; a plain
+token like the one above, from an older app, is kept but never sent to. A
+`gone` reply drops `alert`.
 
 **A shown alert** is push type `alert`, topic the bundle id,
 `apns-collapse-id` the pairing's scope and the chat's tag (at most 64

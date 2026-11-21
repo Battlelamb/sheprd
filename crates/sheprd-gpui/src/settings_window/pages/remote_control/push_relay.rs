@@ -195,7 +195,7 @@ impl SettingsWindow {
             "remote-push-delivery",
             fl!("settings-push-relay-delivery"),
         )
-        .description(delivery_line(status, self.config.remote.push_relay));
+        .description(delivery_line(status));
         // The dot says what the lines below say in words.
         if let Some(worked) = status.and_then(last_worked) {
             let color = if worked {
@@ -240,15 +240,10 @@ impl SettingsWindow {
 
 /// The delivery row's description: the mode, or that it shows once the
 /// daemon runs and says.
-pub(in crate::settings_window) fn delivery_line(
-    status: Option<&PushStatus>,
-    push_relay: bool,
-) -> String {
+pub(in crate::settings_window) fn delivery_line(status: Option<&PushStatus>) -> String {
     match status.map(|status| status.mode) {
         None => fl!("settings-push-relay-delivery-unknown"),
         Some(Mode::Off) => fl!("settings-push-relay-delivery-off"),
-        Some(Mode::OwnKey) if push_relay => fl!("settings-push-relay-delivery-own-key-wins"),
-        Some(Mode::OwnKey) => fl!("settings-push-relay-delivery-own-key"),
         Some(Mode::PushRelay) => fl!("settings-push-relay-delivery-push-relay"),
         Some(Mode::Other) => fl!("settings-push-relay-delivery-other"),
     }
@@ -265,7 +260,6 @@ pub(in crate::settings_window) fn host_line(host: &HostPush) -> String {
     };
     let mode = match status.mode {
         Mode::Off => "off",
-        Mode::OwnKey => "own_key",
         Mode::PushRelay => "push_relay",
         Mode::Other => "other",
     };

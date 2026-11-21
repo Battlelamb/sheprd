@@ -8,7 +8,7 @@ use crate::apns::{
     alert::{Sealed, clear, collapse_id, push, scope, thread_id},
     seal,
 };
-use crate::push::{Kind, Notification, Urgency};
+use crate::push::{EventId, Kind, Notification, Urgency};
 use p256::{PublicKey, SecretKey};
 use sheprd_apns::SealedPush;
 
@@ -21,6 +21,7 @@ fn asking(pane: &str) -> Notification {
     Notification {
         body: "Run tests?".to_owned(),
         clear: false,
+        event: EventId::new(),
         kind: Kind::Question,
         pane: pane.to_owned(),
         permission: None,

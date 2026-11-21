@@ -81,6 +81,8 @@ pub enum CliError {
     DuplicateOption(&'static str),
     #[error("Invalid {0}")]
     InvalidValue(&'static str),
+    #[error("{0} cannot be combined with {1}")]
+    Conflicting(&'static str, &'static str),
     #[error("{command} requires {what}")]
     MissingArgument {
         command: &'static str,

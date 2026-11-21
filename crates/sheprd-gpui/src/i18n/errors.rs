@@ -13,6 +13,7 @@ mod automations;
 mod backdrop;
 mod caffeine;
 mod chat;
+mod chat_brief;
 mod chat_protocol;
 mod chat_pull_requests;
 mod client;

@@ -16,6 +16,7 @@
 // i18n: migrated
 
 mod auto_convert;
+pub(crate) mod brief;
 mod chats;
 pub(crate) mod code_block;
 mod code_choices;

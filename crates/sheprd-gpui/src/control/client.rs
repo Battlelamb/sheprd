@@ -352,6 +352,12 @@ pub(crate) fn status(error: &crate::Error) -> u8 {
         crate::Error::ListenToken(_) => exit::USAGE,
         crate::Error::Control(crate::control::Error::Unavailable { .. }) => exit::NOT_RUNNING,
         crate::Error::ChatPullRequests(error) => chat_pull_requests_status(error),
+        // A file that could not be read is a failure; a brief that is not
+        // one is the caller's to fix.
+        crate::Error::ChatBrief(
+            crate::control::brief::Error::Open { .. } | crate::control::brief::Error::Read(_),
+        ) => exit::REFUSED,
+        crate::Error::ChatBrief(_) => exit::USAGE,
         crate::Error::Control(crate::control::Error::Rejected { code, .. }) => match code {
             ErrorCode::InvalidUrl => exit::USAGE,
             ErrorCode::NotFound | ErrorCode::WorkspaceNotFound | ErrorCode::NoWindow => {

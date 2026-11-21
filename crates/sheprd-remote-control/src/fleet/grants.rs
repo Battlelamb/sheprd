@@ -114,6 +114,8 @@ pub(crate) fn own_host(state: &Log, me: &MemberId, host: Option<HostId>) -> Opti
 
 /// Rewrites the SSH lines and relay records from the log. Blocking.
 pub(crate) fn apply(state: &State, fleet: &Fleet) -> Result<()> {
+    // Read and written as one, so a scrub never runs between them.
+    let _writing = fleet.writing();
     let suspended = fleet.suspended();
     let (lines, records, routes) = {
         let inner = fleet.inner();
@@ -177,6 +179,19 @@ fn revoke_removed(state: &State, fleet: &Fleet) -> Result<()> {
 /// desktop by naming its public keys. Blocking.
 pub(crate) fn supersede(state: &State, tunnel: &[u8; 32]) -> Result<()> {
     let mut auth = state.auth();
+    let keys = auth.ssh_access().ok().map(|access| access.keys.clone());
+    revoke_paired(&mut auth, keys.as_ref(), tunnel)
+}
+
+/// Revokes every desktop paired one by one in `auth` whose tunnel key is
+/// `tunnel`, removing its line from `keys` first: a line that stays is
+/// reported rather than left behind a device that is gone, whose proof
+/// would no longer say whose line it was. Blocking.
+pub(crate) fn revoke_paired(
+    auth: &mut crate::auth::Auth,
+    keys: Option<&crate::ssh_access::AuthorizedKeys>,
+    tunnel: &[u8; 32],
+) -> Result<()> {
     let paired: Vec<crate::control::DeviceId> = auth
         .devices()
         .records()
@@ -192,7 +207,10 @@ pub(crate) fn supersede(state: &State, tunnel: &[u8; 32]) -> Result<()> {
         .map(|record| record.id.clone())
         .collect();
     for device in paired {
-        tracing::info!("the fleet now lets in a desktop paired here; its own pairing goes");
+        tracing::info!("a desktop paired here is a fleet member's device; its own pairing goes");
+        if let Some(keys) = keys {
+            keys.remove(&device)?;
+        }
         auth.revoke(&device)?;
     }
     Ok(())
@@ -246,12 +264,35 @@ fn records(state: &Log, me: &MemberId, suspended: &[MemberId]) -> Vec<(Record, V
                     route: host.record.route.clone(),
                     fleet: true,
                     host: Some(id.to_string()),
-                    opening: host.intro.kind == HostKind::Member,
+                    // A member's daemon and a plain host's agent read the
+                    // purpose byte and proof first; a shared Sheprd host
+                    // that is no member hands the session to SSH as is.
+                    opening: matches!(host.intro.kind, HostKind::Member | HostKind::Agent),
                 },
                 host.record.ssh_host_keys.clone(),
             )
         })
         .collect()
+}
+
+/// Removes every relay record the fleet wrote: those it listed, and any
+/// record marked as the fleet's, so a damaged list still lets them go.
+/// Blocking.
+pub(crate) fn forget_records(state_dir: &Path) -> Result<()> {
+    let file = state_dir.join(RECORDS);
+    let mut gone: BTreeSet<String> = files::read_bounded(&file, 64 * 1024)
+        .ok()
+        .flatten()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    // A machine paired here over Bluetooth since keeps its record.
+    gone.retain(|id| !Record::load(state_dir, id).is_ok_and(|kept| !kept.fleet));
+    gone.extend(Record::fleet_ids(state_dir)?);
+    for id in &gone {
+        Record::remove(state_dir, id)?;
+    }
+    files::write_private(&file, b"[]")?;
+    Ok(())
 }
 
 /// Which live host each route belongs to, `None` when that is unclear.
@@ -433,10 +474,20 @@ pub(crate) async fn follow(state: Shared) {
             }
         }
         let (blocking, fleet_ref) = (state.clone(), fleet.clone());
-        let applied = tokio::task::spawn_blocking(move || apply(&blocking, &fleet_ref)).await;
-        failed = !matches!(applied, Ok(Ok(())));
-        if let Ok(Err(error)) = applied {
-            tracing::warn!(error = %error, "could not apply the fleet's grants; trying again");
+        let applied = tokio::task::spawn_blocking(move || {
+            let grants = apply(&blocking, &fleet_ref);
+            let links = super::links::apply(&blocking, &fleet_ref, crate::web::now_ms());
+            (grants, links)
+        })
+        .await;
+        failed = !matches!(applied, Ok((Ok(()), Ok(_))));
+        if let Ok((grants, links)) = applied {
+            if let Err(error) = grants {
+                tracing::warn!(error = %error, "could not apply the fleet's grants; trying again");
+            }
+            if let Err(error) = links {
+                tracing::warn!(error = %error, "could not apply the fleet's phone links; trying again");
+            }
         }
         if let Some(relay) = &state.relay {
             relay.devices_changed();

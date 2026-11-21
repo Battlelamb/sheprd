@@ -343,6 +343,24 @@ over SSH. Removals pass from daemon to daemon inside the relay tunnel,
 so they land while every Sheprd window is shut; a removal whose history
 has not arrived cuts its target off at once.
 
+Phones reach the fleet through any member daemon they are paired with.
+Every call needs a paired device's session:
+
+| Call | What it does | Bounds |
+| --- | --- | --- |
+| `GET /api/v2/fleet?member=ID` | The fleet as this computer sees it (`View`) and its heads. For `ID`, a live member, also the fleet, sequence number, and parents its next operation signs on, the hosts it linked with each one's latest record, its CA's certificate, and its signature (`routes`), which the phone checks against the host id, and where hosts take direct connections. A computer in no fleet answers only empty heads. | The fleet's own bounds |
+| `POST /api/v2/fleet/sync` | `{heads, ops}` as `fleet apply` takes them: the operations are checked like any member's, and the answer (`Applied`) carries what the phone lacks. A removal floods the fleet at once. A computer in no fleet refuses (409) rather than joining one. | 64 operations, 256 KiB decoded, 64 heads |
+| `POST /api/v2/fleet/join` | `{bundle, signature}`: a phone's bundle and its signature over the fleet id and the bundle. It is kept in memory for Sheprd to list (`Ask::Joins`) and admit with `Ask::Admit` after a person's approval; nothing admits it here. | 8 at once, one per device, 10 minutes |
+
+`fleet::links` follows the log: a live phone member's `Link` for this
+computer's own host makes its key a paired device here, for the API
+only (no SSH, GitHub sharing off), with the dial and tunnel keys of the
+phone's own bundle as its relay keys unless another device or member
+holds them (`Devices` keeps each relay key on one record and refuses
+every clash), named `fleet-` and 16 bytes of the key's hash so the
+phone knows its id. It goes when the phone is removed or links another key; one
+revoked here by hand stays revoked.
+
 ## Workspace pull requests and titles
 
 Mobile workspace headers show the PR number and the same readiness/lifecycle

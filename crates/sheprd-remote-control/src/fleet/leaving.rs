@@ -30,7 +30,7 @@ pub(crate) fn released(inner: &Inner, me: &MemberId) -> bool {
         || others.any(|(id, _)| {
             inner
                 .held
-                .get(id)
+                .get(&super::Holder::Member(*id))
                 .is_some_and(|held| !held.is_disjoint(&removals))
         })
 }

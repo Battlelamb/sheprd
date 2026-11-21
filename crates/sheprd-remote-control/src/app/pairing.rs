@@ -8,7 +8,9 @@
 //! phone's name and matching code and waits for Allow or Deny.
 
 use super::qr::Qr;
-use crate::control::{self, ErrorCode, Offer, PairingId, PairingState, Request, Response};
+use crate::control::{
+    self, DeviceId, ErrorCode, Offer, PairingId, PairingState, Request, Response,
+};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -40,11 +42,16 @@ pub enum Phase {
         /// `PairingState::Claimed::ssh`: another computer's Sheprd asks to
         /// open terminals here over SSH.
         ssh: bool,
+        /// `PairingState::Claimed::fleet`: that computer asks to join this
+        /// computer's fleet, or invites this computer into its own.
+        fleet: Option<control::fleet::bluetooth::Asked>,
         /// The answer given, once sent: `Some(true)` waits for the daemon
         /// to report the device approved.
         answer: Option<Answer>,
     },
     Approved {
+        /// The paired device, as the daemon names it.
+        device: DeviceId,
         device_name: String,
         /// Another computer, let in over SSH rather than to the chats.
         ssh: bool,
@@ -87,6 +94,9 @@ pub struct Pairing {
     hosts: Vec<control::hosts::HostId>,
     /// The dialog's "Share GitHub sign-in with this phone" switch.
     share_github: bool,
+    /// The fleet the dialog's fleet line agreed to, hex, when it showed
+    /// ticked: sent with an Allow, never with a Deny.
+    fleet: Option<String>,
 }
 
 impl Pairing {
@@ -104,6 +114,7 @@ impl Pairing {
             preferred_address: None,
             hosts: Vec::new(),
             share_github: true,
+            fleet: None,
         }
     }
 
@@ -120,6 +131,12 @@ impl Pairing {
     /// The dialog's switch, read when the approval is sent.
     pub fn set_share_github(&mut self, share: bool) {
         self.share_github = share;
+    }
+
+    /// The fleet an approval agrees to, as the dialog's fleet line says:
+    /// `None` when it is unticked or not shown.
+    pub fn set_fleet(&mut self, fleet: Option<String>) {
+        self.fleet = fleet;
     }
 
     /// Select an address before the first offer arrives, for a CLI-opened dialog.
@@ -184,6 +201,7 @@ impl Pairing {
                     Vec::new()
                 },
                 share_github: !*allow || self.share_github,
+                fleet: if *allow { self.fleet.clone() } else { None },
             },
             Phase::Showing { offer, .. } | Phase::Claimed { offer, .. } if poll_due => {
                 Request::Pairing {
@@ -311,6 +329,7 @@ impl Pairing {
                     code,
                     app,
                     ssh,
+                    fleet,
                 },
             ) => Phase::Claimed {
                 offer,
@@ -318,15 +337,21 @@ impl Pairing {
                 code,
                 app,
                 ssh,
+                fleet,
                 answer: None,
             },
             (
                 Phase::Claimed {
                     device_name, ssh, ..
                 },
-                PairingState::Approved { .. },
-            ) => Phase::Approved { device_name, ssh },
-            (Phase::Showing { .. }, PairingState::Approved { .. }) => Phase::Approved {
+                PairingState::Approved { device },
+            ) => Phase::Approved {
+                device,
+                device_name,
+                ssh,
+            },
+            (Phase::Showing { .. }, PairingState::Approved { device }) => Phase::Approved {
+                device,
                 device_name: "The device".into(),
                 ssh: false,
             },

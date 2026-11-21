@@ -136,6 +136,7 @@ pub async fn run(options: Options) -> Result<()> {
         changes: Default::default(),
         computer: options::computer_name(),
         connected: Mutex::new(HashMap::new()),
+        favorites: web::Favorites::load(crate::app::favorites::file(&options.state_dir)),
         fingerprint,
         fleet,
         github: crate::native::changes::github::Reader::new(options.github_cli),
@@ -184,6 +185,7 @@ pub async fn run(options: Options) -> Result<()> {
     if let Some(fleet) = state.fleet.clone() {
         tokio::spawn(crate::fleet::removals::flood(fleet));
     }
+    tokio::spawn(web::follow_favorite_boot(state.clone()));
     tokio::spawn(crate::native::github::checkouts::follow(state.clone()));
     tokio::spawn(crate::native::previews::follow(state.clone()));
     tokio::spawn(crate::native::github::follow_gh_hosts(state.clone()));

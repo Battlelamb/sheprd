@@ -17,7 +17,10 @@ use sheprd_remote_control::control::{
 use std::{sync::atomic::AtomicBool, time::Instant};
 
 /// Asks this computer's daemon `ask` and waits for its fleet answer.
-async fn daemon(client: &crate::remote::supervisor::Client, ask: Ask) -> Result<Answer, Error> {
+pub(super) async fn daemon(
+    client: &crate::remote::supervisor::Client,
+    ask: Ask,
+) -> Result<Answer, Error> {
     match client.request(Request::Fleet(Box::new(ask))).await {
         Ok(Response::Fleet(answer)) => Ok(*answer),
         Ok(Response::Error { message, .. }) => Err(Error::Daemon(message)),
@@ -26,7 +29,7 @@ async fn daemon(client: &crate::remote::supervisor::Client, ask: Ask) -> Result<
     }
 }
 
-async fn applied(
+pub(super) async fn applied(
     client: &crate::remote::supervisor::Client,
     apply: Apply,
 ) -> Result<Applied, Error> {
@@ -38,7 +41,7 @@ async fn applied(
 
 /// The most parts a log is carried in: the largest log a daemon keeps,
 /// one answer at a time, and one more.
-const MAX_PARTS: usize = saved::MAX_SAVED.div_ceil(sync::MAX_ANSWER_BYTES) + 1;
+pub(super) const MAX_PARTS: usize = saved::MAX_SAVED.div_ceil(sync::MAX_ANSWER_BYTES) + 1;
 
 /// Asks `target` for what this computer lacks, from `heads`, naming no
 /// fleet and with a fresh nonce: its answer, when it proves it is one of
@@ -67,7 +70,8 @@ async fn ask_proven(
         Ok(theirs) if theirs.fleet == fleet => {
             Ok(sync::proven_host(&theirs, &nonce, hosts).map(|host| (theirs, host)))
         }
-        Ok(_) | Err(Error::NoProgram) => Ok(None),
+        Ok(_) => Ok(None),
+        // A machine with no Sheprd daemon: the caller decides.
         Err(error) => Err(error),
     }
 }
@@ -77,7 +81,7 @@ async fn ask_proven(
 /// arrived, granting nothing, and answers its heads, from which this
 /// computer's daemon says what comes next. It joins once the history
 /// admits it, or shares it as a host, which the last part holds.
-async fn hand_over(
+pub(super) async fn hand_over(
     client: &crate::remote::supervisor::Client,
     executor: &BackgroundExecutor,
     target: &ConnectTarget,
@@ -163,6 +167,9 @@ async fn hand_removal(
 /// 2. hands what it answered to this computer's daemon, which says what
 ///    the machine lacks, asking again while the machine has more;
 /// 3. sends the machine that, one answer at a time.
+///
+/// A machine with no Sheprd daemon may be a plain host of this fleet: its
+/// relay agent is kept current instead (`plain::sync`).
 pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
     let Some(client) = Supervisor::client(cx) else {
         return;
@@ -200,9 +207,20 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
             };
             hosts.extend(removed.iter().cloned());
             let target = &machine.target;
-            let Some((mut theirs, proven)) =
-                ask_proven(&executor, target, view.heads.clone(), &fleet, &hosts).await?
-            else {
+            let answered =
+                match ask_proven(&executor, target, view.heads.clone(), &fleet, &hosts).await {
+                    // No Sheprd daemon: perhaps a plain host of this fleet.
+                    Err(Error::NoProgram) => {
+                        let (standing, host) =
+                            super::plain::sync(&client, &executor, &machine, &view).await?;
+                        // The host its agent serves: what a removal and a
+                        // later share again are recognized by.
+                        proven_as = host;
+                        return Ok((standing, Vec::new(), view.heads.clone()));
+                    }
+                    answered => answered?,
+                };
+            let Some((mut theirs, proven)) = answered else {
                 let standing = if was.as_ref().is_some_and(|host| removed.contains(host)) {
                     Standing::Removed
                 } else {
@@ -236,11 +254,14 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
                     break;
                 }
                 parts += 1;
-                let Some((next, again)) =
-                    ask_proven(&executor, target, ours.heads.clone(), &fleet, &hosts).await?
-                else {
-                    return Ok((Standing::Outside, Vec::new(), Vec::new()));
-                };
+                let (next, again) =
+                    match ask_proven(&executor, target, ours.heads.clone(), &fleet, &hosts).await {
+                        Ok(Some(answer)) => answer,
+                        Ok(None) | Err(Error::NoProgram) => {
+                            return Ok((Standing::Outside, Vec::new(), Vec::new()));
+                        }
+                        Err(error) => return Err(error),
+                    };
                 if again != proven {
                     return Ok((Standing::Outside, Vec::new(), Vec::new()));
                 }
@@ -304,13 +325,7 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
         cx.update(|cx| {
             match outcome {
                 Ok((standing, heads, synced)) => Fleet::set_link(cx, &id, |link| {
-                    link.running = false;
-                    link.standing = standing;
-                    link.heads = heads;
-                    link.synced = synced;
-                    if proven_as.is_some() {
-                        link.host = proven_as;
-                    }
+                    link.settle(standing, heads, synced, proven_as);
                 }),
                 Err(error) => {
                     tracing::debug!(%error, "Could not sync the fleet with a machine");
@@ -418,6 +433,32 @@ pub(crate) fn share(
             if outcome.is_ok() {
                 Fleet::set_link(cx, &id, super::Link::restart);
             }
+            Fleet::refresh(cx);
+            done(outcome.err().map(|error| error.to_string()), cx);
+        });
+    })
+    .detach();
+}
+
+/// Removes every way a fleet reaches `machine`'s account, over SSH: the
+/// last resort for a host no member can reach or a fleet that is gone (a
+/// person here asked for it). Signs nothing: it only takes access away.
+pub(crate) fn scrub(
+    cx: &mut App,
+    id: String,
+    machine: Machine,
+    done: impl FnOnce(Option<String>, &mut App) + 'static,
+) {
+    Fleet::set_acting(cx, &id, true);
+    let target = machine.target;
+    let task = cx
+        .background_executor()
+        .spawn(async move { remote::scrub(&target, &AtomicBool::new(false)) });
+    cx.spawn(async move |cx| {
+        let outcome = task.await;
+        cx.update(|cx| {
+            Fleet::set_acting(cx, &id, false);
+            Fleet::set_link(cx, &id, |link| *link = super::Link::default());
             Fleet::refresh(cx);
             done(outcome.err().map(|error| error.to_string()), cx);
         });

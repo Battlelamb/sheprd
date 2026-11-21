@@ -5,7 +5,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 use sheprd_remote_control::{
-    app::{enroll, relay_enroll, shortcuts, tags},
+    app::{enroll, favorites, relay_enroll, shortcuts, tags},
     control::{self, DeviceId},
     desktop, fleet,
     server::{self, FleetAction, Invocation},
@@ -40,6 +40,12 @@ fn main() -> ExitCode {
                 print_json(&relays(state_dir, offer)?)
             });
         }
+        Ok(Invocation::Favorites { state_dir, offer }) => {
+            return host(state_dir, |state_dir| {
+                let change = read_offer(offer, MAX_INPUT)?;
+                print_json(&favorites::exchange(state_dir, change)?)
+            });
+        }
         Ok(Invocation::Shortcuts { state_dir, offer }) => {
             return host(state_dir, |state_dir| {
                 let limit = control::shortcuts::MAX_WIRE_BYTES as u64;
@@ -70,6 +76,10 @@ fn main() -> ExitCode {
                     state_dir,
                     control::fleet::sync::Ask::Intro,
                 )?),
+                FleetAction::Scrub => {
+                    fleet::run_scrub(state_dir)?;
+                    print_json(&serde_json::json!({ "scrubbed": true }))
+                }
             });
         }
         Ok(Invocation::DesktopPair { state_dir, name }) => {

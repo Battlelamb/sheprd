@@ -49,6 +49,15 @@ fn native_sidebar() {
     native_fixture(Fixture::Sidebar);
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires active macOS desktop; GUI-only window close fixture, no daemon"]
+fn native_window_close() {
+    let (status, log) = run_fixture(&Fixture::WindowClose).expect("native window close timed out");
+    assert!(status.success(), "native window close failed: {status}");
+    assert!(log.contains("WINDOW CLOSE native PASS"), "{log}");
+}
+
 #[test]
 #[ignore = "requires active native desktop; isolated GitHub quota fixtures, no daemon"]
 fn native_github_quota() {
@@ -161,6 +170,8 @@ fn native_input_shutdown(field: &'static str) {
 }
 
 enum Fixture {
+    #[cfg(target_os = "macos")]
+    WindowClose,
     GitHubQuota,
     Traces,
     Sidebar,
@@ -255,6 +266,10 @@ fn run_fixture(fixture: &Fixture) -> Option<(ExitStatus, String)> {
         command.env("HERDR_TEST_TRACES_CAPTURE", path);
     }
     match fixture {
+        #[cfg(target_os = "macos")]
+        Fixture::WindowClose => {
+            command.env("HERDR_TEST_WINDOW_CLOSE", "1");
+        }
         Fixture::GitHubQuota => {
             command.env("HERDR_TEST_GITHUB_QUOTA_ONLY", "1");
         }

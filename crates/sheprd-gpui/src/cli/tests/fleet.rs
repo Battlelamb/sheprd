@@ -51,5 +51,11 @@ fn fleet_removals_name_a_member_or_host() {
         parse(&["fleet", "remove"]),
         Err(CliError::MissingArgument { .. })
     ));
+    assert_eq!(
+        command(&["fleet", "scrub", "me@build-01"]),
+        ControlCommand::Fleet(FleetCommand::Scrub {
+            machine: "me@build-01".into()
+        })
+    );
     assert!(parse(&["fleet", "found"]).is_err());
 }

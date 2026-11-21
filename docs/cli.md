@@ -214,6 +214,7 @@ share at least two of its keywords and were not shown yet in that chat.
 | `chat [status]` | The `sheprd-acp` chat panes of the window's host, this machine or an SSH host: agent, status, model, context window use, and whether the chat view or the terminal shows |
 | `chat convert [--pane ID]` | Move the terminal agent in your pane (or ID, else the focused one) into a `sheprd-acp` chat in the same pane, keeping its conversation. From a Herdr 2 pane, your pane is your terminal (`HC_TERMINAL_ID`), whose id in `chat` is `core:` and the terminal's (see [Moving a terminal agent into a chat](rich-chat.md#moving-a-terminal-agent-into-a-chat)). Returns once the move has started; `chat` shows the chat when it attaches. Exits 6 while the agent works, 5 when the pane has no terminal agent, and 8 for an agent or pane that cannot move. `config set chat.auto_convert true` moves every new agent this way ([Opening new agents as chats](rich-chat.md#opening-new-agents-as-chats)) |
 | `chat shortcuts` | Your text shortcuts, the prompts every chat's composer offers (type `/`, or use the shortcuts button beside +), in order: each label and its text. `--json` adds each one's `id` and `title`, the list's `updated_ms`, and `complete`, false when the list holds more text than one answer carries. The list is the same on this computer, every connected SSH host with `sheprd-remote-control`, and the phones paired with them; Settings > Text Shortcuts edits it. Exits 4 when there are none |
+| `chat favorite [on\|off\|toggle] [--pane ID]` | Star or unstar the agent in your pane (or ID, else the focused one; default: toggle). Favorites are listed first in the agents panel and on paired phones whatever the sort. Each host's `sheprd-remote-control` keeps its own agents' favorites, so every desktop and phone reaching it shows the same stars. From a Herdr 2 pane, your pane is your terminal, `core:` and its id. Exits 5 when the pane runs no agent the window can star |
 | `chat pr [list]` | Run as the agent of a `sheprd-acp` chat: the pull requests that chat's side rail lists, oldest first, each with its repository, address, and what was done to it (`created`, `pushed`, `edited`, `commented`, `reviewed`, `ready`, `merged`, `closed`, `reopened`). Reaches the chat named by `SHEPRD_CHAT_ENDPOINT`, which the chat sets on its agent, over the chat's own socket; Sheprd need not run. Exits 4 when there are none, 2 outside a chat, and 3 when the chat cannot be reached (see [Pull requests in a chat's rail](#pull-requests-in-a-chats-rail)) |
 | `chat pr add URL` | List a pull request (`https://github.com/OWNER/REPO/pull/N`) in your chat's rail, for one you changed without `gh`. Exits 2 for an address that is not a GitHub pull request |
 | `chat show\|hide\|toggle [--pane ID]` | Show the native chat view over your pane (or ID, else the focused one), or its terminal |
@@ -479,11 +480,12 @@ command line.
 | `fleet open` | Show Settings > Fleet, where a fleet is created, computers this Sheprd reaches are invited, and hosts are shared with the computers ticked |
 | `fleet remove MEMBER` | Ask in Settings > Fleet to remove a member, named by its ID from `fleet status` or its name (a name two members share is refused). The user picks why there: a compromised member takes the members and hosts it added with it |
 | `fleet remove-host HOST` | Ask in Settings > Fleet to remove a host everywhere, by its ID or name; the user confirms there |
+| `fleet scrub MACHINE` | Ask in Settings > Fleet to remove every way a fleet reaches a machine this Sheprd connects to, named by its device ID or name: `sheprd-remote-control fleet scrub` and `sheprd-relay-agent fleet scrub` over SSH, each when installed, remove its `sheprd-fleet:` lines and the agent's entries. The last resort for a host no member can reach or a fleet that is gone; nothing is signed, and the user confirms there |
 
 `--json` for `status` gives the daemon's view: `fleet`, `me`, `members`,
 `hosts` (each with `grants` and an optional `target`), `removed`,
-`suspended`, `equivocating`, `pending`, and `heads`. `remove` and
-`remove-host` exit 5 when nothing of that name is in the fleet.
+`suspended`, `equivocating`, `pending`, and `heads`. `remove`,
+`remove-host`, and `scrub` exit 5 when nothing of that name is there.
 
 ```sh
 sheprd fleet status --json

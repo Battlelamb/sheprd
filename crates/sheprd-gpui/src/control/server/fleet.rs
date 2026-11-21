@@ -1,4 +1,5 @@
-//! `fleet status`, `fleet open`, `fleet remove`, and `fleet remove-host`.
+//! `fleet status`, `fleet open`, `fleet remove`, `fleet remove-host`, and
+//! `fleet scrub`.
 //! The daemon is asked on the background executor. Removing opens
 //! Settings > Fleet asking, where the user picks why and confirms; nothing
 //! is signed from here.
@@ -41,6 +42,18 @@ pub(super) fn serve(
         }
         FleetOp::Remove { member } => Some(Target::Member(member)),
         FleetOp::RemoveHost { host } => Some(Target::Host(host)),
+        // Machines are this Sheprd's own: no daemon to ask.
+        FleetOp::Scrub { machine } => {
+            let machines = crate::fleet::Fleet::machines(cx);
+            let named = machines
+                .iter()
+                .map(|(id, machine)| (id.as_str(), machine.label.as_str()));
+            let response = match pick(named, &machine, "machine") {
+                Ok(id) => open(&caller, FleetPending::Scrub(id), cx),
+                Err(response) => response,
+            };
+            return incoming.respond(response);
+        }
     };
     let Some(client) = Supervisor::client(cx) else {
         return incoming.respond(Response::error(
@@ -159,7 +172,7 @@ fn pick<'a>(
         )),
         (None, _) => Err(Response::error(
             ErrorCode::NotFound,
-            format!("No {what} of the fleet is named {needle}"),
+            format!("No {what} is named {needle}"),
         )),
     }
 }

@@ -11,6 +11,7 @@ mod appearance_messages;
 mod config_watch;
 mod en_xa;
 mod fleet;
+mod fleet_plain;
 mod fleet_removal;
 mod fleet_unsaved;
 mod gpu_settings;

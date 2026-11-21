@@ -10,18 +10,30 @@
 //!   reach.
 //! - [`removals`]: removals passed between daemons inside the relay
 //!   tunnel, so they land while every Sheprd window is shut.
+//! - [`joins`]: phones asking to join through this computer, waiting for a
+//!   person to admit them in Sheprd.
+//! - [`bluetooth`]: computers joining, or inviting this one, as they pair
+//!   over Bluetooth.
+//! - [`links`]: phones on this computer's API through the `Link`s they
+//!   signed.
+//! - [`scrub`]: forgetting the fleet, with every way it let someone in.
 //!
 //! Every change bumps [`Fleet::changed`]; `follow` then rewrites what the
 //! log grants, off the control thread.
 
 pub(crate) mod ask;
+pub(crate) mod bluetooth;
 mod error;
 pub(crate) mod grants;
 mod joining;
+pub(crate) mod joins;
 mod leaving;
+pub(crate) mod links;
 mod lock;
 mod me;
+mod plain;
 pub(crate) mod removals;
+pub(crate) mod scrub;
 mod store;
 pub(crate) mod suspensions;
 
@@ -70,6 +82,10 @@ pub(crate) struct Unconfirmed {
 /// Suspensions that keep their removal to check again.
 pub(crate) const MAX_KEPT_REMOVALS: usize = crate::control::fleet::MAX_PENDING;
 
+/// How long the SSH session that asked for a scrub keeps running after
+/// it, to read the answer.
+pub(crate) const SCRUB_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// The suspensions held, as `peers.json` keeps them.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Suspensions {
@@ -102,9 +118,19 @@ pub(crate) struct Fleet {
     hosted: AtomicBool,
     inner: Mutex<Inner>,
     changed: watch::Sender<u64>,
+    /// Held while what the log grants is read and written, and while a
+    /// scrub forgets it, so a write of the old fleet never lands after a
+    /// scrub took its access away.
+    writing: Mutex<()>,
+    /// When this computer last forgot its fleet (`fleet scrub`), and the
+    /// SSH session that asked for it, by its client port on loopback: only
+    /// that session keeps [`SCRUB_GRACE`] to read the answer.
+    scrubbed: Mutex<Option<(std::time::Instant, u16)>>,
     /// Removal exchanges other members dialed in for, at most
     /// `removals::CONCURRENT` at once.
     pub(crate) inbound: tokio::sync::Semaphore,
+    /// Phones waiting to join, memory only.
+    joins: Mutex<joins::Joins>,
     /// The fleet folder's lock, which the daemon holds for its life.
     _lock: Option<lock::Lock>,
     /// The last write of the fleet's files failed: what is held is ahead
@@ -115,11 +141,23 @@ pub(crate) struct Fleet {
     on_disk: Mutex<Suspensions>,
 }
 
+/// What removals are passed to: a member's daemon, or a plain host's
+/// agent.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum Holder {
+    Host(HostId),
+    Member(MemberId),
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct Inner {
     pub(crate) log: Option<Log>,
     /// The removals each peer said it holds, so none is sent twice.
-    pub(crate) held: BTreeMap<MemberId, BTreeSet<OpId>>,
+    pub(crate) held: BTreeMap<Holder, BTreeSet<OpId>>,
+    /// For each plain host, the members beyond those a removal names
+    /// that its agent took with it (`Message::Also`), by removal: a
+    /// removal whose reach grew since is sent again with the rest.
+    pub(crate) held_also: BTreeMap<HostId, BTreeMap<OpId, BTreeSet<MemberId>>>,
     /// Members cut off by a removal whose history has not arrived, by the
     /// removal: kept after the removal expires from the pending pool,
     /// until its history arrives and settles it, its signer is no longer a
@@ -141,6 +179,10 @@ pub(crate) struct Inner {
     /// one `fleet apply` comes over several. It grants nothing; it becomes
     /// the log once it admits this computer or shares it as a host.
     pub(crate) joining: BTreeMap<FleetId, joining::Joining>,
+    /// Removals plain hosts' agents reported suspending for that the log
+    /// has not heard of, with when first and how many times
+    /// (`plain::Unknown`).
+    pub(crate) unknown: BTreeMap<OpId, plain::Unknown>,
 }
 
 impl Fleet {
@@ -211,7 +253,10 @@ impl Fleet {
             hosted: AtomicBool::new(hosted),
             inner: Mutex::new(inner),
             changed: watch::Sender::new(0),
+            writing: Mutex::new(()),
+            scrubbed: Mutex::new(None),
             inbound: tokio::sync::Semaphore::new(removals::CONCURRENT),
+            joins: Mutex::default(),
             _lock: lock,
             unsaved: AtomicBool::new(false),
             on_disk,
@@ -245,6 +290,12 @@ impl Fleet {
 
     pub(crate) fn inner(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The phones waiting to join. Lock it after [`Fleet::inner`], never
+    /// before.
+    pub(crate) fn joins(&self) -> MutexGuard<'_, joins::Joins> {
+        self.joins.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Members cut off now: those the log's live members removed in an
@@ -347,7 +398,24 @@ impl Fleet {
     /// at `now_ms`; says how many were refused. With no fleet yet, it joins
     /// one only when the operations found it and admit this computer: a
     /// member admitted it, after a person's approval there. Blocking.
+    // Phones' syncs on later branches call it; here only the Unix-only
+    // fleet tests do, so a Windows test build sees it unused too.
+    #[cfg_attr(not(all(test, unix)), allow(dead_code))]
     pub(crate) fn receive(&self, ops: Vec<Op>, now_ms: u64) -> Result<usize> {
+        self.receive_from(ops, &[], now_ms)
+    }
+
+    /// [`Fleet::receive`] into the fleet `fleet` only: what a removal
+    /// exchange passes, which began while this computer was in that fleet.
+    /// After a scrub, or in another fleet, it is refused: an exchange
+    /// never joins this computer to a fleet, so access a scrub took away
+    /// cannot return through one still open. Blocking.
+    pub(crate) fn receive_in(&self, fleet: FleetId, ops: Vec<Op>, now_ms: u64) -> Result<usize> {
+        // Held across the check and the insert: a scrub waits for both.
+        let _writing = self.writing();
+        if self.inner().log.as_ref().map(Log::fleet) != Some(fleet) {
+            return Err(Error::NoFleet);
+        }
         self.receive_from(ops, &[], now_ms)
     }
 
@@ -431,6 +499,16 @@ impl Fleet {
             Some(named) => Some(sync::fleet(named)?),
             None => ops.first().map(joining::fleet_of),
         };
+        // With no log yet, a caller naming a fleet hands over that fleet
+        // alone: another fleet's history it carries, one this computer
+        // once signed a join for, say, never becomes this computer's log.
+        let ops = match (&apply.fleet, named) {
+            (Some(_), Some(named)) if self.inner().log.is_none() => ops
+                .into_iter()
+                .filter(|op| joining::fleet_of(op) == named)
+                .collect(),
+            _ => ops,
+        };
         let refused = match self.receive_from(ops, &heads, now_ms) {
             Ok(refused) => refused,
             Err(Error::NotAdmitted)
@@ -491,7 +569,15 @@ impl Fleet {
     /// caller revokes its pairing at once instead, so no key a member
     /// proved is ever forgotten while a pairing with it stands.
     pub(crate) fn proved(&self, member: MemberId, tunnel: [u8; 32]) -> Result<bool> {
+        // One step with a scrub, which collects, revokes, and forgets what
+        // was proved under the same lock: a proof never lands between.
+        let _writing = self.writing();
         let mut inner = self.inner();
+        // Scrubbed meanwhile: nothing is kept, and the caller revokes the
+        // pairing itself.
+        if inner.log.is_none() {
+            return Ok(false);
+        }
         let keys = inner.proven.entry(member).or_default();
         if keys.contains(&tunnel) {
             return Ok(true);
@@ -514,28 +600,124 @@ impl Fleet {
         self.save(&inner)
     }
 
-    /// Records that `peer` holds the removals `ids`, of those the log
-    /// holds, and forgets what no longer matters: peers that are no
-    /// longer members, and removals the log no longer holds. At most
-    /// [`MAX_HELD_PER_PEER`] per peer; one forgotten is only sent again.
-    /// Blocking.
-    pub(crate) fn held(&self, peer: MemberId, ids: impl IntoIterator<Item = OpId>) -> Result<()> {
+    /// Every tunnel key a member proved here: what scrubbing the fleet
+    /// revokes pairings for first, as if every member were removed.
+    pub(crate) fn proven_keys(&self) -> Vec<[u8; 32]> {
+        self.inner().proven.values().flatten().copied().collect()
+    }
+
+    /// Forgets the fleet: its log, which removals each peer holds, the
+    /// suspensions waiting for history, and the keys members proved. The
+    /// key stays: a fleet founded or joined later is another one, where it
+    /// was never removed. Callers revoke the proven keys' pairings first
+    /// ([`Fleet::proven_keys`]), and remove what the fleet wrote after
+    /// ([`scrub::live`]). Blocking.
+    ///
+    /// What is held goes only once its file is gone: a log left on disk is
+    /// the fleet the daemon reads at its next start, so it stays the fleet
+    /// here too, and a peers file that stays keeps the keys to revoke.
+    /// `session` is the client port of the fleet SSH session that asked,
+    /// if one did: that one session may finish reading the answer.
+    pub(crate) fn scrub(&self, session: Option<u16>) -> Result<()> {
+        *self.scrubbed.lock().unwrap_or_else(PoisonError::into_inner) =
+            session.map(|session| (std::time::Instant::now(), session));
         let mut inner = self.inner();
-        let Inner { log, held, .. } = &mut *inner;
+        // Kept when its file stays: the error is reported, and the role
+        // with it.
+        store::remove_log(&self.state_dir)?;
+        inner.log = None;
+        // A fleet joined later is joined afresh, as a member or a host.
+        self.hosted.store(false, Ordering::SeqCst);
+        let removed = store::remove_peers(&self.state_dir);
+        if removed.is_ok() {
+            *inner = Inner::default();
+            // The peers file is gone with its suspensions: a later save
+            // has none on disk to keep.
+            *self.on_disk.lock().unwrap_or_else(PoisonError::into_inner) = Suspensions::default();
+        }
+        drop(inner);
+        self.bump();
+        removed
+    }
+
+    /// Records that `peer`, a member's daemon or a plain host's agent,
+    /// holds the removals `ids`, of those the log holds, and forgets what
+    /// no longer matters: members no longer members, plain hosts no longer
+    /// in the fleet, and removals the log no longer holds. At most
+    /// [`MAX_HELD_PER_PEER`] per peer; one forgotten is only sent again.
+    /// For a plain host's agent, also the members beyond those each
+    /// removal names that it took with them (`also`), of the removals it
+    /// holds, at most [`MAX_HELD_PER_PEER`] per host. Blocking.
+    pub(crate) fn held(
+        &self,
+        peer: Holder,
+        ids: impl IntoIterator<Item = OpId>,
+        also: impl IntoIterator<Item = (OpId, MemberId)>,
+    ) -> Result<()> {
+        let mut inner = self.inner();
+        let Inner {
+            log,
+            held,
+            held_also,
+            ..
+        } = &mut *inner;
         let Some(log) = log.as_ref() else {
             return Ok(());
         };
-        held.entry(peer)
-            .or_default()
-            .extend(ids.into_iter().filter(|id| log.get(id).is_some()));
+        let ids: BTreeSet<OpId> = ids.into_iter().filter(|id| log.get(id).is_some()).collect();
+        if let Holder::Host(host) = peer {
+            let kept = held_also.entry(host).or_default();
+            for (id, member) in also.into_iter().filter(|(id, _)| ids.contains(id)) {
+                kept.entry(id).or_default().insert(member);
+            }
+        }
+        held.entry(peer).or_default().extend(ids);
         held.retain(|peer, ids| {
             ids.retain(|id| log.get(id).is_some());
             while ids.len() > MAX_HELD_PER_PEER {
                 ids.pop_last();
             }
-            log.is_member(peer) && !ids.is_empty()
+            let current = match peer {
+                Holder::Member(member) => log.is_member(member),
+                Holder::Host(host) => log.state().hosts.contains_key(host),
+            };
+            current && !ids.is_empty()
+        });
+        // What a host took with a removal goes with the removal: forgetting
+        // it only sends that removal again.
+        held_also.retain(|host, kept| {
+            let ids = held.get(&Holder::Host(*host));
+            kept.retain(|id, _| ids.is_some_and(|ids| ids.contains(id)));
+            let mut room = MAX_HELD_PER_PEER;
+            kept.retain(|_, members| {
+                let fits = members.len() <= room;
+                room = room.saturating_sub(members.len());
+                fits
+            });
+            !kept.is_empty()
         });
         self.save(&inner)
+    }
+
+    /// Held while what the log grants is read and written.
+    pub(crate) fn writing(&self) -> MutexGuard<'_, ()> {
+        self.writing.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// How long the fleet SSH session whose client port on loopback is
+    /// `session` may still run after a scrub cut it off: what is left of
+    /// [`SCRUB_GRACE`], only for the session that asked for the scrub, and
+    /// only while this computer is in no fleet again. Every other session
+    /// ends at once; access is gone already and no new session starts.
+    pub(crate) fn scrub_grace(&self, session: u16) -> Option<std::time::Duration> {
+        let in_fleet = self.inner().log.is_some();
+        let mut scrubbed = self.scrubbed.lock().unwrap_or_else(PoisonError::into_inner);
+        let (at, asked) = (*scrubbed)?;
+        let left = SCRUB_GRACE.checked_sub(at.elapsed()).filter(|_| !in_fleet);
+        if left.is_none() {
+            *scrubbed = None;
+        }
+        left.filter(|_| asked == session)
     }
 
     pub(crate) fn bump(&self) {
@@ -601,6 +783,61 @@ pub fn run_ask(state_dir: &Path, ask: sync::Ask) -> Result<sync::Answer> {
         Response::Fleet(answer) => Ok(*answer),
         Response::Error { message, .. } => Err(Error::Daemon(message)),
         _ => Err(Error::Daemon("an unexpected answer".to_owned())), // i18n: data
+    }
+}
+
+/// `fleet scrub`, run over SSH or by hand: asks the running daemon to
+/// forget its fleet, or, with none running, forgets it here and removes
+/// the fleet's `authorized_keys` lines and relay records itself
+/// ([`scrub`]). Succeeds only once they are gone. Blocking.
+pub fn run_scrub(state_dir: &Path) -> Result<()> {
+    let session = std::env::var("SSH_CONNECTION")
+        .ok()
+        .and_then(|connection| loopback_client_port(&connection));
+    scrub_with(state_dir, session, scrub::offline)
+}
+
+/// The client port in `SSH_CONNECTION` ("client port server port") when
+/// the client is on loopback, as a fleet member's session is: the daemon
+/// spliced it to the SSH server from that port.
+pub(crate) fn loopback_client_port(connection: &str) -> Option<u16> {
+    let mut fields = connection.split_whitespace();
+    let client: std::net::IpAddr = fields.next()?.parse().ok()?;
+    let port = fields.next()?.parse().ok()?;
+    client.is_loopback().then_some(port)
+}
+
+/// [`run_scrub`] for the fleet session `session`, with `offline`
+/// forgetting the fleet when no daemon answers, run only while holding
+/// the fleet folder's lock. Blocking.
+fn scrub_with(
+    state_dir: &Path,
+    session: Option<u16>,
+    offline: impl FnOnce(&Path) -> Result<()>,
+) -> Result<()> {
+    use crate::control::{Request, Response};
+    let request = Request::Fleet(Box::new(sync::Ask::Scrub { session }));
+    let deadline = std::time::Instant::now() + lock::WAIT;
+    loop {
+        match crate::control::request(&crate::control::address(state_dir), &request) {
+            Ok(Response::Fleet(answer)) if *answer == sync::Answer::Done => return Ok(()),
+            Ok(Response::Error { message, .. }) => return Err(Error::Daemon(message)),
+            Ok(_) => return Err(Error::Daemon("an unexpected answer".to_owned())), // i18n: data
+            Err(crate::control::Error::Connect(_)) => {}
+            Err(error) => return Err(error.into()),
+        }
+        // No daemon answers. Held, the lock keeps a daemon from loading
+        // the fleet, and an offline update from writing it, until the
+        // files are gone; busy, a daemon is starting (it loads the fleet
+        // before it answers) or an update is writing, and the socket is
+        // tried again.
+        if let Some(_lock) = lock::Lock::try_acquire(state_dir)? {
+            return offline(state_dir);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(Error::Busy);
+        }
+        lock::pause();
     }
 }
 

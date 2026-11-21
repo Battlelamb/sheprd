@@ -8,6 +8,7 @@ mod agent;
 mod carry;
 mod commands;
 mod harness;
+mod known;
 mod pictures;
 mod pull_requests;
 mod thread;
@@ -121,6 +122,10 @@ pub(crate) enum Update {
     /// A prompt just sent to the agent, as the transcript shows it, which
     /// names the pane and its tab.
     Prompt(String),
+    /// A new session of this built-in agent offered these settings, which
+    /// differ from those known for it: kept for its next start, or, when
+    /// empty, what was known forgotten.
+    Settings(Agent, crate::known::Settings),
 }
 
 pub(crate) struct Config {
@@ -136,6 +141,8 @@ pub(crate) struct Config {
     /// The conversation so far, for a continued session whose agent does
     /// not replay it.
     pub history: Option<Transcript>,
+    /// The settings each built-in agent offered last, shown while it starts.
+    pub known: crate::known::Known,
     /// Clients can attach, and the agent was told where: its
     /// `sheprd chat pr add` reaches this chat.
     pub listens: bool,
@@ -188,6 +195,12 @@ pub(crate) struct Session<R: FnMut(Update)> {
     config: Config,
     /// What the agent has been told besides the person's words.
     context: Context,
+    /// Settings picked while the agent started, sent once its session opens.
+    deferred: Vec<known::Deferred>,
+    /// The notice under the conversation this chat continued, decided when
+    /// its first session opens and kept for the chat's life, whichever
+    /// agent it switches to; `None` until then.
+    divider: Option<Option<sheprd_chat_protocol::EntryId>>,
     epoch: Uuid,
     handled: VecDeque<(CommandId, Option<Rejection>)>,
     /// The agent process heard now.
@@ -231,6 +244,7 @@ impl<R: FnMut(Update)> Session<R> {
             available,
             current: config.harness,
         });
+        known::seed(&config.known, config.harness, &mut transcript);
         let thread = thread::Thread::new(config.harness, &transcript.entries);
         let projector = transcript
             .entries
@@ -263,6 +277,8 @@ impl<R: FnMut(Update)> Session<R> {
             commands: pull_requests::Commands::default(),
             config,
             context,
+            deferred: Vec::new(),
+            divider: None,
             epoch: Uuid::new_v4(),
             handled: VecDeque::new(),
             harness: HarnessId::default(),

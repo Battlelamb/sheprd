@@ -3,7 +3,9 @@
 //! member or host. Operations travel as their canonical bytes in
 //! base64url, so nothing here can change what was signed.
 
-use super::{Body, Error, FleetId, HostId, Log, MemberId, Method, Op, OpId, Reason, Result, State};
+use super::{
+    Body, Error, FleetId, HostId, Kind, Log, MemberId, Method, Op, OpId, Reason, Result, State,
+};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 
@@ -193,6 +195,10 @@ pub enum Ask {
     /// This computer's bundle, signed for `fleet`, for a member that is
     /// about to admit it.
     Bundle { fleet: String },
+    /// This computer's bundle signed for `fleet` and bound to a Bluetooth
+    /// pairing whose token hashes to `pairing`, base64url
+    /// (`bluetooth::pairing_digest`), for a claim that joins it.
+    Joining { fleet: String, pairing: String },
     /// Admits a member, after a person's approval here.
     Admit {
         bundle: String,
@@ -227,6 +233,30 @@ pub enum Ask {
     /// This computer as a Sheprd host, its record signed by its own
     /// certificate authority, for a member about to share it.
     Intro,
+    /// Forgets the fleet here without signing anything: its log, and the
+    /// `authorized_keys` lines and relay records it wrote. For a computer
+    /// the fleet removed, or a fleet that is gone (`sheprd fleet scrub`).
+    /// `session` is the loopback client port of the fleet SSH session that
+    /// asked, if one did: only it may finish reading the answer.
+    Scrub {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session: Option<u16>,
+    },
+    /// The access file for plain host `host`, for Sheprd to hand its
+    /// agent (`fleet apply`): computed here, so the log never leaves the
+    /// daemon. `suspended` is what the agent's `status --json` reports
+    /// suspending, which the file settles as the log allows.
+    AgentAccess {
+        host: String,
+        #[serde(default)]
+        suspended: std::collections::BTreeMap<
+            sheprd_relay_agent::access::Id,
+            sheprd_relay_agent::fleet::Suspension,
+        >,
+    },
+    /// The phones waiting to join through this computer, for a person to
+    /// admit one with [`Ask::Admit`]; none is ever admitted otherwise.
+    Joins,
     /// A shared Sheprd host's current `fleet intro`, read over SSH by a
     /// member syncing it: the member carries its record into the log as a
     /// `HostSeen` when it moved, as a host that is no member cannot sign
@@ -254,6 +284,8 @@ pub enum Answer {
     },
     Applied(Applied),
     Done,
+    /// [`Ask::Joining`]'s answer.
+    Joining(super::bluetooth::Joining),
     /// [`Ask::Intro`]'s answer: a `HostIntro`'s canonical bytes,
     /// base64url.
     Intro {
@@ -263,6 +295,35 @@ pub enum Answer {
     Hosts {
         hosts: Vec<String>,
     },
+    /// [`Ask::AgentAccess`]'s answer: the access file, as the agent reads
+    /// it on stdin.
+    AgentAccess {
+        access: String,
+    },
+    Joins {
+        joins: Vec<Join>,
+    },
+}
+
+/// A phone that asked to join through this computer
+/// (`POST /api/v2/fleet/join`), kept in memory for a while.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Join {
+    /// The joiner's member id, hex.
+    pub member: String,
+    /// The name in its bundle.
+    pub name: String,
+    pub kind: Kind,
+    /// Its bundle and its signature over [`super::Bundle::join_message`],
+    /// base64url, as [`Ask::Admit`] takes them.
+    pub bundle: String,
+    pub signature: String,
+    /// The paired device that asked, as this computer names it.
+    pub device: String,
+    /// That device's id, which a pairing approved with "Also add to your
+    /// fleet" names, so Sheprd admits only the phone just approved.
+    pub device_id: crate::control::DeviceId,
+    pub received_ms: u64,
 }
 
 /// Reads a member id from hex.

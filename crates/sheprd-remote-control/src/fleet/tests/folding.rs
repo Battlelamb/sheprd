@@ -317,13 +317,26 @@ async fn acknowledgments_keep_only_removals_sent_and_held() {
     );
     assert_eq!(acked, vec![removal.id()]);
     // What is kept holds only removals the log holds, for members.
-    a.fleet.held(b.fleet.me(), made_up).unwrap();
-    a.fleet.held(c.fleet.me(), acked).unwrap();
-    a.fleet.held(MemberId([0x77; 32]), [removal.id()]).unwrap();
+    a.fleet
+        .held(Holder::Member(b.fleet.me()), made_up, [])
+        .unwrap();
+    a.fleet
+        .held(Holder::Member(c.fleet.me()), acked, [])
+        .unwrap();
+    a.fleet
+        .held(Holder::Member(MemberId([0x77; 32])), [removal.id()], [])
+        .unwrap();
     let inner = a.fleet.inner();
-    assert!(!inner.held.contains_key(&b.fleet.me()));
-    assert_eq!(inner.held[&c.fleet.me()], BTreeSet::from([removal.id()]));
-    assert!(!inner.held.contains_key(&MemberId([0x77; 32])));
+    assert!(!inner.held.contains_key(&Holder::Member(b.fleet.me())));
+    assert_eq!(
+        inner.held[&Holder::Member(c.fleet.me())],
+        BTreeSet::from([removal.id()])
+    );
+    assert!(
+        !inner
+            .held
+            .contains_key(&Holder::Member(MemberId([0x77; 32])))
+    );
 }
 
 /// The most suspensions held: every live signer's removals kept apart and

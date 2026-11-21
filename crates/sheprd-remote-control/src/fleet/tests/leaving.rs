@@ -32,7 +32,9 @@ async fn a_computer_that_left_may_found_another_fleet_once_its_removal_is_passed
         .filter(|op| matches!(op.body(), Body::Remove(_)))
         .map(Op::id)
         .collect();
-    b.fleet.held(a.fleet.me(), removal).unwrap();
+    b.fleet
+        .held(Holder::Member(a.fleet.me()), removal, [])
+        .unwrap();
     // Then the fleet is gone here, on disk too, and b founds another.
     assert!(ask::view(&b.fleet).is_none());
     assert!(
@@ -53,7 +55,7 @@ async fn a_member_still_in_the_fleet_is_never_released() {
     assert_eq!(a.ask(Ask::Found), Answer::Done);
     join(&a, &b);
     b.fleet
-        .held(a.fleet.me(), a.ops().iter().map(Op::id))
+        .held(Holder::Member(a.fleet.me()), a.ops().iter().map(Op::id), [])
         .unwrap();
     assert!(b.fleet.in_fleet().unwrap());
     assert!(ask::view(&b.fleet).is_some());
@@ -82,6 +84,7 @@ async fn leaving_keeps_the_keys_members_proved_until_their_pairings_go() {
         .add(
             crate::auth::NewDevice {
                 app: None,
+                fleet: None,
                 id: legacy.clone(),
                 name: "a over Bluetooth".into(),
                 public_key: crate::auth::PublicKey::parse(
@@ -112,7 +115,9 @@ async fn leaving_keeps_the_keys_members_proved_until_their_pairings_go() {
         .filter(|op| matches!(op.body(), Body::Remove(_)))
         .map(Op::id)
         .collect();
-    b.fleet.held(a.fleet.me(), removal).unwrap();
+    b.fleet
+        .held(Holder::Member(a.fleet.me()), removal, [])
+        .unwrap();
     assert!(!b.fleet.in_fleet().unwrap());
     // The keys survive the release, on disk too, and the pairing goes.
     assert!(b.fleet.inner().proven.contains_key(&a.fleet.me()));

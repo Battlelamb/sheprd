@@ -92,3 +92,84 @@ pub(super) fn intro(target: &ConnectTarget, cancelled: &AtomicBool) -> Result<St
 pub(crate) fn parse_applied(output: &[u8]) -> Result<Applied, Error> {
     serde_json::from_slice(output).map_err(Error::Answer)
 }
+
+/// Removes every way a fleet reaches the host's account, without signing
+/// anything: the relay agent's `fleet scrub`, then the daemon's, each when
+/// installed. Prints whether either ran, and whether one that holds fleet
+/// state failed. A program whose usage names no fleet at all predates the
+/// fleet and holds none; one that knows the fleet but not `fleet scrub`
+/// may hold it, and fails the scrub until it is upgraded. The daemon goes
+/// last: forgetting its fleet ends the fleet sessions it carries, this one
+/// perhaps among them, and it keeps this one only long enough to read the
+/// answer. The agent is the
+/// one Sheprd installs and its service runs, `~/.local/bin`'s, never
+/// another copy earlier on `PATH`, which would scrub other state or none.
+/// Every daemon program that may hold fleet state is scrubbed, the
+/// installed one and any `sheprd-remote-control` or `herdr-remote-control`
+/// on `PATH`, once each by resolved path; it succeeds only if every one
+/// that may hold the fleet was scrubbed.
+pub(super) const SCRUB: &str = "\
+cleared=false
+failed=false
+agent=\"$HOME/.local/bin/sheprd-relay-agent\"
+if [ -x \"$agent\" ]; then
+  usage=$(\"$agent\" --help 2>&1)
+  case \"$usage\" in
+    *'fleet scrub'*) if \"$agent\" fleet scrub >/dev/null 2>&1; then cleared=true; else failed=true; fi ;;
+    *fleet*) failed=true ;;
+  esac
+fi
+seen='|'
+for program in \"$HOME/.local/bin/sheprd-remote-control\" \"$(command -v sheprd-remote-control || true)\" \"$(command -v herdr-remote-control || true)\"; do
+  [ -n \"$program\" ] && [ -x \"$program\" ] || continue
+  real=$(realpath \"$program\" 2>/dev/null || readlink -f \"$program\" 2>/dev/null || printf '%s' \"$program\")
+  case \"$seen\" in *\"|$real|\"*) continue ;; esac
+  seen=\"$seen$real|\"
+  usage=$(\"$program\" --help 2>&1)
+  case \"$usage\" in
+    *'fleet scrub'*) if \"$program\" fleet scrub >/dev/null 2>&1; then cleared=true; else failed=true; fi ;;
+    *fleet*) failed=true ;;
+  esac
+done
+printf '{\"scrubbed\":%s,\"failed\":%s}\\n' \"$cleared\" \"$failed\"
+cat >/dev/null
+";
+
+/// `fleet scrub` on the host, the last resort for a host no member can
+/// reach or a fleet that is gone.
+pub(super) fn scrub(target: &ConnectTarget, cancelled: &AtomicBool) -> Result<(), Error> {
+    let host = Host::new(target).map_err(|_| Error::Unsupported)?;
+    let mut output = Vec::new();
+    host.stream(
+        SCRUB,
+        &b""[..],
+        &mut output,
+        ScriptLimits {
+            output: 1024,
+            idle: IDLE,
+        },
+        cancelled,
+    )
+    .map_err(Error::Run)?;
+    scrub_outcome(&output)
+}
+
+/// What `fleet scrub` on a host printed, as an outcome: success only
+/// when something there held a fleet and nothing failed, so a host that
+/// cannot say its access is gone is never reported clean.
+pub(crate) fn scrub_outcome(output: &[u8]) -> Result<(), Error> {
+    #[derive(serde::Deserialize)]
+    struct Scrubbed {
+        /// Something there held a fleet and forgot it.
+        scrubbed: bool,
+        /// Something there that may hold a fleet could not forget it.
+        failed: bool,
+    }
+    match serde_json::from_slice(output).map_err(Error::Answer)? {
+        Scrubbed { failed: true, .. } => Err(Error::Unscrubbed),
+        Scrubbed {
+            scrubbed: false, ..
+        } => Err(Error::NoProgram),
+        Scrubbed { .. } => Ok(()),
+    }
+}

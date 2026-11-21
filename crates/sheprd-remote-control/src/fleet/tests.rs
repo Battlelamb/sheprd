@@ -22,9 +22,17 @@ use tokio::{
 };
 
 #[cfg(unix)]
+mod agent;
+#[cfg(unix)]
+mod agent_opening;
+#[cfg(unix)]
 mod aging;
 #[cfg(unix)]
+mod also_owed;
+#[cfg(unix)]
 mod atomic;
+#[cfg(unix)]
+mod bluetooth;
 #[cfg(unix)]
 mod catch_up;
 #[cfg(unix)]
@@ -36,9 +44,15 @@ mod folding;
 #[cfg(unix)]
 mod handover;
 #[cfg(unix)]
+mod held_agent;
+#[cfg(unix)]
 mod joining;
 #[cfg(unix)]
 mod leaving;
+#[cfg(unix)]
+mod link_intents;
+#[cfg(unix)]
+mod link_recovery;
 #[cfg(unix)]
 mod offline;
 #[cfg(unix)]
@@ -47,6 +61,10 @@ mod opening;
 mod other_fleet;
 #[cfg(unix)]
 mod partial_join;
+#[cfg(unix)]
+mod phone_relays;
+#[cfg(unix)]
+mod phones;
 #[cfg(unix)]
 mod proof;
 #[cfg(unix)]
@@ -61,6 +79,12 @@ mod restore;
 mod retry;
 #[cfg(unix)]
 mod route_claims;
+#[cfg(unix)]
+mod scrub;
+#[cfg(unix)]
+mod scrub_links;
+#[cfg(unix)]
+mod scrub_races;
 #[cfg(unix)]
 mod sessions;
 #[cfg(unix)]

@@ -9,7 +9,7 @@
 
 use super::{SettingsWindow, ui};
 use crate::{
-    fleet::{Fleet, Standing, flows},
+    fleet::{Fleet, Standing, flows, plain},
     i18n::fl,
 };
 use gpui::{prelude::*, *};
@@ -17,6 +17,9 @@ use sheprd_remote_control::control::fleet::{
     HostKind, Kind, MAX_ALSO_MEMBERS, Reason, View, sync::Ask,
 };
 use std::collections::BTreeSet;
+
+mod joins;
+mod scrub;
 
 /// The page's state while it shows.
 #[derive(Default)]
@@ -29,6 +32,12 @@ pub(in crate::settings_window) struct FleetPage {
     inviting: Option<String>,
     /// The machine being shared, with the computers left out of it.
     sharing: Option<(String, BTreeSet<String>)>,
+    /// The share installs the relay agent: the machine runs no Sheprd.
+    sharing_plain: bool,
+    /// The machine whose Remove fleet access waits for confirmation.
+    scrubbing: Option<String>,
+    /// The joining member whose Admit waits for confirmation.
+    admitting: Option<String>,
     /// The last failure, for a person.
     error: Option<String>,
 }
@@ -41,6 +50,8 @@ pub(crate) enum Pending {
     Remove(String),
     /// Whether to remove this host everywhere.
     RemoveHost(String),
+    /// Whether to remove every way a fleet reaches this machine.
+    Scrub(String),
 }
 
 /// Opens Settings at Fleet, asking what `pending` says.
@@ -60,6 +71,7 @@ pub(crate) fn open(source: WeakEntity<crate::SheprdWindow>, pending: Pending, cx
                 Pending::Nothing => {}
                 Pending::Remove(member) => view.fleet.removing = Some((member, None)),
                 Pending::RemoveHost(host) => view.fleet.removing_host = Some(host),
+                Pending::Scrub(machine) => view.fleet.scrubbing = Some(machine),
             }
             cx.notify();
         });
@@ -131,7 +143,7 @@ impl SettingsWindow {
                     None => fl!("settings-fleet-none-description"),
                 })
                 .control(create);
-            return page.child(row);
+            return page.child(row).children(self.fleet_scrub_only(cx));
         };
         page = page.children(self.fleet_notices(&view));
         if let Some(unsaved) = Fleet::unsaved(cx) {
@@ -145,6 +157,41 @@ impl SettingsWindow {
                 .dot(theme.ink(theme.palette[1])),
             );
         }
+        // A shared host holds the log without being a member: no removal.
+        // It signs nothing, so it shows what the fleet lets in here, and
+        // can still take fleet access away.
+        if view.hosted.is_some() && !view.members.iter().any(|member| member.id == view.me) {
+            return page
+                .child(
+                    ui::row(theme, "fleet-hosted", fl!("settings-fleet-hosted"))
+                        .description(fl!("settings-fleet-hosted-description")),
+                )
+                .child(ui::section(theme, &fl!("settings-fleet-members"), None))
+                .children(self.fleet_member_names(&view))
+                .children(self.fleet_scrub_only(cx));
+        }
+        // Removed from the fleet: nothing here counts any more; what it
+        // wrote is forgotten once the person says so.
+        if !view.members.iter().any(|member| member.id == view.me) {
+            let forget = ui::button(theme, "fleet-forget", fl!("settings-fleet-forget"), true)
+                .on_click(
+                    cx.listener(|this, _, _, cx| this.fleet_act(Ask::Scrub { session: None }, cx)),
+                );
+            return page
+                .child(
+                    ui::row(theme, "fleet-removed", fl!("settings-fleet-removed"))
+                        .description(fl!("settings-fleet-removed-description"))
+                        .dot(theme.ink(theme.palette[1]))
+                        .control(forget),
+                )
+                .children(self.fleet_scrub_only(cx));
+        }
+        let joins = self.fleet_joins(&view, cx);
+        if !joins.is_empty() {
+            page = page
+                .child(ui::section(theme, &fl!("settings-fleet-joins"), None))
+                .children(joins);
+        }
         page = page
             .child(ui::section(theme, &fl!("settings-fleet-members"), None))
             .children(self.fleet_members(&view, cx))
@@ -153,6 +200,25 @@ impl SettingsWindow {
             .child(ui::section(theme, &fl!("settings-fleet-machines"), None))
             .children(self.fleet_machines(&view, cx));
         page
+    }
+
+    /// The members, without actions: what a shared host shows.
+    fn fleet_member_names(&self, view: &View) -> Vec<ui::Row> {
+        view.members
+            .iter()
+            .enumerate()
+            .map(|(index, member)| {
+                ui::row(
+                    &self.theme,
+                    format!("fleet-member-{index}"),
+                    crate::notifications::safe_text(&member.name, 64),
+                )
+                .description(match member.kind {
+                    Kind::Computer => fl!("settings-fleet-kind-computer"),
+                    Kind::Phone => fl!("settings-fleet-kind-phone"),
+                })
+            })
+            .collect()
     }
 
     fn fleet_notices(&self, view: &View) -> Vec<ui::Row> {
@@ -417,7 +483,10 @@ impl SettingsWindow {
             let line = match standing {
                 _ if acting => fl!("settings-fleet-machine-working"),
                 Standing::Member => fl!("settings-fleet-machine-member"),
+                Standing::Agent => fl!("settings-fleet-machine-agent"),
                 Standing::Outside => fl!("settings-fleet-machine-outside"),
+                Standing::NoDaemon => fl!("settings-fleet-machine-no-daemon"),
+                Standing::Unchecked => fl!("settings-fleet-machine-unchecked"),
                 Standing::Failed => fl!("settings-fleet-machine-failed"),
                 Standing::Removed => fl!("settings-fleet-machine-removed"),
                 Standing::Unknown => fl!("settings-fleet-machine-unknown"),
@@ -434,8 +503,17 @@ impl SettingsWindow {
                 .filter(|(sharing, _)| *sharing == id)
                 .map(|(_, deny)| deny.clone());
             let inviting = self.fleet.inviting.as_ref() == Some(&id);
-            if standing == Standing::Member || acting {
-                rows.push(row.description(line));
+            if self.fleet.scrubbing.as_ref() == Some(&id) && !acting {
+                rows.push(self.fleet_scrub_confirm(row, index, &id, &machine, cx));
+                continue;
+            }
+            let scrub = self.fleet_scrub_button(index, &id, acting, cx);
+            if matches!(
+                standing,
+                Standing::Member | Standing::Agent | Standing::Unchecked
+            ) || acting
+            {
+                rows.push(row.description(line).control(scrub));
                 continue;
             }
             if inviting {
@@ -470,7 +548,12 @@ impl SettingsWindow {
                 continue;
             }
             if let Some(deny) = sharing {
-                rows.push(row.description(fl!("settings-fleet-share-ask")));
+                let plain_share = self.fleet.sharing_plain;
+                rows.push(row.description(if plain_share {
+                    fl!("settings-fleet-share-plain-ask")
+                } else {
+                    fl!("settings-fleet-share-ask")
+                }));
                 for (slot, member) in computers.iter().enumerate() {
                     let allowed = !deny.contains(&member.id);
                     let member_id = member.id.clone();
@@ -515,7 +598,11 @@ impl SettingsWindow {
                         ui::button(
                             theme,
                             format!("fleet-machine-{index}-share-confirm"),
-                            fl!("settings-fleet-share"),
+                            if plain_share {
+                                fl!("settings-fleet-share-plain")
+                            } else {
+                                fl!("settings-fleet-share")
+                            },
                             true,
                         )
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -526,20 +613,44 @@ impl SettingsWindow {
                                 .map(|(_, deny)| deny.into_iter().collect())
                                 .unwrap_or_default();
                             let view = cx.entity().downgrade();
-                            flows::share(
-                                cx,
-                                id_confirm.clone(),
-                                machine.clone(),
-                                deny,
-                                move |failure, cx| {
-                                    let _ = view.update(cx, |view, cx| {
-                                        view.fleet.error = failure;
-                                        cx.notify();
-                                    });
-                                },
-                            );
+                            let done = move |failure, cx: &mut App| {
+                                let _ = view.update(cx, |view, cx| {
+                                    view.fleet.error = failure;
+                                    cx.notify();
+                                });
+                            };
+                            let (id, machine) = (id_confirm.clone(), machine.clone());
+                            if std::mem::take(&mut this.fleet.sharing_plain) {
+                                plain::share(cx, id, machine, deny, done);
+                            } else {
+                                flows::share(cx, id, machine, deny, done);
+                            }
                         })),
                     ),
+                );
+                continue;
+            }
+            if standing == Standing::NoDaemon {
+                let plain_id = id.clone();
+                rows.push(
+                    row.description(line)
+                        .control(
+                            ui::button(
+                                theme,
+                                format!("fleet-machine-{index}-share-plain"),
+                                fl!("settings-fleet-share-plain"),
+                                true,
+                            )
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.fleet.sharing = Some((plain_id.clone(), BTreeSet::new()));
+                                    this.fleet.sharing_plain = true;
+                                    this.fleet.inviting = None;
+                                    cx.notify();
+                                },
+                            )),
+                        )
+                        .control(scrub),
                 );
                 continue;
             }
@@ -568,10 +679,12 @@ impl SettingsWindow {
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.fleet.sharing = Some((share_id.clone(), BTreeSet::new()));
+                        this.fleet.sharing_plain = false;
                         this.fleet.inviting = None;
                         cx.notify();
                     })),
-                );
+                )
+                .control(scrub);
             rows.push(row);
         }
         rows
@@ -584,6 +697,9 @@ impl SettingsWindow {
                 this.fleet.removing_host = None;
                 this.fleet.inviting = None;
                 this.fleet.sharing = None;
+                this.fleet.sharing_plain = false;
+                this.fleet.scrubbing = None;
+                this.fleet.admitting = None;
                 cx.notify();
             },
         ))

@@ -15,6 +15,8 @@ use sheprd_remote_control::control::Request;
 use std::{sync::Arc, time::Duration};
 
 mod addresses;
+mod computer_fleet;
+mod fleet_line;
 mod hosts;
 mod share_github;
 
@@ -38,6 +40,13 @@ pub(crate) struct PairingDialog {
     pub(crate) pairing: Pairing,
     /// The other machines the phone may be allowed on too.
     pub(crate) hosts: Vec<hosts::Choice>,
+    /// Whether the phone, once approved, is admitted to this computer's
+    /// fleet when it asks to join (`fleet_line`). Ticked by default, as
+    /// the design has it; shown only while this computer is a member.
+    pub(crate) join_fleet: bool,
+    /// The fleet the phone joins once approved: set at Allow, only when
+    /// the switch was shown ticked, and spent once.
+    fleet_choice: Option<String>,
     addresses_scroll: ScrollHandle,
     other_addresses: crate::motion::Toggle,
     client: Option<Client>,
@@ -104,6 +113,8 @@ impl SheprdWindow {
         self.menu.remote_pairing = Some(PairingDialog {
             pairing: pairing.with_address(address),
             hosts: hosts::choices(Supervisor::hosts(cx)),
+            join_fleet: true,
+            fleet_choice: None,
             addresses_scroll: ScrollHandle::new(),
             other_addresses: crate::motion::Toggle::default(),
             client,
@@ -165,7 +176,10 @@ impl SheprdWindow {
                         Phase::Showing { .. } | Phase::Claimed { .. } => {}
                         _ => dialog._nearby = None,
                     }
-                    if matches!(dialog.pairing.phase(), Phase::Approved { .. }) {
+                    if let Phase::Approved { device, .. } = dialog.pairing.phase() {
+                        if let Some(fleet) = dialog.fleet_choice.take() {
+                            crate::fleet::Fleet::expect(cx, device.clone(), fleet);
+                        }
                         Supervisor::refresh(cx);
                     }
                     cx.notify();
@@ -193,6 +207,17 @@ impl SheprdWindow {
     fn answer_pairing(&mut self, allow: bool, cx: &mut Context<Self>) {
         if let Some(dialog) = &mut self.menu.remote_pairing {
             let ticked = hosts::ticked(&dialog.hosts);
+            // A phone, with the switch shown: this computer is a member.
+            let phone = matches!(dialog.pairing.phase(), Phase::Claimed { ssh: false, .. });
+            dialog.fleet_choice = (allow && phone && dialog.join_fleet)
+                .then(|| crate::fleet::Fleet::member_of(cx))
+                .flatten();
+            // A computer's claim: the fleet its line agreed to, shown
+            // ticked, and nothing for a phone, which joins on its own.
+            let agreed = computer_fleet::line(dialog.pairing.phase(), cx)
+                .filter(|_| allow && dialog.join_fleet)
+                .and_then(|line| line.agrees().map(str::to_owned));
+            dialog.pairing.set_fleet(agreed);
             dialog.pairing.answer_with_hosts(allow, ticked);
             cx.notify();
         }
@@ -312,7 +337,9 @@ impl SheprdWindow {
                 answer,
                 ..
             } => self.pairing_claim(device_name, code, app.as_deref(), *ssh, *answer, cx),
-            Phase::Approved { device_name, ssh } => self.pairing_message(
+            Phase::Approved {
+                device_name, ssh, ..
+            } => self.pairing_message(
                 &if *ssh {
                     fl!("remote-pair-approved-ssh", device = name(device_name))
                 } else {
@@ -589,6 +616,11 @@ impl SheprdWindow {
             .children(
                 (!ssh)
                     .then(|| self.pairing_share_github(!waiting, cx))
+                    .flatten(),
+            )
+            .children((!ssh).then(|| self.pairing_fleet(!waiting, cx)).flatten())
+            .children(
+                ssh.then(|| self.pairing_computer_fleet(&device, !waiting, cx))
                     .flatten(),
             )
             .child(

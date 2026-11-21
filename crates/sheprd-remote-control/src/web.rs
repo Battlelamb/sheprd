@@ -79,9 +79,9 @@ const BODY_LIMIT: usize = 320 * 1024;
 
 /// What every request reads.
 pub(crate) struct State {
-    /// Live Activity pushes for the iOS companion, when the user set up an
-    /// APNs key.
-    pub(crate) apns: Option<crate::apns::Sender>,
+    /// How APNs pushes for the iOS companion leave: the user's own key,
+    /// the push relay, or not at all.
+    pub(crate) apns: crate::apns::Delivery,
     /// `Auth::apps`: origins of apps installed from other computers.
     pub(crate) apps: Arc<RwLock<Vec<String>>>,
     pub(crate) auth: Mutex<Auth>,
@@ -238,7 +238,8 @@ pub(crate) fn router(state: Shared) -> Router {
         .route("/api/relay", get(relay::info).post(relay::enroll))
         .route(
             "/api/apns",
-            post(api::register_apns).layer(DefaultBodyLimit::max(16 * 1024)),
+            // 32 activities, each a token or a relay handle of up to 2 KiB.
+            post(api::register_apns).layer(DefaultBodyLimit::max(96 * 1024)),
         )
         .route(
             "/api/apns/test",

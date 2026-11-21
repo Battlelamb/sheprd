@@ -47,6 +47,9 @@ pub struct Options {
     pub live_activities: ActivityDetail,
     pub port: u16,
     pub privacy: Privacy,
+    /// Whether APNs pushes may go through the Sheprd push relay when there
+    /// is no APNs key in the state directory.
+    pub push_relay: bool,
     /// The relays to listen on, so paired phones reach this computer from
     /// any network; none when empty.
     pub relays: Vec<Relay>,
@@ -219,6 +222,10 @@ Options:
                            (default detailed)
   --device-idle-days N     Forget devices unseen this long, 0 for never
                            (default 30)
+  --push-relay             Without an APNs key in the state directory, send
+                           iPhone alerts and Live Activities sealed through
+                           the Sheprd push relay (push.sheprd.org); an APNs
+                           key, when there is one, is used instead
   --relay URL              Listen on this relay too, so paired phones reach
                            this computer from any network; repeatable
   --relay-name NAME        What the --relay before it is called, such as fra3
@@ -311,6 +318,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
     let mut bonjour = true;
     let mut github_cli = false;
     let mut github_hosts = Vec::new();
+    let mut push_relay = false;
     let mut relays = Vec::new();
     while let Some(arg) = args.next() {
         let name = arg.to_str().unwrap_or_default().to_owned();
@@ -400,6 +408,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
             }
             "--no-bonjour" => bonjour = false,
             "--github-cli" => github_cli = true,
+            "--push-relay" => push_relay = true,
             "--github-host" => {
                 let host = text(value("--github-host")?, "--github-host")?;
                 if !crate::control::github::valid_host(&host) {
@@ -450,6 +459,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
         live_activities,
         port,
         privacy,
+        push_relay,
         relays,
         state_dir: state_dir.ok_or(ParseError::NoStateDir)?,
         wsl_catalog,

@@ -1,7 +1,8 @@
 //! The push tokens one device registers: its app's push-to-start token,
 //! which starts an activity while the app is closed, one token per
 //! activity it shows, which updates and ends it, and its alert token with
-//! the key sealed alerts are opened with. The device store keeps a
+//! the key sealed alerts are opened with. Each may be a push relay handle
+//! instead of a token ([`Recipient`]). The device store keeps a
 //! [`Registration`] as opaque JSON, as it keeps a Web Push subscription.
 //!
 //! `POST /api/apns` takes the same shape:
@@ -13,9 +14,11 @@
 //!
 //! The app sends `activity_detail` only when the phone keeps its activities
 //! generic, so a phone on the default still registers with older daemons,
-//! which refuse a key they do not know.
+//! which refuse a key they do not know. Through the relay, each token is a
+//! handle object instead (`recipient`), and `notify_key` is also what Live
+//! Activity content is sealed to.
 
-use super::{DeviceToken, Error, Result};
+use super::{Error, Recipient, Result};
 use crate::app::config::ActivityDetail;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use p256::PublicKey;
@@ -68,12 +71,12 @@ impl From<NotifyKey> for String {
     }
 }
 
-/// The token that updates the activity for the chat in `pane`.
+/// The token or handle that updates the activity for the chat in `pane`.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ActivityToken {
     pub(crate) pane: String,
-    pub(crate) token: DeviceToken,
+    pub(crate) token: Recipient,
 }
 
 /// Everything one device registered.
@@ -87,12 +90,13 @@ pub(crate) struct Registration {
     pub(crate) activity_detail: ActivityDetail,
     /// The app's own device token, for alerts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) alert: Option<DeviceToken>,
-    /// The key alerts to `alert` are sealed to.
+    pub(crate) alert: Option<Recipient>,
+    /// The key alerts to `alert` are sealed to, and through the relay,
+    /// Live Activity content.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) notify_key: Option<NotifyKey>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) push_to_start: Option<DeviceToken>,
+    pub(crate) push_to_start: Option<Recipient>,
 }
 
 impl Registration {
@@ -128,7 +132,7 @@ impl Registration {
 
     /// Where sealed alerts go: the alert token and the key to seal to,
     /// once the device registered both.
-    pub(crate) fn alerts(&self) -> Option<(&DeviceToken, &PublicKey)> {
+    pub(crate) fn alerts(&self) -> Option<(&Recipient, &PublicKey)> {
         Some((self.alert.as_ref()?, self.notify_key.as_ref()?.key()))
     }
 
@@ -181,16 +185,16 @@ impl Registration {
     }
 
     /// The token for the chat in `pane`'s activity.
-    pub(crate) fn activity(&self, pane: &str) -> Option<&DeviceToken> {
+    pub(crate) fn activity(&self, pane: &str) -> Option<&Recipient> {
         self.activities
             .iter()
             .find(|activity| activity.pane == pane)
             .map(|activity| &activity.token)
     }
 
-    /// Forgets `token` after APNs called it invalid; `true` when it was
-    /// there.
-    pub(crate) fn forget(&mut self, token: &DeviceToken) -> bool {
+    /// Forgets `token` after APNs or the relay called it gone; `true` when
+    /// it was there.
+    pub(crate) fn forget(&mut self, token: &Recipient) -> bool {
         let before = self.activities.len();
         self.activities.retain(|activity| &activity.token != token);
         let mut forgot = self.activities.len() != before;

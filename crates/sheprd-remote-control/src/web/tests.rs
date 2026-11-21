@@ -89,7 +89,7 @@ pub(crate) fn state_lending(
     let auth = Auth::load(dir, Limits::default()).unwrap();
     let (pull_requests, _) = tokio::sync::watch::channel(Arc::new(Default::default()));
     Arc::new(State {
-        apns: None,
+        apns: crate::apns::Delivery::Off,
         apps: auth.apps(),
         auth: Mutex::new(auth),
         changes: Default::default(),

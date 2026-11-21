@@ -30,8 +30,8 @@ pub(crate) const MAX_OPTIONS: usize = 4;
 /// The longest `apns-collapse-id` APNs accepts, in bytes.
 const MAX_COLLAPSE_ID: usize = 64;
 /// What APNs and a phone whose extension cannot open the payload show.
-const COVER_TITLE: &str = "Sheprd";
-const COVER_BODY: &str = "New activity";
+pub(super) const COVER_TITLE: &str = "Sheprd";
+pub(super) const COVER_BODY: &str = "New activity";
 
 /// What the app's extension opens. Field order is the wire order.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

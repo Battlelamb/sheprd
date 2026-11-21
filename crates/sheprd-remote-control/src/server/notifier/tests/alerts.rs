@@ -7,7 +7,8 @@ use serde_json::json;
 
 fn with_apns(dir: &std::path::Path) -> Arc<State> {
     let mut state = crate::web::tests::state(dir);
-    Arc::get_mut(&mut state).unwrap().apns = Some(apns::sender_for_tests());
+    Arc::get_mut(&mut state).unwrap().apns =
+        apns::Delivery::OwnKey(Box::new(apns::sender_for_tests()));
     state
 }
 
@@ -59,7 +60,7 @@ fn a_token_apns_refused_is_dropped_from_the_device() {
     let state = with_apns(dir.path());
     let (device, _) = crate::web::tests::signed_in(&state, 3);
     register(&state, &device, alerts());
-    let token = apns::DeviceToken::parse(&"9f".repeat(32)).unwrap();
+    let token = apns::DeviceToken::parse(&"9f".repeat(32)).unwrap().into();
     forget(&state, &device, &token);
     assert!(alert_devices(&state).is_empty());
 }

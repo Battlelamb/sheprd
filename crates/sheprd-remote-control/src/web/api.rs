@@ -496,14 +496,14 @@ pub(super) async fn start_chat(
     Ok(Json(json!({ "location": location })))
 }
 
-/// The iOS companion's Live Activity tokens: the push-to-start token when
-/// it changed, and every activity it still shows.
+/// The iOS companion's Live Activity tokens or relay handles: the
+/// push-to-start token when it changed, and every activity it still shows.
 pub(super) async fn register_apns(
     State(state): State<Shared>,
     Device(device): Device,
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, ApiError> {
-    if state.apns.is_none() {
+    if state.apns.is_off() {
         return Err(ApiError::NoPush);
     }
     let update = crate::apns::Registration::parse(&body)

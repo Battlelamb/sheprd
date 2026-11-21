@@ -13,6 +13,7 @@ mod fleet;
 mod fleet_joins;
 mod github;
 mod idle;
+mod push_relay;
 mod relay_enroll;
 mod relay_options;
 mod shutdown;

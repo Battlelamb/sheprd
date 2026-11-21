@@ -20,7 +20,7 @@ supported for people who sign the app themselves.
 
 | Piece | Today |
 | --- | --- |
-| Credentials | Each daemon loads `STATE_DIR/apns/AuthKey.p8` and `config.json`. Without them, `state.apns` is `None`, chat changes are skipped, and `POST /api/apns` answers 503. |
+| Credentials | Each daemon loads `STATE_DIR/apns/AuthKey.p8` and `config.json`. Without them, and without `push_relay` (phase 4), `state.apns` is `Delivery::Off`, chat changes are skipped, and `POST /api/apns` answers 503. |
 | Sending | `apns::Sender` posts straight to Apple over HTTP/2, in `crates/sheprd-apns/src/send.rs`. The docs say a device can never make the daemon post anywhere else. |
 | Alerts | Sealed to the phone. APNs sees "Sheprd", "New activity", the thread id, and ciphertext. |
 | Live Activities | Plaintext: agent, chat title, workspace, computer, step, question, and answer options. |
@@ -467,6 +467,15 @@ up the sandbox relay and try the recovery on it.
 **4. Connect it.** Add `Delivery`, handles in `Registration`, the opt-in settings,
 iOS attestation and handles, and sealed Live Activities. Test on a real device
 against the sandbox relay, including a locked phone, and measure memory and CPU.
+The daemon's side is built: `apns::Delivery` (off, own key, or relay),
+`Recipient` in `Registration` (a hex token or
+`{"handle", "environment"}`), sealed and shortened Live Activities
+(`apns::relayed`, info `sheprd-live-activity-v1`), `SealedPush` as the only
+thing `RelayClient` takes, `[remote] push_relay` and `--push-relay`, `gone`
+forgetting a handle, and a one-minute outage window that leaves alerts to Web
+Push and drops activity updates. Still to do: revoking a phone's handles when
+it unpairs, the Sheprd setting, explanation, and status command, and the iOS
+side (attestation, handles, the widget opening sealed content).
 
 **5. Roll out.** Deploy production and offer it to TestFlight users. Watch
 delivery rates, 429s, and `gone` replies. Try the recovery runbook on the sandbox

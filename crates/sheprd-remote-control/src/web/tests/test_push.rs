@@ -15,7 +15,8 @@ fn test_post(token: Option<&str>, body: serde_json::Value) -> HttpRequest<Body> 
 /// A state whose daemon has an APNs key.
 fn with_apns(dir: &std::path::Path) -> Shared {
     let mut state = state(dir);
-    Arc::get_mut(&mut state).unwrap().apns = Some(crate::apns::sender_for_tests());
+    Arc::get_mut(&mut state).unwrap().apns =
+        crate::apns::Delivery::OwnKey(Box::new(crate::apns::sender_for_tests()));
     state
 }
 
@@ -51,5 +52,35 @@ async fn a_bad_id_or_an_unregistered_phone_is_refused_before_apns() {
         assert!(status.is_client_error(), "{body}: {status} {text}");
     }
     let (_, _, text) = send(&state, test_post(Some(&token), json!({"id": "a"}))).await;
+    assert!(text.contains("not registered for alerts"), "{text}");
+}
+
+#[tokio::test]
+async fn through_the_relay_a_phone_with_only_a_token_is_not_registered() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = state(dir.path());
+    Arc::get_mut(&mut state).unwrap().apns =
+        crate::apns::Delivery::Relay(Box::new(crate::apns::Relays::new().unwrap()));
+    let (device, token) = signed_in(&state, 1);
+    let key = p256::SecretKey::from_slice(&[5; 32])
+        .unwrap()
+        .public_key()
+        .to_sec1_bytes();
+    state
+        .auth()
+        .devices_mut()
+        .set_apns(
+            &device,
+            Some(json!({
+                "alert": "9f".repeat(32),
+                "notify_key": base64::Engine::encode(
+                    &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+                    key,
+                ),
+            })),
+        )
+        .unwrap();
+    let (status, _, text) = send(&state, test_post(Some(&token), json!({"id": "a"}))).await;
+    assert!(status.is_client_error(), "{status} {text}");
     assert!(text.contains("not registered for alerts"), "{text}");
 }

@@ -417,6 +417,21 @@ impl Log {
         results
     }
 
+    /// Every removal in effect among the operations held, with every
+    /// member it removes under the log's rules: those it names, and those
+    /// it takes with them, such as a member one it removes admitted at the
+    /// same time.
+    pub fn removed_by(&self) -> Result<BTreeMap<OpId, std::collections::BTreeSet<MemberId>>> {
+        let graph = self.graph()?;
+        let folder = self.folder(&graph)?;
+        let members = folder.members(&Bits::full(graph.len()));
+        Ok(members
+            .removals
+            .iter()
+            .map(|(&position, reach)| (graph.order[position].id(), reach.clone()))
+            .collect())
+    }
+
     /// The state of the history of `id`, which a checkpoint at `id` names
     /// and a joining member is handed with it.
     pub fn state_at(&self, id: &OpId) -> Result<State> {

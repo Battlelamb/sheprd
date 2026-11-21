@@ -1637,7 +1637,11 @@ accepted on this purpose.
 - Plain hosts get it too. Every daemon dials each plain host in its
   state from the host's record, and sends it the removals it signed
   itself that removed every member they name (a voided removal may name
-  a member another removal took, beside one still live). Each member's
+  a member another removal took, beside one still live), each with the
+  members its log removes with it beyond those it names (one a removed
+  member admitted at the same time), in an `Also` message ahead of them.
+  The agent suspends those in the sender's name too, like the removal's
+  own targets, until the next access file confirms or settles it. Each member's
   keys carry the sequence number of its own latest rotation, which the
   fleet's state keeps (so a checkpoint carries it and a pruned log agrees
   with a whole one), so an agent never prefers keys a rotation replaced;

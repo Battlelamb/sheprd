@@ -137,7 +137,8 @@ async fn removals(
     }
 }
 
-/// Reads the removals, suspends their targets, reads who is admitted
+/// Reads the removals, and the members the sender's log removes with
+/// them when it says, suspends their targets, reads who is admitted
 /// again, and answers with the removals taken. Nothing is checked but the
 /// shape: the next access file settles what this did.
 async fn exchange(
@@ -145,12 +146,17 @@ async fn exchange(
     sender: crate::access::Id,
     io: &mut (impl AsyncRead + AsyncWrite + Unpin),
 ) -> Result<()> {
-    let Message::Removal(ops) = read(io).await? else {
+    let (also, first) = match read(io).await? {
+        Message::Also(pairs) => (pairs, read(io).await?),
+        first => (Vec::new(), first),
+    };
+    let Message::Removal(ops) = first else {
         return Ok(());
     };
     let removed: Vec<_> = ops
         .iter()
         .filter_map(|op| removal::peek(op).ok().flatten())
+        .map(|removal| with_also(removal, &also))
         .collect();
     let blocking = Arc::clone(agent);
     let suspended = tokio::task::spawn_blocking(move || {
@@ -175,6 +181,18 @@ async fn exchange(
         .await
         .map_err(Error::Splice)?;
     io.flush().await.map_err(Error::Splice)
+}
+
+/// `removal` with the members `also` says the sender's log removes with
+/// it as targets too: suspended in the sender's name alone, like those it
+/// names, and settled with it by the next access file.
+fn with_also(mut removal: removal::Removed, also: &[([u8; 32], [u8; 32])]) -> removal::Removed {
+    for (_, member) in also.iter().filter(|(id, _)| *id == removal.id) {
+        if !removal.targets.contains(member) {
+            removal.targets.push(*member);
+        }
+    }
+    removal
 }
 
 async fn read(io: &mut (impl AsyncRead + Unpin)) -> Result<Message<[u8; 32]>> {

@@ -45,9 +45,13 @@ pub const SESSION: Duration = Duration::from_secs(30);
 /// Exchanges at once, each way.
 pub const CONCURRENT: usize = 8;
 
+/// Members one `Also` message names beside the removals it goes with.
+pub const MAX_ALSO: usize = 256;
+
 const REMOVAL: u8 = 1;
 const WANT: u8 = 2;
 const HELD: u8 = 3;
+const ALSO: u8 = 4;
 const ID_LEN: usize = 32;
 
 /// Why a frame or an operation was not read.
@@ -73,16 +77,24 @@ pub enum Message<Id> {
     Want(Vec<Id>),
     /// The removals the listener holds now: the dialer owes it no more.
     Held(Vec<Id>),
+    /// Sent to a plain host's agent ahead of [`Message::Removal`]: each
+    /// pair is a removal and a member the dialer's log removes with it
+    /// though the removal does not name it (one a removed member admitted
+    /// at the same time). Unsigned: the agent suspends them only in the
+    /// dialer's own name, as its own removals' targets, until the next
+    /// access file confirms the removal or settles it.
+    Also(Vec<(Id, [u8; ID_LEN])>),
 }
 
 impl<Id: Copy + Into<[u8; ID_LEN]> + From<[u8; ID_LEN]>> Message<Id> {
     pub fn encode(&self) -> Result<Vec<u8>> {
-        let (kind, count) = match self {
-            Self::Removal(ops) => (REMOVAL, ops.len()),
-            Self::Want(ids) => (WANT, ids.len()),
-            Self::Held(ids) => (HELD, ids.len()),
+        let (kind, count, bound) = match self {
+            Self::Removal(ops) => (REMOVAL, ops.len(), MAX_OPS),
+            Self::Want(ids) => (WANT, ids.len(), MAX_OPS),
+            Self::Held(ids) => (HELD, ids.len(), MAX_OPS),
+            Self::Also(pairs) => (ALSO, pairs.len(), MAX_ALSO),
         };
-        if count > MAX_OPS {
+        if count > bound {
             return Err(Error::Bounds);
         }
         let mut bytes = vec![kind];
@@ -100,6 +112,10 @@ impl<Id: Copy + Into<[u8; ID_LEN]> + From<[u8; ID_LEN]>> Message<Id> {
             Self::Want(ids) | Self::Held(ids) => ids
                 .iter()
                 .for_each(|id| bytes.extend_from_slice(&(*id).into())),
+            Self::Also(pairs) => pairs.iter().for_each(|(id, member)| {
+                bytes.extend_from_slice(&(*id).into());
+                bytes.extend_from_slice(member);
+            }),
         }
         Ok(bytes)
     }
@@ -110,7 +126,7 @@ impl<Id: Copy + Into<[u8; ID_LEN]> + From<[u8; ID_LEN]>> Message<Id> {
         }
         let (&kind, rest) = bytes.split_first().ok_or(Error::Encoding)?;
         let (count, mut rest) = take_length(rest)?;
-        if count > MAX_OPS {
+        if count > if kind == ALSO { MAX_ALSO } else { MAX_OPS } {
             return Err(Error::Bounds);
         }
         let message = match kind {
@@ -126,6 +142,18 @@ impl<Id: Copy + Into<[u8; ID_LEN]> + From<[u8; ID_LEN]>> Message<Id> {
                     rest = tail;
                 }
                 Self::Removal(ops)
+            }
+            ALSO => {
+                let mut pairs = Vec::with_capacity(count);
+                for _ in 0..count {
+                    let (id, tail) = rest.split_at_checked(ID_LEN).ok_or(Error::Encoding)?;
+                    let (member, tail) = tail.split_at_checked(ID_LEN).ok_or(Error::Encoding)?;
+                    let id: [u8; ID_LEN] = id.try_into().map_err(|_| Error::Encoding)?;
+                    let member: [u8; ID_LEN] = member.try_into().map_err(|_| Error::Encoding)?;
+                    pairs.push((Id::from(id), member));
+                    rest = tail;
+                }
+                Self::Also(pairs)
             }
             WANT | HELD => {
                 let mut ids = Vec::with_capacity(count);

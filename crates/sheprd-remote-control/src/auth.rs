@@ -80,6 +80,8 @@ pub enum Error {
     NoAddress,
     #[error("open Remote control > Pair device on the computer first")]
     NoPairing,
+    #[error("this computer listens on no relay; a pairing link needs one")]
+    NoRelays,
     #[error("the pairing is not waiting for an answer")]
     NotClaimed,
     #[error("could not draw random bytes")]
@@ -153,6 +155,7 @@ impl From<&Error> for control::ErrorCode {
             Error::UnknownDevice => Self::UnknownDevice,
             Error::NotClaimed => Self::NotClaimed,
             Error::NoPairing => Self::NoPairing,
+            Error::NoRelays => Self::NoRelays,
             Error::Encode(_) | Error::Store { .. } => Self::Unsaved,
             _ => Self::Other,
         }
@@ -556,6 +559,37 @@ impl Auth {
             self.relay_pairing = Some(token);
         }
         Ok(revealed)
+    }
+
+    /// A pairing link for the open pairing `id`: a fresh token, claimable
+    /// through the relays, which open a pairing dial for it
+    /// ([`Auth::take_relay_pairing`]). `fingerprint` is the CA's, hex.
+    pub(crate) fn pair_link(
+        &mut self,
+        id: &PairingId,
+        computer: &str,
+        fingerprint: &str,
+        fleet: Option<control::fleet::bluetooth::Hint>,
+        now_ms: u64,
+    ) -> Result<(String, u64)> {
+        use control::pairing_link::{MAX_RELAYS, PairingLink, Token};
+        let mut relay = self.relay_offer.clone().ok_or(Error::NoRelays)?;
+        relay.relays.truncate(MAX_RELAYS);
+        relay
+            .rtt_ms
+            .retain(|endpoint, _| relay.relays.contains(endpoint));
+        let fingerprint = nearby::fingerprint_bytes(fingerprint).ok_or(Error::NoPairing)?;
+        let token = random_bytes::<SECRET_LEN>()?;
+        let expires_in_ms = self.pairings.set_link(id, &token, now_ms)?;
+        self.relay_pairing = Some(token);
+        let link = PairingLink {
+            computer: device_name(computer).unwrap_or_else(|_| "Sheprd".to_owned()),
+            fingerprint,
+            fleet,
+            relay,
+            token: Token(token),
+        };
+        Ok((link.to_string(), expires_in_ms))
     }
 
     /// Lets nearby offers say how to claim through this computer's relays.

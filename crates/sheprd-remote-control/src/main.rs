@@ -5,7 +5,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 use sheprd_remote_control::{
-    app::{enroll, favorites, relay_enroll, shortcuts, tags},
+    app::{enroll, favorites, push_status, relay_enroll, shortcuts, tags},
     control::{self, DeviceId},
     desktop, fleet,
     server::{self, FleetAction, Invocation},
@@ -26,6 +26,14 @@ fn main() -> ExitCode {
                 std::io::stdin().take(MAX_INPUT).read_to_string(&mut text)?;
                 let request = serde_json::from_str(&text).map_err(std::io::Error::from)?;
                 print_json(&relay_enroll::relay_enroll(&request, state_dir))
+            });
+        }
+        Ok(Invocation::PushStatus { state_dir }) => {
+            // Nothing printed when no daemon answers: the caller reads that
+            // as unknown, as it does an older build that refuses the verb.
+            return host(state_dir, |state_dir| match push_status::read(state_dir) {
+                Some(status) => print_json(&status),
+                None => Ok(()),
             });
         }
         Ok(Invocation::Revoke { state_dir, device }) => {
@@ -82,8 +90,12 @@ fn main() -> ExitCode {
                 }
             });
         }
-        Ok(Invocation::DesktopPair { state_dir, name }) => {
-            return desktop::run_pair(state_dir.as_deref(), name);
+        Ok(Invocation::DesktopPair {
+            state_dir,
+            name,
+            link,
+        }) => {
+            return desktop::run_pair(state_dir.as_deref(), name, link);
         }
         Ok(Invocation::RelayConnect { state_dir, host }) => {
             return desktop::run_connect(state_dir.as_deref(), &host);

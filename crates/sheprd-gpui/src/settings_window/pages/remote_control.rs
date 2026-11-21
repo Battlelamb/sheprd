@@ -30,7 +30,7 @@ mod relays;
 
 #[cfg(test)]
 pub(in crate::settings_window) use push_relay::{
-    delivery_line, last_alert, last_live, last_worked,
+    delivery_line, host_line, last_alert, last_live, last_worked,
 };
 pub(in crate::settings_window) use relays::Offered;
 #[cfg(test)]

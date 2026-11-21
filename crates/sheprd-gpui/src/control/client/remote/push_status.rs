@@ -2,6 +2,7 @@
 //! and how the last alert and Live Activity push went. English, as all
 //! command line output is.
 
+use sheprd_control_protocol::protocol::remote::HostPush;
 use sheprd_remote_control::control::push::{Last, Mode, Outcome, PushStatus};
 
 pub(super) fn text(
@@ -31,6 +32,40 @@ pub(super) fn text(
         ),
     ]
     .join("\n")
+}
+
+/// One line per linked host: how its daemon sends pushes, and how its last
+/// alert went, or why it said nothing.
+pub(super) fn hosts(hosts: &[HostPush]) -> String {
+    let now = crate::remote::now_ms();
+    hosts
+        .iter()
+        .map(|host| {
+            let name = crate::notifications::safe_text(&host.name, 64);
+            match (&host.status, &host.error) {
+                (Some(status), _) => format!(
+                    "  {name}: {}; last alert: {}",
+                    host_mode(status.mode),
+                    last(status.alert.as_ref(), now)
+                ),
+                (None, Some(error)) => format!("  {name}: unavailable: {error}"),
+                (None, None) => format!(
+                    "  {name}: unknown (no remote control daemon runs there, or it is too old to say)"
+                ),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// A host's mode, whose push relay setting this computer does not know.
+fn host_mode(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Off => "off (no APNs key, and the push relay is off)",
+        Mode::OwnKey => "its own APNs key",
+        Mode::PushRelay => "through the push relay",
+        Mode::Other => "a mode this Sheprd does not know",
+    }
 }
 
 fn mode(mode: Mode, push_relay: bool) -> &'static str {

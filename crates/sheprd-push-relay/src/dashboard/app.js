@@ -60,11 +60,18 @@ function render(stats) {
   setText("version", stats.version);
   setText("environment", `${stats.environment} APNs`);
   setText("active-day", count(devices.active_day));
-  setText("active-week", `${count(devices.active_week)} in 7 days`);
+  setText(
+    "active-week",
+    devices.skipped_pushes > 0
+      ? `${count(devices.active_week)} in 7 days · ${count(devices.skipped_pushes)} pushes uncounted (full)`
+      : `${count(devices.active_week)} in 7 days`,
+  );
   setText("attested", count(devices.attested));
   setText(
     "untracked",
-    devices.untracked > 0 ? `${count(devices.untracked)} more not counted (full)` : "since the relay started",
+    devices.skipped_attestations > 0
+      ? `${count(devices.skipped_attestations)} attestations uncounted (full)`
+      : "since the relay started",
   );
   setText("delivered", count(value(totals.pushes, "delivered")));
   setText("pushes", `of ${count(sum(totals.pushes))} pushes`);

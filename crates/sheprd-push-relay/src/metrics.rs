@@ -336,13 +336,22 @@ impl Metrics {
                 "sheprd_push_relay_active_devices{{window=\"{window}\"}} {count}"
             );
         }
-        single(
+        family(
             &mut out,
-            "sheprd_push_relay_untracked_devices_total",
+            "sheprd_push_relay_device_events_skipped_total",
             "counter",
-            "Devices not counted because the device counts were full.",
-            devices.untracked,
+            "Attestations and pushes left out of the device counts because they were full; \
+             one device can be skipped many times.",
         );
+        for (count, skipped) in [
+            ("attested", devices.skipped_attestations),
+            ("active", devices.skipped_pushes),
+        ] {
+            let _ = writeln!(
+                out,
+                "sheprd_push_relay_device_events_skipped_total{{count=\"{count}\"}} {skipped}"
+            );
+        }
         out
     }
 }

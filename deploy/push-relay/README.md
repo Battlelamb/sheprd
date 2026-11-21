@@ -190,7 +190,7 @@ itself. What they count, all since the relay started:
 | `sheprd_push_relay_limited_total{limit}` | Refusals by rate limit: `source`, `attest`, `device`, `handle`, `revoke`, and `apns` for Apple's own 429 |
 | `sheprd_push_relay_attested_devices` | Distinct devices that attested |
 | `sheprd_push_relay_active_devices{window}` | Distinct devices pushed to in the last `24h` and `7d` |
-| `sheprd_push_relay_untracked_devices_total` | Devices left out because the counts were full |
+| `sheprd_push_relay_device_events_skipped_total{count}` | Attestations (`attested`) and pushes (`active`) left out of the device counts because they were full; each event counts, so one device can be skipped many times |
 | `sheprd_push_relay_dashboard_logins_total{outcome}` | Dashboard sign-ins |
 
 No label carries an address, token, handle, device, or payload. Devices

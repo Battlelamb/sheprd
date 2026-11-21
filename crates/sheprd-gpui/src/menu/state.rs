@@ -194,9 +194,11 @@ pub(crate) struct MenuState {
     /// the device's own account.
     pub(super) github_account: Option<String>,
     /// An account whose config entry is being written, shown once it loads.
-    pub(super) github_adding: Option<String>,
+    pub(super) github_adding: Option<github::Adding>,
     /// The pasted-token field, while the GitHub page shows it.
     pub(super) github_token: Option<Entity<crate::search_input::SearchInput>>,
+    /// The form of the GitHub Enterprise Server account being added.
+    pub(super) github_server: Option<github::EnterpriseForm>,
     /// Logins this window already toasted as waiting on GitHub App approval.
     pub(super) github_toasted: std::collections::HashSet<String>,
     /// The GitLab page's instances, fields, and work under way.
@@ -459,6 +461,7 @@ impl MenuState {
             github_account: None,
             github_adding: None,
             github_token: None,
+            github_server: None,
             github_toasted: Default::default(),
             gitlab: Default::default(),
             azure: Default::default(),
@@ -526,6 +529,7 @@ impl MenuState {
         self.github_account = None;
         self.github_adding = None;
         self.github_token = None;
+        self.github_server = None;
         // Closing the menu stops a GitLab connection, as it does GitHub's.
         self.gitlab.connecting = None;
         self.gitlab.form = false;

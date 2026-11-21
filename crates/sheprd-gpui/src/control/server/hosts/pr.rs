@@ -39,7 +39,7 @@ fn lookup(view: &SheprdWindow, caller: &Caller) -> Result<(Place, Lookup), Respo
             ),
         ));
     }
-    if view.pr_profile().is_none() {
+    if !view.pr_signed_in() {
         return Err(Response::error(
             ErrorCode::InvalidRequest,
             "Sign in to GitHub in Sheprd first",

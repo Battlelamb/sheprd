@@ -4471,6 +4471,19 @@ Ctrl+Shift+U is left unbound for
   Accounts are listed in `[github] accounts` with an `id` naming their credential
   entry (`github.com/account/<id>`, or `github-credentials-account-<id>`) and
   optional `owners`; **Remove account (D)** deletes the credential, then the entry.
+- GitHub Enterprise Server accounts read the repositories of a self-hosted
+  GitHub. In the GitHub panel, **Add Enterprise account (E)** asks for the
+  server's host (a port other than 443 goes after a colon) and a personal
+  access token in one form, and the server checks the token before it is saved; there is no browser
+  sign-in. No github.com sign-in is needed. A checkout whose remote is on that
+  host is read with the account listing its owner, else the first account on
+  that server, and never with a github.com credential; a server with no account
+  shows the sign-in prompt. HTTPS is verified against the system's trust store,
+  so a company CA installed on the computer is accepted. They are listed in
+  `[github] enterprise` with `server`, `id`, and optional `owners`
+  (credential `<server>/account/<id>`, or
+  `github-credentials-enterprise-<id>`), and count toward the same limit of
+  eight accounts. Vulnerability reports and avatars stay with github.com.
    Herdr does not give endpoint clients a workspace's checkout path, so every
     daemon version uses this worktree-registry path. No Git or HTTP requests run from menu-open or render paths.
   Opening the top-right Git/PR dropdown also queues a fresh lookup for the focused
@@ -5354,7 +5367,8 @@ GitHub sign-ins are kept in Windows Credential Manager, which plays the part
 of the Keychain and the Secret Service. Each account is one generic credential,
 `dev.herdr.gpui.github/github.com` for the main account,
 `dev.herdr.gpui.github/github.com/host/<device-id>` for a device's own, and
-`dev.herdr.gpui.github/github.com/account/<id>` for an additional account, holding
+`dev.herdr.gpui.github/github.com/account/<id>` for an additional account, and
+`dev.herdr.gpui.github/<server>/account/<id>` for a GitHub Enterprise Server one, holding
 exactly what the other keyrings hold: the device-flow token pair with its
 expiry, or only the GitHub CLI marker, never the CLI's token. Entries are
 persisted for your Windows account on this computer only

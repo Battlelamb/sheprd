@@ -90,17 +90,22 @@ pub(super) fn output(reply: &Reply) -> crate::Result<Output> {
             push_relay,
             status,
             error,
+            hosts,
         } => {
             let json = serde_json::json!({
                 "enabled": enabled,
                 "push_relay": push_relay,
                 "status": status,
                 "error": error,
+                "hosts": hosts,
             });
-            Output::data(
-                push_status::text(*enabled, *push_relay, status.as_ref(), error.as_deref()),
-                &json,
-            )
+            let mut text =
+                push_status::text(*enabled, *push_relay, status.as_deref(), error.as_deref());
+            if !hosts.is_empty() {
+                text.push_str("\n\nLinked hosts:\n");
+                text.push_str(&push_status::hosts(hosts));
+            }
+            Output::data(text, &json)
         }
         Reply::RelayToken { relay, token } => {
             let json = serde_json::json!({ "relay": relay, "token": token });

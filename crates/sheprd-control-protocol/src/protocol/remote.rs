@@ -9,6 +9,11 @@ use sheprd_remote_control::control::{Device, Status, push::PushStatus, relays::L
 /// Asking the daemon, and for `revoke` the device list first, takes up to
 /// its own answer timeout a request.
 const DAEMON_WAIT_SECONDS: u64 = 12;
+/// `push-status` also asks every linked host over SSH, at once, each
+/// within its own idle limit.
+const HOSTS_WAIT_SECONDS: u64 = 45;
+/// Linked hosts a `push-status` reply names at most.
+pub const MAX_PUSH_HOSTS: usize = 32;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
@@ -42,11 +47,10 @@ pub enum RemoteOp {
 impl RemoteOp {
     pub fn wait_seconds(&self) -> u64 {
         match self {
-            Self::Status
-            | Self::Devices
-            | Self::PushStatus
-            | Self::Revoke { .. }
-            | Self::RelayToken { .. } => DAEMON_WAIT_SECONDS,
+            Self::PushStatus => HOSTS_WAIT_SECONDS,
+            Self::Status | Self::Devices | Self::Revoke { .. } | Self::RelayToken { .. } => {
+                DAEMON_WAIT_SECONDS
+            }
             Self::Pair { .. } | Self::Restart => 0,
         }
     }
@@ -74,12 +78,17 @@ pub enum Reply {
         /// Whether `[remote] push_relay` allows the push relay. An own
         /// APNs key wins over it, so `status` may still say `own_key`.
         push_relay: bool,
-        /// What the daemon says, when it answers.
+        /// What the daemon says, when it answers; boxed, as `Status`'s is,
+        /// to keep every response small.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        status: Option<PushStatus>,
+        status: Option<Box<PushStatus>>,
         /// Why it did not, when remote control is on.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        /// Each linked host's daemon, asked over SSH, at most
+        /// [`MAX_PUSH_HOSTS`]; left out when there are none.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        hosts: Vec<HostPush>,
     },
     /// A listen token was kept or forgotten for `relay`, as the app
     /// normalized its address; `token` is whether one is now kept.
@@ -87,6 +96,20 @@ pub enum Reply {
         relay: String,
         token: bool,
     },
+}
+
+/// How a linked host's daemon sends iPhone pushes, as it answered over SSH.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostPush {
+    /// The host's name, as Sheprd lists it.
+    pub name: String,
+    /// What its daemon says; absent when none runs there, or it is too old
+    /// to say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<PushStatus>,
+    /// Why it could not be asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[cfg(test)]

@@ -107,6 +107,8 @@ pub(crate) struct Supervisor {
     /// Lending the main GitHub account to phones.
     github: github::Lending,
     health: Health,
+    /// Linked hosts' push status, for Settings.
+    host_push: push_status::HostPushes,
     /// The status marks set in Sheprd (`status_icons`), by config name,
     /// which the phone's lists draw too.
     indicators: Option<&'static str>,
@@ -153,6 +155,7 @@ impl Default for Supervisor {
             failure: None,
             github: github::Lending::default(),
             health: Health::Off,
+            host_push: push_status::HostPushes::default(),
             indicators: None,
             indicators_sent: None,
             last_poll: None,
@@ -427,6 +430,7 @@ impl Supervisor {
         });
         cx.spawn(async move |cx| {
             let (status, devices, push, sent, sent_prs, hosts, update_asked) = task.await;
+            let asked_push = push.is_some();
             cx.update(|cx| {
                 let supervisor = cx.global_mut::<Self>();
                 let push_changed = match push {
@@ -456,6 +460,10 @@ impl Supervisor {
                 }
                 if let Some(hosts) = hosts {
                     Self::take_incoming(cx, hosts);
+                }
+                // Settings watches the push status: linked hosts' too.
+                if asked_push {
+                    Self::refresh_hosts(cx);
                 }
             });
         })

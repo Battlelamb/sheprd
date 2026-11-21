@@ -384,7 +384,8 @@ DigitalOcean droplet.
   and the daemon's pacer holds updates to one per ten seconds per chat. At this
   size the smallest instance is plenty. Measure it in phase 4 rather than trust
   this estimate.
-- `GET /healthz` for an uptime monitor, and counters with no per-user labels.
+- `GET /healthz` for an uptime monitor, and counters with no per-user labels:
+  `GET /metrics` and a read-only dashboard, both behind the operator's token.
 
 ## Changes by component
 
@@ -452,10 +453,17 @@ change, and `sheprd-push-relay` runs against a mock APNs, covering malformed
 handles, expiry, revocation, kind checks, limits, each APNs reply, and the test
 that no token or payload reaches disk or logs. `POST /v1/challenge` and
 `POST /v1/attest` issue credentials to attested keys, checked against a test PKI
-and against an attestation from an iPhone. Still to build: the relay key signed
-by the offline root, renewal by assertion with the `devices` table (until then a
-phone attests a new key when its credential runs out), and the counters. Stores and `RelayClient` are built; the daemon uses
-the client once `Delivery` lands in phase 4.
+and against an attestation from an iPhone. The counters are built: pushes by reply and type,
+attestations, challenges, revocations, and rate-limit refusals, with no
+per-user labels, and devices attested and active in the last day and week,
+counted in memory by credential device id and never named. `/metrics` and a
+read-only dashboard serve them behind the operator's `dashboard-token`
+(`deploy/push-relay/README.md`, Monitoring), on the dashboard the relay
+shares through `sheprd-dashboard`. Still to build: the relay key signed by
+the offline root, and renewal by assertion with the `devices` table (until
+then a phone attests a new key when its credential runs out). Stores and
+`RelayClient` are built; the daemon uses the client once `Delivery` lands in
+phase 4.
 
 **3. Image and host.** Built: `crates/sheprd-push-relay/Dockerfile`,
 `.github/workflows/push-relay-image.yml`, and `deploy/push-relay`, whose

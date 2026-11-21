@@ -15,6 +15,8 @@ pub enum Error {
         #[source]
         source: io::Error,
     },
+    #[error(transparent)]
+    Dashboard(#[from] sheprd_dashboard::Error),
     #[error("{} has no APNs config", path.display())]
     NoApnsConfig { path: PathBuf },
     #[cfg(not(feature = "postgres"))]
@@ -22,6 +24,8 @@ pub enum Error {
     NoPostgres,
     #[error("{} is open to other users", path.display())]
     NotPrivate { path: PathBuf },
+    #[error("{} is not text", path.display())]
+    NotText { path: PathBuf },
     #[error("could not start the runtime")]
     Runtime(#[source] io::Error),
     #[error("could not read {}", path.display())]

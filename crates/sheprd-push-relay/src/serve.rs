@@ -14,6 +14,7 @@ use crate::{
 use secrecy::SecretString;
 use secrecy::{ExposeSecret, SecretSlice};
 use sheprd_apns::{Config, Host, Sender, is_private, load_secret_key};
+use sheprd_dashboard::auth::Account;
 use std::{
     fs,
     net::SocketAddr,
@@ -61,6 +62,8 @@ async fn postgres(_: &Options) -> Result<()> {
 /// the relay uses it.
 pub(crate) struct Secrets {
     attestations: Verifier,
+    /// The dashboard's and `/metrics`'s token, when the operator set one.
+    dashboard: Option<Account>,
     environment: Host,
     issuer: Issuer,
     keys: Keyring,
@@ -88,6 +91,7 @@ impl Secrets {
             .ok_or(Error::SecretSize { path: secret })?;
         Ok(Self {
             attestations,
+            dashboard: read_dashboard_token(&dir.join("dashboard-token"))?,
             environment,
             issuer,
             keys,
@@ -99,6 +103,7 @@ impl Secrets {
 async fn run(options: &Options, store: impl Store) -> Result<()> {
     let Secrets {
         attestations,
+        dashboard,
         environment,
         issuer,
         keys,
@@ -125,10 +130,15 @@ async fn run(options: &Options, store: impl Store) -> Result<()> {
             address: options.listen,
             source,
         })?;
+    if dashboard.is_some() {
+        tracing::info!("the dashboard is at /dashboard, and /metrics takes its token");
+    } else {
+        tracing::info!("the dashboard and /metrics are off: add dashboard-token to the secrets");
+    }
     tracing::info!(address = %options.listen, host = environment.name(), "the relay is listening");
     axum::serve(
         listener,
-        web::router(relay, source).into_make_service_with_connect_info::<SocketAddr>(),
+        web::router(relay, source, dashboard).into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(stopped())
     .await
@@ -165,6 +175,20 @@ pub(crate) fn read_secret(path: &Path) -> Result<SecretSlice<u8>> {
         .filter(|bytes| bytes.len() >= MIN_SECRET)
         .map(SecretSlice::from)
         .ok_or_else(|| Error::SecretSize { path: owned() })
+}
+
+/// The dashboard's account, from the token at `path`, or `None` when there
+/// is no file: the dashboard is optional. A file others can read, or a
+/// short token, is refused.
+pub(crate) fn read_dashboard_token(path: &Path) -> Result<Option<Account>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = read_private(path)?;
+    let token = std::str::from_utf8(bytes.expose_secret()).map_err(|_| Error::NotText {
+        path: path.to_owned(),
+    })?;
+    Ok(Some(Account::new(token.trim())?))
 }
 
 async fn purge(store: impl Store) {

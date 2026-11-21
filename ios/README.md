@@ -427,13 +427,37 @@ the phone: Apple sees only "Sheprd", "New activity", and ciphertext.
    push that removes the chat's notifications. Badges show the questions
    waiting.
 
-5. **Test push.** Settings > Notifications > Send Test Push asks a computer
-   (`POST /api/apns/test`) for one sealed alert carrying a random id. The
-   extension records the id in the App Group as it opens the alert
+5. **Test push.** Settings > Notifications > Send Test Push from a computer
+   asks it (`POST /api/apns/test`) for one sealed alert carrying a random
+   id. The extension records the id in the App Group as it opens the alert
    (`PushTestReceipts`), and Settings shows "Arrived in N s", or where it
    stopped: no APNs key on the computer, no alert token from this phone yet,
    what APNs refused, or nothing within 30 seconds. A tap on it only opens
    the app.
+6. **Test push from this iPhone.** With the push relay on, Settings >
+   Notifications > Send Test Push from This iPhone needs no computer online.
+   The phone makes (or reuses) a push relay handle for its own alert token
+   and posts a test alert to `POST /v1/push` on this build's push relay
+   (`push-sandbox.sheprd.org` for Xcode builds, `push.sheprd.org`
+   otherwise), shaped like a computer's test push: the same cover,
+   `mutable-content`, thread `test`, and `sealed` field under the same seal.
+   - It is sealed to a key of the phone's own (`NotifyKey.own`), kept in
+     its own keychain item and never given to a computer, and names
+     `this-phone` as its computer, which is no fingerprint.
+   - The extension tries the computers' keys first. Only an alert none of
+     them opens is tried with the phone's own key, and it shows only if it
+     is exactly a self test (`SelfTestPush.open`): a test id, no badge,
+     permission, wizz, or clear. It records the id and shows the text with
+     no computer, chat, or actions.
+   - Settings then waits for the receipt as above. A push relay answer
+     other than `delivered` says where it stopped: an expired credential or
+     a refused handle (the next try attests again), a stale token (`gone`),
+     `limited`, or `unavailable`.
+   - With the push relay off, the row says the phone cannot push itself
+     without it: there is no APNs key on the phone.
+   - A phone that never paired was never asked to show alerts, so it has
+     no alert token: the test asks then, as pairing does, and waits up to
+     10 seconds for iOS to hand the token over.
 
 A Live Activity in the question phase also offers up to three answers
 (never the "always" ones) as buttons that answer from the lock screen.

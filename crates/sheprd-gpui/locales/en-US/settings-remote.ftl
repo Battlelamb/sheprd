@@ -3,7 +3,7 @@
 # saves on each SSH host.
 
 settings-remote-health-updating = Updating the service…
-settings-remote-health-off = Off. Turning it on installs a user service that serves your chats over HTTPS on your network, and over Tailscale when it runs.
+settings-remote-health-off = Off. Turning it on installs a user service that serves your chats over HTTPS on your network, over Tailscale when it runs, and through a relay once you add one under Relays.
 settings-remote-health-starting = Starting…
 settings-remote-health-running = Running on port { $port } · { $devices ->
         [one] { $devices } device

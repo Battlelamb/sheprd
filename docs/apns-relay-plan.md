@@ -492,8 +492,11 @@ Before phase 5 offers the relay to anyone, from issue #1056:
    limited to chosen topics and one environment. Confirm one works for
    `so.pen.herdr.remote.push-type.liveactivity`. If it does, use one per
    environment instead of a team-scoped key.
-2. **Sealed Live Activity (first, and blocking).** Built and waiting for a phone:
-   see `docs/ios-spikes.md`. Payload size is measured above. Can the widget
+2. **Sealed Live Activity (first, and blocking).** Done: it works on a locked
+   iPhone, opening each update in 5 to 7 ms, but the widget cannot read the
+   keychain (`errSecNotAvailable`), so the app also keeps the Secure Enclave
+   key's handle in an App Group file the widget reads. See `docs/ios-spikes.md`.
+   The original question: Payload size is measured above. Can the widget
    extension open sealed content on a locked phone? The alert key is `AfterFirstUnlockThisDeviceOnly` and the
    Notification Service Extension already uses it, but a Secure Enclave
    operation during a widget render is untested. Measure memory, render time,

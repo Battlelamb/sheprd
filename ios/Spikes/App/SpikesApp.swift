@@ -71,12 +71,10 @@ struct NotifyTab: View {
                 if let problem { Section("Problem") { Text(problem) } }
             }
             .navigationTitle("Sealed notifications")
-            .task {
-                // Provisional: granted without a prompt, delivered quietly;
-                // the service extension still runs.
-                _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .provisional])
-                await refresh()
-            }
+            // No provisional request here: iOS showed provisional pushes
+            // quietly and did not run the service extension. Register asks
+            // for banners.
+            .task { await refresh() }
             .refreshable { await refresh() }
         }
     }
@@ -93,6 +91,7 @@ struct NotifyTab: View {
     private func refresh() async {
         do {
             share(try NotifyKey.load() ?? NotifyKey.create())
+            try NotifyKey.mirror()
         } catch {
             problem = "\(error)"
         }
@@ -163,6 +162,7 @@ struct ActivityTab: View {
     private func startSealed() {
         do {
             let key = try NotifyKey.load() ?? NotifyKey.create()
+            try NotifyKey.mirror()
             let device = key.publicKey.x963Representation
             let state = try SealedProbe.state(sequence: 0, device: device)
             let activity = try Activity.request(

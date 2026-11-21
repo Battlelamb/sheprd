@@ -70,6 +70,13 @@ pub fn release(state_dir: &Path) {
     sheprd_client::private_endpoint::release(&address(state_dir));
 }
 
+/// Whether a daemon accepts connections at `address` within `limit`. Sends
+/// nothing, so a daemon that is exiting cannot hold the caller for a reply.
+/// Blocking.
+pub fn answers(address: &Path, limit: Duration) -> bool {
+    sheprd_client::private_endpoint::Connection::connect(address, limit).is_ok()
+}
+
 /// Sends one request and waits for its response. Blocking.
 pub fn request(address: &Path, request: &Request) -> Result<Response, Error> {
     let connection = sheprd_client::private_endpoint::Connection::connect(address, CONNECT_TIMEOUT)

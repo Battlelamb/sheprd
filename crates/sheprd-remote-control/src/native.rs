@@ -68,9 +68,11 @@ fn home(state: &Shared, device: &DeviceId) -> Home {
     let pull_requests = state.pull_requests.borrow().clone();
     let checkouts = state.lending.checkouts.current();
     let recognized = state.lending.recognized();
+    let favorites = state.favorites.current();
     let mut home = Home::project(Sources {
         checkouts: &checkouts,
         computer: &state.computer,
+        favorites: &favorites,
         fingerprint: &state.fingerprint,
         layout: &layout,
         load: *state.load.borrow(),

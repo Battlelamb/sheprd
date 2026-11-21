@@ -468,9 +468,15 @@ final class Fleet {
         }
         let since: Cursor? = if case let .chat(pane) = view { chats[PaneKey(device: device, pane: pane)]?.cursor } else { nil }
         let size: TermSize? = if case let .term(pane) = view { terms[PaneKey(device: device, pane: pane)]?.size } else { nil }
+        let chat: ChatStore? = if case let .chat(pane) = view { chats[PaneKey(device: device, pane: pane)] } else { nil }
+        let term: TermStore? = if case let .term(pane) = view { terms[PaneKey(device: device, pane: pane)] } else { nil }
         // One task, so the computer drops them before the view is asked again.
         Task {
             for key in background { await link.unwatch(.chat(pane: key.pane)) }
+            // Closed meanwhile: nobody shows it now, so it is not asked again.
+            let stillShown = if let chat { chats[chat.key] === chat && chatViewers[chat.key] != nil }
+                else if let term { terms[term.key] === term } else { false }
+            guard stillShown else { return }
             await link.watch(view, since: since, size: size)
         }
     }

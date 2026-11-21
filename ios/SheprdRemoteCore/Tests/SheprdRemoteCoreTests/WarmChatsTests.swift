@@ -58,6 +58,13 @@ struct WarmChatsTests {
         #expect(keys == ["left", "quiet"])
     }
 
+    @Test func aComputerWithoutRoomDoesNotUseUpThePicks() {
+        var warm = WarmChats<String>()
+        let full = (0..<WarmChats<String>.listed).map { listed("other\($0)", busy: true) }
+        let keys = warm.keys(full + [listed("quiet", answered: 5)], at: now, room: ["mac": 1], in: computer)
+        #expect(keys == ["quiet"])
+    }
+
     @Test func roomKeepsOneViewForTheNextScreen() {
         #expect(WarmChats<String>.room(shown: 0) == WarmChats<String>.viewsPerLink - 2)
         #expect(WarmChats<String>.room(shown: WarmChats<String>.viewsPerLink - 2) == 0)

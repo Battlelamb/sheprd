@@ -59,19 +59,25 @@ public struct WarmChats<Key: Hashable & Sendable>: Sendable {
         let known = Set(listed.map(\.key))
         left = left.filter { $0.value > now && known.contains($0.key) }
         let lingering = left.sorted { $0.value > $1.value }.map(\.key)
-        let picked = listed.sorted { a, b in
+        let ranked = listed.sorted { a, b in
             if a.busy != b.busy { return a.busy }
             return (a.lastAnswer ?? .distantPast) > (b.lastAnswer ?? .distantPast)
         }
-        .prefix(Self.listed)
         .map(\.key)
         var room = room
         var kept = Set<Key>()
-        for key in lingering + picked where !kept.contains(key) {
+        func admit(_ key: Key) -> Bool {
             let free = room[group(key), default: 0]
-            guard free > 0 else { continue }
+            guard free > 0 else { return false }
             room[group(key)] = free - 1
             kept.insert(key)
+            return true
+        }
+        for key in lingering { _ = admit(key) }
+        // A chat whose computer has no room does not use up a pick.
+        var picked = 0
+        for key in ranked where picked < Self.listed {
+            if kept.contains(key) || admit(key) { picked += 1 }
         }
         return kept
     }

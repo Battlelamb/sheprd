@@ -22,7 +22,13 @@ use tokio::{
 };
 
 #[cfg(unix)]
+mod agent;
+#[cfg(unix)]
+mod agent_opening;
+#[cfg(unix)]
 mod aging;
+#[cfg(unix)]
+mod also_owed;
 #[cfg(unix)]
 mod atomic;
 #[cfg(unix)]
@@ -37,6 +43,8 @@ mod flood;
 mod folding;
 #[cfg(unix)]
 mod handover;
+#[cfg(unix)]
+mod held_agent;
 #[cfg(unix)]
 mod joining;
 #[cfg(unix)]

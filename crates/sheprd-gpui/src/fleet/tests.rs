@@ -6,6 +6,9 @@ use std::{
 
 mod pairing_error;
 mod scrub;
+mod settle;
+
+mod plain;
 
 fn link(standing: Standing, ago: Duration, synced: &[&str]) -> (Link, Instant) {
     let now = Instant::now() + Duration::from_secs(7200);

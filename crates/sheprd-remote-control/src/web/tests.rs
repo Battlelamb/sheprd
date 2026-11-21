@@ -20,6 +20,7 @@ mod convert;
 #[cfg(unix)]
 mod echo;
 mod empty_core;
+mod favorites;
 #[cfg(unix)]
 pub(crate) mod fleet;
 #[cfg(unix)]
@@ -93,6 +94,7 @@ pub(crate) fn state_lending(
         changes: Default::default(),
         computer: "Studio".into(),
         connected: Mutex::new(HashMap::new()),
+        favorites: Favorites::load(crate::app::favorites::file(dir)),
         fingerprint: authority.fingerprint().to_owned(),
         fleet: None,
         github: Default::default(),

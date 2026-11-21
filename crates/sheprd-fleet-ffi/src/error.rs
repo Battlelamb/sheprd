@@ -47,6 +47,7 @@ impl Error {
             return None;
         };
         Some(match error {
+            fleet::Error::Access(_) => "access",
             fleet::Error::Bounds => "bounds",
             fleet::Error::Checkpoint => "checkpoint",
             fleet::Error::Encoding => "encoding",
@@ -57,6 +58,7 @@ impl Error {
             fleet::Error::JoinSignature => "join_signature",
             fleet::Error::ParentMissing => "parent_missing",
             fleet::Error::Permission => "permission",
+            fleet::Error::Removal(_) => "removal",
             fleet::Error::Rev => "rev",
             fleet::Error::SelfRecord => "self_record",
             fleet::Error::Sequence => "sequence",

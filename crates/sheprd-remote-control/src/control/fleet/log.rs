@@ -448,6 +448,40 @@ impl Log {
         results
     }
 
+    /// Every removal in effect among the operations held, with every
+    /// member it removes under the log's rules: those it names, and those
+    /// it takes with them, such as a member one it removes admitted at the
+    /// same time. A fold starts at the last checkpoint every operation has
+    /// seen or was seen by, so the removals before each such checkpoint
+    /// are read from the history up to it, which settled them: none is
+    /// lost behind a later checkpoint. A log pruned to a checkpoint holds
+    /// no removal from before it to pass on, and every removal after it
+    /// has seen every admission the checkpoint settled.
+    pub fn removed_by(&self) -> Result<BTreeMap<OpId, std::collections::BTreeSet<MemberId>>> {
+        let graph = self.graph()?;
+        let folder = self.folder(&graph)?;
+        let mut removed_by = BTreeMap::new();
+        let mut set = Bits::full(graph.len());
+        loop {
+            let members = folder.members(&set);
+            for (&position, reach) in &members.removals {
+                removed_by
+                    .entry(graph.order[position].id())
+                    .or_insert_with(|| reach.clone());
+            }
+            let Some(at) = folder.barrier(&set) else {
+                break;
+            };
+            // The history the checkpoint settled: its strict ancestors.
+            let before = graph.ancestors[at].clone();
+            if before.iter().next().is_none() {
+                break;
+            }
+            set = before;
+        }
+        Ok(removed_by)
+    }
+
     /// The state of the history of `id`, which a checkpoint at `id` names
     /// and a joining member is handed with it.
     pub fn state_at(&self, id: &OpId) -> Result<State> {

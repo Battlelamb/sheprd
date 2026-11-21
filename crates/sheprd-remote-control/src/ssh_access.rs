@@ -29,18 +29,17 @@ pub(crate) const SERVER: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::LOCALHOST), 22);
 /// What precedes the device id in the line's comment.
 const MARKER: &str = "sheprd-desktop:";
-/// What precedes the fleet and member ids in a fleet member's line.
-const FLEET_MARKER: &str = "sheprd-fleet:";
 /// Only loopback, which only the daemon's relay sessions reach from afar.
 /// Port forwarding stays allowed: Sheprd forwards the ports a remote
-/// program listens on.
-const OPTIONS: &str = r#"from="127.0.0.1,::1",no-agent-forwarding,no-X11-forwarding"#;
+/// program listens on. The same as a plain host's agent writes, as are the
+/// fleet's lines (`sheprd_relay_agent::authorized_keys`).
+const OPTIONS: &str = sheprd_relay_agent::authorized_keys::OPTIONS;
 /// The largest `authorized_keys` rewritten; a bigger one is not ours to
 /// rewrite.
 const MAX_FILE: u64 = 1024 * 1024;
 /// The longest public key line accepted from a desktop.
-const MAX_KEY: usize = 256;
-const ED25519: &str = "ssh-ed25519";
+#[cfg(test)]
+const MAX_KEY: usize = sheprd_relay_agent::authorized_keys::MAX_KEY;
 /// Where OpenSSH keeps the host keys.
 const HOST_KEY_DIR: &str = "/etc/ssh";
 /// Host key files, the ones OpenSSH makes by default, strongest first.
@@ -60,25 +59,9 @@ pub(crate) struct SshKey(String);
 impl SshKey {
     /// Accepts `ssh-ed25519 BASE64 [comment]`; the comment is dropped.
     pub(crate) fn parse(text: &str) -> Result<Self> {
-        if text.len() > MAX_KEY {
-            return Err(Error::InvalidKey);
-        }
-        let mut fields = text.split_ascii_whitespace();
-        let (Some(ED25519), Some(blob)) = (fields.next(), fields.next()) else {
-            return Err(Error::InvalidKey);
-        };
-        let bytes = STANDARD.decode(blob).map_err(|_| Error::InvalidKey)?;
-        // string "ssh-ed25519", then string of the 32-byte key.
-        let expected = [
-            &(ED25519.len() as u32).to_be_bytes()[..],
-            ED25519.as_bytes(),
-            &32u32.to_be_bytes(),
-        ]
-        .concat();
-        if bytes.len() != expected.len() + 32 || !bytes.starts_with(&expected) {
-            return Err(Error::InvalidKey);
-        }
-        Ok(Self(format!("{ED25519} {blob}")))
+        sheprd_relay_agent::authorized_keys::ed25519(text)
+            .map(Self)
+            .ok_or(Error::InvalidKey)
     }
 
     pub(crate) fn as_str(&self) -> &str {
@@ -229,10 +212,10 @@ impl AuthorizedKeys {
         }
         let wanted: Vec<String> = members
             .iter()
-            .map(|(tag, key)| format!("{OPTIONS} {} {FLEET_MARKER}{tag}", key.as_str()))
+            .map(|(tag, key)| sheprd_relay_agent::authorized_keys::fleet_line(tag, key.as_str()))
             .collect();
         self.rewrite(|lines| {
-            lines.retain(|line| fleet_tag(line).is_none());
+            lines.retain(|line| sheprd_relay_agent::authorized_keys::fleet_tag(line).is_none());
             lines.extend(wanted);
         })
     }
@@ -298,17 +281,6 @@ impl AuthorizedKeys {
 /// Whether `line` is the one Sheprd wrote for `device`.
 fn ours(line: &str, device: &DeviceId) -> bool {
     device_of(line).is_some_and(|id| id == device.0)
-}
-
-/// The fleet member a line the fleet wrote names; a line the user wrote,
-/// even one ending in the marker, names none.
-fn fleet_tag(line: &str) -> Option<&str> {
-    if !line.starts_with(OPTIONS) {
-        return None;
-    }
-    line.split_ascii_whitespace()
-        .last()?
-        .strip_prefix(FLEET_MARKER)
 }
 
 /// The device a line Sheprd wrote names, restricted as Sheprd writes it; a

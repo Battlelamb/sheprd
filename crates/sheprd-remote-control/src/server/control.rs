@@ -309,6 +309,18 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
             relay.reload_tokens();
             return Response::Done;
         }
+        Request::Favorites { change } => {
+            let Some(change) = change else {
+                return Response::Favorites(state.favorites.current());
+            };
+            return match state.favorites.change(change) {
+                Ok(favorites) => Response::Favorites(favorites),
+                Err(error) => Response::Error {
+                    code: ErrorCode::Unsaved,
+                    message: error.to_string(),
+                },
+            };
+        }
         Request::Shortcuts { offer } => {
             let Some(offer) = offer else {
                 return Response::Shortcuts(state.shortcuts.current());

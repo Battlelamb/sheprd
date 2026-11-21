@@ -17,7 +17,7 @@ use sheprd_remote_control::control::{
 };
 use std::path::Path;
 
-static ASKED: Mutex<Vec<Ask>> = Mutex::new(Vec::new());
+pub(super) static ASKED: Mutex<Vec<Ask>> = Mutex::new(Vec::new());
 /// The stand-in daemon is shared: these tests take turns.
 static SERIAL: Mutex<()> = Mutex::new(());
 static IN_FLEET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);

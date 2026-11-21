@@ -31,6 +31,7 @@ mod leaving;
 pub(crate) mod links;
 mod lock;
 mod me;
+mod plain;
 pub(crate) mod removals;
 pub(crate) mod scrub;
 mod store;
@@ -140,11 +141,23 @@ pub(crate) struct Fleet {
     on_disk: Mutex<Suspensions>,
 }
 
+/// What removals are passed to: a member's daemon, or a plain host's
+/// agent.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum Holder {
+    Host(HostId),
+    Member(MemberId),
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct Inner {
     pub(crate) log: Option<Log>,
     /// The removals each peer said it holds, so none is sent twice.
-    pub(crate) held: BTreeMap<MemberId, BTreeSet<OpId>>,
+    pub(crate) held: BTreeMap<Holder, BTreeSet<OpId>>,
+    /// For each plain host, the members beyond those a removal names
+    /// that its agent took with it (`Message::Also`), by removal: a
+    /// removal whose reach grew since is sent again with the rest.
+    pub(crate) held_also: BTreeMap<HostId, BTreeMap<OpId, BTreeSet<MemberId>>>,
     /// Members cut off by a removal whose history has not arrived, by the
     /// removal: kept after the removal expires from the pending pool,
     /// until its history arrives and settles it, its signer is no longer a
@@ -166,6 +179,10 @@ pub(crate) struct Inner {
     /// one `fleet apply` comes over several. It grants nothing; it becomes
     /// the log once it admits this computer or shares it as a host.
     pub(crate) joining: BTreeMap<FleetId, joining::Joining>,
+    /// Removals plain hosts' agents reported suspending for that the log
+    /// has not heard of, with when first and how many times
+    /// (`plain::Unknown`).
+    pub(crate) unknown: BTreeMap<OpId, plain::Unknown>,
 }
 
 impl Fleet {
@@ -623,26 +640,61 @@ impl Fleet {
         removed
     }
 
-    /// Records that `peer` holds the removals `ids`, of those the log
-    /// holds, and forgets what no longer matters: peers that are no
-    /// longer members, and removals the log no longer holds. At most
+    /// Records that `peer`, a member's daemon or a plain host's agent,
+    /// holds the removals `ids`, of those the log holds, and forgets what
+    /// no longer matters: members no longer members, plain hosts no longer
+    /// in the fleet, and removals the log no longer holds. At most
     /// [`MAX_HELD_PER_PEER`] per peer; one forgotten is only sent again.
-    /// Blocking.
-    pub(crate) fn held(&self, peer: MemberId, ids: impl IntoIterator<Item = OpId>) -> Result<()> {
+    /// For a plain host's agent, also the members beyond those each
+    /// removal names that it took with them (`also`), of the removals it
+    /// holds, at most [`MAX_HELD_PER_PEER`] per host. Blocking.
+    pub(crate) fn held(
+        &self,
+        peer: Holder,
+        ids: impl IntoIterator<Item = OpId>,
+        also: impl IntoIterator<Item = (OpId, MemberId)>,
+    ) -> Result<()> {
         let mut inner = self.inner();
-        let Inner { log, held, .. } = &mut *inner;
+        let Inner {
+            log,
+            held,
+            held_also,
+            ..
+        } = &mut *inner;
         let Some(log) = log.as_ref() else {
             return Ok(());
         };
-        held.entry(peer)
-            .or_default()
-            .extend(ids.into_iter().filter(|id| log.get(id).is_some()));
+        let ids: BTreeSet<OpId> = ids.into_iter().filter(|id| log.get(id).is_some()).collect();
+        if let Holder::Host(host) = peer {
+            let kept = held_also.entry(host).or_default();
+            for (id, member) in also.into_iter().filter(|(id, _)| ids.contains(id)) {
+                kept.entry(id).or_default().insert(member);
+            }
+        }
+        held.entry(peer).or_default().extend(ids);
         held.retain(|peer, ids| {
             ids.retain(|id| log.get(id).is_some());
             while ids.len() > MAX_HELD_PER_PEER {
                 ids.pop_last();
             }
-            log.is_member(peer) && !ids.is_empty()
+            let current = match peer {
+                Holder::Member(member) => log.is_member(member),
+                Holder::Host(host) => log.state().hosts.contains_key(host),
+            };
+            current && !ids.is_empty()
+        });
+        // What a host took with a removal goes with the removal: forgetting
+        // it only sends that removal again.
+        held_also.retain(|host, kept| {
+            let ids = held.get(&Holder::Host(*host));
+            kept.retain(|id, _| ids.is_some_and(|ids| ids.contains(id)));
+            let mut room = MAX_HELD_PER_PEER;
+            kept.retain(|_, members| {
+                let fits = members.len() <= room;
+                room = room.saturating_sub(members.len());
+                fits
+            });
+            !kept.is_empty()
         });
         self.save(&inner)
     }

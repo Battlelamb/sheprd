@@ -1,16 +1,17 @@
 //! The fleet's files, in the state directory's `fleet` folder, private to
 //! this user: `key` (the fleet key's 32-byte secret), `log.bin` (the log,
-//! `control::fleet::saved`), and `peers.json` (which removals each peer
-//! holds, and which suspensions wait for their history); `joining/` (the
-//! history of each fleet being joined, `FLEET.bin` in `log.bin`'s format,
-//! until one admits this computer or shares it as a host); `hosted` (the
-//! fleet it joined as a shared host); `lock` is `super::lock`'s.
+//! `control::fleet::saved`), and `peers.json` (which removals each member
+//! and plain host holds, and which suspensions wait for their history);
+//! `joining/` (the history of each fleet being joined, `FLEET.bin` in
+//! `log.bin`'s format, until one admits this computer or shares it as a
+//! host); `hosted` (the fleet it joined as a shared host); `lock` is
+//! `super::lock`'s.
 
 use super::{
-    Error, Inner, Result, Suspensions,
+    Error, Holder, Inner, Result, Suspensions,
     joining::{Joining, MAX_FLEETS},
 };
-use crate::control::fleet::{FleetId, MemberId, Op, OpId, saved, sync};
+use crate::control::fleet::{FleetId, HostId, MemberId, Op, OpId, saved, sync};
 use crate::desktop::files::{read_bounded, write_private};
 use p256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
@@ -59,8 +60,16 @@ pub(super) fn load_or_create_key(state_dir: &Path) -> crate::desktop::Result<Sig
 
 #[derive(Default, Serialize, Deserialize)]
 struct Peers {
+    /// By member.
     #[serde(default)]
     held: BTreeMap<String, BTreeSet<String>>,
+    /// By plain host, whose agent holds them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    held_hosts: BTreeMap<String, BTreeSet<String>>,
+    /// By plain host, then removal: the members beyond those it names that
+    /// the host's agent took with it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    held_also: BTreeMap<String, BTreeMap<String, BTreeSet<String>>>,
     #[serde(default)]
     unconfirmed: BTreeMap<String, Kept>,
     /// Suspensions folded per signer and target (`super::suspensions`),
@@ -78,6 +87,9 @@ struct Peers {
     /// from earlier builds, a tunnel handshake alone recorded them.
     #[serde(default)]
     proven_version: u32,
+    /// Removals plain hosts reported that the log has not heard of.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    unknown: BTreeMap<String, super::plain::Unknown>,
 }
 
 /// `proven` holds only keys a session proved with the member's fleet key
@@ -205,20 +217,49 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
         held: peers
             .held
             .iter()
-            .filter_map(|(peer, ids)| {
+            .filter_map(|(peer, ids)| Some((Holder::Member(MemberId::from_hex(peer)?), ids)))
+            .chain(
+                peers
+                    .held_hosts
+                    .iter()
+                    .filter_map(|(host, ids)| Some((Holder::Host(HostId::from_hex(host)?), ids))),
+            )
+            .map(|(holder, ids)| {
                 // Forgetting one only sends it again.
-                Some((
-                    MemberId::from_hex(peer)?,
-                    ids.iter()
-                        .filter_map(|id| OpId::from_hex(id))
-                        .take(super::MAX_HELD_PER_PEER)
-                        .collect(),
-                ))
+                let ids = ids
+                    .iter()
+                    .filter_map(|id| OpId::from_hex(id))
+                    .take(super::MAX_HELD_PER_PEER)
+                    .collect();
+                (holder, ids)
+            })
+            .collect(),
+        // One that no longer reads is only sent again.
+        held_also: peers
+            .held_also
+            .iter()
+            .filter_map(|(host, kept)| {
+                let kept = kept
+                    .iter()
+                    .filter_map(|(id, members)| {
+                        let members = members
+                            .iter()
+                            .filter_map(|member| MemberId::from_hex(member))
+                            .collect();
+                        Some((OpId::from_hex(id)?, members))
+                    })
+                    .collect();
+                Some((HostId::from_hex(host)?, kept))
             })
             .collect(),
         // Keys an earlier build recorded on a handshake alone do not count,
         // here or in a scrub (`proven_keys`).
         proven: counted(&peers),
+        unknown: peers
+            .unknown
+            .iter()
+            .filter_map(|(id, seen)| Some((OpId::from_hex(id)?, *seen)))
+            .collect(),
         folded: folded(&peers.folds, &peers.folded)?,
         folded_pending: BTreeSet::new(),
         unconfirmed: unconfirmed(&peers.unconfirmed)?,
@@ -240,7 +281,7 @@ fn proven(peers: &Peers) -> BTreeMap<MemberId, BTreeSet<[u8; 32]>> {
         .filter_map(|(member, keys)| {
             let keys = keys
                 .keys()
-                .filter_map(|key| crate::control::fleet::HostId::from_hex(key).map(|key| key.0))
+                .filter_map(|key| HostId::from_hex(key).map(|key| key.0))
                 .collect();
             Some((MemberId::from_hex(member)?, keys))
         })
@@ -515,16 +556,39 @@ pub(super) fn merged(now: &Suspensions, on_disk: &Suspensions) -> Suspensions {
 /// Writes `peers.json` from `inner`, with `unconfirmed` as its
 /// suspensions.
 fn write_peers(state_dir: &Path, inner: &Inner, suspensions: &Suspensions) -> Result<()> {
-    let peers = Peers {
-        folded: Vec::new(),
-        held: inner
+    let held = |key: fn(&Holder) -> Option<String>| {
+        inner
             .held
             .iter()
-            .map(|(peer, ids)| {
-                (
-                    peer.to_string(),
-                    ids.iter().map(ToString::to_string).collect(),
-                )
+            .filter_map(|(peer, ids)| {
+                Some((key(peer)?, ids.iter().map(ToString::to_string).collect()))
+            })
+            .collect()
+    };
+    let peers = Peers {
+        folded: Vec::new(),
+        held: held(|peer| match peer {
+            Holder::Member(member) => Some(member.to_string()),
+            Holder::Host(_) => None,
+        }),
+        held_hosts: held(|peer| match peer {
+            Holder::Host(host) => Some(host.to_string()),
+            Holder::Member(_) => None,
+        }),
+        held_also: inner
+            .held_also
+            .iter()
+            .map(|(host, kept)| {
+                let kept = kept
+                    .iter()
+                    .map(|(id, members)| {
+                        (
+                            id.to_string(),
+                            members.iter().map(ToString::to_string).collect(),
+                        )
+                    })
+                    .collect();
+                (host.to_string(), kept)
             })
             .collect(),
         proven: inner
@@ -533,13 +597,14 @@ fn write_peers(state_dir: &Path, inner: &Inner, suspensions: &Suspensions) -> Re
             .map(|(member, keys)| {
                 (
                     member.to_string(),
-                    Proven::Many(
-                        keys.iter()
-                            .map(|key| crate::control::fleet::HostId(*key).to_string())
-                            .collect(),
-                    ),
+                    Proven::Many(keys.iter().map(|key| HostId(*key).to_string()).collect()),
                 )
             })
+            .collect(),
+        unknown: inner
+            .unknown
+            .iter()
+            .map(|(id, seen)| (id.to_string(), *seen))
             .collect(),
         folds: suspensions
             .folded

@@ -8,6 +8,8 @@
 //! - [`flows`]: syncing a machine, inviting a computer, sharing a host.
 //! - [`saved`]: each fleet host this computer may reach, kept as a saved
 //!   device, `USER@r-ID.sheprd.invalid`.
+//! - [`plain`] and [`agent`]: plain hosts, which run no Sheprd daemon:
+//!   installing their relay agent and keeping its access file current.
 //!
 //! Syncing never hands this fleet's log to a machine outside it: a machine
 //! is first asked, with a nonce and without naming the fleet, for what it
@@ -15,10 +17,12 @@
 //! with the certificate authority of one of the fleet's computers or
 //! Sheprd hosts goes on; any other is left alone.
 
+pub(crate) mod agent;
 pub(crate) mod bluetooth;
 mod error;
 pub(crate) mod flows;
 pub(crate) mod joins;
+pub(crate) mod plain;
 mod remote;
 pub(crate) mod saved;
 
@@ -80,8 +84,16 @@ pub(crate) enum Standing {
     Unknown,
     /// In this fleet.
     Member,
-    /// In no fleet, in another, or without the program.
+    /// In no fleet or in another.
     Outside,
+    /// Runs no Sheprd daemon, nor a relay agent of this fleet: it may be
+    /// shared as a plain host.
+    NoDaemon,
+    /// A plain host of this fleet, whose relay agent is kept current.
+    Agent,
+    /// Its SSH host key is not checked: the fleet neither shares it as a
+    /// plain host nor asks its agent anything.
+    Unchecked,
     /// Could not be asked.
     Failed,
     /// A host the fleet removed that holds its removal, or forgot the
@@ -90,6 +102,27 @@ pub(crate) enum Standing {
 }
 
 impl Link {
+    /// Keeps what a sync found: the machine's `standing`, its `heads` and
+    /// this computer's `synced` heads, and the host it proved to be, or
+    /// whose agent it runs, when it said. A host is never forgotten for a
+    /// sync that could not tell, so a removed host the fleet shares again
+    /// is recognized ([`Fleet::forget_stale_links`]).
+    pub(super) fn settle(
+        &mut self,
+        standing: Standing,
+        heads: Vec<String>,
+        synced: Vec<String>,
+        host: Option<String>,
+    ) {
+        self.running = false;
+        self.standing = standing;
+        self.heads = heads;
+        self.synced = synced;
+        if host.is_some() {
+            self.host = host;
+        }
+    }
+
     /// Starts over, as for a machine never asked; a sync running for it
     /// still finishes.
     pub(super) fn restart(&mut self) {
@@ -109,8 +142,8 @@ impl Link {
         };
         match self.standing {
             Standing::Unknown => true,
-            Standing::Member => self.synced != mine || since(REFRESH),
-            Standing::Outside => since(OUTSIDE),
+            Standing::Member | Standing::Agent => self.synced != mine || since(REFRESH),
+            Standing::Outside | Standing::NoDaemon | Standing::Unchecked => since(OUTSIDE),
             Standing::Failed => since(RETRY),
             Standing::Removed => false,
         }
@@ -433,6 +466,20 @@ impl Fleet {
             });
         })
         .detach();
+    }
+
+    /// Sets what `machine` said, as a sync that just ran would, so it is
+    /// not due again.
+    #[cfg(test)]
+    pub(crate) fn set_standing(cx: &mut App, machine: &str, standing: Standing) {
+        let heads = Self::view(cx)
+            .map(|view| view.heads.clone())
+            .unwrap_or_default();
+        Self::set_link(cx, machine, |link| {
+            link.standing = standing;
+            link.synced = heads;
+            link.last = Some(Instant::now());
+        });
     }
 
     fn set_link(cx: &mut App, id: &str, change: impl FnOnce(&mut Link)) {

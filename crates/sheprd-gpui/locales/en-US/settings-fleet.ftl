@@ -64,6 +64,11 @@ settings-fleet-invite = Invite
 settings-fleet-invite-ask = Invite this computer? It will open terminals on your hosts, and your computers on it.
 settings-fleet-share = Share
 settings-fleet-share-ask = Share this host with the computers allowed below:
+settings-fleet-machine-agent = Plain host in your fleet
+settings-fleet-machine-no-daemon = No Sheprd here; it can be shared as a plain host
+settings-fleet-machine-unchecked = Its SSH key is not checked, so the fleet cannot share it
+settings-fleet-share-plain = Share as a plain host
+settings-fleet-share-plain-ask = Installs sheprd-relay-agent on this machine, runs it as a user service on this computer's relays, and lets the computers allowed below in over SSH:
 
 settings-fleet-removed = This computer is not in the fleet any more
 settings-fleet-hosted = This computer is a shared host of the fleet

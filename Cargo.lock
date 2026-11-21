@@ -74,8 +74,7 @@ dependencies = [
 [[package]]
 name = "accesskit_macos"
 version = "0.26.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce02dc63b43f0c9296af9ac946312a2dc8814427d7a64d2d600971dac55b6076"
+source = "git+https://github.com/sheprd-labs/accesskit?rev=d7919c53f9a9667486ba61e946c44be57c3dabe7#d7919c53f9a9667486ba61e946c44be57c3dabe7"
 dependencies = [
  "accesskit 0.24.1",
  "accesskit_consumer 0.38.0",
@@ -11166,6 +11165,7 @@ dependencies = [
  "sheprd-mods",
  "sheprd-orchestrator",
  "sheprd-relay",
+ "sheprd-relay-agent",
  "sheprd-remote",
  "sheprd-remote-control",
  "sheprd-session",
@@ -11388,6 +11388,7 @@ dependencies = [
  "quinn",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "sheprd-relay",
  "sheprd-tunnel",
  "tempfile",
@@ -11470,6 +11471,7 @@ dependencies = [
  "sheprd-core-client",
  "sheprd-github",
  "sheprd-relay",
+ "sheprd-relay-agent",
  "sheprd-session",
  "sheprd-terminal",
  "sheprd-tunnel",

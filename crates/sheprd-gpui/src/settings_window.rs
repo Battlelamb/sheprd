@@ -40,7 +40,7 @@ pub(crate) use sidebar::{apply_loaded_sidebar, sidebar_load_revision};
 mod themes;
 mod ui;
 #[cfg(all(feature = "integration-test", target_os = "macos"))]
-pub(crate) use native::verify_native;
+pub(crate) use native::{verify_native, verify_native_close};
 pub(crate) use themes::{
     apply_loaded_theme, apply_theme_draft, theme_load_revision, theme_pending,
 };

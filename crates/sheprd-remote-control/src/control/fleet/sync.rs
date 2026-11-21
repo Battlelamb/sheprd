@@ -242,6 +242,18 @@ pub enum Ask {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session: Option<u16>,
     },
+    /// The access file for plain host `host`, for Sheprd to hand its
+    /// agent (`fleet apply`): computed here, so the log never leaves the
+    /// daemon. `suspended` is what the agent's `status --json` reports
+    /// suspending, which the file settles as the log allows.
+    AgentAccess {
+        host: String,
+        #[serde(default)]
+        suspended: std::collections::BTreeMap<
+            sheprd_relay_agent::access::Id,
+            sheprd_relay_agent::fleet::Suspension,
+        >,
+    },
     /// The phones waiting to join through this computer, for a person to
     /// admit one with [`Ask::Admit`]; none is ever admitted otherwise.
     Joins,
@@ -282,6 +294,11 @@ pub enum Answer {
     /// [`Ask::RemovedHosts`]'s answer: host ids, hex.
     Hosts {
         hosts: Vec<String>,
+    },
+    /// [`Ask::AgentAccess`]'s answer: the access file, as the agent reads
+    /// it on stdin.
+    AgentAccess {
+        access: String,
     },
     Joins {
         joins: Vec<Join>,

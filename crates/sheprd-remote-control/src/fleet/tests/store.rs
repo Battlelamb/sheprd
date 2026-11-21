@@ -113,6 +113,49 @@ async fn a_peers_file_that_does_not_read_is_an_error() {
     ));
 }
 
+#[test]
+fn what_members_and_plain_hosts_hold_survives_a_restart_beside_the_folds() {
+    let dir = tempfile::tempdir().unwrap();
+    let member = Holder::Member(MemberId([1; 32]));
+    let host = Holder::Host(HostId([1; 32]));
+    let mut inner = Inner::default();
+    inner.held.insert(member, [OpId([7; 32])].into());
+    inner.held.insert(host, [OpId([8; 32])].into());
+    // A removal an agent reported that the log has not heard of.
+    inner.unknown.insert(
+        OpId([9; 32]),
+        plain::Unknown {
+            first_ms: 5,
+            syncs: 2,
+        },
+    );
+    // A suspension folded per signer and target, beside them.
+    let target = suspensions::FoldedTarget {
+        ids: [(
+            OpId([10; 32]),
+            suspensions::FoldedRemoval {
+                since_ms: 6,
+                named: [MemberId([3; 32])].into(),
+                pinned: false,
+            },
+        )]
+        .into(),
+        overflow: Some(suspensions::Overflow {
+            since_ms: 6,
+            named: [(MemberId([3; 32]), 6)].into(),
+            pinned: None,
+        }),
+    };
+    inner
+        .folded
+        .insert(MemberId([2; 32]), [(MemberId([3; 32]), target)].into());
+    crate::fleet::store::save(dir.path(), &inner, &mut Suspensions::default()).unwrap();
+    let again = crate::fleet::store::load(dir.path(), now_ms()).unwrap();
+    assert_eq!(again.held, inner.held);
+    assert_eq!(again.unknown, inner.unknown);
+    assert_eq!(again.folded, inner.folded);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn apply_naming_another_fleet_learns_nothing() {
     let (http, _, _) = relay().await;

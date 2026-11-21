@@ -2122,10 +2122,8 @@ manual multi-machine and phone steps left unticked in its QA list.
      a plain host. "Share as a plain host" asks first, with the computers
      to allow and a line saying the agent is installed; on confirm, over
      the app's own SSH (`fleet::plain`, `fleet::agent`), Sheprd copies the
-     agent build this app ships for the host's platform (`host_build`, as
-     automations do: its own build for a host of its kind, else
-     `relay-agent/TRIPLE/` beside the executable), unless the host holds
-     the same bytes; writes and restarts a systemd user unit (with
+     agent build for the host's platform (`fleet::agent::build`, below),
+     unless the host holds the same bytes; writes and restarts a systemd user unit (with
      lingering asked for) or a launchd agent (in the account's
      graphical session when it is logged in at the screen, else its user
      domain, so a Mac reached only over SSH runs it too) running `run` on this
@@ -2139,12 +2137,31 @@ manual multi-machine and phone steps left unticked in its QA list.
      daemon for the access file (`Ask::AgentAccess`, which computes it so
      the log never leaves the daemon, settling the reported suspensions),
      and runs `fleet apply` when the digest differs or something settles.
-   - **Left:** the release does not ship agent builds yet: until
-     `relay-agent/TRIPLE/` builds sit beside the app (and in the signed
-     host manifest for Linux downloads, as `sheprd-remote-control`'s are),
-     a host of another platform than this computer is refused with "this
-     app ships no sheprd-relay-agent for PLATFORM". Uninstalling the agent
-     after "Remove everywhere"; `--direct`, which stays off and is not
+   - **Built (agent builds):** every release ships `sheprd-relay-agent`
+     for Linux `x86_64` and `aarch64` (static musl) and macOS `arm64` and
+     `x86_64` (thin, macOS 11 and later, signed with the release's
+     Developer ID), built by `scripts/release/build-agent.sh` and listed
+     in their own Ed25519-signed manifest (schema 6,
+     `host-agent-manifest.json`), packed first in one release asset,
+     `sheprd-relay-agent-VERSION.tar.gz`, as the host builds' `sheprd-acp`
+     are. The installer reads the host's `uname -sm` and refuses a platform
+     with no agent (Windows, the BSDs, 32-bit or RISC-V Linux) with a
+     localized "A plain host runs Linux or macOS on x86_64 or ARM64; this
+     host reports PLATFORM" before anything is copied. A release then
+     downloads the archive into a new private folder each time it shares
+     a host, uses the build only if the manifest's signature (by the key
+     the app embeds), schema, version, name, size, and SHA-256 all check,
+     copies only that build (never a program on `PATH`, a file beside the
+     app, or one kept from before), and removes the folder. The host checks the
+     copy's SHA-256 before it moves it into place and runs it. A
+     development build copies the agent beside its executable to a host of
+     its kind, else `relay-agent/TRIPLE/` there; never one from `PATH`. CI builds all four only
+     when the agent's inputs change (`relay_agent` in
+     `scripts/ci-changes.sh`): the `x86_64` Linux one on a pull request,
+     the others when every platform runs. The agent has no Windows build:
+     its service and installer are POSIX shell with systemd or launchd,
+     and its private files rely on Unix modes.
+   - **Left:** uninstalling the agent after "Remove everywhere"; `--direct`, which stays off and is not
      built yet. A member's rotated keys at an unchanged `rev` take the
      newer file's keys, as the agent cannot order them otherwise.
 5. **iOS:** joining at pairing, admitting a computer from the phone, the

@@ -5,6 +5,8 @@ pub enum Error {
     // keep-sorted start
     #[error("The relay agent's answer is not one this app can read")]
     Agent(#[from] sheprd_relay_agent::Error),
+    #[error(transparent)]
+    AgentBuild(#[from] super::agent::build::Error),
     #[error("The host's answer is not one this app can read")]
     Answer(#[source] serde_json::Error),
     #[error(transparent)]
@@ -19,8 +21,6 @@ pub enum Error {
     Intro(#[source] sheprd_remote_control::control::fleet::Error),
     #[error(transparent)]
     Log(#[from] sheprd_remote_control::control::fleet::Error),
-    #[error("This app ships no sheprd-relay-agent for {platform}")]
-    NoBuild { platform: String },
     #[error("Remote control is off on this computer")]
     NoDaemon,
     #[error("The host has no Sheprd remote control to ask")]

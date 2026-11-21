@@ -47,7 +47,7 @@ class ReleaseTargets(unittest.TestCase):
             self.assertIn("github.repository == 'sheprd-labs/sheprd'", job)
         # Keeps every main cache inside the repository's 10 GB cache budget.
         self.assertIn("\nenv:\n  CARGO_PROFILE_DEV_DEBUG: '0'\n\njobs:\n", workflow)
-        self.assertIn("    needs: [checks, windows, windows-native, windows-package, build-macos, commits, website, zizmor]\n",
+        self.assertIn("    needs: [checks, windows, windows-native, windows-package, build-macos, relay-agent, commits, website, zizmor]\n",
                       jobs["checks-passed"])
         # The workflow audit runs beside the other jobs, so the gate requires it.
         self.assertIn('test "$COMMITS" = success && test "$ZIZMOR" = success || exit 1',
@@ -658,7 +658,8 @@ class ReleaseSecurity(unittest.TestCase):
             *(f"sheprd-remote-control-20260920.1-{target}"
               for target in ("x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl")),
             "host-manifest.json", "host-manifest.sig",
-            "sheprd-acp-20260920.1-linux-musl.tar.gz"})
+            "sheprd-acp-20260920.1-linux-musl.tar.gz",
+            "sheprd-relay-agent-20260920.1.tar.gz"})
         # Five files per base asset; SHA256SUMS lists all but itself.
         assets = len(MANIFEST.base_names(VERSION)) * 5 + len(MANIFEST.package_aliases(VERSION))
         self.assertEqual(len((self.path / "SHA256SUMS").read_text().splitlines()), assets)

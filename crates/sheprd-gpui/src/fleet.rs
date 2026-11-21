@@ -17,7 +17,7 @@
 //! with the certificate authority of one of the fleet's computers or
 //! Sheprd hosts goes on; any other is left alone.
 
-mod agent;
+pub(crate) mod agent;
 mod error;
 pub(crate) mod flows;
 pub(crate) mod plain;

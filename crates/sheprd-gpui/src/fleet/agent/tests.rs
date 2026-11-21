@@ -1,5 +1,10 @@
 use super::*;
+use crate::host_build::Platform;
+// For `installed`.
+#[cfg(unix)]
+use std::path::Path;
 
+mod build;
 #[cfg(unix)]
 mod installed;
 #[cfg(unix)]
@@ -39,28 +44,6 @@ fn report(keys: &[&str]) -> Report {
 const ED25519: &str =
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP";
 const RSA: &str = "ssh-rsa AAAAB3NzaC1yc2E";
-
-#[test]
-fn this_apps_own_agent_goes_to_a_host_of_its_kind_and_shipped_builds_to_others() {
-    let dir = tempfile::tempdir().unwrap();
-    let own = dir.path().join("own-agent");
-    std::fs::write(&own, b"own").unwrap();
-    let local = Platform::local();
-    assert_eq!(
-        build_for(&local, dir.path(), Some(own.clone())),
-        Some(own.clone())
-    );
-    let other = if local.os == "linux" {
-        platform("macos", "aarch64")
-    } else {
-        platform("linux", "x86_64")
-    };
-    assert_eq!(build_for(&other, dir.path(), Some(own)), None);
-    let shipped = dir.path().join(BUILDS).join(other.triple()).join(PROGRAM);
-    std::fs::create_dir_all(shipped.parent().unwrap()).unwrap();
-    std::fs::write(&shipped, b"shipped").unwrap();
-    assert_eq!(build_for(&other, dir.path(), None), Some(shipped));
-}
 
 #[test]
 fn only_plain_relay_urls_go_into_a_service() {

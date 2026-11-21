@@ -135,10 +135,21 @@ pub(crate) fn share(
                 Fleet::set_link(cx, &id, |link| link.standing = Standing::Agent);
             }
             Fleet::refresh(cx);
-            done(outcome.err().map(|error| error.to_string()), cx);
+            done(outcome.err().as_ref().map(shown), cx);
         });
     })
     .detach();
+}
+
+/// What a person reads when sharing fails: why no agent build could go to
+/// the host in their language, the rest as the fleet words it.
+pub(crate) fn shown(error: &Error) -> String {
+    use crate::i18n::errors::Localize as _;
+    match error {
+        Error::AgentBuild(error) => error.localize(),
+        Error::Build(error) => error.localize(),
+        other => other.to_string(),
+    }
 }
 
 /// Where a machine with no Sheprd daemon stands: a plain host of this

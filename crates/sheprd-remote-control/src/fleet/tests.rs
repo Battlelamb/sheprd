@@ -30,6 +30,8 @@ mod catch_up;
 #[cfg(unix)]
 mod flood;
 #[cfg(unix)]
+mod folding;
+#[cfg(unix)]
 mod handover;
 #[cfg(unix)]
 mod joining;

@@ -9,6 +9,10 @@ use sheprd_client::one_shot;
 
 /// Blocking: the title for `input`, the excerpt of a transcript.
 pub(crate) fn run(input: &str) -> Result<String, row_summary::Error> {
-    let answer = one_shot::ask(naming::TITLE_PROMPT, input)?;
+    let answer = one_shot::ask(
+        naming::TITLE_PROMPT,
+        input,
+        &std::sync::atomic::AtomicBool::new(false),
+    )?;
     naming::title_from(&answer).ok_or(one_shot::Error::Empty.into())
 }

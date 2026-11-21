@@ -13,7 +13,10 @@ use std::{
     ffi::OsString,
     io::{Read, Write},
     process::Stdio,
-    sync::mpsc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -53,23 +56,34 @@ pub fn claude_args(prompt: &str) -> Vec<OsString> {
 }
 
 /// Blocking: Claude's answer to `prompt` about `input`, on one line and cut
-/// to [`MAX_ANSWER_CHARS`].
-pub fn ask(prompt: &str, input: &str) -> Result<String, Error> {
-    run_first([("claude".into(), claude_args(prompt))], input, WAIT)
+/// to [`MAX_ANSWER_CHARS`]. Setting `cancelled` stops Claude and what it
+/// started, as when nobody waits for the answer any more.
+pub fn ask(prompt: &str, input: &str, cancelled: &AtomicBool) -> Result<String, Error> {
+    run_first(
+        [("claude".into(), claude_args(prompt))],
+        input,
+        WAIT,
+        cancelled,
+    )
 }
 
 /// The answer of the first of `candidates` that gives one, each run for at
 /// most `wait`. One not installed, failing, or answering nothing (an agent
 /// signed out, say) passes to the next; one that overruns is killed and
 /// reaped here, and ends the search, so a request never waits for two.
+/// One stopped by `cancelled` ends it too.
 pub fn run_first(
     candidates: impl IntoIterator<Item = (OsString, Vec<OsString>)>,
     input: &str,
     wait: Duration,
+    cancelled: &AtomicBool,
 ) -> Result<String, Error> {
     let mut last = Error::NoAgent;
     for (program, args) in candidates {
-        match run_one(program, args, input, wait) {
+        if cancelled.load(Ordering::Acquire) {
+            return Err(Error::Cancelled);
+        }
+        match run_one(program, args, input, wait, cancelled) {
             Err(error @ (Error::NoAgent | Error::Failed | Error::Empty)) => last = error,
             answer => return answer,
         }
@@ -83,6 +97,7 @@ fn run_one(
     args: Vec<OsString>,
     input: &str,
     wait: Duration,
+    cancelled: &AtomicBool,
 ) -> Result<String, Error> {
     // A fresh folder only this user can enter, removed after the run: a
     // shared one such as Linux's `/tmp` could hold another user's agent
@@ -106,13 +121,18 @@ fn run_one(
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     match command.spawn() {
-        Ok(child) => answer(child, input.to_owned(), wait),
+        Ok(child) => answer(child, input.to_owned(), wait, cancelled),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(Error::NoAgent),
         Err(error) => Err(Error::Start(error)),
     }
 }
 
-fn answer(mut child: std::process::Child, input: String, wait: Duration) -> Result<String, Error> {
+fn answer(
+    mut child: std::process::Child,
+    input: String,
+    wait: Duration,
+    cancelled: &AtomicBool,
+) -> Result<String, Error> {
     if let Some(mut stdin) = child.stdin.take() {
         // A failed write shows as the agent's own failure or empty answer.
         thread::spawn(move || {
@@ -132,16 +152,19 @@ fn answer(mut child: std::process::Child, input: String, wait: Duration) -> Resu
     }
     let deadline = Instant::now() + wait;
     let status = loop {
-        match child.try_wait() {
+        let stop = match child.try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(POLL),
-            Ok(None) | Err(_) => {
-                end_group(&child);
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(Error::TimedOut);
+            Ok(None) if cancelled.load(Ordering::Acquire) => Error::Cancelled,
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(POLL);
+                continue;
             }
-        }
+            Ok(None) | Err(_) => Error::TimedOut,
+        };
+        end_group(&child);
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(stop);
     };
     // What it started and left running would hold the output open.
     end_group(&child);

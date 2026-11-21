@@ -70,7 +70,12 @@ impl Drop for Slot {
 
 /// Blocking: the summary of `input`.
 pub(crate) fn run(input: &str) -> Result<String, Error> {
-    Ok(one_shot::ask(PROMPT, input)?)
+    // The phone's request does not wait for the summary, so nothing stops it.
+    Ok(one_shot::ask(
+        PROMPT,
+        input,
+        &std::sync::atomic::AtomicBool::new(false),
+    )?)
 }
 
 #[cfg(test)]

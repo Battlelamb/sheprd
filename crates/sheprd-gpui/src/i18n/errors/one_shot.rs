@@ -7,6 +7,7 @@ use sheprd_client::one_shot::Error;
 impl Localize for Error {
     fn localize(&self) -> String {
         match self {
+            Self::Cancelled => fl!("error-one-shot-cancelled"),
             Self::Empty => fl!("error-one-shot-empty"),
             Self::Failed => fl!("error-one-shot-failed"),
             Self::NoAgent => fl!("error-one-shot-no-agent"),

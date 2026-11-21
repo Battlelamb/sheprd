@@ -4,7 +4,7 @@
 
 use super::{
     Field,
-    work::{Reach, Reading, Terminal},
+    work::{Reach, Reading, Role, Terminal},
 };
 use crate::{SheprdWindow, browser::TabId};
 use sheprd_chat_protocol::excerpt;
@@ -21,6 +21,18 @@ struct Chat {
     key: String,
     agent: String,
     excerpt: String,
+    /// Whether it takes prompts: a chat observing a terminal agent is a
+    /// read-only view of it, and that agent is asked in its terminal.
+    askable: bool,
+}
+
+/// How the window keeps a pane's chat, if it keeps one.
+enum Kept {
+    None,
+    /// A chat the app runs, which takes prompts.
+    Chat,
+    /// A read-only view of a terminal agent's own session.
+    Observed,
 }
 
 /// What a subject holds, most relevant first: the focused pane's.
@@ -42,13 +54,19 @@ impl Sources {
     /// chat, else its first terminal agent.
     pub(super) fn asked_agent(&self) -> Option<&str> {
         self.chats
-            .first()
+            .iter()
+            .find(|chat| chat.askable)
             .map(|chat| chat.agent.as_str())
-            .or_else(|| self.terminals.iter().find_map(|t| t.agent.as_deref()))
+            .or_else(|| {
+                self.terminals
+                    .iter()
+                    .filter(|terminal| terminal.askable())
+                    .find_map(|terminal| terminal.agent.as_deref())
+            })
     }
 
     pub(super) fn into_asked(self) -> Option<Asked> {
-        if let Some(chat) = self.chats.into_iter().next() {
+        if let Some(chat) = self.chats.into_iter().find(|chat| chat.askable) {
             return Some(Asked::Chat {
                 key: chat.key,
                 agent: chat.agent,
@@ -56,7 +74,7 @@ impl Sources {
         }
         self.terminals
             .into_iter()
-            .find(|terminal| terminal.agent.is_some())
+            .find(Terminal::askable)
             .map(Asked::Terminal)
     }
 
@@ -71,20 +89,24 @@ impl Sources {
         }
     }
 
-    /// Adds the chat the window keeps under `key`; false when it keeps none.
-    fn add_chat(&mut self, window: &SheprdWindow, key: &str) -> bool {
+    /// Adds the chat the window keeps under `key`, and says how it keeps it.
+    /// A chat is asked only where `types`: not through a watch-only mirror.
+    fn add_chat(&mut self, window: &SheprdWindow, key: &str, types: bool) -> Kept {
         let Some(pane) = window.chats.pane(key) else {
-            return false;
+            return Kept::None;
         };
+        let observed = pane.target.existing.is_some();
+        let askable = !observed && types;
         if self.chats.len() < MAX_CHATS {
             let transcript = pane.session.transcript();
             self.chats.push(Chat {
                 key: key.to_owned(),
                 agent: transcript.agent.clone(),
                 excerpt: excerpt::transcript(transcript),
+                askable,
             });
         }
-        true
+        if observed { Kept::Observed } else { Kept::Chat }
     }
 
     fn add_terminal(&mut self, terminal: Terminal) {
@@ -138,9 +160,12 @@ impl SheprdWindow {
         panes.sort_by_key(|pane| !pane.focused);
         let mut sources = Sources::default();
         for pane in panes {
-            if sources.add_chat(self, &pane.pane_id) {
-                continue;
-            }
+            let role = match sources.add_chat(self, &pane.pane_id, true) {
+                Kept::Chat => continue,
+                // Its transcript is read; its agent is asked in the pane.
+                Kept::Observed => Role::Ask,
+                Kept::None => Role::ReadAndAsk,
+            };
             let Some(host) = &host else {
                 continue;
             };
@@ -155,6 +180,7 @@ impl SheprdWindow {
                     host: host.clone(),
                     pane: pane.pane_id.clone(),
                 },
+                role,
             });
         }
         Some(sources)
@@ -167,11 +193,17 @@ impl SheprdWindow {
         for &tab in tabs {
             let host = core.host_of(tab);
             let backend = core.host_backend(&host);
+            // A watch-only mirror never types into the terminal it shows.
+            let types = core.types_into(tab);
             for terminal in core.tab_terminals(tab) {
                 let key = crate::chat::core_pane::key_on(&host, terminal);
-                if sources.add_chat(self, &key) {
-                    continue;
-                }
+                let role = match (sources.add_chat(self, &key, types), types) {
+                    (Kept::Chat, _) => continue,
+                    (Kept::Observed, true) => Role::Ask,
+                    (Kept::Observed, false) => continue,
+                    (Kept::None, true) => Role::ReadAndAsk,
+                    (Kept::None, false) => Role::Read,
+                };
                 let Some(backend) = backend else {
                     continue;
                 };
@@ -185,6 +217,7 @@ impl SheprdWindow {
                         terminal: terminal.clone(),
                         reported,
                     },
+                    role,
                 });
             }
         }
@@ -197,4 +230,24 @@ impl SheprdWindow {
 pub(super) fn display_name(name: &str) -> String {
     name.parse::<sheprd_chat_protocol::Agent>()
         .map_or_else(|_| name.to_owned(), |agent| agent.display_name().to_owned())
+}
+
+#[cfg(test)]
+impl Sources {
+    /// Sources holding `chats`, each named and askable or not, and
+    /// `terminals`.
+    pub(super) fn for_test(chats: &[(&str, bool)], terminals: Vec<Terminal>) -> Self {
+        Self {
+            chats: chats
+                .iter()
+                .map(|&(agent, askable)| Chat {
+                    key: agent.to_lowercase(),
+                    agent: agent.to_owned(),
+                    excerpt: String::new(),
+                    askable,
+                })
+                .collect(),
+            terminals,
+        }
+    }
 }

@@ -4,6 +4,8 @@
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     // keep-sorted start
+    #[error("Claude was stopped")]
+    Cancelled,
     #[error("Claude answered nothing")]
     Empty,
     #[error("Claude stopped with an error")]

@@ -21,7 +21,10 @@ impl Error {
             Self::Agent(one_shot::Error::NoAgent) => StatusCode::CONFLICT,
             Self::Agent(one_shot::Error::TimedOut) => StatusCode::GATEWAY_TIMEOUT,
             Self::Agent(
-                one_shot::Error::Empty | one_shot::Error::Failed | one_shot::Error::Start(_),
+                one_shot::Error::Cancelled
+                | one_shot::Error::Empty
+                | one_shot::Error::Failed
+                | one_shot::Error::Start(_),
             ) => StatusCode::BAD_GATEWAY,
         }
     }

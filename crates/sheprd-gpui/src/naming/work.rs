@@ -52,12 +52,42 @@ impl std::fmt::Debug for Reach {
     }
 }
 
+/// What naming may do with a terminal.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Role {
+    /// Read its text, and ask its agent.
+    ReadAndAsk,
+    /// Read its text only: a watch-only mirror never types into the
+    /// terminal it shows.
+    Read,
+    /// Ask its agent only: a chat observing it already gives its words.
+    Ask,
+}
+
+impl Role {
+    pub(super) fn reads(self) -> bool {
+        matches!(self, Self::ReadAndAsk | Self::Read)
+    }
+
+    pub(super) fn asks(self) -> bool {
+        matches!(self, Self::ReadAndAsk | Self::Ask)
+    }
+}
+
 /// A terminal of the subject, and the agent running in it, if any.
 #[derive(Clone, Debug)]
 pub(super) struct Terminal {
     /// What the agent is called on a button and in messages.
     pub(super) agent: Option<String>,
     pub(super) reach: Reach,
+    pub(super) role: Role,
+}
+
+impl Terminal {
+    /// Whether [`super::Way::Agent`] can ask the agent in it.
+    pub(super) fn askable(&self) -> bool {
+        self.agent.is_some() && self.role.asks()
+    }
 }
 
 impl Terminal {
@@ -154,7 +184,11 @@ pub(super) fn ask_claude(reading: Reading, cancelled: &AtomicBool) -> Result<Str
         }
     }
     let mut failure = None;
-    for terminal in &reading.terminals {
+    for terminal in reading
+        .terminals
+        .iter()
+        .filter(|terminal| terminal.role.reads())
+    {
         if cancelled.load(Ordering::Acquire) {
             return Err(Error::Gone);
         }
@@ -177,7 +211,7 @@ pub(super) fn ask_claude(reading: Reading, cancelled: &AtomicBool) -> Result<Str
     if cancelled.load(Ordering::Acquire) {
         return Err(Error::Gone);
     }
-    let answer = one_shot::ask(naming::TITLE_PROMPT, &input)?;
+    let answer = one_shot::ask(naming::TITLE_PROMPT, &input, cancelled)?;
     naming::title_from(&answer).ok_or(Error::Claude(one_shot::Error::Empty))
 }
 

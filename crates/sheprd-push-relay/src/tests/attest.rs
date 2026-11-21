@@ -314,27 +314,57 @@ fn apples_root_is_embedded() {
     assert!(root.is_ca());
 }
 
-/// Checks an attestation from a real phone, saved by the spike app's Attest
-/// tab (`ios/Spikes/attest-check.py` has the steps), against Apple's root:
-/// `SHEPRD_ATTEST_FIXTURE=attest.json SHEPRD_ATTEST_APP=TEAM.so.pen.herdr-spikes
-/// SHEPRD_ATTEST_AT=UNIX_SECONDS cargo test -p sheprd-push-relay -- --ignored real_attestation`.
-#[test]
-#[ignore = "needs an attestation from a real phone"]
-fn real_attestation_from_a_phone() {
+/// An attestation from an iPhone 15 Pro, made by the spike app's Attest tab
+/// (`ios/Spikes`, a development build of `VJAHQVZ96V.so.pen.herdr-spikes`)
+/// on 2026-11-21. Its fields are standard base64, as the app saved them.
+const IPHONE: &[u8] = include_bytes!("fixtures/iphone-attestation.json");
+const IPHONE_APP: &str = "VJAHQVZ96V.so.pen.herdr-spikes";
+/// When it was made: Apple's leaf is good from a day before to two after.
+const IPHONE_AT_S: u64 = 1_795_247_105;
+
+fn iphone() -> (Vec<u8>, KeyId, Vec<u8>) {
     use base64::engine::general_purpose::STANDARD;
-    let file = std::env::var("SHEPRD_ATTEST_FIXTURE").unwrap();
-    let app = std::env::var("SHEPRD_ATTEST_APP").unwrap();
-    let at: u64 = std::env::var("SHEPRD_ATTEST_AT").unwrap().parse().unwrap();
-    let record: serde_json::Value = serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
+    let record: serde_json::Value = serde_json::from_slice(IPHONE).unwrap();
     let field = |name: &str| STANDARD.decode(record[name].as_str().unwrap()).unwrap();
-    let key_id: KeyId = field("key_id").try_into().unwrap();
-    let attested = Verifier::apple(&app)
-        .verify(
-            &field("attestation"),
-            &key_id,
-            &hash(&field("challenge")),
-            at,
-        )
+    let key_id = field("key_id").try_into().unwrap();
+    (field("attestation"), key_id, field("challenge"))
+}
+
+#[test]
+fn a_real_attestation_from_an_iphone_checks_against_apples_root() {
+    let (object, key_id, challenge) = iphone();
+    let apple = Verifier::apple(IPHONE_APP);
+    let attested = apple
+        .verify(&object, &key_id, &hash(&challenge), IPHONE_AT_S)
         .unwrap();
     assert_eq!(attested.environment, Environment::Development);
+    assert_eq!(
+        <[u8; 32]>::from(Sha256::digest(attested.public_key)),
+        key_id
+    );
+
+    let three_days_later = IPHONE_AT_S + 3 * 24 * 60 * 60;
+    let cases = [
+        (
+            apple.verify(&object, &key_id, &hash(b"another"), IPHONE_AT_S),
+            Error::Nonce,
+        ),
+        (
+            apple.verify(&object, &key_id, &hash(&challenge), three_days_later),
+            Error::Chain,
+        ),
+        (
+            Verifier::apple(APP_ID).verify(&object, &key_id, &hash(&challenge), IPHONE_AT_S),
+            Error::App,
+        ),
+        (
+            Pki::new()
+                .verifier()
+                .verify(&object, &key_id, &hash(&challenge), IPHONE_AT_S),
+            Error::Chain,
+        ),
+    ];
+    for (verified, expected) in cases {
+        assert_eq!(verified, Err(expected));
+    }
 }

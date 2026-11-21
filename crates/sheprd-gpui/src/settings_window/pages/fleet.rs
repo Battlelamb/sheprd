@@ -11,6 +11,8 @@ use super::{SettingsWindow, ui};
 use crate::{
     fleet::{Fleet, Standing, flows, plain},
     i18n::fl,
+    remote::{Health, Supervisor},
+    settings_window::Section,
 };
 use gpui::{prelude::*, *};
 use sheprd_remote_control::control::fleet::{
@@ -66,7 +68,7 @@ pub(crate) fn open(source: WeakEntity<crate::SheprdWindow>, pending: Pending, cx
             return;
         };
         let _ = handle.update(cx, |view, window, cx| {
-            view.select_section(crate::settings_window::Section::Fleet, window, cx);
+            view.select_section(Section::Fleet, window, cx);
             match pending {
                 Pending::Nothing => {}
                 Pending::Remove(member) => view.fleet.removing = Some((member, None)),
@@ -114,6 +116,42 @@ impl SettingsWindow {
         });
     }
 
+    /// With no fleet to show, why one cannot be created yet: the remote
+    /// control daemon keeps and signs the log, so with it switched off, or
+    /// on but not answering, Create would only fail. A daemon being
+    /// started or restarted (`Unknown`, or the supervisor busy) still
+    /// offers Create, and a fleet already read stays shown either way.
+    fn fleet_needs_remote(&self, cx: &mut Context<Self>) -> Option<ui::Row> {
+        let description = match Supervisor::health(cx) {
+            Health::Off => fl!("settings-fleet-needs-remote-off"),
+            Health::NotRunning(error) if !Supervisor::busy(cx) => fl!(
+                "settings-fleet-needs-remote-down",
+                error = crate::notifications::safe_text(&error, 300)
+            ),
+            Health::NotRunning(_) | Health::Unknown | Health::Running(_) => return None,
+        };
+        let theme = &self.theme;
+        let open = ui::button(
+            theme,
+            "fleet-open-remote",
+            fl!("settings-fleet-needs-remote-open"),
+            true,
+        )
+        .on_click(cx.listener(|this, _, window, cx| {
+            this.select_section(Section::RemoteControl, window, cx);
+        }));
+        Some(
+            // Where Create shows otherwise, so a search for it lands here.
+            ui::row(
+                theme,
+                "fleet-create-row",
+                fl!("settings-fleet-needs-remote"),
+            )
+            .description(description)
+            .control(open),
+        )
+    }
+
     pub(in crate::settings_window) fn render_fleet(&self, cx: &mut Context<Self>) -> Div {
         let theme = &self.theme;
         let mut page = div().flex().flex_col();
@@ -125,6 +163,9 @@ impl SettingsWindow {
             );
         }
         let Some(view) = Fleet::view(cx).cloned() else {
+            if let Some(row) = self.fleet_needs_remote(cx) {
+                return page.child(row).children(self.fleet_scrub_only(cx));
+            }
             let reading = !Fleet::read(cx);
             let create = ui::button(
                 theme,

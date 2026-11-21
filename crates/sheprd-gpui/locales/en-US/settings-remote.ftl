@@ -29,6 +29,9 @@ settings-remote-presence-note = Paired iPhones near this computer over Bluetooth
 settings-remote-restart = Restart the daemon
 settings-remote-restart-note = Starts it again from the binary beside Sheprd, as after an update. Phones reconnect on their own.
 settings-remote-restart-button = Restart
+settings-remote-fleet = Use several computers?
+settings-remote-fleet-note = Fleet links them all, with your phones, so a host added on one is reachable from every other.
+settings-remote-fleet-open = Open Fleet
 
 settings-remote-section-connection = Connection
 settings-remote-bind-all = All interfaces

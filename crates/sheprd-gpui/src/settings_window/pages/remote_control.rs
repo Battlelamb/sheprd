@@ -389,6 +389,21 @@ impl SettingsWindow {
                         }),
                     ),
             )
+            .child(
+                ui::row(theme, "remote-fleet", fl!("settings-remote-fleet"))
+                    .description(fl!("settings-remote-fleet-note"))
+                    .control(
+                        ui::button(
+                            theme,
+                            "remote-fleet-open",
+                            fl!("settings-remote-fleet-open"),
+                            true,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.select_section(Section::Fleet, window, cx);
+                        })),
+                    ),
+            )
             .child(ui::section(
                 theme,
                 &fl!("settings-remote-section-connection"),

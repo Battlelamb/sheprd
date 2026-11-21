@@ -1,14 +1,16 @@
 import SheprdRemoteCore
 import SwiftUI
 
-/// Settings' push relay section: the opt-in, off by default, with what the
-/// push relay sees (`docs/apns-relay-plan.md`, Opt-in), and how each paired
-/// computer delivers this phone's pushes. Turning it on asks first, with
-/// the same explanation, as Sheprd does on the computer.
+/// Settings' push relay section: the setting, on by default
+/// (`PushRelaySetting`), what the push relay sees (`docs/apns-relay-plan.md`,
+/// Opt-in), and how each paired computer delivers this phone's pushes.
+/// Turning it back on after turning it off asks first, with the same
+/// explanation, as Sheprd does on the computer.
 struct PushRelaySection: View {
     @Environment(AppModel.self) private var model
-    @AppStorage(PushRelaySetting.key, store: PushRelaySetting.store) private var pushRelay = false
+    @AppStorage(PushRelaySetting.key, store: PushRelaySetting.store) private var pushRelay = true
     @State private var confirming = false
+    @State private var explaining = false
 
     /// The plan's explanation, kept true as the design changes.
     static let explanation = """
@@ -46,6 +48,7 @@ struct PushRelaySection: View {
             if pushRelay, let error = model.tokens.pushRelay.lastError {
                 Text(error).font(.footnote).foregroundStyle(.secondary)
             }
+            Button("What the Push Relay Sees") { explaining = true }
             if !pushRelay, model.tokens.delivery.values.contains(.pushRelay) {
                 Text("A computer sends pushes through the push relay. Turn it on here to get its alerts and Live Activities.")
                     .font(.footnote)
@@ -64,6 +67,11 @@ struct PushRelaySection: View {
                 Task { await model.tokens.pushRelayChanged(to: true) }
             }
             Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(Self.explanation)
+        }
+        .alert("What the push relay sees", isPresented: $explaining) {
+            Button("OK", role: .cancel) {}
         } message: {
             Text(Self.explanation)
         }

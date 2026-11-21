@@ -5,8 +5,10 @@ and sealed alerts, without shipping the APNs key to their computers. A small
 Rust service in this repository, `sheprd-push-relay`, holds the key and forwards
 pushes from each user's `sheprd-remote-control` daemon to Apple.
 
-- **Opt-in.** It is off until the user turns it on, in a setting that explains
-  what the relay sees.
+- **Opt-in on the computer.** Each computer sends nothing through it until the
+  user turns it on, in a setting that explains what the relay sees. The iOS
+  app has it on by default, since without it the App Store app gets no push;
+  its setting explains the same and turns it off.
 - **Cheap to run.** One Docker image built by CI, on any small host, with no database.
   TestFlight has about 120 downloads, so nothing here needs to scale yet.
 - **Little to steal.** The server stores no push tokens and no chat content, and
@@ -202,22 +204,22 @@ the app lets the credential expire, and APNs reports the tokens gone.
 
 ## Opt-in
 
-Relay delivery starts with the phone. The iOS app makes no attest call and
-gives out no handle until the user turns it on, and a daemon connects to the
-relay only to deliver to a handle a phone gave it, so until then nothing
-reaches the relay from either side.
+Relay delivery is on by default on both sides, and either side turns it off.
+The iOS app has it on from its first launch, and again after a reinstall,
+unless the user turned it off; a daemon connects to the relay only to deliver
+to a handle a phone gave it, so nothing reaches the relay from a computer
+until a phone with the setting on registers there.
 
 The choice is made in two places, because each side holds something different:
 
 - **Sheprd**, Remote Control settings: `push_relay` in `[remote]`, for each
   computer. It is on by default, so every computer the phone is paired with,
-  linked hosts and fleet members included, pushes once the phone opts in,
-  without a setting to find on each machine. Turning it off
-  (`push_relay = false`, `--no-push-relay`) keeps content from leaving that
-  computer through the relay even for a phone that opted in.
-- **iOS app**, Settings > Live Activities: this allows the phone to attest and
-  give out handles. When the user first pairs, or when a paired computer has
-  the relay on, the app offers this with the same explanation.
+  linked hosts and fleet members included, pushes without a setting to find
+  on each machine. Turning it off (`push_relay = false`, `--no-push-relay`)
+  keeps content from leaving that computer through the relay.
+- **iOS app**, Settings > Push Relay: this allows the phone to attest and
+  give out handles. It is on by default, as the App Store app has no other
+  way to get pushes; the setting shows the same explanation and turns it off.
 
 Both must be on for pushes to flow. Turning either off stops them, and turning
 off the phone's setting also revokes its handles.
@@ -423,7 +425,7 @@ and deployment config stay on the host and out of the repository.
   a subscription exists, and activity updates are dropped, not queued.
 
 **iOS.**
-- The opt-in setting and explanation. Nothing below runs until it is on.
+- The setting and explanation, on by default. Nothing below runs while it is off.
 - App Attest registration and credential renewal, in the main app only.
 - `ActivityTokens.sync` sends handles, and sends tokens only in own-key mode.
 - A daemon reply of "push not configured" stops being an error: it no longer
@@ -485,16 +487,18 @@ The daemon's side is built: `apns::Delivery` (off, own key, or relay),
 `{"handle", "environment"}`), sealed and shortened Live Activities
 (`apns::relayed`, info `sheprd-live-activity-v1`), `SealedPush` as the only
 thing `RelayClient` takes, `[remote] push_relay` and `--push-relay`, `gone`
-forgetting a handle, and a one-minute outage window that leaves alerts to Web
-Push and drops activity updates. The iOS side is built too: the
-opt-in in Settings > Push Relay with this explanation, App Attest and the
-credential in the main app's keychain, renewed a week before it runs out,
-handles made on the phone per token and sent with the notify key, revoking
-them when the setting goes off, the widget opening sealed content from the
-notify keys in an App Group file, and each computer's delivery (`POST
-/api/apns` answers `own_key` or `push_relay`). Still to do: revoking a
-phone's handles when it unpairs, the Sheprd setting, explanation, and status
-command, and testing on a device.
+forgetting a handle, a one-minute outage window that leaves alerts to Web
+Push and drops activity updates, and revoking a phone's handles at the push
+relay when it unpairs by any path (`apns::push_relay_revoke`; best effort,
+bounded, and only in push relay mode: with `push_relay` off the daemon makes
+no push relay connection and keeps the handles unused). The iOS side is built
+too: the opt-in in Settings > Push Relay with this explanation, App Attest
+and the credential in the main app's keychain, renewed a week before it runs
+out, handles made on the phone per token and sent with the notify key,
+revoking them when the setting goes off, the widget opening sealed content
+from the notify keys in an App Group file, and each computer's delivery
+(`POST /api/apns` answers `own_key` or `push_relay`). Still to do: the Sheprd
+setting, explanation, and status command, and testing on a device.
 
 **5. Roll out.** Deploy production and offer it to TestFlight users. Watch
 delivery rates, 429s, and `gone` replies. Try the recovery runbook on the sandbox

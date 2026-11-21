@@ -90,10 +90,20 @@ final class ActivityTokens {
     }
 
     /// `computer` is online again: registers with it when the last try
-    /// did not reach it.
+    /// did not reach it. A try still running may have started before the
+    /// link found its relay proxy, so it is waited for, and registered
+    /// again when it too misses: the link sends no second online event.
     func online(_ computer: Computer) {
-        guard unreached.contains(computer.fingerprint) else { return }
-        Task { await sync(only: computer.fingerprint) }
+        let fingerprint = computer.fingerprint
+        if unreached.contains(fingerprint) {
+            Task { await sync(only: fingerprint) }
+            return
+        }
+        guard let running = syncing[fingerprint] else { return }
+        Task {
+            _ = await running.value
+            if unreached.contains(fingerprint) { await sync(only: fingerprint) }
+        }
     }
 
     /// Starts watching ActivityKit; safe to call more than once.

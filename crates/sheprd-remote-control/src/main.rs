@@ -90,8 +90,12 @@ fn main() -> ExitCode {
                 }
             });
         }
-        Ok(Invocation::DesktopPair { state_dir, name }) => {
-            return desktop::run_pair(state_dir.as_deref(), name);
+        Ok(Invocation::DesktopPair {
+            state_dir,
+            name,
+            link,
+        }) => {
+            return desktop::run_pair(state_dir.as_deref(), name, link);
         }
         Ok(Invocation::RelayConnect { state_dir, host }) => {
             return desktop::run_connect(state_dir.as_deref(), &host);

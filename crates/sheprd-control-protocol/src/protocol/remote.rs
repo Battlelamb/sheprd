@@ -1,10 +1,15 @@
 //! Remote control: the daemon's status and devices, how its iPhone pushes
 //! leave it (the push relay), the pairing dialog, the revoke confirmation,
-//! restarting the daemon, and keeping a private relay's listen token. The daemon's own types are reused as they are;
-//! no pairing token ever crosses this socket, and a listen token crosses
-//! it only from the caller, once, to be kept: no answer carries it back.
+//! restarting the daemon, keeping a private relay's listen token, and Add
+//! Device filled with a pairing link. The daemon's own types are reused as
+//! they are; no pairing token of this computer ever crosses this socket,
+//! and a listen token or another computer's pairing link crosses it only
+//! from the caller, once: no answer carries either back.
 use serde::{Deserialize, Serialize};
-use sheprd_remote_control::control::{Device, Status, push::PushStatus, relays::ListenToken};
+use sheprd_remote_control::{
+    app::pairing::LinkText,
+    control::{Device, Status, push::PushStatus, relays::ListenToken},
+};
 
 /// Asking the daemon, and for `revoke` the device list first, takes up to
 /// its own answer timeout a request.
@@ -33,6 +38,11 @@ pub enum RemoteOp {
     Revoke {
         device: String,
     },
+    /// Opens Add Device > Nearby Sheprd with another computer's pairing
+    /// link filled in; the user clicks Pair there. `Debug` never shows it.
+    AddLink {
+        link: LinkText,
+    },
     /// Restarts the daemon from the binary beside the app.
     Restart,
     /// Keeps this computer's listen token for the relay at `relay`, or
@@ -51,7 +61,7 @@ impl RemoteOp {
             Self::Status | Self::Devices | Self::Revoke { .. } | Self::RelayToken { .. } => {
                 DAEMON_WAIT_SECONDS
             }
-            Self::Pair { .. } | Self::Restart => 0,
+            Self::AddLink { .. } | Self::Pair { .. } | Self::Restart => 0,
         }
     }
 }

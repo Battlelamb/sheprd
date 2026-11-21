@@ -7,6 +7,7 @@
 //! an SSH host has no path to this machine's socket.
 
 mod client;
+pub(crate) mod link_input;
 pub(crate) mod listen_token;
 mod server;
 

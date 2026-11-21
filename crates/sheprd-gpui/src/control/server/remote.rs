@@ -38,6 +38,22 @@ pub(super) fn serve(
             .unwrap_or_default(),
         Err(response) => return incoming.respond(response),
     };
+    // Another computer's link: this computer's remote control plays no
+    // part, as Add Device does not need it on.
+    if let RemoteOp::AddLink { link } = op {
+        return incoming.respond(in_free_window(&caller, cx, |view, window, cx| {
+            if view.open_pairing_link(&link.0, window, cx) {
+                Response::done(
+                    "Showing Add Device > Nearby Sheprd with the link; the user clicks Pair there",
+                )
+            } else {
+                Response::error(
+                    ErrorCode::Unsupported,
+                    "Add Device is not available in this window",
+                )
+            }
+        }));
+    }
     if let RemoteOp::Pair { address } = op {
         return incoming.respond(in_free_window(&caller, cx, |view, window, cx| {
             if !enabled {
@@ -145,7 +161,8 @@ pub(super) fn serve(
                 })
             })
         }
-        RemoteOp::Pair { .. }
+        RemoteOp::AddLink { .. }
+        | RemoteOp::Pair { .. }
         | RemoteOp::PushStatus
         | RemoteOp::Restart
         | RemoteOp::RelayToken { .. } => return,

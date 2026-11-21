@@ -153,6 +153,8 @@ pub enum Invocation {
     DesktopPair {
         state_dir: Option<PathBuf>,
         name: String,
+        /// From a pairing link on stdin, not over Bluetooth.
+        link: bool,
     },
     /// Carries `ssh` to a machine added over Bluetooth, `r-ID.sheprd.invalid`,
     /// through its relays: its `ProxyCommand`.
@@ -199,7 +201,7 @@ Usage: sheprd-remote-control serve --state-dir DIR [options]
        sheprd-remote-control fleet bundle --fleet ID [--state-dir DIR]
        sheprd-remote-control fleet intro [--state-dir DIR]
        sheprd-remote-control fleet scrub [--state-dir DIR]
-       sheprd-remote-control desktop-pair --name NAME [--state-dir DIR]
+       sheprd-remote-control desktop-pair --name NAME [--link] [--state-dir DIR]
        sheprd-remote-control relay-connect [--state-dir DIR] HOST
 
 Serves this computer's Herdr chats to paired phones over HTTPS. Sheprd
@@ -263,7 +265,9 @@ the daemon listens on them too, beside its own [remote] relays.
 desktop-pair adds a nearby Sheprd that is on another network: Sheprd
 runs it and carries its Bluetooth frames as JSON lines on stdio. The
 other computer is then reached through its relays, and relay-connect is
-the ProxyCommand ssh runs for it.
+the ProxyCommand ssh runs for it. With --link, it adds a Sheprd on any
+network from a pairing link that computer's Pair device copied, read as
+the first JSON line on stdin, never from the command line.
 fleet apply and fleet bundle are the fleet's halves Sheprd on another
 computer runs here over SSH: apply takes signed fleet operations and
 prints what this computer holds that the caller lacks; bundle prints this
@@ -536,13 +540,13 @@ fn parse_host(
     })
 }
 
-/// `desktop-pair --name NAME [--state-dir DIR]` and
+/// `desktop-pair --name NAME [--link] [--state-dir DIR]` and
 /// `relay-connect [--state-dir DIR] HOST`.
 fn parse_desktop(
     pair: bool,
     mut args: impl Iterator<Item = OsString>,
 ) -> Result<Invocation, ParseError> {
-    let (mut state_dir, mut name, mut host) = (None, None, None);
+    let (mut state_dir, mut name, mut host, mut link) = (None, None, None, false);
     while let Some(arg) = args.next() {
         let text = arg.to_str().unwrap_or_default().to_owned();
         match text.as_str() {
@@ -559,6 +563,7 @@ fn parse_desktop(
                         .map_err(|_| ParseError::Value { option: "--name" })?,
                 );
             }
+            "--link" if pair => link = true,
             "-h" | "--help" => return Ok(Invocation::Help),
             _ if !pair && host.is_none() && !text.starts_with('-') && !text.is_empty() => {
                 host = Some(text);
@@ -570,6 +575,7 @@ fn parse_desktop(
         return Ok(Invocation::DesktopPair {
             state_dir,
             name: name.ok_or(ParseError::Missing("--name"))?,
+            link,
         });
     }
     Ok(Invocation::RelayConnect {

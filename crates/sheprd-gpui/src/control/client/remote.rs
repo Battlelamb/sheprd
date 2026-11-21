@@ -21,6 +21,9 @@ pub(super) fn remote(command: RemoteCommand, context: &Context) -> crate::Result
         RemoteCommand::PushStatus => RemoteOp::PushStatus,
         RemoteCommand::Revoke { device } => RemoteOp::Revoke { device },
         RemoteCommand::Restart => RemoteOp::Restart,
+        RemoteCommand::AddLink => RemoteOp::AddLink {
+            link: piped_link()?,
+        },
         RemoteCommand::RelayToken { relay, clear } => RemoteOp::RelayToken {
             relay: relay.to_string(),
             token: if clear { None } else { Some(piped_token()?) },
@@ -41,6 +44,16 @@ fn piped_token() -> crate::Result<sheprd_remote_control::control::relays::Listen
         return Err(crate::control::listen_token::Error::Terminal.into());
     }
     Ok(crate::control::listen_token::read(stdin.lock())?)
+}
+
+/// The pairing link piped on standard input. A terminal is refused, as
+/// for a listen token.
+fn piped_link() -> crate::Result<sheprd_remote_control::app::pairing::LinkText> {
+    let stdin = std::io::stdin();
+    if stdin.is_terminal() {
+        return Err(crate::control::link_input::Error::Terminal.into());
+    }
+    Ok(crate::control::link_input::read(stdin.lock())?)
 }
 
 /// What a reply prints, as text and as JSON.

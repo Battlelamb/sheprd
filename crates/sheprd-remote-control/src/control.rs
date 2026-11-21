@@ -19,6 +19,7 @@ pub mod github;
 pub mod host_relay;
 pub mod hosts;
 pub mod layout;
+pub mod pairing_link;
 pub mod pull_requests;
 pub mod push;
 pub mod relays;
@@ -140,6 +141,14 @@ pub enum Request {
         /// joins the claimant's. One the fleet no longer matches is refused.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fleet: Option<String>,
+    },
+    /// A pairing link for the open, unclaimed pairing `id`
+    /// (`pairing_link`): a second token, claimable for two minutes through
+    /// this computer's relays, which the dialog copies so another Sheprd
+    /// can pair from any network. Refused while no relay listens. A new
+    /// link replaces the previous one.
+    PairLink {
+        id: PairingId,
     },
     /// Closes the dialog's pairing; its token stops working.
     CancelPairing {
@@ -325,6 +334,11 @@ pub enum Response {
     Status(Status),
     Offer(Offer),
     Pairing(PairingState),
+    /// A pairing link, and how long it may be claimed.
+    PairLink {
+        link: String,
+        expires_in_ms: u64,
+    },
     Devices {
         devices: Vec<Device>,
     },
@@ -427,6 +441,8 @@ pub enum ErrorCode {
     Unsupported,
     /// Nearby pairing needs the pairing dialog open on the computer.
     NoPairing,
+    /// A pairing link needs this computer to listen on a relay.
+    NoRelays,
     /// The daemon could not write its state; nothing changed, and the
     /// same request may succeed later.
     Unsaved,

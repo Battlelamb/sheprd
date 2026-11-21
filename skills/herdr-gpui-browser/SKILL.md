@@ -400,6 +400,7 @@ what Sheprd shows or keeps.
 | Check remote control and its daemon-host network interfaces, or pair a phone (Tailscale preferred; optionally choose an origin from status) | `sheprd remote status`, `sheprd remote pair [--address HTTPS_ORIGIN]` |
 | Check whether iPhone pushes go out (off, own APNs key, or the push relay) and whether the last ones worked, here and on each linked host; read-only, the user turns the push relay off or on in Settings | `sheprd remote push-status --json` |
 | See the user's fleet of computers and phones and which hosts each reaches, or ask to remove one (the user confirms in Settings > Fleet) | `sheprd fleet status --json`, `sheprd fleet remove MEMBER` |
+| Add another computer running Sheprd on any network from its pairing link (piped on stdin, never an argument); the user clicks Pair | `sheprd remote add-link < FILE` |
 | Keep this computer's listen token for a private relay (piped on stdin, never an argument), or forget it | `sheprd remote relays token ENDPOINT < FILE`, `sheprd remote relays token ENDPOINT --clear` |
 | Keep the machine awake during a long job | `sheprd caffeine on --for 2h` |
 | Check whether the app runs, and which windows and hosts it has | `sheprd status` |

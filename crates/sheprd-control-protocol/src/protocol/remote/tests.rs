@@ -3,6 +3,7 @@ use super::*;
 use crate::protocol::{Call, Caller, Request, Response};
 use sheprd_remote_control::control::DeviceId;
 
+mod add_link;
 mod addresses;
 mod push_hosts;
 mod push_status;

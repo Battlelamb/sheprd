@@ -17,7 +17,7 @@ if [[ "$(uname -s)" == Darwin ]]; then
   service() { ./svc.sh "$1"; }
 else
   # scripts/install-linux-deps.sh runs in every job and needs it. pip is
-  # how zizmor-action fetches zizmor.
+  # how zizmor-action fetches zizmor, and the docs check builds a venv.
   sudo -n true || { echo "passwordless sudo is required" >&2; exit 1; }
   export DEBIAN_FRONTEND=noninteractive
   # Grow the root file system into a disk `tart set` enlarged.
@@ -32,7 +32,7 @@ else
     grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
   fi
   sudo apt-get update -qq
-  sudo apt-get install -y -qq --no-install-recommends build-essential git curl ca-certificates python3 python3-pip jq >/dev/null
+  sudo apt-get install -y -qq --no-install-recommends build-essential git curl ca-certificates python3 python3-pip python3-venv jq >/dev/null
   job_path="$HOME/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
   limit=70
   service() { sudo ./svc.sh "$1"; }

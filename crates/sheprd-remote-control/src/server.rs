@@ -61,8 +61,21 @@ pub(crate) fn registrations_for_tests(
 }
 
 /// Runs the daemon on the current Tokio runtime until it is told to stop.
+/// A daemon already serving the state directory leaves this one nothing to
+/// do: it returns at once, so the process exits cleanly and the service
+/// manager, which relaunches only a failed daemon, leaves it down. Failing
+/// instead would retry every few seconds for as long as the other one runs,
+/// filling the log. Sheprd stops the other one and starts the service when
+/// it restarts or updates the daemon.
 pub async fn run(options: Options) -> Result<()> {
     std::fs::create_dir_all(&options.state_dir)?;
+    if control::serving(&options.state_dir) {
+        tracing::warn!(
+            state_dir = %options.state_dir.display(),
+            "Another remote control daemon serves this state directory; exiting"
+        );
+        return Ok(());
+    }
     let bind = options.bind;
     // Relays may be shared with this computer while it runs, so loopback,
     // where relay sessions are served, is always certified.

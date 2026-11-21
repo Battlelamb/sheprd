@@ -27,6 +27,11 @@ pub(crate) fn version() -> &'static str {
     option_env!("HERDR_RELEASE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
 }
 
+/// Whether a daemon already serves `state_dir`: its control socket answers.
+pub(super) fn serving(state_dir: &Path) -> bool {
+    Connection::connect(&control::address(state_dir), PROBE_TIMEOUT).is_ok()
+}
+
 pub(super) fn serve(
     state_dir: &Path,
     state: Arc<State>,
@@ -35,7 +40,7 @@ pub(super) fn serve(
     let address = control::address(state_dir);
     // A daemon already serving this state answers here; taking its socket
     // would leave it running where Sheprd can no longer reach it.
-    if Connection::connect(&address, PROBE_TIMEOUT).is_ok() {
+    if serving(state_dir) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::AddrInUse,
             "another herdr-remote-control serves this state directory",

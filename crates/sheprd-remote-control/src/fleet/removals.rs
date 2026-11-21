@@ -287,6 +287,7 @@ async fn push(fleet: &Arc<Fleet>, peer: MemberId, record: &Record, ops: Vec<Op>)
                 }
             }
             Ok(Message::Held(ids)) => {
+                let ids = acknowledged(&ops, ids);
                 let all = ops.iter().all(|op| ids.contains(&op.id()));
                 let fleet = fleet.clone();
                 let _ = tokio::task::spawn_blocking(move || fleet.held(peer, ids)).await;
@@ -297,6 +298,13 @@ async fn push(fleet: &Arc<Fleet>, peer: MemberId, record: &Record, ops: Vec<Op>)
         }
     }
     false
+}
+
+/// Of the ids a peer says it holds, those sent to it in this exchange:
+/// a peer cannot fill what is kept for it with ids it makes up.
+pub(crate) fn acknowledged(sent: &[Op], held: Vec<OpId>) -> Vec<OpId> {
+    let sent: std::collections::BTreeSet<OpId> = sent.iter().map(Op::id).collect();
+    held.into_iter().filter(|id| sent.contains(id)).collect()
 }
 
 async fn read(io: &mut (impl AsyncRead + Unpin)) -> crate::control::fleet::Result<Message> {

@@ -23,8 +23,9 @@ public struct TermSize: Codable, Hashable, Sendable {
 public enum LiveRequest: Encodable, Hashable, Sendable {
     /// `since` is the cursor of a cached transcript, so an unchanged chat
     /// answers `chat_resumed` instead of a snapshot; `size` asks for a
-    /// terminal at the phone's size; `background` follows a chat no
-    /// screen shows, so what finishes in it is not marked seen (`api` 2).
+    /// terminal at the phone's size. A `background` chat is followed while
+    /// no screen shows it: the computer neither marks its answers seen nor
+    /// lets it keep a view on screen from starting.
     case subscribe(LiveView, since: Cursor? = nil, size: TermSize? = nil, background: Bool = false)
     case unsubscribe(LiveView)
     /// Scrolls a terminal held at the phone's size, as a mouse wheel

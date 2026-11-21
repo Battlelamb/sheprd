@@ -5,9 +5,11 @@
 //! have one order and a client's catch-up can never interleave with a change.
 
 mod agent;
+mod carry;
 mod commands;
 mod harness;
 mod pictures;
+mod pull_requests;
 mod thread;
 
 use std::{
@@ -134,6 +136,9 @@ pub(crate) struct Config {
     /// The conversation so far, for a continued session whose agent does
     /// not replay it.
     pub history: Option<Transcript>,
+    /// Clients can attach, and the agent was told where: its
+    /// `sheprd chat pr add` reaches this chat.
+    pub listens: bool,
     pub load: Option<String>,
     pub login_hint: Option<String>,
     pub pane: Option<String>,
@@ -143,6 +148,9 @@ pub(crate) struct Config {
     /// Fail rather than start a new session when the agent cannot continue
     /// `load`.
     pub require_load: bool,
+    /// What the chat that asked for this one ran with, applied once the
+    /// agent's new session opens; never to a continued one.
+    pub settings: Option<sheprd_chat_protocol::Settings>,
     /// The `sheprd` command the first note tells the agent to keep the
     /// repository's memory with; `None` leaves memory out of it.
     pub sheprd: Option<PathBuf>,
@@ -175,9 +183,15 @@ pub(crate) struct Session<R: FnMut(Update)> {
     acp_session: Option<wire::SessionId>,
     activity: Option<Activity>,
     asked: HashMap<PermissionId, Asked>,
+    /// The whole commands of shell calls, which their titles cut short.
+    commands: pull_requests::Commands,
     config: Config,
     /// What the agent has been told besides the person's words.
     context: Context,
+    /// The notice under the conversation this chat continued, decided when
+    /// its first session opens and kept for the chat's life, whichever
+    /// agent it switches to; `None` until then.
+    divider: Option<Option<sheprd_chat_protocol::EntryId>>,
     epoch: Uuid,
     handled: VecDeque<(CommandId, Option<Rejection>)>,
     /// The agent process heard now.
@@ -237,14 +251,23 @@ impl<R: FnMut(Update)> Session<R> {
             .as_ref()
             .and_then(|_| crate::context::Recall::open(&config.cwd));
         let context = Context::new(std::mem::take(&mut config.prompts), facts, told)
-            .with_memory(config.sheprd.as_deref(), recall);
+            .with_memory(config.sheprd.as_deref(), recall)
+            .with_pull_requests(config.sheprd.as_deref().filter(|_| config.listens))
+            .with_launch(
+                config
+                    .sheprd
+                    .as_deref()
+                    .filter(|_| config.harness.is_some()),
+            );
         Self {
             accepts: crate::files::Accepts::default(),
             acp_session: None,
             activity: None,
             asked: HashMap::new(),
+            commands: pull_requests::Commands::default(),
             config,
             context,
+            divider: None,
             epoch: Uuid::new_v4(),
             handled: VecDeque::new(),
             harness: HarnessId::default(),
@@ -383,6 +406,7 @@ impl<R: FnMut(Update)> Session<R> {
         }
         self.report_activity();
         self.pictures_after(&change);
+        self.find_pull_requests(&change);
     }
 
     fn emit_all(&mut self, changes: impl IntoIterator<Item = Change>) {

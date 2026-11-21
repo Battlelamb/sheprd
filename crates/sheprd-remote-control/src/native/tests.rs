@@ -3,12 +3,12 @@ use crate::hub::{ChatRow, Hub, Layout, TerminalPane, Workspace};
 use sheprd_chat_protocol::{EndpointId, PermissionId};
 use sheprd_client::protocol::AgentStatus;
 
+mod activity_fixture;
 mod agent_name;
-#[cfg(unix)]
-mod background_chat;
 mod chat_title;
 mod create;
 mod create_start;
+mod create_title;
 mod fixtures;
 mod hosts;
 mod installed_agents;
@@ -23,8 +23,10 @@ mod projection;
 mod reducer;
 mod socket;
 mod tab_actions;
+mod term_prompt;
 mod term_scroll;
 mod term_size;
+mod terminal_preview;
 mod views;
 
 /// A layout with one workspace holding chat `p1` and terminal `t2`.

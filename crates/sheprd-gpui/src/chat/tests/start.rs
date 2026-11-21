@@ -185,11 +185,11 @@ fn a_new_chat_opens_a_tab_and_types_the_fixed_line(cx: &mut gpui::TestAppContext
         view.update(cx, |view, cx| {
             local_window(view, &peer, cx);
             assert!(view.can_start_chat());
-            view.start_chat(Agent::Claude, None).unwrap();
+            view.start_chat(Agent::Claude, None, None).unwrap();
             // One tab opens at a time, a script's included.
             assert!(view.script_slot_busy());
             assert!(matches!(
-                view.start_chat(Agent::Codex, None),
+                view.start_chat(Agent::Codex, None, None),
                 Err(start::Error::SlotBusy)
             ));
         })
@@ -243,12 +243,12 @@ fn a_chat_does_not_start_without_the_program_or_a_reachable_host(cx: &mut gpui::
             view.chats.program = Program::Missing;
             assert!(!view.can_start_chat());
             assert!(matches!(
-                view.start_chat(Agent::Claude, None),
+                view.start_chat(Agent::Claude, None, None),
                 Err(start::Error::ProgramMissing)
             ));
             view.chats.program = Program::Looking;
             assert!(matches!(
-                view.start_chat(Agent::Claude, None),
+                view.start_chat(Agent::Claude, None, None),
                 Err(start::Error::ProgramUnknown)
             ));
             view.chats.program = Program::Found(PathBuf::from("/opt/herdr-acp"));
@@ -263,7 +263,7 @@ fn a_chat_does_not_start_without_the_program_or_a_reachable_host(cx: &mut gpui::
                 sheprd_client::ConnectTarget::Socket(PathBuf::from("/tmp/herdr.sock"));
             assert!(!view.can_start_chat());
             assert!(matches!(
-                view.start_chat(Agent::Claude, None),
+                view.start_chat(Agent::Claude, None, None),
                 Err(start::Error::NotLocal)
             ));
             assert!(!view.chat_starting());
@@ -278,7 +278,7 @@ fn a_start_from_a_replaced_connection_types_nothing(cx: &mut gpui::TestAppContex
     cx.update(|_, cx| {
         view.update(cx, |view, cx| {
             local_window(view, &peer, cx);
-            view.start_chat(Agent::Gemini, None).unwrap();
+            view.start_chat(Agent::Gemini, None, None).unwrap();
             view.endpoints[0].generation += 1;
             view.poll_chat_start(cx);
             assert!(!view.chat_starting());
@@ -297,7 +297,7 @@ fn an_agent_the_host_lacks_does_not_start(cx: &mut gpui::TestAppContext) {
             let id = view.endpoints[0].id.clone();
             view.chats.agents.record(&id, vec![Agent::Opencode]);
             assert!(matches!(
-                view.start_chat(Agent::Claude, None),
+                view.start_chat(Agent::Claude, None, None),
                 Err(start::Error::AgentMissing(Agent::Claude))
             ));
             assert!(!view.chat_starting());

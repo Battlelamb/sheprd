@@ -22,11 +22,13 @@ use std::{
 mod actions;
 mod batch;
 mod by_number;
+mod by_url;
 mod cache;
 mod fetch;
 mod fork_branch;
 mod fork_remote;
 mod lookup;
+mod merge_queue;
 mod moved_checkout;
 mod moved_repository;
 mod remote_paths;

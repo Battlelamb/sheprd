@@ -38,6 +38,10 @@ final class NotificationService: UNNotificationServiceExtension {
         if let permission = alert.permission { info[AlertKeys.permission] = NSNumber(value: permission.id.value) }
         if alert.kind.isTerminal { info[AlertKeys.terminal] = true }
         content.userInfo = info
+        if alert.wizz {
+            content.interruptionLevel = .timeSensitive
+            if let sound = WizzSound.named() { content.sound = sound }
+        }
         let presentation = alert.presentation
         guard let category = presentation.category else {
             contentHandler(content)
@@ -66,4 +70,27 @@ final class NotificationService: UNNotificationServiceExtension {
 /// it; the handler is called once, after the category is registered.
 private struct UncheckedSendable<Value>: @unchecked Sendable {
     let value: Value
+}
+
+/// The buzz a wizz alert plays: the chat effect's own sound
+/// (`ScreenEffect.wizz.cue`), written once where notification sounds are
+/// looked for, the app group's `Library/Sounds`.
+enum WizzSound {
+    /// Named by version: a changed buzz is written afresh rather than read stale.
+    static let file = "wizz-1.wav"
+
+    static func named() -> UNNotificationSound? {
+        guard let group = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.so.pen.herdr.remote") else { return nil }
+        let folder = group.appending(path: "Library/Sounds", directoryHint: .isDirectory)
+        let url = folder.appending(path: file)
+        if !FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) {
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try ScreenEffect.wizz.cue().sound.wav().write(to: url, options: .atomic)
+            } catch {
+                return nil
+            }
+        }
+        return UNNotificationSound(named: UNNotificationSoundName(file))
+    }
 }

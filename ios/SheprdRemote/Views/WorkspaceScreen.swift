@@ -34,10 +34,12 @@ struct WorkspaceScreen: View {
     @State private var pictures = WorkspacePictureStore()
     /// What the person is asked to confirm: closing, or deleting the worktree.
     @State private var confirming: Ending?
+    /// Whether the deletion asked about discards uncommitted changes.
+    @State private var discarding = false
     /// What is on its way to the computer.
     @State private var ending: Ending?
     /// Why the last close or deletion failed.
-    @State private var endProblem: (Ending, String)?
+    @State private var endProblem: EndProblem?
     @Environment(\.dismiss) private var dismiss
 
     private static let terminal = "terminal"
@@ -168,7 +170,7 @@ struct WorkspaceScreen: View {
             #endif
         }
         // This screen is right behind what it opens, so Back is the way here.
-        .navigationDestination(item: $opened) { $0.screen.environment(\.offersWorkspace, false) }
+        .navigationDestination(item: $opened) { $0.screen.makesRoomForConnectionToast().environment(\.offersWorkspace, false) }
         // Keyed on the whole status, so a link that comes back at another
         // address loads again: a phone waking from sleep still shows the
         // address it had, and the first try there fails.
@@ -222,20 +224,21 @@ struct WorkspaceScreen: View {
         })
     }
 
-    /// The confirmation and failure of closing the workspace or deleting its
-    /// worktree; apart from the screen's other modifiers, which together are
-    /// more than the type checker takes in one expression.
+    /// The failure of closing the workspace or deleting its worktree; apart
+    /// from the screen's other modifiers, which together are more than the
+    /// type checker takes in one expression. A deletion the computer refused
+    /// as a conflict, with changes the phone had not counted, offers to
+    /// discard them; the computer's reason always shows.
     private func endingDialogs(_ content: some View) -> some View {
         content
-            .confirmationDialog(confirming?.question ?? "", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
-                                titleVisibility: .visible, presenting: confirming) { action in
-                Button(action.title, role: .destructive) { end(action) }
-            } message: { action in
-                Text(action.consequence)
-            }
-            .alert(endProblem?.0.failure ?? "", isPresented: Binding(get: { endProblem != nil }, set: { if !$0 { endProblem = nil } })) {
-            } message: {
-                Text(endProblem?.1 ?? "")
+            .alert(endProblem?.action.failure ?? "", isPresented: Binding(get: { endProblem != nil }, set: { if !$0 { endProblem = nil } }),
+                   presenting: endProblem) { problem in
+                if problem.changes > 0 {
+                    Button("Discard Changes and Delete", role: .destructive) { end(.removeWorktree, discard: true) }
+                    Button("Cancel", role: .cancel) {}
+                }
+            } message: { problem in
+                Text(problem.changes > 0 ? problem.reason + "\n\n" + Ending.discardWarning(problem.changes) : problem.reason)
             }
     }
 
@@ -247,14 +250,19 @@ struct WorkspaceScreen: View {
             if workspace.worktree?.linked == true { endingButton(.removeWorktree) }
         } footer: {
             if workspace.worktree?.linked == true {
-                Text("Deleting keeps a checkout with uncommitted changes, and leaves one with an archive script for Sheprd.")
+                Text("Deleting asks before discarding uncommitted changes, and leaves a checkout with an archive script for Sheprd.")
             }
         }
         .disabled(!online || ending != nil)
     }
 
+    /// A button and its confirmation, attached to the button so the popover
+    /// points at the row that asked.
     private func endingButton(_ action: Ending) -> some View {
-        Button(role: .destructive) { confirming = action } label: {
+        Button(role: .destructive) {
+            discarding = action == .removeWorktree && (changedFiles ?? 0) > 0
+            confirming = action
+        } label: {
             HStack {
                 Label(action.title, systemImage: action.symbol)
                 Spacer()
@@ -262,23 +270,48 @@ struct WorkspaceScreen: View {
             }
             .contentShape(.rect)
         }
+        .confirmationDialog(action.question(discarding: discarding),
+                            isPresented: Binding(get: { confirming == action }, set: { if !$0 { confirming = nil } }),
+                            titleVisibility: .visible) {
+            Button(discarding ? "Discard Changes and Delete" : action.title, role: .destructive) {
+                end(action, discard: discarding)
+            }
+        } message: {
+            Text(action.consequence(discarding: discarding ? changedFiles ?? 0 : 0))
+        }
     }
 
-    private func end(_ action: Ending) {
+    private func end(_ action: Ending, discard: Bool = false) {
         ending = action
         Task {
             defer { ending = nil }
             do {
                 switch action {
                 case .close: try await model.fleet.closeWorkspace(key)
-                case .removeWorktree: try await model.fleet.removeWorktree(key)
+                case .removeWorktree: try await model.fleet.removeWorktree(key, discard: discard)
                 }
                 // Gone from the computer: its lists drop it on the next home.
                 if opener == nil { dismiss() }
             } catch {
-                endProblem = (action, error.localizedDescription)
+                // Changes made since the phone counted them are a conflict
+                // (409); an archive script or a main checkout is not, and
+                // discarding would not get past it.
+                let conflict = if case RemoteError.status(409, _) = error { true } else { false }
+                let changes = action == .removeWorktree && !discard && conflict ? await uncommitted() : 0
+                endProblem = EndProblem(action: action, reason: error.localizedDescription, changes: changes)
             }
         }
+    }
+
+    /// The checkout's uncommitted changes as the computer counts them now;
+    /// 0 when it cannot say.
+    private func uncommitted() async -> Int {
+        let (device, id) = (key.device, key.workspace)
+        let count = try? await model.fleet.call(device) { client, token in
+            try await client.changes(workspace: id, scope: .uncommitted, bearer: token)
+        }.total
+        if let count { changedFiles = count }
+        return count ?? 0
     }
 
     private func rename(to label: String, from current: String) {
@@ -534,18 +567,27 @@ private enum Ending: Hashable, Identifiable {
         }
     }
 
-    var question: String {
+    func question(discarding: Bool) -> String {
         switch self {
         case .close: "Close this workspace?"
-        case .removeWorktree: "Delete this worktree?"
+        case .removeWorktree: discarding ? "Delete this worktree and its changes?" : "Delete this worktree?"
         }
     }
 
-    var consequence: String {
+    /// What ending does; `changes` uncommitted ones are lost with it.
+    func consequence(discarding changes: Int) -> String {
         switch self {
         case .close: "Its tabs close in Sheprd and their agents and programs stop. Its files stay on the computer."
+        case .removeWorktree where changes > 0:
+            Self.discardWarning(changes) + " Its checkout is removed and the workspace closes, ending its tabs. Its branch stays."
         case .removeWorktree: "Its checkout is removed from the computer and the workspace closes, ending its tabs. Its branch stays."
         }
+    }
+
+    static func discardWarning(_ changes: Int) -> String {
+        changes == 1
+            ? "Its uncommitted change is lost and cannot be recovered."
+            : "Its \(changes) uncommitted changes are lost and cannot be recovered."
     }
 
     var failure: String {
@@ -554,6 +596,15 @@ private enum Ending: Hashable, Identifiable {
         case .removeWorktree: "The worktree was not deleted"
         }
     }
+}
+
+/// Why ending a workspace failed, and the uncommitted changes a refused
+/// deletion could discard instead.
+private struct EndProblem: Identifiable {
+    let id = UUID()
+    let action: Ending
+    let reason: String
+    let changes: Int
 }
 
 /// The workspace's branch, and where it is.

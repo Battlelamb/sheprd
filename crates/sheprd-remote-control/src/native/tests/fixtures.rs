@@ -146,10 +146,15 @@ fn home() -> Home {
             commits: 3,
         }],
     };
-    Home::project(Sources {
+    let mut home = Home::project(Sources {
         checkouts: &Default::default(),
         recognized: &Default::default(),
         computer: "MacBook Pro",
+        // The chat and the terminal's agent are starred.
+        favorites: &crate::control::favorites::Favorites {
+            boot: Some("b".into()),
+            panes: vec!["p1".into(), "p2".into()],
+        },
         fingerprint: &"AB".repeat(32),
         layout: &layout,
         load: Some(Load {
@@ -164,7 +169,9 @@ fn home() -> Home {
         tags: crate::control::tags::ComputerTags::new(["work"], 1_770_000_000_000),
         version: "20261106.1",
         waiting: 1,
-    })
+    });
+    home.preview_terminals(&[("p2".to_owned(), "Fixed the build.\nPushed it.".to_owned())].into());
+    home
 }
 
 fn snapshot() -> ChatSnapshot {
@@ -272,46 +279,37 @@ fn client_messages_match_the_swift_fixtures() {
     check(
         "subscribe_home",
         &ClientMessage::Subscribe {
+            background: false,
             view: View::Home,
             since: None,
             size: None,
-            background: false,
         },
     );
     check(
         "subscribe_chat",
         &ClientMessage::Subscribe {
-            view: View::Chat { pane: "p1".into() },
-            since: Some(cursor(41)),
-            size: None,
             background: false,
-        },
-    );
-    check(
-        "subscribe_chat_background",
-        &ClientMessage::Subscribe {
             view: View::Chat { pane: "p1".into() },
             since: Some(cursor(41)),
             size: None,
-            background: true,
         },
     );
     check(
         "subscribe_term",
         &ClientMessage::Subscribe {
+            background: false,
             view: View::Term { pane: "p2".into() },
             since: None,
             size: None,
-            background: false,
         },
     );
     check(
         "subscribe_term_sized",
         &ClientMessage::Subscribe {
+            background: false,
             view: View::Term { pane: "p2".into() },
             since: None,
             size: Some(TermSize { cols: 46, rows: 30 }),
-            background: false,
         },
     );
     check(
@@ -355,7 +353,6 @@ fn every_fixture_reads_back_as_what_wrote_it() {
     for name in [
         "subscribe_home",
         "subscribe_chat",
-        "subscribe_chat_background",
         "subscribe_term",
         "subscribe_term_sized",
         "term_scroll",

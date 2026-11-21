@@ -12,10 +12,10 @@ fn parse(value: serde_json::Value) -> Option<ClientMessage> {
 
 pub(super) fn term(size: Option<TermSize>) -> ClientMessage {
     ClientMessage::Subscribe {
+        background: false,
         view: View::Term { pane: "p2".into() },
         since: None,
         size,
-        background: false,
     }
 }
 

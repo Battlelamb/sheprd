@@ -51,6 +51,10 @@ pub(crate) struct Sealed {
     /// The permission request a question is, for its answer buttons.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) permission: Option<SealedPermission>,
+    /// The agent asked for attention with `::wizz`: the phone plays its
+    /// buzz. Left out otherwise, as older phones expect.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) wizz: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -85,6 +89,7 @@ impl Sealed {
                         .cloned()
                         .collect(),
                 }),
+            wizz: notification.wizz,
         }
     }
 }
@@ -127,7 +132,7 @@ pub(crate) fn push(
     loop {
         let body = outer(&sealed, &seal)?;
         if body.len() <= MAX_PAYLOAD {
-            let question = sealed.kind.asks() && !sealed.clear;
+            let question = (sealed.kind.asks() || sealed.wizz) && !sealed.clear;
             return Ok(Push {
                 body,
                 collapse_id: Some(collapse_id(tag)),
@@ -174,7 +179,7 @@ fn outer(sealed: &Sealed, seal: &impl Fn(&[u8]) -> Result<Vec<u8>>) -> Result<Ve
             mutable_content: Some(1),
             content_available: None,
             thread_id: Some(&sealed.pane),
-            interruption_level: Some(if sealed.kind.asks() {
+            interruption_level: Some(if sealed.kind.asks() || sealed.wizz {
                 "time-sensitive"
             } else {
                 "active"

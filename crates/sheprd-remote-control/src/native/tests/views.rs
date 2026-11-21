@@ -22,10 +22,10 @@ fn terminals(count: usize) -> Layout {
 
 fn subscribe(view: View) -> ClientMessage {
     ClientMessage::Subscribe {
+        background: false,
         view,
         since: None,
         size: None,
-        background: false,
     }
 }
 

@@ -8,10 +8,13 @@ mod checkouts;
 mod convert;
 mod create;
 pub(super) use create::Place;
+pub(crate) use saved::TabRef;
 mod error;
 mod hold;
 mod job;
+mod kept;
 mod lines;
+mod new_workspace;
 mod own;
 mod poller;
 mod projection;
@@ -177,6 +180,7 @@ impl Source {
         let next = {
             let mut poller = lock(&self.poller);
             poller.read_spaces(&boot, core.doc_get("herdr-app"))?;
+            poller.read_shared(core.doc_get(sheprd_session::spaces::DOC))?;
             let mut next = poller.project(
                 &boot,
                 &terminals,
@@ -246,6 +250,14 @@ impl Source {
             .cloned()
             .ok_or(HubError::Response)?;
         Ok((core, terminal))
+    }
+
+    /// `pane`'s screen as text, which the core reads itself: no shared
+    /// screen is opened, so this never holds one a phone needs to open
+    /// another terminal. Blocking.
+    pub(super) fn screen_text(&self, pane: &str) -> Result<String> {
+        let (core, terminal) = self.terminal(pane)?;
+        Ok(core.read(&terminal.address)?.text)
     }
 
     /// The shared screen of `terminal`, opened outside the state lock.
@@ -379,14 +391,9 @@ fn id(address: &str) -> String {
     id
 }
 
-/// A pane's id. Addresses survive a core restart but start over when its
-/// state is wiped, which also gives the core a new id: naming the core
-/// keeps an open phone view from landing on an unrelated new terminal.
+/// A pane's id, which favorites share (`control::favorites::core_pane`).
 fn pane_id(boot: &str, address: &str) -> String {
-    let tag = boot.bytes().fold(0x811c_9dc5_u32, |hash, byte| {
-        (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
-    });
-    format!("{PREFIX}{tag:08x}-{}", &id(address)[PREFIX.len()..])
+    crate::control::favorites::core_pane(boot, address)
 }
 
 pub(super) fn owns(params: &Value) -> bool {

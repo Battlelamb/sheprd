@@ -103,12 +103,6 @@ impl Opened {
         }
     }
 
-    /// Whether a view shows `pane` now.
-    #[cfg(test)]
-    pub(crate) fn watched(&self, pane: &str) -> bool {
-        self.marks().watching.contains_key(pane)
-    }
-
     /// A view of `pane` opened.
     pub(super) fn begin(&self, layout: &Layout, pane: &str, chat: impl Fn(&str) -> ChatFacts) {
         *self.marks().watching.entry(pane.to_owned()).or_default() += 1;
@@ -126,6 +120,12 @@ impl Opened {
                 marks.watching.remove(pane);
             }
         }
+    }
+
+    /// Whether a view of `pane` is open, which marks what finishes in it seen.
+    #[cfg(all(test, unix))]
+    pub(crate) fn watched(&self, pane: &str) -> bool {
+        self.marks().watching.contains_key(pane)
     }
 
     /// Moves whenever a pane stops counting.

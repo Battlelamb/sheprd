@@ -1199,6 +1199,20 @@ commit, and has no agent working or waiting on a prompt. A repository with an
 archive script is left for the delete dialog. The focused workspace opens that
 dialog instead of being removed. The branch is not deleted, and a checkout
 the daemon finds dirty is never force removed.
+To clean up once without turning that on, click the sparkles button beside the
+sidebar's Spaces heading, shown while the selected device has merged
+worktrees, or run **Remove Merged Worktrees** (`remove_merged_worktrees`) from
+the palette or `sheprd run`. One dialog lists them; confirming runs the same
+checks over each, removes the focused one too, and reports how many stayed.
+Herdr answers `worktree.remove` only once Git has removed the checkout, and
+other workspace actions wait behind it, so the delete dialog stays open with a
+sliding bar and the seconds waited, and the merged sweep's dialog shows how
+many of them are done and which one is in hand. Dismissing either leaves the
+removal running; the sparkles button shows a running sweep again.
+When the workspace in front is removed or closed, from this window or
+anywhere else, the sidebar row above it comes to the front (the row below
+when it was first), so a long list stays where it was rather than jumping to
+the daemon's or Herdr 2's first workspace.
 The pane dialog's **Do not ask again** checkbox (click it or press Space) saves
 `confirm_close_pane = false` to `config-gpui.local.toml` once the close is sent. Saved edits apply automatically. The
 **Show agents** control in **Settings > Sidebar** saves
@@ -2626,8 +2640,8 @@ window at once, and `sheprd ui panel NAME` shows a section.
   an hour fold into one **+N idle** row that opens on click. Hovering a row
   offers **Reply**, **Snooze** (until a preset time), **Settle**, **Pin**, and
   **Open**; snoozed and settled rows fold away at the bottom and come back once
-  their time comes or the agent works or asks again. These marks are this
-  client's own. Shift or Cmd/Ctrl click selects rows, and a bar over the list
+  their time comes or the agent works or asks again, and leave the Dock or
+  taskbar badge until then. These marks are this client's own. Shift or Cmd/Ctrl click selects rows, and a bar over the list
   then settles, snoozes, or replies to all of them.
 
   A blocked agent's row shows the last lines of its pane, so you can read what
@@ -2651,9 +2665,11 @@ window at once, and `sheprd ui panel NAME` shows a section.
   hours or with delivery off; clicking one goes to its pane.
   **Notification History** in the palette opens it, and `sheprd window alerts`
   prints it. An alert about the tab you are looking at is not kept.
-  **Clear** on the shelf, or **Clear All Notifications** in the palette (no
-  default shortcut; bind `clear_all_notifications` under `[keybindings]`, or
-  run `sheprd run clear_all_notifications`), empties it in every window,
+  **Clear all** at the top of the page, shown while there is an alert or a
+  toast to clear, **Clear** on the shelf, or **Clear All Notifications** in
+  the palette (no default shortcut; bind `clear_all_notifications` under
+  `[keybindings]`, or run `sheprd run clear_all_notifications`), empties it
+  in every window,
   dismisses every toast, shown or waiting, and withdraws the app's OS
   notifications (see [System notifications](#system-notifications)). Agents
   keep their status: a finished agent's Done dot and the Dock badge clear as
@@ -3718,7 +3734,9 @@ so the Herdr TUI, a plain terminal, and every app window see one conversation.
 agent `sheprd-acp` knows (Claude, Codex, Copilot, Gemini, Kimi Code, OpenCode, Pi). A row
 opens a tab named after the agent in the focused workspace, in the focused
 pane's folder, and runs the program there; `sheprd chat new AGENT` does
-the same from a pane. The rows show once the app has found `sheprd-acp`,
+the same from a pane, and from a chat, `sheprd chat new` starts that chat's
+agent with its settings ([Starting a chat like this
+one](../../docs/rich-chat.md#starting-a-chat-like-this-one)). The rows show once the app has found `sheprd-acp`,
 first beside its own executable (the app bundle, `cargo build`'s target
 directory, or where `just install` puts both) and then on the login shell's
 `PATH`. A Herdr 2 tab starts a chat beside its active pane, including on
@@ -4042,8 +4060,12 @@ notification from before the app last started stays until you dismiss it.
 The Dock icon shows the number of agents reporting `Done` (finished) or `Blocked`
 (waiting for input), and clears at zero. It covers all connected hosts and
 main windows, including minimized windows, without counting the same agent twice.
-Sidebar visibility, muted sounds, dismissed toasts, and the notification
-delivery setting (including off) do not affect the badge.
+Agents in a muted workspace or tab are not counted, nor agents whose Overview
+row you settled or snoozed: a snoozed agent counts again when its time comes,
+and a settled or snoozed one as soon as it asks for input or works and finishes
+again, as its row comes back. Sidebar visibility, muted sounds, dismissed
+toasts, and the notification delivery setting (including off) do not affect
+the badge.
 Existing attention is counted from each host's first snapshot at startup; no
 new completion or notification is needed. The first positive focus report waits
 until the terminal surface is ready so loading cannot acknowledge unseen work.
@@ -4111,9 +4133,8 @@ three newest reports, redacted like the log records, and lists dumps by name and
 size without including them: they hold the app's memory, so attach one only
 when asked.
 
-For the known macOS Touch Bar window-close crash, see the
-[investigation and native validation steps](../../docs/macos-window-close.md).
-The upstream dependency fix has not yet been adopted by this checkout.
+The fix for the macOS Touch Bar window-close crash is covered by a native
+regression test. See the [cause and test command](../../docs/macos-window-close.md).
 
 Local Windows connections are supported through the daemon's named pipe; pass
 the binary client socket path to `--socket`, not the JSON API socket. No debug

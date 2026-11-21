@@ -63,6 +63,7 @@ fn since(change: &Change) -> u32 {
     match change {
         Change::Activity { .. } => 1,
         Change::Harnesses { .. } => 2,
+        Change::PullRequest { .. } => 3,
         _ => 0,
     }
 }

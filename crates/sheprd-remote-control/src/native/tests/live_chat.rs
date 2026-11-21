@@ -60,10 +60,7 @@ fn serve_chat(listener: UnixListener, cursor: Cursor, burst: std_mpsc::Receiver<
 
 /// A session on a hub linked to the chat program, once the hub holds its
 /// snapshot.
-pub(super) async fn linked(
-    dir: &std::path::Path,
-    cursor: Cursor,
-) -> (Session, std_mpsc::Sender<()>) {
+async fn linked(dir: &std::path::Path, cursor: Cursor) -> (Session, std_mpsc::Sender<()>) {
     let endpoint = EndpointId::random();
     let (burst, bursts) = std_mpsc::channel();
     let socket = sheprd_chat_protocol::endpoint_path(dir, &endpoint);
@@ -82,11 +79,40 @@ pub(super) async fn linked(
 
 fn chat(since: Option<Cursor>) -> ClientMessage {
     ClientMessage::Subscribe {
+        background: false,
         view: View::Chat { pane: "p1".into() },
         since,
         size: None,
-        background: false,
     }
+}
+
+#[tokio::test]
+async fn a_chat_followed_in_the_background_is_not_opened_until_a_screen_shows_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut session, _burst) = linked(dir.path(), Cursor::new_epoch()).await;
+    let ClientMessage::Subscribe { view, size, .. } = chat(None) else {
+        unreachable!()
+    };
+    let background = ClientMessage::Subscribe {
+        background: true,
+        view,
+        since: None,
+        size,
+    };
+    session.send(background).await;
+    assert!(matches!(
+        session.next().await,
+        ServerMessage::ChatSnapshot(_)
+    ));
+    assert!(!session.state.opened.watched("p1"));
+
+    // A screen opens it: the same view, now on screen, marks it opened.
+    session.send(chat(None)).await;
+    assert!(matches!(
+        session.next().await,
+        ServerMessage::ChatSnapshot(_)
+    ));
+    assert!(session.state.opened.watched("p1"));
 }
 
 #[tokio::test]

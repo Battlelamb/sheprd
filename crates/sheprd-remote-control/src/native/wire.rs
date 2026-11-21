@@ -29,9 +29,9 @@ pub(crate) enum ClientMessage {
         /// view, Herdr sizes the pane's terminal to it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         size: Option<TermSize>,
-        /// A chat the phone keeps current with no screen showing it: what
-        /// finishes in it is not seen, so it still counts as waiting.
-        /// Subscribing again without it marks the chat shown.
+        /// For `chat`: followed while no screen shows it, so it opens
+        /// current. It neither marks the chat's answers seen nor keeps a
+        /// view a screen shows from starting.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         background: bool,
     },

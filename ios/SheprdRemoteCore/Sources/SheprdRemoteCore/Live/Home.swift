@@ -78,14 +78,6 @@ public struct Home: Codable, Hashable, Sendable {
     /// Whether the computer runs a Sheprd too old for this app.
     public var needsUpdate: Bool { (api ?? 0) < Self.requiredAPI }
 
-    /// The `api` from which a chat followed in the background is not
-    /// marked seen (`LiveRequest.subscribe`).
-    public static let backgroundChatsAPI = 2
-
-    /// Whether the phone may follow chats no screen shows: older computers
-    /// would count what finishes in them as seen.
-    public var followsInBackground: Bool { (api ?? 0) >= Self.backgroundChatsAPI }
-
     /// CPU and memory in whole percentages, 0 to 100. Older computers
     /// send neither `cores` nor `load5Tenths`, and a computer whose OS
     /// keeps no load average leaves that out.
@@ -161,7 +153,7 @@ public struct Home: Codable, Hashable, Sendable {
 
         /// What the badge says, before a theme colors it.
         public enum Tone: String, Codable, Hashable, Sendable {
-            case attention, held, merged, ready, waiting, other
+            case attention, held, merged, queued, ready, waiting, other
 
             public init(from decoder: Decoder) throws {
                 self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .other
@@ -176,6 +168,9 @@ public struct Home: Codable, Hashable, Sendable {
         /// Herdr's name for the agent, such as `claude`.
         public var agent: String?
         public var status: AgentStatus
+        /// Starred on some device; lists show it first. Older computers
+        /// leave it out, and so does an unstarred chat.
+        public var favorite: Bool? = nil
         /// Absent until the daemon has linked the chat.
         public var summary: Summary?
 
@@ -308,11 +303,24 @@ public struct Home: Codable, Hashable, Sendable {
             /// When the computer saw it last change state; unknown until
             /// it does, and from older computers.
             public var changedMs: UInt64?
+            /// What it last said, read off its screen: its latest
+            /// paragraph, one item to a line. Absent until read, and from
+            /// older computers.
+            public var preview: String?
+            /// Whether its conversation opens as a read-only chat on its
+            /// pane, beside the terminal; older computers leave it out.
+            public var transcript: Bool?
+            /// Its pane was starred on some device; absent when not, and
+            /// from older computers.
+            public var favorite: Bool? = nil
 
             enum CodingKeys: String, CodingKey {
-                case name, status, pane, title
+                case name, status, pane, title, preview, transcript, favorite
                 case changedMs = "changed_ms"
             }
+
+            /// Whether the computer shows its conversation as a chat.
+            public var opensAsChat: Bool { transcript == true && pane != nil }
         }
 
         /// The pane a phone opens for the tab's agent: its own, else the

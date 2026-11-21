@@ -154,8 +154,9 @@ impl Projector {
     }
 
     /// The user's own prompt, which ACP does not echo back, ending in
-    /// `files` lines naming the files it carried.
-    pub(crate) fn prompt(&mut self, text: &str, files: usize) -> Change {
+    /// `files` lines naming the files it carried, with what was sent
+    /// ahead of it.
+    pub(crate) fn prompt(&mut self, text: &str, files: usize, note: Option<String>) -> Change {
         self.close();
         let id = self.next_id();
         Change::Push {
@@ -164,6 +165,7 @@ impl Projector {
                 kind: EntryKind::User {
                     text: bounded(text.to_owned()),
                     files,
+                    note: note.map(bounded),
                 },
             },
         }
@@ -203,7 +205,11 @@ impl Projector {
         });
         let text = bounded(text);
         let kind = match stream {
-            Stream::User => EntryKind::User { text, files: 0 },
+            Stream::User => EntryKind::User {
+                text,
+                files: 0,
+                note: None,
+            },
             Stream::Agent => EntryKind::Agent { text },
             Stream::Thought => EntryKind::Thought { text },
         };

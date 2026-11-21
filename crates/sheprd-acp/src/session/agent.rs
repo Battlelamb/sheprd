@@ -347,13 +347,24 @@ impl<R: FnMut(Update)> Session<R> {
             && let Some((note, rest)) = crate::context::split(&content.text)
         {
             self.context.heard(note);
+            self.replayed_note = Some(note.to_owned());
             if rest.is_empty() {
                 return;
             }
             content.text = rest.to_owned();
         }
         self.commands.keep(&update);
-        let changes = self.projector.update(&self.transcript, update, now_ms());
+        let mut changes = self.projector.update(&self.transcript, update, now_ms());
+        // The note goes with the words that follow it, and with nothing
+        // after something else began.
+        for change in &mut changes {
+            if let Change::Push { entry } = change {
+                let note = self.replayed_note.take();
+                if let sheprd_chat_protocol::EntryKind::User { note: kept, .. } = &mut entry.kind {
+                    *kept = note.map(project::bounded);
+                }
+            }
+        }
         self.emit_all(changes);
     }
 

@@ -114,12 +114,11 @@ impl<R: FnMut(Update)> Session<R> {
             shown.push_str(sheprd_chat_protocol::ATTACHED);
             shown.push_str(attachment.name());
         }
-        let prompt = self.projector.prompt(&shown, attachments.len());
-        self.emit(prompt);
         let mut blocks = Vec::with_capacity(prepared.len() + 3);
         self.context
             .running(crate::context::Running::of(&self.transcript));
-        if let Some(note) = self.context.before_prompt(origin, text) {
+        let note = self.context.before_prompt(origin, text);
+        if let Some(note) = &note {
             blocks.push(wire::ContentBlock::Text(wire::TextContent::new(note)));
         }
         // The agent that took over hears the conversation next, apart from
@@ -128,6 +127,15 @@ impl<R: FnMut(Update)> Session<R> {
         if let Some(handoff) = &handoff {
             blocks.push(wire::ContentBlock::Text(wire::TextContent::new(handoff)));
         }
+        // The transcript keeps what went ahead of the person's words apart
+        // from them, for a client to show when asked.
+        let sent = [note.as_deref(), handoff.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        let sent = (!sent.is_empty()).then(|| sent.join("\n\n"));
+        let prompt = self.projector.prompt(&shown, attachments.len(), sent);
+        self.emit(prompt);
         if !text.trim().is_empty() {
             blocks.push(wire::ContentBlock::Text(wire::TextContent::new(text)));
         }

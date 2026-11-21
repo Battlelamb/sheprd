@@ -159,18 +159,20 @@ pub(crate) fn split(text: &str) -> Option<(&str, &str)> {
     Some((&text[..end], text[end..].trim_start()))
 }
 
-/// Takes the notes out of `transcript`'s messages from the person, and a
-/// message that held nothing else, and says what they told the agent.
+/// Moves the notes in `transcript`'s messages from the person out of their
+/// words into the entry's `note`, drops a message that held nothing else,
+/// and says what they told the agent.
 pub(crate) fn hide(transcript: &mut Transcript) -> Told {
     let mut told = Told::default();
     transcript.entries.retain_mut(|entry| {
-        let EntryKind::User { text, files } = &mut entry.kind else {
+        let EntryKind::User { text, files, note } = &mut entry.kind else {
             return true;
         };
-        let Some((note, rest)) = split(text) else {
+        let Some((heard, rest)) = split(text) else {
             return true;
         };
-        told.heard(note);
+        told.heard(heard);
+        *note = Some(heard.to_owned());
         *text = rest.to_owned();
         !text.is_empty() || *files > 0
     });

@@ -193,6 +193,12 @@ pub enum EntryKind {
         /// carried, each starting with [`ATTACHED`]; the user typed the rest.
         #[serde(default, skip_serializing_if = "is_zero")]
         files: usize,
+        /// What the chat program sent the agent ahead of `text` and leaves
+        /// out of it: Sheprd's note, and on a live prompt the conversation
+        /// a newly chosen agent is handed. Clients show it only when asked,
+        /// to see what the agent was told; ones that predate it skip it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
     },
     /// The agent's answer, streamed in chunks.
     Agent {

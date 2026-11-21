@@ -21,6 +21,7 @@ mod rail;
 mod rich;
 pub(crate) mod running;
 pub(crate) mod selection;
+mod sent;
 mod settings;
 mod shortcuts;
 mod summary;
@@ -736,10 +737,12 @@ impl SheprdWindow {
                     .children(reconnecting)
                     .children(watching)
                     .children(usage)
+                    .child(self.render_chat_sent_toggle(chat, cx))
                     .child(layout)
                     .children(rail)
                     .child(terminal),
             )
+            .children(self.render_chat_sent_banner(chat))
             .children(message.map(|message| {
                 div()
                     .px(px(10.))

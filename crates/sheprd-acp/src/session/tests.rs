@@ -30,6 +30,7 @@ mod prompt_titles;
 mod pull_requests;
 mod questions;
 mod resume;
+mod sent_notes;
 mod settings;
 mod streaming;
 mod threads;

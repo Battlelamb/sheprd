@@ -220,6 +220,9 @@ pub(crate) struct Session<R: FnMut(Update)> {
     /// queue does not carry it, as no client needs it.
     queued_origins: HashMap<CommandId, Origin>,
     ready: bool,
+    /// The note a replayed message from the person held and the entry
+    /// for their words that comes next takes.
+    replayed_note: Option<String>,
     report: R,
     seq: u64,
     subscribers: Vec<Subscriber>,
@@ -293,6 +296,7 @@ impl<R: FnMut(Update)> Session<R> {
             projector,
             queued_origins: HashMap::new(),
             ready: false,
+            replayed_note: None,
             report,
             seq: 0,
             subscribers: Vec::new(),

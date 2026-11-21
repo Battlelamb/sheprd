@@ -20,7 +20,11 @@ use tower::ServiceExt as _;
 
 /// A request for what `pki` attests, over `challenge`, in `aaguid`'s
 /// environment.
-fn attest_request(pki: &Pki, challenge: &str, aaguid: [u8; 16]) -> (AttestRequest, [u8; 32]) {
+pub(super) fn attest_request(
+    pki: &Pki,
+    challenge: &str,
+    aaguid: [u8; 16],
+) -> (AttestRequest, [u8; 32]) {
     let shape = Shape {
         aaguid,
         challenge: challenge.as_bytes(),
@@ -187,7 +191,7 @@ async fn a_phone_attests_over_http() {
     let pki = Pki::new();
     let Fixture { relay, .. } =
         fixture_attesting(Rates::default(), Host::Production, pki.verifier());
-    let app = router(relay, Source::Peer);
+    let app = router(relay, Source::Peer, None);
 
     let (status, body) = send(&app, post("/v1/challenge", "")).await;
     assert_eq!(status, StatusCode::OK);

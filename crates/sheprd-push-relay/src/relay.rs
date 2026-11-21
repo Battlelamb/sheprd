@@ -7,6 +7,7 @@ use crate::{
     credential::{Credential, DeviceId, Issuer, Spent},
     handle::{Handle, Keyring},
     limit::{Limiter, Rates, source_key},
+    metrics::{Attestation, Challenge, Limit, Metrics},
     store::{Memory, Revoked, Store},
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -14,10 +15,11 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use sheprd_apns::{DeviceToken, Host, MAX_PAYLOAD, Outcome, Priority, Push, PushType, Sender};
+use sheprd_dashboard::labels;
 use std::{
     future::Future,
     net::IpAddr,
-    sync::{Mutex, PoisonError},
+    sync::{Arc, Mutex, PoisonError},
 };
 
 /// APNs's longest `apns-collapse-id`.
@@ -91,24 +93,26 @@ pub struct Issued {
 /// 7,900 in base64.
 const MAX_ATTESTATION: usize = 12 * 1024;
 
-/// What a caller is told. `Refused` covers every bad handle alike, so a
-/// caller learns nothing about why.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Reply {
-    Delivered,
-    /// The credential ran out: the phone must renew it. Keep the handle's
-    /// place, since a new one will come.
-    Expired,
-    /// The handle will never work again: the daemon forgets it.
-    Gone,
-    /// The request is malformed.
-    Invalid,
-    Limited,
-    Refused,
-    Revoked,
-    /// The relay or APNs cannot take it now. Not worth queueing.
-    Unavailable,
+labels! {
+    /// What a caller is told. `Refused` covers every bad handle alike, so a
+    /// caller learns nothing about why. Each label is its wire name too.
+    #[derive(Serialize)]
+    #[serde(rename_all = "snake_case")]
+    Reply {
+        Delivered => "delivered",
+        /// The credential ran out: the phone must renew it. Keep the
+        /// handle's place, since a new one will come.
+        Expired => "expired",
+        /// The handle will never work again: the daemon forgets it.
+        Gone => "gone",
+        /// The request is malformed.
+        Invalid => "invalid",
+        Limited => "limited",
+        Refused => "refused",
+        Revoked => "revoked",
+        /// The relay or APNs cannot take it now. Not worth queueing.
+        Unavailable => "unavailable",
+    }
 }
 
 struct Limits {
@@ -128,6 +132,7 @@ pub struct Relay<G, S = Memory> {
     issuer: Issuer,
     keys: Keyring,
     limits: Mutex<Limits>,
+    metrics: Arc<Metrics>,
     store: S,
 }
 
@@ -156,6 +161,7 @@ impl<G: Gateway, S: Store> Relay<G, S> {
                 source: Limiter::new(rates.source),
                 spent: Spent::default(),
             }),
+            metrics: Arc::default(),
             store,
         }
     }
@@ -164,28 +170,63 @@ impl<G: Gateway, S: Store> Relay<G, S> {
         self.limits.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// What the relay has counted, for `/metrics` and the dashboard.
+    #[must_use]
+    pub fn metrics(&self) -> &Arc<Metrics> {
+        &self.metrics
+    }
+
+    /// The APNs environment this relay serves.
+    #[must_use]
+    pub fn environment(&self) -> Host {
+        self.environment
+    }
+
+    /// Whether a limit refused the request, counting the one that did.
+    fn refused(&self, limit: Option<Limit>) -> bool {
+        limit
+            .inspect(|limit| self.metrics.limited(*limit))
+            .is_some()
+    }
+
     /// Before any cryptography, so a flood of junk costs no key agreement.
     pub fn source_allowed(&self, source: IpAddr, now_ms: u64) -> bool {
-        self.limits().source.allow(source_key(source), now_ms)
+        let allowed = self.limits().source.allow(source_key(source), now_ms);
+        !self.refused((!allowed).then_some(Limit::Source))
     }
 
     /// Whether `source` may ask for a challenge or attest now. Both spend
     /// the general limit too.
     fn attest_allowed(&self, source: IpAddr, now_ms: u64) -> bool {
-        let mut limits = self.limits();
-        let key = source_key(source);
-        limits.source.allow(key, now_ms) && limits.attest.allow(key, now_ms)
+        let refused = {
+            let mut limits = self.limits();
+            let key = source_key(source);
+            if !limits.source.allow(key, now_ms) {
+                Some(Limit::Source)
+            } else if !limits.attest.allow(key, now_ms) {
+                Some(Limit::Attest)
+            } else {
+                None
+            }
+        };
+        !self.refused(refused)
     }
 
     /// A challenge for a phone at `source` to attest over.
     pub fn challenge(&self, source: IpAddr, now_ms: u64) -> Result<String, Reply> {
-        if !self.attest_allowed(source, now_ms) {
-            return Err(Reply::Limited);
-        }
-        self.issuer.challenge(now_ms / 1000).map_err(|error| {
-            tracing::error!(%error, "could not make a challenge");
-            Reply::Unavailable
-        })
+        let challenge = if self.attest_allowed(source, now_ms) {
+            self.issuer.challenge(now_ms / 1000).map_err(|error| {
+                tracing::error!(%error, "could not make a challenge");
+                Reply::Unavailable
+            })
+        } else {
+            Err(Reply::Limited)
+        };
+        self.metrics.challenge(match challenge {
+            Ok(_) => Challenge::Issued,
+            Err(reply) => Challenge::from(reply),
+        });
+        challenge
     }
 
     /// A credential for a key App Attest vouches for, made over one of this
@@ -193,6 +234,20 @@ impl<G: Gateway, S: Store> Relay<G, S> {
     /// environment: Xcode builds attest in development and push through the
     /// sandbox.
     pub fn attest(
+        &self,
+        source: IpAddr,
+        request: &AttestRequest,
+        now_ms: u64,
+    ) -> Result<Issued, Reply> {
+        let issued = self.attested(source, request, now_ms);
+        self.metrics.attestation(match issued {
+            Ok(_) => Attestation::Issued,
+            Err(reply) => Attestation::from(reply),
+        });
+        issued
+    }
+
+    fn attested(
         &self,
         source: IpAddr,
         request: &AttestRequest,
@@ -239,6 +294,7 @@ impl<G: Gateway, S: Store> Relay<G, S> {
         }
         let (relay_key_id, relay_key) = self.keys.current().ok_or(Reply::Unavailable)?;
         let device = self.issuer.device(&key_id);
+        self.metrics.attested(&device);
         Ok(Issued {
             credential: self.issuer.issue(device, self.environment, now_s),
             expires_s: now_s + crate::credential::LIFETIME_S,
@@ -262,6 +318,13 @@ impl<G: Gateway, S: Store> Relay<G, S> {
 
     /// Sends one push, at `now_ms`, for a caller at `source`.
     pub async fn push(&self, source: IpAddr, request: PushRequest, now_ms: u64) -> Reply {
+        self.metrics.kind(request.push_type);
+        let reply = self.send(source, request, now_ms).await;
+        self.metrics.push(reply);
+        reply
+    }
+
+    async fn send(&self, source: IpAddr, request: PushRequest, now_ms: u64) -> Reply {
         if !self.source_allowed(source, now_ms) {
             return Reply::Limited;
         }
@@ -288,14 +351,20 @@ impl<G: Gateway, S: Store> Relay<G, S> {
         if !valid_payload(&request.payload) || !valid_collapse_id(request.collapse_id.as_deref()) {
             return Reply::Invalid;
         }
-        {
+        let refused = {
             let mut limits = self.limits();
-            if !limits.device.allow(credential.device, now_ms)
-                || !limits.handle.allow(handle.id, now_ms)
-            {
-                return Reply::Limited;
+            if !limits.device.allow(credential.device, now_ms) {
+                Some(Limit::Device)
+            } else if !limits.handle.allow(handle.id, now_ms) {
+                Some(Limit::Handle)
+            } else {
+                None
             }
+        };
+        if self.refused(refused) {
+            return Reply::Limited;
         }
+        self.metrics.pushed(&credential.device, now_s);
         let push = Push {
             body: request.payload.into_bytes(),
             collapse_id: request.collapse_id,
@@ -303,6 +372,10 @@ impl<G: Gateway, S: Store> Relay<G, S> {
             push_type: request.push_type,
         };
         match self.gateway.post(&handle.token, &push, now_s).await {
+            Ok(Outcome::RateLimited) => {
+                self.metrics.limited(Limit::Apns);
+                Reply::Limited
+            }
             Ok(outcome) => reply(outcome),
             Err(error) => {
                 tracing::warn!(%error, "could not reach APNs");
@@ -314,6 +387,12 @@ impl<G: Gateway, S: Store> Relay<G, S> {
     /// Revokes one handle, for its daemon when a phone unpairs. Holding the
     /// handle is the authority: only that daemon does.
     pub async fn revoke(&self, source: IpAddr, request: RevokeRequest, now_ms: u64) -> Reply {
+        let reply = self.revoke_handle(source, request, now_ms).await;
+        self.metrics.revocation(reply);
+        reply
+    }
+
+    async fn revoke_handle(&self, source: IpAddr, request: RevokeRequest, now_ms: u64) -> Reply {
         if !self.source_allowed(source, now_ms) {
             return Reply::Limited;
         }
@@ -325,12 +404,17 @@ impl<G: Gateway, S: Store> Relay<G, S> {
         if credential.expires_s <= now_ms / 1000 {
             return Reply::Revoked;
         }
-        let allowed = {
+        let refused = {
             let mut limits = self.limits();
-            limits.device.allow(credential.device, now_ms)
-                && limits.revoke.allow(credential.device, now_ms)
+            if !limits.device.allow(credential.device, now_ms) {
+                Some(Limit::Device)
+            } else if !limits.revoke.allow(credential.device, now_ms) {
+                Some(Limit::Revoke)
+            } else {
+                None
+            }
         };
-        if !allowed {
+        if self.refused(refused) {
             return Reply::Limited;
         }
         let what = Revoked::Handle(handle.id);

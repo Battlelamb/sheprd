@@ -12,7 +12,7 @@ use tower::ServiceExt as _;
 
 fn app(rates: Rates, source: Source) -> (Router, Apple) {
     let Fixture { apple, relay, .. } = fixture_with(rates);
-    (router(relay, source), apple)
+    (router(relay, source, None), apple)
 }
 
 fn post(path: &str, body: impl Into<Body>) -> Request<Body> {

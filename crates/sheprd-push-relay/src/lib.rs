@@ -20,6 +20,10 @@
 //! - [`store`]: revocations, the only state kept, in memory unless the
 //!   operator chooses a database.
 //! - [`relay`]: the checks, in order, and the reply each one gives.
+//! - [`metrics`] and [`devices`]: counters with no per-user labels, and how
+//!   many devices the relay serves, counted in memory without naming any.
+//! - [`dashboard`]: the read-only dashboard and `/metrics`, behind the
+//!   operator's token, served only when there is one.
 //! - [`web`]: the HTTP API.
 //!
 //! A phone asks `POST /v1/challenge`, attests a new key over it, and sends
@@ -29,9 +33,12 @@
 
 pub mod attest;
 pub mod credential;
+pub mod dashboard;
+pub mod devices;
 mod error;
 pub mod handle;
 pub mod limit;
+pub mod metrics;
 mod options;
 pub mod relay;
 mod serve;

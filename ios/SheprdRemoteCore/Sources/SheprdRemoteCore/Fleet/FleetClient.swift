@@ -137,7 +137,9 @@ public struct FleetClient: Sendable {
     /// The fleet, and what `member` signs on next when it is one.
     public func status(member: Data?) async throws -> API.FleetStatus {
         let path = member.map { "/api/v2/fleet?member=\($0.hexString)" } ?? "/api/v2/fleet"
-        return try JSONDecoder().decode(API.FleetStatus.self, from: await send("GET", path, nil))
+        var status = try JSONDecoder().decode(API.FleetStatus.self, from: await send("GET", path, nil))
+        status.member = member?.hexString
+        return status
     }
 
     /// Posts `ops` (base64url) for `fleet`, which a computer of another

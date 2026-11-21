@@ -17,6 +17,7 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use hmac::{Hmac, KeyInit as _, Mac as _};
 use sha2::Sha256;
 use sheprd_apns::Host;
+use std::collections::HashMap;
 
 /// How long a credential lasts, matching the daemon's `device_idle_days`.
 pub const LIFETIME_S: u64 = 30 * 24 * 60 * 60;
@@ -44,6 +45,35 @@ pub struct Credential {
     pub environment: Host,
     /// When it stops working, in seconds since the Unix epoch.
     pub expires_s: u64,
+}
+
+/// The most challenges [`Spent`] remembers, which bounds its memory: more
+/// attestations than that within one challenge's lifetime are refused.
+const MAX_SPENT: usize = 65_536;
+
+/// Challenges already attested over, each until it would have expired, so
+/// a captured attestation cannot be sent again for another credential. In
+/// memory: after a restart, a challenge spent in the last five minutes could
+/// be spent once more, for the same key and so the same device.
+#[derive(Debug, Default)]
+pub struct Spent {
+    until_s: HashMap<String, u64>,
+}
+
+impl Spent {
+    /// Marks `challenge`, which [`Issuer::check_challenge`] took at `now_s`,
+    /// as used: `false` if it was already, or no more can be remembered.
+    pub fn spend(&mut self, challenge: &str, now_s: u64) -> bool {
+        if self.until_s.len() >= MAX_SPENT {
+            self.until_s.retain(|_, until_s| *until_s > now_s);
+        }
+        if self.until_s.len() >= MAX_SPENT || self.until_s.contains_key(challenge) {
+            return false;
+        }
+        self.until_s
+            .insert(challenge.to_owned(), now_s + CHALLENGE_LIFETIME_S);
+        true
+    }
 }
 
 /// Issues and checks credentials and challenges with the relay's secret.

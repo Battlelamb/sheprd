@@ -214,3 +214,30 @@ async fn a_phone_attests_over_http() {
     let (status, _) = send(&app, post("/v1/attest", unknown.to_string())).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
+
+#[test]
+fn a_challenge_is_spent_by_the_attestation_it_carries() {
+    let pki = Pki::new();
+    let fixture = fixture_attesting(Rates::default(), Host::Production, pki.verifier());
+    let challenge = fixture.relay.challenge(source(), NOW_MS).unwrap();
+
+    // A refused attestation spends nothing: the phone can still use it.
+    let (wrong, _) = attest_request(&pki, &challenge, DEVELOPMENT);
+    assert_eq!(
+        fixture.relay.attest(source(), &wrong, NOW_MS),
+        Err(Reply::Refused)
+    );
+    let (good, _) = attest_request(&pki, &challenge, PRODUCTION);
+    assert!(fixture.relay.attest(source(), &good, NOW_MS).is_ok());
+
+    // Sent again, whole or with another key, it gets nothing.
+    assert_eq!(
+        fixture.relay.attest(source(), &good, NOW_MS),
+        Err(Reply::Refused)
+    );
+    let (other_key, _) = attest_request(&pki, &challenge, PRODUCTION);
+    assert_eq!(
+        fixture.relay.attest(source(), &other_key, NOW_MS),
+        Err(Reply::Refused)
+    );
+}

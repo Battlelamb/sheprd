@@ -4,7 +4,7 @@
 
 use crate::{
     attest::{self, Environment, KeyId, Verifier},
-    credential::{Credential, DeviceId, Issuer},
+    credential::{Credential, DeviceId, Issuer, Spent},
     handle::{Handle, Keyring},
     limit::{Limiter, Rates, source_key},
     store::{Memory, Revoked, Store},
@@ -117,6 +117,7 @@ struct Limits {
     handle: Limiter<String>,
     revoke: Limiter<DeviceId>,
     source: Limiter<IpAddr>,
+    spent: Spent,
 }
 
 /// One relay instance serves one APNs environment.
@@ -153,6 +154,7 @@ impl<G: Gateway, S: Store> Relay<G, S> {
                 handle: Limiter::new(rates.handle),
                 revoke: Limiter::new(rates.revoke),
                 source: Limiter::new(rates.source),
+                spent: Spent::default(),
             }),
             store,
         }
@@ -187,8 +189,9 @@ impl<G: Gateway, S: Store> Relay<G, S> {
     }
 
     /// A credential for a key App Attest vouches for, made over one of this
-    /// relay's challenges by a build for this relay's APNs environment:
-    /// Xcode builds attest in development and push through the sandbox.
+    /// relay's challenges, once, by a build for this relay's APNs
+    /// environment: Xcode builds attest in development and push through the
+    /// sandbox.
     pub fn attest(
         &self,
         source: IpAddr,
@@ -228,6 +231,10 @@ impl<G: Gateway, S: Store> Relay<G, S> {
             Host::Sandbox => Environment::Development,
         };
         if attested.environment != expected {
+            return Err(Reply::Refused);
+        }
+        // Last, once the attestation is good, so a bad one spends nothing.
+        if !self.limits().spent.spend(&request.challenge, now_s) {
             return Err(Reply::Refused);
         }
         let (relay_key_id, relay_key) = self.keys.current().ok_or(Reply::Unavailable)?;

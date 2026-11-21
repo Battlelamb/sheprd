@@ -39,3 +39,18 @@ fn a_key_always_gets_the_same_device_and_keys_differ() {
     assert_ne!(device, issuer().device(&[2; 32]));
     assert_ne!(device, Issuer::new(&[6; 32]).unwrap().device(&[1; 32]));
 }
+
+#[test]
+fn a_challenge_is_spent_once_and_forgotten_after_it_expires() {
+    use crate::credential::Spent;
+    let mut spent = Spent::default();
+    assert!(spent.spend("a", NOW_S));
+    assert!(!spent.spend("a", NOW_S));
+    assert!(spent.spend("b", NOW_S));
+    // Full, it drops what expired before refusing.
+    for n in 2..65_536 {
+        assert!(spent.spend(&n.to_string(), NOW_S));
+    }
+    assert!(!spent.spend("late", NOW_S + 1));
+    assert!(spent.spend("late", NOW_S + CHALLENGE_LIFETIME_S));
+}

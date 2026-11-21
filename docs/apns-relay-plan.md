@@ -97,7 +97,8 @@ zero, and that the build's App Attest environment is this relay's: Xcode builds
 attest in development and push through the sandbox relay. It answers with the
 credential, its expiry, and the relay's key and key id. Challenges and device
 ids are derived from the credential secret, so none is stored: a device id is
-an HMAC of the key id. The key is not yet signed by the offline root.
+an HMAC of the key id. Each challenge is good for one attestation, remembered in
+memory until it expires, so a captured attestation cannot be sent again. The key is not yet signed by the offline root.
 
 ### 2. Make handles on the phone
 

@@ -19,7 +19,11 @@ pub use error::Error;
 
 use sha2::{Digest as _, Sha256};
 use x509_parser::{
-    certificate::X509Certificate, oid_registry::Oid, prelude::FromDer as _, time::ASN1Time,
+    certificate::X509Certificate,
+    extensions::ParsedExtension,
+    oid_registry::{OID_X509_EXT_BASIC_CONSTRAINTS, Oid},
+    prelude::FromDer as _,
+    time::ASN1Time,
 };
 
 /// Apple App Attestation Root CA in DER, from
@@ -208,8 +212,9 @@ fn issued_by(
 
 /// Whether `parent` may sign certificates with `below` CAs under it: it is
 /// a CA, its path length (if any) allows them, and its key usage (if any)
-/// includes signing certificates. An unreadable or repeated extension
-/// refuses.
+/// includes signing certificates. A repeated or unreadable extension
+/// refuses: `basic_constraints` reads an unreadable one as absent, and
+/// `key_usage` fails on it.
 fn may_issue(parent: &X509Certificate<'_>, below: u32) -> bool {
     let Ok(Some(constraints)) = parent.basic_constraints() else {
         return false;
@@ -229,12 +234,19 @@ fn may_issue(parent: &X509Certificate<'_>, below: u32) -> bool {
     }
 }
 
-/// Whether `certificate` says it is a CA; an unreadable or repeated basic
-/// constraints extension counts as one, so the leaf is refused.
+/// Whether `certificate` may be a CA: anything but no basic constraints or
+/// one readable extension saying it is not. x509-parser's
+/// `basic_constraints` reads an unparsable extension as absent, so the
+/// extension is looked up by its OID instead.
 fn is_ca(certificate: &X509Certificate<'_>) -> bool {
-    certificate
-        .basic_constraints()
-        .map_or(true, |constraints| constraints.is_some_and(|c| c.value.ca))
+    match certificate.get_extension_unique(&OID_X509_EXT_BASIC_CONSTRAINTS) {
+        Ok(None) => false,
+        Ok(Some(extension)) => !matches!(
+            extension.parsed_extension(),
+            ParsedExtension::BasicConstraints(constraints) if !constraints.ca
+        ),
+        Err(_) => true,
+    }
 }
 
 /// One DER certificate with nothing after it.

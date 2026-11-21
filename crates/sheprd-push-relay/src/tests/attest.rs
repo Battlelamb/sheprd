@@ -78,8 +78,10 @@ pub(super) struct Shape<'a> {
     /// The credential id, when it should differ from the key id.
     pub(super) credential: Option<KeyId>,
     pub(super) fmt: &'a str,
-    /// Whether the leaf claims to be a CA.
-    pub(super) leaf_ca: bool,
+    /// The leaf's basic constraints.
+    pub(super) leaf_ca: IsCa,
+    /// Extensions added to the leaf as they are, malformed or repeated.
+    pub(super) leaf_extensions: Vec<CustomExtension>,
 }
 
 impl Default for Shape<'_> {
@@ -91,7 +93,8 @@ impl Default for Shape<'_> {
             counter: 0,
             credential: None,
             fmt: "apple-appattest",
-            leaf_ca: false,
+            leaf_ca: IsCa::NoCa,
+            leaf_extensions: Vec::new(),
         }
     }
 }
@@ -112,8 +115,12 @@ pub(super) fn attestation(pki: &Pki, shape: &Shape<'_>) -> (Vec<u8>, KeyId) {
     nonce.update(Sha256::digest(shape.challenge));
     let mut extension = vec![0x30, 0x24, 0xa1, 0x22, 0x04, 0x20];
     extension.extend_from_slice(&nonce.finalize());
-    let mut leaf = ca("leaf", shape.leaf_ca);
-    leaf.custom_extensions = vec![CustomExtension::from_oid_content(NONCE_OID, extension)];
+    let mut leaf = ca("leaf", false);
+    leaf.is_ca = shape.leaf_ca;
+    leaf.custom_extensions = [CustomExtension::from_oid_content(NONCE_OID, extension)]
+        .into_iter()
+        .chain(shape.leaf_extensions.iter().cloned())
+        .collect();
     let issuer = CertIssuer::new(pki.intermediate.clone(), &pki.intermediate_key);
     let leaf = leaf.signed_by(&leaf_key, &issuer).unwrap().der().to_vec();
 

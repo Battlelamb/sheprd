@@ -2,7 +2,12 @@
 ### and who may reach which.
 
 settings-fleet-section = Fleet
-settings-fleet-lead = Your computers and phones as one fleet: a host added on one is reached from every other, each with its own keys.
+settings-fleet-lead = Joins all your computers and phones, so a host added on one is reachable from every other. Remote control pairs one phone with this computer; a fleet links every device you own, and needs Remote control on.
+
+settings-fleet-needs-remote = Fleet needs Remote control
+settings-fleet-needs-remote-off = Remote control is off. Its service on this computer keeps and signs the fleet, so turn it on to create or join one.
+settings-fleet-needs-remote-down = Remote control is on, but its service is not answering: { $error }
+settings-fleet-needs-remote-open = Open Remote control
 
 settings-fleet-none = Not in a fleet
 settings-fleet-none-description = Create a fleet to share hosts between your computers and phones. Computers join it from this page, once this Sheprd reaches them over SSH.

@@ -77,6 +77,8 @@ pub(super) enum Step {
     TrustKey(setup::Request, NewHostKey),
     /// Setup needs prompts, so the user decides whether to run it locally.
     Confirm(setup::Request, Offer),
+    // Only interactive setup verifies, and Windows cannot host it yet.
+    #[cfg(unix)]
     Verifying(setup::Request, Offer),
     #[cfg(unix)]
     Running(setup::Request, progress::Progress),
@@ -313,6 +315,7 @@ impl SheprdWindow {
                 request.target(),
                 setup.claim.as_ref().map(setup::Claim::user),
             )),
+            #[cfg(unix)]
             Step::Verifying(request, _) => {
                 Some(fl!("add-device-verifying", target = request.target()))
             }
@@ -649,10 +652,10 @@ impl SheprdWindow {
     }
 
     pub(crate) fn poll_device_setup(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.poll_saved_device(window, cx) {
-            return;
+        // Windows has no interactive setup to poll once nothing was saved.
+        if !self.poll_saved_device(window, cx) {
+            #[cfg(unix)]
+            self.poll_device_progress(window, cx);
         }
-        #[cfg(unix)]
-        self.poll_device_progress(window, cx);
     }
 }

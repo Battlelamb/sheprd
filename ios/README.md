@@ -279,9 +279,10 @@ for the CA fingerprint the claim then pins.
 A TestFlight or App Store install cannot use a computer's own APNs key:
 Apple takes pushes for this app only from Sheprd's. The Sheprd push relay
 (`crates/sheprd-push-relay`, `docs/apns-relay-plan.md`) holds that key and
-forwards pushes, sealed so it reads none of them. It is off on both sides
-until the user turns it on: Settings > Push Relay here, and `push_relay` in
-`[remote]` on each computer.
+forwards pushes, sealed so it reads none of them. The app turns it on at
+launch, after a new install or a reinstall, unless the user turned it off in
+Settings > Push Relay, which also shows what the push relay sees. Each
+computer still needs `push_relay` in `[remote]`, off by default there.
 
 How a computer delivers this phone's pushes:
 

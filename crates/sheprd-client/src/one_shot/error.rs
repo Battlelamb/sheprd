@@ -1,17 +1,18 @@
-//! Why Claude, run once on its own, gave no answer.
+//! Why Claude, run once on its own, gave no answer; the phone shows these
+//! on a chat's row, and the desktop under a rename field.
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     // keep-sorted start
-    #[error("the agent answered nothing")]
+    #[error("Claude answered nothing")]
     Empty,
-    #[error("the agent stopped with an error")]
+    #[error("Claude stopped with an error")]
     Failed,
-    #[error("no agent that can answer is installed on this computer")]
+    #[error("Claude is not installed on this computer")]
     NoAgent,
-    #[error("the agent could not start")]
+    #[error("Claude could not start")]
     Start(#[source] std::io::Error),
-    #[error("the agent took too long to answer")]
+    #[error("Claude took too long to answer")]
     TimedOut,
     // keep-sorted end
 }

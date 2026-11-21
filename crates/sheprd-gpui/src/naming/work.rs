@@ -25,6 +25,10 @@ pub(super) enum Reach {
     Core {
         backend: CoreBackend,
         terminal: TerminalId,
+        /// The agent as the core names it (`claude`), which a prompt must
+        /// match: the core types nothing once another program has the
+        /// terminal.
+        reported: Option<String>,
     },
 }
 
@@ -37,9 +41,13 @@ impl std::fmt::Debug for Reach {
                 .field("pane", pane)
                 .finish(),
             // The core's connection has nothing to show.
-            Self::Core { terminal, .. } => {
-                f.debug_struct("Core").field("terminal", terminal).finish()
-            }
+            Self::Core {
+                terminal, reported, ..
+            } => f
+                .debug_struct("Core")
+                .field("terminal", terminal)
+                .field("reported", reported)
+                .finish(),
         }
     }
 }
@@ -47,6 +55,7 @@ impl std::fmt::Debug for Reach {
 /// A terminal of the subject, and the agent running in it, if any.
 #[derive(Clone, Debug)]
 pub(super) struct Terminal {
+    /// What the agent is called on a button and in messages.
     pub(super) agent: Option<String>,
     pub(super) reach: Reach,
 }
@@ -83,7 +92,9 @@ pub(super) fn read(terminal: &Terminal, cancelled: &AtomicBool) -> Result<String
             let bytes = host.capture(&line, cancelled).map_err(Error::Script)?;
             Ok(String::from_utf8_lossy(&bytes).into_owned())
         }
-        Reach::Core { backend, terminal } => backend
+        Reach::Core {
+            backend, terminal, ..
+        } => backend
             .core()
             .read(terminal.as_str())
             .map(|read| read.text)
@@ -106,13 +117,20 @@ pub(super) fn prompt(terminal: &Terminal, prompt: &str) -> Result<(), Error> {
                     _ => Error::Script(error),
                 })
         }
-        Reach::Core { backend, terminal } => {
+        Reach::Core {
+            backend,
+            terminal,
+            reported,
+        } => {
             use sheprd_core_client::{
                 Error as CoreError,
                 reply::{Replied, reply},
                 wire::{BLOCKED as CORE_BLOCKED, STATUS_MISMATCH},
             };
-            match reply(backend.core(), terminal.as_str(), &agent, prompt) {
+            let Some(reported) = reported else {
+                return Err(Error::Gone);
+            };
+            match reply(backend.core(), terminal.as_str(), reported, prompt) {
                 Ok(Replied::Sent) => Ok(()),
                 Ok(Replied::Gone) => Err(Error::Gone),
                 Err(CoreError::Refused {

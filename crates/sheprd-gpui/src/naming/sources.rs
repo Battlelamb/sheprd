@@ -148,7 +148,7 @@ impl SheprdWindow {
                 .agents
                 .iter()
                 .find(|agent| agent.pane_id == pane.pane_id && agent.agent.is_some())
-                .map(|agent| crate::sidebar::agent_name(agent).to_owned());
+                .map(|agent| display_name(crate::sidebar::agent_name(agent)));
             sources.add_terminal(Terminal {
                 agent,
                 reach: Reach::Herdr {
@@ -175,17 +175,26 @@ impl SheprdWindow {
                 let Some(backend) = backend else {
                     continue;
                 };
+                let reported = core
+                    .info(tab, terminal)
+                    .and_then(sheprd_core_client::agent_name);
                 sources.add_terminal(Terminal {
-                    agent: core
-                        .info(tab, terminal)
-                        .and_then(sheprd_core_client::agent_name),
+                    agent: reported.as_deref().map(display_name),
                     reach: Reach::Core {
                         backend: backend.clone(),
                         terminal: terminal.clone(),
+                        reported,
                     },
                 });
             }
         }
         sources
     }
+}
+
+/// What a terminal agent is called on a button: a known agent's own name,
+/// as its chats show it (`claude` is Claude), else the name it goes by.
+pub(super) fn display_name(name: &str) -> String {
+    name.parse::<sheprd_chat_protocol::Agent>()
+        .map_or_else(|_| name.to_owned(), |agent| agent.display_name().to_owned())
 }

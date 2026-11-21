@@ -36,3 +36,11 @@ fn claude_reads_the_end_of_each_source_and_no_more_than_fits() {
     );
     assert_eq!(work::bounded(vec!["a".into(), "b".into()]), "a\n\nb");
 }
+
+#[test]
+fn a_known_terminal_agent_is_called_as_its_chats_are() {
+    assert_eq!(sources::display_name("claude"), "Claude");
+    assert_eq!(sources::display_name("opencode"), "OpenCode");
+    assert_eq!(sources::display_name("Claude"), "Claude");
+    assert_eq!(sources::display_name("droid"), "droid");
+}

@@ -123,7 +123,8 @@ impl Opened {
     }
 
     /// Whether a view of `pane` is open, which marks what finishes in it seen.
-    #[cfg(test)]
+    /// Only `native::tests::live_chat`, a Unix test, asks.
+    #[cfg(all(test, unix))]
     pub(crate) fn watched(&self, pane: &str) -> bool {
         self.marks().watching.contains_key(pane)
     }

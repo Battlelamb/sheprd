@@ -207,16 +207,19 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
             };
             hosts.extend(removed.iter().cloned());
             let target = &machine.target;
-            let answered = match ask_proven(&executor, target, view.heads.clone(), &fleet, &hosts)
-                .await
-            {
-                // No Sheprd daemon: perhaps a plain host of this fleet.
-                Err(Error::NoProgram) => {
-                    let standing = super::plain::sync(&client, &executor, &machine, &view).await?;
-                    return Ok((standing, Vec::new(), view.heads.clone()));
-                }
-                answered => answered?,
-            };
+            let answered =
+                match ask_proven(&executor, target, view.heads.clone(), &fleet, &hosts).await {
+                    // No Sheprd daemon: perhaps a plain host of this fleet.
+                    Err(Error::NoProgram) => {
+                        let (standing, host) =
+                            super::plain::sync(&client, &executor, &machine, &view).await?;
+                        // The host its agent serves: what a removal and a
+                        // later share again are recognized by.
+                        proven_as = host;
+                        return Ok((standing, Vec::new(), view.heads.clone()));
+                    }
+                    answered => answered?,
+                };
             let Some((mut theirs, proven)) = answered else {
                 let standing = if was.as_ref().is_some_and(|host| removed.contains(host)) {
                     Standing::Removed
@@ -322,13 +325,7 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
         cx.update(|cx| {
             match outcome {
                 Ok((standing, heads, synced)) => Fleet::set_link(cx, &id, |link| {
-                    link.running = false;
-                    link.standing = standing;
-                    link.heads = heads;
-                    link.synced = synced;
-                    if proven_as.is_some() {
-                        link.host = proven_as;
-                    }
+                    link.settle(standing, heads, synced, proven_as);
                 }),
                 Err(error) => {
                     tracing::debug!(%error, "Could not sync the fleet with a machine");

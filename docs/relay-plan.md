@@ -1432,7 +1432,9 @@ sequenceDiagram
    writes its `ssh_access` lines and admits the members' tunnel keys.
 3. **H is a plain SSH machine.** The dialog also says "Installs
    sheprd-relay-agent on H". A installs or updates it over its working
-   SSH session (Enrolling), on A's relays: a private relay's listen token
+   SSH session (Enrolling), on A's relays, forwarding to the port the
+   host's SSH server took that session on (`SSH_CONNECTION`, 22 when it
+   does not say): a private relay's listen token
    goes over the session's input into a file in the agent's state
    directory readable by that account alone, passed with `--token-file`,
    and the share waits until a relay lets the agent listen. A then runs
@@ -1635,7 +1637,11 @@ accepted on this purpose.
 - Plain hosts get it too. Every daemon dials each plain host in its
   state from the host's record, and sends it the removals it signed
   itself that removed every member they name (a voided removal may name
-  a member another removal took, beside one still live). Each member's
+  a member another removal took, beside one still live), each with the
+  members its log removes with it beyond those it names (one a removed
+  member admitted at the same time), in an `Also` message ahead of them.
+  The agent suspends those in the sender's name too, like the removal's
+  own targets, until the next access file confirms or settles it. Each member's
   keys carry the sequence number of its own latest rotation, which the
   fleet's state keeps (so a checkpoint carries it and a pruned log agrees
   with a whole one), so an agent never prefers keys a rotation replaced;
@@ -1707,6 +1713,15 @@ history still acts on it at once, to fail closed:
   syncs brings the history long before, so only a removal whose history
   does not exist outlives it. A removal that cannot be checked yet never
   cuts off the computer receiving it.
+- What a receiver keeps is bounded: a live member's sixteen newest
+  removals are kept apart, each settled by its own history (refused, never
+  merely dropped for room); older ones, and all of a member no longer
+  live, fold per signer and target: four by id, each with what it named
+  and settled by its own history, then an overflow that keeps the latest
+  arrival and each member named with the latest arrival naming it, which
+  time alone ends. A name ends with the removals that gave it, and the
+  signer rule is the same as for each removal on its own. Acknowledgments count only removals sent in
+  that exchange and still held, at most 2,048 per peer.
 
 That last case is only a member removing another member, which any
 member can do anyway.
@@ -1778,7 +1793,7 @@ all of them. It needs no fleet key, because it only removes access.
 | Thing | Bound |
 | --- | --- |
 | Live members | 16 computers and 16 phones, so a host names at most 32 fleet dial keys and keeps room in a relay's 64 for its own paired devices |
-| Hosts | 256 |
+| Hosts | 256. A `HostAdd` made while 256 hosts are live counts for nothing, even after one of them is removed: add the host again once there is room. |
 | Member tombstones | 1,024, kept forever. Past that, create a new fleet. |
 | Membership operations between checkpoints | 256 (`Found`, `Admit`, `Rotate`): the costly ones to fold |
 | Removals between checkpoints | 32 per signer, a share no one else can use up, and 1,024 in all from members no longer live. They count against no other bound, so a member that fills the log cannot keep out its own removal. |
@@ -1800,7 +1815,10 @@ all of them. It needs no fleet key, because it only removes access.
   `STATE_DIR/fleet/peers.json` each peer's last heads and backoff. All
   three are 0600.
 - **Agents:** the merged access file (`fleet`) and the suspensions
-  (`suspended`) sit in the agent's state directory, 0600.
+  (`suspended`) sit in the agent's state directory, 0600, beside `lines`,
+  the fleet whose `authorized_keys` lines the agent may have written,
+  kept before any is: a scrub or a refusal removes them from it even when
+  no access file was saved, and every fleet line when it does not read.
 - **Phones:** the key is in the Secure Enclave, and the log in the app
   group container under complete file protection.
 - **Logs:** nothing beyond counts and short ids. No route, relay,
@@ -2102,7 +2120,9 @@ manual multi-machine and phone steps left unticked in its QA list.
      the app's own SSH (`fleet::plain`, `fleet::agent`), Sheprd copies the
      agent build for the host's platform (`fleet::agent::build`, below),
      unless the host holds the same bytes; writes and restarts a systemd user unit (with
-     lingering asked for) or a launchd agent running `run` on this
+     lingering asked for) or a launchd agent (in the account's
+     graphical session when it is logged in at the screen, else its user
+     domain, so a Mac reached only over SSH runs it too) running `run` on this
      computer's relays (its own host record's); reads `status --json`,
      which now carries the SSH host keys; keeps only keys this computer's
      known hosts list for the target (`sheprd_client::known_host_keys`),

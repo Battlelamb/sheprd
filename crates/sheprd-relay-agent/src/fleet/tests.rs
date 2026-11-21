@@ -14,6 +14,8 @@ mod paused;
 mod refused;
 mod report_parse;
 mod report_size;
+mod rotation_room;
+mod scrub_lines;
 mod snapshot;
 mod stored_size;
 mod suspended_keys;

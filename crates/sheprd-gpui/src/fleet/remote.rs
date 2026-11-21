@@ -96,22 +96,28 @@ pub(crate) fn parse_applied(output: &[u8]) -> Result<Applied, Error> {
 /// Removes every way a fleet reaches the host's account, without signing
 /// anything: the relay agent's `fleet scrub`, then the daemon's, each when
 /// installed. Prints whether either ran, and whether one that holds fleet
-/// state failed: an agent whose usage names no `fleet scrub` predates the
-/// fleet and holds none. The daemon goes last: forgetting its fleet ends
-/// the fleet sessions it carries, this one perhaps among them, and it
-/// keeps this one only long enough to read the answer. The agent is the
+/// state failed. A program whose usage names no fleet at all predates the
+/// fleet and holds none; one that knows the fleet but not `fleet scrub`
+/// may hold it, and fails the scrub until it is upgraded. The daemon goes
+/// last: forgetting its fleet ends the fleet sessions it carries, this one
+/// perhaps among them, and it keeps this one only long enough to read the
+/// answer. The agent is the
 /// one Sheprd installs and its service runs, `~/.local/bin`'s, never
 /// another copy earlier on `PATH`, which would scrub other state or none.
 /// Every daemon program that may hold fleet state is scrubbed, the
 /// installed one and any `sheprd-remote-control` or `herdr-remote-control`
-/// on `PATH`, once each by resolved path and only one that knows `fleet
-/// scrub`; it succeeds only if every one that ran did.
+/// on `PATH`, once each by resolved path; it succeeds only if every one
+/// that may hold the fleet was scrubbed.
 pub(super) const SCRUB: &str = "\
 cleared=false
 failed=false
 agent=\"$HOME/.local/bin/sheprd-relay-agent\"
-if [ -x \"$agent\" ] && \"$agent\" --help 2>&1 | grep -q 'fleet scrub'; then
-  if \"$agent\" fleet scrub >/dev/null 2>&1; then cleared=true; else failed=true; fi
+if [ -x \"$agent\" ]; then
+  usage=$(\"$agent\" --help 2>&1)
+  case \"$usage\" in
+    *'fleet scrub'*) if \"$agent\" fleet scrub >/dev/null 2>&1; then cleared=true; else failed=true; fi ;;
+    *fleet*) failed=true ;;
+  esac
 fi
 seen='|'
 for program in \"$HOME/.local/bin/sheprd-remote-control\" \"$(command -v sheprd-remote-control || true)\" \"$(command -v herdr-remote-control || true)\"; do
@@ -119,8 +125,11 @@ for program in \"$HOME/.local/bin/sheprd-remote-control\" \"$(command -v sheprd-
   real=$(realpath \"$program\" 2>/dev/null || readlink -f \"$program\" 2>/dev/null || printf '%s' \"$program\")
   case \"$seen\" in *\"|$real|\"*) continue ;; esac
   seen=\"$seen$real|\"
-  \"$program\" --help 2>&1 | grep -q 'fleet scrub' || continue
-  if \"$program\" fleet scrub >/dev/null 2>&1; then cleared=true; else failed=true; fi
+  usage=$(\"$program\" --help 2>&1)
+  case \"$usage\" in
+    *'fleet scrub'*) if \"$program\" fleet scrub >/dev/null 2>&1; then cleared=true; else failed=true; fi ;;
+    *fleet*) failed=true ;;
+  esac
 done
 printf '{\"scrubbed\":%s,\"failed\":%s}\\n' \"$cleared\" \"$failed\"
 cat >/dev/null

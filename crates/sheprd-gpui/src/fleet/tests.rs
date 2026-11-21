@@ -5,6 +5,7 @@ use std::{
 };
 
 mod scrub;
+mod settle;
 
 mod plain;
 

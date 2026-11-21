@@ -197,3 +197,55 @@ fn a_daemon_program_without_fleet_scrub_is_left_alone() {
     // Nothing that held a fleet ran: not reported as access gone.
     assert!(remote::scrub_outcome(printed.as_bytes()).is_err());
 }
+
+/// An executable `name` in `dir` whose usage is `usage` and that leaves
+/// `marker` when asked to `fleet scrub`.
+#[cfg(unix)]
+fn program(dir: &std::path::Path, name: &str, usage: &str, marker: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::create_dir_all(dir).unwrap();
+    let path = dir.join(name);
+    std::fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\ncase \"$1\" in --help) echo '{usage}';; fleet) : > '{}';; esac\n",
+            marker.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_program_that_knows_the_fleet_but_not_scrub_fails_the_scrub() {
+    let path = std::ffi::OsStr::new("/usr/bin:/bin");
+    // An older daemon that already kept a fleet, beside an agent that
+    // scrubs: the daemon may still let members in, so this is no success.
+    let root = tempfile::tempdir().unwrap();
+    let (home, ran) = (root.path().join("home"), root.path().join("ran"));
+    let bin = home.join(".local/bin");
+    program(&bin, "sheprd-relay-agent", "usage: fleet scrub", &ran);
+    program(
+        &bin,
+        "sheprd-remote-control",
+        "usage: fleet apply | fleet bundle",
+        &ran,
+    );
+    let printed = run_scrub(&home, path);
+    assert!(matches!(
+        remote::scrub_outcome(printed.as_bytes()),
+        Err(Error::Unscrubbed)
+    ));
+    // The same for an older agent beside a daemon that scrubs.
+    let root = tempfile::tempdir().unwrap();
+    let (home, ran) = (root.path().join("home"), root.path().join("ran"));
+    let bin = home.join(".local/bin");
+    program(&bin, "sheprd-relay-agent", "usage: fleet apply", &ran);
+    program(&bin, "sheprd-remote-control", "usage: fleet scrub", &ran);
+    let printed = run_scrub(&home, path);
+    assert!(matches!(
+        remote::scrub_outcome(printed.as_bytes()),
+        Err(Error::Unscrubbed)
+    ));
+}

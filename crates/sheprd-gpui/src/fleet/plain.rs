@@ -154,18 +154,19 @@ pub(crate) fn shown(error: &Error) -> String {
 
 /// Where a machine with no Sheprd daemon stands: a plain host of this
 /// fleet, kept current; or one with no agent of this fleet, which may be
-/// shared as one. Runs from the sync worker.
+/// shared as one; and the host its agent serves, once its key names it.
+/// Runs from the sync worker.
 pub(super) async fn sync(
     client: &Client,
     executor: &BackgroundExecutor,
     machine: &Machine,
     view: &View,
-) -> Result<Standing, Error> {
+) -> Result<(Standing, Option<String>), Error> {
     // Nothing is asked of a machine whose key is not checked.
     let target = match strict_target(&machine.target) {
         Ok(target) => target,
-        Err(Error::Unchecked) => return Ok(Standing::Unchecked),
-        Err(_) => return Ok(Standing::NoDaemon),
+        Err(Error::Unchecked) => return Ok((Standing::Unchecked, None)),
+        Err(_) => return Ok((Standing::NoDaemon, None)),
     };
     let connect = machine.target.clone();
     let report = executor
@@ -175,15 +176,15 @@ pub(super) async fn sync(
         })
         .await?;
     let Some(report) = report else {
-        return Ok(Standing::NoDaemon);
+        return Ok((Standing::NoDaemon, None));
     };
     if let Some(standing) = not_ours(report.fleet.as_ref(), &view.fleet) {
-        return Ok(standing);
+        return Ok((standing, None));
     }
     let reported = report.ssh_host_keys.clone();
     let known = executor.spawn(async move { known_keys(&target) }).await?;
     let Some(host) = agent::host_id(&reported, &known) else {
-        return Ok(Standing::NoDaemon);
+        return Ok((Standing::NoDaemon, None));
     };
     let host = host.to_string();
     // A host removed everywhere is gone from the view, but its agent still
@@ -196,10 +197,10 @@ pub(super) async fn sync(
             _ => Vec::new(),
         }
     };
-    match next(view, &host, &removed) {
+    let standing = match next(view, &host, &removed) {
         Next::Keep => {
             keep(client, executor, machine, &host, &report).await?;
-            Ok(Standing::Agent)
+            Standing::Agent
         }
         Next::Forget => {
             let connect = machine.target.clone();
@@ -209,10 +210,12 @@ pub(super) async fn sync(
                     agent::scrub(&host, &AtomicBool::new(false))
                 })
                 .await?;
-            Ok(Standing::Removed)
+            Standing::Removed
         }
-        Next::Leave => Ok(Standing::NoDaemon),
-    }
+        Next::Leave => Standing::NoDaemon,
+    };
+    // The host, proved by its key, whatever came of it.
+    Ok((standing, Some(host)))
 }
 
 /// What the sync does with an agent of this fleet on host `host`.

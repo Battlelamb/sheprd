@@ -93,8 +93,16 @@ import Testing
         let daemon = try #require(fixture["apns"] as? [String: Any])
         let ours = try Self.payload(request)
         #expect(Set(ours.keys) == Set(daemon.keys))
-        #expect(NSDictionary(dictionary: try #require(ours["aps"] as? [String: Any]))
-            == NSDictionary(dictionary: try #require(daemon["aps"] as? [String: Any])))
+        // The daemon starts its thread with the scope of the notify key the
+        // phone gave it (`alert::thread_id`); a self test has no computer
+        // and keeps the bare test thread, which the extension sets anyway.
+        var ourAps = try #require(ours["aps"] as? [String: Any])
+        var daemonAps = try #require(daemon["aps"] as? [String: Any])
+        let ourThread = try #require(ourAps.removeValue(forKey: "thread-id") as? String)
+        let daemonThread = try #require(daemonAps.removeValue(forKey: "thread-id") as? String)
+        #expect(ourThread == SelfTestPush.pane)
+        #expect(daemonThread.hasSuffix("/\(SelfTestPush.pane)"))
+        #expect(NSDictionary(dictionary: ourAps) == NSDictionary(dictionary: daemonAps))
         // The sealed side has the daemon's keys, less the badge.
         let plaintext = try #require(fixture["plaintext"] as? [String: Any])
         let opened = try NotificationSeal.open(

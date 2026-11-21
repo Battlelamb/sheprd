@@ -131,6 +131,14 @@ pub(crate) struct MenuState {
     /// was opened for: a branch that moved since must be reviewed again.
     pub(super) merge_method: Option<crate::pull_request::MergeMethod>,
     pub(super) merge_target: Option<crate::pr_actions::Target>,
+    /// What the merge queue confirmation adds or takes out.
+    pub(super) queue_change: Option<sheprd_control_protocol::protocol::hosts::QueueOp>,
+    /// A command opened the merge or queue dialog, which then confirms only
+    /// by a click: an Enter typed for a terminal must not land on it.
+    pub(super) asked_by_command: bool,
+    /// The checkout and restack the restack dialog was opened for: a focus
+    /// or lookup that moved since must be reviewed again.
+    pub(super) restack: Option<(crate::pull_request::Input, super::git_restack::Restack)>,
     pub(super) target: Option<WorkspaceTarget>,
     pub input: Option<DialogInput>,
     pub(crate) error: Option<String>,
@@ -249,6 +257,8 @@ pub(crate) struct Removal {
     pub(super) pending: Option<String>,
     /// Set once the daemon refused the checkout as dirty.
     pub(super) force: bool,
+    /// When the request was queued, for the dialog's elapsed time.
+    pub(super) started: std::time::Instant,
 }
 
 impl Removal {
@@ -256,6 +266,11 @@ impl Removal {
     /// its force confirmation.
     pub(crate) fn waiting(&self) -> bool {
         self.pending.is_some()
+    }
+
+    /// How long the request has been waiting on the daemon.
+    pub(crate) fn elapsed(&self) -> std::time::Duration {
+        self.started.elapsed()
     }
 
     pub(crate) fn pending_for(&self, endpoint: (u64, u64), boot_id: &str, workspace: &str) -> bool {
@@ -405,6 +420,9 @@ impl MenuState {
             git_selected: None,
             merge_method: None,
             merge_target: None,
+            queue_change: None,
+            asked_by_command: false,
+            restack: None,
             target: None,
             input: None,
             error: None,
@@ -522,6 +540,9 @@ impl MenuState {
         self.git_selected = None;
         self.merge_method = None;
         self.merge_target = None;
+        self.queue_change = None;
+        self.asked_by_command = false;
+        self.restack = None;
         self.target = None;
         self.input = None;
         self.error = None;

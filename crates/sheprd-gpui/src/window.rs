@@ -240,6 +240,9 @@ pub(crate) struct SheprdWindow {
     pub(crate) flash: Option<(Flash, std::time::Instant)>,
     pub(crate) flash_motion: flash::Motion,
     pub(crate) focus: FocusHandle,
+    /// The workspace in front and the row that takes its place when it is
+    /// removed; see `sidebar::front_watch`.
+    pub(crate) front_watch: sidebar::FrontWatch,
     pub(crate) git: git::Git,
     /// Where the titlebar's Git button last painted. The window owns it so a
     /// shortcut and a click open the Git menu at the same place.
@@ -770,6 +773,7 @@ impl SheprdWindow {
         self.sync_remote_hosts(window, cx);
         self.reach_device_tags(cx);
         self.update_merged_cleanup(window, cx);
+        self.follow_removed_front(cx);
         if self.update_git() {
             cx.notify();
         }

@@ -78,6 +78,8 @@ pub struct Stamp {
     device_picker: Value,
     /// Every device's snapshot and folds; see `hosted_devices_stamp`.
     devices: u64,
+    /// How many merged worktrees the sidebar's broom would remove.
+    merged: usize,
     metrics: SidebarMetrics,
     /// Whether Back and Forward fit the left column's header.
     navigation: bool,
@@ -104,6 +106,7 @@ impl PartialEq for Stamp {
             && self.details_visible == other.details_visible
             && self.device_picker == other.device_picker
             && self.devices == other.devices
+            && self.merged == other.merged
             && self.metrics == other.metrics
             && self.navigation == other.navigation
             && self.panel == other.panel
@@ -267,6 +270,7 @@ impl SheprdWindow {
             details_visible: self.details_visible,
             device_picker: self.hosted_device_picker(),
             devices: self.hosted_devices_stamp(),
+            merged: self.merged_worktrees().len(),
             panel: self.activity_panel(),
             section: self.activity_section().is_some(),
             metrics: self.hosted_metrics(),
@@ -362,6 +366,8 @@ impl SheprdWindow {
                     AgentSort::Priority => "priority",
                 },
                 "chat_turns": self.hosted_chat_turns(),
+                // Merged worktrees the spaces heading's broom removes.
+                "merged": self.merged_worktrees().len(),
                 "layout": layout_state(self.config.layout.mode.name(), &self.hosted_metrics()),
                 "connected": self.live.status.is_connected(),
                 "details_visible": self.details_visible,

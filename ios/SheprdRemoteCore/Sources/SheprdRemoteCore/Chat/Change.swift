@@ -21,10 +21,14 @@ public enum Change: Codable, Hashable, Sendable {
     case commands([SlashCommand])
     case usage(Usage?)
     case autoAccept(Bool)
+    /// A sub-agent, shell, or monitor started, or what is known of one
+    /// changed; it replaces the activity with the same call id.
+    case activity(AgentActivity)
+    case harnesses(Harnesses?)
 
     enum CodingKeys: String, CodingKey {
         case change, entry, id, text, before, status, permission, plan, modes, options, turn, queued, count
-        case session, commands, usage, on
+        case session, commands, usage, on, activity, harnesses
     }
 
     public init(from decoder: Decoder) throws {
@@ -48,6 +52,8 @@ public enum Change: Codable, Hashable, Sendable {
         case "commands": self = .commands(try c.decode([SlashCommand].self, forKey: .commands))
         case "usage": self = .usage(try c.decodeIfPresent(Usage.self, forKey: .usage))
         case "auto_accept": self = .autoAccept(try c.decode(Bool.self, forKey: .on))
+        case "activity": self = .activity(try c.decode(AgentActivity.self, forKey: .activity))
+        case "harnesses": self = .harnesses(try c.decodeIfPresent(Harnesses.self, forKey: .harnesses))
         case let other:
             throw DecodingError.dataCorruptedError(forKey: .change, in: c, debugDescription: "unknown change \(other)")
         }
@@ -76,6 +82,8 @@ public enum Change: Codable, Hashable, Sendable {
         case let .commands(commands): try c.encode("commands", forKey: .change); try c.encode(commands, forKey: .commands)
         case let .usage(usage): try c.encode("usage", forKey: .change); try c.encode(usage, forKey: .usage)
         case let .autoAccept(on): try c.encode("auto_accept", forKey: .change); try c.encode(on, forKey: .on)
+        case let .activity(activity): try c.encode("activity", forKey: .change); try c.encode(activity, forKey: .activity)
+        case let .harnesses(harnesses): try c.encode("harnesses", forKey: .change); try c.encode(harnesses, forKey: .harnesses)
         }
     }
 }
@@ -90,6 +98,8 @@ public enum ChangeError: String, Error, Hashable, Sendable {
     case duplicatePermission = "duplicate_permission"
     case unknownPermission = "unknown_permission"
     case noModes = "no_modes"
+    case activityLimit = "activity_limit"
+    case activityText = "activity_text"
 }
 
 extension Transcript {
@@ -140,6 +150,8 @@ extension Transcript {
         case let .commands(commands): self.commands = commands
         case let .usage(usage): self.usage = usage
         case let .autoAccept(on): autoAccept = on
+        case let .activity(activity): try record(activity)
+        case let .harnesses(harnesses): self.harnesses = harnesses
         }
     }
 }

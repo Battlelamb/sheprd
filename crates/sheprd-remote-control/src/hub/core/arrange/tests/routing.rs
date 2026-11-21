@@ -18,7 +18,7 @@ fn state(dir: &Path, path: &Path) -> crate::web::Shared {
 
 fn keeper() -> Keeper {
     Keeper::Saved {
-        tab: 4,
+        tab: TabRef::File(4),
         terminal: "t2".into(),
     }
 }
@@ -76,7 +76,12 @@ async fn exiting_desktop_leaves_an_unclaimed_intent_for_the_daemon() {
     state.changes.seen();
     let owner = desktop(&path);
     // Poll until the request is queued while the desktop still owns the file.
-    let mut change = Box::pin(changes::change_layout(&state, 4, "t2".into(), Op::Zoom));
+    let mut change = Box::pin(changes::change_layout(
+        &state,
+        TabRef::File(4),
+        "t2".into(),
+        Op::Zoom,
+    ));
     assert!(
         change
             .as_mut()
@@ -99,7 +104,12 @@ async fn claimed_intent_is_not_replayed_after_desktop_exit() {
     let state = state(dir.path(), &path);
     state.changes.seen();
     let owner = desktop(&path);
-    let mut change = Box::pin(changes::change_layout(&state, 4, "t2".into(), Op::Zoom));
+    let mut change = Box::pin(changes::change_layout(
+        &state,
+        TabRef::File(4),
+        "t2".into(),
+        Op::Zoom,
+    ));
     assert!(
         change
             .as_mut()
@@ -111,7 +121,9 @@ async fn claimed_intent_is_not_replayed_after_desktop_exit() {
     drop(owner);
     // Stand in for the desktop saving the change but losing its answer.
     let source = tests_support_source(Some(path.clone()), Some(SCOPE));
-    source.arrange_saved(4, "t2", &Op::Zoom).unwrap();
+    source
+        .arrange_saved(&TabRef::File(4), "t2", &Op::Zoom)
+        .unwrap();
     assert!(
         tokio::time::timeout(Duration::from_secs(1), change)
             .await
@@ -127,15 +139,23 @@ fn concurrent_phone_edits_preserve_each_other_and_reopen_under_the_lock() {
     let path = saved_file(dir.path());
     let source = tests_support_source(Some(path.clone()), Some(SCOPE));
     std::thread::scope(|threads| {
-        threads.spawn(|| source.arrange_saved(4, "t2", &Op::Zoom).unwrap());
         threads.spawn(|| {
             source
-                .arrange_saved(4, "t1", &Op::RenamePane(Some("server".into())))
+                .arrange_saved(&TabRef::File(4), "t2", &Op::Zoom)
                 .unwrap()
         });
         threads.spawn(|| {
             source
-                .arrange_saved(4, "t1", &Op::RenameTab(Some("logs".into())))
+                .arrange_saved(
+                    &TabRef::File(4),
+                    "t1",
+                    &Op::RenamePane(Some("server".into())),
+                )
+                .unwrap()
+        });
+        threads.spawn(|| {
+            source
+                .arrange_saved(&TabRef::File(4), "t1", &Op::RenameTab(Some("logs".into())))
                 .unwrap()
         });
     });
@@ -148,7 +168,7 @@ fn concurrent_phone_edits_preserve_each_other_and_reopen_under_the_lock() {
     // Even split cannot start a speculative shell while the app owns it.
     assert!(
         source
-            .arrange_saved(4, "t2", &Op::SplitRight)
+            .arrange_saved(&TabRef::File(4), "t2", &Op::SplitRight)
             .unwrap_err()
             .desktop_owns_layout()
     );

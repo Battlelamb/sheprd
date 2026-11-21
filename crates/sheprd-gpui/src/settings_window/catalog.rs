@@ -338,10 +338,20 @@ pub(super) const CATALOG: &[Entry] = &[
     // One per `[features]` flag; a test checks none is missing.
     // keep-sorted start
     feature(Feature::AcpChats),
+    #[cfg(feature = "mcp")]
+    feature(Feature::Mcp),
     feature(Feature::MoonframeWindow),
     feature(Feature::QaMenu),
     feature(Feature::SidebarHoverMenu),
     // keep-sorted end
+    // Under the flags; its button works while the MCP server is on.
+    #[cfg(feature = "mcp")]
+    entry(
+        Section::General,
+        "general-mcp-config",
+        "mcp-settings-copy",
+        "mcp-settings-copy-description",
+    ),
     entry(
         Section::General,
         "general-copy-on-select",

@@ -153,7 +153,7 @@ public struct Home: Codable, Hashable, Sendable {
 
         /// What the badge says, before a theme colors it.
         public enum Tone: String, Codable, Hashable, Sendable {
-            case attention, held, merged, ready, waiting, other
+            case attention, held, merged, queued, ready, waiting, other
 
             public init(from decoder: Decoder) throws {
                 self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .other
@@ -300,12 +300,16 @@ public struct Home: Codable, Hashable, Sendable {
             /// When the computer saw it last change state; unknown until
             /// it does, and from older computers.
             public var changedMs: UInt64?
+            /// What it last said, read off its screen: its latest
+            /// paragraph, one item to a line. Absent until read, and from
+            /// older computers.
+            public var preview: String?
             /// Whether its conversation opens as a read-only chat on its
             /// pane, beside the terminal; older computers leave it out.
             public var transcript: Bool?
 
             enum CodingKeys: String, CodingKey {
-                case name, status, pane, title, transcript
+                case name, status, pane, title, preview, transcript
                 case changedMs = "changed_ms"
             }
 

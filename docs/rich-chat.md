@@ -634,6 +634,11 @@ All 214 tests pass.
   down, each bursting into pixels. Effects stay in the chat's pane, never over
   the terminals, tabs, or sidebar, and never take the pointer. A message plays its first; another
   arriving while one plays is dropped, not queued.
+- A line `::wizz` asks for the person's attention, as MSN Messenger's nudge
+  did: the chat shakes for a second and, on a phone, buzzes. A turn whose
+  last reply holds it sends a time-sensitive push that plays the same buzz,
+  whatever the push privacy, so a locked phone buzzes too. The excerpt a
+  push shows leaves every directive line out.
 
 Only an agent's replies play effects; a user's message shows its effect
 directives as text, though its size spans still apply. Each effect plays once,
@@ -658,6 +663,12 @@ differences:
   at rest.
 - A list row strips the directives from the computer's one-line excerpt of
   the latest reply.
+- Each effect also has a sound and, on an iPhone, haptic taps timed to its
+  animation (`Chat/Effects/Cue.swift`): a slam's landing, each firework's
+  burst, each letter zap shoots down. The sounds are synthesized
+  (`Synth.swift`), not shipped as files. They play in the ambient category,
+  so the Ring/Silent switch mutes them, and never while dictation or voice
+  holds the audio session. Settings > Sounds & Haptics turns each off.
 
 The phone web app draws neither, so `phone.md` does not mention them and only
 `phone-app.md`, which follows it for the iPhone and iPad app, does.
@@ -715,6 +726,36 @@ large, not UTF-8, or names an unknown placeholder becomes a warning notice in
 the chat. The `<sheprd>` wrapper, its checksum, and the `<instructions>`
 block stay Sheprd's, so a replaced template cannot break hiding notes or
 deciding what to tell again. Templates are escaped like instructions, opening `<instructions>` tags included. Instructions are kept as written and filled in when sent, so a switch of agent (`Context::switched`) changes `{{ agent }}` and sends them again; the intro is filled in with the prompt's origin, or the last one a client gave. Files are read through a capped reader. Only a missing `instructions.md` falls back to the older file.
+
+### Starting a chat like this one
+
+For a built-in agent, when a `sheprd` command is beside the program, the
+note also says in a `<chat>` block what the agent runs as: which agent, in
+a Sheprd chat rather than its own terminal interface, with the model,
+thinking level, and permission mode the chat shows (`context/launch.rs`).
+It goes with the first prompt and again whenever any of it changes, as when
+the person picks another model, the chat switches agent, or a terminal
+agent moved into the chat ([Moving a terminal agent into a
+chat](#moving-a-terminal-agent-into-a-chat)): its earlier messages were
+written in a terminal, and the block tells it that it now runs in a chat. A
+restored chat learns from the notes it replays what the agent last heard.
+
+The block asks the agent, when the person wants another agent started, in
+a new workspace, tab, or worktree, to start a chat like this one with
+`sheprd chat new --pane PANE`, not the agent's terminal command. Run from a
+chat, with no agent named, the app starts the caller's own agent, and when
+the agent is the caller's own it copies the chat's settings
+(`sheprd_chat_protocol::Settings`: the model, its settings, the thinking level,
+the mode, and auto-accepting) into the new tab's environment as
+`SHEPRD_CHAT_SETTINGS`, at most 4 KiB of JSON. The new program applies them
+once its agent opens a new session, never a continued one, and only for
+the agent they were read from: one setting at a time, each after the agent
+answered the one before, so a thinking level is checked against the model
+just chosen. A setting the agent does not offer, or already has, is
+skipped, and a refused one leaves a warning in the chat while the rest
+still go. The program keeps the variable from its agent, so a chat that
+agent starts carries its own. A program on an SSH host older than this
+ignores the variable and starts with the agent's defaults.
 
 ## Existing CLI sessions
 

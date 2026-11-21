@@ -94,3 +94,13 @@ pr-stack-inferred-ready-detail = { $count ->
     [one] Nothing below it is still open.
    *[other] Merge them one at a time, bottom first.
 }
+
+# The Git popup's merge queue confirmation. $numbers lists the pull requests
+# queued together, bottom first.
+pr-stack-dialog-add-title = Add to the merge queue
+# $head is the start of the head commit the dialog was opened for.
+pr-stack-dialog-add-body = Queues { $numbers } at head commit { $head }. They merge once the queue's checks pass.
+pr-stack-dialog-add = Add to queue
+pr-stack-dialog-remove-title = Remove from the merge queue
+pr-stack-dialog-remove-body = Pull requests of its stack above it leave the queue with it.
+pr-stack-dialog-remove = Remove

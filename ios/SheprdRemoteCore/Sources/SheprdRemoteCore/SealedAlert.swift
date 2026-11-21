@@ -40,8 +40,10 @@ public struct SealedAlert: Codable, Hashable, Sendable {
     public var body: String
     public var badge: Int?
     public var permission: Permission?
+    /// The agent asked for attention with `::wizz`: the alert buzzes.
+    public var wizz: Bool
 
-    enum CodingKeys: String, CodingKey { case kind, clear, computer, pane, title, body, badge, permission }
+    enum CodingKeys: String, CodingKey { case kind, clear, computer, pane, title, body, badge, permission, wizz }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -53,6 +55,7 @@ public struct SealedAlert: Codable, Hashable, Sendable {
         body = try c.decodeIfPresent(String.self, forKey: .body) ?? ""
         badge = try c.decodeIfPresent(Int.self, forKey: .badge)
         permission = try c.decodeIfPresent(Permission.self, forKey: .permission)
+        wizz = try c.decodeIfPresent(Bool.self, forKey: .wizz) ?? false
     }
 
     /// Opens an APNs payload's `sealed` field with the device's key.

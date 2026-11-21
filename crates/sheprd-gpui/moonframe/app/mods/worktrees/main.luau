@@ -745,6 +745,14 @@ return mod {
 						msg = { fold_all = not folded },
 						to = LINK,
 					},
+					if (sheprd.merged or 0) > 0
+						then head_tool {
+							icon = "sparkles",
+							tooltip = "Remove merged worktrees",
+							msg = { command = "remove_merged_worktrees" },
+							to = LINK,
+						}
+						else false,
 					head_tool { icon = "search", tooltip = "Search devices, worktrees, branches and notes", msg = "search" },
 				},
 			}

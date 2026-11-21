@@ -6,7 +6,7 @@ import SwiftUI
 /// the push relay the phone has no way to push itself, so the row says so.
 struct SelfTestPushRow: View {
     @Environment(AppModel.self) private var model
-    @AppStorage(PushRelaySetting.key, store: PushRelaySetting.store) private var pushRelay = false
+    @AppStorage(PushRelaySetting.key, store: PushRelaySetting.store) private var pushRelay = true
 
     var body: some View {
         if pushRelay {

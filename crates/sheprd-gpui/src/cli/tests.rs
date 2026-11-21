@@ -16,6 +16,8 @@ mod links;
 mod local_ports;
 mod machine;
 mod machine_agent;
+#[cfg(feature = "mcp")]
+mod mcp;
 mod memory;
 mod menu_bar;
 mod mods;

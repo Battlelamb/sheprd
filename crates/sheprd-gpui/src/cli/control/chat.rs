@@ -5,9 +5,10 @@ use super::{Args, CliError, Switch, unknown};
 pub enum ChatCommand {
     /// The window's chat panes and how each shows.
     Status,
-    /// Open a tab running a chat with `agent`.
+    /// Open a tab running a chat with `agent`, else the caller's own
+    /// chat's agent with that chat's settings.
     New {
-        agent: sheprd_chat_protocol::Agent,
+        agent: Option<sheprd_chat_protocol::Agent>,
         /// The pane whose workspace and folder it starts in, else the caller's.
         pane: Option<String>,
     },
@@ -18,6 +19,12 @@ pub enum ChatCommand {
     },
     /// The person's text shortcuts, which every chat's composer offers.
     Shortcuts,
+    /// Star or unstar a pane's agent.
+    Favorite {
+        switch: Switch,
+        /// The pane, else the caller's own.
+        pane: Option<String>,
+    },
     /// The pull requests the caller's chat lists in its rail, as the agent
     /// of that chat.
     PullRequests(ChatPrCommand),
@@ -50,10 +57,25 @@ pub(super) fn chat(args: &mut Args) -> Result<ChatCommand, CliError> {
         Some("new") => {
             let pane = args.text_option("--pane")?;
             let agent = args
-                .required_text("an agent, such as claude")?
-                .parse()
+                .optional_text()?
+                .map(|agent| agent.parse())
+                .transpose()
                 .map_err(|_| CliError::InvalidValue("AGENT"))?;
             return Ok(ChatCommand::New { agent, pane });
+        }
+        Some("favorite") => {
+            // The pane first, as it may come before the switch.
+            let pane = args.text_option("--pane")?;
+            let switch = match args.verb() {
+                None => Switch::Toggle,
+                Some(word) => match word.to_str() {
+                    Some("on") => Switch::On,
+                    Some("off") => Switch::Off,
+                    Some("toggle") => Switch::Toggle,
+                    _ => return Err(unknown("chat favorite", word)),
+                },
+            };
+            return Ok(ChatCommand::Favorite { switch, pane });
         }
         Some("convert") => {
             return Ok(ChatCommand::Convert {

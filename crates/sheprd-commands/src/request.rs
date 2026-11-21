@@ -142,6 +142,7 @@ pub fn request(command: Command, snapshot: &ClientShellSnapshot) -> Option<(Meth
         | Command::NewWorktree
         | Command::OpenWorktree
         | Command::RemoveWorktree
+        | Command::RemoveMergedWorktrees
         | Command::WorktreeNotes
         | Command::EditWorktreeNote
         | Command::Find

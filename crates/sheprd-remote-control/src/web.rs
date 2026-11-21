@@ -12,6 +12,7 @@
 mod api;
 mod assets;
 pub(crate) mod attention;
+mod favorites;
 mod fragments;
 mod github;
 mod hosts;
@@ -34,6 +35,7 @@ mod uploads;
 mod workspace;
 
 pub(crate) use api::{NEW_CHAT_WAIT, check_new_workspace, parse_agent};
+pub(crate) use favorites::{Kept as Favorites, follow_boot as follow_favorite_boot};
 pub(crate) use fragments::folders;
 pub(crate) use indicators::{Indicators, Look};
 pub(crate) use log::report_limit;
@@ -88,6 +90,8 @@ pub(crate) struct State {
     pub(crate) computer: String,
     /// Streams open per device.
     pub(crate) connected: Mutex<HashMap<DeviceId, usize>>,
+    /// This computer's favorite agents, which its phones and desktops share.
+    pub(crate) favorites: Favorites,
     pub(crate) fingerprint: String,
     pub(crate) github: crate::native::changes::github::Reader,
     pub(crate) hub: Arc<Hub>,
@@ -242,6 +246,10 @@ pub(crate) fn router(state: Shared) -> Router {
             "/api/term/{pane}/upload",
             post(terminal::upload).layer(DefaultBodyLimit::max(uploads::MAX_UPLOAD + 1024)),
         )
+        .route(
+            "/api/term/{pane}/file",
+            post(terminal::file).layer(DefaultBodyLimit::max(uploads::MAX_FILE + 1024)),
+        )
         .route("/api/term/{pane}/action", post(terminal::action))
         .route("/api/term/{pane}/rename", post(terminal::rename))
         .route("/api/stream", get(stream::stream))
@@ -259,6 +267,7 @@ pub(crate) fn router(state: Shared) -> Router {
             post(hosts::relay).layer(DefaultBodyLimit::max(16 * 1024)),
         )
         .route("/api/v2/hosts/{host}/pair", post(hosts::pair))
+        .route("/api/v2/favorites", post(favorites::post))
         .route("/api/v2/live", get(crate::native::live))
         .route("/api/v2/new", get(crate::native::new_options))
         .route("/api/v2/search", get(crate::native::search))
@@ -536,6 +545,7 @@ impl IntoResponse for ApiError {
                 ),
             ) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Update(update::Error::AppClosed) => StatusCode::CONFLICT,
+            Self::App(crate::app::Error::Favorites(_)) => StatusCode::BAD_REQUEST,
             Self::App(_) | Self::Upload(uploads::Error::Write(_)) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -551,6 +561,7 @@ impl IntoResponse for ApiError {
                 | crate::hub::ConvertError::Refused(_),
             ))
             | Self::Hub(crate::hub::Error::SessionOnHerdr2) => StatusCode::CONFLICT,
+            Self::Hub(error) if error.worktree_kept() => StatusCode::CONFLICT,
             Self::Hub(_) | Self::NoPush => StatusCode::SERVICE_UNAVAILABLE,
         };
         // The request line only has the status. A computer without push

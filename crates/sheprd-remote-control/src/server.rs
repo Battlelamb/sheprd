@@ -131,6 +131,7 @@ pub async fn run(options: Options) -> Result<()> {
         changes: Default::default(),
         computer: options::computer_name(),
         connected: Mutex::new(HashMap::new()),
+        favorites: web::Favorites::load(crate::app::favorites::file(&options.state_dir)),
         fingerprint,
         github: crate::native::changes::github::Reader::new(options.github_cli),
         hub,
@@ -174,6 +175,7 @@ pub async fn run(options: Options) -> Result<()> {
     // pictures.
     state.uploads.remove_leftovers();
     tokio::spawn(notifier::run(state.clone()));
+    tokio::spawn(web::follow_favorite_boot(state.clone()));
     tokio::spawn(crate::native::github::checkouts::follow(state.clone()));
     tokio::spawn(crate::native::previews::follow(state.clone()));
     tokio::spawn(crate::native::github::follow_gh_hosts(state.clone()));

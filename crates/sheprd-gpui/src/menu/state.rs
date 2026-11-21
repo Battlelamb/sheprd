@@ -257,6 +257,8 @@ pub(crate) struct Removal {
     pub(super) pending: Option<String>,
     /// Set once the daemon refused the checkout as dirty.
     pub(super) force: bool,
+    /// When the request was queued, for the dialog's elapsed time.
+    pub(super) started: std::time::Instant,
 }
 
 impl Removal {
@@ -264,6 +266,11 @@ impl Removal {
     /// its force confirmation.
     pub(crate) fn waiting(&self) -> bool {
         self.pending.is_some()
+    }
+
+    /// How long the request has been waiting on the daemon.
+    pub(crate) fn elapsed(&self) -> std::time::Duration {
+        self.started.elapsed()
     }
 
     pub(crate) fn pending_for(&self, endpoint: (u64, u64), boot_id: &str, workspace: &str) -> bool {

@@ -111,6 +111,7 @@ pub(crate) use server_keys::ActiveServerKeymap;
 pub(crate) struct SheprdWindow {
     // keep-sorted start
     pub(crate) _activation: Subscription,
+    pub(crate) _agent_favorites: Subscription,
     pub(crate) _appearance: Subscription,
     pub(crate) _browser_tabs: Subscription,
     pub(crate) _device_tags: Subscription,
@@ -130,6 +131,8 @@ pub(crate) struct SheprdWindow {
     pub(crate) active: bool,
     /// The activity bar's panel and filter.
     pub(crate) activity: sidebar::Activity,
+    /// Every device's favorite agents, as their daemons last answered.
+    pub(crate) agent_favorites: std::sync::Arc<crate::agent_favorites::Sets>,
     /// The coordinator group the agents panel is narrowed to, by name: a
     /// group outlives its coordinator's pane. None lists every group.
     pub(crate) agent_group: Option<String>,
@@ -234,6 +237,9 @@ pub(crate) struct SheprdWindow {
     pub(crate) flash: Option<(Flash, std::time::Instant)>,
     pub(crate) flash_motion: flash::Motion,
     pub(crate) focus: FocusHandle,
+    /// The workspace in front and the row that takes its place when it is
+    /// removed; see `sidebar::front_watch`.
+    pub(crate) front_watch: sidebar::FrontWatch,
     pub(crate) git: git::Git,
     /// Where the titlebar's Git button last painted. The window owns it so a
     /// shortcut and a click open the Git menu at the same place.
@@ -761,6 +767,7 @@ impl SheprdWindow {
         self.sync_remote_hosts(window, cx);
         self.reach_device_tags(cx);
         self.update_merged_cleanup(window, cx);
+        self.follow_removed_front(cx);
         if self.update_git() {
             cx.notify();
         }

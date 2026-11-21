@@ -123,6 +123,12 @@ pub enum Invocation {
         state_dir: Option<PathBuf>,
         offer: bool,
     },
+    /// Reads this computer's favorite agents, making the change
+    /// (`control::favorites::Change`) given on standard input, if any.
+    Favorites {
+        state_dir: Option<PathBuf>,
+        offer: bool,
+    },
     /// Reads this computer's text shortcuts, offering any given on standard
     /// input.
     Shortcuts {
@@ -157,6 +163,7 @@ Usage: sheprd-remote-control serve --state-dir DIR [options]
        sheprd-remote-control relay-enroll [--state-dir DIR] < REQUEST.json
        sheprd-remote-control tags [--offer] [--state-dir DIR] [< TAGS.json]
        sheprd-remote-control shortcuts [--offer] [--state-dir DIR] [< SHORTCUTS.json]
+       sheprd-remote-control favorites [--offer] [--state-dir DIR] [< CHANGE.json]
        sheprd-remote-control relays [--offer] [--state-dir DIR] [< RELAYS.json]
        sheprd-remote-control desktop-pair --name NAME [--state-dir DIR]
        sheprd-remote-control relay-connect [--state-dir DIR] HOST
@@ -225,6 +232,12 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
             return parse_host(true, args).map(|invocation| match invocation {
                 Invocation::Enroll { state_dir } => Invocation::RelayEnroll { state_dir },
                 other => other,
+            });
+        }
+        Some("favorites") => {
+            return parse_edited(args, |state_dir, offer| Invocation::Favorites {
+                state_dir,
+                offer,
             });
         }
         Some("relays") => {
@@ -499,7 +512,7 @@ fn parse_desktop(
     })
 }
 
-/// `tags`, `shortcuts`, or `relays`, then `[--offer] [--state-dir DIR]`, as `made`.
+/// `tags`, `shortcuts`, `favorites`, or `relays`, then `[--offer] [--state-dir DIR]`, as `made`.
 fn parse_edited(
     mut args: impl Iterator<Item = OsString>,
     made: fn(Option<PathBuf>, bool) -> Invocation,

@@ -3,10 +3,12 @@
 //! modes that agent offered last ([`crate::known`]) while it comes up, and
 //! a pick made meanwhile is shown at once and sent once its session opens.
 
-use sheprd_chat_protocol::{Agent, Change, OptionKind, OptionValue, Rejection, Status, Transcript};
+use sheprd_chat_protocol::{
+    Agent, Change, OptionKind, OptionValue, Rejection, Setting, Settings, Status, Transcript,
+};
 
 use super::{Session, Update};
-use crate::known::{Known, Settings};
+use crate::known::{self, Known};
 
 /// A setting picked before the agent's session opened.
 #[derive(Debug, Eq, PartialEq)]
@@ -25,8 +27,8 @@ pub(super) fn seed(known: &Known, agent: Option<Agent>, transcript: &mut Transcr
 }
 
 impl<R: FnMut(Update)> Session<R> {
-    fn settings(&self) -> Settings {
-        Settings {
+    fn settings(&self) -> known::Settings {
+        known::Settings {
             modes: self.transcript.modes.clone(),
             options: self.transcript.options.clone(),
         }
@@ -112,20 +114,32 @@ impl<R: FnMut(Update)> Session<R> {
         Ok(())
     }
 
-    /// Sends the picks made while the agent started. One its session no
-    /// longer offers is dropped: the setting then shows the agent's own.
-    /// `false` when the agent could not be sent one, which failed the
-    /// session; the rest are dropped with it.
-    pub(super) fn apply_deferred(&mut self) -> bool {
+    /// Hands the picks made while the agent started to the settings carried
+    /// into its session, after those so the person's pick wins, to be sent
+    /// one at a time like them; prompts wait for them too. A continued
+    /// session takes them as well, though it keeps its own carried ones.
+    /// One the session no longer offers is skipped there: the setting then
+    /// shows the agent's own.
+    pub(super) fn carry_deferred(&mut self) {
+        let Some(agent) = self.config.harness else {
+            self.deferred.clear();
+            return;
+        };
+        if self.deferred.is_empty() {
+            return;
+        }
+        let carried = self.config.settings.get_or_insert_with(|| Settings {
+            agent: agent.name().to_owned(),
+            ..Settings::default()
+        });
         for deferred in std::mem::take(&mut self.deferred) {
-            let sent = match deferred {
-                Deferred::Mode(mode) => self.set_mode(mode),
-                Deferred::Option { id, value } => self.set_option(id, &value),
-            };
-            if sent == Err(Rejection::AgentUnavailable) {
-                return false;
+            match deferred {
+                Deferred::Mode(mode) => carried.mode = Some(mode),
+                Deferred::Option { id, value } => {
+                    carried.options.retain(|setting| setting.id != id);
+                    carried.options.push(Setting { id, value });
+                }
             }
         }
-        true
     }
 }

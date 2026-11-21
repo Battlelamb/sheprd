@@ -141,18 +141,34 @@ fn a_starting_agent_shows_its_known_settings_and_takes_picks() {
             "modes": {"currentModeId": "default", "availableModes": [
                 {"id": "default", "name": "default"}, {"id": "plan", "name": "plan"}]}}),
     );
+    // A prompt typed now waits for the picks, so it runs with them.
+    harness.command(
+        1,
+        Command::Prompt {
+            origin: None,
+            text: "hello".to_owned(),
+            attachments: Vec::new(),
+        },
+    );
+    // One at a time: the model first, as its thinking levels follow it.
     let sent = harness.sent();
-    let option = sent
-        .iter()
-        .find(|message| message["method"] == "session/set_config_option")
-        .expect("the pick is sent once the session opens");
-    assert_eq!(option["params"]["configId"], "model");
-    assert_eq!(option["params"]["value"], "sonnet");
-    let mode = sent
-        .iter()
-        .find(|message| message["method"] == "session/set_mode")
-        .expect("the mode is sent once the session opens");
-    assert_eq!(mode["params"]["modeId"], "plan");
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0]["method"], "session/set_config_option");
+    assert_eq!(sent[0]["params"]["configId"], "model");
+    assert_eq!(sent[0]["params"]["value"], "sonnet");
+    harness.respond(
+        sent[0]["id"].as_i64().unwrap(),
+        json!({"configOptions": options_json("sonnet")}),
+    );
+    let sent = harness.sent();
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0]["method"], "session/set_mode");
+    assert_eq!(sent[0]["params"]["modeId"], "plan");
+    harness.respond(sent[0]["id"].as_i64().unwrap(), json!({}));
+    assert_eq!(
+        harness.last_request("session/prompt")["method"],
+        "session/prompt"
+    );
     // What is kept is what the agent opened with, not the pick.
     assert!(harness.settings.borrow().is_empty());
 }
@@ -251,6 +267,15 @@ fn a_pick_the_agent_cannot_be_sent_leaves_the_session_failed() {
     let initialize = serde_json::from_slice::<Value>(&receiver.recv().unwrap()).unwrap();
     harness.command(
         1,
+        Command::SetOption {
+            id: "model".to_owned(),
+            value: OptionValue::Choice {
+                id: "sonnet".to_owned(),
+            },
+        },
+    );
+    harness.command(
+        1,
         Command::SetMode {
             id: "plan".to_owned(),
         },
@@ -269,4 +294,48 @@ fn a_pick_the_agent_cannot_be_sent_leaves_the_session_failed() {
                 {"id": "default", "name": "default"}, {"id": "plan", "name": "plan"}]}}),
     );
     assert!(matches!(harness.transcript().status, Status::Failed { .. }));
+    // Nothing more was tried once the agent stopped reading.
+    let errors = harness
+        .notices()
+        .into_iter()
+        .filter(|(level, _)| *level == NoticeLevel::Error)
+        .count();
+    assert_eq!(errors, 1);
+}
+
+#[test]
+fn a_pick_made_while_starting_wins_over_a_carried_setting() {
+    let mut harness = harness_with(Config {
+        known: known(Agent::Claude),
+        settings: Some(sheprd_chat_protocol::Settings {
+            agent: Agent::Claude.name().to_owned(),
+            options: vec![sheprd_chat_protocol::Setting {
+                id: "model".to_owned(),
+                value: OptionValue::Choice {
+                    id: "sonnet".to_owned(),
+                },
+            }],
+            ..Default::default()
+        }),
+        ..config()
+    });
+    harness.session.start();
+    harness.command(
+        1,
+        Command::SetOption {
+            id: "model".to_owned(),
+            value: OptionValue::Choice {
+                id: "opus".to_owned(),
+            },
+        },
+    );
+    open(&mut harness, options_json("opus"));
+    // The session already runs the pick, so the carried model is not sent.
+    assert!(
+        harness
+            .sent()
+            .iter()
+            .all(|message| message["method"] != "session/set_config_option")
+    );
+    assert_eq!(harness.transcript().options, [model("opus")]);
 }

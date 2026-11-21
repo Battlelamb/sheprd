@@ -16,7 +16,11 @@ use crate::{
 };
 use secrecy::{ExposeSecret as _, SecretString};
 use sheprd_chat_protocol::{Change, Cursor, EntryKind, Transcript};
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::{
     sync::{broadcast::error::RecvError, mpsc, watch},
     task::{AbortHandle, JoinSet},
@@ -30,6 +34,9 @@ const HOME_COALESCE: Duration = Duration::from_millis(400);
 const CHAT_COALESCE: Duration = Duration::from_millis(120);
 /// Scrolls one terminal view holds before it reads them; more are dropped.
 const SCROLL_QUEUE: usize = 8;
+/// What the phone hears when its background chat gives way to a view a
+/// screen shows.
+const GAVE_WAY: &str = "this chat gave way to a view on screen";
 /// What the phone hears when it scrolls a terminal no attach holds.
 const CANNOT_SCROLL: &str = "this terminal cannot scroll from the phone";
 /// Failed screen reads in a row before the view reloads.
@@ -41,6 +48,8 @@ const ACCESS_CHECK: Duration = Duration::from_secs(30);
 type Outbound = mpsc::Sender<ServerMessage>;
 
 mod term_size;
+#[cfg(test)]
+mod tests;
 
 /// The views a socket follows, and their tasks. Dropping it stops them.
 #[derive(Default)]
@@ -50,6 +59,8 @@ pub(crate) struct Views {
     /// What each running terminal view takes besides its subscription,
     /// by pane.
     terms: HashMap<String, TermControl>,
+    /// Running chats no screen shows, which give way first.
+    background: HashSet<View>,
 }
 
 /// The size a terminal view follows at, and the scrolls it forwards.
@@ -59,17 +70,39 @@ struct TermControl {
 }
 
 impl Views {
-    /// Whether `view` may start: it replaces itself, and a new one fits
-    /// under [`MAX_VIEWS`] once finished views are forgotten.
-    pub(crate) fn admits(&mut self, view: &View) -> bool {
+    /// Whether `view` may start, and the background chat stopped to make
+    /// room for it; `None` when it may not. It replaces itself, a new one
+    /// fits under [`MAX_VIEWS`] once finished views are forgotten, and when
+    /// none fits, one a screen shows takes a background chat's place.
+    pub(crate) fn admit(&mut self, view: &View, background: bool) -> Option<Option<View>> {
         while self.tasks.try_join_next().is_some() {}
         self.running.retain(|_, task| !task.is_finished());
-        self.running.contains_key(view) || self.running.len() < MAX_VIEWS
+        self.background
+            .retain(|view| self.running.contains_key(view));
+        if self.running.contains_key(view) || self.running.len() < MAX_VIEWS {
+            return Some(None);
+        }
+        if background {
+            return None;
+        }
+        let gives_way = self.background.iter().next()?.clone();
+        self.stop(&gives_way);
+        Some(Some(gives_way))
     }
 
-    fn start(&mut self, view: View, task: impl Future<Output = ()> + Send + 'static) {
+    /// Starts `view`, in place of itself; `background` for a chat no
+    /// screen shows.
+    fn start(
+        &mut self,
+        view: View,
+        background: bool,
+        task: impl Future<Output = ()> + Send + 'static,
+    ) {
         self.stop(&view);
         let handle = self.tasks.spawn(task);
+        if background {
+            self.background.insert(view.clone());
+        }
         self.running.insert(view, handle);
     }
 
@@ -77,6 +110,7 @@ impl Views {
         if let View::Term { pane } = view {
             self.terms.remove(pane);
         }
+        self.background.remove(view);
         if let Some(task) = self.running.remove(view) {
             task.abort();
         }
@@ -164,13 +198,22 @@ fn handle(
     message: ClientMessage,
     outbound: &Outbound,
 ) -> Option<Refusal> {
-    let (view, since, size) = match message {
+    let (view, since, size, background) = match message {
         ClientMessage::Unsubscribe { view } => {
             tracing::debug!(?view, "a phone stopped following a view");
             views.stop(&view);
             return None;
         }
-        ClientMessage::Subscribe { view, since, size } => (view, since, size),
+        ClientMessage::Subscribe {
+            view,
+            since,
+            size,
+            background,
+        } => {
+            // Only a chat is followed in the background.
+            let background = background && matches!(view, View::Chat { .. });
+            (view, since, size, background)
+        }
         ClientMessage::TermScroll { pane, lines } => {
             let refused = |message| Some((message, Some(View::Term { pane: pane.clone() })));
             if lines == 0 {
@@ -184,8 +227,16 @@ fn handle(
             };
         }
     };
-    if !views.admits(&view) {
+    let Some(gave_way) = views.admit(&view, background) else {
         return Some(("too many views on one connection", Some(view)));
+    };
+    if let Some(gave_way) = gave_way {
+        // The phone stops counting on it. Should the queue be full, the
+        // phone follows the chat again when a screen opens it.
+        let _ = outbound.try_send(ServerMessage::Error {
+            message: GAVE_WAY.into(),
+            view: Some(gave_way),
+        });
     }
     tracing::debug!(?view, ?size, "a phone follows a view");
     let layout = state.hub.layout();
@@ -194,15 +245,16 @@ fn handle(
     match view.clone() {
         View::Home => {
             state.hub.wake_for_phone();
-            views.start(view, follow_home(state, device.clone(), out))
+            views.start(view, false, follow_home(state, device.clone(), out))
         }
         View::Chat { pane } => {
             let link = layout.chat(&pane).and_then(|_| state.hub.chat(&pane));
             if link.is_none() && !state.hub.observable(&pane) {
                 return Some(("no such chat", Some(view)));
             }
-            let watching = Watching::new(&state, &pane);
-            views.start(view.clone(), async move {
+            // Only a chat on screen is opened, which marks its answers seen.
+            let watching = (!background).then(|| Watching::new(&state, &pane));
+            views.start(view.clone(), background, async move {
                 let _watching = watching;
                 // A terminal agent's conversation is observed only once a
                 // phone asks for it, and only while its agent runs.
@@ -244,7 +296,7 @@ fn handle(
                 let (scrolls, scrolled) = mpsc::channel(SCROLL_QUEUE);
                 let watching = Watching::new(&state, &pane);
                 let term = follow_term(state, device.clone(), pane.clone(), follow, scrolled, out);
-                views.start(view.clone(), async move {
+                views.start(view.clone(), false, async move {
                     let _watching = watching;
                     term.await;
                 });
@@ -289,6 +341,7 @@ async fn follow_home(state: Shared, device: DeviceId, out: Outbound) {
     let mut load = state.load.clone();
     let mut tags = state.tags.subscribe();
     let mut shortcuts = state.shortcuts.subscribe();
+    let mut favorites = state.favorites.subscribe();
     let mut opened = state.opened.changed();
     let mut lending = state.lending.watch();
     let mut previews = state.previews.watch();
@@ -316,6 +369,7 @@ async fn follow_home(state: Shared, device: DeviceId, out: Outbound) {
                 changed = pull_requests.changed() => if changed.is_err() { return } else { break },
                 changed = tags.changed() => if changed.is_err() { return } else { break },
                 changed = shortcuts.changed() => if changed.is_err() { return } else { break },
+                changed = favorites.changed() => if changed.is_err() { return } else { break },
                 changed = opened.changed() => if changed.is_err() { return } else { break },
                 changed = previews.changed() => if changed.is_err() { return } else { break },
                 changed = lending.changed() => if changed { break } else { return },

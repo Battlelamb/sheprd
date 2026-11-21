@@ -6,6 +6,7 @@
 mod about;
 mod accessibility;
 mod actions;
+mod agent_favorites;
 mod agent_notes;
 mod agent_skill;
 mod ago;
@@ -100,6 +101,8 @@ mod log_window;
 mod luau_window;
 mod machine;
 mod mark_layer;
+#[cfg(feature = "mcp")]
+mod mcp;
 mod menu;
 mod menus;
 mod merged_cleanup;

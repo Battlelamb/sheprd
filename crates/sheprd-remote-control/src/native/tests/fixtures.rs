@@ -150,6 +150,11 @@ fn home() -> Home {
         checkouts: &Default::default(),
         recognized: &Default::default(),
         computer: "MacBook Pro",
+        // The chat and the terminal's agent are starred.
+        favorites: &crate::control::favorites::Favorites {
+            boot: Some("b".into()),
+            panes: vec!["p1".into(), "p2".into()],
+        },
         fingerprint: &"AB".repeat(32),
         layout: &layout,
         load: Some(Load {
@@ -274,6 +279,7 @@ fn client_messages_match_the_swift_fixtures() {
     check(
         "subscribe_home",
         &ClientMessage::Subscribe {
+            background: false,
             view: View::Home,
             since: None,
             size: None,
@@ -282,6 +288,7 @@ fn client_messages_match_the_swift_fixtures() {
     check(
         "subscribe_chat",
         &ClientMessage::Subscribe {
+            background: false,
             view: View::Chat { pane: "p1".into() },
             since: Some(cursor(41)),
             size: None,
@@ -290,6 +297,7 @@ fn client_messages_match_the_swift_fixtures() {
     check(
         "subscribe_term",
         &ClientMessage::Subscribe {
+            background: false,
             view: View::Term { pane: "p2".into() },
             since: None,
             size: None,
@@ -298,6 +306,7 @@ fn client_messages_match_the_swift_fixtures() {
     check(
         "subscribe_term_sized",
         &ClientMessage::Subscribe {
+            background: false,
             view: View::Term { pane: "p2".into() },
             since: None,
             size: Some(TermSize { cols: 46, rows: 30 }),

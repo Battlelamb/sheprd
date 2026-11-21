@@ -74,8 +74,7 @@ dependencies = [
 [[package]]
 name = "accesskit_macos"
 version = "0.26.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce02dc63b43f0c9296af9ac946312a2dc8814427d7a64d2d600971dac55b6076"
+source = "git+https://github.com/sheprd-labs/accesskit?rev=d7919c53f9a9667486ba61e946c44be57c3dabe7#d7919c53f9a9667486ba61e946c44be57c3dabe7"
 dependencies = [
  "accesskit 0.24.1",
  "accesskit_consumer 0.38.0",
@@ -11150,6 +11149,7 @@ dependencies = [
  "sheprd-diagnostics",
  "sheprd-github",
  "sheprd-i18n",
+ "sheprd-mcp",
  "sheprd-memory",
  "sheprd-mods",
  "sheprd-orchestrator",
@@ -11216,6 +11216,15 @@ name = "sheprd-luau"
 version = "0.1.0"
 dependencies = [
  "mlua",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "sheprd-mcp"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 

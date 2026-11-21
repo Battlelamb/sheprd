@@ -29,7 +29,7 @@ use super::Handle;
 use sheprd_apns::RelayOutcome;
 use tokio::{
     sync::mpsc::{self, error::TrySendError},
-    task::JoinSet,
+    task::{JoinError, JoinSet},
 };
 
 /// How many unpaired devices' handles may wait to be revoked.
@@ -65,39 +65,55 @@ pub(crate) fn queue(revocations: &Revocations, handles: Vec<Handle>) {
 }
 
 /// Revokes each queued handle once with `revoke`, at most
-/// [`CONCURRENCY`] at a time, until every sender is gone.
-pub(crate) async fn run<F, A>(mut receiver: mpsc::Receiver<Vec<Handle>>, revoke: F)
-where
+/// [`CONCURRENCY`] at a time, until every sender is gone, handing each
+/// call's result to `report` ([`log`] in the daemon) as soon as it ends,
+/// whether or not more work arrives.
+pub(crate) async fn run<F, A, R>(
+    mut receiver: mpsc::Receiver<Vec<Handle>>,
+    revoke: F,
+    mut report: R,
+) where
     F: Fn(Handle) -> A,
     A: Future<Output = RelayOutcome> + Send + 'static,
+    R: FnMut(Result<RelayOutcome, JoinError>),
 {
     let mut running = JoinSet::new();
-    while let Some(handles) = receiver.recv().await {
-        for handle in handles {
-            while running.len() >= CONCURRENCY {
-                finished(running.join_next().await);
+    loop {
+        tokio::select! {
+            Some(result) = running.join_next(), if !running.is_empty() => report(result),
+            received = receiver.recv() => {
+                let Some(handles) = received else {
+                    break;
+                };
+                for handle in handles {
+                    while running.len() >= CONCURRENCY {
+                        if let Some(result) = running.join_next().await {
+                            report(result);
+                        }
+                    }
+                    running.spawn(revoke(handle));
+                }
             }
-            running.spawn(revoke(handle));
         }
     }
     while let Some(result) = running.join_next().await {
-        finished(Some(result));
+        report(result);
     }
 }
 
-fn finished(result: Option<Result<RelayOutcome, tokio::task::JoinError>>) {
+/// Logs what came of one revocation, naming no handle or device.
+pub(crate) fn log(result: Result<RelayOutcome, JoinError>) {
     match result {
-        Some(Ok(RelayOutcome::Delivered | RelayOutcome::Gone | RelayOutcome::Stale)) => {
+        Ok(RelayOutcome::Delivered | RelayOutcome::Gone | RelayOutcome::Stale) => {
             // Revoked, or the push relay refuses the handle already.
             tracing::debug!("revoked a push relay handle");
         }
-        Some(Ok(outcome)) => {
+        Ok(outcome) => {
             tracing::info!(
                 ?outcome,
                 "could not revoke a push relay handle; it is left to expire"
             );
         }
-        Some(Err(error)) => tracing::warn!(%error, "a push relay revocation failed"),
-        None => {}
+        Err(error) => tracing::warn!(%error, "a push relay revocation failed"),
     }
 }

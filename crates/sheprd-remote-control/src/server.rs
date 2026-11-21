@@ -346,7 +346,7 @@ async fn revoke_push_relay_handles(
     state: Arc<State>,
     receiver: tokio::sync::mpsc::Receiver<Vec<crate::apns::Handle>>,
 ) {
-    crate::apns::push_relay_revoke::run(receiver, move |handle| {
+    let revoke = move |handle: crate::apns::Handle| {
         let state = state.clone();
         async move {
             match state.apns.push_relays() {
@@ -354,8 +354,9 @@ async fn revoke_push_relay_handles(
                 None => sheprd_apns::RelayOutcome::Unavailable,
             }
         }
-    })
-    .await;
+    };
+    crate::apns::push_relay_revoke::run(receiver, revoke, crate::apns::push_relay_revoke::log)
+        .await;
 }
 
 /// One tick of [`expire`]: drops old pictures, and devices away for

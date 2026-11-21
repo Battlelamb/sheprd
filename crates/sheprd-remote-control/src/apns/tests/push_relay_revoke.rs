@@ -59,13 +59,17 @@ async fn each_queued_push_relay_handle_is_revoked_once() {
     drop(revocations);
     let revoked = Arc::new(Mutex::new(Vec::new()));
     let seen = revoked.clone();
-    push_relay_revoke::run(receiver, move |handle| {
-        let seen = seen.clone();
-        async move {
-            seen.lock().unwrap().push(handle);
-            RelayOutcome::Delivered
-        }
-    })
+    push_relay_revoke::run(
+        receiver,
+        move |handle| {
+            let seen = seen.clone();
+            async move {
+                seen.lock().unwrap().push(handle);
+                RelayOutcome::Delivered
+            }
+        },
+        push_relay_revoke::log,
+    )
     .await;
     assert_eq!(
         *revoked.lock().unwrap(),
@@ -83,23 +87,50 @@ async fn at_most_a_few_push_relay_revocations_run_at_once() {
     let most = Arc::new(AtomicUsize::new(0));
     let calls = Arc::new(AtomicUsize::new(0));
     let (running_in, most_in, calls_in) = (running.clone(), most.clone(), calls.clone());
-    push_relay_revoke::run(receiver, move |_| {
-        let (running, most, calls) = (running_in.clone(), most_in.clone(), calls_in.clone());
-        async move {
-            let now = running.fetch_add(1, Ordering::SeqCst) + 1;
-            most.fetch_max(now, Ordering::SeqCst);
-            for _ in 0..4 {
-                tokio::task::yield_now().await;
+    push_relay_revoke::run(
+        receiver,
+        move |_| {
+            let (running, most, calls) = (running_in.clone(), most_in.clone(), calls_in.clone());
+            async move {
+                let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+                most.fetch_max(now, Ordering::SeqCst);
+                for _ in 0..4 {
+                    tokio::task::yield_now().await;
+                }
+                running.fetch_sub(1, Ordering::SeqCst);
+                calls.fetch_add(1, Ordering::SeqCst);
+                // An unreachable push relay is not tried again.
+                RelayOutcome::Unavailable
             }
-            running.fetch_sub(1, Ordering::SeqCst);
-            calls.fetch_add(1, Ordering::SeqCst);
-            // An unreachable push relay is not tried again.
-            RelayOutcome::Unavailable
-        }
-    })
+        },
+        push_relay_revoke::log,
+    )
     .await;
     assert_eq!(calls.load(Ordering::SeqCst), handles.len());
     assert!(most.load(Ordering::SeqCst) <= CONCURRENCY);
+}
+
+#[tokio::test]
+async fn a_lone_failed_revocation_is_reported_while_the_queue_stays_open() {
+    let (revocations, receiver) = push_relay_revoke::channel();
+    let (reports, mut reported) = tokio::sync::mpsc::unbounded_channel();
+    let runner = tokio::spawn(push_relay_revoke::run(
+        receiver,
+        |_| async { RelayOutcome::Unavailable },
+        move |result| {
+            let _ = reports.send(result.unwrap());
+        },
+    ));
+    push_relay_revoke::queue(&revocations, vec![handle('A')]);
+    // `Auth` keeps its sender for the daemon's life, so nothing else
+    // arrives to wake the loop: the report must come on its own.
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), reported.recv())
+        .await
+        .expect("a failed revocation is reported without more work arriving");
+    assert_eq!(outcome, Some(RelayOutcome::Unavailable));
+    assert!(!runner.is_finished());
+    drop(revocations);
+    runner.await.unwrap();
 }
 
 #[test]

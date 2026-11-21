@@ -1,11 +1,11 @@
-# Settings > Remote control: the push relay (push.sheprd.org), which sends
-# iPhone pushes for a computer without its own APNs key. Always "push
+# Settings > Remote control: the push relay (push.sheprd.org), the only way
+# a computer sends iPhone pushes. Always "push
 # relay", never bare "relay": the host relays that let computers reach each
 # other are a different thing with their own settings.
 
 settings-push-relay-title = Push through the Sheprd push relay
-settings-push-relay-description = Live Activities and alerts on a paired iPhone without your own APNs key, sent through push.sheprd.org.
-settings-push-relay-note = Get Live Activities and alerts when you are away from this computer. Your own APNs key wins when you have one.
+settings-push-relay-description = Live Activities and alerts on a paired iPhone, sent through push.sheprd.org.
+settings-push-relay-note = Get Live Activities and alerts when you are away from this computer. Without the push relay, the phone gets web notifications only.
 
 # The confirmation before it turns on. Keep it true to what the push relay
 # does (docs/apns-relay-plan.md, "Opt-in").
@@ -24,11 +24,9 @@ settings-push-relay-ask-cancel = Cancel
 
 # How the remote control daemon sends iPhone pushes now.
 settings-push-relay-delivery = Push delivery
-settings-push-relay-delivery-off = Off: there is no APNs key here, and the push relay is off.
-settings-push-relay-delivery-own-key = Straight to Apple with your own APNs key.
-settings-push-relay-delivery-own-key-wins = Straight to Apple with your own APNs key, which wins over the push relay.
+settings-push-relay-delivery-off = Off: the push relay is off.
 settings-push-relay-delivery-push-relay = Through the push relay.
-settings-push-relay-delivery-other = The daemon sends pushes in a way this Sheprd does not know; update Sheprd.
+settings-push-relay-delivery-other = The daemon sends pushes in a way this Sheprd does not know; restart remote control, or update Sheprd.
 settings-push-relay-delivery-unknown = Shown while remote control runs.
 
 # How the last push of each kind went. $ago is how long ago, such as
@@ -38,7 +36,7 @@ settings-push-relay-last-alert = { $outcome ->
     [gone] Last alert { $ago }: the phone's registration had expired; it registers again when the app opens.
     [limited] Last alert { $ago }: held back, too many pushes for that phone.
     [refused] Last alert { $ago }: refused ({ $status }).
-    [unreachable] Last alert { $ago }: could not reach Apple or the push relay.
+    [unreachable] Last alert { $ago }: could not reach the push relay.
     [unsent] Last alert { $ago }: not sent, as it could not be sealed.
    *[other] Last alert { $ago }: an outcome this Sheprd does not know.
 }
@@ -48,7 +46,7 @@ settings-push-relay-last-live = { $outcome ->
     [gone] Last Live Activity push { $ago }: the phone's registration had expired; it registers again when the app opens.
     [limited] Last Live Activity push { $ago }: held back, too many pushes for that phone.
     [refused] Last Live Activity push { $ago }: refused ({ $status }).
-    [unreachable] Last Live Activity push { $ago }: could not reach Apple or the push relay.
+    [unreachable] Last Live Activity push { $ago }: could not reach the push relay.
     [unsent] Last Live Activity push { $ago }: not sent, as it could not be sealed.
    *[other] Last Live Activity push { $ago }: an outcome this Sheprd does not know.
 }

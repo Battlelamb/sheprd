@@ -22,7 +22,7 @@ pub(super) fn text(
     };
     let now = crate::remote::now_ms();
     [
-        format!("iPhone pushes: {}", mode(status.mode, push_relay)),
+        format!("iPhone pushes: {}", mode(status.mode)),
         format!("Push relay setting: {setting}"),
         format!("Last alert: {}", last(status.alert.as_ref(), now)),
         format!(
@@ -33,13 +33,13 @@ pub(super) fn text(
     .join("\n")
 }
 
-fn mode(mode: Mode, push_relay: bool) -> &'static str {
+fn mode(mode: Mode) -> &'static str {
     match mode {
-        Mode::Off => "off (no APNs key, and the push relay is off)",
-        Mode::OwnKey if push_relay => "your own APNs key, which wins over the push relay",
-        Mode::OwnKey => "your own APNs key",
+        Mode::Off => "off (the push relay is off)",
         Mode::PushRelay => "through the push relay (push.sheprd.org)",
-        Mode::Other => "a mode this Sheprd does not know",
+        // An older daemon still sending with its own APNs key says
+        // `own_key`, which this Sheprd reads as a mode it does not know.
+        Mode::Other => "a mode this Sheprd does not know; restart remote control, or update Sheprd",
     }
 }
 
@@ -69,7 +69,7 @@ fn outcome(outcome: &Outcome) -> String {
             status,
             reason: None,
         } => format!("refused ({status})"),
-        Outcome::Unreachable => "could not reach Apple or the push relay".to_owned(),
+        Outcome::Unreachable => "could not reach the push relay".to_owned(),
         Outcome::Unsent => "not sent: it could not be sealed".to_owned(),
         Outcome::Other => "an outcome this Sheprd does not know".to_owned(),
     }

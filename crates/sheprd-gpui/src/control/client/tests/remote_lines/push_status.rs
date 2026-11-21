@@ -38,22 +38,19 @@ fn push_status_names_the_mode_and_each_last_push() {
 }
 
 #[test]
-fn push_status_says_when_an_own_key_wins_and_nothing_was_sent() {
+fn push_status_says_when_an_older_daemon_uses_its_own_key_and_nothing_was_sent() {
+    // `own_key`, from a daemon not yet restarted since the update.
+    let status: PushStatus = serde_json::from_str(r#"{"mode":"own_key"}"#).unwrap();
     let output = remote::output(&Reply::PushStatus {
         enabled: true,
         push_relay: true,
-        status: Some(PushStatus {
-            mode: Mode::OwnKey,
-            ..PushStatus::default()
-        }),
+        status: Some(status),
         error: None,
     })
     .unwrap();
-    assert!(
-        output
-            .text
-            .starts_with("iPhone pushes: your own APNs key, which wins over the push relay\n")
-    );
+    assert!(output.text.starts_with(
+        "iPhone pushes: a mode this Sheprd does not know; restart remote control, or update Sheprd\n"
+    ));
     assert!(output.text.ends_with(
         "Last alert: none since the daemon started\n\
          Last Live Activity push: none since the daemon started"

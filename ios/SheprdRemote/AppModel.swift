@@ -551,7 +551,7 @@ final class AppModel {
 
     /// Starts a local activity with sample content and plays it through a
     /// few steps to done, to check the layouts and updates on a device
-    /// without an APNs key.
+    /// without any push.
     func startSample() {
         let facts = ChatActivityFacts(
             computer: computers.first?.name ?? "studio",

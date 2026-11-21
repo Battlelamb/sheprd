@@ -47,8 +47,8 @@ pub struct Options {
     pub live_activities: ActivityDetail,
     pub port: u16,
     pub privacy: Privacy,
-    /// Whether APNs pushes may go through the Sheprd push relay when there
-    /// is no APNs key in the state directory.
+    /// Whether APNs pushes go through the Sheprd push relay; without it
+    /// none go at all.
     pub push_relay: bool,
     /// The relays to listen on, so paired phones reach this computer from
     /// any network; none when empty.
@@ -222,10 +222,9 @@ Options:
                            (default detailed)
   --device-idle-days N     Forget devices unseen this long, 0 for never
                            (default 30)
-  --push-relay             Without an APNs key in the state directory, send
-                           iPhone alerts and Live Activities sealed through
-                           the Sheprd push relay (push.sheprd.org); an APNs
-                           key, when there is one, is used instead
+  --push-relay             Send iPhone alerts and Live Activities sealed
+                           through the Sheprd push relay (push.sheprd.org);
+                           without it the daemon sends none through APNs
   --relay URL              Listen on this relay too, so paired phones reach
                            this computer from any network; repeatable
   --relay-name NAME        What the --relay before it is called, such as fra3

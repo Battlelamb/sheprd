@@ -20,7 +20,7 @@ pub enum RemoteOp {
         address: Option<String>,
     },
     Devices,
-    /// How iPhone pushes leave the daemon (off, own APNs key, or push
+    /// How iPhone pushes leave the daemon (off, or through the push
     /// relay) and how the last of each kind went. Read-only: the push
     /// relay is turned on in Settings.
     PushStatus,
@@ -71,8 +71,9 @@ pub enum Reply {
     PushStatus {
         /// Whether remote control is on in Settings.
         enabled: bool,
-        /// Whether `[remote] push_relay` allows the push relay. An own
-        /// APNs key wins over it, so `status` may still say `own_key`.
+        /// Whether `[remote] push_relay` turns on the push relay. A daemon
+        /// not yet restarted, or an older one, may still say otherwise in
+        /// `status`.
         push_relay: bool,
         /// What the daemon says, when it answers.
         #[serde(default, skip_serializing_if = "Option::is_none")]

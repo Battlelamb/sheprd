@@ -192,8 +192,10 @@ passes untouched: a set the rules were tuned on stops measuring anything.
 
 ## Sign with your own team
 
-Live Activities and pushes need APNs, which needs a paid Apple Developer
-account.
+Running the app on a device needs a paid Apple Developer account. Pushes
+are another matter: computers send them only through the Sheprd push relay,
+which holds the APNs key for the published app (`so.pen.herdr.remote`), so a
+copy signed by another team gets no APNs pushes, only Web Push.
 
 1. Set `DEVELOPMENT_TEAM` in `project.yml` (or in Xcode, Signing &
    Capabilities, for both targets).
@@ -202,7 +204,6 @@ account.
    - Change both `so.pen.herdr.remote` and `so.pen.herdr.remote.widgets`;
      the extension's must start with the app's.
    - Change the App Group `group.so.pen.herdr.remote` too.
-   - Use the new identifier as `topic` below.
 3. Run on a device. Live Activities and the Secure Enclave do not work fully
    in the simulator; there the app uses a software device key.
 
@@ -274,56 +275,20 @@ there. The code comes from a commitment-based exchange
 (`docs/ios-app-plan.md`, "Nearby pairing, exactly"), so it also vouches
 for the CA fingerprint the claim then pins.
 
-## APNs key for the daemon
+## How pushes reach the phone
 
-The daemon (`sheprd-remote-control`) sends Live Activity pushes with your own
-APNs token key. Without it everything else works, and the app's token upload
-is answered 503.
+The app has one publisher, so only the Sheprd push relay holds an APNs key
+for it (`docs/apns-relay-plan.md`). A computer's remote control daemon
+(`sheprd-remote-control`) never holds one and never contacts Apple: it seals
+Live Activities and alerts to the phone and hands them to the push relay
+(`push.sheprd.org`, or `push-sandbox.sheprd.org` for Xcode builds), once the
+push relay is on in Sheprd's Settings > Remote control. With it off, the
+phone gets Web Push alone, and its token upload is answered 503.
 
-1. **Create the key.** In the Apple Developer site, go to Certificates,
-   Identifiers & Profiles > Keys. Create a key with Apple Push Notifications
-   service (APNs) enabled, and download `AuthKey_KEYID.p8` (it downloads
-   once).
-2. **Install it.** Put it in the daemon's state directory as
-   `apns/AuthKey.p8`, readable only by you:
-
-   ```sh
-   mkdir -p STATE_DIR/apns
-   cp AuthKey_KEYID.p8 STATE_DIR/apns/AuthKey.p8
-   chmod 600 STATE_DIR/apns/AuthKey.p8
-   ```
-
-3. **Configure it.** Beside it, write `STATE_DIR/apns/config.json`:
-
-   ```json
-   {
-     "team_id": "ABCDE12345",
-     "key_id": "KEYID12345",
-     "topic": "so.pen.herdr.remote",
-     "sandbox": true
-   }
-   ```
-
-   - `team_id` is your ten-character team.
-   - `key_id` is the key's ID.
-   - `topic` is the app's bundle identifier. The daemon adds
-     `.push-type.liveactivity` itself.
-4. **Restart.** Restart remote control in Sheprd, so the daemon reads them at
-   start.
-
-`STATE_DIR` is the remote control daemon's private state directory (its
-`--state-dir`).
-
-### Sandbox or production
-
-The two must match, so switch both together.
-
-- **Xcode builds:** an app run from Xcode gets sandbox tokens. Set
-  `"sandbox": true`.
-- **TestFlight and App Store builds:** these get production tokens. Set
-  `"sandbox": false`.
-- **A mismatch:** a token sent to the wrong service is refused as
-  `BadDeviceToken`, and the daemon then forgets it.
+The relay reaches the phone through a handle the app seals to it, never a
+plain token. A computer still accepts and keeps the plain tokens an app from
+before the push relay registers, so that app keeps registering, but sends
+nothing to them.
 
 ## Live Activity detail
 
@@ -347,8 +312,8 @@ update Sheprd first. Phones on the default are unaffected.
 
 ## Sealed alerts
 
-With the APNs key installed, questions, finished turns, and errors reach
-the phone as APNs alerts instead of Web Push. These alerts are sealed to
+With the push relay on, questions, finished turns, and errors reach the
+phone as APNs alerts instead of Web Push. These alerts are sealed to
 the phone: Apple sees only "Sheprd", "New activity", and ciphertext.
 
 1. **Registration.** The app asks to show alerts after the first pairing.
@@ -379,8 +344,9 @@ the phone: Apple sees only "Sheprd", "New activity", and ciphertext.
    (`POST /api/apns/test`) for one sealed alert carrying a random id. The
    extension records the id in the App Group as it opens the alert
    (`PushTestReceipts`), and Settings shows "Arrived in N s", or where it
-   stopped: no APNs key on the computer, no alert token from this phone yet,
-   what APNs refused, or nothing within 30 seconds. A tap on it only opens
+   stopped: the push relay off on the computer, no alert registration from
+   this phone yet, what the push relay refused, or nothing within 30
+   seconds. A tap on it only opens
    the app.
 
 A Live Activity in the question phase also offers up to three answers

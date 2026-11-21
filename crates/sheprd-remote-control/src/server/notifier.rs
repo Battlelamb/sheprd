@@ -4,8 +4,7 @@
 //! in plain terminals have no transcript: their settled status changes,
 //! read from the layout every tick, alert instead. A
 //! device the native app registered for alerts gets them sealed through
-//! APNs, with the user's own key or through the push relay; any other, or
-//! one whose APNs push failed, gets Web Push, which is blocking HTTPS on the
+//! the push relay; any other, or one whose push failed, gets Web Push, which is blocking HTTPS on the
 //! blocking pool. A push service that says a token, handle, or subscription
 //! is gone drops it from the device. While Sheprd marks a device near
 //! (presence), its alerts are held and go out when the owner leaves.

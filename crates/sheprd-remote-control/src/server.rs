@@ -112,8 +112,18 @@ pub async fn run(options: Options) -> Result<()> {
         Err(error) => tracing::info!(error = %error, "desktops cannot be let in over SSH"),
     }
     let apps = auth.apps();
-    let apns = crate::apns::Delivery::load(&options.state_dir, options.push_relay)?;
+    let apns = crate::apns::Delivery::new(options.push_relay)?;
     tracing::info!(delivery = apns.name(), "APNs pushes");
+    // A key an earlier release used, or copied here when linking a host, is
+    // left on disk for its owner and never read: only the push relay holds
+    // the key APNs takes for the app.
+    let unused_key = sheprd_apns::dir(&options.state_dir);
+    if unused_key.join("AuthKey.p8").exists() {
+        tracing::info!(
+            directory = %unused_key.display(),
+            "an APNs key here is no longer used: iPhone pushes go only through the push relay"
+        );
+    }
     // Only origins this computer's own authority serves may be remembered.
     let seen = match &authority {
         Some(authority) => web::Origins::load(&options.state_dir, authority.fingerprint()),

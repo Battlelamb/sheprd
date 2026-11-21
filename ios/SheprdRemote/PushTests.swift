@@ -38,7 +38,7 @@ final class PushTests {
             let session = try await sessions.session(for: computer)
             answer = try await session.client.sendTestPush(id: id, bearer: session.token)
         } catch let RemoteError.status(503, _) {
-            status[key] = .failed("\(computer.name) has no APNs key, so it cannot send this phone notifications.")
+            status[key] = .failed("\(computer.name) has the push relay off, so it cannot send this phone notifications. Turn it on in Sheprd's Remote control settings there.")
             return
         } catch let RemoteError.status(400, text) where text.contains("not registered") {
             status[key] = .failed("This phone has not given \(computer.name) its notification token yet. Allow notifications for Sheprd, then reopen the app.")

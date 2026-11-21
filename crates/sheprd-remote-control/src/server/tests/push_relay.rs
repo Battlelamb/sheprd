@@ -1,5 +1,5 @@
-//! `--push-relay` lets a computer without an APNs key push through the
-//! Sheprd relay; it is off unless given.
+//! `--push-relay` lets a computer push through the Sheprd push relay, the
+//! only way it pushes to an iPhone; it is off unless given.
 
 use super::{options::USAGE, *};
 

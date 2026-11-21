@@ -13,6 +13,7 @@ pub mod app_update;
 pub mod changes;
 pub mod desktop;
 pub mod edited;
+pub mod favorites;
 pub mod fleet;
 pub mod github;
 pub mod host_relay;
@@ -218,6 +219,13 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         offer: Option<tags::ComputerTags>,
     },
+    /// This computer's favorite agents: stars or unstars one pane, if
+    /// `change` says so, and answers with the favorites that stand
+    /// (`favorites`).
+    Favorites {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        change: Option<favorites::Change>,
+    },
     /// This computer's text shortcuts: offers Sheprd's copy, if any, and
     /// answers with the ones that stand (`shortcuts`).
     Shortcuts {
@@ -336,6 +344,7 @@ pub enum Response {
     Enrolled(hosts::Enrolled),
     Fleet(Box<fleet::sync::Answer>),
     Tags(tags::ComputerTags),
+    Favorites(favorites::Favorites),
     Shortcuts(shortcuts::TextShortcuts),
     /// The relays the daemon listens on, its own and those shared with it.
     Relays {

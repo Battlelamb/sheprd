@@ -275,8 +275,11 @@ zeroize              = "=1.9.1"
 [profile.dev]
 debug = "line-tables-only"
 
+[patch.crates-io]
+# GPUI still uses the 0.26 adapter; AccessKit #835 backported to it until GPUI
+# moves on (docs/macos-window-close.md).
+accesskit_macos = { git = "https://github.com/sheprd-labs/accesskit", rev = "d7919c53f9a9667486ba61e946c44be57c3dabe7" }
 # GPUI's build script embeds its own Windows manifest through embed-resource,
 # which would clash with Herdr's (crates/sheprd-gpui/windows.manifest); this
 # no-op stands in for it. See crates/embed-resource.
-[patch.crates-io]
 embed-resource = { path = "crates/embed-resource" }

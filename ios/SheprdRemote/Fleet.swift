@@ -669,6 +669,15 @@ final class Fleet {
 
     /// Asks for a chat's row summary; every phone's list shows it when the
     /// computer has it.
+    /// Stars or unstars the agent in `key`'s pane on its computer, which
+    /// every device then lists first.
+    func setFavorite(_ favorite: Bool, for key: PaneKey) async throws {
+        let pane = key.pane
+        try await call(key.device) { client, token in
+            try await client.setFavorite(favorite, pane: pane, bearer: token)
+        }
+    }
+
     func summarize(_ key: PaneKey) async throws {
         let pane = key.pane
         try await call(key.device) { client, token in

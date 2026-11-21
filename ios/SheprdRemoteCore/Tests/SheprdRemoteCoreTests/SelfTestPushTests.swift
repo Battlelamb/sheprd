@@ -93,8 +93,18 @@ import Testing
         let daemon = try #require(fixture["apns"] as? [String: Any])
         let ours = try Self.payload(request)
         #expect(Set(ours.keys) == Set(daemon.keys))
-        #expect(NSDictionary(dictionary: try #require(ours["aps"] as? [String: Any]))
-            == NSDictionary(dictionary: try #require(daemon["aps"] as? [String: Any])))
+        // The thread is scoped by the key each is sealed to, as the daemon
+        // scopes it; the rest of `aps` is the daemon's.
+        var oursAps = try #require(ours["aps"] as? [String: Any])
+        var daemonAps = try #require(daemon["aps"] as? [String: Any])
+        #expect(oursAps.removeValue(forKey: "thread-id") as? String
+            == "\(SelfTestPush.scope(of: Self.own.publicKey))/\(SelfTestPush.pane)")
+        let fixtureText = try #require(fixture["device_private_key"] as? String)
+        let fixtureBytes = try #require(Base64URL.decode(fixtureText))
+        let fixtureKey = try P256.KeyAgreement.PrivateKey(rawRepresentation: fixtureBytes)
+        #expect(daemonAps.removeValue(forKey: "thread-id") as? String
+            == "\(SelfTestPush.scope(of: fixtureKey.publicKey))/\(SelfTestPush.pane)")
+        #expect(NSDictionary(dictionary: oursAps) == NSDictionary(dictionary: daemonAps))
         // The sealed side has the daemon's keys, less the badge.
         let plaintext = try #require(fixture["plaintext"] as? [String: Any])
         let opened = try NotificationSeal.open(

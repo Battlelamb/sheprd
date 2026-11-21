@@ -91,13 +91,18 @@ public struct FleetChain: Codable, Equatable, Sendable {
     /// `next` is the phone's next sequence number there, past every
     /// operation of its that applied. The last of the refused post that
     /// applied, else what it followed, becomes what new operations follow.
-    /// A read from another computer settles it only when it is past every
+    /// A read from any other computer settles it only when it is past every
     /// operation of the refused post, which then all applied; one behind
-    /// says nothing. With no `next`, the refusal stays.
+    /// says nothing, and nothing is ever lowered by it. That rule alone
+    /// settles a refusal with no computer recorded (kept before refusals
+    /// named one), or whose computer the phone no longer reaches (removed
+    /// from the fleet, or forgotten here): it clears once any computer has
+    /// caught up past it. With no `next`, the refusal stays.
     public mutating func resolve(next: UInt64?, from computer: String) {
         guard let refusal, let next else { return }
         let newest = refusal.ops.compactMap { try? Fleet.Op.decode($0) }.map(\.seq).max() ?? 0
-        guard refusal.computer == computer || next > newest else { return }
+        let fromRefuser = refusal.computer.map { $0 == computer } ?? false
+        guard fromRefuser || next > newest else { return }
         let known = (refusal.ops + (refusal.base.map { [$0] } ?? [])).compactMap { data -> (UInt64, Data)? in
             (try? Fleet.Op.decode(data)).map { ($0.seq, data) }
         }

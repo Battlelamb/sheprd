@@ -110,6 +110,47 @@ struct FleetChainTests {
         #expect(!past.refusalPending && past.lastOp == ops[2])
     }
 
+    @Test func aRefusalWithNoComputerSettlesOnceAnyComputerIsPastIt() throws {
+        let signer = FleetClientTests.signer()
+        let ops = try Self.line(2, from: 3, signer: signer)
+        var chain = FleetChain()
+        try chain.signed(ops)
+        chain.refused(by: "studio")
+        // As kept before refusals named their computer.
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(chain)) as? [String: Any])
+        var refusal = try #require(object["refusal"] as? [String: Any])
+        refusal["computer"] = nil
+        object["refusal"] = refusal
+        var old = try JSONDecoder().decode(FleetChain.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(old.refusalPending)
+        // No read below the post settles it, from any computer.
+        for computer in ["studio", "laptop"] {
+            old.resolve(next: ops[1].seq, from: computer)
+            #expect(old.refusalPending && old.carried == nil)
+        }
+        // A read past every operation of it does.
+        old.resolve(next: ops[1].seq + 1, from: "laptop")
+        #expect(!old.refusalPending && old.lastOp == ops[1])
+    }
+
+    @Test func aRefusalWhoseComputerIsGoneSettlesOnceAnotherIsPastIt() throws {
+        let signer = FleetClientTests.signer()
+        let ops = try Self.line(3, from: 3, signer: signer)
+        var chain = FleetChain()
+        try chain.signed([ops[0]])
+        chain.confirmed()
+        try chain.signed([ops[1], ops[2]])
+        // Refused by a computer the phone no longer reaches: only others
+        // read now.
+        chain.refused(by: "gone")
+        for next in [ops[0].seq, ops[1].seq, ops[2].seq] {
+            chain.resolve(next: next, from: "laptop")
+            #expect(chain.refusalPending)
+        }
+        chain.resolve(next: ops[2].seq + 1, from: "laptop")
+        #expect(!chain.refusalPending && chain.lastOp == ops[2])
+    }
+
     @Test func aLineKeptBeforeItWasOneValueCarriesOver() throws {
         let signer = FleetClientTests.signer()
         let ops = try Self.line(2, from: 3, signer: signer)

@@ -590,7 +590,7 @@ final class FleetMembership {
         case let FleetClientError.refused(count): "The fleet refused \(count == 1 ? "it" : "\(count) of them")."
         case FleetClientError.unapplied: "Your computers have not applied it yet. This \(UIDevice.current.model) sends it again until one does."
         case FleetClientError.notKept: "This \(UIDevice.current.model) could not save it, so nothing was sent."
-        case FleetClientError.refusalUnresolved: "Your computers refused this \(UIDevice.current.model)'s last change. Reach one of them, then try again."
+        case FleetClientError.refusalUnresolved: "Your computers refused this \(UIDevice.current.model)'s last change. Reach the computer that refused it, then try again. This clears on its own once any of your computers has caught up with this \(UIDevice.current.model)'s changes."
         case RemoteError.status(429, _): "Too many devices are waiting to join. Try again in a few minutes."
         case RemoteError.status(404, _): "That computer's Sheprd does not know fleets yet. Update it first."
         default: error.localizedDescription

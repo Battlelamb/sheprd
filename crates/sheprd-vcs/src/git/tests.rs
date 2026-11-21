@@ -63,6 +63,31 @@ fn close_probe_detects_untracked_staged_unstaged_and_unpublished_work() {
     ));
 }
 
+#[test]
+fn close_probe_keeps_dirty_work_in_a_repository_without_a_first_commit() {
+    let directory = tempfile::tempdir().unwrap();
+    let checkout = directory.path().to_str().unwrap();
+    let init = Command::new("git")
+        .args(["-C", checkout, "init", "-b", "test"])
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .output()
+        .unwrap();
+    assert!(init.status.success());
+    let input = Input {
+        repo_key: Some(directory.path().join(".git").to_str().unwrap().to_owned()),
+        branch: "test".into(),
+        checkout: Some(checkout.into()),
+    };
+    let probe =
+        || close_status(&input, Instant::now() + Duration::from_secs(15), &|| false).unwrap();
+    // No commit exists, so nothing is unpublished and nothing is dirty.
+    assert_eq!(probe(), (false, false));
+    std::fs::write(directory.path().join("new"), "uncommitted\n").unwrap();
+    assert_eq!(probe(), (true, false));
+}
+
 struct Peer {
     git: Git,
     incoming: mpsc::Receiver<(u64, Input, Job)>,

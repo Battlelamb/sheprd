@@ -888,14 +888,26 @@ pub fn close_status(
         cancelled,
     )?
     .is_empty();
-    let unpushed = !git(
+    // A branch with no commit yet has nothing to publish, and its dirty
+    // result must survive: only a missing HEAD is tolerated here.
+    let unpushed = match git(
         &checkout,
-        &["rev-list", "--max-count=1", "HEAD", "--not", "--remotes"],
-        "check unpushed commits",
+        &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+        "check for a first commit",
         deadline,
         cancelled,
-    )?
-    .is_empty();
+    ) {
+        Ok(_) => !git(
+            &checkout,
+            &["rev-list", "--max-count=1", "HEAD", "--not", "--remotes"],
+            "check unpushed commits",
+            deadline,
+            cancelled,
+        )?
+        .is_empty(),
+        Err(crate::Error::Git(Error::Failed { .. })) => false,
+        Err(error) => return Err(error),
+    };
     Ok((dirty, unpushed))
 }
 

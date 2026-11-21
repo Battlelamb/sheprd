@@ -7,10 +7,6 @@ use super::{Delivery, Sent};
 use crate::control::push::{Last, Mode, Outcome, PushStatus};
 use std::sync::{Mutex, PoisonError};
 
-/// The longest refusal reason kept. APNs's are short names, such as
-/// `BadDeviceToken`; anything longer is cut.
-const REASON_CHARS: usize = 64;
-
 /// What a push was for.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Kind {
@@ -57,7 +53,6 @@ impl Delivery {
     pub(crate) fn mode(&self) -> Mode {
         match self {
             Self::Off => Mode::Off,
-            Self::OwnKey(_) => Mode::OwnKey,
             Self::Relay(_) => Mode::PushRelay,
         }
     }
@@ -69,11 +64,10 @@ impl From<&Sent> for Outcome {
             Sent::Delivered => Self::Delivered,
             Sent::Gone => Self::Gone,
             Sent::Limited => Self::Limited,
-            Sent::Refused { status, reason } => Self::Refused {
+            // The push relay gives no reason, only a status.
+            Sent::Refused { status } => Self::Refused {
                 status: *status,
-                reason: reason
-                    .as_deref()
-                    .map(|reason| reason.chars().take(REASON_CHARS).collect()),
+                reason: None,
             },
             Sent::Unreachable => Self::Unreachable,
             Sent::Unsent => Self::Unsent,

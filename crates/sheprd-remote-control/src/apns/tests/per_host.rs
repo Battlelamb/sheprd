@@ -3,7 +3,7 @@
 //! for one chat replaces its older one, and nothing in the clear names the
 //! computer.
 
-use super::alert::{COMPUTER, EVENT, device, fixed_seal, json};
+use super::alert::{COMPUTER, device, fixed_seal, json};
 use crate::apns::{
     alert::{Sealed, clear, collapse_id, push, scope, thread_id},
     seal,
@@ -21,7 +21,7 @@ fn asking(pane: &str) -> Notification {
     Notification {
         body: "Run tests?".to_owned(),
         clear: false,
-        event: EventId::fixed(EVENT),
+        event: EventId::new(),
         kind: Kind::Question,
         pane: pane.to_owned(),
         permission: None,

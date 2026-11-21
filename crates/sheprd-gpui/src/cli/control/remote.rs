@@ -10,8 +10,8 @@ pub enum RemoteCommand {
         address: Option<String>,
     },
     Devices,
-    /// How iPhone pushes leave the daemon: off, own APNs key, or push
-    /// relay, and whether the last of each kind worked. Read-only.
+    /// How iPhone pushes leave the daemon: off, or through the push relay,
+    /// and whether the last of each kind worked. Read-only.
     PushStatus,
     /// Open the confirmation for revoking a device, by ID or name.
     Revoke {

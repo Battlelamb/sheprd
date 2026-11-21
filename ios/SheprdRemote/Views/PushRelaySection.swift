@@ -59,7 +59,7 @@ struct PushRelaySection: View {
         } footer: {
             Text(pushRelay
                 ? "On. The computers get sealed handles instead of this phone's push tokens. Turning it off revokes them."
-                : "Off. Pushes reach this phone only from a computer with its own APNs key, for a copy of the app you sign yourself.")
+                : "Off. Computers push only through the push relay, so this phone gets no alerts or Live Activities from them.")
         }
         .alert("Push through the Sheprd push relay?", isPresented: $confirming) {
             Button("Turn On") {
@@ -85,7 +85,6 @@ struct PushRelaySection: View {
         }
         return switch delivery {
         case .pushRelay: pushRelay ? "Push relay" : "Push relay, off here"
-        case .ownKey: pushRelay ? "Own APNs key, which needs the push relay off" : "Own APNs key"
         case .off: "No push set up"
         case .unknown: "Not reported"
         case nil: "Not asked yet"

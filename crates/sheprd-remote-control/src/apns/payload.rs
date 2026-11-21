@@ -165,16 +165,20 @@ impl Live {
         self.state.phase == Phase::Question
     }
 
+    pub(crate) fn priority(&self) -> Priority {
+        if self.urgent() {
+            Priority::High
+        } else {
+            Priority::Low
+        }
+    }
+
     /// The push for this change at `now_s` (seconds since the Unix epoch).
     pub(crate) fn push(&self, now_s: u64) -> Result<Push> {
         Ok(Push {
             body: self.payload(now_s)?,
             collapse_id: None,
-            priority: if self.urgent() {
-                Priority::High
-            } else {
-                Priority::Low
-            },
+            priority: self.priority(),
             push_type: PushType::LiveActivity,
         })
     }

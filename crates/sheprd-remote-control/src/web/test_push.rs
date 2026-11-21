@@ -1,11 +1,12 @@
 //! `POST /api/apns/test`: the phone asks this computer to send it one
-//! sealed alert now, to see notifications arrive. The answer is what APNs
+//! sealed alert now, to see notifications arrive, with the daemon's own
+//! key or through the push relay. The answer is what APNs or the relay
 //! said; the phone's extension records the id when the alert opens, so the
 //! app can tell whether, and how fast, it came.
 
 use super::{ApiError, Device, Shared, now_ms};
 use crate::apns::{
-    self, Outcome, Registration,
+    self, Registration, Sent,
     alert::{Sealed, valid_test_id},
 };
 use axum::{Json, extract::State};
@@ -17,7 +18,8 @@ pub(super) struct TestRequest {
     id: String,
 }
 
-/// What APNs answered. `reason` is one of Apple's fixed names.
+/// What APNs or the relay answered. `reason` is one of Apple's fixed
+/// names; the relay gives none.
 #[derive(Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "outcome")]
 pub(super) enum TestAnswer {
@@ -31,7 +33,7 @@ pub(super) enum TestAnswer {
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
-    /// APNs could not be reached.
+    /// APNs or the relay could not be reached.
     Unreachable,
 }
 
@@ -40,7 +42,9 @@ pub(super) async fn send(
     Device(device): Device,
     Json(request): Json<TestRequest>,
 ) -> Result<Json<TestAnswer>, ApiError> {
-    let sender = state.apns.as_ref().ok_or(ApiError::NoPush)?;
+    if state.apns.is_off() {
+        return Err(ApiError::NoPush);
+    }
     if !valid_test_id(&request.id) {
         return Err(ApiError::Invalid("that test id is not valid"));
     }
@@ -53,6 +57,7 @@ pub(super) async fn send(
     );
     let (token, key) = registration
         .alerts()
+        .filter(|(token, _)| state.apns.reaches(token))
         .map(|(token, key)| (token.clone(), *key))
         .ok_or(ApiError::Invalid(
             "this phone has not registered for alerts",
@@ -65,13 +70,9 @@ pub(super) async fn send(
         badge,
     );
     let tag = format!("test-{}", request.id);
-    let push = apns::alert::push(sealed, &tag, |plaintext| {
-        Ok(apns::seal::seal(&key, plaintext, apns::seal::INFO)?)
-    })
-    .map_err(|_| ApiError::Invalid("the test push could not be sealed"))?;
-    let answer = match sender.post(&token, &push, now_ms() / 1000).await {
-        Ok(Outcome::Delivered) => TestAnswer::Delivered,
-        Ok(Outcome::Gone) => {
+    let answer = match state.apns.alert(&token, &key, sealed, &tag, now_ms()).await {
+        Sent::Delivered => TestAnswer::Delivered,
+        Sent::Gone => {
             let state = state.clone();
             let _ = tokio::task::spawn_blocking(move || {
                 crate::server::forget(&state, &device, &token);
@@ -79,12 +80,13 @@ pub(super) async fn send(
             .await;
             TestAnswer::Gone
         }
-        Ok(Outcome::RateLimited) => TestAnswer::Limited,
-        Ok(Outcome::Rejected { reason, status }) => TestAnswer::Refused { status, reason },
-        Err(error) => {
-            tracing::warn!(%error, "could not send a test push");
+        Sent::Limited => TestAnswer::Limited,
+        Sent::Refused { status, reason } => TestAnswer::Refused { status, reason },
+        Sent::Unreachable => {
+            tracing::warn!(delivery = state.apns.name(), "could not send a test push");
             TestAnswer::Unreachable
         }
+        Sent::Unsent => return Err(ApiError::Invalid("the test push could not be sealed")),
     };
     Ok(Json(answer))
 }

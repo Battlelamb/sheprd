@@ -4,6 +4,7 @@ use uuid::Uuid;
 mod alerts;
 mod badge;
 mod presence;
+mod relay;
 mod terminals;
 
 #[test]

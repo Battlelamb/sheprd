@@ -67,7 +67,7 @@ pub struct Plan {
 impl Plan {
     /// `serve --state-dir DIR --port N --bind ADDR [--cert F --key F]
     /// --privacy generic|excerpt --device-idle-days N [--live-activities
-    /// generic] [--herdr-socket P] [--chat-dir D] [--wsl-catalog F]
+    /// generic] [--push-relay] [--herdr-socket P] [--chat-dir D] [--wsl-catalog F]
     /// [--core-socket P --core-session S]`.
     pub fn args(&self) -> Vec<OsString> {
         let config = &self.config;
@@ -101,6 +101,9 @@ impl Plan {
                 "--live-activities".into(),
                 config.live_activities.name().into(),
             ]);
+        }
+        if config.push_relay {
+            args.push("--push-relay".into());
         }
         if config.github_cli {
             args.push("--github-cli".into());

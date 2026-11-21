@@ -112,7 +112,8 @@ pub async fn run(options: Options) -> Result<()> {
         Err(error) => tracing::info!(error = %error, "desktops cannot be let in over SSH"),
     }
     let apps = auth.apps();
-    let apns = crate::apns::Sender::load(&options.state_dir).map_err(crate::apns::Error::from)?;
+    let apns = crate::apns::Delivery::load(&options.state_dir, options.push_relay)?;
+    tracing::info!(delivery = apns.name(), "APNs pushes");
     // Only origins this computer's own authority serves may be remembered.
     let seen = match &authority {
         Some(authority) => web::Origins::load(&options.state_dir, authority.fingerprint()),

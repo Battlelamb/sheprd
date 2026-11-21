@@ -2,6 +2,8 @@ use super::*;
 use crate::apns::{ContentState, Phase};
 use secrecy::ExposeSecret as _;
 
+mod relay;
+
 fn live(event: Event) -> Live {
     Live {
         event,
@@ -29,6 +31,8 @@ fn registration(json: &str) -> Registration {
 
 #[test]
 fn an_end_waits_for_the_activity_token_on_a_device_that_starts_activities() {
+    let own_key = Delivery::OwnKey(Box::new(crate::apns::sender_for_tests()));
+    let route = |live: &Live, registration| route(live, registration, &own_key);
     let start_only = registration(&format!(r#"{{"push_to_start":"{}"}}"#, "ab".repeat(32)));
     let end = live(Event::End { dismissal_s: 0 });
     // The activity started, but its own token has not arrived yet.
@@ -41,7 +45,7 @@ fn an_end_waits_for_the_activity_token_on_a_device_that_starts_activities() {
         "ab".repeat(32),
         "cd".repeat(40)
     ));
-    let Route::Send(token) = route(&end, &with_activity) else {
+    let Route::Send(Recipient::Token(token)) = route(&end, &with_activity) else {
         panic!("expected a send");
     };
     assert_eq!(token.expose_secret(), "cd".repeat(40));

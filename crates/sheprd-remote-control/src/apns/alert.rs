@@ -30,8 +30,8 @@ pub(crate) const MAX_OPTIONS: usize = 4;
 /// The longest `apns-collapse-id` APNs accepts, in bytes.
 const MAX_COLLAPSE_ID: usize = 64;
 /// What APNs and a phone whose extension cannot open the payload show.
-const COVER_TITLE: &str = "Sheprd";
-const COVER_BODY: &str = "New activity";
+pub(super) const COVER_TITLE: &str = "Sheprd";
+pub(super) const COVER_BODY: &str = "New activity";
 
 /// What the app's extension opens. Field order is the wire order.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -248,6 +248,22 @@ fn shorten(text: &str, drop: usize) -> String {
         return String::new();
     }
     format!("{}{ELLIPSIS}", &base[..end])
+}
+
+/// The only text a push for `pane` under `tag` carries unsealed: the cover,
+/// the thread, how it interrupts, and the collapse id. A push through the
+/// relay may carry nothing else in the clear (`sheprd_apns::SealedPush`).
+pub(crate) fn clear(pane: &str, tag: &str) -> [String; 7] {
+    [
+        COVER_TITLE,
+        COVER_BODY,
+        pane,
+        "time-sensitive",
+        "active",
+        "default",
+        &collapse_id(tag),
+    ]
+    .map(str::to_owned)
 }
 
 /// `tag` cut to APNs's limit on a character boundary.

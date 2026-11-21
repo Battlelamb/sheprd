@@ -5,10 +5,13 @@ use crate::push::Chat;
 
 mod alert;
 mod decide;
+mod delivery;
 mod notify_key;
 mod pacer;
 mod payload;
+mod recipient;
 mod redact;
+mod relayed;
 mod terminal;
 mod test_push;
 mod tokens;
@@ -20,6 +23,8 @@ const CHAT: Chat<'static> = Chat {
     workspace: "herdr-gpui",
 };
 
-fn token(byte: u8) -> DeviceToken {
-    DeviceToken::parse(&format!("{byte:02x}").repeat(32)).unwrap()
+fn token(byte: u8) -> Recipient {
+    DeviceToken::parse(&format!("{byte:02x}").repeat(32))
+        .unwrap()
+        .into()
 }

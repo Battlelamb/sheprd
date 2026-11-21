@@ -73,6 +73,7 @@ class CiPolicy(unittest.TestCase):
             "needs.commits.outputs.full": "true",
             "needs.commits.outputs.macos_release": "true",
             "needs.commits.outputs.website": "true",
+            "needs.commits.outputs.windows": "true",
             "needs.commits.outputs.windows_native": "true",
             "needs.commits.outputs.windows_package": "true",
             **overrides,
@@ -117,10 +118,20 @@ class CiPolicy(unittest.TestCase):
     def test_fast_pull_request_skips_only_other_platforms(self):
         # Without every platform, a pull request still runs the Linux checks.
         for full in ("false", ""):
-            context = self.context(**{"needs.commits.outputs.full": full})
+            context = self.context(**{"needs.commits.outputs.full": full,
+                                      "needs.commits.outputs.windows": full})
             for job in PR_JOBS:
                 self.assertEqual(condition_matches(job, context),
-                                 job not in ("windows", "windows-native", "build-macos"), (job, full))
+                                 job not in ("windows", "windows-native", "windows-package", "build-macos"),
+                                 (job, full))
+
+    def test_macos_code_runs_every_platform_but_windows(self):
+        # ci-scope.py leaves Windows out of a pull request whose platform code
+        # is macOS's alone; the merge queue and main still run it.
+        context = self.context(**{"needs.commits.outputs.windows": "false"})
+        for job in PR_JOBS:
+            self.assertEqual(condition_matches(job, context),
+                             job not in ("windows", "windows-native", "windows-package"), job)
 
     def test_merge_queue_runs_every_platform_but_no_main_release_build(self):
         # The queue's ref and actor are GitHub's; it checks what reaches main.
@@ -194,7 +205,9 @@ class CiPolicy(unittest.TestCase):
 
         def gate(code, checks, windows, native, commits, package_inputs="false", package="skipped",
                  event="push", macos=None, site_inputs="false", site="skipped", full="true",
-                 native_inputs=None, macos_inputs=None, zizmor="success"):
+                 native_inputs=None, macos_inputs=None, zizmor="success", windows_scope=None):
+            if windows_scope is None:
+                windows_scope = full
             if native_inputs is None:
                 native_inputs = code if code in ("true", "false") else "false"
             if macos_inputs is None:
@@ -207,11 +220,20 @@ class CiPolicy(unittest.TestCase):
                 ["bash", "-e", "-c", script], capture_output=True,
                 env={**os.environ, "CODE": code, "RESULT": checks, "WINDOWS": windows,
                      "NATIVE": native, "NATIVE_INPUTS": native_inputs, "COMMITS": commits,
-                     "FULL": full,
+                     "FULL": full, "WINDOWS_SCOPE": windows_scope,
                      "PACKAGE_INPUTS": package_inputs, "PACKAGE": package,
                      "EVENT": event, "MACOS_RELEASE": macos, "MACOS_INPUTS": macos_inputs,
                      "SITE_INPUTS": site_inputs, "SITE": site, "ZIZMOR": zizmor},
             ).returncode == 0
+
+        # A pull request needing every platform for macOS code leaves Windows
+        # out (scripts/ci-scope.py): skipped passes, and a Windows run that
+        # should not have happened, or a main run without Windows, fails.
+        self.assertTrue(gate("true", "success", "skipped", "skipped", "success", event="pull_request",
+                             windows_scope="false"))
+        self.assertFalse(gate("true", "success", "success", "success", "success", event="pull_request",
+                              windows_scope="false"))
+        self.assertFalse(gate("true", "success", "skipped", "skipped", "success", windows_scope="false"))
 
         for code, checks, windows, commits in itertools.product(
                 ("true", "false", ""), ("success", "failure", "cancelled", "skipped"),

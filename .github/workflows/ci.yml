@@ -89,6 +89,7 @@ jobs:
       gpui: ${{ steps.scope.outputs.gpui }}
       macos_release: ${{ steps.changes.outputs.macos_release }}
       website: ${{ steps.changes.outputs.website }}
+      windows: ${{ steps.scope.outputs.windows }}
       windows_native: ${{ steps.changes.outputs.windows_native }}
       windows_package: ${{ steps.changes.outputs.windows_package }}
     # Members' runs use our own Linux VMs when CI_LINUX_ARM_RUNNER names
@@ -179,12 +180,15 @@ jobs:
         # default-features pass.
         features: [default, all]
         # Every pull request runs the macOS default-features leg, as nothing
-        # checks macOS between it and main. One that needs every platform
-        # (scripts/ci-scope.py) adds ARM64 Linux, and, from a branch of this
-        # repository, the macOS all-features leg, which our own Macs make
-        # cheap; a fork's runs on the account's few hosted macOS runners and
-        # skips it. Main and the merge queue run every leg.
-        exclude: ${{ fromJSON(github.event_name != 'pull_request' && '[]' || needs.commits.outputs.full != 'true' && '[{"runner":"macos-15","features":"all"},{"runner":"ubuntu-24.04-arm"}]' || (github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) && '[]' || '[{"runner":"macos-15","features":"all"}]') }}
+        # checks macOS between it and main. A members' pull request runs its
+        # Linux legs on ARM64, which our own machines take; x86_64 Linux is
+        # left to main and the merge queue. Any other pull request runs x86_64
+        # Linux, adding ARM64 when it needs every platform
+        # (scripts/ci-scope.py). Every platform also brings the macOS
+        # all-features leg for members, whose macOS runs on our own Macs; a
+        # fork's runs on the account's few hosted macOS runners and skips it.
+        # Main and the merge queue run every leg.
+        exclude: ${{ fromJSON(github.event_name != 'pull_request' && '[]' || (github.event.pull_request.head.repo.full_name == github.repository && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) && (needs.commits.outputs.full != 'true' && '[{"runner":"ubuntu-24.04"},{"runner":"macos-15","features":"all"}]' || '[{"runner":"ubuntu-24.04"}]') || needs.commits.outputs.full != 'true' && '[{"runner":"macos-15","features":"all"},{"runner":"ubuntu-24.04-arm"}]' || '[{"runner":"macos-15","features":"all"}]') }}
     # The repository variables CI_MACOS_RUNNER and CI_LINUX_ARM_RUNNER, JSON
     # label lists such as '["self-hosted", "macOS", "ARM64", "tart"]', move
     # the macOS and ARM64 Linux legs to our own machines, past the account's
@@ -300,7 +304,7 @@ jobs:
   # the release workflow.
   windows:
     if: >-
-      needs.commits.outputs.code == 'true' && needs.commits.outputs.full == 'true' &&
+      needs.commits.outputs.code == 'true' && needs.commits.outputs.windows == 'true' &&
       (github.repository == 'sheprd-labs/sheprd' || github.repository == 'penso/herdr-gpui') &&
       (github.event_name == 'pull_request' || github.event_name == 'merge_group' ||
        ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
@@ -358,7 +362,7 @@ jobs:
   # (`scripts/ci-changes.sh`); main always does.
   windows-native:
     if: >-
-      needs.commits.outputs.windows_native == 'true' && needs.commits.outputs.full == 'true' &&
+      needs.commits.outputs.windows_native == 'true' && needs.commits.outputs.windows == 'true' &&
       (github.repository == 'sheprd-labs/sheprd' || github.repository == 'penso/herdr-gpui') &&
       (github.event_name == 'pull_request' || github.event_name == 'merge_group' ||
        ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
@@ -428,7 +432,7 @@ jobs:
   # request labeled for it.
   windows-package:
     if: >-
-      needs.commits.outputs.windows_package == 'true' && needs.commits.outputs.full == 'true' &&
+      needs.commits.outputs.windows_package == 'true' && needs.commits.outputs.windows == 'true' &&
       (github.repository == 'sheprd-labs/sheprd' || github.repository == 'penso/herdr-gpui') &&
       (github.event_name == 'pull_request' || github.event_name == 'merge_group' ||
        ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
@@ -558,6 +562,7 @@ jobs:
           COMMITS: ${{ needs.commits.result }}
           CODE: ${{ needs.commits.outputs.code }}
           FULL: ${{ needs.commits.outputs.full }}
+          WINDOWS_SCOPE: ${{ needs.commits.outputs.windows }}
           PACKAGE_INPUTS: ${{ needs.commits.outputs.windows_package }}
           SITE: ${{ needs.website.result }}
           SITE_INPUTS: ${{ needs.commits.outputs.website }}
@@ -567,14 +572,14 @@ jobs:
           # Only a pull request may skip platforms; main and the merge queue
           # check every one.
           if [ "$EVENT" != pull_request ]; then
-            test "$FULL" = true || exit 1
+            test "$FULL" = true && test "$WINDOWS_SCOPE" = true || exit 1
           fi
           if [ "$CODE" = true ]; then
             test "$RESULT" = success || exit 1
-            if [ "$FULL" = true ]; then
+            if [ "$WINDOWS_SCOPE" = true ]; then
               test "$WINDOWS" = success || exit 1
             else
-              test "$FULL" = false && test "$WINDOWS" = skipped || exit 1
+              test "$WINDOWS_SCOPE" = false && test "$WINDOWS" = skipped || exit 1
             fi
           else
             test "$CODE" = false && test "$RESULT" = skipped && test "$WINDOWS" = skipped || exit 1
@@ -582,10 +587,10 @@ jobs:
           # The GUI tests run with every platform: on main and in the merge
           # queue with code changes, on pull requests when their inputs
           # change; missing detection fails.
-          if [ "$NATIVE_INPUTS" = true ] && [ "$FULL" = true ]; then
+          if [ "$NATIVE_INPUTS" = true ] && [ "$WINDOWS_SCOPE" = true ]; then
             test "$NATIVE" = success || exit 1
           else
-            { [ "$NATIVE_INPUTS" = false ] || [ "$FULL" = false ]; } && test "$NATIVE" = skipped || exit 1
+            { [ "$NATIVE_INPUTS" = false ] || [ "$WINDOWS_SCOPE" = false ]; } && test "$NATIVE" = skipped || exit 1
           fi
           # The macOS release builds run before merge, with every platform,
           # when their inputs change.
@@ -595,10 +600,10 @@ jobs:
           else
             test "$MACOS_RELEASE" = skipped || exit 1
           fi
-          if [ "$PACKAGE_INPUTS" = true ] && [ "$FULL" = true ]; then
+          if [ "$PACKAGE_INPUTS" = true ] && [ "$WINDOWS_SCOPE" = true ]; then
             test "$PACKAGE" = success || exit 1
           else
-            { [ "$PACKAGE_INPUTS" = false ] || [ "$FULL" = false ]; } && test "$PACKAGE" = skipped || exit 1
+            { [ "$PACKAGE_INPUTS" = false ] || [ "$WINDOWS_SCOPE" = false ]; } && test "$PACKAGE" = skipped || exit 1
           fi
           if [ "$SITE_INPUTS" = true ]; then
             test "$SITE" = success

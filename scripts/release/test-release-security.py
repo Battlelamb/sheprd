@@ -64,13 +64,18 @@ class ReleaseTargets(unittest.TestCase):
         self.assertIn("python3 scripts/ci-scope.py >> \"$GITHUB_OUTPUT\"", jobs["commits"])
         self.assertIn("python3 scripts/test_ci_scope.py", jobs["commits"])
         self.assertIn("FULL: ${{ needs.commits.outputs.full }}", jobs["checks-passed"])
-        self.assertIn('if [ "$EVENT" != pull_request ]; then\n            test "$FULL" = true || exit 1\n',
+        self.assertIn('if [ "$EVENT" != pull_request ]; then\n'
+                      '            test "$FULL" = true && test "$WINDOWS_SCOPE" = true || exit 1\n',
                       jobs["checks-passed"])
-        self.assertIn('if [ "$FULL" = true ]; then\n              test "$WINDOWS" = success || exit 1\n',
+        self.assertIn('if [ "$WINDOWS_SCOPE" = true ]; then\n              test "$WINDOWS" = success || exit 1\n',
                       jobs["checks-passed"])
-        self.assertIn('test "$FULL" = false && test "$WINDOWS" = skipped', jobs["checks-passed"])
-        for name in ("windows", "windows-native", "build-macos"):
-            self.assertIn("needs.commits.outputs.full == 'true'", jobs[name])
+        self.assertIn('test "$WINDOWS_SCOPE" = false && test "$WINDOWS" = skipped', jobs["checks-passed"])
+        self.assertIn("WINDOWS_SCOPE: ${{ needs.commits.outputs.windows }}", jobs["checks-passed"])
+        self.assertIn("windows: ${{ steps.scope.outputs.windows }}", jobs["commits"])
+        # Windows runs for what a Windows build reads (scripts/ci-scope.py).
+        for name in ("windows", "windows-native", "windows-package"):
+            self.assertIn("needs.commits.outputs.windows == 'true'", jobs[name])
+        self.assertIn("needs.commits.outputs.full == 'true'", jobs["build-macos"])
         for name in ("checks", "windows", "windows-native", "checks-passed"):
             self.assertIn("github.event_name == 'merge_group'", jobs[name])
         self.assertIn("needs.commits.outputs.macos_release == 'true'", jobs["build-macos"])
@@ -142,7 +147,7 @@ class ReleaseTargets(unittest.TestCase):
         # The installer check runs only for its inputs and with every
         # platform, and the gate requires it then, and its absence otherwise.
         package = jobs["windows-package"]
-        self.assertIn("needs.commits.outputs.windows_package == 'true' && needs.commits.outputs.full == 'true'", package)
+        self.assertIn("needs.commits.outputs.windows_package == 'true' && needs.commits.outputs.windows == 'true'", package)
         self.assertIn("    needs: commits\n", package)
         self.assertNotIn("secrets.", package)
         # Bash, so "$TARGET" and friends expand on the Windows runner.
@@ -168,10 +173,10 @@ class ReleaseTargets(unittest.TestCase):
             self.assertIn(command, native)
         self.assertIn("NATIVE: ${{ needs.windows-native.result }}", jobs["checks-passed"])
         self.assertIn('test "$NATIVE" = success', jobs["checks-passed"])
-        self.assertIn('{ [ "$NATIVE_INPUTS" = false ] || [ "$FULL" = false ]; } && test "$NATIVE" = skipped', jobs["checks-passed"])
+        self.assertIn('{ [ "$NATIVE_INPUTS" = false ] || [ "$WINDOWS_SCOPE" = false ]; } && test "$NATIVE" = skipped', jobs["checks-passed"])
         self.assertIn("PACKAGE: ${{ needs.windows-package.result }}", jobs["checks-passed"])
         self.assertIn('test "$PACKAGE" = success', jobs["checks-passed"])
-        self.assertIn('{ [ "$PACKAGE_INPUTS" = false ] || [ "$FULL" = false ]; } && test "$PACKAGE" = skipped', jobs["checks-passed"])
+        self.assertIn('{ [ "$PACKAGE_INPUTS" = false ] || [ "$WINDOWS_SCOPE" = false ]; } && test "$PACKAGE" = skipped', jobs["checks-passed"])
         # The optimized performance build waits for the merge queue and main.
         self.assertIn("      - name: Release-mode performance budget\n        if: github.event_name != 'pull_request'\n", native)
 

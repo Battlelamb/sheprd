@@ -78,13 +78,17 @@ def runs_on(job, values, runner=HOSTED):
     return evaluate(text, {**values, "matrix.runner": runner})
 
 
-def macos_legs(values):
-    """The macOS feature sets the checks job runs."""
+def legs(values, runner):
+    """The feature sets the checks job runs on `runner`."""
     text = re.search(r"^        exclude: (.+)$", JOBS["checks"], re.M)[1]
     excluded = evaluate(text, values)
     return sorted(features for features in ("default", "all")
-                  if not any(rule.get("runner") == HOSTED and rule.get("features", features) == features
+                  if not any(rule.get("runner") == runner and rule.get("features", features) == features
                              for rule in excluded))
+
+
+def macos_legs(values):
+    return legs(values, HOSTED)
 
 
 class MacosRunners(unittest.TestCase):
@@ -156,10 +160,22 @@ class MacosRunners(unittest.TestCase):
         for event in ("push", "merge_group"):
             self.assertEqual(macos_legs(context(event)), ["all", "default"])
 
-    def test_arm64_linux_waits_for_every_platform(self):
-        text = re.search(r"^        exclude: (.+)$", JOBS["checks"], re.M)[1]
-        self.assertIn({"runner": "ubuntu-24.04-arm"}, evaluate(text, context("pull_request", full="false")))
-        self.assertNotIn({"runner": "ubuntu-24.04-arm"}, evaluate(text, context("pull_request")))
+    def test_members_check_linux_on_arm64_and_others_on_x86_64(self):
+        # A members' pull request runs Linux on ARM64, our own machines;
+        # x86_64 waits for main and the merge queue.
+        for full in ("false", "true"):
+            values = context("pull_request", full=full)
+            self.assertEqual(legs(values, "ubuntu-24.04-arm"), ["all", "default"])
+            self.assertEqual(legs(values, "ubuntu-24.04"), [])
+        # Anyone else's runs x86_64, adding ARM64 only with every platform.
+        for values in (context("pull_request", fork=True, full="false"),
+                       context("pull_request", association="NONE", full="false")):
+            self.assertEqual(legs(values, "ubuntu-24.04"), ["all", "default"])
+            self.assertEqual(legs(values, "ubuntu-24.04-arm"), [])
+        self.assertEqual(legs(context("pull_request", fork=True), "ubuntu-24.04-arm"), ["all", "default"])
+        for event in ("push", "merge_group"):
+            for runner in ("ubuntu-24.04", "ubuntu-24.04-arm"):
+                self.assertEqual(legs(context(event), runner), ["all", "default"])
 
 
 if __name__ == "__main__":

@@ -40,6 +40,11 @@ build scripts. A member whose organization membership is private may be
 listed otherwise, and then runs hosted. Windows, Nix, the
 release workflow, and the iOS workflow stay hosted, as does x86_64 Linux.
 
+A members' pull request runs its Linux checks on ARM64 rather than x86_64,
+so they land on our VMs too; x86_64 Linux runs on main and in the merge
+queue. Windows, hosted and the slowest platform, runs on a pull request only
+for what a Windows build reads (`scripts/ci-scope.py`).
+
 Every pull request runs the macOS default-features leg. One that needs every
 platform (`scripts/ci-scope.py`) also runs the all-features leg on our Macs;
 a fork's skips it, as it runs on the account's few hosted macOS runners.

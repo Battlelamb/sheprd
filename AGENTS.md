@@ -266,14 +266,18 @@ what was deferred to CI.
   and requires CI to have passed on the commit. Keep the `cfg(unix)`/`cfg(windows)`
   split honest and say plainly what a platform cannot do instead of stubbing
   behavior that appears to work.
-- Pull requests run CI on `ubuntu-24.04` and the macOS default-features
-  leg, and lint and test only the crates their changes reach
-  (`scripts/ci-scope.py`). `main`, the merge queue, and a pull request that
-  changes a platform `cfg` line or file, a dependency (any `Cargo.toml`,
-  `Cargo.lock`) or the toolchain, or the CI selection itself, or carries the
-  `windows`, `macos`, or `full-ci` label, run every platform over the whole
-  workspace. The Nix flake builds on pull requests only when the flake or
-  the toolchain pin changes, and on `main` and every release otherwise.
+- Pull requests run the Linux checks and the macOS default-features leg,
+  and lint and test only the crates their changes reach
+  (`scripts/ci-scope.py`): on ARM64 for members' pull requests, whose runs
+  take our own machines, and on x86_64 otherwise. `main`, the merge queue,
+  and a pull request that changes a platform `cfg` line or file, a
+  dependency (any `Cargo.toml`, `Cargo.lock`) or the toolchain, or the CI
+  selection itself, or carries the `windows`, `macos`, or `full-ci` label,
+  run every platform over the whole workspace, except that such a pull
+  request runs Windows only for what a Windows build reads: not for macOS
+  files, `cfg` gates naming only macOS or Apple, or the `macos` label. The
+  Nix flake builds on pull requests only when the flake or the toolchain pin
+  changes, and on `main` and every release otherwise.
 - macOS jobs, and the ARM64 Linux legs, run on our own machines when the
   repository variables `CI_MACOS_RUNNER` and `CI_LINUX_ARM_RUNNER` name their
   labels (`docs/self-hosted-runners.md`), for

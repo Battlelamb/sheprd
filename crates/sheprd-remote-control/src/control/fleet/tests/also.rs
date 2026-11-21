@@ -3,7 +3,7 @@
 //! which cannot work it out, is told with the removal.
 
 use super::*;
-use crate::fleet::removals::also;
+use crate::control::fleet::access::also;
 
 /// a, b, and c, computers.
 fn three() -> (Log, Device, Device) {

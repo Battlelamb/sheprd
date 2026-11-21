@@ -21,7 +21,7 @@
 use super::{Fleet, Holder};
 use crate::control::fleet::{
     Body, HostKind, MemberId, Op, OpId, State, access,
-    removal::{MAX_ALSO, MAX_FRAME, MAX_OPS, MAX_ROUNDS, Message, PURPOSE_REMOVAL},
+    removal::{MAX_FRAME, MAX_OPS, MAX_ROUNDS, Message, PURPOSE_REMOVAL},
 };
 use crate::desktop::record::Record;
 use std::{
@@ -150,7 +150,7 @@ fn rand_quarter() -> u8 {
 /// What one peer is owed: the record to dial it at, the removals, and for
 /// a plain host's agent, the members the log removes with them that they
 /// do not name ([`Message::Also`]).
-type Owed = (Holder, Record, Vec<Op>, Vec<(OpId, MemberId)>);
+pub(super) type Owed = (Holder, Record, Vec<Op>, Vec<(OpId, MemberId)>);
 
 /// What each live computer member and plain host is owed: the removals
 /// the log holds that it has not said it holds, and the record to dial it
@@ -158,7 +158,7 @@ type Owed = (Holder, Record, Vec<Op>, Vec<(OpId, MemberId)>);
 /// agent acts on what it is sent without checking it, and with each the
 /// members the log removes with it beyond those it names: a member's
 /// daemon works those out from the log, an agent cannot.
-fn owed(fleet: &Fleet) -> Vec<Owed> {
+pub(super) fn owed(fleet: &Fleet) -> Vec<Owed> {
     let inner = fleet.inner();
     let Some(log) = &inner.log else {
         return Vec::new();
@@ -204,43 +204,42 @@ fn owed(fleet: &Fleet) -> Vec<Owed> {
             // An agent suspends only in the dialing member's own name, so
             // it is passed only this computer's removals; the others reach
             // it in the access file.
-            let mut effective = removals
+            let effective: Vec<&Op> = removals
                 .iter()
-                .filter(|op| op.signer() == fleet.me() && access::for_agents(state, op));
-            let ops = unheld(&holder, &mut effective);
-            let also = also(&removed_by, &ops);
+                .copied()
+                .filter(|op| op.signer() == fleet.me() && access::for_agents(state, op))
+                .collect();
+            // A removal the agent holds is owed again once it takes a
+            // member the agent was not told of: one admitted with a
+            // removed member, whose admission arrived after.
+            let took = inner.held_also.get(id);
+            let grew: Vec<OpId> = access::also(
+                &removed_by,
+                &effective.iter().map(|op| (*op).clone()).collect::<Vec<_>>(),
+            )
+            .into_iter()
+            .filter(|(removal, member)| {
+                !took
+                    .and_then(|took| took.get(removal))
+                    .is_some_and(|took| took.contains(member))
+            })
+            .map(|(removal, _)| removal)
+            .collect();
+            let held = inner.held.get(&holder);
+            let ops: Vec<Op> = effective
+                .iter()
+                .filter(|op| {
+                    held.is_none_or(|held| !held.contains(&op.id())) || grew.contains(&op.id())
+                })
+                .take(MAX_OPS)
+                .map(|op| (*op).clone())
+                .collect();
+            let also = access::also(&removed_by, &ops);
             Some((holder, record, ops, also))
         });
     members
         .chain(hosts)
         .filter(|(_, _, ops, _)| !ops.is_empty())
-        .collect()
-}
-
-/// For each of `ops`, the members `removed_by` says it removes that it
-/// does not name, at most [`MAX_ALSO`]: those beyond reach the agent in
-/// the access file.
-pub(crate) fn also(
-    removed_by: &BTreeMap<OpId, std::collections::BTreeSet<MemberId>>,
-    ops: &[Op],
-) -> Vec<(OpId, MemberId)> {
-    ops.iter()
-        .filter_map(|op| {
-            let Body::Remove(remove) = op.body() else {
-                return None;
-            };
-            let named: Vec<&MemberId> = remove.targets().collect();
-            let reach = removed_by.get(&op.id())?;
-            Some(
-                reach
-                    .iter()
-                    .filter(move |member| !named.contains(member))
-                    .map(move |member| (op.id(), *member))
-                    .collect::<Vec<_>>(),
-            )
-        })
-        .flatten()
-        .take(MAX_ALSO)
         .collect()
 }
 
@@ -337,11 +336,8 @@ async fn push(
     // Ahead of the removals, for an agent: who they take out beyond those
     // they name.
     if !also.is_empty() {
-        let also = also
-            .into_iter()
-            .map(|(id, member)| (id, member.0))
-            .collect();
-        if write(io, &Message::Also(also)).await.is_err() {
+        let pairs = also.iter().map(|(id, member)| (*id, member.0)).collect();
+        if write(io, &Message::Also(pairs)).await.is_err() {
             return false;
         }
     }
@@ -370,7 +366,7 @@ async fn push(
                 let ids = acknowledged(&ops, ids);
                 let all = ops.iter().all(|op| ids.contains(&op.id()));
                 let fleet = fleet.clone();
-                let _ = tokio::task::spawn_blocking(move || fleet.held(peer, ids)).await;
+                let _ = tokio::task::spawn_blocking(move || fleet.held(peer, ids, also)).await;
                 drop(connection);
                 return all;
             }

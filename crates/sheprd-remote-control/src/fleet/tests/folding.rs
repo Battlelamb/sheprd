@@ -316,10 +316,14 @@ async fn acknowledgments_keep_only_removals_sent_and_held() {
     );
     assert_eq!(acked, vec![removal.id()]);
     // What is kept holds only removals the log holds, for members.
-    a.fleet.held(Holder::Member(b.fleet.me()), made_up).unwrap();
-    a.fleet.held(Holder::Member(c.fleet.me()), acked).unwrap();
     a.fleet
-        .held(Holder::Member(MemberId([0x77; 32])), [removal.id()])
+        .held(Holder::Member(b.fleet.me()), made_up, [])
+        .unwrap();
+    a.fleet
+        .held(Holder::Member(c.fleet.me()), acked, [])
+        .unwrap();
+    a.fleet
+        .held(Holder::Member(MemberId([0x77; 32])), [removal.id()], [])
         .unwrap();
     let inner = a.fleet.inner();
     assert!(!inner.held.contains_key(&Holder::Member(b.fleet.me())));

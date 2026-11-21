@@ -58,6 +58,10 @@ struct Peers {
     /// By plain host, whose agent holds them.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     held_hosts: BTreeMap<String, BTreeSet<String>>,
+    /// By plain host, then removal: the members beyond those it names that
+    /// the host's agent took with it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    held_also: BTreeMap<String, BTreeMap<String, BTreeSet<String>>>,
     #[serde(default)]
     unconfirmed: BTreeMap<String, Kept>,
     /// Suspensions folded per signer and target (`super::suspensions`),
@@ -225,6 +229,24 @@ pub(super) fn load(state_dir: &Path, now_ms: u64) -> Result<Inner> {
                     .take(super::MAX_HELD_PER_PEER)
                     .collect();
                 (holder, ids)
+            })
+            .collect(),
+        // One that no longer reads is only sent again.
+        held_also: peers
+            .held_also
+            .iter()
+            .filter_map(|(host, kept)| {
+                let kept = kept
+                    .iter()
+                    .filter_map(|(id, members)| {
+                        let members = members
+                            .iter()
+                            .filter_map(|member| MemberId::from_hex(member))
+                            .collect();
+                        Some((OpId::from_hex(id)?, members))
+                    })
+                    .collect();
+                Some((HostId::from_hex(host)?, kept))
             })
             .collect(),
         proven: peers
@@ -481,6 +503,22 @@ fn write_peers(state_dir: &Path, inner: &Inner, suspensions: &Suspensions) -> Re
             Holder::Host(host) => Some(host.to_string()),
             Holder::Member(_) => None,
         }),
+        held_also: inner
+            .held_also
+            .iter()
+            .map(|(host, kept)| {
+                let kept = kept
+                    .iter()
+                    .map(|(id, members)| {
+                        (
+                            id.to_string(),
+                            members.iter().map(ToString::to_string).collect(),
+                        )
+                    })
+                    .collect();
+                (host.to_string(), kept)
+            })
+            .collect(),
         proven: inner
             .proven
             .iter()

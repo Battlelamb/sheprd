@@ -11,6 +11,7 @@ mod admission;
 mod agent_ssh_keys;
 mod agents;
 mod also;
+mod also_checkpoints;
 mod base_lifetime;
 mod bounds;
 mod checkpoint;

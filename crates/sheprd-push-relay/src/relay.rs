@@ -3,13 +3,16 @@
 //! tests can stand in for it.
 
 use crate::{
+    attest::{self, Environment, KeyId, Verifier},
     credential::{Credential, DeviceId, Issuer},
     handle::{Handle, Keyring},
     limit::{Limiter, Rates, source_key},
     store::{Memory, Revoked, Store},
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use sheprd_apns::{DeviceToken, Host, MAX_PAYLOAD, Outcome, Priority, Push, PushType, Sender};
 use std::{
     future::Future,
@@ -61,6 +64,33 @@ pub struct RevokeRequest {
     pub handle: SecretString,
 }
 
+/// `POST /v1/attest`, as `DCAppAttestService` gives its parts: the key id
+/// and attestation in standard base64, and the challenge as the relay sent
+/// it, whose SHA-256 is the attestation's client data hash.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AttestRequest {
+    pub attestation: String,
+    pub challenge: String,
+    pub key_id: String,
+}
+
+/// What an attested phone gets: a credential for its handles, and the key
+/// to seal them to.
+#[derive(Debug, Eq, PartialEq, Serialize)]
+pub struct Issued {
+    pub credential: String,
+    pub expires_s: u64,
+    /// The id handles name the key by, before their `.`.
+    pub relay_key_id: String,
+    /// The relay's public key, an uncompressed SEC1 point in base64url.
+    pub relay_key: String,
+}
+
+/// The longest attestation body field: an attestation is about 5,900 bytes,
+/// 7,900 in base64.
+const MAX_ATTESTATION: usize = 12 * 1024;
+
 /// What a caller is told. `Refused` covers every bad handle alike, so a
 /// caller learns nothing about why.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -82,6 +112,7 @@ pub enum Reply {
 }
 
 struct Limits {
+    attest: Limiter<IpAddr>,
     device: Limiter<DeviceId>,
     handle: Limiter<String>,
     revoke: Limiter<DeviceId>,
@@ -90,6 +121,7 @@ struct Limits {
 
 /// One relay instance serves one APNs environment.
 pub struct Relay<G, S = Memory> {
+    attestations: Verifier,
     environment: Host,
     gateway: G,
     issuer: Issuer,
@@ -107,13 +139,16 @@ impl<G: Gateway, S: Store> Relay<G, S> {
         keys: Keyring,
         store: S,
         rates: Rates,
+        attestations: Verifier,
     ) -> Self {
         Self {
+            attestations,
             environment,
             gateway,
             issuer,
             keys,
             limits: Mutex::new(Limits {
+                attest: Limiter::new(rates.attest),
                 device: Limiter::new(rates.device),
                 handle: Limiter::new(rates.handle),
                 revoke: Limiter::new(rates.revoke),
@@ -130,6 +165,79 @@ impl<G: Gateway, S: Store> Relay<G, S> {
     /// Before any cryptography, so a flood of junk costs no key agreement.
     pub fn source_allowed(&self, source: IpAddr, now_ms: u64) -> bool {
         self.limits().source.allow(source_key(source), now_ms)
+    }
+
+    /// Whether `source` may ask for a challenge or attest now. Both spend
+    /// the general limit too.
+    fn attest_allowed(&self, source: IpAddr, now_ms: u64) -> bool {
+        let mut limits = self.limits();
+        let key = source_key(source);
+        limits.source.allow(key, now_ms) && limits.attest.allow(key, now_ms)
+    }
+
+    /// A challenge for a phone at `source` to attest over.
+    pub fn challenge(&self, source: IpAddr, now_ms: u64) -> Result<String, Reply> {
+        if !self.attest_allowed(source, now_ms) {
+            return Err(Reply::Limited);
+        }
+        self.issuer.challenge(now_ms / 1000).map_err(|error| {
+            tracing::error!(%error, "could not make a challenge");
+            Reply::Unavailable
+        })
+    }
+
+    /// A credential for a key App Attest vouches for, made over one of this
+    /// relay's challenges by a build for this relay's APNs environment:
+    /// Xcode builds attest in development and push through the sandbox.
+    pub fn attest(
+        &self,
+        source: IpAddr,
+        request: &AttestRequest,
+        now_ms: u64,
+    ) -> Result<Issued, Reply> {
+        if !self.attest_allowed(source, now_ms) {
+            return Err(Reply::Limited);
+        }
+        let now_s = now_ms / 1000;
+        if request.attestation.len() > MAX_ATTESTATION {
+            return Err(Reply::Invalid);
+        }
+        let (Ok(attestation), Ok(key_id)) = (
+            STANDARD.decode(&request.attestation),
+            STANDARD.decode(&request.key_id),
+        ) else {
+            return Err(Reply::Invalid);
+        };
+        let Ok(key_id) = KeyId::try_from(key_id) else {
+            return Err(Reply::Invalid);
+        };
+        if !self.issuer.check_challenge(&request.challenge, now_s) {
+            return Err(Reply::Refused);
+        }
+        let client_data_hash: [u8; 32] = Sha256::digest(&request.challenge).into();
+        let attested = self
+            .attestations
+            .verify(&attestation, &key_id, &client_data_hash, now_s)
+            .map_err(|error: attest::Error| {
+                // A fixed reason, safe to log: no key, token, or address.
+                tracing::info!(%error, "refused an attestation");
+                Reply::Refused
+            })?;
+        let expected = match self.environment {
+            Host::Production => Environment::Production,
+            Host::Sandbox => Environment::Development,
+        };
+        if attested.environment != expected {
+            return Err(Reply::Refused);
+        }
+        let (relay_key_id, relay_key) = self.keys.current().ok_or(Reply::Unavailable)?;
+        let device = self.issuer.device(&key_id);
+        Ok(Issued {
+            credential: self.issuer.issue(device, self.environment, now_s),
+            expires_s: now_s + crate::credential::LIFETIME_S,
+            relay_key_id,
+            relay_key,
+        })
     }
 
     /// The opened handle and its credential, or the reply that ends the

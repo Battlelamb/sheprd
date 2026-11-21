@@ -1,0 +1,340 @@
+//! App Attest checks, against a test PKI shaped like Apple's: a P-384 root
+//! and intermediate, and a P-256 leaf holding the nonce. Only Apple can sign
+//! a real attestation; `real_attestation_from_a_phone` checks one by hand.
+
+use super::*;
+use crate::attest::{APPLE_ROOT_PEM, Attested, Environment, Error, KeyId};
+use rcgen::{
+    BasicConstraints, CertificateParams, CustomExtension, DnType, IsCa, Issuer as CertIssuer,
+    KeyPair, PKCS_ECDSA_P256_SHA256, PKCS_ECDSA_P384_SHA384,
+};
+use sha2::{Digest as _, Sha256};
+
+pub(super) const DEVELOPMENT: [u8; 16] = *b"appattestdevelop";
+pub(super) const PRODUCTION: [u8; 16] = *b"appattest\0\0\0\0\0\0\0";
+const NONCE_OID: &[u64] = &[1, 2, 840, 113_635, 100, 8, 2];
+
+/// A root and intermediate that sign attestations, like Apple's.
+pub(super) struct Pki {
+    pub(super) root: Vec<u8>,
+    intermediate: CertificateParams,
+    intermediate_key: KeyPair,
+    intermediate_der: Vec<u8>,
+}
+
+fn ca(name: &str, is_ca: bool) -> CertificateParams {
+    let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
+    params.distinguished_name.push(DnType::CommonName, name);
+    if is_ca {
+        params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    }
+    params
+}
+
+impl Pki {
+    pub(super) fn new() -> Self {
+        Self::with_intermediate_ca(true)
+    }
+
+    fn with_intermediate_ca(is_ca: bool) -> Self {
+        let root_key = KeyPair::generate_for(&PKCS_ECDSA_P384_SHA384).unwrap();
+        let root_params = ca("Test App Attestation Root CA", true);
+        let root = root_params.self_signed(&root_key).unwrap();
+        let intermediate_key = KeyPair::generate_for(&PKCS_ECDSA_P384_SHA384).unwrap();
+        let intermediate = ca("Test App Attestation CA 1", is_ca);
+        let intermediate_der = intermediate
+            .signed_by(&intermediate_key, &CertIssuer::new(root_params, &root_key))
+            .unwrap()
+            .der()
+            .to_vec();
+        Self {
+            root: root.der().to_vec(),
+            intermediate,
+            intermediate_key,
+            intermediate_der,
+        }
+    }
+
+    pub(super) fn verifier(&self) -> Verifier {
+        Verifier::new(APP_ID, self.root.clone())
+    }
+}
+
+/// One attestation's parts, each of which a test can spoil.
+pub(super) struct Shape<'a> {
+    pub(super) aaguid: [u8; 16],
+    pub(super) app_id: &'a str,
+    /// What the nonce covers: the challenge the phone attested over.
+    pub(super) challenge: &'a [u8],
+    pub(super) counter: u32,
+    /// The credential id, when it should differ from the key id.
+    pub(super) credential: Option<KeyId>,
+    pub(super) fmt: &'a str,
+}
+
+impl Default for Shape<'_> {
+    fn default() -> Self {
+        Self {
+            aaguid: PRODUCTION,
+            app_id: APP_ID,
+            challenge: b"challenge",
+            counter: 0,
+            credential: None,
+            fmt: "apple-appattest",
+        }
+    }
+}
+
+/// An attestation made by `pki`, and the key id it attests.
+pub(super) fn attestation(pki: &Pki, shape: &Shape<'_>) -> (Vec<u8>, KeyId) {
+    let leaf_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).unwrap();
+    let key_id: KeyId = Sha256::digest(leaf_key.public_key_raw()).into();
+    let mut auth_data = Sha256::digest(shape.app_id).to_vec();
+    auth_data.push(0x40);
+    auth_data.extend_from_slice(&shape.counter.to_be_bytes());
+    auth_data.extend_from_slice(&shape.aaguid);
+    auth_data.extend_from_slice(&32u16.to_be_bytes());
+    auth_data.extend_from_slice(&shape.credential.unwrap_or(key_id));
+
+    let mut nonce = Sha256::new();
+    nonce.update(&auth_data);
+    nonce.update(Sha256::digest(shape.challenge));
+    let mut extension = vec![0x30, 0x24, 0xa1, 0x22, 0x04, 0x20];
+    extension.extend_from_slice(&nonce.finalize());
+    let mut leaf = ca("leaf", false);
+    leaf.custom_extensions = vec![CustomExtension::from_oid_content(NONCE_OID, extension)];
+    let issuer = CertIssuer::new(pki.intermediate.clone(), &pki.intermediate_key);
+    let leaf = leaf.signed_by(&leaf_key, &issuer).unwrap().der().to_vec();
+
+    let object = map(&[
+        (text("fmt"), text(shape.fmt)),
+        (
+            text("attStmt"),
+            map(&[
+                (
+                    text("x5c"),
+                    array(&[bytes(&leaf), bytes(&pki.intermediate_der)]),
+                ),
+                (text("receipt"), bytes(b"receipt")),
+            ]),
+        ),
+        (text("authData"), bytes(&auth_data)),
+    ]);
+    (object, key_id)
+}
+
+/// The client data hash for `challenge`, as the relay computes it.
+pub(super) fn hash(challenge: &[u8]) -> [u8; 32] {
+    Sha256::digest(challenge).into()
+}
+
+fn head(major: u8, length: usize) -> Vec<u8> {
+    match length {
+        0..=23 => vec![major << 5 | u8::try_from(length).unwrap()],
+        24..=255 => vec![major << 5 | 24, u8::try_from(length).unwrap()],
+        _ => {
+            let mut head = vec![major << 5 | 25];
+            head.extend_from_slice(&u16::try_from(length).unwrap().to_be_bytes());
+            head
+        }
+    }
+}
+
+fn bytes(value: &[u8]) -> Vec<u8> {
+    [head(2, value.len()), value.to_vec()].concat()
+}
+
+fn text(value: &str) -> Vec<u8> {
+    [head(3, value.len()), value.as_bytes().to_vec()].concat()
+}
+
+fn array(items: &[Vec<u8>]) -> Vec<u8> {
+    [head(4, items.len()), items.concat()].concat()
+}
+
+fn map(entries: &[(Vec<u8>, Vec<u8>)]) -> Vec<u8> {
+    let mut out = head(5, entries.len());
+    for (key, value) in entries {
+        out.extend_from_slice(key);
+        out.extend_from_slice(value);
+    }
+    out
+}
+
+fn verify(pki: &Pki, shape: &Shape<'_>) -> Result<Attested, Error> {
+    let (object, key_id) = attestation(pki, shape);
+    pki.verifier()
+        .verify(&object, &key_id, &hash(b"challenge"), NOW_S)
+}
+
+#[test]
+fn a_good_attestation_yields_its_key_and_environment() {
+    let pki = Pki::new();
+    let (object, key_id) = attestation(&pki, &Shape::default());
+    let attested = pki
+        .verifier()
+        .verify(&object, &key_id, &hash(b"challenge"), NOW_S)
+        .unwrap();
+    assert_eq!(attested.environment, Environment::Production);
+    assert_eq!(
+        <[u8; 32]>::from(Sha256::digest(attested.public_key)),
+        key_id
+    );
+
+    let development = Shape {
+        aaguid: DEVELOPMENT,
+        ..Shape::default()
+    };
+    assert_eq!(
+        verify(&pki, &development).unwrap().environment,
+        Environment::Development
+    );
+}
+
+#[test]
+fn each_spoiled_part_is_refused_for_its_own_reason() {
+    let pki = Pki::new();
+    let cases = [
+        (
+            Shape {
+                challenge: b"another",
+                ..Shape::default()
+            },
+            Error::Nonce,
+        ),
+        (
+            Shape {
+                app_id: "ABCDE12345.other.app",
+                ..Shape::default()
+            },
+            Error::App,
+        ),
+        (
+            Shape {
+                counter: 1,
+                ..Shape::default()
+            },
+            Error::Counter,
+        ),
+        (
+            Shape {
+                aaguid: [0; 16],
+                ..Shape::default()
+            },
+            Error::Environment,
+        ),
+        (
+            Shape {
+                credential: Some([7; 32]),
+                ..Shape::default()
+            },
+            Error::Credential,
+        ),
+        (
+            Shape {
+                fmt: "packed",
+                ..Shape::default()
+            },
+            Error::Format,
+        ),
+    ];
+    for (shape, expected) in cases {
+        assert_eq!(verify(&pki, &shape), Err(expected));
+    }
+}
+
+#[test]
+fn an_attestation_for_another_key_is_refused() {
+    let pki = Pki::new();
+    let (object, _) = attestation(&pki, &Shape::default());
+    let verified = pki
+        .verifier()
+        .verify(&object, &[9; 32], &hash(b"challenge"), NOW_S);
+    assert_eq!(verified, Err(Error::Key));
+}
+
+#[test]
+fn only_a_chain_to_the_root_at_a_valid_time_is_taken() {
+    let pki = Pki::new();
+    let (object, key_id) = attestation(&pki, &Shape::default());
+    let stranger = Pki::new();
+    let check =
+        |verifier: Verifier, now_s| verifier.verify(&object, &key_id, &hash(b"challenge"), now_s);
+    assert_eq!(check(stranger.verifier(), NOW_S), Err(Error::Chain));
+    // rcgen's certificates are valid from 1975 to 4096.
+    assert_eq!(check(pki.verifier(), 0), Err(Error::Chain));
+    assert_eq!(
+        check(Verifier::new(APP_ID, b"not a certificate".to_vec()), NOW_S),
+        Err(Error::Certificate)
+    );
+
+    let not_ca = Pki::with_intermediate_ca(false);
+    assert_eq!(verify(&not_ca, &Shape::default()), Err(Error::Chain));
+}
+
+#[test]
+fn malformed_cbor_is_refused_before_any_certificate_is_read() {
+    let pki = Pki::new();
+    let (good, key_id) = attestation(&pki, &Shape::default());
+    let deep = [vec![0x81; 8], vec![0x00]].concat();
+    let long = [vec![0x91], vec![0x00; 17]].concat();
+    let cases: [&[u8]; 8] = [
+        b"",
+        &[0x9f, 0xff],                   // indefinite length
+        &[0xc0, 0x00],                   // a tag
+        &[0xfb, 0, 0, 0, 0, 0, 0, 0, 0], // a float
+        &[0x5a, 0xff, 0xff, 0xff, 0xff], // bytes longer than the input
+        &deep,
+        &long,
+        &[good.as_slice(), &[0x00]].concat(),
+    ];
+    for case in cases {
+        let verified = pki
+            .verifier()
+            .verify(case, &key_id, &hash(b"challenge"), NOW_S);
+        assert_eq!(verified, Err(Error::Cbor), "{case:02x?}");
+    }
+    let truncated = &good[..good.len() - 1];
+    assert_eq!(
+        pki.verifier()
+            .verify(truncated, &key_id, &hash(b"challenge"), NOW_S),
+        Err(Error::Cbor)
+    );
+}
+
+#[test]
+fn apples_root_is_embedded() {
+    let (_, pem) = x509_parser::pem::parse_x509_pem(APPLE_ROOT_PEM).unwrap();
+    let root = pem.parse_x509().unwrap();
+    assert!(
+        root.subject()
+            .to_string()
+            .contains("Apple App Attestation Root CA")
+    );
+    assert!(root.is_ca());
+}
+
+/// Checks an attestation from a real phone, saved by the spike app's Attest
+/// tab (`ios/Spikes/attest-check.py` has the steps), against Apple's root:
+/// `SHEPRD_ATTEST_FIXTURE=attest.json SHEPRD_ATTEST_APP=TEAM.so.pen.herdr-spikes
+/// SHEPRD_ATTEST_AT=UNIX_SECONDS cargo test -p sheprd-push-relay -- --ignored real_attestation`.
+#[test]
+#[ignore = "needs an attestation from a real phone"]
+fn real_attestation_from_a_phone() {
+    use base64::engine::general_purpose::STANDARD;
+    let file = std::env::var("SHEPRD_ATTEST_FIXTURE").unwrap();
+    let app = std::env::var("SHEPRD_ATTEST_APP").unwrap();
+    let at: u64 = std::env::var("SHEPRD_ATTEST_AT").unwrap().parse().unwrap();
+    let record: serde_json::Value = serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
+    let field = |name: &str| STANDARD.decode(record[name].as_str().unwrap()).unwrap();
+    let key_id: KeyId = field("key_id").try_into().unwrap();
+    let attested = Verifier::apple(&app)
+        .verify(
+            &field("attestation"),
+            &key_id,
+            &hash(&field("challenge")),
+            at,
+        )
+        .unwrap();
+    assert_eq!(attested.environment, Environment::Development);
+}

@@ -11381,9 +11381,11 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
+ "getrandom 0.4.3",
  "hmac 0.13.0",
  "http-body-util",
  "p256 0.14.0",
+ "rcgen",
  "rusqlite",
  "rustls",
  "secrecy",
@@ -11400,6 +11402,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "webpki-roots",
+ "x509-parser",
 ]
 
 [[package]]

@@ -14,10 +14,12 @@ two:
 | `production` | `push.sheprd.org` | TestFlight and App Store builds |
 | `sandbox` | `push-sandbox.sheprd.org` | Builds from Xcode |
 
-Until App Attest and `POST /v1/attest` exist (plan, phase 2), nothing issues
-the credentials handles carry, so a relay answers `/healthz` but has no phone
-to push to. Bringing up the sandbox relay now still rehearses the deploy and
-the recovery below.
+Phones get the credentials their handles carry from `POST /v1/attest`, after
+App Attest. Until the iOS app does that (plan, phase 4), a relay answers
+`/healthz` and attestations but has no phone to push to. The sandbox relay
+takes only Xcode builds, whose App Attest environment is development; the
+production relay takes only TestFlight and App Store builds. Bringing up the
+sandbox relay now still rehearses the deploy and the recovery below.
 
 ## The image
 

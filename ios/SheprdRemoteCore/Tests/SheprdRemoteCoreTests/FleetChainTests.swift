@@ -131,8 +131,15 @@ struct FleetChainTests {
         chain.refused(by: "studio")
         var old = try Self.legacy(chain)
         #expect(old.refusalPending)
-        // Any computer's read settles it, as before: it follows what the
-        // post followed, never the refused one.
+        // A computer that has not caught up to what the post followed settles
+        // nothing, though the refusal names no computer and no floor: what it
+        // followed is the floor.
+        for next in [ops[0].seq - 1, ops[0].seq] {
+            old.resolve(next: next, from: "laptop")
+            #expect(old.refusalPending && old.carried == nil)
+        }
+        // Any computer's read past it settles it, as before: it follows what
+        // the post followed, never the refused one.
         old.resolve(next: ops[1].seq, from: "laptop")
         #expect(!old.refusalPending && old.lastOp == ops[0])
         #expect(old.carried == [ops[0]])

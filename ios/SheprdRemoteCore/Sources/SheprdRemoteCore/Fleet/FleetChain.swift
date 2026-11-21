@@ -111,7 +111,10 @@ public struct FleetChain: Codable, Equatable, Sendable {
     public mutating func resolve(next: UInt64?, from computer: String) {
         guard let refusal, let next else { return }
         let decode = { (data: Data) -> (UInt64, Data)? in (try? Fleet.Op.decode(data)).map { ($0.seq, data) } }
-        let floor = refusal.floor.flatMap(decode)
+        // The floor: the last operation confirmed before the refusal, or
+        // what the refused post followed, which the computer that drafted it
+        // had applied (a refusal kept by the version before has only that).
+        let floor = [refusal.floor, refusal.base].compactMap { $0.flatMap(decode) }.max { $0.0 < $1.0 }
         if let floor, next <= floor.0 { return }
         let newest = refusal.ops.compactMap(decode).map(\.0).max() ?? 0
         let fromRefuser = refusal.computer.map { $0 == computer } ?? true

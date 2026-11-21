@@ -3,6 +3,7 @@ use super::{
     frame::{Frame, MAX_PAYLOAD, Size},
 };
 use crate::Result;
+use secrecy::zeroize::Zeroizing;
 use sheprd_terminal::{Emulator, Size as TerminalSize};
 use std::{
     net::Shutdown,
@@ -15,7 +16,6 @@ use std::{
     thread,
     time::Duration,
 };
-use zeroize::Zeroizing;
 
 const ROWS: u16 = 24;
 const COLS: u16 = 100;

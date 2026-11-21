@@ -127,7 +127,7 @@ pub(crate) struct MenuState {
     pub(super) selected: Option<usize>,
     pub(super) workspace_selected: Option<WorkspaceMenuAction>,
     pub(super) git_selected: Option<git::Row>,
-    pub(super) git_create_target: Option<crate::pull_request::Input>,
+    pub(super) git_create_target: Option<git::CreateTarget>,
     /// The merge dialog's method, and the pull request (with its head) it
     /// was opened for: a branch that moved since must be reviewed again.
     pub(super) merge_method: Option<crate::pull_request::MergeMethod>,

@@ -23,6 +23,11 @@ pub(super) enum Row {
     Restack,
 }
 
+pub(super) struct CreateTarget {
+    input: crate::pull_request::Input,
+    pane: Option<(crate::browser::TabId, sheprd_backend::TerminalId)>,
+}
+
 impl Row {
     pub(super) fn icon(self) -> &'static str {
         match self {
@@ -220,6 +225,14 @@ impl SheprdWindow {
         else {
             return false;
         };
+        let pane = self.shown_core_pane(cx);
+        if self.shows_core_tab() != pane.is_some()
+            || pane.as_ref().is_some_and(|(tab, terminal)| {
+                self.core_pane_git_input(*tab, terminal).as_ref() != Some(&input)
+            })
+        {
+            return false;
+        }
         let anchor = if self.zen_active() {
             point(window.viewport_size().width - px(24.), px(24.))
         } else {
@@ -230,7 +243,7 @@ impl SheprdWindow {
             return false;
         }
         self.menu.asked_by_command = true;
-        self.menu.git_create_target = Some(input);
+        self.menu.git_create_target = Some(CreateTarget { input, pane });
         cx.notify();
         true
     }
@@ -330,8 +343,13 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(input) = self.menu.git_create_target.as_ref()
-            && (self.git_input().as_ref() != Some(input) || self.git.tracked() != Some(input))
+        if let Some(target) = self.menu.git_create_target.as_ref()
+            && (self.git_input().as_ref() != Some(&target.input)
+                || self.git.tracked() != Some(&target.input)
+                || self.shown_core_pane(cx) != target.pane
+                || target.pane.as_ref().is_some_and(|(tab, terminal)| {
+                    self.core_pane_git_input(*tab, terminal).as_ref() != Some(&target.input)
+                }))
         {
             self.dismiss_menu(window, cx);
             return;

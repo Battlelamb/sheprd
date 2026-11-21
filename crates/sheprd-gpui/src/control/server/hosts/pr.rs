@@ -156,6 +156,19 @@ pub(super) fn create(
             "Pull request creation needs a local Git checkout on a branch",
         );
     };
+    if let Some(terminal) = caller.terminal_id.as_deref()
+        && !view.shown_core_pane(cx).is_some_and(|(tab, focused)| {
+            focused.as_str() == terminal
+                && view.core_pane_git_input(tab, &focused).as_ref() == Some(&input)
+        })
+    {
+        return Response::error(
+            ErrorCode::InvalidRequest,
+            format!(
+                "Focus terminal {terminal} and wait for its checkout before asking to create its pull request"
+            ),
+        );
+    }
     if view.git.tracked() != Some(&input) {
         return Response::error(
             ErrorCode::InvalidRequest,

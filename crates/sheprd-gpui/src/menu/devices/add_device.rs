@@ -12,7 +12,22 @@ use crate::{
 };
 use gpui::{prelude::*, *};
 pub(super) use offer::Offer;
+use sheprd_client::protocol::{ClientKeyCode, ClientKeyKind, ClientPaneInputEvent};
 use sheprd_client::{HostKeys, HostProbe, NewHostKey, SshFailure};
+
+pub(crate) fn enter() -> ClientPaneInputEvent {
+    ClientPaneInputEvent::Key {
+        code: ClientKeyCode::Enter,
+        modifiers: 0,
+        kind: ClientKeyKind::Press,
+        repeat_count: 1,
+        shifted_codepoint: None,
+        generated_text: None,
+        tracks_release: false,
+        physical_key_id: None,
+        windows_record: None,
+    }
+}
 
 pub(in crate::menu) struct Setup {
     pub(super) fields: [Entity<SearchInput>; 3],

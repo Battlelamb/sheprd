@@ -11158,6 +11158,7 @@ dependencies = [
  "sheprd-remote",
  "sheprd-remote-control",
  "sheprd-session",
+ "sheprd-terminal",
  "sheprd-traces",
  "sheprd-updater",
  "sheprd-usage",

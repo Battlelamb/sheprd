@@ -305,10 +305,6 @@ impl Request {
         &self.target
     }
 
-    pub(super) fn label(&self) -> &str {
-        &self.label
-    }
-
     /// Whether a saved device connects the same way: Herdr's `machine add` saves
     /// a new profile every time, so the same host would otherwise appear twice.
     pub(super) fn same_host(&self, target: &str, session: &str) -> bool {

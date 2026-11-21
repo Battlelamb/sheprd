@@ -53,9 +53,9 @@ final class ActivityTokens {
     let pushRelay = PushRelayAccess()
     private let sessions: Sessions
     private var started = false
-    /// The sync running or last queued; each waits for the one before, so
-    /// one started under the other setting cannot finish after it.
-    private var syncing: Task<Void, Never>?
+    /// Each computer's sync running or last queued; the next for that
+    /// computer waits for it.
+    private var syncing: [Fingerprint: Task<String?, Never>] = [:]
 
     init(sessions: Sessions) {
         self.sessions = sessions
@@ -75,10 +75,11 @@ final class ActivityTokens {
     }
 
     /// The push relay refused a handle `computer` held: attests again and
-    /// sends it new handles.
-    func pushRelayRejected(by computer: Computer) async {
+    /// sends it new handles. Answers why the computer did not get them, or
+    /// `nil` when it did.
+    func pushRelayRejected(by computer: Computer) async -> String? {
         pushRelay.rejected()
-        await sync(only: computer.fingerprint)
+        return await sync(only: computer.fingerprint)[computer.fingerprint]
     }
 
     /// Starts watching ActivityKit; safe to call more than once.
@@ -165,26 +166,41 @@ final class ActivityTokens {
     }
 
     /// Sends each paired computer (or only the one with CA `only`) its
-    /// tokens, or with the push relay on, handles for them. Syncs run one
-    /// at a time, in the order asked.
-    func sync(only: Fingerprint? = nil) async {
-        let previous = syncing
-        let task = Task {
-            await previous?.value
-            await self.register(only: only)
+    /// tokens, or with the push relay on, handles for them, and answers
+    /// why each computer that did not take them did not. Syncs for one
+    /// computer run one at a time, in the order asked, so one started under
+    /// the other setting cannot finish after it; different computers do
+    /// not wait on each other, so one that is away delays no other.
+    @discardableResult
+    func sync(only: Fingerprint? = nil) async -> [Fingerprint: String] {
+        var queued: [(Fingerprint, Task<String?, Never>)] = []
+        for computer in computers where only == nil || computer.fingerprint == only {
+            let previous = syncing[computer.fingerprint]
+            let task = Task {
+                _ = await previous?.value
+                return await self.register(computer)
+            }
+            syncing[computer.fingerprint] = task
+            queued.append((computer.fingerprint, task))
         }
-        syncing = task
-        await task.value
+        var failures: [Fingerprint: String] = [:]
+        for (fingerprint, task) in queued {
+            failures[fingerprint] = await task.value
+        }
+        return failures
     }
 
-    /// One sync. It stops when the push relay setting changes under it, so
-    /// no token goes out after it was turned on and no handle after it was
-    /// turned off; `pushRelayChanged` queues the sync for the new setting.
-    private func register(only: Fingerprint?) async {
+    /// Registers with one computer, answering why it failed, or `nil`. It
+    /// stops when the push relay setting changes under it, so no token goes
+    /// out after it was turned on and no handle after it was turned off;
+    /// `pushRelayChanged` queues the sync for the new setting.
+    private func register(_ computer: Computer) async -> String? {
         let viaPushRelay = PushRelaySetting.isOn
+        let changed = "The push relay setting changed while registering."
         // Attests first when needed; without a credential no handle can be
         // made, and no token goes out either while the push relay is on.
         let credential = viaPushRelay ? await pushRelay.usableCredential() : nil
+        guard PushRelaySetting.isOn == viaPushRelay else { return changed }
         let recipient = { (token: String?, kind: PushRelayKind) -> API.PushRecipient? in
             guard let token else { return nil }
             guard viaPushRelay else { return .token(token) }
@@ -193,46 +209,52 @@ final class ActivityTokens {
             }
             return .pushRelayHandle(handle, environment: credential.environment)
         }
-        for computer in computers where only == nil || computer.fingerprint == only {
-            guard PushRelaySetting.isOn == viaPushRelay else { return }
-            let activities = running.values
-                .filter { $0.attributes.fingerprint == computer.fingerprint }
-                .compactMap { running in
-                    recipient(running.token, .activity).map { API.APNsRegistration.Activity(pane: running.attributes.pane, token: $0) }
-                }
-            let alert = recipient(alert, .alert)
-            // Each computer seals to its own key. Without one, alerts would
-            // arrive sealed to nobody: send neither, and the computer keeps
-            // using Web Push or nothing. Through the push relay, Live
-            // Activity content is sealed to it too.
-            let needsKey = alert != nil || viaPushRelay
-            let notifyKey = needsKey ? try? NotifyKey.loadOrCreate(for: computer.fingerprint).registered : nil
-            let registration = API.APNsRegistration(
-                pushToStart: recipient(pushToStart, .pushToStart),
-                activities: activities,
-                alert: notifyKey == nil ? nil : alert,
-                notifyKey: notifyKey,
-                genericActivities: UserDefaults.standard.bool(forKey: Self.genericSetting)
-            )
-            do {
-                let session = try await sessions.session(for: computer)
-                guard PushRelaySetting.isOn == viaPushRelay else { return }
-                let answer = try await session.client.registerAPNs(registration, bearer: session.token)
-                delivery[computer.fingerprint] = switch answer.delivery {
-                case .ownKey: .ownKey
-                case .pushRelay: .pushRelay
-                case nil: .unknown
-                }
-                lastError = viaPushRelay && credential == nil ? pushRelay.lastError : nil
-            } catch let RemoteError.status(503, _) {
-                // A computer with no push set up. Nothing is wrong, and the
-                // session is good: it answered.
-                delivery[computer.fingerprint] = .off
-                lastError = nil
-            } catch {
-                await sessions.forget(computer)
-                lastError = "\(computer.name) (\(computer.fingerprint.hex.prefix(8))): \(error.localizedDescription)"
+        let activities = running.values
+            .filter { $0.attributes.fingerprint == computer.fingerprint }
+            .compactMap { running in
+                recipient(running.token, .activity).map { API.APNsRegistration.Activity(pane: running.attributes.pane, token: $0) }
             }
+        let alert = recipient(alert, .alert)
+        // Each computer seals to its own key. Without one, alerts would
+        // arrive sealed to nobody: send neither, and the computer keeps
+        // using Web Push or nothing. Through the push relay, Live Activity
+        // content is sealed to it too.
+        let needsKey = alert != nil || viaPushRelay
+        let notifyKey = needsKey ? try? NotifyKey.loadOrCreate(for: computer.fingerprint).registered : nil
+        let registration = API.APNsRegistration(
+            pushToStart: recipient(pushToStart, .pushToStart),
+            activities: activities,
+            alert: notifyKey == nil ? nil : alert,
+            notifyKey: notifyKey,
+            genericActivities: UserDefaults.standard.bool(forKey: Self.genericSetting)
+        )
+        do {
+            let session = try await sessions.session(for: computer)
+            guard PushRelaySetting.isOn == viaPushRelay else { return changed }
+            let answer = try await session.client.registerAPNs(registration, bearer: session.token)
+            delivery[computer.fingerprint] = switch answer.delivery {
+            case .ownKey: .ownKey
+            case .pushRelay: .pushRelay
+            case nil: .unknown
+            }
+            // Through the push relay, no credential means the computer got
+            // no handles at all.
+            let failure = viaPushRelay && credential == nil
+                ? pushRelay.lastError ?? "The push relay gave this phone no credential."
+                : nil
+            lastError = failure
+            return failure
+        } catch RemoteError.status(503, _) {
+            // A computer with no push set up. Nothing is wrong, and the
+            // session is good: it answered.
+            delivery[computer.fingerprint] = .off
+            lastError = nil
+            return nil
+        } catch {
+            await sessions.forget(computer)
+            let failure = "\(computer.name) (\(computer.fingerprint.hex.prefix(8))): \(error.localizedDescription)"
+            lastError = failure
+            return failure
         }
     }
 }

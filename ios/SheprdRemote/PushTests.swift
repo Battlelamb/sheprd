@@ -39,7 +39,7 @@ final class PushTests {
         do {
             let session = try await sessions.session(for: computer)
             answer = try await session.client.sendTestPush(id: id, bearer: session.token)
-        } catch let RemoteError.status(503, _) {
+        } catch RemoteError.status(503, _) {
             status[key] = .failed(PushRelaySetting.isOn
                 ? "\(computer.name) has the push relay off and no APNs key. Turn on the push relay in Sheprd's Remote control settings there."
                 : "\(computer.name) has no APNs key, so it cannot send this phone notifications. Turn on the push relay here and on the computer.")
@@ -66,9 +66,9 @@ final class PushTests {
             // The push relay gives no reason; 403 is a handle it no longer
             // takes. The phone attests again and sends the computer new
             // handles, as reusing the cached ones would fail the same way.
-            await tokens.pushRelayRejected(by: computer)
-            status[key] = .failed(tokens.pushRelay.lastError.map {
-                "The push relay no longer took this phone's handle, and getting a new one failed: \($0)"
+            let failure = await tokens.pushRelayRejected(by: computer)
+            status[key] = .failed(failure.map {
+                "The push relay no longer took this phone's handle, and sending \(computer.name) a new one failed: \($0)"
             } ?? "The push relay no longer took this phone's handle. A new one was sent to \(computer.name); try again.")
             return
         case .refused:

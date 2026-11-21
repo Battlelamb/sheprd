@@ -34,7 +34,8 @@ pub enum Placement {
 /// family's `machine` requests, and the `machine` kind in `tab list`.
 /// 15: `machine` `agent`, `exec`, `screenshot`, `click`, `type`, and `key`.
 /// 16: `via` on the caller and on feedback, for requests `sheprd mcp` relays.
-pub const PROTOCOL_VERSION: u32 = 16;
+/// 17: `chat` `favorite`.
+pub const PROTOCOL_VERSION: u32 = 17;
 
 /// Older apps and clients know only tabs, so a tab is left off the wire.
 fn is_tab(placement: &Placement) -> bool {

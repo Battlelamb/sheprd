@@ -296,6 +296,11 @@ impl Hub {
         self.layout.clone()
     }
 
+    /// The primary Herdr 1 session's own layout, whose boot favorites follow.
+    pub(crate) fn watch_primary(&self) -> watch::Receiver<Arc<Layout>> {
+        self.primary.clone()
+    }
+
     /// Every step of every chat, tagged with its pane.
     pub(crate) fn subscribe_all(&self) -> broadcast::Receiver<(String, Event)> {
         self.all.subscribe()

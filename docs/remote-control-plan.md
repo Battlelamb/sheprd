@@ -417,6 +417,24 @@ phone never disturbs the desktop's layout.
     SSH: at once after an edit, else every two minutes. A machine without
     the program is not given one for this: no phone is paired with it, so
     the copy is all there is.
+- **Favorite agents.** Each computer's daemon keeps the agents a person
+  starred on any device, by pane (`favorites.json`, at most 256, the oldest
+  dropped first). Phones and Sheprd list them first, in a Favorites section
+  above whatever order is chosen.
+  - **The rule.** A change names one pane, starred or not, so two devices
+    starring different agents at once both count; the latest change to a
+    pane wins. Herdr 1 numbers panes from one again when it restarts, so the
+    favorites remember the primary session's boot and drop its panes when
+    another boot answers. herdr-core panes carry their core's id and named
+    sessions their name, so neither is mistaken for a new pane.
+  - **Phones.** `home` marks a starred chat and a terminal's starred agent
+    with `"favorite": true`, and `POST /api/v2/favorites` with
+    `{"pane": …, "favorite": …}` makes a change. A home is sent again at once
+    to every phone connected.
+  - **Sheprd.** It reads this computer's daemon over the control socket
+    (`Request::Favorites`) and a connected machine's by running
+    `sheprd-remote-control favorites [--offer]` over SSH, with a change as
+    JSON on standard input.
 - **WSL distributions.** A distribution saved as a device on a Windows
   computer is part of that computer, not another machine: it sleeps with it,
   and a phone usually cannot reach its network. So the Windows daemon follows

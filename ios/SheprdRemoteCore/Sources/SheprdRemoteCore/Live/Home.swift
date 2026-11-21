@@ -168,6 +168,9 @@ public struct Home: Codable, Hashable, Sendable {
         /// Herdr's name for the agent, such as `claude`.
         public var agent: String?
         public var status: AgentStatus
+        /// Starred on some device; lists show it first. Older computers
+        /// leave it out, and so does an unstarred chat.
+        public var favorite: Bool? = nil
         /// Absent until the daemon has linked the chat.
         public var summary: Summary?
 
@@ -307,9 +310,12 @@ public struct Home: Codable, Hashable, Sendable {
             /// Whether its conversation opens as a read-only chat on its
             /// pane, beside the terminal; older computers leave it out.
             public var transcript: Bool?
+            /// Its pane was starred on some device; absent when not, and
+            /// from older computers.
+            public var favorite: Bool? = nil
 
             enum CodingKeys: String, CodingKey {
-                case name, status, pane, title, preview, transcript
+                case name, status, pane, title, preview, transcript, favorite
                 case changedMs = "changed_ms"
             }
 

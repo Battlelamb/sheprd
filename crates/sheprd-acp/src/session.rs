@@ -188,6 +188,10 @@ pub(crate) struct Session<R: FnMut(Update)> {
     config: Config,
     /// What the agent has been told besides the person's words.
     context: Context,
+    /// The notice under the conversation this chat continued, decided when
+    /// its first session opens and kept for the chat's life, whichever
+    /// agent it switches to; `None` until then.
+    divider: Option<Option<sheprd_chat_protocol::EntryId>>,
     epoch: Uuid,
     handled: VecDeque<(CommandId, Option<Rejection>)>,
     /// The agent process heard now.
@@ -263,6 +267,7 @@ impl<R: FnMut(Update)> Session<R> {
             commands: pull_requests::Commands::default(),
             config,
             context,
+            divider: None,
             epoch: Uuid::new_v4(),
             handled: VecDeque::new(),
             harness: HarnessId::default(),

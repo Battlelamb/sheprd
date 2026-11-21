@@ -16,6 +16,7 @@ mod auto_accept;
 mod bounds;
 mod carry;
 mod commands;
+mod continued;
 mod flow;
 mod harnesses;
 mod history;

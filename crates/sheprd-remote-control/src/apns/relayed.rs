@@ -15,7 +15,9 @@
 //!
 //! An update's alert is the same cover, and an end keeps its
 //! `dismissal-date`. What is sealed is what the phone may see, after
-//! `Live::redacted`, cut until the payload fits APNs's 4 KB.
+//! `Live::redacted`, cut until the payload fits APNs's 4 KB: the earlier
+//! steps go first, then the longest text is halved, and when nothing is left
+//! to halve, the answer buttons go with the permission they answer.
 
 use super::{
     Error, Event, Live, Push, PushType, Result,
@@ -36,9 +38,11 @@ impl Live {
     /// The push for this change at `now_s`, sealed to `device`, with its
     /// longest text cut until it fits.
     pub(crate) fn sealed_push(&self, device: &PublicKey, now_s: u64) -> Result<SealedPush> {
+        // Everything else in the payload is a number or a sealed field.
+        let clear = [COVER_TITLE, COVER_BODY, self.event.name(), ATTRIBUTES_TYPE];
         let mut live = self.clone();
         loop {
-            match SealedPush::build(device, seal::ACTIVITY_INFO, |sealer| {
+            match SealedPush::build(device, seal::ACTIVITY_INFO, &clear, |sealer| {
                 live.sealed(sealer, now_s)
             }) {
                 Err(Error::PayloadTooLarge { .. }) if live.shorten() => {}
@@ -81,8 +85,8 @@ impl Live {
         })
     }
 
-    /// Drops the earlier steps, else halves the longest text; `false` when
-    /// nothing is left worth cutting.
+    /// Drops the earlier steps, else halves the longest text, else drops
+    /// the answer buttons; `false` when nothing is left worth cutting.
     fn shorten(&mut self) -> bool {
         let state = &mut self.state;
         if !state.previous.is_empty() {
@@ -95,15 +99,23 @@ impl Live {
         if let Event::Start { attributes, .. } = &mut self.event {
             texts.extend([&mut attributes.chat_title, &mut attributes.workspace]);
         }
-        let Some(longest) = texts.into_iter().max_by_key(|text| text.len()) else {
-            return false;
-        };
-        let chars = longest.chars().count();
-        if chars <= MIN_TEXT {
+        let longest = texts
+            .into_iter()
+            .max_by_key(|text| text.len())
+            .filter(|text| text.chars().count() > MIN_TEXT);
+        if let Some(longest) = longest {
+            let chars = longest.chars().count();
+            let kept: String = longest.chars().take(chars / 2).collect();
+            *longest = format!("{kept}\u{2026}");
+            return true;
+        }
+        // Buttons whose names alone do not fit: the phone shows the question
+        // without them, as a generic activity does, and answers in the app.
+        if self.state.options.is_empty() {
             return false;
         }
-        let kept: String = longest.chars().take(chars / 2).collect();
-        *longest = format!("{kept}\u{2026}");
+        self.state.options.clear();
+        self.state.permission = None;
         true
     }
 }

@@ -250,6 +250,22 @@ fn shorten(text: &str, drop: usize) -> String {
     format!("{}{ELLIPSIS}", &base[..end])
 }
 
+/// The only text a push for `pane` under `tag` carries unsealed: the cover,
+/// the thread, how it interrupts, and the collapse id. A push through the
+/// relay may carry nothing else in the clear (`sheprd_apns::SealedPush`).
+pub(crate) fn clear(pane: &str, tag: &str) -> [String; 7] {
+    [
+        COVER_TITLE,
+        COVER_BODY,
+        pane,
+        "time-sensitive",
+        "active",
+        "default",
+        &collapse_id(tag),
+    ]
+    .map(str::to_owned)
+}
+
 /// `tag` cut to APNs's limit on a character boundary.
 fn collapse_id(tag: &str) -> String {
     let mut end = tag.len().min(MAX_COLLAPSE_ID);

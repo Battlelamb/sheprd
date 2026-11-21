@@ -510,13 +510,17 @@ start, are each one `sealed` field (`apns::relayed`, info
 detail choices are applied, to the same notify key alerts use, so a phone
 on the relay must register one. Only `event`, `timestamp`,
 `attributes-type`, `dismissal-date`, and a fixed "Sheprd" / "New activity"
-alert stay readable. Text is cut until the payload fits 4 KB.
-`sheprd_apns::RelayClient` takes only a `SealedPush`, which only sealing
-builds, so plain text cannot reach the relay.
+alert stay readable. Text is cut until the payload fits 4 KB: the earlier
+steps first, then the longest text, then the answer buttons with their
+permission. `sheprd_apns::RelayClient` takes only a `SealedPush`, which only
+sealing builds and which refuses a body with any string that is neither
+sealed nor named clear by its builder (the cover, an alert's thread and
+collapse id), so plain text cannot reach the relay unnoticed.
 
 A `gone` reply forgets the handle, as `BadDeviceToken` forgets a token. A
-stale handle waits for the phone's next registration. When the relay cannot
-be reached after its retries, pushes through it are dropped for a minute
+stale handle waits for the phone's next registration. When a relay cannot
+be reached after its retries, pushes through it, and only it, are dropped
+for a minute
 (`apns::delivery::OUTAGE_MS`): alerts go by Web Push where the device
 subscribed, as any alert APNs did not take does, and activity updates are
 dropped rather than queued.

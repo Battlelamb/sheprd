@@ -138,3 +138,36 @@ fn text_too_long_to_seal_is_cut_until_it_fits() {
     assert!(step.ends_with('\u{2026}'), "{step}");
     assert!(step.len() < live.state.step.len());
 }
+
+#[test]
+fn buttons_too_long_to_seal_go_with_their_permission() {
+    use sheprd_chat_protocol::{PermissionKind, PermissionOption};
+    let mut live = start("q");
+    live.event = Event::Update { alert: None };
+    live.state.options = (0..3)
+        .map(|n| PermissionOption {
+            id: format!("option-{n}"),
+            kind: PermissionKind::AllowOnce,
+            name: "\u{1f600}".repeat(250),
+        })
+        .collect();
+    let opened = open(&payload(&live)["aps"]["content-state"]);
+    assert!(opened.get("options").is_none(), "{opened}");
+    assert!(opened.get("permission").is_none(), "{opened}");
+    // The question stays, for the phone to answer in the app.
+    assert!(opened["question"].as_str().unwrap().starts_with('q'));
+}
+
+#[test]
+fn buttons_that_fit_are_kept() {
+    use sheprd_chat_protocol::{PermissionKind, PermissionOption};
+    let mut live = start("q");
+    live.state.options = vec![PermissionOption {
+        id: "allow".to_owned(),
+        kind: PermissionKind::AllowOnce,
+        name: "Allow once".to_owned(),
+    }];
+    let opened = open(&payload(&live)["aps"]["content-state"]);
+    assert_eq!(opened["options"][0]["name"], "Allow once");
+    assert_eq!(opened["permission"], 7);
+}

@@ -68,7 +68,7 @@ async fn during_a_relay_outage_an_alert_is_left_to_web_push_at_once() {
     let apns::Delivery::Relay(relays) = &state.apns else {
         unreachable!()
     };
-    relays.mark_down(now_ms());
+    relays.mark_down(sheprd_apns::RelayHost::Production, now_ms());
     let notification = Notification::badge();
     let carried = tokio::time::timeout(
         Duration::from_millis(500),

@@ -7,7 +7,7 @@
 //! tokens, the relay reaches handles. Through the relay every payload is
 //! sealed to the phone ([`SealedPush`]), Live Activities included.
 //!
-//! A relay outage must not stall the notifier: once the relay could not be
+//! A relay outage must not stall the notifier: once a relay could not be
 //! reached, pushes through it are dropped at once for [`OUTAGE_MS`], so
 //! alerts fall back to Web Push and activity updates are not queued.
 
@@ -142,10 +142,11 @@ impl Delivery {
                 sender.post(token, &push, now_ms / 1000).await.into()
             }
             (Self::Relay(relays), Recipient::Handle(handle)) => {
-                if relays.is_down(now_ms) {
+                if relays.is_down(handle.environment(), now_ms) {
                     return Sent::Unreachable;
                 }
-                let Ok(push) = SealedPush::build(key, seal::INFO, |sealer| {
+                let clear = alert::clear(&sealed.pane, tag);
+                let Ok(push) = SealedPush::build(key, seal::INFO, &clear, |sealer| {
                     alert::push(sealed, tag, |plaintext| Ok(sealer.seal(plaintext)?))
                 }) else {
                     return Sent::Unsent;
@@ -178,7 +179,7 @@ impl Delivery {
                 let Some(key) = key else {
                     return Sent::Unsent;
                 };
-                if relays.is_down(now_ms) {
+                if relays.is_down(handle.environment(), now_ms) {
                     return Sent::Unreachable;
                 }
                 let Ok(push) = live.sealed_push(key, now_s) else {
@@ -191,42 +192,65 @@ impl Delivery {
     }
 }
 
-/// The two relays, one per APNs environment, and whether they are out.
+/// The two relays, one per APNs environment. Each keeps its own outage, so
+/// a sandbox relay that is down never holds back production pushes.
 pub(crate) struct Relays {
+    production: Relay,
+    sandbox: Relay,
+}
+
+struct Relay {
+    client: RelayClient,
     /// Until when pushes are dropped, in ms since the Unix epoch.
     down_until_ms: AtomicU64,
-    production: RelayClient,
-    sandbox: RelayClient,
+}
+
+impl Relay {
+    fn new(host: RelayHost) -> sheprd_apns::Result<Self> {
+        Ok(Self {
+            client: RelayClient::new(host)?,
+            down_until_ms: AtomicU64::new(0),
+        })
+    }
 }
 
 impl Relays {
     /// Opens no connection until a push goes out.
     pub(crate) fn new() -> sheprd_apns::Result<Self> {
         Ok(Self {
-            down_until_ms: AtomicU64::new(0),
-            production: RelayClient::new(RelayHost::Production)?,
-            sandbox: RelayClient::new(RelayHost::Sandbox)?,
+            production: Relay::new(RelayHost::Production)?,
+            sandbox: Relay::new(RelayHost::Sandbox)?,
         })
     }
 
-    pub(crate) fn is_down(&self, now_ms: u64) -> bool {
-        now_ms < self.down_until_ms.load(Ordering::Relaxed)
+    fn relay(&self, host: RelayHost) -> &Relay {
+        match host {
+            RelayHost::Production => &self.production,
+            RelayHost::Sandbox => &self.sandbox,
+        }
     }
 
-    /// Drops pushes through the relay for [`OUTAGE_MS`] from `now_ms`.
-    pub(crate) fn mark_down(&self, now_ms: u64) {
-        self.down_until_ms
+    pub(crate) fn is_down(&self, host: RelayHost, now_ms: u64) -> bool {
+        now_ms < self.relay(host).down_until_ms.load(Ordering::Relaxed)
+    }
+
+    /// Drops pushes through `host` for [`OUTAGE_MS`] from `now_ms`.
+    pub(crate) fn mark_down(&self, host: RelayHost, now_ms: u64) {
+        self.relay(host)
+            .down_until_ms
             .fetch_max(now_ms.saturating_add(OUTAGE_MS), Ordering::Relaxed);
     }
 
+    /// Sends `push` to the relay `handle` names, or drops it while that
+    /// relay is out.
     async fn post(&self, handle: &Handle, push: &SealedPush, now_ms: u64) -> Sent {
-        let client = match handle.environment() {
-            RelayHost::Production => &self.production,
-            RelayHost::Sandbox => &self.sandbox,
-        };
-        let outcome = client.post(handle.secret(), push).await;
+        let host = handle.environment();
+        if self.is_down(host, now_ms) {
+            return Sent::Unreachable;
+        }
+        let outcome = self.relay(host).client.post(handle.secret(), push).await;
         if outcome == RelayOutcome::Unavailable {
-            self.mark_down(now_ms);
+            self.mark_down(host, now_ms);
         }
         outcome.into()
     }

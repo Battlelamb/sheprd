@@ -91,21 +91,30 @@ fn each_reply_says_what_came_of_the_push() {
 #[test]
 fn an_outage_lasts_its_window() {
     let relays = Relays::new().unwrap();
-    assert!(!relays.is_down(1_000));
-    relays.mark_down(1_000);
-    assert!(relays.is_down(1_000));
-    assert!(relays.is_down(1_000 + crate::apns::delivery::OUTAGE_MS - 1));
-    assert!(!relays.is_down(1_000 + crate::apns::delivery::OUTAGE_MS));
+    let host = RelayHost::Production;
+    assert!(!relays.is_down(host, 1_000));
+    relays.mark_down(host, 1_000);
+    assert!(relays.is_down(host, 1_000));
+    assert!(relays.is_down(host, 1_000 + crate::apns::delivery::OUTAGE_MS - 1));
+    assert!(!relays.is_down(host, 1_000 + crate::apns::delivery::OUTAGE_MS));
     // A later failure extends it; an earlier one does not shorten it.
-    relays.mark_down(500);
-    assert!(relays.is_down(1_000 + crate::apns::delivery::OUTAGE_MS - 1));
+    relays.mark_down(host, 500);
+    assert!(relays.is_down(host, 1_000 + crate::apns::delivery::OUTAGE_MS - 1));
+}
+
+#[test]
+fn one_relay_down_leaves_the_other_up() {
+    let relays = Relays::new().unwrap();
+    relays.mark_down(RelayHost::Sandbox, 1_000);
+    assert!(relays.is_down(RelayHost::Sandbox, 1_000));
+    assert!(!relays.is_down(RelayHost::Production, 1_000));
 }
 
 #[tokio::test]
 async fn during_an_outage_pushes_are_dropped_without_a_call() {
     let relays = Relays::new().unwrap();
     let now = 1_800_000_000_000;
-    relays.mark_down(now);
+    relays.mark_down(RelayHost::Sandbox, now);
     let delivery = Delivery::Relay(Box::new(relays));
     let key = p256::SecretKey::from_slice(&[5; 32]).unwrap().public_key();
     let live = Live {

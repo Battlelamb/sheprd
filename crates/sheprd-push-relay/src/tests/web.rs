@@ -200,10 +200,11 @@ fn the_daemons_body_is_what_the_relay_reads() {
     use secrecy::ExposeSecret as _;
     use sheprd_apns::{Priority, Push, PushType, SealedPush, push_body, seal::INFO};
     let device = SecretKey::from_slice(&[5; 32]).unwrap().public_key();
-    let sealed = SealedPush::build(&device, INFO, |sealer| {
-        sealer.seal(b"hidden")?;
+    let sealed = SealedPush::build(&device, INFO, &["chat-1"], |sealer| {
+        let hidden = base64::Engine::encode(&URL_SAFE_NO_PAD, sealer.seal(b"hidden")?);
         Ok::<_, sheprd_apns::Error>(Push {
-            body: br#"{"aps":{}}"#.to_vec(),
+            body: format!(r#"{{"aps":{{"content-available":1}},"sealed":"{hidden}"}}"#)
+                .into_bytes(),
             collapse_id: Some("chat-1".to_owned()),
             priority: Priority::Low,
             push_type: PushType::Background,

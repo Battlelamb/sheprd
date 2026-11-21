@@ -3734,7 +3734,9 @@ so the Herdr TUI, a plain terminal, and every app window see one conversation.
 agent `sheprd-acp` knows (Claude, Codex, Copilot, Gemini, Kimi Code, OpenCode, Pi). A row
 opens a tab named after the agent in the focused workspace, in the focused
 pane's folder, and runs the program there; `sheprd chat new AGENT` does
-the same from a pane. The rows show once the app has found `sheprd-acp`,
+the same from a pane, and from a chat, `sheprd chat new` starts that chat's
+agent with its settings ([Starting a chat like this
+one](../../docs/rich-chat.md#starting-a-chat-like-this-one)). The rows show once the app has found `sheprd-acp`,
 first beside its own executable (the app bundle, `cargo build`'s target
 directory, or where `just install` puts both) and then on the login shell's
 `PATH`. A Herdr 2 tab starts a chat beside its active pane, including on
@@ -4131,9 +4133,8 @@ three newest reports, redacted like the log records, and lists dumps by name and
 size without including them: they hold the app's memory, so attach one only
 when asked.
 
-For the known macOS Touch Bar window-close crash, see the
-[investigation and native validation steps](../../docs/macos-window-close.md).
-The upstream dependency fix has not yet been adopted by this checkout.
+The fix for the macOS Touch Bar window-close crash is covered by a native
+regression test. See the [cause and test command](../../docs/macos-window-close.md).
 
 Local Windows connections are supported through the daemon's named pipe; pass
 the binary client socket path to `--socket`, not the JSON API socket. No debug

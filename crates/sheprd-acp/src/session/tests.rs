@@ -14,7 +14,9 @@ mod attach;
 mod attachments;
 mod auto_accept;
 mod bounds;
+mod carry;
 mod commands;
+mod continued;
 mod flow;
 mod harnesses;
 mod history;
@@ -63,6 +65,7 @@ fn config() -> Config {
         pane: Some("p_1".to_owned()),
         prompts: Default::default(),
         require_load: false,
+        settings: None,
         sheprd: None,
     }
 }

@@ -45,6 +45,10 @@ impl Target {
 pub(crate) enum Action {
     NewTab,
     Rename,
+    /// Stars or unstars the pane's agent on its host (`agent_favorites`).
+    Favorite {
+        favorite: bool,
+    },
     /// Opens the list of workspaces the tab can move to.
     MoveToWorkspace,
     /// Continue the tab's terminal agent in a chat, in the same pane.
@@ -67,6 +71,8 @@ impl Action {
             (Self::NewTab, _) => fl!("tab-menu-new-tab"),
             (Self::Rename, Target::Tab(_)) => fl!("tab-menu-rename"),
             (Self::Rename, Target::Pane { .. }) => fl!("pane-menu-rename"),
+            (Self::Favorite { favorite: true }, _) => fl!("agent-favorites-remove"),
+            (Self::Favorite { favorite: false }, _) => fl!("agent-favorites-add"),
             (Self::MoveToWorkspace, _) => fl!("tab-menu-move-to-workspace"),
             (Self::MoveToChat(_), _) => fl!("tab-menu-move-to-chat"),
             (Self::Mute(MuteRow::Mute), _) => fl!("tab-menu-mute"),
@@ -140,7 +146,15 @@ impl SheprdWindow {
             Target::Pane { terminal, .. } => {
                 let mut actions = Vec::new();
                 if !shown.observe {
-                    actions.extend([Action::Rename, Action::SplitRight, Action::SplitDown]);
+                    actions.push(Action::Rename);
+                }
+                if let Some(star) = self.core_pane_favorite(target.tab(), terminal) {
+                    actions.push(Action::Favorite {
+                        favorite: star.favorite,
+                    });
+                }
+                if !shown.observe {
+                    actions.extend([Action::SplitRight, Action::SplitDown]);
                 }
                 if shown.panes.count() > 1 {
                     let zoomed = shown.zoom.is_open() && shown.zoomed.as_ref() == Some(terminal);
@@ -258,6 +272,16 @@ impl SheprdWindow {
         match (action.clone(), target) {
             (Action::NewTab, _) => self.new_core_terminal(window, cx),
             (Action::Mute(row), _) => self.apply_core_mute_row(tab, row, cx),
+            (Action::Favorite { .. }, Target::Pane { terminal, .. }) => {
+                if let Some(star) = self.core_pane_favorite(tab, &terminal) {
+                    crate::agent_favorites::AgentFavorites::set(
+                        cx,
+                        &star.endpoint,
+                        star.key,
+                        !star.favorite,
+                    );
+                }
+            }
             (Action::MoveToChat(terminal), _) => {
                 // A refusal leaves the agent running, and says why.
                 if let Err(error) = self.convert_to_chat(Some(&self.core_chat_key(tab, &terminal)))

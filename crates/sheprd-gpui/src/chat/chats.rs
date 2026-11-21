@@ -144,6 +144,9 @@ pub(crate) struct ChatPane {
     /// Which slash-command completion is selected.
     pub(crate) completion: usize,
     pub(crate) composer: Option<Entity<MultilineInput>>,
+    /// Closes the open menu once the person types in the composer, as a
+    /// click outside it would.
+    pub(super) composer_typed: Option<gpui::Subscription>,
     /// The message effects met and playing.
     pub(crate) effects: super::effects::Effects,
     /// The last command this window could not send.
@@ -276,6 +279,7 @@ impl ChatPane {
             code: Default::default(),
             completion: 0,
             composer: None,
+            composer_typed: None,
             effects: Default::default(),
             error: None,
             expanded: HashSet::new(),
@@ -522,6 +526,19 @@ impl ChatPane {
         } else {
             ChatInput::Composer
         }
+    }
+
+    /// The fold over the turns a continued conversation brought, if any.
+    pub(crate) fn earlier(&self) -> Option<super::earlier::Earlier> {
+        super::earlier::earlier(self.session.transcript(), &self.expanded)
+    }
+
+    /// Opens the turns a continued conversation brought, or folds them
+    /// again, then measures every row up to the header once more.
+    pub(crate) fn toggle_earlier(&mut self, fold: super::earlier::Earlier) {
+        self.toggle_expanded(fold.divider);
+        let rows = fold.start + 1;
+        super::glide::splice_in_place(&self.list, 0..rows, rows);
     }
 
     /// Opens a folded card or folds an open one, then redraws it.

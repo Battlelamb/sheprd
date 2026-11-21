@@ -55,31 +55,45 @@ impl<R: FnMut(Update)> Session<R> {
                 self.session_opened(matches!(pending, Pending::LoadSession), result);
             }
             Pending::Prompt => self.turn_ended(id, result),
-            Pending::SetOption => match result {
-                Ok(value) => {
-                    if let Some(options) = value.get("configOptions") {
-                        let options = project::options(Some(options));
-                        self.emit(Change::Options { options });
-                    }
+            Pending::SetOption => {
+                self.option_set(result);
+                self.carry_next();
+            }
+            Pending::SetMode(mode) => {
+                self.mode_set(mode, result);
+                self.carry_next();
+            }
+        }
+    }
+
+    fn option_set(&mut self, result: Result<Value, wire::Error>) {
+        match result {
+            Ok(value) => {
+                if let Some(options) = value.get("configOptions") {
+                    let options = project::options(Some(options));
+                    self.emit(Change::Options { options });
                 }
-                Err(error) => {
-                    let notice = self.projector.notice(
-                        NoticeLevel::Warning,
-                        format!("Could not change the setting: {}", error.message),
-                    );
-                    self.emit(notice);
-                }
-            },
-            Pending::SetMode(mode) => match result {
-                Ok(_) => self.emit(Change::CurrentMode { id: mode }),
-                Err(error) => {
-                    let notice = self.projector.notice(
-                        NoticeLevel::Warning,
-                        format!("Could not change mode: {}", error.message),
-                    );
-                    self.emit(notice);
-                }
-            },
+            }
+            Err(error) => {
+                let notice = self.projector.notice(
+                    NoticeLevel::Warning,
+                    format!("Could not change the setting: {}", error.message),
+                );
+                self.emit(notice);
+            }
+        }
+    }
+
+    fn mode_set(&mut self, mode: String, result: Result<Value, wire::Error>) {
+        match result {
+            Ok(_) => self.emit(Change::CurrentMode { id: mode }),
+            Err(error) => {
+                let notice = self.projector.notice(
+                    NoticeLevel::Warning,
+                    format!("Could not change mode: {}", error.message),
+                );
+                self.emit(notice);
+            }
         }
     }
 
@@ -206,8 +220,12 @@ impl<R: FnMut(Update)> Session<R> {
         };
         self.ready = true;
         (self.report)(Update::Opened(id.0.to_string()));
+        let continued = self.continued(loaded);
         self.emit(Change::Session {
-            session: Some(project::session(&id, &self.config.cwd)),
+            session: Some(sheprd_chat_protocol::SessionInfo {
+                continued,
+                ..project::session(&id, &self.config.cwd)
+            }),
         });
         if let Some(modes) = modes {
             self.emit(Change::Modes {
@@ -220,7 +238,48 @@ impl<R: FnMut(Update)> Session<R> {
         self.projector.close();
         self.hand_over(loaded);
         self.status(Status::Idle);
+        if loaded {
+            // A continued session keeps its own settings.
+            self.config.settings = None;
+        }
+        self.carry_next();
         self.next_queued();
+    }
+
+    /// The notice under the conversation a continued session brought with
+    /// it, which the chat's first session places as it opens and every
+    /// later one, after a switch of agent too, keeps. A chat whose first
+    /// session is new, or brought nothing, has none.
+    fn continued(&mut self, loaded: bool) -> Option<sheprd_chat_protocol::EntryId> {
+        if let Some(divider) = self.divider {
+            return divider;
+        }
+        let divider = self.place_divider(loaded);
+        self.divider = Some(divider);
+        divider
+    }
+
+    fn place_divider(&mut self, loaded: bool) -> Option<sheprd_chat_protocol::EntryId> {
+        let brought = self.transcript.entries.iter().any(|entry| {
+            matches!(
+                entry.kind,
+                sheprd_chat_protocol::EntryKind::User { .. }
+                    | sheprd_chat_protocol::EntryKind::Agent { .. }
+            )
+        });
+        if !loaded || !brought {
+            return None;
+        }
+        let notice = self.projector.notice(
+            NoticeLevel::Info,
+            format!("Continued from {}'s earlier session", self.config.agent),
+        );
+        let Change::Push { entry } = &notice else {
+            return None;
+        };
+        let id = entry.id;
+        self.emit(notice);
+        Some(id)
     }
 
     /// The agent that took over opened its session: prepare what it is

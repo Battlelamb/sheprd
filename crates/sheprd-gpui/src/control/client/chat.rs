@@ -43,12 +43,13 @@ pub(super) fn chat(command: ChatCommand, context: &Context) -> crate::Result<Out
     let op = match command {
         ChatCommand::Status => ChatOp::Status,
         ChatCommand::New { agent, pane } => ChatOp::New {
-            agent: agent.name().to_owned(),
+            agent: agent.map(|agent| agent.name().to_owned()),
             pane,
         },
         ChatCommand::Convert { pane } => ChatOp::Convert { pane },
         ChatCommand::View { switch, pane } => ChatOp::View { switch, pane },
         ChatCommand::Shortcuts => ChatOp::Shortcuts,
+        ChatCommand::Favorite { switch, pane } => ChatOp::Favorite { switch, pane },
         // Answered by the caller's own chat, not the app.
         ChatCommand::PullRequests(command) => return chat_pull_requests(command),
     };
@@ -72,6 +73,16 @@ pub(super) fn chat(command: ChatCommand, context: &Context) -> crate::Result<Out
                 format!("{pane_id} shows its terminal")
             },
             &serde_json::json!({ "pane_id": pane_id, "shown": shown }),
+        ),
+        Response::Chat {
+            reply: Reply::Favorite { pane_id, favorite },
+        } => Output::data(
+            if favorite {
+                format!("{pane_id} is a favorite")
+            } else {
+                format!("{pane_id} is not a favorite")
+            },
+            &serde_json::json!({ "pane_id": pane_id, "favorite": favorite }),
         ),
         Response::Chat {
             reply: Reply::Started { agent },

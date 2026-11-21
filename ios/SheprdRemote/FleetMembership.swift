@@ -38,15 +38,9 @@ final class FleetMembership {
         var relayTunnel: Data
         /// Device keys made for hosts whose `Link` may not have landed yet.
         var pendingLinks: [FleetPendingLink]?
-        /// Operations this phone signed that no computer confirmed it
-        /// applied (base64url): sent again until one does, and followed by
-        /// any new ones, so none shares a sequence number with another.
-        var unconfirmed: [String]?
-        /// The last operation this phone signed (base64url), kept after it
-        /// is confirmed: every new one follows it, whichever computer the
-        /// phone posts through, so a computer that has not heard of it yet
-        /// cannot hand the phone an older sequence number.
-        var lastSigned: String?
+        /// The phone's own line of operations: the last one signed, those
+        /// no computer confirmed yet, and a refusal waiting to be settled.
+        var chain: FleetChain?
     }
 
     private(set) var record: Record?
@@ -340,32 +334,21 @@ final class FleetMembership {
 
     // MARK: Private
 
-    /// The operations no computer confirmed applied yet.
-    private var unconfirmedOps: [FleetLog.Op] {
-        (record?.unconfirmed ?? []).compactMap { Base64URL.decode($0).flatMap { try? FleetLog.Op.decode($0) } }
-    }
+    /// The phone's line of operations, as kept.
+    private var chain: FleetChain { record?.chain ?? FleetChain() }
 
-    /// The last operation this phone signed, confirmed or not.
-    private var lastSignedOp: FleetLog.Op? {
-        record?.lastSigned.flatMap(Base64URL.decode).flatMap { try? FleetLog.Op.decode($0) }
-    }
-
-    /// Makes `op` the operation new ones follow.
-    private func chain(after op: FleetLog.Op?) {
-        guard var record else { return }
-        record.lastSigned = (try? op?.encode()).flatMap { $0 }.map(Base64URL.encode)
-        if record != self.record { save(record) }
-    }
-
-    /// Keeps `ops` as unconfirmed, or forgets them all with none; the last
-    /// one signed stays either way. Whether they were kept.
+    /// Changes the phone's line of operations and keeps it; whether that
+    /// landed. Every change of it goes through here, refusals included.
     @discardableResult
-    private func remember(_ ops: [FleetLog.Op]) -> Bool {
+    private func update(_ change: (inout FleetChain) throws -> Void) -> Bool {
         guard var record else { return false }
-        let encoded = ops.compactMap { try? $0.encode() }.map(Base64URL.encode)
-        guard encoded.count == ops.count else { return false }
-        record.unconfirmed = encoded.isEmpty ? nil : encoded
-        if let last = encoded.last { record.lastSigned = last }
+        var chain = self.chain
+        do {
+            try change(&chain)
+        } catch {
+            return false
+        }
+        record.chain = chain
         return record == self.record || save(record)
     }
 
@@ -373,20 +356,24 @@ final class FleetMembership {
     /// forgotten once the fleet applied them there, else sent to it again,
     /// as the same bytes, until it applies or refuses them.
     private func confirm(_ status: API.FleetStatus, through computer: Computer) {
-        let ops = unconfirmedOps
+        if chain.refusalPending {
+            update { $0.resolve(next: status.next?.seq) }
+        }
+        let ops = chain.unconfirmedOps
         guard let last = ops.last, let next = status.next else { return }
         if next.seq > last.seq {
-            remember([])
+            update { $0.confirmed() }
             return
         }
         let client = client(computer)
         Task {
             do {
                 try await client.post(FleetClient.Signed(ops: ops, heads: status.heads))
-                if self.unconfirmedOps == ops { remember([]) }
+                if self.chain.unconfirmedOps == ops { update { $0.confirmed() } }
             } catch FleetClientError.refused {
-                // The next action learns which of them applied.
-                if self.unconfirmedOps == ops { remember([]) }
+                // Settled by the next fresh read, before anything new is
+                // signed.
+                if self.chain.unconfirmedOps == ops { update { $0.refused() } }
             } catch {
                 log.info("fleet: \(computer.name, privacy: .public) has not applied this phone's operations yet")
             }
@@ -427,10 +414,19 @@ final class FleetMembership {
         // Signed once, by the first computer that answers its fleet: a post
         // whose answer is lost goes to the next computer as the same bytes.
         var signed: FleetClient.Signed?
+        // After a refusal, nothing is signed until a fresh read says which
+        // of it applied.
+        if chain.refusalPending {
+            for computer in candidates {
+                if await check(computer), !chain.refusalPending { break }
+            }
+        }
         // New operations follow the unconfirmed ones, or with none the last
         // one signed: a computer behind it gets it again with them.
-        let before = lastSignedOp
-        let after = FleetClient.carried(unconfirmed: unconfirmedOps, last: before)
+        guard let after = chain.carried else {
+            problem = Self.describe(FleetClientError.refusalUnresolved)
+            return .nothing
+        }
         let attempt = await FleetAttempt.first(candidates) { computer in
             let client = client(computer)
             if let signed {
@@ -441,7 +437,7 @@ final class FleetMembership {
             // Kept before it is posted: until a computer confirms it
             // applied, it is sent again, and new ones follow it. Not kept
             // (a Keychain write failed), it is not posted at all.
-            let kept = remember(ops.ops)
+            let kept = update { try $0.signed(ops.ops) }
             if kept { signed = ops }
             try await client.post(ops, kept: kept)
         } failed: { computer, error in
@@ -449,7 +445,7 @@ final class FleetMembership {
         }
         switch attempt {
         case let .done(computer):
-            remember([])
+            update { $0.confirmed() }
             // A computer before it may have failed: that no longer matters.
             problem = nil
             if computer.device != record.through, var moved = self.record {
@@ -459,18 +455,11 @@ final class FleetMembership {
             await check(computer)
             return .taken
         case let .refused(computer, count):
-            // Refused by the fleet: carrying them would only block what
-            // follows. A refused operation is void everywhere, so what new
-            // ones follow is the last of them the fleet applied, read back
-            // from the computer that refused the rest, else what came
-            // before them.
-            remember([])
+            // Refused by the fleet: what was posted is not followed until a
+            // fresh read says which of it applied (`check`).
+            update { $0.refused() }
             problem = Self.describe(FleetClientError.refused(count))
-            let fresh = await check(computer)
-            if fresh, let next = status?.next {
-                chain(after: signed?.ops.last { $0.seq < next.seq } ?? before)
-            }
-            return .refused(fresh: fresh)
+            return .refused(fresh: await check(computer))
         case let .failed(error):
             problem = error.map(Self.describe)
             // Nothing signed means nothing posted; otherwise what was
@@ -555,6 +544,7 @@ final class FleetMembership {
         case let FleetClientError.refused(count): "The fleet refused \(count == 1 ? "it" : "\(count) of them")."
         case FleetClientError.unapplied: "Your computers have not applied it yet. This \(UIDevice.current.model) sends it again until one does."
         case FleetClientError.notKept: "This \(UIDevice.current.model) could not save it, so nothing was sent."
+        case FleetClientError.refusalUnresolved: "Your computers refused this \(UIDevice.current.model)'s last change. Reach one of them, then try again."
         case RemoteError.status(429, _): "Too many devices are waiting to join. Try again in a few minutes."
         case RemoteError.status(404, _): "That computer's Sheprd does not know fleets yet. Update it first."
         default: error.localizedDescription

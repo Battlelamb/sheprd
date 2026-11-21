@@ -10,7 +10,7 @@ use super::alert::{EVENT, device, fixed_seal, json, open, question};
 use crate::{
     apns::{
         Push,
-        alert::{Sealed, push},
+        alert::{Sealed, push, scope},
     },
     push::{EventId, Notification},
 };
@@ -20,7 +20,13 @@ use std::path::PathBuf;
 
 fn sent(notification: &Notification, badge: u32) -> Push {
     let sealed = Sealed::new(notification, super::alert::COMPUTER.to_owned(), badge);
-    push(sealed, &notification.tag, fixed_seal).unwrap()
+    push(
+        sealed,
+        &scope(&device().public_key()),
+        &notification.tag,
+        fixed_seal,
+    )
+    .unwrap()
 }
 
 fn event(push: &Push) -> Value {

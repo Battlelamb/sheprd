@@ -63,6 +63,11 @@ pub(super) struct Incoming {
 }
 
 impl Links {
+    /// The hosts this app connects to, as windows last said.
+    pub(super) fn known(&self) -> &[Known] {
+        &self.known
+    }
+
     pub(super) fn outgoing(&self) -> Outgoing {
         let hosts: Vec<Host> = self.known.iter().map(|known| known.host.clone()).collect();
         let due = self

@@ -31,6 +31,7 @@ mod quit_saves;
 mod remote_control;
 mod remote_github;
 mod remote_history_reload;
+mod remote_push_hosts;
 mod remote_push_relay;
 mod remote_relay_deploy;
 mod remote_relay_labels;

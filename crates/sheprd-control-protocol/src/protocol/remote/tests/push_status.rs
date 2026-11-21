@@ -25,25 +25,28 @@ fn push_status_has_a_stable_wire_form_and_round_trips() {
             push_relay: false,
             status: None,
             error: None,
+            hosts: Vec::new(),
         },
         Reply::PushStatus {
             enabled: true,
             push_relay: true,
             status: None,
             error: Some("could not reach the remote control daemon".into()),
+            hosts: Vec::new(),
         },
         Reply::PushStatus {
             enabled: true,
             push_relay: true,
-            status: Some(PushStatus {
+            status: Some(Box::new(PushStatus {
                 mode: Mode::PushRelay,
                 alert: Some(Last {
                     at_ms: 9,
                     outcome: Outcome::Delivered,
                 }),
                 live_activity: None,
-            }),
+            })),
             error: None,
+            hosts: Vec::new(),
         },
     ] {
         let response = Response::Remote { reply };

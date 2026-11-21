@@ -115,6 +115,11 @@ pub enum Invocation {
     RelayEnroll {
         state_dir: Option<PathBuf>,
     },
+    /// Prints the running daemon's push status as JSON, or nothing when
+    /// none answers (`app::push_status`).
+    PushStatus {
+        state_dir: Option<PathBuf>,
+    },
     /// Revokes a device that other computer enrolled.
     Revoke {
         state_dir: Option<PathBuf>,
@@ -185,6 +190,7 @@ Usage: sheprd-remote-control serve --state-dir DIR [options]
        sheprd-remote-control enroll [--state-dir DIR] < REQUEST.json
        sheprd-remote-control revoke --device ID [--state-dir DIR]
        sheprd-remote-control relay-enroll [--state-dir DIR] < REQUEST.json
+       sheprd-remote-control push-status [--state-dir DIR]
        sheprd-remote-control tags [--offer] [--state-dir DIR] [< TAGS.json]
        sheprd-remote-control shortcuts [--offer] [--state-dir DIR] [< SHORTCUTS.json]
        sheprd-remote-control favorites [--offer] [--state-dir DIR] [< CHANGE.json]
@@ -247,6 +253,10 @@ daemon when it does not run and prints this computer's answer as JSON.
 relay-enroll keeps a phone's relay keys, signed with its own key here, so
 the phone reaches this computer through its relays, and prints the outcome
 as JSON; it needs the daemon running.
+push-status prints how the daemon running here sends iPhone pushes, as
+JSON (its mode, and how the last alert and Live Activity push went), so
+Sheprd on another computer can show it; it prints nothing when no daemon
+answers.
 relays --offer takes {\"source\", \"relays\"}, the relays Sheprd on
 another computer listens on, replacing what that computer shared before:
 the daemon listens on them too, beside its own [remote] relays.
@@ -274,6 +284,13 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
         Some("relay-enroll") => {
             return parse_host(true, args).map(|invocation| match invocation {
                 Invocation::Enroll { state_dir } => Invocation::RelayEnroll { state_dir },
+                other => other,
+            });
+        }
+        // `--state-dir` alone too.
+        Some("push-status") => {
+            return parse_host(true, args).map(|invocation| match invocation {
+                Invocation::Enroll { state_dir } => Invocation::PushStatus { state_dir },
                 other => other,
             });
         }

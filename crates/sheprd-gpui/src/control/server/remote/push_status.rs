@@ -1,8 +1,11 @@
-//! `remote push-status`: how the daemon's iPhone pushes leave it, asked on
-//! the background executor. It only reads; the push relay is turned on in
-//! Settings, never from here.
+//! `remote push-status`: how the daemon's iPhone pushes leave it, and each
+//! linked host's, asked on the background executor. It only reads; the
+//! push relay is turned on in Settings, never from here.
 use crate::{
-    control::protocol::{ErrorCode, Response, remote::Reply},
+    control::protocol::{
+        ErrorCode, Response,
+        remote::{HostPush, Reply},
+    },
     remote::Supervisor,
 };
 use gpui::{App, Task};
@@ -15,8 +18,13 @@ pub(super) fn serve(
     push_relay: bool,
     cx: &mut App,
 ) -> Result<Task<Response>, Response> {
+    // Linked hosts are asked whether or not this computer's runs.
+    let hosts = Supervisor::has_hosts(cx).then(|| Supervisor::ask_hosts(cx));
     if !enabled {
-        return Err(reply(false, push_relay, None, None));
+        let Some(hosts) = hosts else {
+            return Err(reply(false, push_relay, None, None, Vec::new()));
+        };
+        return Ok(cx.spawn(async move |_| reply(false, push_relay, None, None, hosts.await)));
     }
     let Some(client) = Supervisor::client(cx) else {
         return Err(Response::error(
@@ -33,7 +41,11 @@ pub(super) fn serve(
             Ok(_) => (None, Some(crate::remote::Error::Unexpected.to_string())),
             Err(error) => (None, Some(error.to_string())),
         };
-        reply(true, push_relay, status, error)
+        let hosts = match hosts {
+            Some(hosts) => hosts.await,
+            None => Vec::new(),
+        };
+        reply(true, push_relay, status, error, hosts)
     }))
 }
 
@@ -42,13 +54,15 @@ fn reply(
     push_relay: bool,
     status: Option<control::push::PushStatus>,
     error: Option<String>,
+    hosts: Vec<HostPush>,
 ) -> Response {
     Response::Remote {
         reply: Reply::PushStatus {
             enabled,
             push_relay,
-            status,
+            status: status.map(Box::new),
             error,
+            hosts,
         },
     }
 }

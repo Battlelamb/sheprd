@@ -193,3 +193,76 @@ async fn a_removal_exchange_open_across_a_scrub_cannot_restore_the_fleet() {
     assert!(ask::view(&b.fleet).is_none());
     assert!(b.lines().is_empty());
 }
+
+/// `a` founds a fleet that shares `host`, which takes the log as a host.
+async fn shared_host() -> (Node, Node) {
+    use crate::control::fleet::sync::Apply;
+    let (http, _, _) = relay().await;
+    let (a, host) = (Node::new(http, 1).await, Node::new(http, 5).await);
+    assert_eq!(a.ask(Ask::Found), Answer::Done);
+    let Answer::Intro { intro } = host.ask(Ask::Intro) else {
+        panic!("no intro");
+    };
+    assert_eq!(
+        a.ask(Ask::AddHost {
+            intro,
+            deny: Vec::new(),
+        }),
+        Answer::Done
+    );
+    let Answer::Applied(_) = host.ask(Ask::Apply(Apply {
+        heads: a.view().heads,
+        ops: sync::encode_ops(&a.ops()),
+        ..Apply::default()
+    })) else {
+        panic!("not applied");
+    };
+    assert!(host.fleet.host().is_some());
+    (a, host)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scrub_forgets_that_this_computer_was_a_shared_host() {
+    use crate::control::fleet::Reason;
+    let (a, host) = shared_host().await;
+    assert_eq!(host.ask(Ask::Scrub { session: None }), Answer::Done);
+    // The role went with the fleet, here and on disk.
+    assert_eq!(host.fleet.host(), None);
+    assert!(!host.dir.path().join("fleet/hosted").exists());
+    assert_eq!(Fleet::load(host.dir.path(), now_ms()).unwrap().host(), None);
+    // Joining as a member later, and leaving, takes a member's path: the
+    // log stays until the removal is passed on.
+    join(&a, &host);
+    assert_eq!(
+        host.ask(Ask::Remove {
+            member: host.me(),
+            also_members: Vec::new(),
+            also_hosts: Vec::new(),
+            reason: Reason::Left,
+        }),
+        Answer::Done
+    );
+    assert!(host.fleet.in_fleet().unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_shared_host_role_that_cannot_go_fails_the_scrub_and_stays() {
+    let (_a, host) = shared_host().await;
+    // The role's file cannot be removed.
+    let hosted = host.dir.path().join("fleet/hosted");
+    std::fs::remove_file(&hosted).unwrap();
+    std::fs::create_dir_all(hosted.join("stuck")).unwrap();
+    assert!(
+        ask::answer(
+            &host.state,
+            &host.fleet,
+            Ask::Scrub { session: None },
+            now_ms()
+        )
+        .is_err()
+    );
+    // Nothing went: the role and the fleet stay, and asking again after
+    // the file is fixed finishes the job.
+    assert!(host.fleet.host().is_some());
+    assert!(host.fleet.inner().log.is_some());
+}

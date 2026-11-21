@@ -15,6 +15,7 @@ mod github;
 mod idle;
 mod push_relay;
 mod push_relay_revoke;
+mod push_status;
 mod relay_enroll;
 mod relay_options;
 mod shutdown;

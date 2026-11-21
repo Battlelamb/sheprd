@@ -544,6 +544,14 @@ own setting is what revokes them then. Handles a phone replaces or drops in
 a later registration, such as an ended activity's, are not revoked: the push
 relay allows each phone only a few revocations a minute.
 
+The control socket's `push_status` request (`control::push`) answers with
+the mode (`off`, `own_key`, or `push_relay`) and how the last alert (a test
+push included) and the last Live Activity push went, each with its time
+(`apns::Ledger`). It is kept in memory, so a restart, as every change of
+mode is, starts it empty, and it names no token, handle, or device. Sheprd
+shows it in Settings > Remote control beside the push relay switch, and
+`sheprd remote push-status` prints it.
+
 ## Empty chats
 
 An empty chat opens at its header with the agent's icon and a prompt to start.

@@ -286,15 +286,16 @@ reads none of them. A computer's remote control daemon
 (`sheprd-remote-control`) never holds an APNs key and never contacts Apple:
 it pushes only through the push relay. The app turns the push relay on at
 launch, after a new install or a reinstall, unless the user turned it off in
-Settings > Push Relay, which also shows what the push relay sees. Each
-computer still needs `push_relay` in `[remote]`, off by default there.
+Settings > Push Relay, which also shows what the push relay sees. Computers
+are ready by default too (`push_relay` in `[remote]`, which a user may turn
+off per computer), so every paired computer pushes through it.
 
 How a computer delivers this phone's pushes:
 
 | Mode | Computer | Phone sends | What travels |
 | --- | --- | --- | --- |
-| Off | `push_relay` off, or the push relay off here | No tokens; with `push_relay` off the registration is answered 503 | Nothing through APNs: no alerts or Live Activities |
-| Push relay | `push_relay = true` | Handles, with the push relay on here | Through push.sheprd.org. Alerts and Live Activities sealed |
+| Off | `push_relay = false`, or the push relay off here | No tokens; with `push_relay` off the registration is answered 503 | Nothing through APNs: no alerts or Live Activities |
+| Push relay | `push_relay` on (the default) | Handles, with the push relay on here | Through push.sheprd.org. Alerts and Live Activities sealed |
 
 Web Push is separate: only the browser app, installed and subscribed on its
 own, receives it. A computer still accepts and keeps the plain tokens an app

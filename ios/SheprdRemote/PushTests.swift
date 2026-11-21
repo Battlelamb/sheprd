@@ -46,12 +46,13 @@ final class PushTests {
         let started = Date()
         let answer: API.PushTestAnswer
         do {
-            let session = try await sessions.session(for: computer)
+            let relay = tokens.relayOrigin(computer.device).map { [$0] } ?? []
+            let session = try await sessions.session(for: computer, fallback: relay)
             answer = try await session.client.sendTestPush(id: id, bearer: session.token)
         } catch RemoteError.status(503, _) {
             status[key] = .failed(PushRelaySetting.isOn
                 ? "\(computer.name) has the push relay off. Turn it on in Sheprd's Remote control settings there."
-                : "\(computer.name) cannot push to this phone while the push relay is off here. Turn it on here and on the computer.")
+                : "\(computer.name) cannot push to this phone while the push relay is off here. Turn it on here, and check it is not turned off in Sheprd's Remote control settings there.")
             return
         } catch let RemoteError.status(400, text) where text.contains("not registered") {
             status[key] = .failed(PushRelaySetting.isOn

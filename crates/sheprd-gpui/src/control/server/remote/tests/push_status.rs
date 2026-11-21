@@ -41,6 +41,7 @@ async fn push_status_asks_the_daemon_only_while_remote_control_is_on(cx: &mut Te
             push_relay: true,
             status: None,
             error: None,
+            hosts: Vec::new(),
         }
     );
     let task = cx

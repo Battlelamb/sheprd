@@ -7,7 +7,7 @@ fn push_status_names_the_mode_and_each_last_push() {
     let output = remote::output(&Reply::PushStatus {
         enabled: true,
         push_relay: true,
-        status: Some(PushStatus {
+        status: Some(Box::new(PushStatus {
             mode: Mode::PushRelay,
             alert: Some(Last {
                 at_ms: now,
@@ -20,8 +20,9 @@ fn push_status_names_the_mode_and_each_last_push() {
                     reason: None,
                 },
             }),
-        }),
+        })),
         error: None,
+        hosts: Vec::new(),
     })
     .unwrap();
     assert_eq!(
@@ -44,8 +45,9 @@ fn push_status_says_when_an_older_daemon_uses_its_own_key_and_nothing_was_sent()
     let output = remote::output(&Reply::PushStatus {
         enabled: true,
         push_relay: true,
-        status: Some(status),
+        status: Some(Box::new(status)),
         error: None,
+        hosts: Vec::new(),
     })
     .unwrap();
     assert!(output.text.starts_with(
@@ -64,6 +66,7 @@ fn push_status_while_remote_control_is_off_or_down() {
         push_relay: false,
         status: None,
         error: None,
+        hosts: Vec::new(),
     })
     .unwrap();
     assert_eq!(
@@ -75,6 +78,7 @@ fn push_status_while_remote_control_is_off_or_down() {
         push_relay: true,
         status: None,
         error: Some("could not reach the remote control daemon".into()),
+        hosts: Vec::new(),
     })
     .unwrap();
     assert_eq!(

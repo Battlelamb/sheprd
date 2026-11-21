@@ -107,6 +107,8 @@ pub(crate) struct Supervisor {
     /// Lending the main GitHub account to phones.
     github: github::Lending,
     health: Health,
+    /// Linked hosts' push status, for Settings.
+    host_push: push_status::HostPushes,
     /// The status marks set in Sheprd (`status_icons`), by config name,
     /// which the phone's lists draw too.
     indicators: Option<&'static str>,
@@ -153,6 +155,7 @@ impl Default for Supervisor {
             failure: None,
             github: github::Lending::default(),
             health: Health::Off,
+            host_push: push_status::HostPushes::default(),
             indicators: None,
             indicators_sent: None,
             last_poll: None,
@@ -303,6 +306,12 @@ impl Supervisor {
         if supervisor.quitting || !supervisor.loaded {
             return;
         }
+        // Linked hosts have daemons of their own, asked whether or not this
+        // computer's runs or answers, while Settings watches.
+        if supervisor.watchers.get() > 0 {
+            Self::refresh_hosts(cx);
+        }
+        let supervisor = cx.global_mut::<Self>();
         // Presence runs the nearby helper while the daemon it reports to
         // does.
         {

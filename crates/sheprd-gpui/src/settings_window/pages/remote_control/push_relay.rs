@@ -1,10 +1,11 @@
 //! The push relay (`[remote] push_relay`, `push.sheprd.org`): its switch,
 //! the explanation of what the push relay sees that the user agrees to
 //! before it turns on, and how the daemon's iPhone pushes leave it now,
-//! with how the last alert and Live Activity push went. Turning it off
-//! needs no asking. Saving restarts the daemon with or without
-//! `--push-relay`, as any `[remote]` change does; the status comes from
-//! [`Supervisor`]'s polls while this page holds its lease.
+//! with how the last alert and Live Activity push went, and each linked
+//! host's mode. Turning it off needs no asking. Saving restarts the daemon
+//! with or without `--no-push-relay`, as any `[remote]` change does; the
+//! status comes from [`Supervisor`]'s polls while this page holds its
+//! lease, and the hosts' from its asks over SSH then.
 // i18n: migrated
 
 use super::{Edit, SettingsWindow, ui};
@@ -12,6 +13,7 @@ use crate::{
     config::preferences::Preference, direction::Logical, i18n::fl, motion, remote::Supervisor,
 };
 use gpui::{prelude::*, *};
+use sheprd_control_protocol::protocol::remote::HostPush;
 use sheprd_remote_control::control::push::{Last, Mode, Outcome, PushStatus};
 use std::{cell::Cell, rc::Rc, time::Instant};
 
@@ -204,10 +206,23 @@ impl SettingsWindow {
             row = row.dot(theme.ink(color));
         }
         let now = crate::remote::now_ms();
+        let hosts = Supervisor::host_pushes(cx);
         div()
             .flex()
             .flex_col()
             .child(row)
+            .when(!hosts.is_empty(), |page| {
+                page.child(
+                    div()
+                        .ps(px(16.))
+                        .pb(px(6.))
+                        .flex()
+                        .flex_col()
+                        .debug_selector(|| "remote-push-delivery-hosts".into())
+                        .child(self.control_note(fl!("settings-push-relay-hosts")))
+                        .children(hosts.iter().map(|host| self.control_note(host_line(host)))),
+                )
+            })
             .when_some(status, |page, status| {
                 page.child(
                     div()
@@ -232,6 +247,23 @@ pub(in crate::settings_window) fn delivery_line(status: Option<&PushStatus>) -> 
         Some(Mode::PushRelay) => fl!("settings-push-relay-delivery-push-relay"),
         Some(Mode::Other) => fl!("settings-push-relay-delivery-other"),
     }
+}
+
+/// A linked host's line: how its daemon sends pushes, or why it is unknown.
+pub(in crate::settings_window) fn host_line(host: &HostPush) -> String {
+    let name = host.name.as_str();
+    let Some(status) = &host.status else {
+        return match host.error {
+            Some(_) => fl!("settings-push-relay-host-failed", host = name),
+            None => fl!("settings-push-relay-host-unknown", host = name),
+        };
+    };
+    let mode = match status.mode {
+        Mode::Off => "off",
+        Mode::PushRelay => "push_relay",
+        Mode::Other => "other",
+    };
+    fl!("settings-push-relay-host", host = name, mode = mode)
 }
 
 /// Whether the most recent push of either kind worked; `None` before any.

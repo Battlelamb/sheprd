@@ -299,7 +299,9 @@ final class AppModel {
         fleetMembership.computers = { [weak self] in self?.computers ?? [] }
         fleetMembership.links = fleet
         fleetMembership.onLinked = { [weak self] in self?.add($0) ?? false }
+        tokens.relayOrigin = { [weak fleet] device in fleet?.relayOrigin(device) }
         fleet.onOnline = { [weak self] computer in
+            self?.tokens.online(computer)
             self?.hostLinks.check(computer)
             self?.fleetMembership.online(computer)
         }

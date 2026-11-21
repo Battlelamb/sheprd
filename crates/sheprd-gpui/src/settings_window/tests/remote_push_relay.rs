@@ -2,7 +2,7 @@
 //! with what the push relay sees, turning it off does not, and the page
 //! shows how the daemon's pushes leave it and how the last ones went.
 use super::{
-    remote_control::{click, draw, page},
+    remote_control::{Edits, click, draw, page},
     *,
 };
 use crate::{
@@ -21,9 +21,21 @@ fn last(at_ms: u64, outcome: Outcome) -> Option<Last> {
     Some(Last { at_ms, outcome })
 }
 
+/// The page with the push relay off, which is on by default: this
+/// computer's user turned it off before.
+fn turned_off(cx: &mut TestAppContext) -> (Entity<SettingsWindow>, &mut VisualTestContext, Edits) {
+    let (view, cx, edits) = page(cx);
+    view.update(cx, |view, cx| {
+        view.config.remote.push_relay = false;
+        cx.notify();
+    });
+    draw(cx);
+    (view, cx, edits)
+}
+
 #[gpui::test]
 fn turning_the_push_relay_on_asks_first(cx: &mut TestAppContext) {
-    let (view, cx, edits) = page(cx);
+    let (view, cx, edits) = turned_off(cx);
     click(cx, "remote-push-relay-toggle");
     assert!(
         edits.lock().unwrap().is_empty(),
@@ -51,11 +63,9 @@ fn turning_the_push_relay_on_asks_first(cx: &mut TestAppContext) {
 #[gpui::test]
 fn turning_the_push_relay_off_needs_no_asking(cx: &mut TestAppContext) {
     let (view, cx, edits) = page(cx);
-    view.update(cx, |view, cx| {
-        view.config.remote.push_relay = true;
-        cx.notify();
+    view.read_with(cx, |view, _| {
+        assert!(view.config.remote.push_relay, "on by default")
     });
-    draw(cx);
     click(cx, "remote-push-relay-toggle");
     view.read_with(cx, |view, _| assert!(!view.remote.push_relay.is_open()));
     assert_eq!(
@@ -129,7 +139,7 @@ fn the_dot_follows_the_most_recent_push() {
 
 #[gpui::test]
 fn turn_on_waits_while_another_setting_saves(cx: &mut TestAppContext) {
-    let (view, cx, edits) = page(cx);
+    let (view, cx, edits) = turned_off(cx);
     click(cx, "remote-push-relay-toggle");
     view.update(cx, |view, cx| {
         view.saving = true;

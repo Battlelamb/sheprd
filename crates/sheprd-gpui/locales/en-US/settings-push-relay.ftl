@@ -29,6 +29,17 @@ settings-push-relay-delivery-push-relay = Through the push relay.
 settings-push-relay-delivery-other = The daemon sends pushes in a way this Sheprd does not know; restart remote control, or update Sheprd.
 settings-push-relay-delivery-unknown = Shown while remote control runs.
 
+# Each linked host's push delivery, asked over SSH. $host is the host's
+# name; $mode is how its daemon sends pushes.
+settings-push-relay-hosts = Linked hosts:
+settings-push-relay-host = { $mode ->
+    [off] { $host }: off, with the push relay off there.
+    [push_relay] { $host }: through the push relay.
+   *[other] { $host }: a way this Sheprd does not know.
+}
+settings-push-relay-host-unknown = { $host }: no remote control daemon answered there.
+settings-push-relay-host-failed = { $host }: could not be asked.
+
 # How the last push of each kind went. $ago is how long ago, such as
 # "5 min ago"; $status is an HTTP status code, such as 403.
 settings-push-relay-last-alert = { $outcome ->

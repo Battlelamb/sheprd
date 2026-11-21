@@ -530,8 +530,8 @@ push relay (`apns::Delivery`), chosen at start and logged as `APNs pushes`:
 
 | Mode | When | What travels |
 | --- | --- | --- |
-| Off | `push_relay` off (the default) | Nothing through APNs; `POST /api/apns` answers 503. The native app gets no notifications; alerts go by Web Push only to a browser app that subscribed |
-| Push relay | `[remote] push_relay = true` (`--push-relay`) | Through the Sheprd push relay, which holds the app's key (`docs/apns-relay-plan.md`). Every payload is sealed to the phone |
+| Off | `push_relay = false` (`--no-push-relay`) | Nothing through APNs; `POST /api/apns` answers 503. The native app gets no notifications; alerts go by Web Push only to a browser app that subscribed |
+| Push relay | `[remote] push_relay` on (the default) | Through the Sheprd push relay, which holds the app's key (`docs/apns-relay-plan.md`). Every payload is sealed to the phone |
 
 The iOS app has one publisher, so only the push relay holds an APNs key for
 it: the daemon reads no key, and never contacts `api.push.apple.com`. An
@@ -590,6 +590,11 @@ reaches them again without the phone registering); turning off the phone's
 own setting is what revokes them then. Handles a phone replaces or drops in
 a later registration, such as an ended activity's, are not revoked: the push
 relay allows each phone only a few revocations a minute.
+
+`sheprd-remote-control push-status` prints the running daemon's answer to
+that request as JSON, or nothing when none answers, so Sheprd on another
+computer can show each linked host's push delivery: it runs the verb over
+SSH, as it runs `enroll`, without installing anything.
 
 The control socket's `push_status` request (`control::push`) answers with
 the mode (`off` or `push_relay`; a daemon from before this said `own_key`

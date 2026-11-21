@@ -402,7 +402,16 @@ the phone: Apple sees only "Sheprd", "New activity", and ciphertext.
    and posts a test alert to `POST /v1/push` on this build's push relay
    (`push-sandbox.sheprd.org` for Xcode builds, `push.sheprd.org`
    otherwise), shaped like a computer's test push: the same cover,
-   `mutable-content`, thread `test`, and `sealed` field under the same seal.
+   `mutable-content`, and `sealed` field under the same seal.
+   - Its thread is always `test` and its collapse id `test-ID`. A
+     computer's carry the pairing's scope (`scope/test`), from the notify
+     key the phone gave that computer, so two computers' pushes never
+     group or replace each other. A self test has no computer and so no
+     scope, and a fixed thread is all it needs. Once the extension opens an
+     alert it sets the thread itself: a computer's test goes in that
+     computer's thread, and a self test in `test`. The Swift tests compare
+     the self test with the daemon's test push on everything except these
+     two ids.
    - It is sealed to a key of the phone's own (`NotifyKey.own`), kept in
      its own keychain item and never given to a computer, and names
      `this-phone` as its computer, which is no fingerprint.

@@ -471,10 +471,11 @@ through APNs, without answer or Reply buttons, and a Live Activity per run
 `POST /api/apns/test` (`web::test_push`) sends the signed-in phone one sealed
 alert at once, at high priority, when it asks from Settings: kind `test`, its
 own thread, the computer's real badge, and the phone's random id inside the
-seal. It answers with what APNs said (`delivered`, `gone`, which also forgets
-the token, `limited`, `refused` with Apple's status and reason, or
-`unreachable`), 503 without an APNs key, and 400 when the phone registered no
-alert token. The phone's extension records the id as it opens the alert, so
+seal. It goes the way every alert does (`apns::Delivery`, below) and answers
+with what APNs or the relay said (`delivered`, `gone`, which also forgets the
+token or handle, `limited`, `refused` with Apple's status and reason, or the
+relay's status alone, or `unreachable`), 503 when delivery is off, and 400
+when the phone registered no alert token or handle this mode reaches. The phone's extension records the id as it opens the alert, so
 the app can tell the user whether, and how fast, it arrived.
 
 The app's badge counts agents that want the user (`web::attention`): those

@@ -249,17 +249,22 @@ final class ActivityTokens {
         let alert = recipient(alert, .alert)
         // Each computer seals to its own notify key. Without one, alerts
         // would arrive sealed to nobody: send neither, and the computer
-        // sends this phone nothing through APNs. Through the push relay, Live Activity
-        // content is sealed to it too.
+        // sends this phone nothing through APNs. Through the push relay,
+        // Live Activity content is sealed to it too.
         let needsKey = alert != nil || viaPushRelay
         let notifyKey = needsKey ? try? NotifyKey.loadOrCreate(for: computer.fingerprint).registered : nil
-        let registration = API.APNsRegistration(
-            pushToStart: recipient(pushToStart, .pushToStart),
-            activities: activities,
-            alert: notifyKey == nil ? nil : alert,
-            notifyKey: notifyKey,
-            genericActivities: UserDefaults.standard.bool(forKey: Self.genericSetting)
-        )
+        let generic = UserDefaults.standard.bool(forKey: Self.genericSetting)
+        // With the push relay off, the computer drops every handle it holds,
+        // so it stops pushing even if revoking them at the push relay failed.
+        let registration = viaPushRelay
+            ? API.APNsRegistration(
+                pushToStart: recipient(pushToStart, .pushToStart),
+                activities: activities,
+                alert: notifyKey == nil ? nil : alert,
+                notifyKey: notifyKey,
+                genericActivities: generic
+            )
+            : .pushRelayOff(genericActivities: generic)
         do {
             let relay = relayOrigin(computer.device).map { [$0] } ?? []
             let session = try await sessions.session(for: computer, fallback: relay)

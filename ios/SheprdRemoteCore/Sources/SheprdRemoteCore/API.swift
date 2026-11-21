@@ -192,19 +192,36 @@ public enum API {
         /// when true, so a phone on the default still registers with older
         /// daemons, which refuse a key they do not know.
         public let genericActivities: Bool
+        /// Whether a missing push-to-start or alert recipient goes out as an
+        /// explicit `null`, which makes the computer drop the one it holds
+        /// (`apns::Update`). Left out, it keeps it. Older daemons read the
+        /// `null` as left out.
+        public let clearsRecipients: Bool
 
         public init(
             pushToStart: PushRecipient?,
             activities: [Activity],
             alert: PushRecipient? = nil,
             notifyKey: String? = nil,
-            genericActivities: Bool = false
+            genericActivities: Bool = false,
+            clearsRecipients: Bool = false
         ) {
             self.pushToStart = pushToStart
             self.activities = activities
             self.alert = alert
             self.notifyKey = notifyKey
             self.genericActivities = genericActivities
+            self.clearsRecipients = clearsRecipients
+        }
+
+        /// What a computer gets while this phone's push relay is off: no
+        /// tokens, since computers push only through the push relay, and an
+        /// explicit `null` for the push-to-start and alert recipients and an
+        /// empty activity list, so it drops every handle it held. That stops
+        /// its pushes even when revoking the handles at the push relay
+        /// failed or was refused.
+        public static func pushRelayOff(genericActivities: Bool) -> Self {
+            Self(pushToStart: nil, activities: [], genericActivities: genericActivities, clearsRecipients: true)
         }
 
         enum CodingKeys: String, CodingKey {
@@ -217,9 +234,17 @@ public enum API {
 
         public func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
-            try container.encodeIfPresent(pushToStart, forKey: .pushToStart)
+            if let pushToStart {
+                try container.encode(pushToStart, forKey: .pushToStart)
+            } else if clearsRecipients {
+                try container.encodeNil(forKey: .pushToStart)
+            }
             try container.encode(activities, forKey: .activities)
-            try container.encodeIfPresent(alert, forKey: .alert)
+            if let alert {
+                try container.encode(alert, forKey: .alert)
+            } else if clearsRecipients {
+                try container.encodeNil(forKey: .alert)
+            }
             try container.encodeIfPresent(notifyKey, forKey: .notifyKey)
             if genericActivities {
                 try container.encode("generic", forKey: .activityDetail)

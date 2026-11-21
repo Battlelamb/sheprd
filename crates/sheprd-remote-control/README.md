@@ -544,8 +544,16 @@ daemon never sees the token inside. The app registers them with
 "production"}` (`sandbox` for Xcode builds). The answer names the mode,
 `"delivery": "push_relay"`, which the app's Settings shows per computer; an
 older daemon may answer `own_key`, which the app shows as unknown. The
-environment picks one of the two relays compiled in, `push.sheprd.org` and `push-sandbox.sheprd.org`;
-no device can name another host. An app from before the push relay still
+environment picks one of the two relays compiled in, `push.sheprd.org` and
+`push-sandbox.sheprd.org`; no device can name another host.
+
+A registration that leaves out `push_to_start` or `alert` keeps the one
+stored; an explicit `null` clears it (`apns::Update`). The app sends
+`{"push_to_start": null, "alert": null, "activities": []}` when its push
+relay is turned off, so this daemon drops every handle and pushes nothing
+through the push relay again, even when the phone's revocation at the push
+relay failed or was refused. Older daemons read the `null` as left out, and
+older apps never send it. An app from before the push relay still
 registers plain hex tokens: they are accepted and stored, and stored ones
 keep loading, so that app keeps registering without errors, but nothing is
 ever sent to a token: that app gets no APNs push. The native app holds no

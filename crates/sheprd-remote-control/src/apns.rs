@@ -61,7 +61,7 @@ pub(crate) use sheprd_apns::{DeviceToken, Priority, Push, PushType, seal};
 pub(crate) use terminal::decide as decide_terminal;
 #[cfg(test)]
 pub(crate) use tokens::ActivityToken;
-pub(crate) use tokens::Registration;
+pub(crate) use tokens::{Registration, Update};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

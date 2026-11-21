@@ -507,14 +507,16 @@ pub(super) async fn register_apns(
     if state.apns.is_off() {
         return Err(ApiError::NoPush);
     }
-    let update = crate::apns::Registration::parse(&body)
+    // An explicit `null` alert or push-to-start clears it: the phone sends
+    // that when its push relay goes off (`apns::Update`).
+    let update = crate::apns::Update::parse(&body)
         .map_err(|_| ApiError::Invalid("that registration is not valid"))?;
     with_auth(&state, move |auth| {
         let devices = auth.devices_mut();
         let mut stored = crate::apns::Registration::from_stored(
             devices.get(&device).and_then(|record| record.apns.as_ref()),
         );
-        stored.merge(update);
+        stored.apply(update);
         let value = stored
             .to_stored()
             .map_err(|_| ApiError::Invalid("that registration cannot be stored"))?;

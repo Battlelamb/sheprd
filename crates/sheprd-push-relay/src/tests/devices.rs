@@ -62,6 +62,25 @@ fn a_full_count_of_recent_devices_waits_for_the_oldest_to_age_out() {
 }
 
 #[test]
+fn a_delayed_newcomer_brings_the_next_sweep_forward() {
+    let mut devices = Devices::default();
+    devices.pushed(&device(0), 0);
+    devices.pushed(&device(1), 0);
+    for index in 2..MAX_DEVICES {
+        devices.pushed(&device(index), 2 * DAY_S);
+    }
+    // A week on, a newcomer sweeps out the two quiet devices; the next
+    // sweep would wait for the oldest left, a week after 2 * DAY_S.
+    devices.pushed(&device(MAX_DEVICES), WEEK_S);
+    // A delayed push from DAY_S takes the last slot, and ages out first.
+    devices.pushed(&device(MAX_DEVICES + 1), DAY_S);
+    devices.pushed(&device(MAX_DEVICES + 2), DAY_S + WEEK_S);
+    let counts = devices.counts(DAY_S + WEEK_S);
+    assert_eq!(counts.skipped_pushes, 0);
+    assert_eq!(counts.active_week, MAX_DEVICES as u64);
+}
+
+#[test]
 fn a_late_push_never_moves_a_device_back() {
     let mut devices = Devices::default();
     devices.pushed(&device(1), 2 * DAY_S);

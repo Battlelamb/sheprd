@@ -117,6 +117,9 @@ impl Devices {
                 return;
             }
         }
+        // A delayed push can be older than every device swept past: its
+        // own week ending is then the earliest a slot frees.
+        self.sweep_at_s = self.sweep_at_s.min(now_s.saturating_add(WEEK_S));
         self.pushed.insert(key, now_s);
     }
 

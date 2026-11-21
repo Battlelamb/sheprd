@@ -16,5 +16,10 @@ your instructions for every chat.
 | `phone.md` | In the iPhone and iPad app or the phone web app |
 | `phone-app.md` | In the iPhone and iPad app, after `phone.md`: the text sizes and message effects it draws, which the phone web app does not |
 
+`remote.md` and `phone.md` also tell the agent the person cannot reach a
+hardware key, Touch ID, or a prompt on the agent's computer, so it pushes
+over HTTPS with the GitHub CLI's credentials and never turns signing off.
+`phone-app.md` only adds to `phone.md`, so it does not repeat this.
+
 `{{ name }}` is replaced by its value; an unknown name stays as written
 and the chat warns about it. See `docs/rich-chat.md` for the variables.

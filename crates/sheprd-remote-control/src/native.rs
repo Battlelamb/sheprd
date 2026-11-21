@@ -9,6 +9,7 @@ mod create;
 pub(crate) mod github;
 mod live;
 mod model;
+pub(crate) mod previews;
 mod search;
 mod summarize;
 mod title;
@@ -67,9 +68,11 @@ fn home(state: &Shared, device: &DeviceId) -> Home {
     let pull_requests = state.pull_requests.borrow().clone();
     let checkouts = state.lending.checkouts.current();
     let recognized = state.lending.recognized();
+    let favorites = state.favorites.current();
     let mut home = Home::project(Sources {
         checkouts: &checkouts,
         computer: &state.computer,
+        favorites: &favorites,
         fingerprint: &state.fingerprint,
         layout: &layout,
         load: *state.load.borrow(),
@@ -81,6 +84,7 @@ fn home(state: &Shared, device: &DeviceId) -> Home {
         version: crate::server::version(),
         waiting: state.attention().len(),
     });
+    home.preview_terminals(&state.previews.current());
     home.github = Some(state.github.enabled());
     home.github_hosts = github::lent_hosts(state, device);
     home
@@ -99,8 +103,15 @@ pub(crate) async fn get_chat(
     _device: Device,
     Path(pane): Path<String>,
 ) -> Result<Json<ChatSnapshot>, ApiError> {
-    state.hub.layout().chat(&pane).ok_or(ApiError::NotFound)?;
-    let link = state.hub.chat(&pane).ok_or(ApiError::NotFound)?;
+    let link = match state.hub.layout().chat(&pane) {
+        Some(_) => state.hub.chat(&pane).ok_or(ApiError::NotFound)?,
+        None if state.hub.observable(&pane) => state
+            .hub
+            .observe(&pane)
+            .await
+            .map_err(|_| ApiError::NotFound)?,
+        None => return Err(ApiError::NotFound),
+    };
     let (transcript, cursor) = link.base();
     Ok(Json(ChatSnapshot {
         pane,

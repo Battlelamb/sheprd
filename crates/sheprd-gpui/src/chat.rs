@@ -22,6 +22,7 @@ mod code_choices;
 mod convert;
 pub(crate) mod core_pane;
 mod discovery;
+mod earlier;
 pub(crate) mod effects;
 mod existing;
 mod glide;
@@ -35,6 +36,7 @@ mod pick;
 mod prepared;
 #[cfg(feature = "integration-test")]
 pub(crate) mod preview;
+pub(crate) mod pull_requests;
 mod rail_folds;
 mod reader;
 mod remote_route;

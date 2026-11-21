@@ -30,6 +30,7 @@ The native app for Sheprd's remote control (`docs/ios-app-plan.md`).
 | --- | --- |
 | `project.yml` | XcodeGen spec for the `SheprdRemote` app and the `SheprdRemoteWidgets` extension: iOS 26, Swift 6 with complete concurrency checking, iPhone and iPad |
 | `SheprdRemoteCore/` | Swift package with no UIKit: the transcript model and its reducer, the v2 API's messages, `ComputerLink` (address racing, resubscription, backoff), pairing links, fingerprints, session signatures, sealed notifications |
+| `SheprdRemoteCore/Sources/SheprdFleetLog/` | The phone's own copy of the fleet log: replayed and checked by the Rust `sheprd-fleet-ffi` crate, linked as `SheprdFleetFFI` (`tools/build-fleet-ffi.sh` builds it, `just ios-test` and `just ios-build` run it first), drafts checked before Face ID, and sync with any computer of the fleet. Linked by the app alone |
 | `SheprdRemoteCore/Sources/SheprdGitHub/` | The phone's GitHub client, its own target over `SheprdRemoteCore` (never the reverse) and linked by the app alone: hosts, leased and signed-in tokens, the GraphQL and REST reads, pull requests, checks, and their logs |
 | `SheprdRemoteCore/Sources/SheprdNearby/` | Nearby pairing over Bluetooth: the offer exchange, framing, the short code, and the sightings the scan keeps; the radio is in `SheprdRemote/Nearby/`. Over `SheprdRemoteCore`, linked by the app alone |
 | `SheprdRemoteCore/Sources/SheprdRelay/` | Reaching a computer through Sheprd relays: dial proofs, sessions, the local proxy, racing, nearness, and the saved list. Over `SheprdRemoteCore` and `SheprdTunnel`, linked by the app alone; the saved `RelayRecord` itself stays in Core |
@@ -47,7 +48,12 @@ The native app for Sheprd's remote control (`docs/ios-app-plan.md`).
 
 Requires Xcode 27 or later (App Store uploads need the iOS 27 SDK) and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
+Building the app or the package needs the fleet log library from Rust
+first, with the pinned toolchain (`rust-toolchain.toml`); `just ios-test` and
+`just ios-build` build it.
+
 ```sh
+just ios-fleet-ffi # the fleet log library (ios/tools/build-fleet-ffi.sh)
 just ios-test      # Swift package tests on the Mac, no simulator
 just ios-build     # unsigned simulator build of the app and its extensions
 just ios-generate  # then open ios/SheprdRemote.xcodeproj
@@ -143,6 +149,10 @@ and nothing goes through your phone.
      opens one with text sizes and message effects at rest; `-samplePlay NAME`
      then asks for the screen effect NAME (`confetti`, `zap`, …) in its last
      reply and plays it and every bubble a second after it opens.
+   - `-sampleChat activity` opens a made-up running chat with sub-agents,
+     shells, a monitor, a plan, and changed files. In any chat,
+     `-agentPanel YES` opens its activity panel (`-agentPanel large` at full
+     height), and `-agentPanelScroll plan|changed` scrolls it to a section.
    - With `-openLink`, `-session YES` opens the chat's session sheet and
      `-draft TEXT` types into its composer (`-draft /` lists the slash
      commands).

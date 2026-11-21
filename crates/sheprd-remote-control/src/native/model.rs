@@ -5,6 +5,7 @@
 use crate::{
     ansi::{self, Color, Style},
     control::{
+        favorites::Favorites,
         github::valid_login,
         pull_requests::{PullRequests, Tone, WorkspacePullRequest},
         tags::ComputerTags,
@@ -155,6 +156,9 @@ pub(crate) struct Chat {
     pub(crate) title: String,
     pub(crate) agent: Option<String>,
     pub(crate) status: AgentStatus,
+    /// Starred on some device (`control::favorites`); lists show it first.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) favorite: bool,
     /// Absent until the daemon's connection to the chat is up.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) summary: Option<ChatSummary>,
@@ -256,6 +260,9 @@ pub(crate) struct Pane {
 pub(crate) struct TerminalAgent {
     pub(crate) name: Option<String>,
     pub(crate) status: AgentStatus,
+    /// Its pane was starred on some device (`control::favorites`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) favorite: bool,
     /// The pane it runs in; absent from older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) pane: Option<String>,
@@ -265,6 +272,14 @@ pub(crate) struct TerminalAgent {
     /// When the daemon saw it last change state; unknown until it does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) changed_ms: Option<u64>,
+    /// What it last said, read off its screen: its latest paragraph, one
+    /// item to a line, bounded. Absent until read, and from older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) preview: Option<String>,
+    /// Whether its conversation opens as a read-only chat (`view: chat`
+    /// on its pane) beside the terminal; absent from older servers.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) transcript: bool,
 }
 
 /// A chat's whole transcript and the stream position it includes.
@@ -408,7 +423,7 @@ impl From<Summary> for ChatSummary {
     }
 }
 
-fn chat(row: &ChatRow, summaries: &mut HashMap<String, Summary>) -> Chat {
+fn chat(row: &ChatRow, summaries: &mut HashMap<String, Summary>, favorites: &Favorites) -> Chat {
     let summary = summaries.remove(&row.pane);
     // Herdr may know an ACP chat only as `acp`, without the display name
     // `herdr-acp` reported; the chat's own transcript names its agent.
@@ -430,11 +445,12 @@ fn chat(row: &ChatRow, summaries: &mut HashMap<String, Summary>) -> Chat {
         title,
         agent,
         status: row.status,
+        favorite: favorites.contains(&row.pane),
         summary: summary.map(ChatSummary::from),
     }
 }
 
-fn terminal(terminal: &hub::Terminal) -> Terminal {
+fn terminal(terminal: &hub::Terminal, favorites: &Favorites) -> Terminal {
     Terminal {
         tab: terminal.tab.clone(),
         label: terminal.label.clone(),
@@ -455,9 +471,12 @@ fn terminal(terminal: &hub::Terminal) -> Terminal {
         agent: terminal.agent.as_ref().map(|agent| TerminalAgent {
             name: agent.name.clone(),
             status: agent.status,
+            favorite: favorites.contains(&agent.pane),
             pane: Some(agent.pane.clone()),
             title: agent.title.clone(),
             changed_ms: agent.changed_ms,
+            preview: None,
+            transcript: hub::observable(&agent.pane, agent.name.as_deref()),
         }),
         convert: terminal.convert.as_ref().map(|(pane, agent)| ConvertOffer {
             agent: agent.name().to_owned(),
@@ -472,6 +491,7 @@ pub(crate) struct Sources<'a> {
     /// What each folder's checkout is on, as last read.
     pub(crate) checkouts: &'a HashMap<String, Checkout>,
     pub(crate) computer: &'a str,
+    pub(crate) favorites: &'a Favorites,
     pub(crate) fingerprint: &'a str,
     pub(crate) layout: &'a Layout,
     pub(crate) load: Option<Load>,
@@ -487,10 +507,28 @@ pub(crate) struct Sources<'a> {
 }
 
 impl Home {
+    /// Gives each terminal tab's agent its preview from `previews`, by the
+    /// pane it runs in.
+    pub(crate) fn preview_terminals(&mut self, previews: &HashMap<String, String>) {
+        let agents = self
+            .workspaces
+            .iter_mut()
+            .flat_map(|workspace| &mut workspace.terminals)
+            .filter_map(|terminal| terminal.agent.as_mut());
+        for agent in agents {
+            agent.preview = agent
+                .pane
+                .as_ref()
+                .and_then(|pane| previews.get(pane))
+                .cloned();
+        }
+    }
+
     pub(crate) fn project(sources: Sources<'_>) -> Self {
         let Sources {
             checkouts,
             computer,
+            favorites,
             fingerprint,
             layout,
             load,
@@ -527,9 +565,13 @@ impl Home {
                 chats: workspace
                     .chats
                     .iter()
-                    .map(|row| chat(row, &mut summaries))
+                    .map(|row| chat(row, &mut summaries, favorites))
                     .collect(),
-                terminals: workspace.terminals.iter().map(terminal).collect(),
+                terminals: workspace
+                    .terminals
+                    .iter()
+                    .map(|row| terminal(row, favorites))
+                    .collect(),
             })
             .collect();
         Self {

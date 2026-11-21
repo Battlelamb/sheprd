@@ -739,6 +739,7 @@ pub(crate) fn tokens(result: &serde_json::Value) -> Option<Tokens> {
 
 pub(crate) fn session(id: &wire::SessionId, cwd: &std::path::Path) -> SessionInfo {
     SessionInfo {
+        continued: None,
         cwd: Some(cwd.display().to_string()),
         id: id.0.to_string(),
         title: None,

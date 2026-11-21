@@ -20,6 +20,11 @@ mod convert;
 #[cfg(unix)]
 mod echo;
 mod empty_core;
+mod favorites;
+#[cfg(unix)]
+pub(crate) mod fleet;
+#[cfg(unix)]
+mod fleet_copy;
 mod github;
 mod handoff;
 mod hosts;
@@ -32,6 +37,7 @@ mod origins;
 mod pace;
 mod pairing;
 mod presence;
+mod prompt;
 mod pull_requests;
 mod rename;
 mod routes;
@@ -41,6 +47,7 @@ mod stream;
 #[cfg(unix)]
 mod streaming;
 mod tags;
+mod term_files;
 #[cfg(unix)]
 mod term_history;
 mod terminal;
@@ -87,7 +94,9 @@ pub(crate) fn state_lending(
         changes: Default::default(),
         computer: "Studio".into(),
         connected: Mutex::new(HashMap::new()),
+        favorites: Favorites::load(crate::app::favorites::file(dir)),
         fingerprint: authority.fingerprint().to_owned(),
+        fleet: None,
         github: Default::default(),
         authority: Some(authority),
         hub,
@@ -99,6 +108,7 @@ pub(crate) fn state_lending(
         near: Mutex::default(),
         opened: crate::web::attention::Opened::default(),
         port: 7443,
+        previews: Default::default(),
         privacy: Privacy::Generic,
         pull_requests,
         push: None,

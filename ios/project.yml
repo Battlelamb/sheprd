@@ -195,6 +195,7 @@ targets:
     platform: iOS
     sources:
       - SheprdRemoteNotifications
+      - path: Shared/AlertSweep.swift
       - path: Shared/NotifyKey.swift
       - path: Shared/NotificationCategories.swift
       - path: Shared/PushRelaySetting.swift

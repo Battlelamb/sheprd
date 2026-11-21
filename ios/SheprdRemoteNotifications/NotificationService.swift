@@ -9,10 +9,14 @@ import UserNotifications
 ///
 /// A copy of an alert it already showed (the same sealed `event`: a push
 /// delivered twice, or sent again another way) shows once (`AlertGate`).
-/// With Apple's notification filtering entitlement, which a build marks by
-/// `SheprdFiltersRepeats` in its Info.plist, the copy is dropped; without
-/// it an extension must deliver something, so the copy takes the first
-/// one's place silently, and the phone shows and buzzes once.
+/// Without Apple's notification filtering entitlement an extension must
+/// deliver something, so a copy is silent: while the first is still shown
+/// it takes the first one's place (they share the APNs collapse id, which
+/// iOS uses as the notification's identifier), and when the person
+/// already dismissed or opened the first, the copy is noted
+/// (`RetractedAlerts`) and taken back a moment later or at the next sweep
+/// (`AlertSweep`). A build with the entitlement, marked by
+/// `SheprdFiltersRepeats` in its Info.plist, drops the copy outright.
 final class NotificationService: UNNotificationServiceExtension {
     private static let group = "group.so.pen.herdr.remote"
     /// One per extension process, which iOS may hand several pushes at once.
@@ -30,16 +34,25 @@ final class NotificationService: UNNotificationServiceExtension {
         let deliver = UncheckedSendable(value: contentHandler)
         let request = UncheckedSendable(value: request)
         Task {
-            let (content, first) = await Self.prepare(request.value)
+            await AlertSweep.run()
+            let (content, first, retract) = await Self.prepare(request.value)
             deliver.value(content)
             // Copies waiting on this one go on only once it reached iOS.
             if let first { await Self.gate.delivered(first) }
+            // A late copy goes at once when iOS lets this run a little
+            // longer; otherwise at the next sweep.
+            if retract {
+                try? await Task.sleep(for: .seconds(1))
+                await AlertSweep.run()
+            }
         }
     }
 
-    /// What `request` shows, and the event it is the first copy of, which
-    /// must be marked delivered once the content was handed to iOS.
-    private static func prepare(_ request: UNNotificationRequest) async -> (UNNotificationContent, String?) {
+    /// What `request` shows, the event it is the first copy of, which must
+    /// be marked delivered once the content was handed to iOS, and whether
+    /// it is a late copy to take back.
+    private static func prepare(_ request: UNNotificationRequest) async -> (UNNotificationContent, String?, Bool) {
+        let id = request.identifier
         let content = (request.content.mutableCopy() as? UNMutableNotificationContent) ?? UNMutableNotificationContent()
         let sealed = request.content.userInfo["sealed"] as? String
         // A computer's key first: what one opens is that computer's alert.
@@ -47,13 +60,13 @@ final class NotificationService: UNNotificationServiceExtension {
         let opened = sealed.flatMap { try? NotifyKey.open($0) }
         if opened == nil, let sealed, let test = try? NotifyKey.openSelfTest(sealed) {
             // Its id is its event: each test is a decision of its own.
-            return await admitted(selfTest(test), event: test.id)
+            return await admitted(selfTest(test), event: test.id, id: id)
         }
         guard let opened else {
             // Not from a paired computer, or one this phone forgot. Only
             // the cover is shown, whatever the push said, with none of its
             // actions: opening the app shows what is really waiting.
-            return (cover(), nil)
+            return (cover(), nil, false)
         }
         let alert = opened.alert
         content.title = alert.title
@@ -71,7 +84,7 @@ final class NotificationService: UNNotificationServiceExtension {
             // repeat records too. It names no chat, so a tap only opens the app.
             PushTestReceipts.record(test, at: Date(), in: UserDefaults(suiteName: group))
             content.userInfo = info
-            return await admitted(content, event: alert.event)
+            return await admitted(content, event: alert.event, id: id)
         }
         // The computer whose key opened it, which actions then reach.
         info[AlertKeys.computer] = opened.computer.hex
@@ -88,34 +101,37 @@ final class NotificationService: UNNotificationServiceExtension {
             content.categoryIdentifier = category
             await NotificationCategories.register(presentation)
         }
-        return await admitted(content, event: alert.event)
+        return await admitted(content, event: alert.event, id: id)
     }
 
     /// `content` as the first copy of `event` shows it, or as a repeat
-    /// does: dropped where the build may filter, else in the first one's
-    /// place without a sound. An alert without an event, from an older
-    /// computer, always shows.
-    private static func admitted(_ content: UNNotificationContent, event: String?) async -> (UNNotificationContent, String?) {
-        guard let event else { return (content, nil) }
+    /// does: dropped where the build may filter, else silent, in the first
+    /// one's place while it shows, or noted to take back (`RetractedAlerts`)
+    /// when the person already dealt with it. `id` is the notification's
+    /// identifier. An alert without an event, from an older computer,
+    /// always shows.
+    private static func admitted(
+        _ content: UNNotificationContent,
+        event: String?,
+        id: String
+    ) async -> (UNNotificationContent, String?, Bool) {
+        guard let event else { return (content, nil, false) }
         let content = (content.mutableCopy() as? UNMutableNotificationContent) ?? UNMutableNotificationContent()
         content.userInfo[AlertKeys.event] = event
-        guard await gate.admit(event) == .repeated else { return (content, event) }
-        if filtersRepeats { return (UNNotificationContent(), nil) }
-        await removeShown(event)
+        guard await gate.admit(event) == .repeated else { return (content, event, false) }
+        if filtersRepeats { return (UNNotificationContent(), nil, false) }
         content.sound = nil
         content.interruptionLevel = .passive
-        return (content, nil)
-    }
-
-    /// Removes the notifications already shown for `event`, which the copy
-    /// arriving now replaces.
-    private static func removeShown(_ event: String) async {
         let center = UNUserNotificationCenter.current()
-        let shown = await center.deliveredNotifications()
-        let ids = shown
+        let ids = await center.deliveredNotifications()
             .filter { $0.request.content.userInfo[AlertKeys.event] as? String == event }
             .map(\.request.identifier)
-        if !ids.isEmpty { center.removeDeliveredNotifications(withIdentifiers: ids) }
+        guard ids.isEmpty else {
+            center.removeDeliveredNotifications(withIdentifiers: ids)
+            return (content, nil, false)
+        }
+        RetractedAlerts.add(id, event: event, at: Date(), in: UserDefaults(suiteName: group))
+        return (content, nil, true)
     }
 
     /// A test push this phone sent itself through the push relay: its

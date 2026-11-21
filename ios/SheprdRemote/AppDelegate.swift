@@ -21,6 +21,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUser
         AppModel.current = model
         UNUserNotificationCenter.current().delegate = self
         Task { await NotificationCategories.register(.finished) }
+        // Late copies of alerts the extension could not drop.
+        Task { await AlertSweep.run() }
         #if DEBUG
         if followDebugArguments() { return true }
         #endif
@@ -57,6 +59,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUser
         _ application: UIApplication,
         didReceiveRemoteNotification userInfo: [AnyHashable: Any]
     ) async -> UIBackgroundFetchResult {
+        await AlertSweep.run()
         guard let sealed = userInfo["sealed"] as? String,
               let opened = try? NotifyKey.open(sealed)
         else { return .noData }

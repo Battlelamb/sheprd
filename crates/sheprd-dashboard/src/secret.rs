@@ -1,5 +1,5 @@
-//! A secret the operator gave: the dashboard token, the listen token, or
-//! the metrics token.
+//! A secret the operator gave: a dashboard token, the relay's listen token,
+//! or a metrics token.
 
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;

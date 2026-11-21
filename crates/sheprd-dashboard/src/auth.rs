@@ -7,8 +7,9 @@
 //! signs everyone out.
 //!
 //! The token, not a password, is what keeps guessing hopeless: at least 24
-//! characters, and `deploy/relay` generates 32 random bytes. The lockout in
-//! `lockout` then stops an address after three wrong tries.
+//! characters; `deploy/relay` generates 32 random bytes, and
+//! `deploy/push-relay` 32 as hex. The lockout in `lockout` then stops an
+//! address after three wrong tries.
 
 use crate::secret::Secret;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};

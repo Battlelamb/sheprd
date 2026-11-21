@@ -592,8 +592,12 @@ impl Fleet {
         *self.scrubbed.lock().unwrap_or_else(PoisonError::into_inner) =
             session.map(|session| (std::time::Instant::now(), session));
         let mut inner = self.inner();
+        // Kept when its file stays: the error is reported, and the role
+        // with it.
         store::remove_log(&self.state_dir)?;
         inner.log = None;
+        // A fleet joined later is joined afresh, as a member or a host.
+        self.hosted.store(false, Ordering::SeqCst);
         let removed = store::remove_peers(&self.state_dir);
         if removed.is_ok() {
             *inner = Inner::default();

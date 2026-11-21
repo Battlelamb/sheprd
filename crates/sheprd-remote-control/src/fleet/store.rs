@@ -604,9 +604,12 @@ fn write_peers(state_dir: &Path, inner: &Inner, suspensions: &Suspensions) -> Re
     Ok(())
 }
 
-/// Removes the log, and any history of a fleet being joined, so a scrub
-/// leaves no fleet behind. Blocking.
+/// Removes how this computer joined its fleet as a shared host, the log,
+/// and any history of a fleet being joined, so a scrub leaves no fleet,
+/// and no role in one, behind. The role goes first: kept, it fails the
+/// scrub before anything else goes. Blocking.
 pub(super) fn remove_log(state_dir: &Path) -> Result<()> {
+    remove(&path(state_dir, HOSTED))?;
     remove(&path(state_dir, LOG))?;
     remove_joining(state_dir)
 }

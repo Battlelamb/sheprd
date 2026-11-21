@@ -4,8 +4,10 @@ import SwiftUI
 
 /// The panel's Pull requests section, as the desktop rail's: each pull
 /// request the agent worked on in this chat, newest first. A tap opens it
-/// in the app's pull request screen, titled when the phone's own lists
-/// know it.
+/// in the app's pull request screen. Its title and state come from the
+/// phone's own lists when they know it: what the agent did says it was
+/// merged, but not whether a pull request it closed or reopened is closed
+/// now.
 struct ChatPullRequestList: View {
     let pulls: [ChatPullRequest]
 
@@ -16,10 +18,10 @@ struct ChatPullRequestList: View {
             ForEach(Array(pulls.reversed().enumerated()), id: \.element.id) { index, pull in
                 if index > 0 { Divider().padding(.leading, 46) }
                 if let route = Self.route(pull) {
-                    NavigationLink(value: route) { row(pull, title: direct.title(for: route)) }
+                    NavigationLink(value: route) { row(pull, listed: direct.listed(route)) }
                         .buttonStyle(.plain)
                 } else {
-                    row(pull, title: nil)
+                    row(pull, listed: nil)
                 }
             }
         }
@@ -29,10 +31,13 @@ struct ChatPullRequestList: View {
         }
     }
 
-    private func row(_ pull: ChatPullRequest, title: String?) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Image(systemName: Self.symbol(pull))
-                .foregroundStyle(Self.tint(pull))
+    private func row(_ pull: ChatPullRequest, listed: GitHubSearchPull?) -> some View {
+        let title = listed?.title
+        let look = Self.look(pull, listed: listed)
+        return HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: look.symbol)
+                .foregroundStyle(look.color)
+                .accessibilityLabel(look.label)
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title ?? "#\(pull.number)")
@@ -68,16 +73,13 @@ struct ChatPullRequestList: View {
         return did.isEmpty ? name : "\(name) · \(did.joined(separator: ", "))"
     }
 
-    private static func symbol(_ pull: ChatPullRequest) -> String {
-        if pull.actions.contains(.merged) { return "arrow.triangle.merge" }
-        if pull.actions.contains(.closed), !pull.actions.contains(.reopened) { return "xmark.circle" }
-        return "arrow.triangle.pull"
-    }
-
-    private static func tint(_ pull: ChatPullRequest) -> Color {
-        if pull.actions.contains(.merged) { return .purple }
-        if pull.actions.contains(.closed), !pull.actions.contains(.reopened) { return .red }
-        return .green
+    /// Its state as the phone's lists know it; else merged once the agent
+    /// merged it, as a merge is never undone; else unknown. Closed and
+    /// reopened are kept once each in the order first seen, so they cannot
+    /// tell which came last.
+    static func look(_ pull: ChatPullRequest, listed: GitHubSearchPull?) -> PullRequestLook {
+        if let listed { return PullRequestLook(listed.state, draft: listed.isDraft) }
+        return pull.actions.contains(.merged) ? .merged : .unknown
     }
 }
 

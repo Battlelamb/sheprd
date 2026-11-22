@@ -55,6 +55,11 @@ import Testing
         #expect(opened.facts == SelfTestActivity.facts(id: Self.id))
         #expect(opened.state == SelfTestActivity.started(at: Self.now))
         #expect(SelfTestActivity.id(of: opened.facts) == Self.id)
+        // The widget offers no Reply or Open on it, only on a chat's.
+        #expect(SelfTestActivity.isTest(opened.facts))
+        var chat = opened.facts
+        chat.computerId = String(repeating: "AB", count: 32)
+        #expect(!SelfTestActivity.isTest(chat))
         // It names no computer, so its token and link go nowhere.
         #expect(opened.facts.fingerprint == nil)
         #expect(Self.open(facts, state, with: P256.KeyAgreement.PrivateKey()) == nil)

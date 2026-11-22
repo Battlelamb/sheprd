@@ -122,16 +122,19 @@ private struct ExpandedBottom: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Link(destination: facts.link.url) {
-                    Text("Open")
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 6)
-                        .background(
-                            state.phase == .question ? Palette.question : Color.white.opacity(0.18),
-                            in: Capsule()
-                        )
-                        .foregroundStyle(state.phase == .question ? Color.black : Color.white)
+                // A test activity opens no chat.
+                if !SelfTestActivity.isTest(facts) {
+                    Link(destination: facts.link.url) {
+                        Text("Open")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 6)
+                            .background(
+                                state.phase == .question ? Palette.question : Color.white.opacity(0.18),
+                                in: Capsule()
+                            )
+                            .foregroundStyle(state.phase == .question ? Color.black : Color.white)
+                    }
                 }
             }
         }

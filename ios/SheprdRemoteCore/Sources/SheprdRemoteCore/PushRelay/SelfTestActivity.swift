@@ -77,6 +77,12 @@ public enum SelfTestActivity {
         return SelfTestPush.validId(id) ? id : nil
     }
 
+    /// Whether `facts` are a test activity's, which opens no chat, so the
+    /// widget offers no Reply or Open.
+    public static func isTest(_ facts: ChatActivityFacts) -> Bool {
+        id(of: facts) != nil
+    }
+
     /// Opens a test activity with this phone's own key: both parts must be
     /// sealed to it, name no computer, and carry no question or buttons.
     /// `nil` for anything else, which then shows the cover.

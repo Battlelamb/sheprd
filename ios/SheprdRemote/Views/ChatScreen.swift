@@ -67,7 +67,9 @@ struct ChatScreen: View {
         .toolbar(.hidden, for: .tabBar)
         .hidesConnectionToast()
         .toolbar {
-            if offersWorkspace, let workspace = item?.workspace {
+            // A terminal agent's conversation has no chat item; its tab's
+            // workspace is the same place, on the same computer.
+            if offersWorkspace, let workspace = item?.workspace ?? terminal?.workspace {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { model.pendingWorkspace = WorkspaceKey(device: key.device, workspace: workspace.id) } label: {
                         Image(systemName: "square.stack.3d.up")

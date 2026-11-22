@@ -24,7 +24,7 @@ unwrap_used = "deny"
 # The terminal emulator behind herdr-core terminals, which arrive as raw bytes;
 # Zed's fork, the revision Arbor runs.
 alacritty_terminal   = "0.26.0"
-url = "2"
+url = "2.5.9"
 # The adapter GPUI's macOS backend links; its window focus forwarder.
 accesskit_macos      = "=0.27.2"
 # ACP wire types for sheprd-acp; its own transport, so no async runtime.

@@ -6,7 +6,7 @@ use crate::{
     chat::visual::{self, Drawn},
     window::FileLink,
 };
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 mod error;
 pub(crate) use error::Error;
@@ -30,20 +30,75 @@ pub(crate) fn supported(path: &Path) -> bool {
         })
 }
 
-pub(super) fn draw(file: &FileLink) -> visual::Result<Drawn> {
+/// A file version and its image or failure. Unchanged files reuse the same
+/// allocation, so a metadata check neither regenerates nor evicts a texture.
+#[derive(Clone)]
+pub(crate) struct Preview {
+    version: Option<Version>,
+    pub(super) image: Arc<visual::Result<Drawn>>,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, PartialEq, Eq)]
+struct Version {
+    path: std::path::PathBuf,
+    length: u64,
+    modified: Option<std::time::SystemTime>,
+    changed: (i64, i64),
+    inode: u64,
+}
+
+#[cfg(not(target_os = "macos"))]
+type Version = ();
+
+#[cfg(target_os = "macos")]
+fn version(file: &FileLink) -> Option<Version> {
+    use std::os::unix::fs::MetadataExt;
+    let path = file.thumbnail_path().filter(|path| supported(path))?;
+    let metadata = std::fs::metadata(&path).ok()?;
+    Some(Version {
+        path,
+        length: metadata.len(),
+        modified: metadata.modified().ok(),
+        changed: (metadata.ctime(), metadata.ctime_nsec()),
+        inode: metadata.ino(),
+    })
+}
+
+/// Runs only on a visual worker. Recheck failed previews too, so a missing
+/// file that the agent finishes writing can acquire its thumbnail later.
+pub(super) fn refresh(file: &FileLink, previous: Option<Preview>) -> Preview {
     #[cfg(target_os = "macos")]
-    {
-        let path = file
-            .thumbnail_path()
-            .filter(|path| supported(path))
-            .ok_or(Error::Unavailable)?;
-        let bytes = generate(&path)?;
-        visual::decode_bytes(bytes, image::ImageFormat::Png)
-    }
+    let version = version(file);
     #[cfg(not(target_os = "macos"))]
-    {
+    let version = {
         let _ = file;
-        Err(Error::Unavailable.into())
+        None
+    };
+    if let Some(previous) = previous.filter(|previous| previous.version == version) {
+        return previous;
+    }
+    #[cfg(target_os = "macos")]
+    let image = version
+        .as_ref()
+        .ok_or_else(|| visual::Error::from(Error::Unavailable))
+        .and_then(|version| {
+            visual::decode_bytes(generate(&version.path)?, image::ImageFormat::Png)
+        });
+    #[cfg(not(target_os = "macos"))]
+    let image = Err(Error::Unavailable.into());
+    Preview {
+        version,
+        image: Arc::new(image),
+    }
+}
+
+#[cfg(test)]
+fn draw(file: &FileLink) -> visual::Result<Drawn> {
+    let preview = refresh(file, None);
+    match Arc::try_unwrap(preview.image) {
+        Ok(image) => image,
+        Err(_) => Err(Error::Unavailable.into()),
     }
 }
 

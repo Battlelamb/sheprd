@@ -30,8 +30,12 @@ No VM or installed app was changed.
 
 Thumbnails are generated only for local PDF/video attachments on macOS.
 Missing/unsupported files and remote attachments retain a generic file icon.
-The native test uses the actual Quick Look service:
+Visible thumbnails are checked in the background every two seconds. Replaced
+or edited files regenerate their preview; unchanged files reuse their cached
+image, and missing files are checked again so newly written attachments appear.
+The native tests use the actual Quick Look service, including overwriting a PDF
+at the same path and checking that the rendered pixels change:
 
 ```sh
-cargo test --locked -p sheprd-gpui --lib native_pdf_and_video_thumbnails_are_real_bounded_images -- --ignored
+cargo test --locked -p sheprd-gpui --lib chat::visual::thumbnail::tests::native_ -- --ignored
 ```

@@ -36,8 +36,8 @@ fn thumbnails_share_worker_and_retention_limits_and_cache_failures(cx: &mut Test
     let mut completed = Vec::new();
     for job in jobs {
         let (id, ticket, result) = job.run();
-        assert!(result.is_err());
         visuals.finish(id, ticket, result);
+        assert!(matches!(visuals.shown(id), Shown::Failed(_)));
         completed.push(id);
     }
     let next = visuals.jobs(&style, &renderer);

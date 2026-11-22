@@ -132,3 +132,116 @@ fn timed_out_thumbnail_process_is_killed_and_reaped() {
     ));
     assert!(child.try_wait().unwrap().is_some());
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn file_version_detects_overwrites_replacement_and_disappearance() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("report.pdf");
+    let link = file(&path);
+    assert!(thumbnail::version(&link).is_none());
+    std::fs::write(&path, b"one").unwrap();
+    let first = thumbnail::version(&link).unwrap();
+    assert!(thumbnail::version(&link).as_ref() == Some(&first));
+    std::fs::write(&path, b"longer").unwrap();
+    let overwritten = thumbnail::version(&link).unwrap();
+    assert!(first != overwritten);
+    let replacement = root.path().join("replacement.pdf");
+    std::fs::write(&replacement, b"longer").unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&replacement)
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(overwritten.modified.unwrap()))
+        .unwrap();
+    std::fs::rename(replacement, &path).unwrap();
+    assert!(thumbnail::version(&link).unwrap() != overwritten);
+    std::fs::remove_file(path).unwrap();
+    assert!(thumbnail::version(&link).is_none());
+}
+
+#[gpui::test]
+fn visible_thumbnail_checks_are_throttled_and_unchanged_failures_are_reused(
+    cx: &mut gpui::TestAppContext,
+) {
+    use crate::{
+        chat::visual::{DiagramStyle, Source, VisualId, Visuals},
+        config::{Config, Theme},
+    };
+    use std::time::{Duration, Instant};
+    let renderer = cx.update(|cx| cx.svg_renderer());
+    let style = DiagramStyle::of(&Theme::default(), &Config::default().ui);
+    // With no cwd this relative path cannot resolve, on any machine.
+    let link = file(Path::new("not-written-yet.pdf"));
+    let id = VisualId::of("thumbnail-refresh");
+    let mut visuals = Visuals::default();
+    visuals.request_visible(id, Source::Thumbnail(link));
+    let jobs = visuals.jobs_at(2, &style, &renderer, Instant::now());
+    assert_eq!(jobs.len(), 1);
+    for job in jobs {
+        let (id, ticket, image) = job.run();
+        assert!(visuals.finish(id, ticket, image));
+    }
+    assert!(
+        visuals
+            .jobs_at(2, &style, &renderer, Instant::now())
+            .is_empty()
+    );
+    let later = Instant::now() + Duration::from_secs(3);
+    let jobs = visuals.jobs_at(2, &style, &renderer, later);
+    assert_eq!(jobs.len(), 1);
+    for job in jobs {
+        let (id, ticket, image) = job.run();
+        assert!(
+            !visuals.finish(id, ticket, image),
+            "unchanged metadata must not redraw"
+        );
+    }
+    assert!(visuals.take_released().is_empty());
+    visuals.begin_frame();
+    assert!(
+        visuals
+            .jobs_at(2, &style, &renderer, later + Duration::from_secs(3))
+            .is_empty()
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires macOS Quick Look services; run explicitly on a desktop"]
+fn native_revised_pdf_replaces_cached_pixels_and_missing_files_recover() {
+    use std::sync::Arc;
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("report.pdf");
+    let link = file(&path);
+    let missing = thumbnail::refresh(&link, None);
+    assert!(missing.image.is_err());
+    let original = include_str!("../../../../tests/fixtures/attachments/Review report.pdf");
+    std::fs::write(&path, original).unwrap();
+    let first = thumbnail::refresh(&link, Some(missing));
+    let first_pixels = first
+        .image
+        .as_ref()
+        .as_ref()
+        .unwrap()
+        .texture
+        .as_bytes(0)
+        .unwrap()
+        .to_vec();
+    let unchanged = thumbnail::refresh(&link, Some(first.clone()));
+    assert!(Arc::ptr_eq(&first.image, &unchanged.image));
+    // Equal-length PDF edit keeps its object offsets valid.
+    std::fs::write(&path, original.replace("0.12 0.2 0.45", "0.80 0.2 0.45")).unwrap();
+    let revised = thumbnail::refresh(&link, Some(first));
+    let revised_pixels = revised
+        .image
+        .as_ref()
+        .as_ref()
+        .unwrap()
+        .texture
+        .as_bytes(0)
+        .unwrap();
+    assert_ne!(first_pixels, revised_pixels);
+    std::fs::remove_file(path).unwrap();
+    assert!(thumbnail::refresh(&link, Some(revised)).image.is_err());
+}

@@ -25,6 +25,7 @@ use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     rc::Rc,
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 /// Bytes of Mermaid source drawn; a longer fence stays code.
@@ -131,6 +132,7 @@ pub(crate) struct Drawn {
 /// Prepared by the same bounded worker queue; code has no GPU texture.
 pub(crate) enum Output {
     Image(Drawn),
+    Thumbnail(thumbnail::Preview),
     Code(Vec<Vec<crate::review::highlight::Span>>),
 }
 
@@ -142,6 +144,13 @@ impl Output {
                 .texture
                 .as_bytes(0)
                 .map_or(usize::MAX, |bytes| bytes.len()),
+            Self::Thumbnail(preview) => preview
+                .image
+                .as_ref()
+                .as_ref()
+                .ok()
+                .and_then(|drawn| drawn.texture.as_bytes(0))
+                .map_or(0, |bytes| bytes.len()),
             Self::Code(_) => 0,
         }
     }
@@ -149,6 +158,12 @@ impl Output {
     fn texture(self) -> Option<Arc<RenderImage>> {
         match self {
             Self::Image(drawn) => Some(drawn.texture),
+            Self::Thumbnail(preview) => preview
+                .image
+                .as_ref()
+                .as_ref()
+                .ok()
+                .map(|drawn| drawn.texture.clone()),
             Self::Code(_) => None,
         }
     }
@@ -253,7 +268,7 @@ enum Work {
     Math(Arc<str>, MathMode, Arc<DiagramStyle>),
     Diagram(Arc<str>, Arc<DiagramStyle>, SvgRenderer),
     Remote(crate::browser::WebUrl),
-    Thumbnail(crate::window::FileLink),
+    Thumbnail(crate::window::FileLink, Option<thumbnail::Preview>),
 }
 
 impl Job {
@@ -270,7 +285,9 @@ impl Job {
             .unwrap_or(Err(Error::Panicked))
             .map(Output::Image),
             Work::Remote(url) => remote::fetch(&url).map(Output::Image),
-            Work::Thumbnail(file) => thumbnail::draw(&file).map(Output::Image),
+            Work::Thumbnail(file, previous) => {
+                Ok(Output::Thumbnail(thumbnail::refresh(&file, previous)))
+            }
             Work::Diagram(source, style, renderer) => {
                 // The renderer is a third-party parser fed untrusted text; a
                 // panic in it fails this diagram rather than the app.
@@ -360,6 +377,7 @@ enum Kind {
 }
 
 struct Item {
+    checked_at: Option<Instant>,
     kind: Kind,
     phase: Phase,
     /// What is drawn now; a diagram keeps its old texture while it redraws.
@@ -512,6 +530,7 @@ impl Visuals {
             self.rich_count += 1;
         }
         self.items.entry(id).or_insert(Item {
+            checked_at: None,
             kind,
             phase: Phase::Queued,
             shown: None,
@@ -562,6 +581,10 @@ impl Visuals {
     pub(crate) fn shown(&self, id: VisualId) -> Shown<'_> {
         match self.items.get(&id).and_then(|item| item.shown.as_ref()) {
             Some(Ok(Output::Image(drawn))) => Shown::Ready(drawn),
+            Some(Ok(Output::Thumbnail(preview))) => match preview.image.as_ref() {
+                Ok(drawn) => Shown::Ready(drawn),
+                Err(error) => Shown::Failed(error),
+            },
             Some(Ok(Output::Code(_))) => Shown::Pending,
             Some(Err(error)) => Shown::Failed(error),
             None => Shown::Pending,
@@ -571,7 +594,7 @@ impl Visuals {
     pub(crate) fn code(&self, id: VisualId) -> Option<&[Vec<crate::review::highlight::Span>]> {
         match self.items.get(&id)?.shown.as_ref()?.as_ref().ok()? {
             Output::Code(spans) => Some(spans),
-            Output::Image(_) => None,
+            Output::Image(_) | Output::Thumbnail(_) => None,
         }
     }
 
@@ -590,8 +613,32 @@ impl Visuals {
         style: &DiagramStyle,
         renderer: &SvgRenderer,
     ) -> Vec<Job> {
+        self.jobs_at(capacity, style, renderer, Instant::now())
+    }
+
+    fn jobs_at(
+        &mut self,
+        capacity: usize,
+        style: &DiagramStyle,
+        renderer: &SvgRenderer,
+        now: Instant,
+    ) -> Vec<Job> {
         let visible = self.visible.take();
         self.admit_visible(&visible);
+        // Only visible thumbnails are polled, and only metadata is read unless
+        // the background fingerprint changes. No disk I/O happens here.
+        for (id, source) in &visible {
+            if let Some(item) = self.items.get_mut(id)
+                && item.kind == Kind::Thumbnail
+                && matches!(item.phase, Phase::Done)
+                && item.checked_at.is_some_and(|checked| {
+                    now.saturating_duration_since(checked) >= Duration::from_secs(2)
+                })
+            {
+                item.phase = Phase::Queued;
+                item.source = Some(source.clone());
+            }
+        }
         let jobs = self.start_jobs(capacity, &visible, style, renderer);
         self.visible.replace(visible);
         jobs
@@ -639,7 +686,13 @@ impl Visuals {
                     Some(Source::Code { language, source }) => Work::Code(language, source),
                     Some(Source::Image(image)) => Work::Image(image),
                     Some(Source::Remote(url)) => Work::Remote(url),
-                    Some(Source::Thumbnail(file)) => Work::Thumbnail(file),
+                    Some(Source::Thumbnail(file)) => {
+                        let previous = match item.shown.as_ref() {
+                            Some(Ok(Output::Thumbnail(preview))) => Some(preview.clone()),
+                            _ => None,
+                        };
+                        Work::Thumbnail(file, previous)
+                    }
                     None => continue,
                 };
                 self.tickets += 1;
@@ -699,6 +752,15 @@ impl Visuals {
             }
         }
         item.phase = Phase::Done;
+        if item.kind == Kind::Thumbnail {
+            item.checked_at = Some(Instant::now());
+            if let (Some(Ok(Output::Thumbnail(previous))), Ok(Output::Thumbnail(next))) =
+                (&item.shown, &drawn)
+                && Arc::ptr_eq(&previous.image, &next.image)
+            {
+                return false;
+            }
+        }
         if let Some(Ok(old)) = item.shown.replace(drawn) {
             self.released.extend(old.texture());
         }

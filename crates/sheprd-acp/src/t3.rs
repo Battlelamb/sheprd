@@ -1,30 +1,59 @@
-//! A T3 Code thread, followed live and served on the attach wire, read-only.
+//! A T3 Code thread, followed live, served on the attach wire, and steered.
 //!
-//! T3 Code runs the thread's agent; this program only reads the thread's
-//! stream (`sheprd_t3`) and shows it to Sheprd's chat views through the same
-//! [`Mirror`] that serves existing CLI transcripts. Every command a client
-//! sends is refused. One worker thread owns the T3 connection and hands the
-//! main loop a fresh transcript after each chunk; when the connection ends,
-//! the chat says why and keeps showing what it had.
+//! T3 Code runs the thread's agent; this program reads the thread's stream
+//! (`sheprd_t3`) and shows it to Sheprd's chat views through the same
+//! [`Mirror`] that serves existing CLI transcripts. A client's prompts,
+//! answers, stops, and model changes go back to T3 as dispatched commands
+//! ([`sheprd_t3::steer`]), and each is acknowledged once T3 has taken or
+//! refused it. One worker thread owns the T3 connection: it hands the main
+//! loop a fresh transcript after each chunk and sends the commands the loop
+//! passes it. When the connection ends, the chat says why, keeps showing
+//! what it had, and takes no more commands.
 
 use std::{
+    collections::HashMap,
     io::{Read, Write},
     thread,
+    time::{Duration, Instant},
 };
 
 use anyhow::Context as _;
-use crossbeam_channel::{bounded, select};
+use crossbeam_channel::{Receiver, Sender, bounded, select};
 use serde_json::json;
-use sheprd_chat_protocol::{EndpointId, Status, Transcript};
+use sheprd_chat_protocol::{Command, CommandId, EndpointId, Rejection, Status, Transcript};
 use sheprd_t3::{
-    connection::Connection, discover, frame::ServerFrame, http::Server, thread::Thread,
+    connection::Connection,
+    discover,
+    frame::{Exit, ServerFrame},
+    http::Server,
+    steer::{self, Provider},
+    thread::Thread,
 };
 
-use crate::{cli::T3Options, mirror::Mirror, session::Input};
+use crate::{
+    cli::T3Options,
+    mirror::Mirror,
+    session::{ConnId, Input},
+};
+
+/// How long the worker waits for a frame before sending waiting commands.
+const POLL: Duration = Duration::from_millis(200);
+/// How long a quiet connection waits before checking the server is there,
+/// and then for its answer.
+const QUIET: Duration = Duration::from_secs(30);
+/// The most commands waiting for the worker, and for T3 to answer; more
+/// are refused.
+const MAX_ORDERS: usize = 32;
 
 /// What one frame of the thread's stream does to the chat.
 #[derive(Debug, PartialEq)]
 pub(crate) enum Step {
+    /// T3 took a client's command, or refused it.
+    Acked {
+        conn: ConnId,
+        id: CommandId,
+        rejected: Option<Rejection>,
+    },
     /// The thread changed; this is its transcript now.
     Changed(Box<Transcript>),
     /// Nothing the chat shows changed.
@@ -33,18 +62,49 @@ pub(crate) enum Step {
     Ended(String),
 }
 
-/// The thread a stream follows, and what it last looked like.
+/// A client's command, on its way to T3.
+#[derive(Debug)]
+pub(crate) struct Order {
+    pub command: Command,
+    pub conn: ConnId,
+    pub id: CommandId,
+}
+
+/// The thread a stream follows, what it last looked like, and the commands
+/// sent to it that T3 has not answered yet.
 pub(crate) struct Follower {
+    /// Dispatches waiting for their `Exit`, by RPC request id.
+    dispatched: HashMap<String, (ConnId, CommandId)>,
+    providers: Vec<Provider>,
     request: String,
     thread: Thread,
 }
 
 impl Follower {
-    pub(crate) fn new(request: String) -> Self {
+    pub(crate) fn new(request: String, providers: Vec<Provider>) -> Self {
         Self {
+            dispatched: HashMap::new(),
+            providers,
             request,
             thread: Thread::default(),
         }
+    }
+
+    /// The dispatch for `order`, or why T3 cannot take it.
+    pub(crate) fn dispatch(&self, order: &Order) -> Result<steer::Dispatch, Rejection> {
+        if !self.ready() {
+            return Err(Rejection::NotReady);
+        }
+        if self.dispatched.len() >= MAX_ORDERS {
+            return Err(Rejection::QueueFull);
+        }
+        steer::dispatch(&self.thread, &self.providers, order.id, &order.command)
+    }
+
+    /// Remembers that RPC `request` carries `order`, to acknowledge it when
+    /// T3 answers.
+    pub(crate) fn sent(&mut self, request: String, order: &Order) {
+        self.dispatched.insert(request, (order.conn, order.id));
     }
 
     /// Whether the thread's snapshot has arrived.
@@ -65,6 +125,24 @@ impl Follower {
                     Step::Changed(Box::new(self.transcript()))
                 }
             }
+            ServerFrame::Exit { request_id, exit } if self.dispatched.contains_key(&request_id) => {
+                let Some((conn, id)) = self.dispatched.remove(&request_id) else {
+                    return Step::Same;
+                };
+                let rejected = match exit {
+                    Exit::Success { .. } => None,
+                    failure => {
+                        // T3's own words, for the pane; the client hears
+                        // that the command did not reach the agent.
+                        eprintln!(
+                            "T3 Code refused a command: {}",
+                            plain(&failure.cause().unwrap_or_default())
+                        );
+                        Some(Rejection::AgentUnavailable)
+                    }
+                };
+                Step::Acked { conn, id, rejected }
+            }
             ServerFrame::Exit { request_id, exit } if request_id == self.request => Step::Ended(
                 exit.cause()
                     .unwrap_or_else(|| "T3 Code ended the thread's stream.".to_owned()),
@@ -74,15 +152,15 @@ impl Follower {
         }
     }
 
-    /// The thread as a read-only chat transcript.
+    /// The thread as a chat transcript, with its provider and model as
+    /// settings.
     pub(crate) fn transcript(&self) -> Transcript {
         let agent = match &self.thread.header.provider_instance_id {
             Some(provider) => format!("{provider} in T3 Code"),
             None => "T3 Code".to_owned(),
         };
         let mut transcript = sheprd_t3::transcript::transcript(&self.thread, &agent);
-        // Prompts, answers, and settings stay in T3 Code for now.
-        transcript.read_only = true;
+        transcript.options = steer::options(&self.thread, &self.providers);
         transcript
     }
 }
@@ -105,11 +183,23 @@ pub(crate) fn run(options: T3Options) -> anyhow::Result<()> {
     let token = sheprd_t3::token::load(&options.token_file, &descriptor.environment_id)?;
     let ticket = server.ticket(&token)?;
     let mut connection = Connection::open(&server.socket(&ticket)?)?;
+    // Without the server's providers the chat offers no model to change,
+    // and the thread still shows and takes prompts.
+    let providers = match connection.call("server.getConfig", json!({})) {
+        Ok(config) => steer::providers(&config),
+        Err(error) => {
+            eprintln!(
+                "T3 Code did not list its agents: {}",
+                plain(&error.to_string())
+            );
+            Vec::new()
+        }
+    };
     let request = connection.request(
         "orchestration.subscribeThread",
         json!({ "threadId": options.thread }),
     )?;
-    let mut follower = Follower::new(request);
+    let mut follower = Follower::new(request, providers);
     while !follower.ready() {
         let frame = connection.next_frame()?;
         if let Step::Ended(reason) = follower.frame(frame) {
@@ -128,27 +218,45 @@ pub(crate) fn run(options: T3Options) -> anyhow::Result<()> {
     println!("{id}");
     std::io::stdout().flush()?;
 
+    // A short read timeout lets the worker send commands between frames;
+    // a partly read frame waits in the socket for the next read.
+    connection
+        .stream()
+        .set_read_timeout(Some(POLL))
+        .context("could not set the T3 Code socket's timeout")?;
     // One transcript in flight: the worker waits while the loop takes the
     // last, which holds the server's next chunk back too.
     let (updates, mut changes) = bounded::<Step>(1);
+    let (orders, queue) = bounded::<Order>(MAX_ORDERS);
     thread::Builder::new()
         .name("t3-thread".to_owned())
-        .spawn(move || follow(connection, follower, &updates))?;
+        .spawn(move || follow(connection, follower, &updates, &queue, QUIET))?;
+    let mut ended = false;
     loop {
         select! {
             recv(receiver) -> input => match input {
                 Ok(Input::Shutdown) | Err(_) => break,
+                Ok(Input::Command { command, conn, id }) => {
+                    if ended || orders.try_send(Order { command, conn, id }).is_err() {
+                        mirror.ack(conn, id, Some(Rejection::AgentUnavailable));
+                    }
+                }
                 Ok(input) => mirror.input(input),
             },
             recv(changes) -> step => match step {
+                Ok(Step::Acked { conn, id, rejected }) => mirror.ack(conn, id, rejected),
                 Ok(Step::Changed(transcript)) => {
                     shown = *transcript;
                     mirror.update(shown.clone());
                 }
                 Ok(Step::Ended(reason)) => {
+                    ended = true;
                     shown.status = Status::Failed {
                         message: format!("The T3 Code connection ended: {reason}"),
                     };
+                    // Nothing reaches T3 any more.
+                    shown.permissions.clear();
+                    shown.read_only = true;
                     mirror.update(shown.clone());
                 }
                 Ok(Step::Same) => {}
@@ -161,32 +269,75 @@ pub(crate) fn run(options: T3Options) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Reads the stream until it ends, passing each change on.
+/// `text` from the server, safe for the pane's terminal: control
+/// characters, which could start an escape sequence, become `\u{fffd}`.
+fn plain(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { '\u{fffd}' } else { c })
+        .collect()
+}
+
+/// Reads the stream until it ends, passing each change on, and sends the
+/// commands waiting in `orders` between reads.
 ///
-/// A quiet read sends one ping; a second quiet read with that ping still
-/// unanswered means the server is gone even if its socket stays open.
+/// After `quiet` with nothing heard it sends one ping; `quiet` more with
+/// that ping unanswered means the server is gone even if its socket stays
+/// open.
 fn follow<S: Read + Write>(
     mut connection: Connection<S>,
     mut follower: Follower,
-    updates: &crossbeam_channel::Sender<Step>,
+    updates: &Sender<Step>,
+    orders: &Receiver<Order>,
+    quiet: Duration,
 ) {
-    let mut pinged = false;
+    let mut heard = Instant::now();
+    let mut pinged = None;
     loop {
+        while let Ok(order) = orders.try_recv() {
+            let rejected = match follower.dispatch(&order) {
+                Ok(dispatch) => {
+                    let sent = serde_json::to_value(&dispatch)
+                        .map_err(sheprd_t3::Error::from)
+                        .and_then(|payload| connection.request(steer::DISPATCH, payload));
+                    match sent {
+                        Ok(request) => {
+                            follower.sent(request, &order);
+                            continue;
+                        }
+                        Err(_) => Rejection::AgentUnavailable,
+                    }
+                }
+                Err(rejection) => rejection,
+            };
+            let step = Step::Acked {
+                conn: order.conn,
+                id: order.id,
+                rejected: Some(rejected),
+            };
+            if updates.send(step).is_err() {
+                return;
+            }
+        }
         let step = match connection.next_frame() {
             Ok(frame) => {
-                pinged = false;
+                heard = Instant::now();
+                pinged = None;
                 follower.frame(frame)
             }
-            Err(sheprd_t3::Error::Idle) if pinged => {
-                Step::Ended("T3 Code stopped answering.".to_owned())
-            }
-            // A quiet thread: check the server is still there.
-            Err(sheprd_t3::Error::Idle) => match connection.ping() {
-                Ok(()) => {
-                    pinged = true;
-                    Step::Same
+            Err(sheprd_t3::Error::Idle) => match pinged {
+                Some(at) if Instant::now().duration_since(at) >= quiet => {
+                    Step::Ended("T3 Code stopped answering.".to_owned())
                 }
-                Err(error) => Step::Ended(error.to_string()),
+                Some(_) => Step::Same,
+                // A quiet thread: check the server is still there.
+                None if Instant::now().duration_since(heard) >= quiet => match connection.ping() {
+                    Ok(()) => {
+                        pinged = Some(Instant::now());
+                        Step::Same
+                    }
+                    Err(error) => Step::Ended(error.to_string()),
+                },
+                None => Step::Same,
             },
             Err(error) => Step::Ended(error.to_string()),
         };

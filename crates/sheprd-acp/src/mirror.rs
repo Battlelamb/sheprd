@@ -15,7 +15,7 @@ use std::{
 use anyhow::Context as _;
 use crossbeam_channel::{Sender, bounded};
 use sheprd_chat_protocol::{
-    Change, Cursor, EndpointId, Rejection, ServerMessage, Transcript, VERSION,
+    Change, CommandId, Cursor, EndpointId, Rejection, ServerMessage, Transcript, VERSION,
 };
 
 use crate::{
@@ -110,18 +110,20 @@ impl Mirror {
             Input::Command { conn, id, .. } | Input::Unsupported { conn, id } => {
                 // This applies to every command, including Cancel and Answer:
                 // old log records never become actionable permission requests.
-                if let Some(client) = self.clients.get(&conn)
-                    && client
-                        .try_send(ServerMessage::Ack {
-                            id,
-                            rejected: Some(Rejection::NotReady),
-                        })
-                        .is_err()
-                {
-                    self.clients.remove(&conn);
-                }
+                self.ack(conn, id, Some(Rejection::NotReady));
             }
             Input::Agent(..) | Input::AgentExited { .. } | Input::Shutdown => {}
+        }
+    }
+
+    /// Tells client `conn` its command `id` was taken, or why not.
+    pub(crate) fn ack(&mut self, conn: ConnId, id: CommandId, rejected: Option<Rejection>) {
+        if let Some(client) = self.clients.get(&conn)
+            && client
+                .try_send(ServerMessage::Ack { id, rejected })
+                .is_err()
+        {
+            self.clients.remove(&conn);
         }
     }
 

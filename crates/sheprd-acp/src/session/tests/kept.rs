@@ -441,3 +441,81 @@ fn a_thread_has_one_owner_until_the_chat_releases_it() {
     drop(first);
     drop(ThreadStart::read(dir.path().to_owned(), id).unwrap());
 }
+
+#[test]
+fn restored_tools_keep_their_identity_timing_and_conversation_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = ThreadId::random();
+    let mut first = kept(dir.path(), id, None);
+    let turn = prompt(&mut first, 1, "run it");
+    first.update(json!({
+        "sessionUpdate": "tool_call", "toolCallId": "command-1",
+        "title": "command", "kind": "execute", "status": "in_progress"
+    }));
+    first.update(json!({
+        "sessionUpdate": "tool_call_update", "toolCallId": "command-1", "status": "completed"
+    }));
+    first.agent_says("finished");
+    first.respond(turn, json!({"stopReason": "end_turn"}));
+    let saved = contents(dir.path(), &id);
+    let tool = saved
+        .entries
+        .iter()
+        .find(|entry| matches!(entry.kind, EntryKind::Tool(_)))
+        .unwrap()
+        .clone();
+    let EntryKind::Tool(saved_tool) = &tool.kind else {
+        panic!("tool")
+    };
+    assert!(saved_tool.started_ms.is_some());
+    drop(first);
+
+    let mut history = Transcript::new("Claude");
+    history.entries = saved
+        .entries
+        .iter()
+        .filter(|entry| {
+            matches!(
+                entry.kind,
+                EntryKind::User { .. } | EntryKind::Tool(_) | EntryKind::Agent { .. }
+            )
+        })
+        .cloned()
+        .collect();
+    for (at, entry) in history.entries.iter_mut().enumerate() {
+        entry.id = EntryId(at as u64 + 1);
+        if let EntryKind::Tool(tool) = &mut entry.kind {
+            tool.started_ms = None;
+        }
+    }
+    // Recovery may also contain a missing entry between two saved entries.
+    history.entries.insert(2, user_entry(50, "missing middle"));
+    let expected: Vec<_> = history
+        .entries
+        .iter()
+        .map(|entry| entry.kind.clone())
+        .collect();
+    for _ in 0..2 {
+        let mut resumed = kept_with(dir.path(), id, Some("s1"), Some(history.clone()));
+        let shown = &resumed.transcript().entries;
+        assert_eq!(
+            shown
+                .iter()
+                .take(expected.len())
+                .map(|entry| entry.kind.clone())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert!(shown.windows(2).all(|pair| pair[0].id < pair[1].id));
+        resumed.input(Input::Shutdown);
+        let kept = contents(dir.path(), &id);
+        let tools: Vec<_> = kept
+            .entries
+            .iter()
+            .filter(
+                |entry| matches!(&entry.kind, EntryKind::Tool(tool) if tool.call_id == "command-1"),
+            )
+            .collect();
+        assert_eq!(tools, vec![&tool]);
+    }
+}

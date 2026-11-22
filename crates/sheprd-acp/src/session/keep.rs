@@ -8,7 +8,10 @@
 //! the transcript is about to drop them. A failure to write is said once in
 //! the chat, and the thread is no longer kept.
 
-use std::{collections::BTreeSet, path::PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+};
 
 use sheprd_chat_protocol::{
     Change, Entry, EntryId, EntryKind, OptionCategory, OptionKind, Transcript,
@@ -71,6 +74,8 @@ pub(super) struct Keep {
     marked: BTreeSet<EntryId>,
     /// Saved entries still available to match during initial recovery.
     recovery: Vec<Entry>,
+    /// Display IDs stay in replay order; writes retain the saved identity.
+    recovered: BTreeMap<EntryId, (EntryId, Option<u64>)>,
     _lock: thread::Lock,
     title: String,
     /// Whether the record is on disk.
@@ -124,23 +129,24 @@ impl Keep {
                 segment.is_some_and(|segment| segment.after.is_none_or(|after| entry.id > after))
             })
             .collect();
+        let mut recovered = BTreeMap::new();
         let mut next = last.map_or(0, |id| id.0);
         if record.is_some() {
             for entry in entries.iter_mut() {
-                if let Some(at) = recovery.iter().position(|saved| saved.kind == entry.kind) {
-                    entry.id = recovery.remove(at).id;
-                } else {
-                    next = next.saturating_add(1);
-                    entry.id = EntryId(next);
+                next = next.saturating_add(1);
+                entry.id = EntryId(next);
+                if let Some(at) = recovery.iter().position(|saved| same_entry(saved, entry)) {
+                    let saved = recovery.remove(at);
+                    recovered.insert(entry.id, saved_identity(&saved));
                 }
             }
-            entries.sort_by_key(|entry| entry.id);
         }
         let mut keep = Self {
             created_ms: None,
             cwd,
             dir,
             marked: entries.iter().map(|entry| entry.id).collect(),
+            recovered,
             recovery: if load.is_some() { recovery } else { Vec::new() },
             _lock: lock,
             title: String::new(),
@@ -213,21 +219,45 @@ impl Keep {
             .collect();
         let entries: Vec<_> = entries
             .into_iter()
-            .filter(|entry| {
-                if let Some(at) = self
-                    .recovery
-                    .iter()
-                    .position(|saved| saved.kind == entry.kind)
+            .map(|entry| {
+                if !self.recovered.contains_key(&entry.id)
+                    && let Some(at) = self
+                        .recovery
+                        .iter()
+                        .position(|saved| same_entry(saved, entry))
                 {
-                    self.recovery.remove(at);
-                    false
-                } else {
-                    true
+                    let saved = self.recovery.remove(at);
+                    self.recovered.insert(entry.id, saved_identity(&saved));
                 }
+                let mut entry = entry.clone();
+                if let Some((id, started_ms)) = self.recovered.get(&entry.id) {
+                    entry.id = *id;
+                    if let EntryKind::Tool(tool) = &mut entry.kind {
+                        tool.started_ms = tool.started_ms.or(*started_ms);
+                    }
+                }
+                entry
             })
             .collect();
-        self.writer.append(&entries)
+        self.writer.append(&entries.iter().collect::<Vec<_>>())
     }
+}
+
+/// A call's identity survives history readers omitting live timing and
+/// progress metadata. Other entries have no source identity.
+fn same_entry(saved: &Entry, recovered: &Entry) -> bool {
+    match (&saved.kind, &recovered.kind) {
+        (EntryKind::Tool(saved), EntryKind::Tool(recovered)) => saved.call_id == recovered.call_id,
+        _ => saved.kind == recovered.kind,
+    }
+}
+
+fn saved_identity(entry: &Entry) -> (EntryId, Option<u64>) {
+    let started = match &entry.kind {
+        EntryKind::Tool(tool) => tool.started_ms,
+        _ => None,
+    };
+    (entry.id, started)
 }
 
 /// The current value of the transcript's model setting.

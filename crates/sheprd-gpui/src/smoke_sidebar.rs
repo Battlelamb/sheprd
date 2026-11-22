@@ -377,10 +377,7 @@ pub fn start_sidebar(handle: WindowHandle<SheprdWindow>, cx: &mut App) {
                                         || p.glyph_text.strip_suffix('\u{2026}').is_some_and(
                                             |kept| input.starts_with(kept.trim_end()),
                                         );
-                                    // As in the child-label probe, truncation may leave
-                        // one glyph plus the ellipsis short of the column.
-                        // Rounded rows have narrower columns than flat ones.
-                        if p.glyph_text != p.cached
+                                    if p.glyph_text != p.cached
                                         || !shown
                                         || p.clipped
                                         || p.width > p.bounds.size.width

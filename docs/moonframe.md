@@ -220,8 +220,14 @@ the workload; `--output-only` measures steady and heavy output together.
 Keep the VM tab visible and the guest unobscured by permission dialogs;
 a hidden virtual display can stop delivering frame callbacks even when the
 guest window reports itself active. Failed commands, inactive
-windows, failed wheel injection, and unchanged scroll positions reject a
-run. Each run saves screenshots, status, synthetic terminal readback, logs,
+windows, failed wheel injection, and unchanged measured scroll positions reject a
+run. The harness samples the daemon's scroll offset every half second during
+measurement and saves `scroll-samples.json`; warmup movement alone is not
+enough. This readback adds a small amount of measurement overhead. Wheel
+input and optional pixel capture use `--until-eof`: the harness closes their
+stdin only after measurement ends, so setup delays cannot shorten their run.
+An early helper exit rejects the run, even if its exit code is zero.
+Each run saves screenshots, status, synthetic terminal readback, logs,
 frame timestamps, and `result.json`. Compare redraw rates **and** maximum
 silence, including the measurement boundaries: a frozen UI can report cheap
 frames precisely because it did not draw. These are frame-processing times

@@ -57,11 +57,13 @@ final class Pixels: NSObject, SCStreamOutput {
 @main
 struct Probe {
     static func main() async throws {
-        guard CommandLine.arguments.count == 3,
-              let seconds = Double(CommandLine.arguments[1]), seconds > 0 else {
-            fputs("usage: bench-terminal-pixels SECONDS FIRST_FRAME_BGRA\n", stderr)
+        guard CommandLine.arguments.count == 3 else {
+            fputs("usage: bench-terminal-pixels SECONDS|--until-eof FIRST_FRAME_BGRA\n", stderr)
             exit(2)
         }
+        let untilEOF = CommandLine.arguments[1] == "--until-eof"
+        let seconds = Double(CommandLine.arguments[1]) ?? 0
+        guard untilEOF || (seconds.isFinite && seconds > 0 && seconds <= 3600) else { exit(2) }
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let display = content.displays.first else { throw CocoaError(.fileNoSuchFile) }
         let filter = SCContentFilter(display: display, excludingWindows: [])
@@ -79,10 +81,18 @@ struct Probe {
         try await stream.startCapture()
         print("{\"start\":\(ProcessInfo.processInfo.systemUptime)}")
         fflush(stdout)
-        try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        if untilEOF {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                DispatchQueue.global().async {
+                    _ = FileHandle.standardInput.readDataToEndOfFile()
+                    continuation.resume()
+                }
+            }
+        } else {
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        }
         try await stream.stopCapture()
         queue.sync {}
         print("{\"end\":\(ProcessInfo.processInfo.systemUptime)}")
     }
 }
-

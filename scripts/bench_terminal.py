@@ -54,6 +54,32 @@ def pixel_measurements(records, start, end):
     }
 
 
+def sample_scroll_positions(deadline, read_position, now=time.monotonic, sleep=time.sleep):
+    samples = []
+    while now() < deadline:
+        position = read_position()
+        stamp = now()
+        if stamp >= deadline:
+            break
+        samples.append({"time": stamp, "offset": position["pane"]["scroll"]["offset_from_bottom"]})
+        sleep(min(0.5, max(0, deadline - now())))
+    return samples
+
+
+def validate_scroll_positions(samples, start, end):
+    offsets = {sample["offset"] for sample in samples if start <= sample["time"] < end}
+    if len(offsets) < 2:
+        raise RuntimeError("scroll position did not change during measurement")
+
+
+def finish_helper(process, name):
+    if process.poll() is not None:
+        raise RuntimeError(f"{name} exited before measurement ended")
+    process.stdin.close()
+    if process.wait(timeout=5):
+        raise RuntimeError(f"{name} failed")
+
+
 class CheckedSandbox(Sandbox):
     def _populate(self, home, trees):
         self.env["PATH"] = os.environ.get("PATH", "/usr/bin:/bin")
@@ -64,7 +90,8 @@ class CheckedSandbox(Sandbox):
             raise
 
     def run(self, *args):
-        result = subprocess.run([self.herdr, *args], env=self.env, capture_output=True, text=True)
+        result = subprocess.run([self.herdr, *args], env=self.env, capture_output=True,
+                                text=True, timeout=15)
         if result.returncode:
             raise RuntimeError(f"herdr {args}: {result.stdout} {result.stderr}")
         try:
@@ -145,11 +172,11 @@ def run_case(args, mode, round_number):
                 if args.pixels:
                     pixel_log = (destination / "pixels.jsonl").open("w")
                     probe = subprocess.Popen(
-                        [args.pixels, str(args.seconds + 3), str(destination / "first-frame.bgra")],
-                        stdout=pixel_log, stderr=pixel_log,
+                        [args.pixels, "--until-eof", str(destination / "first-frame.bgra")],
+                        stdin=subprocess.PIPE, stdout=pixel_log, stderr=pixel_log,
                     )
                     time.sleep(0.5)
-                scroll_process = subprocess.Popen([args.scroll, str(args.seconds + 2)])
+                scroll_process = subprocess.Popen([args.scroll, "--until-eof"], stdin=subprocess.PIPE)
             if batch:
                 generator = sandbox.root / "output.py"
                 generator.write_text(
@@ -163,21 +190,24 @@ def run_case(args, mode, round_number):
                                      f"{shlex.quote(args.python)} {shlex.quote(str(generator))}")
                 (destination / f"{phase}-command.json").write_text(json.dumps(result))
             time.sleep(2)
-            warmup_position = None
             if phase == "scroll":
                 warmup_position = sandbox.run("pane", "current")
                 (destination / "scroll-warmup-position.json").write_text(json.dumps(warmup_position))
-            start = time.monotonic()
             cpu_start = cpu_seconds(app.pid)
-            time.sleep(args.seconds)
+            start = time.monotonic()
+            positions = []
+            if phase == "scroll":
+                positions = sample_scroll_positions(
+                    start + args.seconds, lambda: sandbox.run("pane", "current"),
+                )
+            else:
+                time.sleep(args.seconds)
             cpu_end = cpu_seconds(app.pid)
             end = time.monotonic()
             if scroll_process is not None:
-                if scroll_process.wait(timeout=5):
-                    raise RuntimeError("native scroll helper failed")
+                finish_helper(scroll_process, "native scroll helper")
             if phase == "scroll" and probe is not None:
-                if probe.wait(timeout=5):
-                    raise RuntimeError("pixel probe failed")
+                finish_helper(probe, "pixel probe")
                 pixel_log.close()
             samples = [(stamp, duration) for stamp, duration in frames if start <= stamp < end]
             (destination / f"{phase}-pane.json").write_text(json.dumps(sandbox.run("pane", "read", pane)))
@@ -185,10 +215,8 @@ def run_case(args, mode, round_number):
             if phase == "scroll":
                 current = sandbox.run("pane", "current")
                 (destination / "scroll-position.json").write_text(json.dumps(current))
-                offsets = [position["pane"]["scroll"]["offset_from_bottom"]
-                           for position in [warmup_position, current]]
-                if not any(offsets):
-                    raise RuntimeError("scroll input did not move the terminal")
+                (destination / "scroll-samples.json").write_text(json.dumps(positions))
+                validate_scroll_positions(positions, start, end)
             subprocess.run(["/usr/sbin/screencapture", "-x", str(destination / f"{phase}.png")], check=True)
             if not frames:
                 raise RuntimeError(f"no frame measurements for {mode} {phase}")
@@ -210,12 +238,12 @@ def run_case(args, mode, round_number):
             print(json.dumps({"mode": mode, "round": round_number, "phase": phase, **rows[phase]}), flush=True)
         (destination / "result.json").write_text(json.dumps(rows, indent=2))
     finally:
-        if probe is not None:
-            stop(probe)
+        for helper in [probe, scroll_process]:
+            if helper is not None:
+                stop(helper)
+                helper.stdin.close()
         if pixel_log is not None:
             pixel_log.close()
-        if scroll_process is not None:
-            stop(scroll_process)
         if app is not None:
             stop(app)
             reader.join(timeout=5)

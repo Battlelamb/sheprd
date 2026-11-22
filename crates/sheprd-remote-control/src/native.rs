@@ -55,6 +55,15 @@ const INBOUND_QUEUE: usize = 16;
 const MAX_STREAMS: usize = 8;
 /// How often an idle socket is pinged, so proxies and NATs keep it.
 const PING_INTERVAL: Duration = Duration::from_secs(20);
+/// How long a socket may go without a frame from the phone, which
+/// answers every ping, before it is closed as a path that stopped
+/// carrying traffic: two pings unanswered, and some room for a slow pong.
+const QUIET_LIMIT: Duration = Duration::from_secs(45);
+/// How long one write may wait for room to send. A phone whose path went
+/// quiet stops taking bytes, and a write to it would otherwise wait for
+/// the operating system to give up, keeping the socket and its views
+/// alive past [`QUIET_LIMIT`].
+const WRITE_LIMIT: Duration = Duration::from_secs(10);
 
 /// This computer's home as the state holds it now, for `device`.
 fn home(state: &Shared, device: &DeviceId) -> Home {
@@ -146,9 +155,9 @@ pub(crate) async fn live(
 
 /// Carries messages between the socket and the session until either ends:
 /// the phone closes, sends a binary or oversized frame, or the session
-/// says `bye`. Logs how it ended and how long the phone had been quiet:
-/// a path that stopped carrying traffic shows as a socket quiet for more
-/// than a [`PING_INTERVAL`], as the phone answers every ping.
+/// says `bye`, or the phone stays quiet past [`QUIET_LIMIT`] or takes no
+/// bytes for [`WRITE_LIMIT`]. Logs how it ended and how long the phone
+/// had been quiet.
 async fn serve(mut socket: WebSocket, state: Shared, device: DeviceId, token: SecretString) {
     let _connected = Connected::new(state.clone(), device.clone());
     let (to_phone, mut outbound) = mpsc::channel(OUTBOUND_QUEUE);
@@ -163,8 +172,8 @@ async fn serve(mut socket: WebSocket, state: Shared, device: DeviceId, token: Se
             message = outbound.recv() => {
                 let Some(message) = message else { break Ending::SessionEnded };
                 let bye = matches!(message, ServerMessage::Bye { .. });
-                if !send(&mut socket, &message).await {
-                    break Ending::SendFailed;
+                if let Some(ending) = send(&mut socket, &message).await {
+                    break ending;
                 }
                 if bye {
                     break Ending::Bye;
@@ -185,8 +194,8 @@ async fn serve(mut socket: WebSocket, state: Shared, device: DeviceId, token: Se
                         };
                         if let Some(message) = reply {
                             let error = ServerMessage::Error { message: message.to_owned(), view: None };
-                            if !send(&mut socket, &error).await {
-                                break Ending::SendFailed;
+                            if let Some(ending) = send(&mut socket, &error).await {
+                                break ending;
                             }
                         }
                     }
@@ -197,14 +206,17 @@ async fn serve(mut socket: WebSocket, state: Shared, device: DeviceId, token: Se
                 }
             },
             _ = ping.tick() => {
-                if socket.send(Message::Ping(Default::default())).await.is_err() {
-                    break Ending::SendFailed;
+                if too_quiet(heard.elapsed()) {
+                    break Ending::Quiet;
+                }
+                if let Some(ending) = bounded(WRITE_LIMIT, socket.send(Message::Ping(Default::default()))).await {
+                    break ending;
                 }
             }
         }
     };
     session.abort();
-    let _ = socket.send(Message::Close(None)).await;
+    let _ = bounded(WRITE_LIMIT, socket.send(Message::Close(None))).await;
     tracing::info!(
         ?ending,
         lasted_s = opened.elapsed().as_secs(),
@@ -218,17 +230,35 @@ async fn serve(mut socket: WebSocket, state: Shared, device: DeviceId, token: Se
 enum Ending {
     Bye,
     PhoneClosed,
+    Quiet,
     ReadFailed,
     SendFailed,
     SessionEnded,
+    Stalled,
     Unreadable,
 }
 
-async fn send(socket: &mut WebSocket, message: &ServerMessage) -> bool {
+/// Whether a phone quiet for `quiet` has stopped answering pings.
+fn too_quiet(quiet: Duration) -> bool {
+    quiet > QUIET_LIMIT
+}
+
+/// Sends `message`; how the socket ends when it cannot.
+async fn send(socket: &mut WebSocket, message: &ServerMessage) -> Option<Ending> {
     let Ok(text) = serde_json::to_string(message) else {
-        return false;
+        return Some(Ending::SendFailed);
     };
-    socket.send(Message::Text(text.into())).await.is_ok()
+    bounded(WRITE_LIMIT, socket.send(Message::Text(text.into()))).await
+}
+
+/// Waits up to `limit` for `write`; how the socket ends when it fails or
+/// is still waiting then, nothing when it went out.
+async fn bounded<E>(limit: Duration, write: impl Future<Output = Result<(), E>>) -> Option<Ending> {
+    match tokio::time::timeout(limit, write).await {
+        Ok(Ok(())) => None,
+        Ok(Err(_)) => Some(Ending::SendFailed),
+        Err(_) => Some(Ending::Stalled),
+    }
 }
 
 #[cfg(test)]

@@ -738,7 +738,7 @@ final class Fleet {
     }
 
     private func origins(_ computer: Computer) -> [String] {
-        computer.origins + (relayOrigins[computer.device].map { [$0] } ?? [])
+        AddressOrder.preferred(computer.origins) + (relayOrigins[computer.device].map { [$0] } ?? [])
     }
 
     /// Starts the computer's relay proxy, when it has relays, and adds its

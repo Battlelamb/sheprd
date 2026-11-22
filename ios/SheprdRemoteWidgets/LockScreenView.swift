@@ -67,6 +67,16 @@ struct LockScreenView: View {
 
     @ViewBuilder
     private var action: some View {
+        // A test activity opens no chat, so it offers nothing to open.
+        if SelfTestActivity.isTest(facts) {
+            EmptyView()
+        } else {
+            chatAction
+        }
+    }
+
+    @ViewBuilder
+    private var chatAction: some View {
         switch state.phase {
         case .question:
             Link(destination: facts.link.url) {

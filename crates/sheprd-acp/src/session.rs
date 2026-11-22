@@ -272,7 +272,7 @@ impl<R: FnMut(Update)> Session<R> {
                     start,
                     agent,
                     config.load.as_deref(),
-                    &transcript.entries,
+                    &mut transcript.entries,
                     config.cwd.clone(),
                 )
             });

@@ -11,7 +11,7 @@
 use std::{collections::BTreeSet, path::PathBuf};
 
 use sheprd_chat_protocol::{
-    Change, EntryId, OptionCategory, OptionKind, Transcript,
+    Change, Entry, EntryId, EntryKind, OptionCategory, OptionKind, Transcript,
     thread::{self, Record, Thread, ThreadId, file},
 };
 
@@ -20,18 +20,45 @@ use super::{Session, Update, now_ms};
 /// Entries marked before they are written without waiting for the turn.
 const MARKED: usize = 64;
 
-/// The thread a chat starts with: `--thread`'s, or a new one.
+/// The thread a chat starts with, `--thread`'s or a new one, and what is
+/// already kept of it.
 #[derive(Debug)]
 pub(crate) struct Start {
-    pub dir: PathBuf,
-    pub id: ThreadId,
+    dir: PathBuf,
+    id: ThreadId,
+    /// The newest entry id the thread's file knows, kept or trimmed.
+    last: Option<EntryId>,
+    record: Option<Record>,
+    writer: file::Writer,
+}
+
+impl Start {
+    /// Reads what thread `id` in `dir` keeps: nothing for a thread not kept
+    /// yet. Anything kept that cannot be read is an error, so a thread is
+    /// never written over with less than it held.
+    pub(crate) fn read(dir: PathBuf, id: ThreadId) -> Result<Self, thread::Error> {
+        let record = match Record::read(&thread::record_path(&dir, &id)) {
+            Ok(record) => Some(record),
+            Err(thread::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error),
+        };
+        let writer = file::Writer::open(&dir, &id)?;
+        let last = file::Contents::read(writer.path())?.last_id();
+        Ok(Self {
+            dir,
+            id,
+            last,
+            record,
+            writer,
+        })
+    }
 }
 
 /// What the session keeps of its thread on disk.
 #[derive(Debug)]
 pub(super) struct Keep {
-    /// When the first prompt was sent, once it was: only then is the
-    /// thread kept.
+    /// When the conversation started, once it has: only then is the thread
+    /// kept.
     created_ms: Option<u64>,
     cwd: PathBuf,
     dir: PathBuf,
@@ -40,6 +67,8 @@ pub(super) struct Keep {
     /// file already holds, its entries are not written again.
     quiet: bool,
     title: String,
+    /// Whether the record is on disk.
+    written: bool,
     writer: file::Writer,
 }
 
@@ -56,46 +85,62 @@ impl Keep {
     /// Opens the thread of `start` for `agent`, continuing its record when
     /// there is one. `load` is the session the chat continues: a thread
     /// whose last segment is that session goes on in it; otherwise `agent`
-    /// takes over after `last`, the transcript's newest entry.
+    /// takes over after the newest entry. A new thread keeps `entries`, the
+    /// conversation the chat opened with, and is kept at once when they
+    /// hold a prompt.
     pub(super) fn open(
         start: Start,
         agent: sheprd_chat_protocol::Agent,
         load: Option<&str>,
-        last: Option<EntryId>,
+        entries: &[Entry],
         cwd: PathBuf,
     ) -> Opened {
-        let record = Record::read(&thread::record_path(&start.dir, &start.id)).ok();
-        let writer = file::Writer::new(&start.dir, &start.id);
-        let known = record
-            .as_ref()
-            .and_then(|_| file::Contents::read(writer.path()).ok())
-            .and_then(|contents| contents.last_id());
-        let (thread, created_ms, title) = match record {
+        let Start {
+            dir,
+            id,
+            last,
+            record,
+            writer,
+        } = start;
+        let newest = entries.last().map(|entry| entry.id);
+        let mut keep = Self {
+            created_ms: None,
+            cwd,
+            dir,
+            marked: BTreeSet::new(),
+            quiet: false,
+            title: String::new(),
+            written: record.is_some(),
+            writer,
+        };
+        let thread = match record {
             Some(record) => {
                 let mut thread = record.thread;
                 let same = thread.current().is_some_and(|current| {
                     current.agent == agent && load.is_some() && current.session.as_deref() == load
                 });
                 if !same {
-                    thread.switch(agent, last.max(known));
+                    thread.switch(agent, newest.max(last));
                 }
-                (thread, Some(record.created_ms), record.title)
+                keep.created_ms = Some(record.created_ms);
+                keep.title = record.title;
+                // The file holds the conversation the session replays.
+                keep.quiet = load.is_some();
+                thread
             }
-            None => (Thread::new(start.id, agent), None, String::new()),
+            None => {
+                keep.marked.extend(entries.iter().map(|entry| entry.id));
+                if let Some(prompt) = entries.iter().find_map(|entry| match &entry.kind {
+                    EntryKind::User { text, .. } => Some(text),
+                    _ => None,
+                }) {
+                    keep.created_ms = Some(now_ms());
+                    keep.title = thread::title(prompt);
+                }
+                Thread::new(id, agent)
+            }
         };
-        Opened {
-            keep: Self {
-                created_ms,
-                cwd,
-                dir: start.dir,
-                marked: BTreeSet::new(),
-                quiet: load.is_some(),
-                title,
-                writer,
-            },
-            last: known,
-            thread,
-        }
+        Opened { keep, last, thread }
     }
 
     /// Whether the record is on disk, or will be from now on.
@@ -103,7 +148,7 @@ impl Keep {
         self.created_ms.is_some()
     }
 
-    fn write_record(&self, thread: &Thread) -> Result<(), thread::Error> {
+    fn write_record(&mut self, thread: &Thread) -> Result<(), thread::Error> {
         let Some(created_ms) = self.created_ms else {
             return Ok(());
         };
@@ -114,13 +159,21 @@ impl Keep {
             title: self.title.clone(),
             updated_ms: now_ms(),
         }
-        .write(&self.dir)
+        .write(&self.dir)?;
+        self.written = true;
+        Ok(())
     }
 
     /// Writes the marked entries the transcript still holds.
     fn flush(&mut self, transcript: &Transcript) -> Result<(), thread::Error> {
         if self.marked.is_empty() || !self.kept() {
             return Ok(());
+        }
+        // A transcript file is never left without the record naming it.
+        if !self.written
+            && let Some(thread) = &transcript.thread
+        {
+            self.write_record(thread)?;
         }
         let entries: Vec<_> = std::mem::take(&mut self.marked)
             .into_iter()
@@ -139,44 +192,56 @@ fn model(transcript: &Transcript) -> Option<&str> {
 }
 
 impl<R: FnMut(Update)> Session<R> {
-    /// Notes what `change` did to the thread, after it applied: entries to
-    /// write, and the model the agent now runs.
-    pub(super) fn keep_after(&mut self, change: &Change) {
-        let Some(keep) = &mut self.keep else {
+    /// Marks the entry `change` made or changed, right after it applied and
+    /// before the transcript may drop it for room.
+    pub(super) fn keep_mark(&mut self, change: &Change) {
+        let Some(keep) = self.keep.as_mut().filter(|keep| !keep.quiet) else {
             return;
         };
         match change {
-            Change::Push { entry } | Change::Replace { entry } if !keep.quiet => {
+            Change::Push { entry } | Change::Replace { entry } => {
                 keep.marked.insert(entry.id);
             }
-            Change::Append { id, .. } if !keep.quiet => {
+            Change::Append { id, .. } => {
                 keep.marked.insert(*id);
             }
-            Change::Options { .. } => {
-                let ran = model(&self.transcript)
-                    .map(str::to_owned)
-                    .zip(self.transcript.thread.as_mut())
-                    .is_some_and(|(model, thread)| thread.ran(&model));
-                if ran {
-                    self.thread_changed();
-                }
-                return;
-            }
-            _ => return,
-        }
-        if keep.marked.len() >= MARKED {
-            self.keep_entries();
+            _ => {}
         }
     }
 
-    /// Writes entries the transcript is about to drop before `before`.
-    pub(super) fn keep_before_truncate(&mut self, before: EntryId) {
+    /// What `change` did to the thread once every client has it: entries
+    /// written when enough wait, the model the agent now runs, and a
+    /// failure to keep the thread said.
+    pub(super) fn keep_after(&mut self, change: &Change) {
         if self
             .keep
             .as_ref()
-            .is_some_and(|keep| keep.marked.first().is_some_and(|id| *id < before))
+            .is_some_and(|keep| keep.marked.len() >= MARKED)
         {
             self.keep_entries();
+        }
+        if matches!(change, Change::Options { .. }) {
+            let ran = model(&self.transcript)
+                .map(str::to_owned)
+                .zip(self.transcript.thread.as_mut())
+                .is_some_and(|(model, thread)| thread.ran(&model));
+            if ran {
+                self.thread_changed();
+            }
+        }
+        self.say_keep_failure();
+    }
+
+    /// Writes entries the transcript is about to drop before `before`. A
+    /// failure is said once the change that drops them is out.
+    pub(super) fn keep_before_truncate(&mut self, before: EntryId) {
+        let Some(keep) = &mut self.keep else {
+            return;
+        };
+        if keep.marked.first().is_some_and(|id| *id < before)
+            && let Err(error) = keep.flush(&self.transcript)
+        {
+            self.keep_failed(&error);
         }
     }
 
@@ -187,6 +252,7 @@ impl<R: FnMut(Update)> Session<R> {
         };
         if let Err(error) = keep.flush(&self.transcript) {
             self.keep_failed(&error);
+            self.say_keep_failure();
         }
     }
 
@@ -232,23 +298,26 @@ impl<R: FnMut(Update)> Session<R> {
         let Some(thread) = self.transcript.thread.clone() else {
             return;
         };
-        let written = self
-            .keep
-            .as_ref()
-            .map_or(Ok(()), |keep| keep.write_record(&thread));
-        if let Err(error) = written {
+        if let Some(keep) = &mut self.keep
+            && let Err(error) = keep.write_record(&thread)
+        {
             self.keep_failed(&error);
         }
         self.emit(Change::Thread { thread });
     }
 
-    /// Keeping failed: the chat says so once and keeps nothing more.
+    /// Keeping failed: nothing more is kept, and the chat says so once.
     fn keep_failed(&mut self, error: &thread::Error) {
         if self.keep.take().is_some() {
-            self.notice(
-                sheprd_chat_protocol::NoticeLevel::Warning,
-                format!("This conversation can no longer be kept as a thread: {error}"),
-            );
+            self.keep_failure = Some(format!(
+                "This conversation can no longer be kept as a thread: {error}"
+            ));
+        }
+    }
+
+    fn say_keep_failure(&mut self) {
+        if let Some(text) = self.keep_failure.take() {
+            self.notice(sheprd_chat_protocol::NoticeLevel::Warning, text);
         }
     }
 }

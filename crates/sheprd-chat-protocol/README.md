@@ -27,7 +27,7 @@ segments, one per agent session that held the conversation, each with the
 agent, its session id, the model it last ran, and the entry it began after.
 A `Handoff` entry marks where another agent took over and how much it was
 handed. The program keeps a thread's `Record` in the private `threads_dir`
-once a prompt reached its agent, and every entry in the thread's transcript
+once its conversation started, and every entry in the thread's transcript
 file beside it (`thread::file`): JSON lines, at most 64 MiB, trimmed from
 the oldest entry after the pinned first prompt, with each trimmed range of
 ids recorded so a read of one answers "trimmed". Segments are capped at 64;

@@ -338,16 +338,29 @@ pub(crate) fn run_owned(
     };
     // A built-in agent's chat is a thread, `--thread`'s or a new one,
     // which a restore continues.
-    let thread = match (&options.agent, sheprd_chat_protocol::thread::threads_dir()) {
-        (AgentChoice::Builtin { .. }, Some(dir)) => Some(crate::session::ThreadStart {
-            dir,
-            id: options
+    let thread_id = match &options.agent {
+        AgentChoice::Builtin { .. } => Some(
+            options
                 .thread
                 .unwrap_or_else(sheprd_chat_protocol::thread::ThreadId::random),
-        }),
-        _ => None,
+        ),
+        AgentChoice::Command { .. } => None,
     };
-    let mut keeper = keeper.map(|keeper| keeper.with_thread(thread.as_ref().map(|start| start.id)));
+    let thread = thread_id
+        .zip(sheprd_chat_protocol::thread::threads_dir())
+        .and_then(
+            |(id, dir)| match crate::session::ThreadStart::read(dir, id) {
+                Ok(start) => Some(start),
+                Err(error) => {
+                    notices.push((
+                        NoticeLevel::Warning,
+                        format!("This conversation cannot be kept as a thread: {error}"),
+                    ));
+                    None
+                }
+            },
+        );
+    let mut keeper = keeper.map(|keeper| keeper.with_thread(thread_id));
     if let Some(keeper) = &mut keeper {
         keeper.child = Some(agent_process.id());
     }

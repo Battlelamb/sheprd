@@ -213,6 +213,8 @@ pub(crate) struct Session<R: FnMut(Update)> {
     harness: HarnessId,
     /// The thread kept on disk, while it can be.
     keep: Option<keep::Keep>,
+    /// Why the thread stopped being kept, until the chat says so.
+    keep_failure: Option<String>,
     /// An agent to start once the input that chose it is handled.
     launch: Option<Agent>,
     log: VecDeque<(u64, Change)>,
@@ -263,7 +265,7 @@ impl<R: FnMut(Update)> Session<R> {
                     start,
                     agent,
                     config.load.as_deref(),
-                    transcript.last_entry_id(),
+                    &transcript.entries,
                     config.cwd.clone(),
                 )
             });
@@ -309,6 +311,7 @@ impl<R: FnMut(Update)> Session<R> {
             handled: VecDeque::new(),
             harness: HarnessId::default(),
             keep,
+            keep_failure: None,
             launch: None,
             log: VecDeque::new(),
             log_bytes: 0,
@@ -414,6 +417,7 @@ impl<R: FnMut(Update)> Session<R> {
         if let Change::Truncate { before } = &change {
             self.projector.forget_before(*before);
         }
+        self.keep_mark(&change);
         self.seq += 1;
         let size = change_size(&change);
         while self.log.len() == LOG || (self.log_bytes + size > LOG_BYTES && !self.log.is_empty()) {

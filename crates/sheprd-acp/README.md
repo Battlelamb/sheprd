@@ -235,7 +235,8 @@ outside a Herdr pane or core terminal keep no record.
 
 A chat of a built-in agent is also a thread
 (`sheprd_chat_protocol::thread`), kept in `threads/` beside `restore/` once
-a prompt reached the agent, and kept after the chat ends, not only when it
+its conversation started (a prompt reached the agent, or the chat continued
+a session that held one), and kept after the chat ends, not only when it
 was killed: the record lists each agent session that held the conversation,
 and the transcript file beside it holds every entry, apart from the trimmed
 window clients see. The restore record names the thread, and a restore

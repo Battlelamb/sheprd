@@ -160,7 +160,7 @@ fn threads_live_beside_restore_records() {
 fn the_file_keeps_each_entry_at_its_latest() {
     let dir = tempfile::tempdir().unwrap();
     let id = ThreadId::random();
-    let mut writer = Writer::new(dir.path(), &id);
+    let mut writer = Writer::open(dir.path(), &id).unwrap();
     writer
         .append(&[&user(1, "hello"), &agent(2, "hi")])
         .unwrap();
@@ -172,7 +172,7 @@ fn the_file_keeps_each_entry_at_its_latest() {
     assert_eq!(contents.entries[1], agent(2, "hi there"));
     assert_eq!(contents.last_id(), Some(EntryId(3)));
     // A writer opened later appends after what is there.
-    let mut again = Writer::new(dir.path(), &id);
+    let mut again = Writer::open(dir.path(), &id).unwrap();
     again.append(&[&agent(4, "after")]).unwrap();
     assert_eq!(ids(&Contents::read(writer.path()).unwrap()), [1, 2, 3, 4]);
     #[cfg(unix)]
@@ -193,7 +193,7 @@ fn a_missing_file_holds_nothing_and_a_torn_line_is_skipped() {
     let id = ThreadId::random();
     let path = transcript_path(dir.path(), &id);
     assert_eq!(Contents::read(&path).unwrap(), Contents::default());
-    let mut writer = Writer::new(dir.path(), &id);
+    let mut writer = Writer::open(dir.path(), &id).unwrap();
     writer.append(&[&user(1, "hello")]).unwrap();
     // A program killed mid-write leaves half a line, and a newer one may
     // write lines this version does not know.
@@ -201,13 +201,35 @@ fn a_missing_file_holds_nothing_and_a_torn_line_is_skipped() {
     bytes.extend(b"{\"line\":\"future\",\"x\":1}\n{\"line\":\"entry\",\"entry\":{\"id\":2,");
     std::fs::write(&path, bytes).unwrap();
     assert_eq!(ids(&Contents::read(&path).unwrap()), [1]);
+    // A writer opened on the torn file starts its first line on its own.
+    let mut after = Writer::open(dir.path(), &id).unwrap();
+    after.append(&[&agent(3, "after the tear")]).unwrap();
+    assert_eq!(ids(&Contents::read(&path).unwrap()), [1, 3]);
+}
+
+#[test]
+fn a_file_that_does_not_read_is_never_trimmed_over() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = ThreadId::random();
+    let path = transcript_path(dir.path(), &id);
+    // Past the bound, so the next append trims, which must read it first.
+    std::fs::File::create(&path)
+        .unwrap()
+        .set_len(MAX_FILE + 1)
+        .unwrap();
+    let mut writer = Writer::open(dir.path(), &id).unwrap();
+    assert!(matches!(
+        writer.append(&[&user(1, "hello")]),
+        Err(Error::TranscriptSize)
+    ));
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), MAX_FILE + 1);
 }
 
 #[test]
 fn trimming_keeps_the_first_prompt_and_records_what_went() {
     let dir = tempfile::tempdir().unwrap();
     let id = ThreadId::random();
-    let mut writer = Writer::new(dir.path(), &id);
+    let mut writer = Writer::open(dir.path(), &id).unwrap();
     let notice = Entry {
         id: EntryId(1),
         kind: EntryKind::Notice {
@@ -257,7 +279,7 @@ fn trimming_keeps_the_first_prompt_and_records_what_went() {
 #[test]
 fn an_entry_too_large_to_keep_is_recorded_as_trimmed() {
     let dir = tempfile::tempdir().unwrap();
-    let mut writer = Writer::new(dir.path(), &ThreadId::random());
+    let mut writer = Writer::open(dir.path(), &ThreadId::random()).unwrap();
     let huge = agent(2, &"x".repeat(MAX_LINE));
     writer
         .append(&[&user(1, "hi"), &huge, &agent(3, "ok")])

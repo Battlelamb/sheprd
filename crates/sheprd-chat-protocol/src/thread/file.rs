@@ -218,18 +218,29 @@ pub struct Writer {
     path: PathBuf,
     /// The file's size as this writer left it.
     size: u64,
+    /// The file may end inside a line, as a killed program or a failed
+    /// write leaves it: the next append starts on a line of its own.
+    torn: bool,
 }
 
 impl Writer {
     /// The writer of thread `id`'s file in `dir`, which may not exist yet.
-    pub fn new(dir: &Path, id: &ThreadId) -> Self {
+    pub fn open(dir: &Path, id: &ThreadId) -> Result<Self, Error> {
         let path = super::transcript_path(dir, id);
-        let size = std::fs::metadata(&path).map_or(0, |metadata| metadata.len());
-        Self {
+        let (size, torn) = match std::fs::File::open(&path) {
+            Ok(mut file) => {
+                let size = file.metadata()?.len();
+                (size, size > 0 && !ends_a_line(&mut file)?)
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => (0, false),
+            Err(error) => return Err(error.into()),
+        };
+        Ok(Self {
             dir: dir.to_owned(),
             path,
             size,
-        }
+            torn,
+        })
     }
 
     pub fn path(&self) -> &Path {
@@ -246,12 +257,18 @@ impl Writer {
         for entry in entries {
             bytes.extend(entry_line(entry)?);
         }
+        if self.torn {
+            bytes.insert(0, b'\n');
+        }
         if self.size + bytes.len() as u64 > MAX_FILE {
             return self.rewrite(entries);
         }
         crate::private::create_dir(&self.dir)?;
-        let mut file = crate::private::open_append(&self.path)?;
-        file.write_all(&bytes)?;
+        let written =
+            crate::private::open_append(&self.path).and_then(|mut file| file.write_all(&bytes));
+        // A write that failed part way may have left half a line.
+        self.torn = written.is_err();
+        written?;
         self.size += bytes.len() as u64;
         Ok(())
     }
@@ -259,12 +276,14 @@ impl Writer {
     /// Rewrites the file with `entries` taken in and its oldest entries
     /// trimmed to [`TRIM_TO`], in one rename.
     fn rewrite(&mut self, entries: &[&Entry]) -> Result<(), Error> {
-        let mut contents = Contents::read(&self.path).unwrap_or_default();
+        // A file that does not read is never replaced by less.
+        let mut contents = Contents::read(&self.path)?;
         contents.update(entries);
         contents.trim(TRIM_TO)?;
         let bytes = contents.encode()?;
         crate::private::write(&self.dir, &self.path, &bytes)?;
         self.size = bytes.len() as u64;
+        self.torn = false;
         Ok(())
     }
 
@@ -277,6 +296,16 @@ impl Writer {
         let bytes = contents.encode()?;
         crate::private::write(&self.dir, &self.path, &bytes)?;
         self.size = bytes.len() as u64;
+        self.torn = false;
         Ok(())
     }
+}
+
+/// Whether `file`'s last byte ends a line.
+fn ends_a_line(file: &mut std::fs::File) -> io::Result<bool> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    file.seek(SeekFrom::End(-1))?;
+    let mut last = [0];
+    file.read_exact(&mut last)?;
+    Ok(last[0] == b'\n')
 }

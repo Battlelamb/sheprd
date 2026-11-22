@@ -12,13 +12,27 @@ use super::*;
 /// A chat that may switch between Claude and Codex, keeping thread `id` in
 /// `dir`, whose agent opened session `s1`; `load` continues a session.
 fn kept(dir: &std::path::Path, id: ThreadId, load: Option<&str>) -> Harness {
+    kept_with(dir, id, load, None)
+}
+
+/// The chat's folder: absolute on every platform, as a record needs.
+fn work() -> PathBuf {
+    std::env::temp_dir()
+}
+
+/// [`kept`], opening with `history` from the agent's own log.
+fn kept_with(
+    dir: &std::path::Path,
+    id: ThreadId,
+    load: Option<&str>,
+    history: Option<Transcript>,
+) -> Harness {
     let mut harness = harness_with(Config {
         choices: load.is_none().then(|| vec![Agent::Claude, Agent::Codex]),
+        cwd: work(),
+        history,
         load: load.map(str::to_owned),
-        thread: Some(ThreadStart {
-            dir: dir.to_owned(),
-            id,
-        }),
+        thread: Some(ThreadStart::read(dir.to_owned(), id).unwrap()),
         ..config()
     });
     harness.session.start();
@@ -67,7 +81,7 @@ fn a_thread_is_kept_once_a_prompt_reaches_its_agent() {
     let turn = prompt(&mut harness, 1, "Fix the build\nplease");
     let kept = record(dir.path(), &id).expect("kept from the first prompt");
     assert_eq!(kept.title, "Fix the build");
-    assert_eq!(kept.cwd, PathBuf::from("/work"));
+    assert_eq!(kept.cwd, work());
     assert_eq!(
         kept.thread.segments,
         [Segment {
@@ -155,14 +169,14 @@ fn a_continued_thread_goes_on_in_its_segment_after_its_entries() {
     thread.opened("s1");
     Record {
         created_ms: 1,
-        cwd: PathBuf::from("/work"),
+        cwd: work(),
         thread: thread.clone(),
         title: "Earlier".to_owned(),
         updated_ms: 1,
     }
     .write(dir.path())
     .unwrap();
-    let mut writer = thread::file::Writer::new(dir.path(), &id);
+    let mut writer = thread::file::Writer::open(dir.path(), &id).unwrap();
     let earlier = sheprd_chat_protocol::Entry {
         id: EntryId(40),
         kind: EntryKind::User {
@@ -199,7 +213,7 @@ fn a_continued_thread_with_another_session_starts_a_segment() {
     thread.opened("c1");
     Record {
         created_ms: 1,
-        cwd: PathBuf::from("/work"),
+        cwd: work(),
         thread,
         title: "Earlier".to_owned(),
         updated_ms: 1,
@@ -215,10 +229,10 @@ fn a_continued_thread_with_another_session_starts_a_segment() {
 #[test]
 fn a_thread_that_cannot_be_written_says_so_once_and_stops() {
     let dir = tempfile::tempdir().unwrap();
-    // A file where the threads folder should be.
-    let blocked = dir.path().join("threads");
-    std::fs::write(&blocked, b"").unwrap();
-    let mut harness = kept(&blocked, ThreadId::random(), None);
+    let threads = dir.path().join("threads");
+    let mut harness = kept(&threads, ThreadId::random(), None);
+    // A file where the threads folder should be, once the chat runs.
+    std::fs::write(&threads, b"").unwrap();
     let turn = prompt(&mut harness, 1, "hello");
     harness.respond(turn, json!({"stopReason": "end_turn"}));
     prompt(&mut harness, 1, "again");
@@ -236,4 +250,100 @@ fn a_thread_that_cannot_be_written_says_so_once_and_stops() {
 fn a_chat_without_a_thread_sends_none() {
     let harness = ready();
     assert_eq!(harness.transcript().thread, None);
+}
+
+fn user_entry(id: u64, text: &str) -> sheprd_chat_protocol::Entry {
+    sheprd_chat_protocol::Entry {
+        id: EntryId(id),
+        kind: EntryKind::User {
+            text: text.to_owned(),
+            files: 0,
+        },
+    }
+}
+
+#[test]
+fn a_new_thread_keeps_the_conversation_a_resumed_session_opened_with() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = ThreadId::random();
+    let mut history = Transcript::new("Claude");
+    history.entries = vec![user_entry(7, "From the agent's log")];
+    let mut harness = kept_with(dir.path(), id, Some("s1"), Some(history));
+    // Kept at once: the conversation already started.
+    let kept = record(dir.path(), &id).expect("kept as the session opened");
+    assert_eq!(kept.title, "From the agent's log");
+    assert_eq!(harness.input(Input::Shutdown), Flow::Exit);
+    let written = contents(dir.path(), &id);
+    assert_eq!(written.entries[0], user_entry(7, "From the agent's log"));
+    // What the session replayed is the conversation too.
+    assert!(written.entries.iter().any(|entry| matches!(
+        &entry.kind,
+        EntryKind::Agent { text } if text == "replayed"
+    )));
+}
+
+#[test]
+fn a_thread_kept_by_a_newer_program_is_not_written_over() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = ThreadId::random();
+    let path = thread::record_path(dir.path(), &id);
+    std::fs::write(&path, br#"{"version":99}"#).unwrap();
+    assert!(matches!(
+        ThreadStart::read(dir.path().to_owned(), id),
+        Err(thread::Error::Json(_) | thread::Error::Version(_))
+    ));
+}
+
+#[test]
+fn a_late_update_to_an_entry_the_window_then_drops_is_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = ThreadId::random();
+    let mut harness = kept(dir.path(), id, None);
+    prompt(&mut harness, 1, "hello");
+    let call = |id: &str, text: &str, status: &str| {
+        json!({"sessionUpdate": "tool_call", "toolCallId": id, "title": id, "kind": "execute",
+            "status": status, "content": [{"type": "content", "content": {"type": "text", "text": text}}]})
+    };
+    harness.update(call("first", "", "pending"));
+    // Enough small calls to write what waits, "first" still pending.
+    for at in 0..64 {
+        harness.update(call(&format!("small-{at}"), "", "completed"));
+    }
+    assert!(
+        contents(dir.path(), &id)
+            .entries
+            .iter()
+            .any(|entry| matches!(
+                &entry.kind,
+                EntryKind::Tool(tool) if tool.call_id == "first"
+            ))
+    );
+    let big = "x".repeat(200 * 1024);
+    for at in 0..9 {
+        harness.update(call(&format!("big-{at}"), &big, "completed"));
+    }
+    // "first" ends with output that takes the window past its bound, so the
+    // window drops it as it changes.
+    harness.update(
+        json!({"sessionUpdate": "tool_call_update", "toolCallId": "first",
+        "status": "completed", "content": [{"type": "content",
+        "content": {"type": "text", "text": "y".repeat(250 * 1024)}}]}),
+    );
+    assert!(
+        !harness.transcript().entries.iter().any(|entry| matches!(
+            &entry.kind,
+            EntryKind::Tool(tool) if tool.call_id == "first"
+        )),
+        "the window still holds it"
+    );
+    let written = contents(dir.path(), &id);
+    let first = written
+        .entries
+        .iter()
+        .find_map(|entry| match &entry.kind {
+            EntryKind::Tool(tool) if tool.call_id == "first" => Some(tool),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(first.status, sheprd_chat_protocol::ToolStatus::Completed);
 }

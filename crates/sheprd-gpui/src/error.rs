@@ -34,6 +34,8 @@ pub enum Error {
     #[error(transparent)]
     Chat(#[from] crate::chat::Error),
     #[error(transparent)]
+    ChatBrief(#[from] crate::control::brief::Error),
+    #[error(transparent)]
     ChatPullRequests(#[from] crate::chat::pull_requests::Error),
     #[error("{source}; removing {}: {cleanup}", path.display())]
     Cleanup {
@@ -217,6 +219,8 @@ pub enum Error {
     MissingStateRoot,
     #[error(transparent)]
     Mods(#[from] crate::mods::Error),
+    #[error(transparent)]
+    Naming(#[from] crate::naming::Error),
     #[error(transparent)]
     Nearby(#[from] crate::remote::nearby::Error),
     #[error("No current daemon snapshot.")]

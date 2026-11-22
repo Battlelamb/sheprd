@@ -192,8 +192,12 @@ passes untouched: a set the rules were tuned on stops measuring anything.
 
 ## Sign with your own team
 
-Live Activities and pushes need APNs, which needs a paid Apple Developer
-account.
+Running the app on a device needs a paid Apple Developer account. Pushes
+are another matter: computers send them only through the Sheprd push relay,
+which holds the APNs key for the published app (`so.pen.herdr.remote`), so a
+copy signed by another team gets no pushes. The app has no Web Push
+subscription of its own: Web Push reaches only the browser app, installed
+and subscribed separately.
 
 1. Set `DEVELOPMENT_TEAM` in `project.yml` (or in Xcode, Signing &
    Capabilities, for both targets).
@@ -202,7 +206,6 @@ account.
    - Change both `so.pen.herdr.remote` and `so.pen.herdr.remote.widgets`;
      the extension's must start with the app's.
    - Change the App Group `group.so.pen.herdr.remote` too.
-   - Use the new identifier as `topic` below.
 3. Run on a device. Live Activities and the Secure Enclave do not work fully
    in the simulator; there the app uses a software device key.
 
@@ -276,10 +279,12 @@ for the CA fingerprint the claim then pins.
 
 ## Push relay
 
-A TestFlight or App Store install cannot use a computer's own APNs key:
-Apple takes pushes for this app only from Sheprd's. The Sheprd push relay
-(`crates/sheprd-push-relay`, `docs/apns-relay-plan.md`) holds that key and
-forwards pushes, sealed so it reads none of them. The app turns it on at
+The app has one publisher, so Apple takes pushes for it only with Sheprd's
+APNs key, and only the Sheprd push relay (`crates/sheprd-push-relay`,
+`docs/apns-relay-plan.md`) holds that key. It forwards pushes, sealed so it
+reads none of them. A computer's remote control daemon
+(`sheprd-remote-control`) never holds an APNs key and never contacts Apple:
+it pushes only through the push relay. The app turns the push relay on at
 launch, after a new install or a reinstall, unless the user turned it off in
 Settings > Push Relay, which also shows what the push relay sees. Computers
 are ready by default too (`push_relay` in `[remote]`, which a user may turn
@@ -289,12 +294,17 @@ How a computer delivers this phone's pushes:
 
 | Mode | Computer | Phone sends | What travels |
 | --- | --- | --- | --- |
-| Off | No APNs key, `push_relay = false` | Tokens, answered 503 | Nothing through APNs; Web Push only |
-| Own key | `STATE_DIR/apns/AuthKey.p8` (below) | Tokens, with the push relay off here | Straight to Apple. Alerts sealed, Live Activities plain |
-| Push relay | No key, `push_relay` on (the default) | Handles, with the push relay on here | Through push.sheprd.org. Alerts and Live Activities sealed |
+| Off | `push_relay = false`, or the push relay off here | No tokens; with `push_relay` off the registration is answered 503 | Nothing through APNs: no alerts or Live Activities |
+| Push relay | `push_relay` on (the default) | Handles, with the push relay on here | Through push.sheprd.org. Alerts and Live Activities sealed |
+
+Web Push is separate: only the browser app, installed and subscribed on its
+own, receives it. A computer still accepts and keeps the plain tokens an app
+from before the push relay sends, so that app keeps registering without
+errors, but nothing is sent to them.
 
 Settings shows each computer's mode, as it answered the last
-registration (older computers do not say).
+registration (older computers do not say, or say `own_key`, a mode they no
+longer have, which shows as not reported).
 
 - **Attesting.** On first use the app asks the push relay for a challenge,
   attests a new App Attest key over the challenge's SHA-256, and gets a
@@ -317,7 +327,14 @@ registration (older computers do not say).
   no buttons (`SealedCover`). The debug sample activity is plain, so it
   shows that cover while the push relay is on.
 - **Turning it off** revokes every handle the phone made, forgets the
-  credential, removes the App Group key file, and sends tokens again.
+  credential, and removes the App Group key file. Each computer then gets
+  `APNsRegistration.pushRelayOff`: an explicit `null` push-to-start and
+  alert and no activities, which makes it drop the handles it held, so it
+  stops pushing even when the revocation failed or was refused (a computer
+  that is away drops them when the phone next reaches it). No token goes
+  out instead: native notifications stop until it is on again. Web Push is
+  separate and reaches only the browser app, installed and subscribed on
+  its own.
 - **Environments.** Xcode builds attest in App Attest's development
   environment and use `push-sandbox.sheprd.org`; TestFlight and App Store
   builds attest in production and use `push.sheprd.org`. The app tells them
@@ -325,59 +342,6 @@ registration (older computers do not say).
   distribution builds do not carry. Each push relay refuses the other's
   builds. The simulator has no App Attest, so the push relay cannot be used
   there.
-
-## APNs key for the daemon
-
-For a copy of the app you sign yourself, the daemon
-(`sheprd-remote-control`) can send pushes with your own APNs token key
-instead of the push relay. Turn the push relay off in the app's Settings to
-use it. Without it everything else works, and the app's token upload
-is answered 503.
-
-1. **Create the key.** In the Apple Developer site, go to Certificates,
-   Identifiers & Profiles > Keys. Create a key with Apple Push Notifications
-   service (APNs) enabled, and download `AuthKey_KEYID.p8` (it downloads
-   once).
-2. **Install it.** Put it in the daemon's state directory as
-   `apns/AuthKey.p8`, readable only by you:
-
-   ```sh
-   mkdir -p STATE_DIR/apns
-   cp AuthKey_KEYID.p8 STATE_DIR/apns/AuthKey.p8
-   chmod 600 STATE_DIR/apns/AuthKey.p8
-   ```
-
-3. **Configure it.** Beside it, write `STATE_DIR/apns/config.json`:
-
-   ```json
-   {
-     "team_id": "ABCDE12345",
-     "key_id": "KEYID12345",
-     "topic": "so.pen.herdr.remote",
-     "sandbox": true
-   }
-   ```
-
-   - `team_id` is your ten-character team.
-   - `key_id` is the key's ID.
-   - `topic` is the app's bundle identifier. The daemon adds
-     `.push-type.liveactivity` itself.
-4. **Restart.** Restart remote control in Sheprd, so the daemon reads them at
-   start.
-
-`STATE_DIR` is the remote control daemon's private state directory (its
-`--state-dir`).
-
-### Sandbox or production
-
-The two must match, so switch both together.
-
-- **Xcode builds:** an app run from Xcode gets sandbox tokens. Set
-  `"sandbox": true`.
-- **TestFlight and App Store builds:** these get production tokens. Set
-  `"sandbox": false`.
-- **A mismatch:** a token sent to the wrong service is refused as
-  `BadDeviceToken`, and the daemon then forgets it.
 
 ## Live Activity detail
 
@@ -401,8 +365,10 @@ update Sheprd first. Phones on the default are unaffected.
 
 ## Sealed alerts
 
-With the APNs key installed, questions, finished turns, and errors reach
-the phone as APNs alerts instead of Web Push. These alerts are sealed to
+With the push relay on, questions, finished turns, and errors reach the
+phone as APNs alerts. With it off the app gets none; Web Push reaches only
+the browser app, installed and subscribed on its own. These alerts are
+sealed to
 the phone: Apple sees only "Sheprd", "New activity", and ciphertext.
 
 1. **Registration.** The app asks to show alerts after the first pairing.
@@ -433,8 +399,9 @@ the phone: Apple sees only "Sheprd", "New activity", and ciphertext.
    asks it (`POST /api/apns/test`) for one sealed alert carrying a random
    id. The extension records the id in the App Group as it opens the alert
    (`PushTestReceipts`), and Settings shows "Arrived in N s", or where it
-   stopped: no APNs key on the computer, no alert token from this phone yet,
-   what APNs refused, or nothing within 30 seconds. A tap on it only opens
+   stopped: the push relay off on the computer, no alert registration from
+   this phone yet, what the push relay refused, or nothing within 30
+   seconds. A tap on it only opens
    the app.
 6. **Test push from this iPhone.** With the push relay on, Settings >
    Notifications > Send Test Push from This iPhone needs no computer online.
@@ -442,7 +409,16 @@ the phone: Apple sees only "Sheprd", "New activity", and ciphertext.
    and posts a test alert to `POST /v1/push` on this build's push relay
    (`push-sandbox.sheprd.org` for Xcode builds, `push.sheprd.org`
    otherwise), shaped like a computer's test push: the same cover,
-   `mutable-content`, thread `test`, and `sealed` field under the same seal.
+   `mutable-content`, and `sealed` field under the same seal.
+   - Its thread is always `test` and its collapse id `test-ID`. A
+     computer's carry the pairing's scope (`scope/test`), from the notify
+     key the phone gave that computer, so two computers' pushes never
+     group or replace each other. A self test has no computer and so no
+     scope, and a fixed thread is all it needs. Once the extension opens an
+     alert it sets the thread itself: a computer's test goes in that
+     computer's thread, and a self test in `test`. The Swift tests compare
+     the self test with the daemon's test push on everything except these
+     two ids.
    - It is sealed to a key of the phone's own (`NotifyKey.own`), kept in
      its own keychain item and never given to a computer, and names
      `this-phone` as its computer, which is no fingerprint.
@@ -456,7 +432,7 @@ the phone: Apple sees only "Sheprd", "New activity", and ciphertext.
      a refused handle (the next try attests again), a stale token (`gone`),
      `limited`, or `unavailable`.
    - With the push relay off, the row says the phone cannot push itself
-     without it: there is no APNs key on the phone.
+     without it, as no computer can either.
    - A phone that never paired was never asked to show alerts, so it has
      no alert token: the test asks then, as pairing does, and waits up to
      10 seconds for iOS to hand the token over.
@@ -483,9 +459,22 @@ orders copies it handles at once (`AlertGate`), so a copy that arrives
 again, from a retry, a failover, or a second sender, shows once:
 
 - Without Apple's notification filtering entitlement, which is the case
-  today, the copy replaces the first one silently: no sound, and the first
-  is removed. One the person already dismissed comes back silently.
-- With it, the copy is dropped. The account holder requests
+  today, a copy is silent. While the first still shows, the copy takes its
+  place: they share the APNs collapse id, which iOS uses as the
+  notification's identifier. When the person already dismissed or opened
+  the first, the copy is noted (`RetractedAlerts`) and taken back
+  (`AlertSweep`): by the extension a moment after showing it, or at its
+  next run, and by the app at launch, whenever it becomes active (any
+  window), and on a background push. The list is a file in the App Group,
+  changed only under `NSFileCoordinator`, so the app and the extension
+  never overwrite each other. A sweep reads what is shown, checks, and
+  removes while holding it, and the extension forgets a delivered copy's
+  identifier under the same hold before showing another alert there, so a
+  newer alert for the same chat, under the same identifier, is never taken
+  back. A copy counts as replaced only once the extension marked it
+  delivered: until then another event under its identifier proves nothing,
+  as the copy may still land on top of it.
+- With the entitlement, the copy is dropped. The account holder requests
   `com.apple.developer.usernotifications.filtering` for
   `so.pen.herdr.remote.notifications` at
   https://developer.apple.com/contact/request/notification-service . Once

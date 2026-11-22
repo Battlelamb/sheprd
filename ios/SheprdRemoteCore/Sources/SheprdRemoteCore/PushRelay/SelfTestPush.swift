@@ -13,7 +13,9 @@ import Foundation
 public enum SelfTestPush {
     /// What a self test names in place of a computer's fingerprint.
     public static let sender = "this-phone"
-    /// The thread test pushes share (`TEST_PANE`), which names no chat.
+    /// The thread a self test goes in (`TEST_PANE`), which names no chat.
+    /// A computer's test push puts its pairing scope in front
+    /// (`scope/test`); a self test has no computer, so no scope.
     public static let pane = "test"
     public static let title = "Test push"
     public static let body = "From this iPhone: the push relay reaches this phone."

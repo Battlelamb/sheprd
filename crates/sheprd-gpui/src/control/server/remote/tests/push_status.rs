@@ -9,7 +9,7 @@ use sheprd_remote_control::control::{
 fn answering(_: &std::path::Path, request: &Request) -> Result<daemon::Response, daemon::Error> {
     match request {
         Request::PushStatus => Ok(daemon::Response::PushStatus(PushStatus {
-            mode: Mode::OwnKey,
+            mode: Mode::PushRelay,
             ..PushStatus::default()
         })),
         _ => Ok(daemon::Response::Done),
@@ -58,7 +58,7 @@ async fn push_status_asks_the_daemon_only_while_remote_control_is_on(cx: &mut Te
         panic!("not a push status");
     };
     assert!(enabled);
-    assert_eq!(status.unwrap().mode, Mode::OwnKey);
+    assert_eq!(status.unwrap().mode, Mode::PushRelay);
     assert_eq!(error, None);
 }
 

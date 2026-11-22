@@ -136,3 +136,44 @@ fn a_note_counts_toward_both_byte_budgets() {
     let kept: usize = entries[keep..].iter().map(entry_size).sum();
     assert!(kept <= MAX_TRANSCRIPT_TEXT, "{kept}");
 }
+
+#[test]
+fn a_replayed_note_stays_with_a_paste_split_across_chunks() {
+    let mut harness = started(Config {
+        load: Some("old".to_owned()),
+        ..config()
+    });
+    let id = harness.last_request("initialize")["id"].as_i64().unwrap();
+    harness.respond(
+        id,
+        json!({"protocolVersion": 1, "agentCapabilities": {"loadSession": true}}),
+    );
+    let load = harness.last_request("session/load");
+    let note = Context::new(
+        Prompts::with_instructions("Be brief."),
+        Facts::default(),
+        Default::default(),
+    )
+    .before(None)
+    .unwrap();
+    for text in [
+        note.as_str(),
+        "<pasted_content id=\"0e15\">",
+        "\nTask: ship it\n</pasted_",
+        "content>",
+    ] {
+        harness.input(Input::Agent(
+            HarnessId::default(),
+            Inbound::Notification {
+                method: "session/update".to_owned(),
+                params: json!({"sessionId": "old", "update": {"sessionUpdate": "user_message_chunk",
+                    "content": {"type": "text", "text": text}}}),
+            },
+        ));
+    }
+    harness.respond(load["id"].as_i64().unwrap(), json!({}));
+    assert_eq!(
+        prompts(&harness),
+        [("Task: ship it".to_owned(), Some(note))]
+    );
+}

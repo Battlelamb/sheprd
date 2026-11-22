@@ -1,9 +1,10 @@
 import SheprdRemoteCore
 import SwiftUI
 
-/// Settings' push relay section: the setting, on by default
+/// Settings > Notifications' push relay section: the setting, on by default
 /// (`PushRelaySetting`), what the push relay sees (`docs/apns-relay-plan.md`,
-/// Opt-in), and how each paired computer delivers this phone's pushes.
+/// Opt-in), and how many paired computers can deliver this phone's pushes,
+/// opening how each one does.
 /// Turning it back on after turning it off asks first, with the same
 /// explanation, as Sheprd does on the computer.
 struct PushRelaySection: View {
@@ -38,12 +39,12 @@ struct PushRelaySection: View {
                     }
                 }
             ))
-            ForEach(model.computers) { computer in
-                LabeledContent(model.displayName(computer), value: Self.label(
-                    model.tokens.delivery[computer.fingerprint],
-                    reached: !model.tokens.unreached.contains(computer.fingerprint),
-                    pushRelay: pushRelay
-                ))
+            if !model.computers.isEmpty {
+                NavigationLink {
+                    PushDeliveryView().makesRoomForConnectionToast()
+                } label: {
+                    LabeledContent("Delivery", value: "\(readyCount) of \(model.computers.count) ready")
+                }
             }
             if pushRelay, let error = model.tokens.pushRelay.lastError {
                 Text(error).font(.footnote).foregroundStyle(.secondary)
@@ -58,8 +59,8 @@ struct PushRelaySection: View {
             Text("Push Relay")
         } footer: {
             Text(pushRelay
-                ? "On. The computers get sealed handles instead of this phone's push tokens. Turning it off revokes them."
-                : "Off. Pushes reach this phone only from a computer with its own APNs key, for a copy of the app you sign yourself.")
+                ? "Computers get sealed handles, not this phone's push tokens. Turning it off revokes them."
+                : "Computers push only through the push relay, so this phone gets no alerts or Live Activities from them.")
         }
         .alert("Push through the Sheprd push relay?", isPresented: $confirming) {
             Button("Turn On") {
@@ -77,6 +78,24 @@ struct PushRelaySection: View {
         }
     }
 
+    private var readyCount: Int {
+        model.computers.count(where: { computer in
+            Self.ready(model.tokens.delivery[computer.fingerprint],
+                       reached: !model.tokens.unreached.contains(computer.fingerprint),
+                       pushRelay: pushRelay)
+        })
+    }
+
+    /// Whether a computer can push to this phone as things stand: it was
+    /// reached, and delivers the way this phone's setting expects.
+    static func ready(_ delivery: ActivityTokens.Delivery?, reached: Bool, pushRelay: Bool) -> Bool {
+        guard reached else { return false }
+        return switch delivery {
+        case .pushRelay: pushRelay
+        case .off, .unknown, nil: false
+        }
+    }
+
     /// How one computer delivers, as far as its last answer said, and
     /// whether the last registration reached it.
     static func label(_ delivery: ActivityTokens.Delivery?, reached: Bool, pushRelay: Bool) -> String {
@@ -85,7 +104,6 @@ struct PushRelaySection: View {
         }
         return switch delivery {
         case .pushRelay: pushRelay ? "Push relay" : "Push relay, off here"
-        case .ownKey: pushRelay ? "Own APNs key, which needs the push relay off" : "Own APNs key"
         case .off: "No push set up"
         case .unknown: "Not reported"
         case nil: "Not asked yet"

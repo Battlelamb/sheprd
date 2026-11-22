@@ -4,6 +4,7 @@ use super::*;
 use crate::push::Chat;
 
 mod alert;
+mod clear;
 mod decide;
 mod delivery;
 mod notify_key;

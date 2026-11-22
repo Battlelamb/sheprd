@@ -79,8 +79,8 @@ const BODY_LIMIT: usize = 320 * 1024;
 
 /// What every request reads.
 pub(crate) struct State {
-    /// How APNs pushes for the iOS companion leave: the user's own key,
-    /// the push relay, or not at all.
+    /// How APNs pushes for the iOS companion leave: through the push relay,
+    /// or not at all.
     pub(crate) apns: crate::apns::Delivery,
     /// `Auth::apps`: origins of apps installed from other computers.
     pub(crate) apps: Arc<RwLock<Vec<String>>>,

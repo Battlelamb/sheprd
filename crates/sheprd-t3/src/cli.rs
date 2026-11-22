@@ -9,7 +9,7 @@ Usage:
   sheprd-t3 pair --token-file FILE [--server URL]
   sheprd-t3 threads --token-file FILE [--server URL] [--json]
   sheprd-t3 show --token-file FILE [--server URL] [--json] THREAD
-  sheprd-t3 send --token-file FILE [--server URL] [--json] THREAD TEXT
+  sheprd-t3 send --token-file FILE [--server URL] [--json] THREAD [--] TEXT
   sheprd-t3 stop --token-file FILE [--server URL] [--json] THREAD
 
 Commands:
@@ -84,6 +84,12 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Options, Error>
     let mut token_file = None;
     while let Some(arg) = args.next() {
         match arg.to_str() {
+            // What follows is text, such as a prompt starting with `-`.
+            Some("--") => {
+                for rest in args.by_ref() {
+                    positional.push(rest.into_string().map_err(|_| Error::Utf8)?);
+                }
+            }
             Some("-h" | "--help") => {
                 return Ok(Options {
                     command: Command::Help,

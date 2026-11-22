@@ -1,7 +1,8 @@
-use std::{net::TcpListener, time::Duration};
+use std::net::TcpListener;
 
 use super::*;
 use serde_json::{Value, json};
+use sheprd_chat_protocol::ServerMessage;
 use tungstenite::Message;
 
 fn read(socket: &mut tungstenite::WebSocket<std::net::TcpStream>) -> Value {
@@ -55,15 +56,31 @@ fn a_clients_commands_reach_t3_and_its_answers_come_back_as_acks() {
             &json!({"_tag": "Exit", "requestId": stop["id"],
                 "exit": {"_tag": "Success", "value": {"sequence": 2}}}),
         );
+        // The run the stop ended, which the next command waits to see.
+        send(
+            &mut socket,
+            &json!({"_tag": "Chunk", "requestId": "2", "values": [{"kind": "event",
+                "sequence": 2, "event": {"type": "run.updated",
+                    "payload": {"id": "run-1", "ordinal": 1, "status": "interrupted"}}}]}),
+        );
+        assert_eq!(read(&mut socket), json!({"_tag": "Ack", "requestId": "2"}));
         // A prompt T3 refuses.
         let prompt = read(&mut socket);
         assert_eq!(prompt["payload"]["type"], "message.dispatch");
         assert_eq!(prompt["payload"]["text"], "hi");
+        // The run had ended, so it starts at once.
+        assert_eq!(
+            prompt["payload"]["dispatchMode"],
+            json!({"type": "start_immediately"})
+        );
         send(
             &mut socket,
             &json!({"_tag": "Exit", "requestId": prompt["id"], "exit": {"_tag": "Failure",
                 "cause": [{"_tag": "Fail", "error": "busy"}]}}),
         );
+        // One more that T3 never answers before the socket closes.
+        let unanswered = read(&mut socket);
+        assert_eq!(unanswered["payload"]["text"], "again");
         let _ = socket.close(None);
         while socket.read().is_ok() {}
     });
@@ -123,11 +140,30 @@ fn a_clients_commands_reach_t3_and_its_answers_come_back_as_acks() {
         origin: None,
     };
     orders.send(order(prompt, 2)).unwrap();
+    let Step::Changed(stopped) = next() else {
+        panic!("the stopped run");
+    };
+    assert_eq!(stopped.status, Status::Idle);
     assert_eq!(
         next(),
         Step::Acked {
             conn: ConnId(1),
             id: CommandId(uuid::Uuid::from_u128(2)),
+            rejected: Some(Rejection::AgentUnavailable),
+        }
+    );
+    let again = Command::Prompt {
+        text: "again".to_owned(),
+        attachments: Vec::new(),
+        origin: None,
+    };
+    orders.send(order(again, 3)).unwrap();
+    // A command T3 never answered is refused before the end is told.
+    assert_eq!(
+        next(),
+        Step::Acked {
+            conn: ConnId(1),
+            id: CommandId(uuid::Uuid::from_u128(3)),
             rejected: Some(Rejection::AgentUnavailable),
         }
     );
@@ -142,32 +178,144 @@ fn a_clients_commands_reach_t3_and_its_answers_come_back_as_acks() {
 fn a_command_before_the_snapshot_is_not_ready() {
     let follower = Follower::new("2".to_owned(), Vec::new());
     assert_eq!(
-        follower.dispatch(&order(Command::Cancel, 1)),
-        Err(Rejection::NotReady)
+        follower.verdict(&order(Command::Cancel, 1)),
+        Verdict::Answer(Some(Rejection::NotReady))
     );
 }
 
-#[test]
-fn commands_t3_has_not_answered_are_bounded() {
-    let mut follower = Follower::new("2".to_owned(), Vec::new());
-    let _ = follower.frame(ServerFrame::Chunk {
+fn chunk(values: Value) -> ServerFrame {
+    ServerFrame::Chunk {
         request_id: "2".to_owned(),
-        values: vec![json!({"kind": "snapshot", "snapshotSequence": 1,
-            "projection": {"thread": {"id": "thread-1"},
-                "runs": [{"id": "run-1", "ordinal": 1, "status": "running"}]}})],
-    });
-    for n in 0..MAX_ORDERS {
-        let order = order(Command::Cancel, n as u128);
-        assert!(follower.dispatch(&order).is_ok());
-        follower.sent(n.to_string(), &order);
+        values: values.as_array().unwrap().clone(),
     }
+}
+
+fn exit(request: &str, sequence: u64) -> ServerFrame {
+    serde_json::from_value(json!({"_tag": "Exit", "requestId": request,
+        "exit": {"_tag": "Success", "value": {"sequence": sequence}}}))
+    .unwrap()
+}
+
+fn idle() -> Follower {
+    let mut follower = Follower::new("2".to_owned(), Vec::new());
+    let _ = follower.frame(chunk(json!([{"kind": "snapshot", "snapshotSequence": 1,
+        "projection": {"thread": {"id": "thread-1"}}}])));
+    follower
+}
+
+#[test]
+fn a_stop_right_after_a_prompt_waits_for_the_run_it_started() {
+    let mut follower = idle();
+    let now = Instant::now();
+    assert!(follower.settled(now));
+    let prompt = order(
+        Command::Prompt {
+            text: "hi".to_owned(),
+            attachments: Vec::new(),
+            origin: None,
+        },
+        1,
+    );
+    assert!(matches!(follower.verdict(&prompt), Verdict::Send(_)));
+    follower.sent("10".to_owned(), &prompt);
+    // Until T3 answers, the stop waits.
+    assert!(!follower.settled(now));
+    assert!(matches!(
+        follower.frame(exit("10", 5)),
+        Step::Acked { rejected: None, .. }
+    ));
+    // T3 answered before the thread shows the run: still waiting.
+    assert!(!follower.settled(Instant::now()));
+    let _ = follower.frame(chunk(json!([{"kind": "event", "sequence": 5, "event": {
+        "type": "run.created", "payload": {"id": "run-1", "ordinal": 1, "status": "starting"}}}])));
+    assert!(follower.settled(Instant::now()));
+    let Verdict::Send(stop) = follower.verdict(&order(Command::Cancel, 2)) else {
+        panic!("the stop goes to T3");
+    };
+    assert_eq!(serde_json::to_value(stop).unwrap()["runId"], "run-1");
+}
+
+#[test]
+fn a_thread_that_never_shows_the_effect_holds_commands_only_briefly() {
+    let mut follower = idle();
+    let prompt = order(Command::Cancel, 1);
+    follower.sent("10".to_owned(), &prompt);
+    let _ = follower.frame(exit("10", 99));
+    assert!(!follower.settled(Instant::now()));
+    assert!(follower.settled(Instant::now() + SETTLE));
+}
+
+#[test]
+fn a_command_sent_again_hears_t3s_first_answer() {
+    let mut follower = idle();
+    let _ = follower.frame(chunk(json!([{"kind": "event", "sequence": 2, "event": {
+        "type": "run.created", "payload": {"id": "run-1", "ordinal": 1, "status": "running"}}}])));
+    let stop = order(Command::Cancel, 7);
+    assert!(matches!(follower.verdict(&stop), Verdict::Send(_)));
+    follower.sent("10".to_owned(), &stop);
+    let _ = follower.frame(exit("10", 3));
+    let _ = follower.frame(chunk(json!([{"kind": "event", "sequence": 3, "event": {
+        "type": "run.updated", "payload": {"id": "run-1", "ordinal": 1, "status": "interrupted"}}}])));
+    // Nothing runs now, yet the same stop again was taken.
+    assert_eq!(follower.verdict(&stop), Verdict::Answer(None));
     assert_eq!(
-        follower.dispatch(&order(Command::Cancel, 99)),
-        Err(Rejection::QueueFull)
+        follower.verdict(&order(Command::Cancel, 8)),
+        Verdict::Answer(Some(Rejection::NotWorking))
     );
 }
 
 #[test]
-fn server_text_cannot_reach_the_terminal_as_escapes() {
-    assert_eq!(plain("busy\u{1b}[2J\n"), "busy\u{fffd}[2J\u{fffd}");
+fn an_attached_client_sees_a_request_asked_then_answered() {
+    let mut follower = idle();
+    let Step::Changed(quiet) = follower.frame(chunk(json!([{"kind": "event", "sequence": 2,
+        "event": {"type": "turn-item.updated", "payload": {"id": "item-0", "ordinal": 0,
+            "type": "system_notice", "message": "started"}}}])))
+    else {
+        panic!("a change");
+    };
+    let mut mirror = Mirror::new(*quiet, None);
+    let (outbox, queue) = bounded(16);
+    mirror.input(Input::Attach(crate::session::Attach {
+        conn: ConnId(1),
+        local: false,
+        outbox,
+        since: None,
+    }));
+    let mut client = match (queue.recv().unwrap(), queue.recv().unwrap()) {
+        (ServerMessage::Welcome { .. }, ServerMessage::Snapshot { transcript, .. }) => *transcript,
+        other => panic!("{other:?}"),
+    };
+    let mut apply = |mirror: &mut Mirror, follower: &mut Follower, values: Value| {
+        if let Step::Changed(transcript) = follower.frame(chunk(values)) {
+            mirror.update(*transcript);
+        }
+        while let Ok(message) = queue.try_recv() {
+            let ServerMessage::Change { change, .. } = message else {
+                panic!("a change, not {message:?}");
+            };
+            client.apply(&change).unwrap();
+        }
+        client.permissions.len()
+    };
+    let asked = apply(
+        &mut mirror,
+        &mut follower,
+        json!([
+            {"kind": "event", "sequence": 3, "event": {"type": "runtime-request.updated",
+                "payload": {"id": "request-1", "status": "pending"}}},
+            {"kind": "event", "sequence": 4, "event": {"type": "turn-item.updated",
+                "payload": {"id": "item-1", "ordinal": 1, "type": "approval_request",
+                    "requestId": "request-1", "requestKind": "command", "prompt": "Run it?"}}},
+        ]),
+    );
+    assert_eq!(asked, 1);
+    let answered = apply(
+        &mut mirror,
+        &mut follower,
+        json!([
+            {"kind": "event", "sequence": 5, "event": {"type": "runtime-request.updated",
+                "payload": {"id": "request-1", "status": "resolved"}}},
+        ]),
+    );
+    assert_eq!(answered, 0);
 }

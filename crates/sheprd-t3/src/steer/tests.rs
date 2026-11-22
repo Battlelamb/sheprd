@@ -309,6 +309,28 @@ fn the_threads_provider_and_model_are_settings() {
     assert!(super::options(&idle(), &[]).is_empty());
 }
 
+#[test]
+fn a_thread_whose_agent_cannot_run_can_still_move_to_another() {
+    let thread = thread(json!([]), json!([]), json!([]));
+    let healthy: Vec<Provider> = providers()
+        .into_iter()
+        .filter(|provider| provider.instance_id == "other")
+        .collect();
+    let options = options(&thread, &healthy);
+    let ids: Vec<&str> = options.iter().map(|option| option.id.as_str()).collect();
+    assert_eq!(ids, [PROVIDER]);
+    // The agent it runs is still named, though no longer offered.
+    assert_eq!(options[0].current_name(), "fakeacp");
+    let switch = Command::SetOption {
+        id: PROVIDER.to_owned(),
+        value: OptionValue::Choice {
+            id: "other".to_owned(),
+        },
+    };
+    let sent = serde_json::to_value(dispatch(&thread, &healthy, id(1), &switch).unwrap()).unwrap();
+    assert_eq!(sent["type"], "provider.switch");
+}
+
 fn options_for(count: usize) -> Vec<String> {
     let providers: Vec<Provider> = providers().into_iter().take(count).collect();
     options(&idle(), &providers)

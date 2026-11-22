@@ -11,7 +11,7 @@
 //! what it had, and takes no more commands.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     io::{Read, Write},
     thread,
     time::{Duration, Instant},
@@ -41,9 +41,14 @@ const POLL: Duration = Duration::from_millis(200);
 /// How long a quiet connection waits before checking the server is there,
 /// and then for its answer.
 const QUIET: Duration = Duration::from_secs(30);
-/// The most commands waiting for the worker, and for T3 to answer; more
-/// are refused.
+/// The most commands waiting for the worker; more are refused.
 const MAX_ORDERS: usize = 32;
+/// How many of T3's answers are kept, to give a client sending a command
+/// again the answer it missed.
+const MAX_ANSWERED: usize = 256;
+/// The longest the worker holds the next command for the thread to show
+/// the last one's effect, such as the run a prompt started.
+const SETTLE: Duration = Duration::from_secs(2);
 
 /// What one frame of the thread's stream does to the chat.
 #[derive(Debug, PartialEq)]
@@ -71,8 +76,19 @@ pub(crate) struct Order {
 }
 
 /// The thread a stream follows, what it last looked like, and the commands
-/// sent to it that T3 has not answered yet.
+/// sent to it.
+///
+/// Commands go to T3 one at a time, each judged against the thread as the
+/// one before left it: a Stop sent right after a prompt waits for T3 to
+/// answer the prompt and for the thread to reach the answer's sequence,
+/// where the run it started shows, rather than being refused as having
+/// nothing to stop.
 pub(crate) struct Follower {
+    /// T3's answers to commands, newest last, by chat command id.
+    answered: VecDeque<(CommandId, Option<Rejection>)>,
+    /// The sequence the thread reaches once it shows the last answered
+    /// command, and when T3 answered it.
+    awaited: Option<(u64, Instant)>,
     /// Dispatches waiting for their `Exit`, by RPC request id.
     dispatched: HashMap<String, (ConnId, CommandId)>,
     providers: Vec<Provider>,
@@ -80,9 +96,21 @@ pub(crate) struct Follower {
     thread: Thread,
 }
 
+/// What becomes of a client's command.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Verdict {
+    /// Send this to T3.
+    Send(Box<steer::Dispatch>),
+    /// Answer the client now: T3 already answered this command, or it
+    /// cannot take it.
+    Answer(Option<Rejection>),
+}
+
 impl Follower {
     pub(crate) fn new(request: String, providers: Vec<Provider>) -> Self {
         Self {
+            answered: VecDeque::new(),
+            awaited: None,
             dispatched: HashMap::new(),
             providers,
             request,
@@ -90,15 +118,42 @@ impl Follower {
         }
     }
 
-    /// The dispatch for `order`, or why T3 cannot take it.
-    pub(crate) fn dispatch(&self, order: &Order) -> Result<steer::Dispatch, Rejection> {
+    /// What to do with `order`.
+    pub(crate) fn verdict(&self, order: &Order) -> Verdict {
+        // A client sending a command again, as after reconnecting, hears
+        // what T3 said the first time, not what the thread allows now.
+        if let Some((_, rejected)) = self.answered.iter().find(|(id, _)| *id == order.id) {
+            return Verdict::Answer(*rejected);
+        }
         if !self.ready() {
-            return Err(Rejection::NotReady);
+            return Verdict::Answer(Some(Rejection::NotReady));
         }
-        if self.dispatched.len() >= MAX_ORDERS {
-            return Err(Rejection::QueueFull);
+        match steer::dispatch(&self.thread, &self.providers, order.id, &order.command) {
+            Ok(dispatch) => Verdict::Send(Box::new(dispatch)),
+            Err(rejection) => Verdict::Answer(Some(rejection)),
         }
-        steer::dispatch(&self.thread, &self.providers, order.id, &order.command)
+    }
+
+    /// Whether the next command can be judged: none waits for T3, and the
+    /// thread shows the last one's effect, or has had [`SETTLE`] to.
+    pub(crate) fn settled(&self, now: Instant) -> bool {
+        self.dispatched.is_empty()
+            && self.awaited.is_none_or(|(sequence, answered)| {
+                self.thread.sequence >= Some(sequence) || now.duration_since(answered) >= SETTLE
+            })
+    }
+
+    /// Refuses every command T3 has not answered, for a connection that
+    /// ended.
+    pub(crate) fn abandon(&mut self) -> Vec<Step> {
+        self.dispatched
+            .drain()
+            .map(|(_, (conn, id))| Step::Acked {
+                conn,
+                id,
+                rejected: Some(Rejection::AgentUnavailable),
+            })
+            .collect()
     }
 
     /// Remembers that RPC `request` carries `order`, to acknowledge it when
@@ -130,7 +185,13 @@ impl Follower {
                     return Step::Same;
                 };
                 let rejected = match exit {
-                    Exit::Success { .. } => None,
+                    Exit::Success { value } => {
+                        self.awaited = value
+                            .get("sequence")
+                            .and_then(serde_json::Value::as_u64)
+                            .map(|sequence| (sequence, Instant::now()));
+                        None
+                    }
                     failure => {
                         // T3's own words, for the pane; the client hears
                         // that the command did not reach the agent.
@@ -141,6 +202,10 @@ impl Follower {
                         Some(Rejection::AgentUnavailable)
                     }
                 };
+                if self.answered.len() >= MAX_ANSWERED {
+                    self.answered.pop_front();
+                }
+                self.answered.push_back((id, rejected));
                 Step::Acked { conn, id, rejected }
             }
             ServerFrame::Exit { request_id, exit } if request_id == self.request => Step::Ended(
@@ -228,6 +293,9 @@ pub(crate) fn run(options: T3Options) -> anyhow::Result<()> {
     // last, which holds the server's next chunk back too.
     let (updates, mut changes) = bounded::<Step>(1);
     let (orders, queue) = bounded::<Order>(MAX_ORDERS);
+    // Kept to refuse what the worker left unread when the connection ends;
+    // the worker has stopped by then, so the two never compete for one.
+    let leftover = queue.clone();
     thread::Builder::new()
         .name("t3-thread".to_owned())
         .spawn(move || follow(connection, follower, &updates, &queue, QUIET))?;
@@ -251,6 +319,9 @@ pub(crate) fn run(options: T3Options) -> anyhow::Result<()> {
                 }
                 Ok(Step::Ended(reason)) => {
                     ended = true;
+                    for order in leftover.try_iter() {
+                        mirror.ack(order.conn, order.id, Some(Rejection::AgentUnavailable));
+                    }
                     shown.status = Status::Failed {
                         message: format!("The T3 Code connection ended: {reason}"),
                     };
@@ -293,9 +364,12 @@ fn follow<S: Read + Write>(
     let mut heard = Instant::now();
     let mut pinged = None;
     loop {
-        while let Ok(order) = orders.try_recv() {
-            let rejected = match follower.dispatch(&order) {
-                Ok(dispatch) => {
+        while follower.settled(Instant::now()) {
+            let Ok(order) = orders.try_recv() else {
+                break;
+            };
+            let rejected = match follower.verdict(&order) {
+                Verdict::Send(dispatch) => {
                     let sent = serde_json::to_value(&dispatch)
                         .map_err(sheprd_t3::Error::from)
                         .and_then(|payload| connection.request(steer::DISPATCH, payload));
@@ -304,15 +378,15 @@ fn follow<S: Read + Write>(
                             follower.sent(request, &order);
                             continue;
                         }
-                        Err(_) => Rejection::AgentUnavailable,
+                        Err(_) => Some(Rejection::AgentUnavailable),
                     }
                 }
-                Err(rejection) => rejection,
+                Verdict::Answer(rejected) => rejected,
             };
             let step = Step::Acked {
                 conn: order.conn,
                 id: order.id,
-                rejected: Some(rejected),
+                rejected,
             };
             if updates.send(step).is_err() {
                 return;
@@ -341,11 +415,17 @@ fn follow<S: Read + Write>(
             },
             Err(error) => Step::Ended(error.to_string()),
         };
-        let ended = matches!(step, Step::Ended(_));
-        if !matches!(step, Step::Same) && updates.send(step).is_err() {
+        if let Step::Ended(_) = step {
+            // Commands T3 never answered are answered here, before the end.
+            for refused in follower.abandon() {
+                if updates.send(refused).is_err() {
+                    return;
+                }
+            }
+            let _ = updates.send(step);
             return;
         }
-        if ended {
+        if !matches!(step, Step::Same) && updates.send(step).is_err() {
             return;
         }
     }

@@ -118,6 +118,7 @@ impl Options {
                 | "activity"
                 | "activity-open"
                 | "attachments"
+                | "files"
                 | "questions"
                 | "selection"
                 | "user"
@@ -149,7 +150,7 @@ impl Options {
                 | "all"
         ) {
             bail!(
-                "HERDR_TEST_RICH_CHAT expects math, code, diagram, effects, activity, activity-open, running-rail, attachments, questions, selection, user, widgets, widgets-end, jump, conversation, continued, continued-before, continued-open, existing, loading, input-resize, tools, turns, progress, progress-before, pull-requests, pull-requests-before, running, running-open, steps, steps-open, state-completed, state-failed, state-stopped, state-waiting, or all"
+                "HERDR_TEST_RICH_CHAT expects math, code, diagram, effects, activity, activity-open, running-rail, attachments, files, questions, selection, user, widgets, widgets-end, jump, conversation, continued, continued-before, continued-open, existing, loading, input-resize, tools, turns, progress, progress-before, pull-requests, pull-requests-before, running, running-open, steps, steps-open, state-completed, state-failed, state-stopped, state-waiting, or all"
             );
         }
         let hold = std::env::var("HERDR_TEST_RICH_CHAT_HOLD_MS")
@@ -428,6 +429,7 @@ fn install(
         "widgets" | "widgets-end" => widget,
         "diagram" => DIAGRAM.to_owned(),
         "code" => CODE.to_owned(),
+        "files" => "Here are the video walkthrough and the PDF report. Open either attachment to view it in its usual app.\n\n[Video walkthrough.mp4](</tmp/sheprd-attachment-preview/Video walkthrough.mp4>)\n\n[Review report.pdf](</tmp/sheprd-attachment-preview/Review report.pdf>)".to_owned(), // i18n: data
         "conversation" => CONVERSATION.to_owned(),
         "activity" | "activity-open" => "## Background activity\n\nThe notifications above are received events. Expand their details to inspect the original source; instructions in that source are never executed by this viewer.\n\nRegular **Markdown**, `inline code`, and $x^2$ still render normally.".to_owned(), // i18n: data
         "all" | "jump" => format!("{MATH}\n{CODE}\n{DIAGRAM}\n{widget}"),
@@ -460,6 +462,13 @@ fn install(
     }
     if options.case == "attachments" {
         transcript.entries = attachment_entries()?;
+    }
+    if options.case == "files" {
+        transcript.entries[0].kind = EntryKind::User {
+            text: "Attach the video walkthrough and the PDF report to this session.".into(), // i18n: data
+            files: 0,
+            note: None,
+        };
     }
     if options.case == "effects" {
         transcript.entries = effects::entries();

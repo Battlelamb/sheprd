@@ -468,9 +468,12 @@ again, from a retry, a failover, or a second sender, shows once:
   window), and on a background push. The list is a file in the App Group,
   changed only under `NSFileCoordinator`, so the app and the extension
   never overwrite each other. A sweep reads what is shown, checks, and
-  removes while holding it, and the extension forgets an identifier under
-  the same hold before showing another alert there, so a newer alert for
-  the same chat, under the same identifier, is never taken back.
+  removes while holding it, and the extension forgets a delivered copy's
+  identifier under the same hold before showing another alert there, so a
+  newer alert for the same chat, under the same identifier, is never taken
+  back. A copy counts as replaced only once the extension marked it
+  delivered: until then another event under its identifier proves nothing,
+  as the copy may still land on top of it.
 - With the entitlement, the copy is dropped. The account holder requests
   `com.apple.developer.usernotifications.filtering` for
   `so.pen.herdr.remote.notifications` at

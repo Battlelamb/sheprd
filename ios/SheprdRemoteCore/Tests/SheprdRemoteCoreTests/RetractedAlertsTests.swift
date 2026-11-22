@@ -21,6 +21,7 @@ import Testing
     @Test func aNewerAlertUnderTheSameIdentifierStays() {
         var retracted = RetractedAlerts()
         retracted.add("chat-w1:p2", event: "e1", at: start)
+        retracted.delivered("chat-w1:p2", event: "e1")
         #expect(retracted.take(shown: ["chat-w1:p2": "e2"], at: start).isEmpty)
         #expect(retracted.isEmpty, "forgotten, not kept to remove later")
         retracted.add("chat-w1:p3", event: "e3", at: start)
@@ -32,8 +33,33 @@ import Testing
     @Test func anAlertAboutToShowIsNeverTakenBack() {
         var retracted = RetractedAlerts()
         retracted.add("chat-w1:p2", event: "e1", at: start)
+        retracted.delivered("chat-w1:p2", event: "e1")
         retracted.forget("chat-w1:p2")
         #expect(retracted.take(shown: ["chat-w1:p2": "e1"], at: start).isEmpty)
+    }
+
+    /// The person dismissed A; B now shows under the same identifier; a
+    /// late copy of A is noted but not delivered yet when a sweep runs. B
+    /// on screen does not prove A was replaced: A stays noted, and once it
+    /// lands it is taken back.
+    @Test func aCopyNotDeliveredYetOutlivesAnotherEventOnScreen() {
+        var retracted = RetractedAlerts()
+        retracted.add("chat-w1:p2", event: "A", at: start)
+        #expect(retracted.take(shown: ["chat-w1:p2": "B"], at: start).isEmpty)
+        retracted.forget("chat-w1:p2")
+        #expect(!retracted.isEmpty, "neither a sweep nor a newer alert forgets it")
+        retracted.delivered("chat-w1:p2", event: "A")
+        #expect(retracted.take(shown: ["chat-w1:p2": "A"], at: start) == ["chat-w1:p2"])
+    }
+
+    /// Marking delivery names the event: a newer copy noted under the same
+    /// identifier is not marked by an older one's delivery.
+    @Test func deliveryMarksOnlyItsOwnEvent() {
+        var retracted = RetractedAlerts()
+        retracted.add("x", event: "A", at: start)
+        retracted.delivered("x", event: "B")
+        #expect(retracted.take(shown: ["x": "C"], at: start).isEmpty)
+        #expect(!retracted.isEmpty)
     }
 
     /// Two late copies of one dismissed alert: the second replaces the

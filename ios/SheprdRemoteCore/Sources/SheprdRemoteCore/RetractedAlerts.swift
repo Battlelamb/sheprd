@@ -22,6 +22,10 @@ public struct RetractedAlerts: Codable, Equatable, Sendable {
         let identifier: String
         let event: String
         let at: TimeInterval
+        /// Whether the extension handed the copy to iOS. Until then,
+        /// another event under its identifier proves nothing: the copy may
+        /// still arrive on top of it.
+        var delivered = false
     }
 
     private(set) var entries: [Entry] = []
@@ -43,24 +47,38 @@ public struct RetractedAlerts: Codable, Equatable, Sendable {
         entries.contains { $0.event == event }
     }
 
-    /// Forgets any copy noted under `identifier`: another alert is about
-    /// to be shown there, which no sweep may take back.
+    /// The copy noted under `identifier` for `event` was handed to iOS.
+    public mutating func delivered(_ identifier: String, event: String) {
+        for index in entries.indices where entries[index].identifier == identifier && entries[index].event == event {
+            entries[index].delivered = true
+        }
+    }
+
+    /// Forgets the delivered copy noted under `identifier`: another alert
+    /// is about to be shown there, replacing it, which no sweep may take
+    /// back. A copy not delivered yet may still land on top of that alert,
+    /// so it stays noted.
     public mutating func forget(_ identifier: String) {
-        entries.removeAll { $0.identifier == identifier }
+        entries.removeAll { $0.identifier == identifier && $0.delivered }
     }
 
     /// The identifiers to remove now, given what is shown (`identifier` to
-    /// its event, if it has one) at `date`. A copy not shown yet waits for
-    /// a later sweep; one whose identifier shows another event was replaced
-    /// by a newer alert and is forgotten, as is one past `window`.
+    /// its event, if it has one) at `date`. A copy shown is removed. A copy
+    /// not shown yet waits for a later sweep. A delivered copy whose
+    /// identifier shows another event was replaced by a newer alert and is
+    /// forgotten; one not delivered yet waits, as it may still land on top.
+    /// Any past `window` is forgotten.
     public mutating func take(shown: [String: String?], at date: Date) -> [String] {
         let now = date.timeIntervalSince1970
         var remove: [String] = []
         entries.removeAll { entry in
             if now - entry.at > Self.window { return true }
             guard let event = shown[entry.identifier] else { return false }
-            if event == entry.event { remove.append(entry.identifier) }
-            return true
+            if event == entry.event {
+                remove.append(entry.identifier)
+                return true
+            }
+            return entry.delivered
         }
         return remove
     }

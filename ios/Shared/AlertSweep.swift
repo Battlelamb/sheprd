@@ -43,6 +43,12 @@ enum AlertSweep {
         }
     }
 
+    /// The late copy noted as `identifier` for `event` was handed to iOS.
+    static func delivered(_ identifier: String, event: String) {
+        guard let file else { return }
+        RetractedAlerts.update(file: file) { $0.delivered(identifier, event: event) }
+    }
+
     /// Another alert is about to show as `identifier`: no noted copy there
     /// may be taken back now. Blocks while a sweep holds the list.
     static func willShow(_ identifier: String) {

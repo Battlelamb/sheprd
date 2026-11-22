@@ -35,16 +35,19 @@ final class NotificationService: UNNotificationServiceExtension {
         let request = UncheckedSendable(value: request)
         Task {
             await AlertSweep.run()
-            let (content, first, retract) = await Self.prepare(request.value)
-            // A copy noted under this identifier must not take this alert
-            // back once it shows; a late copy is noted after this.
-            if !retract { AlertSweep.willShow(request.value.identifier) }
+            let (content, first, late) = await Self.prepare(request.value)
+            let identifier = request.value.identifier
+            // A delivered copy noted under this identifier must not take
+            // this alert back once it shows; a late copy is noted already.
+            if late == nil { AlertSweep.willShow(identifier) }
             deliver.value(content)
             // Copies waiting on this one go on only once it reached iOS.
             if let first { await Self.gate.delivered(first) }
-            // A late copy goes at once when iOS lets this run a little
-            // longer; otherwise at the next sweep.
-            if retract {
+            // A late copy is accounted for once handed to iOS, and goes at
+            // once when iOS lets this run a little longer; otherwise at the
+            // next sweep.
+            if let late {
+                AlertSweep.delivered(identifier, event: late)
                 try? await Task.sleep(for: .seconds(1))
                 await AlertSweep.run()
             }
@@ -52,9 +55,9 @@ final class NotificationService: UNNotificationServiceExtension {
     }
 
     /// What `request` shows, the event it is the first copy of, which must
-    /// be marked delivered once the content was handed to iOS, and whether
-    /// it is a late copy to take back.
-    private static func prepare(_ request: UNNotificationRequest) async -> (UNNotificationContent, String?, Bool) {
+    /// be marked delivered once the content was handed to iOS, and the
+    /// event of a late copy to take back.
+    private static func prepare(_ request: UNNotificationRequest) async -> (UNNotificationContent, String?, String?) {
         let id = request.identifier
         let content = (request.content.mutableCopy() as? UNMutableNotificationContent) ?? UNMutableNotificationContent()
         let sealed = request.content.userInfo["sealed"] as? String
@@ -69,7 +72,7 @@ final class NotificationService: UNNotificationServiceExtension {
             // Not from a paired computer, or one this phone forgot. Only
             // the cover is shown, whatever the push said, with none of its
             // actions: opening the app shows what is really waiting.
-            return (cover(), nil, false)
+            return (cover(), nil, nil)
         }
         let alert = opened.alert
         content.title = alert.title
@@ -117,12 +120,12 @@ final class NotificationService: UNNotificationServiceExtension {
         _ content: UNNotificationContent,
         event: String?,
         id: String
-    ) async -> (UNNotificationContent, String?, Bool) {
-        guard let event else { return (content, nil, false) }
+    ) async -> (UNNotificationContent, String?, String?) {
+        guard let event else { return (content, nil, nil) }
         let content = (content.mutableCopy() as? UNMutableNotificationContent) ?? UNMutableNotificationContent()
         content.userInfo[AlertKeys.event] = event
-        guard await gate.admit(event) == .repeated else { return (content, event, false) }
-        if filtersRepeats { return (UNNotificationContent(), nil, false) }
+        guard await gate.admit(event) == .repeated else { return (content, event, nil) }
+        if filtersRepeats { return (UNNotificationContent(), nil, nil) }
         content.sound = nil
         content.interruptionLevel = .passive
         let center = UNUserNotificationCenter.current()
@@ -132,12 +135,12 @@ final class NotificationService: UNNotificationServiceExtension {
         guard ids.isEmpty else {
             // What shows may itself be a late copy waiting to be taken
             // back: this one replaces it and is taken back in its place.
-            if AlertSweep.retractIfPending(id, event: event) { return (content, nil, true) }
+            if AlertSweep.retractIfPending(id, event: event) { return (content, nil, event) }
             center.removeDeliveredNotifications(withIdentifiers: ids)
-            return (content, nil, false)
+            return (content, nil, nil)
         }
         AlertSweep.retract(id, event: event)
-        return (content, nil, true)
+        return (content, nil, event)
     }
 
     /// A test push this phone sent itself through the push relay: its

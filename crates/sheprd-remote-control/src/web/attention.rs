@@ -35,6 +35,8 @@ pub(crate) struct Opened {
     dirty: watch::Sender<u64>,
     /// Where the marks are saved; none in tests.
     file: Option<PathBuf>,
+    /// The file was missing, so these marks start now: saved at once.
+    fresh: bool,
     inner: Mutex<Inner>,
 }
 
@@ -114,7 +116,9 @@ fn agents(layout: &Layout, chat: impl Fn(&str) -> ChatFacts) -> HashMap<&str, Ag
 
 impl Opened {
     fn new(marks: Marks, file: Option<PathBuf>) -> Self {
+        let fresh = file.as_deref().is_some_and(|file| !file.exists());
         Self {
+            fresh,
             changed: watch::channel(0).0,
             dirty: watch::channel(0).0,
             file,
@@ -182,6 +186,12 @@ impl Opened {
         self.inner().watching.contains_key(pane)
     }
 
+    /// Whether these marks start now, their file missing.
+    #[cfg(test)]
+    pub(crate) fn fresh(&self) -> bool {
+        self.fresh
+    }
+
     /// Moves whenever what counts or shows unread changes.
     pub(crate) fn changed(&self) -> watch::Receiver<u64> {
         self.changed.subscribe()
@@ -210,16 +220,6 @@ impl Opened {
         let mut inner = self.inner();
         let Inner { marks, watching } = &mut *inner;
         let mut dirty = false;
-        // An agent working with no reply known has nothing that was read:
-        // its next finish is news, however it is told apart.
-        marks.panes.retain(|pane, mark| {
-            let stale = !mark.unread
-                && agents
-                    .get(pane.as_str())
-                    .is_some_and(|agent| !agent.reply.news);
-            dirty |= stale;
-            !stale
-        });
         for pane in watching.keys() {
             if let Some(agent) = agents.get(pane.as_str()) {
                 dirty |= marks.read(pane, agent.reply, now_ms);
@@ -357,6 +357,12 @@ pub(crate) async fn keep(state: Shared) {
         return;
     };
     let mut dirty = state.opened.dirty.subscribe();
+    // Marks a first start began are saved at once: their cutoff must
+    // outlive a restart before any mark changes, or what was replied
+    // meanwhile would count as read.
+    if state.opened.fresh {
+        state.opened.saved_later();
+    }
     while dirty.changed().await.is_ok() {
         tokio::time::sleep(SAVE_AFTER).await;
         dirty.mark_unchanged();

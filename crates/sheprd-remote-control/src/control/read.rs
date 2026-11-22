@@ -37,14 +37,22 @@ pub struct Marks {
     /// has no mark.
     #[serde(default)]
     pub since_ms: u64,
+    /// The same for the primary Herdr 1 session's panes since it last
+    /// restarted, whose replies from before are restored, not new.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub primary_since_ms: u64,
     #[serde(default)]
     pub panes: BTreeMap<String, Mark>,
+}
+
+fn is_zero(ms: &u64) -> bool {
+    *ms == 0
 }
 
 /// What was read of one pane.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Mark {
-    /// The reply last read.
+    /// The latest reply read; a reply that ended later is news.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seen: Finish,
     /// Marked unread by hand: stays so until read again.
@@ -72,8 +80,9 @@ pub struct Unread {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Reply {
     pub finish: Finish,
-    /// Whether it has replied since it last worked: a finish is known, or
-    /// its status says done.
+    /// Whether it has replied since it last worked: a chat once a turn
+    /// ended, a terminal agent while Herdr says it is done. A reply with
+    /// no known time is not told apart from what was read.
     pub news: bool,
 }
 
@@ -86,55 +95,97 @@ impl Marks {
         }
     }
 
-    /// Whether `pane`, whose latest reply is `reply`, is unread.
+    /// Whether `pane`, whose latest reply is `reply`, is unread: marked so
+    /// by hand, or with a reply that ended after the one last read, else
+    /// after marks were kept. One with no known time, as when the daemon
+    /// found it done on starting, is not news.
     pub fn unread(&self, pane: &str, reply: Reply) -> bool {
-        match self.panes.get(pane) {
-            Some(mark) => mark.unread || (reply.news && mark.seen != reply.finish),
-            // With no mark, only a reply known to come after marks were
-            // kept is news: one the daemon found done when it started, with
-            // no time, came before.
-            None => reply.news && reply.finish.is_some_and(|finish| finish > self.since_ms),
+        let mark = self.panes.get(pane);
+        if mark.is_some_and(|mark| mark.unread) {
+            return true;
+        }
+        let Some(finish) = reply.finish.filter(|_| reply.news) else {
+            return false;
+        };
+        finish
+            > mark
+                .and_then(|mark| mark.seen)
+                .unwrap_or_else(|| self.cutoff(pane))
+    }
+
+    /// When replies on `pane` began to count, with no mark there.
+    fn cutoff(&self, pane: &str) -> u64 {
+        if primary_pane(pane) {
+            self.since_ms.max(self.primary_since_ms)
+        } else {
+            self.since_ms
         }
     }
 
     /// Marks `pane`, whose latest reply is `reply`, read: up to that reply,
-    /// and no longer by hand. A pane with nothing to read keeps no mark, so
-    /// its first reply shows. Returns whether anything changed.
+    /// and no longer by hand. What was read stays read when the reply's
+    /// time is not known. Returns whether anything changed.
     pub fn read(&mut self, pane: &str, reply: Reply, now_ms: u64) -> bool {
-        if !reply.news {
-            return match self.panes.get_mut(pane) {
-                Some(mark) if mark.unread => {
-                    mark.unread = false;
-                    mark.at_ms = now_ms;
-                    true
-                }
-                _ => false,
+        let finish = reply.finish.filter(|_| reply.news);
+        let Some(mark) = self.panes.get_mut(pane) else {
+            let Some(finish) = finish else {
+                return false;
+            };
+            self.panes.insert(
+                pane.to_owned(),
+                Mark {
+                    seen: Some(finish),
+                    unread: false,
+                    at_ms: now_ms,
+                },
+            );
+            self.evict();
+            return true;
+        };
+        let seen = mark.seen.max(finish);
+        let changed = mark.unread || seen != mark.seen;
+        if changed {
+            *mark = Mark {
+                seen,
+                unread: false,
+                at_ms: now_ms,
             };
         }
-        let mark = Mark {
-            seen: reply.finish,
-            unread: false,
-            at_ms: now_ms,
-        };
-        let before = self.panes.insert(pane.to_owned(), mark);
-        before.is_none_or(|before| before.seen != mark.seen || before.unread)
+        changed
     }
 
     /// Marks `pane` unread by hand, until it is read again. Returns whether
     /// anything changed.
     pub fn mark_unread(&mut self, pane: &str, reply: Reply, now_ms: u64) -> bool {
-        let since_ms = self.since_ms;
+        let cutoff = self.cutoff(pane);
         let mark = self.panes.entry(pane.to_owned()).or_insert_with(|| Mark {
             // What it would have shown unmarked, so reading it later lands
             // where it was.
-            seen: reply.finish.filter(|finish| *finish <= since_ms),
+            seen: reply.finish.filter(|finish| *finish <= cutoff),
             unread: false,
             at_ms: now_ms,
         });
         let changed = !mark.unread;
         mark.unread = true;
         mark.at_ms = now_ms;
+        self.evict();
         changed
+    }
+
+    /// Drops the oldest marks past [`MAX_MARKS`], so a long-running daemon
+    /// does not keep every pane it ever read.
+    fn evict(&mut self) {
+        while self.panes.len() > MAX_MARKS {
+            let oldest = self
+                .panes
+                .iter()
+                .min_by_key(|(_, mark)| mark.at_ms)
+                .map(|(pane, _)| pane.clone());
+            let Some(oldest) = oldest else {
+                return;
+            };
+            self.panes.remove(&oldest);
+        }
     }
 
     /// Within bounds: no invalid pane, and at most [`MAX_MARKS`], the
@@ -155,15 +206,15 @@ impl Marks {
 
     /// Follows the primary session's `boot`: when it differs from the one
     /// these were made in, that session's panes are other panes now, and
-    /// what they replied before counts as read. Returns whether anything
-    /// changed.
+    /// what they replied before counts as read. Other panes keep their
+    /// marks and cutoff. Returns whether anything changed.
     pub fn follow_boot(&mut self, boot: &str, now_ms: u64) -> bool {
         if boot.is_empty() || self.boot.as_deref() == Some(boot) {
             return false;
         }
         if self.boot.is_some() {
             self.panes.retain(|pane, _| !primary_pane(pane));
-            self.since_ms = self.since_ms.max(now_ms);
+            self.primary_since_ms = self.primary_since_ms.max(now_ms);
         }
         self.boot = Some(boot.to_owned());
         true

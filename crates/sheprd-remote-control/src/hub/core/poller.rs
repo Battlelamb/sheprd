@@ -38,6 +38,9 @@ pub(super) struct Poller {
     /// never written (version 0) or does not read: Sheprd's saved tabs then
     /// stand in for it.
     shared: Option<(u64, Option<Shared>)>,
+    /// When each terminal agent last changed status, which herdr-core does
+    /// not say: read marks know a reply by it (`control::read`).
+    pub(super) times: crate::hub::recency::AgentTimes,
 }
 
 impl Poller {

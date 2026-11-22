@@ -87,3 +87,57 @@ fn reading_tells_views_once() {
     opened.change(&idle, &change("p", true), finished_at(5));
     assert!(!changed.has_changed().unwrap());
 }
+
+#[test]
+fn marks_a_first_start_begins_are_saved_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = crate::app::read::file(dir.path());
+    assert!(
+        Opened::load(file.clone()).fresh(),
+        "their cutoff must outlive a restart"
+    );
+    crate::app::read::save(&file, &crate::control::read::Marks::starting(1)).unwrap();
+    assert!(!Opened::load(file).fresh());
+}
+
+#[test]
+fn a_core_agent_read_stays_read_until_it_finishes_again() {
+    use crate::hub::{Terminal, TerminalAgent};
+    let opened = Opened::default();
+    let done = |changed_ms| {
+        layout(
+            Vec::new(),
+            vec![Terminal {
+                tab: "t".into(),
+                label: String::new(),
+                cwd: None,
+                panes: Vec::new(),
+                zoomed: false,
+                agent: Some(TerminalAgent {
+                    name: None,
+                    status: AgentStatus::Done,
+                    pane: "core:x-61".into(),
+                    title: None,
+                    changed_ms,
+                }),
+                agents: Vec::new(),
+                convert: None,
+            }],
+        )
+    };
+    let quiet = |_: &str| ChatFacts::default();
+    assert_eq!(
+        opened.seen(&done(Some(5)), quiet).unread,
+        panes(["core:x-61"])
+    );
+    opened.open(&done(Some(5)), "core:x-61", quiet);
+    assert_eq!(
+        opened.seen(&done(None), quiet).unread,
+        panes([]),
+        "after a restart"
+    );
+    assert_eq!(
+        opened.seen(&done(Some(9)), quiet).unread,
+        panes(["core:x-61"])
+    );
+}

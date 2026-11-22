@@ -128,3 +128,46 @@ fn marks_keep_their_wire_names() {
     let change: Change = serde_json::from_str(r#"{"panes":["p"],"read":false}"#).unwrap();
     assert!(!change.read);
 }
+
+#[test]
+fn a_read_reply_whose_time_is_lost_stays_read() {
+    // The daemon restarted: a terminal still done has no known time.
+    let mut marks = Marks::starting(0);
+    marks.read("3", replied(5), 9);
+    let untimed = Reply {
+        finish: None,
+        news: true,
+    };
+    assert!(!marks.unread("3", untimed));
+    assert!(!marks.read("3", untimed, 10), "what was read is kept");
+    assert!(marks.unread("3", replied(6)));
+}
+
+#[test]
+fn a_herdr_restart_leaves_other_panes_cutoff_alone() {
+    let mut marks = Marks::starting(0);
+    marks.follow_boot("b1", 1);
+    assert!(marks.follow_boot("b2", 50));
+    assert!(
+        marks.unread("core:00000000-61", replied(40)),
+        "unread before the restart"
+    );
+    assert!(
+        marks.unread("herdr:work:2", replied(40)),
+        "a named session is not restarted"
+    );
+    assert!(!marks.unread("3", replied(40)));
+}
+
+#[test]
+fn marks_stay_bounded_as_they_are_made() {
+    let mut marks = Marks::starting(0);
+    for at in 0..(MAX_MARKS as u64 + 3) {
+        marks.read(&format!("p{at}"), replied(at + 1), at);
+    }
+    assert_eq!(marks.panes.len(), MAX_MARKS);
+    assert!(!marks.panes.contains_key("p0"), "the oldest went first");
+    marks.mark_unread("late", QUIET, u64::MAX);
+    assert_eq!(marks.panes.len(), MAX_MARKS);
+    assert!(marks.panes.contains_key("late"));
+}

@@ -445,8 +445,12 @@ phone never disturbs the desktop's layout.
     the one last read, or while someone marked it unread by hand. Replies
     from before the daemon kept marks count as read, so the first start
     lights nothing up. A terminal agent has replied while Herdr says it is
-    done. Herdr 1 restarts drop that session's panes' marks, as favorites
-    do, and what they replied before the restart counts as read.
+    done, dated when the daemon saw its status move (herdr-core reports no
+    time, so its agents are dated the same way); one found done when the
+    daemon starts has no time and is not news, and a reply already read
+    stays read. Herdr 1 restarts drop that session's panes' marks, as
+    favorites do, and only that session's earlier replies count as read.
+    Marks past 1024 drop the oldest as they are made.
   - **What reads.** A phone reads what it shows on screen, including what
     is replied while it does; Sheprd reads an agent focused for a second in
     a window in front. The badge counts unread agents beside those that

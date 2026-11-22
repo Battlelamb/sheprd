@@ -204,6 +204,7 @@ windows = { features = [
   "Data_Xml_Dom",
   "UI_Notifications",
   "Win32_Graphics_Gdi",
+  "Win32_Graphics_DirectWrite",
   "Win32_UI_Shell_Common",
   "Win32_UI_WindowsAndMessaging",
 ], workspace = true }

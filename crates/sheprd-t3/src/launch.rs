@@ -69,9 +69,18 @@ pub fn checkout(path: &Path) -> Result<Checkout, Error> {
                 worktree: None,
             });
         }
-        let root = linked_root(&dot_git).ok_or_else(|| Error::Worktree {
+        let gitdir = gitdir(&dot_git).ok_or_else(|| Error::Worktree {
             path: folder.to_owned(),
         })?;
+        // A submodule, or a checkout made with `--separate-git-dir`, keeps
+        // its Git folder elsewhere without being a linked worktree: it has
+        // no `commondir`, and the folder is its own root.
+        let Some(root) = linked_root(&gitdir) else {
+            return Ok(Checkout {
+                root: folder.to_owned(),
+                worktree: None,
+            });
+        };
         return Ok(Checkout {
             root,
             worktree: Some(folder.to_owned()),
@@ -83,13 +92,19 @@ pub fn checkout(path: &Path) -> Result<Checkout, Error> {
     })
 }
 
-/// The main folder of the repository a linked worktree's `.git` file names:
-/// `gitdir: <common>/worktrees/<name>`, whose `commondir` leads to
-/// `<common>`, the main folder's `.git`.
-fn linked_root(dot_git: &Path) -> Option<PathBuf> {
+/// The Git folder a `.git` file names (`gitdir: PATH`), if it exists.
+fn gitdir(dot_git: &Path) -> Option<PathBuf> {
     let text = fs::read_to_string(dot_git).ok()?;
     let gitdir = Path::new(text.strip_prefix("gitdir:")?.trim());
     let gitdir = dot_git.parent()?.join(gitdir);
+    gitdir.is_dir().then_some(gitdir)
+}
+
+/// The main folder of the repository whose linked worktree keeps its Git
+/// folder at `gitdir` (`<common>/worktrees/<name>`): its `commondir` leads
+/// to `<common>`, the main folder's `.git`. None for a Git folder that is
+/// no linked worktree's.
+fn linked_root(gitdir: &Path) -> Option<PathBuf> {
     let common = fs::read_to_string(gitdir.join("commondir")).ok()?;
     let common = fs::canonicalize(gitdir.join(common.trim())).ok()?;
     Some(common.parent()?.to_owned())
@@ -244,26 +259,29 @@ pub fn model_for(
     project: Option<&Project>,
     providers: &[Provider],
 ) -> Result<ModelSelection, Error> {
-    let provider = match &request.provider {
-        Some(id) => providers
+    // The project's default, while it names an agent the server runs.
+    let preferred = project
+        .and_then(|project| project.default_model_selection.as_ref())
+        .filter(|selection| {
+            providers
+                .iter()
+                .any(|provider| provider.instance_id == selection.instance_id)
+        });
+    let provider = match (&request.provider, preferred) {
+        (Some(id), _) => providers
             .iter()
             .find(|provider| &provider.instance_id == id)
             .ok_or_else(|| Error::UnknownAgent(id.clone()))?,
-        None => {
-            let preferred = project
-                .and_then(|project| project.default_model_selection.as_ref())
-                .filter(|_| request.model.is_none())
-                .and_then(|selection| {
-                    providers
-                        .iter()
-                        .any(|provider| provider.instance_id == selection.instance_id)
-                        .then(|| selection.clone())
-                });
-            if let Some(selection) = preferred {
-                return Ok(selection);
+        (None, Some(selection)) => {
+            if request.model.is_none() {
+                return Ok(selection.clone());
             }
-            providers.first().ok_or(Error::NoAgent)?
+            providers
+                .iter()
+                .find(|provider| provider.instance_id == selection.instance_id)
+                .ok_or(Error::NoAgent)?
         }
+        (None, None) => providers.first().ok_or(Error::NoAgent)?,
     };
     let model = match &request.model {
         Some(slug) => provider
@@ -352,15 +370,25 @@ pub fn start<S: Read + Write>(
     let project_id = match existing {
         Some(project) => project.id.clone(),
         None => {
-            let created = connection.call(
+            match connection.call(
                 MUTATE_PROJECT,
                 serde_json::to_value(create_project(&checkout, id))?,
-            )?;
-            created
-                .get("id")
-                .and_then(Value::as_str)
-                .ok_or(Error::Answer(MUTATE_PROJECT))?
-                .to_owned()
+            ) {
+                Ok(created) => created
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .ok_or(Error::Answer(MUTATE_PROJECT))?
+                    .to_owned(),
+                // Another client may have created the root's project since
+                // the list was read; T3 refuses a second one, so use it.
+                Err(refused @ crate::Error::Call { .. }) => {
+                    let now = self::shell(connection)?;
+                    project_for(&now, &checkout.root)
+                        .map(|project| project.id.clone())
+                        .ok_or(refused)?
+                }
+                Err(error) => return Err(error),
+            }
         }
     };
     let launch = launch(request, &checkout, &project_id, model_selection, id);

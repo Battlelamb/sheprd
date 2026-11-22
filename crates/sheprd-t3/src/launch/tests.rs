@@ -69,8 +69,22 @@ fn a_linked_worktree_belongs_to_its_repositorys_project() {
     assert_eq!(
         checkout(&worktree.join("src")).unwrap(),
         Checkout {
-            root: repo,
+            root: repo.clone(),
             worktree: Some(worktree.clone()),
+        }
+    );
+    // A submodule's `.git` file leads to a Git folder with no `commondir`:
+    // the submodule is its own root.
+    let modules = repo.join(".git/modules/lib");
+    fs::create_dir_all(&modules).unwrap();
+    let submodule = repo.join("lib");
+    fs::create_dir_all(&submodule).unwrap();
+    fs::write(submodule.join(".git"), "gitdir: ../.git/modules/lib\n").unwrap();
+    assert_eq!(
+        checkout(&submodule).unwrap(),
+        Checkout {
+            root: submodule,
+            worktree: None,
         }
     );
     // A `.git` file that leads nowhere is not guessed at.
@@ -118,6 +132,17 @@ fn the_model_is_the_one_asked_for_else_the_projects_else_the_first_agents() {
     // A project's default for an agent T3 no longer runs is passed over.
     let gone = project("/r", Some(("c", "c1")));
     assert_eq!(pick(&request, Some(&gone)).unwrap(), "a/a2");
+    // A model alone keeps the project's agent.
+    let both = [
+        fake_provider("a", &[("shared", true)]),
+        fake_provider("b", &[("shared", false), ("b2", true)]),
+    ];
+    let model_only = Request {
+        model: Some("shared".to_owned()),
+        ..Request::default()
+    };
+    let selection = model_for(&model_only, Some(&preferred), &both).unwrap();
+    assert_eq!(selection.instance_id, "b");
     request.provider = Some("b".to_owned());
     assert_eq!(pick(&request, Some(&preferred)).unwrap(), "b/b1");
     request.model = Some("a1".to_owned());

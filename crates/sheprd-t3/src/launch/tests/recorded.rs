@@ -205,3 +205,64 @@ fn start_creates_the_project_then_launches_the_thread() {
     assert_eq!(launched["commandId"], format!("sheprd:{id}"));
     assert_eq!(launched["workspaceStrategy"], json!({"type": "root"}));
 }
+
+#[test]
+fn a_project_another_client_just_created_is_used() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let theirs = json!({"kind": "snapshot", "snapshot": {"schemaVersion": 2,
+        "snapshotSequence": 9, "threads": [], "projects": [{"id": "theirs",
+            "title": "repo", "workspaceRoot": root.to_string_lossy()}]}});
+    let server = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut socket = tungstenite::accept(stream).unwrap();
+        let mut shells = 0;
+        let mut launched = None;
+        while let Ok(message) = socket.read() {
+            let Message::Text(text) = message else {
+                continue;
+            };
+            let frame: Value = serde_json::from_str(text.as_str()).unwrap();
+            if frame["_tag"] != "Request" {
+                continue;
+            }
+            let mut reply = match frame["tag"].as_str().unwrap() {
+                "server.getConfig" => answer(STEER, "1"),
+                "orchestration.subscribeShell" => {
+                    shells += 1;
+                    // Empty at first; the other client's project after.
+                    let values = if shells == 1 {
+                        json!([{"kind": "snapshot", "snapshot": {"schemaVersion": 2,
+                            "snapshotSequence": 8, "threads": [], "projects": []}}])
+                    } else {
+                        json!([theirs.clone()])
+                    };
+                    json!({"_tag": "Chunk", "values": values})
+                }
+                // The recorded refusal of a second project for one root.
+                MUTATE_PROJECT => answer(LAUNCHES, "4"),
+                LAUNCH => {
+                    launched = Some(frame["payload"]["projectId"].clone());
+                    answer(LAUNCHES, "5")
+                }
+                other => panic!("unexpected {other}"),
+            };
+            reply["requestId"] = frame["id"].clone();
+            socket
+                .send(Message::Text(reply.to_string().into()))
+                .unwrap();
+        }
+        launched
+    });
+    let url = url::Url::parse(&format!("ws://127.0.0.1:{port}/ws")).unwrap();
+    let mut connection = Connection::open(&url).unwrap();
+    let request = Request {
+        cwd: dir.path().to_owned(),
+        ..Request::default()
+    };
+    start(&mut connection, &request, Uuid::from_u128(2)).unwrap();
+    connection.close();
+    assert_eq!(server.join().unwrap(), Some(json!("theirs")));
+}

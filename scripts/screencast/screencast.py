@@ -182,24 +182,40 @@ def record(spec, name, slots, work):
         act(name, a)
 
     movie = f"/tmp/screencast-{spec['id']}-{int(time.time())}.mov"
-    machine(name, "exec", "--", "sh", "-c",
-            f"nohup screencapture -v -x {movie} >/tmp/screencast.log 2>&1 &")
+    recorder = machine(name, "exec", "--", "sh", "-c",
+                       f"nohup screencapture -v -x {movie} >/tmp/screencast.log 2>&1 & "
+                       "echo $!").strip()
+    if not recorder.isdigit():
+        sys.exit(f"screencapture did not start in the machine: {recorder}")
     t0 = time.monotonic()
-    time.sleep(WARMUP)
 
-    starts = []
-    for seg, slot in zip(spec["segments"], slots):
-        begin = time.monotonic()
-        starts.append(begin - t0)
-        for a in seg["actions"]:
-            act(name, a)
-        left = slot - (time.monotonic() - begin)
-        if left > 0:
-            time.sleep(left)
-    time.sleep(TAIL)
+    def stop():
+        # SIGINT makes screencapture finish the movie; only this run's recorder.
+        machine(name, "exec", "--", "sh", "-c", f"kill -INT {recorder}; sleep 2")
 
-    stopped = time.monotonic() - t0
-    machine(name, "exec", "--", "sh", "-c", "pkill -INT -x screencapture; sleep 2")
+    try:
+        time.sleep(WARMUP)
+        starts = []
+        for seg, slot in zip(spec["segments"], slots):
+            begin = time.monotonic()
+            starts.append(begin - t0)
+            for a in seg["actions"]:
+                act(name, a)
+            left = slot - (time.monotonic() - begin)
+            if left > 0:
+                time.sleep(left)
+        time.sleep(TAIL)
+        stopped = time.monotonic() - t0
+    except BaseException:
+        # A failed action or Control-C: stop the recorder and put the app back
+        # as best we can, then report the original failure.
+        for cleanup in [stop] + [lambda a=a: act(name, a) for a in spec.get("teardown", [])]:
+            try:
+                cleanup()
+            except (subprocess.CalledProcessError, OSError) as error:
+                print(f"cleanup step failed: {error}", file=sys.stderr)
+        raise
+    stop()
     for a in spec.get("teardown", []):
         act(name, a)
 
@@ -316,6 +332,19 @@ def render(spec, provider, lang, starts, work, window, out, captions=False, crop
     return mp4
 
 
+def fits(recorded, wanted, window):
+    """Exit unless narration of `wanted` slot lengths fits a recording made for
+    `recorded` ones: each segment must have as many and no longer slots, or a
+    sentence would run over the next or past the movie's end."""
+    if len(recorded) != len(wanted):
+        sys.exit(f"{window}: recorded for {len(recorded)} segments, the feature has "
+                 f"{len(wanted)}; record again (drop --skip-record)")
+    for i, (old, new) in enumerate(zip(recorded, wanted)):
+        if new > old + 0.05:
+            sys.exit(f"{window}: segment {i + 1} now needs {new:.1f}s but was recorded "
+                     f"with {old:.1f}s; record again (drop --skip-record)")
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("feature", type=Path)
@@ -352,7 +381,9 @@ def main():
         sys.exit(f"unknown window {', '.join(unknown)}: {', '.join(WINDOWS)}")
     for window in windows:
         if a.skip_record:
-            starts = json.loads((work / window / "timing.json").read_text())["starts"]
+            saved = json.loads((work / window / "timing.json").read_text())
+            fits(saved["slots"], slots, window)
+            starts = saved["starts"]
         else:
             launch(a.machine, window, work / window)
             starts = record(spec, a.machine, slots, work / window)

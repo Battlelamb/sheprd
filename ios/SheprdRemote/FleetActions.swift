@@ -20,6 +20,16 @@ extension Fleet {
         }
     }
 
+    /// Marks `keys` read or unread, one request per computer.
+    func setRead(_ read: Bool, for keys: [PaneKey]) async throws {
+        for (device, keys) in Dictionary(grouping: keys, by: \.device) {
+            let panes = keys.map(\.pane)
+            try await call(device) { client, token in
+                try await client.setRead(read, panes: panes, bearer: token)
+            }
+        }
+    }
+
     /// Asks for a chat's row summary; every phone's list shows it when the
     /// computer has it.
     func summarize(_ key: PaneKey) async throws {

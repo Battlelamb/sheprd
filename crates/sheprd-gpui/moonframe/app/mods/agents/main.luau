@@ -3,8 +3,9 @@
 -- (its workspace, tab and pane) over the agent itself, and its status's word
 -- when its integration shows one. Orca and Minimal keep each agent to one
 -- line. Rows are their lines, sized by their text; the order is Sheprd's
--- sort (`app.sheprd.agent_sort`), the highlight the focused pane's, and a
--- click shows that pane.
+-- sort (`app.sheprd.agent_sort`), the highlight the focused pane's, a dot at
+-- the end while the agent has a reply no one read, and a click shows that
+-- pane.
 local row = use "sheprd-row"
 local status_dot = use "sheprd-status-dot"
 local subhead = use "sheprd-subhead"
@@ -101,6 +102,18 @@ local function agent_row(agent: any, layout: any, theme: any)
 			style = { gap = gap },
 			status_dot { status = agent.status, theme = theme, height = DOT },
 			first,
+			-- A reply no one read, on any device (`app.sheprd` marks it); the
+			-- row's click shows the agent, which reads it.
+			if agent.unread
+				then ui.row {
+					class = "agent-unread",
+					width = 7,
+					height = 7,
+					shrink = false,
+					tooltip = "Unread",
+					style = { background = theme.unread or theme.foreground, radius = 3.5 },
+				}
+				else false,
 		},
 		if single then false else under(gap, who(agent, theme)),
 		if not single and agent.state

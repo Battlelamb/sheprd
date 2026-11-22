@@ -24,6 +24,7 @@ mod nearby;
 mod origins;
 mod pace;
 pub(crate) mod prompt;
+mod read;
 mod relay;
 mod render;
 mod shortcuts;
@@ -288,6 +289,7 @@ pub(crate) fn router(state: Shared) -> Router {
         )
         .route("/api/v2/hosts/{host}/pair", post(hosts::pair))
         .route("/api/v2/favorites", post(favorites::post))
+        .route("/api/v2/read", post(read::post))
         .route("/api/v2/live", get(crate::native::live))
         .route("/api/v2/new", get(crate::native::new_options))
         .route("/api/v2/search", get(crate::native::search))

@@ -31,6 +31,7 @@ fn home_with(agent: Option<&str>, summary: Option<&str>) -> Home {
         shortcuts_ms: 0,
         tags: Default::default(),
         version: "20261106.1",
+        unread: &Default::default(),
         waiting: 0,
     })
 }

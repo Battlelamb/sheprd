@@ -175,6 +175,7 @@ pub(crate) fn install_services(personal: bool, cx: &mut App) {
         crate::remote::nearby::desktop::install(cx);
         crate::device_tags::DeviceTags::install(cx);
         crate::agent_favorites::AgentFavorites::install(cx);
+        crate::agent_read::AgentRead::install(cx);
         crate::relay_sharing::RelaySharing::install(cx);
         crate::fleet::Fleet::install(cx);
         // Nor do they read the user's agent sessions.

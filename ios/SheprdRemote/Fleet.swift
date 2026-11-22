@@ -27,6 +27,8 @@ struct ChatItem: Identifiable, Hashable {
     var question: Permission? { answered ? nil : chat.summary?.question }
     var needsYou: Bool { question != nil || (!answered && chat.status == .blocked) }
     var working: Bool { !needsYou && (chat.status == .working || chat.summary?.status == .working) }
+    /// It replied since anyone last read it, on any device.
+    var unread: Bool { chat.unread == true }
 }
 
 enum FleetError: Error, LocalizedError {
@@ -58,6 +60,8 @@ struct TerminalItem: Identifiable, Hashable {
     /// When the computer saw its agent last change state.
     var changed: Date? { agent?.changedMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
     var working: Bool { agent?.status == .working }
+    /// It finished since anyone last looked at it, on any device.
+    var unread: Bool { agent?.unread == true }
 
     /// Where a list opens it: an agent's conversation, when its computer
     /// shows it as a chat, else the agent's pane, else the focused one.

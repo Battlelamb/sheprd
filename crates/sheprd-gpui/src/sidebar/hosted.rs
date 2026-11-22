@@ -67,6 +67,8 @@ pub struct Palette {
 /// noticing, such as the machine's load, is not in it.
 #[derive(Clone)]
 pub struct Stamp {
+    /// The unread agents, which each answer from a daemon replaces whole.
+    agent_read: Arc<crate::agent_read::Sets>,
     agent_sort: AgentSort,
     agents_list: bool,
     /// The chat whose turns the layout shows; see `chat::turns`.
@@ -99,6 +101,7 @@ impl PartialEq for Stamp {
             _ => false,
         };
         same_snapshot
+            && Arc::ptr_eq(&self.agent_read, &other.agent_read)
             && self.agent_sort == other.agent_sort
             && self.agents_list == other.agents_list
             && self.chat_turns == other.chat_turns
@@ -143,11 +146,13 @@ fn panel_id(panel: ActivityPanel) -> &'static str {
 }
 
 /// An agent as the window's agents list labels it: the place it runs (its
-/// workspace, and its tab when that earns a place), its pane's name, and the
-/// word its integration chose for its status.
+/// workspace, and its tab when that earns a place), its pane's name, the
+/// word its integration chose for its status, and whether it has a reply no
+/// one read (`crate::agent_read`).
 fn agent_state(
     agent: &Listed<'_>,
     show_state: bool,
+    unread: bool,
     (endpoint, host): (&str, Option<&str>),
 ) -> Value {
     let place = agent.place();
@@ -169,6 +174,7 @@ fn agent_state(
         "status": status_name(agent.status()),
         "tab": place.and_then(|(_, tab)| tab),
         "title": title,
+        "unread": unread,
         "workspace": agent.workspace(),
         "workspace_label": place.map(|(workspace, _)| workspace),
     })
@@ -263,6 +269,7 @@ impl SheprdWindow {
     /// Whether a host's state may have changed; see [`Stamp`].
     pub(crate) fn hosted_stamp(&self) -> Stamp {
         Stamp {
+            agent_read: self.agent_read.clone(),
             agent_sort: self.agent_sort,
             agents_list: self.hosted_agents_list(),
             chat_turns: self.hosted_chat_turns_stamp(),
@@ -304,7 +311,10 @@ impl SheprdWindow {
                     .agents
                     .shows_status_text(agent.identity());
                 let host = multi.then_some(endpoint.label.as_str());
-                Some(agent_state(&agent, shows, (&endpoint.id, host)))
+                let unread = agent
+                    .favorite_key()
+                    .is_some_and(|key| self.agent_read.contains(&endpoint.id, &key));
+                Some(agent_state(&agent, shows, unread, (&endpoint.id, host)))
             })
             .collect()
     }
@@ -409,6 +419,8 @@ impl SheprdWindow {
                 "success": hex(self.theme.palette[2]),
                 "surface": hex(self.theme.surface),
                 "status": status_colors(&self.theme),
+                // The unread agent dot's, as the window's own rows draw it.
+                "unread": hex(self.theme.palette[4]),
                 "warning": hex(self.theme.palette[3]),
             }),
         }

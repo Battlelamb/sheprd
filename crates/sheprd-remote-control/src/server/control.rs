@@ -350,6 +350,18 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
             relay.reload_tokens();
             return Response::Done;
         }
+        Request::Read { change } => {
+            return match change {
+                None => Response::Read(control::read::Unread {
+                    panes: state.seen().unread,
+                }),
+                Some(change) if change.valid() => Response::Read(state.mark_read(&change)),
+                Some(_) => Response::Error {
+                    code: ErrorCode::Other,
+                    message: "a read change names one to 1024 pane ids".into(),
+                },
+            };
+        }
         Request::Favorites { change } => {
             let Some(change) = change else {
                 return Response::Favorites(state.favorites.current());

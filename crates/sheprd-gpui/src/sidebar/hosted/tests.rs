@@ -6,6 +6,7 @@ mod focus;
 mod icons;
 mod nest;
 mod sidebar_size;
+mod unread;
 
 #[gpui::test]
 fn the_state_lists_each_workspace_with_what_its_row_shows(cx: &mut TestAppContext) {

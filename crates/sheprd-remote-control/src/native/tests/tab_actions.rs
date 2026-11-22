@@ -18,6 +18,7 @@ fn home(layout: &Layout) -> Home {
         shortcuts_ms: 0,
         tags: Default::default(),
         version: "20261109.1",
+        unread: &Default::default(),
         waiting: 0,
     })
 }

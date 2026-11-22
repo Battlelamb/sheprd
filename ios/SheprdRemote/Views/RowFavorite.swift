@@ -68,10 +68,12 @@ struct FavoriteMenuButton: View {
 }
 
 extension View {
-    /// The star at the row's leading edge, for a row that offers nothing
-    /// else there (`summarizeSwipe` shows it beside Summarize).
-    func favoriteSwipe(_ target: FavoriteTarget?) -> some View {
+    /// The star at the row's leading edge, after Read or Unread, for a row
+    /// that offers nothing else there (`summarizeSwipe` shows them beside
+    /// Summarize).
+    func favoriteSwipe(_ target: FavoriteTarget?, read: ReadTarget? = nil) -> some View {
         swipeActions(edge: .leading) {
+            if let read { ReadSwipeButton(target: read) }
             if let target { FavoriteSwipeButton(target: target) }
         }
     }

@@ -137,6 +137,13 @@ pub enum Invocation {
         state_dir: Option<PathBuf>,
         offer: bool,
     },
+    /// Reads which agents are unread here, making the change
+    /// (`control::read::Change`) given on standard input, if any. Prints
+    /// nothing when no daemon runs.
+    Read {
+        state_dir: Option<PathBuf>,
+        offer: bool,
+    },
     /// Reads this computer's text shortcuts, offering any given on standard
     /// input.
     Shortcuts {
@@ -196,6 +203,7 @@ Usage: sheprd-remote-control serve --state-dir DIR [options]
        sheprd-remote-control tags [--offer] [--state-dir DIR] [< TAGS.json]
        sheprd-remote-control shortcuts [--offer] [--state-dir DIR] [< SHORTCUTS.json]
        sheprd-remote-control favorites [--offer] [--state-dir DIR] [< CHANGE.json]
+       sheprd-remote-control read [--offer] [--state-dir DIR] [< CHANGE.json]
        sheprd-remote-control relays [--offer] [--state-dir DIR] [< RELAYS.json]
        sheprd-remote-control fleet apply [--state-dir DIR] < APPLY.json
        sheprd-remote-control fleet bundle --fleet ID [--state-dir DIR]
@@ -298,6 +306,12 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
         }
         Some("favorites") => {
             return parse_edited(args, |state_dir, offer| Invocation::Favorites {
+                state_dir,
+                offer,
+            });
+        }
+        Some("read") => {
+            return parse_edited(args, |state_dir, offer| Invocation::Read {
                 state_dir,
                 offer,
             });
@@ -625,7 +639,7 @@ fn parse_fleet(mut args: impl Iterator<Item = OsString>) -> Result<Invocation, P
     Ok(Invocation::Fleet { state_dir, action })
 }
 
-/// `tags`, `shortcuts`, `favorites`, or `relays`, then `[--offer] [--state-dir DIR]`, as `made`.
+/// `tags`, `shortcuts`, `favorites`, `read`, or `relays`, then `[--offer] [--state-dir DIR]`, as `made`.
 fn parse_edited(
     mut args: impl Iterator<Item = OsString>,
     made: fn(Option<PathBuf>, bool) -> Invocation,

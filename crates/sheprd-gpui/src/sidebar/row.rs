@@ -501,7 +501,6 @@ pub(super) fn row(
         RowIcon::None => 0.,
         _ => scaled(font, ICON_RESERVE),
     };
-    let muted = theme.muted;
     let status_width = indicators.width(font);
     let extra_status_width = status_width - STATUS_WIDTH;
     let indent = cx.nest

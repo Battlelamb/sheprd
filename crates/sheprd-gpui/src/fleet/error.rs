@@ -33,10 +33,14 @@ pub enum Error {
         "The relay agent runs on the host, but no relay lets it listen; check the relays' listen tokens"
     )]
     NotListening,
+    #[error("The other computer is not a member of a fleet this one can join")]
+    NotMember,
     #[error("The relay agent's service did not start on the host")]
     NotRunning,
     #[error("Could not read the account's name on the host")]
     NoUser,
+    #[error("The computer is in another fleet")]
+    OtherFleet,
     #[error("Could not reach the remote control daemon")]
     Request(#[source] sheprd_remote_control::control::Error),
     #[error("Could not run sheprd-remote-control on the host")]

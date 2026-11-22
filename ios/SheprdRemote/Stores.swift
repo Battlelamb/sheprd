@@ -34,7 +34,7 @@ final class ChatStore {
         self.key = key
         transcript = cached?.transcript
         cursor = cached?.cursor
-        if let transcript { effects.history(transcript, metThrough: cached?.metThrough) }
+        if let transcript { effects.history(transcript, epoch: cursor?.epoch, mark: cached?.effects) }
     }
 
     #if DEBUG
@@ -60,7 +60,7 @@ final class ChatStore {
         switch event {
         case let .chatSnapshot(snapshot):
             transcript = snapshot.transcript
-            effects.history(snapshot.transcript, metThrough: effects.ledger.metThrough)
+            effects.history(snapshot.transcript, epoch: snapshot.cursor?.epoch, mark: effects.ledger.mark)
             effects.catchUp(snapshot.transcript)
             cursor = snapshot.cursor
             connected = snapshot.connected

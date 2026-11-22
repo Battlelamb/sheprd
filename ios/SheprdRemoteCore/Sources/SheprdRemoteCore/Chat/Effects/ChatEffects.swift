@@ -20,6 +20,27 @@ public struct ChatEffects: Hashable, Sendable {
         }
     }
 
+    /// How far a chat's effects were met, kept with the chat so the next
+    /// opening plays only what came after.
+    public struct Mark: Codable, Hashable, Sendable {
+        /// The session the entry ids belong to (`Cursor.epoch`): another
+        /// one may number a replaced history from the start again.
+        public var epoch: UUID?
+        /// The last entry met.
+        public var entry: EntryId
+        /// Its bubbles met, as a reply may stream more in later.
+        public var bubbles: Int
+        /// Whether its screen effect was met.
+        public var screen: Bool
+
+        public init(epoch: UUID?, entry: EntryId, bubbles: Int, screen: Bool) {
+            self.epoch = epoch
+            self.entry = entry
+            self.bubbles = bubbles
+            self.screen = screen
+        }
+    }
+
     /// A screen effect playing.
     public struct Playing: Hashable, Sendable {
         public var entry: EntryId
@@ -88,9 +109,10 @@ public struct ChatEffects: Hashable, Sendable {
     /// When each bubble last began to play.
     private var started: [BubbleKey: Date] = [:]
     private var playing: Playing?
-    /// The last entry whose effects were met, kept with the chat so the
-    /// next opening plays only what came after it.
-    public private(set) var metThrough: EntryId?
+    /// How far the effects were met (`Mark`).
+    public private(set) var mark: Mark?
+    /// The session of the transcript the ledger follows.
+    private var epoch: UUID?
 
     public init() {}
 
@@ -99,21 +121,29 @@ public struct ChatEffects: Hashable, Sendable {
     public mutating func history(_ transcript: Transcript) {
         self = Self()
         note(transcript) { _ in true }
-        metThrough = transcript.entries.last?.id
+        if let last = transcript.entries.last { advance(to: last.id) }
     }
 
-    /// Notes the effects of `transcript` up to `metThrough`, leaving the
-    /// ones after it for `catchUp`. With no entry met yet, the last reply
-    /// is left: a chat opened for the first time plays it once.
-    public mutating func history(_ transcript: Transcript, metThrough: EntryId?) {
+    /// Notes the effects of `transcript`, of session `epoch`, up to `mark`,
+    /// leaving the ones after it for `catchUp`. With no mark, or one of
+    /// another session, the last reply is left: a chat opened for the
+    /// first time plays it once.
+    public mutating func history(_ transcript: Transcript, epoch: UUID?, mark: Mark?) {
         self = Self()
-        if let metThrough {
-            note(transcript) { $0 <= metThrough }
-        } else {
+        self.epoch = epoch
+        guard let mark, mark.epoch == epoch else {
             let last = Self.lastReply(in: transcript)
             note(transcript) { $0 != last }
+            return
         }
-        self.metThrough = metThrough
+        note(transcript) { $0 < mark.entry }
+        // What streamed into the marked entry after it was met is not met.
+        if let message = transcript.entry(mark.entry).flatMap(Self.message) {
+            let met = min(mark.bubbles, message.bubbles)
+            if met > 0 { bubbles[mark.entry] = met }
+            if mark.screen, message.screen != nil { screens.insert(mark.entry) }
+        }
+        self.mark = mark
     }
 
     /// Plays the effects of the last reply if they were not met yet, as a
@@ -124,7 +154,7 @@ public struct ChatEffects: Hashable, Sendable {
         let last = Self.lastReply(in: transcript)
         note(transcript) { $0 != last }
         let began = last.map { live(transcript, changed: [$0], now: now) } ?? []
-        if let end = transcript.entries.last?.id { metThrough = max(metThrough ?? end, end) }
+        if let end = transcript.entries.last?.id { advance(to: end) }
         return began
     }
 
@@ -162,7 +192,7 @@ public struct ChatEffects: Hashable, Sendable {
                 began.append(.screen(effect, text: message.gist()))
             }
         }
-        if let newest = seen.max() { metThrough = max(metThrough ?? newest, newest) }
+        if let newest = seen.max() { advance(to: newest) }
         expire(now: now)
         return began
     }
@@ -202,6 +232,12 @@ public struct ChatEffects: Hashable, Sendable {
         let bubbleEnds = started.values.map { $0.addingTimeInterval(BubbleEffect.longest) }
         let screenEnd = playing(at: now).map { $0.since.addingTimeInterval($0.effect.length) }
         return (bubbleEnds + [screenEnd].compactMap { $0 }).filter { $0 > now }.min()
+    }
+
+    /// Moves the mark to `entry`, as met now, unless it is already past it.
+    private mutating func advance(to entry: EntryId) {
+        if let mark, mark.entry > entry { return }
+        mark = Mark(epoch: epoch, entry: entry, bubbles: bubbles[entry] ?? 0, screen: screens.contains(entry))
     }
 
     /// Notes the effects of the entries `noted` picks without playing them.

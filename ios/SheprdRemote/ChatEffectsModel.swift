@@ -26,10 +26,10 @@ final class ChatEffectsModel {
         update { $0.history(transcript) }
     }
 
-    /// Notes a whole transcript's effects up to `metThrough`, leaving the
-    /// newer ones for `catchUp`.
-    func history(_ transcript: Transcript, metThrough: EntryId?) {
-        update { $0.history(transcript, metThrough: metThrough) }
+    /// Notes a whole transcript's effects up to `mark`, leaving the newer
+    /// ones for `catchUp`.
+    func history(_ transcript: Transcript, epoch: UUID?, mark: ChatEffects.Mark?) {
+        update { $0.history(transcript, epoch: epoch, mark: mark) }
     }
 
     /// Plays the last reply's effects if they were missed, as the chat is

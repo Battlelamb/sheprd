@@ -439,7 +439,7 @@ final class Fleet {
 
     private func save(_ store: ChatStore) {
         guard let transcript = store.transcript else { return }
-        cache.save(chat: transcript, cursor: store.cursor, metThrough: store.effects.ledger.metThrough, device: store.key.device, pane: store.key.pane)
+        cache.save(chat: transcript, cursor: store.cursor, effects: store.effects.ledger.mark, device: store.key.device, pane: store.key.pane)
     }
 
     /// Follows the chats `WarmChats` picks and lets go of the rest no

@@ -18,8 +18,8 @@ struct Cache: Sendable {
     struct CachedChat: Codable, Sendable {
         var cursor: Cursor?
         var transcript: Transcript
-        /// The last entry whose effects were shown (`ChatEffects.metThrough`).
-        var metThrough: EntryId?
+        /// How far its effects were shown (`ChatEffects.Mark`).
+        var effects: ChatEffects.Mark?
     }
 
     /// A chat's unsent words and pictures, as the composer prepared them.
@@ -91,7 +91,7 @@ struct Cache: Sendable {
         read(CachedChat.self, at: chatFile(device, pane))
     }
 
-    func save(chat transcript: Transcript, cursor: Cursor?, metThrough: EntryId?, device: String, pane: String) {
+    func save(chat transcript: Transcript, cursor: Cursor?, effects: ChatEffects.Mark?, device: String, pane: String) {
         var kept = transcript
         if kept.entries.count > Self.entriesKept {
             kept.entries.removeFirst(kept.entries.count - Self.entriesKept)
@@ -100,7 +100,7 @@ struct Cache: Sendable {
         let file = chatFile(device, pane)
         let chats = computerFolder(device).appending(path: "chats", directoryHint: .isDirectory)
         Task.detached(priority: .utility) {
-            Self.store(CachedChat(cursor: cursor, transcript: kept, metThrough: metThrough), to: file)
+            Self.store(CachedChat(cursor: cursor, transcript: kept, effects: effects), to: file)
             Self.evict(in: chats, keeping: Self.chatsKept)
             // All of it, so search finds more than the cache keeps.
             try? await MessageIndex.shared.save(transcript, device: device, pane: pane)

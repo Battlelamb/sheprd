@@ -221,7 +221,12 @@ fn join(start: Start) -> Result<CoreBackend, Error> {
         Ok(core) => return Ok(CoreBackend::new(core, SCROLLBACK)),
         Err(error) => error,
     };
-    if start == Start::Join || !matches!(first, sheprd_core_client::Error::Connect { .. }) {
+    // The App Store build only joins: a core it started would inherit its
+    // sandbox, and with it every shell and agent in its terminals.
+    if start == Start::Join
+        || cfg!(feature = "mas")
+        || !matches!(first, sheprd_core_client::Error::Connect { .. })
+    {
         return Err(first.into());
     }
     let binary = crate::bundled::locate(PROGRAM).ok_or(Error::NotBundled)?;

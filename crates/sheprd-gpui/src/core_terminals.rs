@@ -626,12 +626,17 @@ impl SheprdWindow {
             return;
         };
         self.dismiss_menu(window, cx);
-        // A kept workspace's folder is the app's to give: herdr-core knows
-        // no workspaces to start a shell in.
+        // Follow the shown terminal, or the workspace's live folder when
+        // a new split group has no terminal to inherit from.
         let spawn = Spawn {
             cwd: self
-                .kept_in_front()
-                .and_then(|_| self.front_workspace_cwd()),
+                .shown_core_pane(cx)
+                .and_then(|(tab, terminal)| self.core_terminals.info(tab, &terminal))
+                .and_then(|info| info.cwd.clone())
+                .or_else(|| {
+                    self.kept_in_front()
+                        .and_then(|_| self.front_workspace_cwd())
+                }),
             ..Spawn::default()
         };
         self.start_core_program(Purpose::Tab { scope, workspace }, spawn, cx);

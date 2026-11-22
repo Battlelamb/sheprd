@@ -216,6 +216,27 @@ impl SheprdWindow {
         self.start_core_chat_at(agent, tab, at, carry, cx)
     }
 
+    /// A launcher opens a chat tab in the terminal's workspace and folder.
+    pub(crate) fn start_core_chat_in_tab(
+        &mut self,
+        agent: Agent,
+        tab: TabId,
+        cx: &gpui::App,
+    ) -> Result<(), super::StartError> {
+        let store = cx
+            .try_global::<crate::browser::Store>()
+            .ok_or(super::StartError::NoWorkspace)?;
+        let saved = store.get(tab).ok_or(super::StartError::NoWorkspace)?;
+        let scope = saved.scope.clone();
+        let workspace = saved.workspace_id.clone();
+        let cwd = self
+            .core_terminals
+            .chat_split_at(tab)
+            .and_then(|terminal| self.core_terminals.info(tab, &terminal))
+            .and_then(|info| info.cwd.clone());
+        self.start_core_chat_tab(agent, scope, workspace, cwd, None, cx)
+    }
+
     /// Explicit CLI pane keys resolve against the owning core, including
     /// ordinary terminal panes; an unknown key never falls through to Herdr 1.
     pub(crate) fn start_core_chat_beside(

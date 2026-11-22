@@ -426,10 +426,10 @@ impl SheprdWindow {
     }
 
     /// [`Self::start_chat`], reporting a failure as a flash.
-    /// A herdr-core tab in the active group splits with the chat instead.
+    /// Herdr-core chats open in a new tab, like Herdr 1 chats.
     pub(crate) fn start_chat_or_flash(&mut self, agent: Agent, cx: &mut Context<Self>) {
         let started = match self.core_chat_group_tab(None, cx) {
-            Some(tab) => self.start_core_chat(agent, tab, None, cx),
+            Some(tab) => self.start_core_chat_in_tab(agent, tab, cx),
             None if self.kept_in_front().is_some() => self.start_kept_core_chat(agent, None, cx),
             None => self.start_chat(agent, None, None),
         };
@@ -441,11 +441,12 @@ impl SheprdWindow {
 
     /// Starts a chat from a tab strip's launcher, so its tab opens in that
     /// strip's group as one from the strip's "+" does.
-    /// A herdr-core tab the strip shows splits with the chat instead.
+    /// Herdr-core chats use the same group ownership as terminal tabs.
     pub(crate) fn start_chat_in(&mut self, agent: Agent, group: GroupId, cx: &mut Context<Self>) {
         if let Some(tab) = self.core_chat_group_tab(Some(group), cx) {
-            if let Err(error) = self.start_core_chat(agent, tab, None, cx) {
-                self.flash_chat_error(&error, cx);
+            match self.start_core_chat_in_tab(agent, tab, cx) {
+                Ok(()) => self.expect_new_tab_in(group),
+                Err(error) => self.flash_chat_error(&error, cx),
             }
             cx.notify();
             return;

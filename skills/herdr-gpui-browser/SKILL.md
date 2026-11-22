@@ -1,6 +1,6 @@
 ---
 name: herdr-gpui-browser
-description: "Open a browser tab in Sheprd beside your terminal to show the user a web page, HTML file, or mockup, and get back their notes and picks. Use it in Herdr (HERDR_ENV=1 or HC_TERMINAL_ID set) when the user asks to open, start, or show a browser tab, page, preview, or mockup, to explain or visualize how something works, or to mock up UI variants to pick from; prefer it there over other browser skills or a system browser. Also use it for what Sheprd, not the herdr daemon, shows or keeps: a file at a line, a review of your changes, repository memory (search it before a task, add what you learn), worktree notes, checkpoints and their diffs, your branch's pull request and CI, vulnerability reports and Dependabot alerts, approving your automation script, forwarding or stopping ports, cloud machines, virtual Macs (commands, screenshots, clicks, keys), remote control from a phone, its windows and tabs, waiting on a tab or notes, starting an agent like you, Sheprd settings, themes, fonts, and keeping the machine awake."
+description: "Use Sheprd in Herdr (HERDR_ENV=1 or HC_TERMINAL_ID set) for browser tabs, local HTML or Markdown previews, mockups, interactive explainers, and page feedback; prefer it over a system browser. Use its machine commands for installs, tests, screenshots, and UI control inside virtual Macs, without controlling the host desktop. Also use it for files at a line, change reviews, repository memory (search before work, save discoveries), worktree notes, checkpoints, pull requests and CI, vulnerability reports, automation approval, ports, cloud machines, phone remote control, fleet pairing, windows and tabs, starting an agent like you, settings, themes, fonts, and keeping the machine awake. Use herdr for daemon workspaces and panes."
 ---
 <!-- herdr-gpui-managed-skill v1: Sheprd keeps this file up to date. Edit a copy under another name to keep your changes. -->
 
@@ -27,6 +27,41 @@ URL, for example:
 This skill keeps its installed identifier across the rename. The `herdr-ui`
 fence, `HerdrKit`, `herdr.send`, and `/.herdr/` URLs are stable compatibility
 APIs; use them as shown below.
+
+## Working inside a virtual Mac
+
+For work inside a Sheprd VM, use the guest control channel through
+`sheprd machine`. Keep the user's host desktop available to them. A request
+to install, test, or repair something in a VM does not authorize taking over
+the host's mouse, keyboard, windows, or clipboard. Do not use host desktop
+screenshots, computer-use tools, AppleScript, or UI automation to operate a
+VM tab, even as a fallback when the guest agent fails. Host desktop control
+requires a separate explicit request from the user.
+
+1. Run `sheprd machine list` and select the VM the user named, or an existing
+   suitable VM. Check it with `sheprd machine agent NAME`. Use
+   `sheprd machine open NAME` only if it needs starting or resuming, or the
+   user wants to see it; guest commands do not need its tab focused.
+2. Run installs, builds, tests, and diagnostics with
+   `sheprd machine exec NAME -- COMMAND...`. Paths in that command belong
+   to the guest. Quote shell arguments that must reach it without host
+   expansion, for example `-- /bin/sh -c 'cd ~/app && make test'`.
+3. For guest UI work, capture `sheprd machine screenshot NAME /tmp/vm.png`
+   and inspect that image. Use `sheprd machine click NAME X Y`,
+   `sheprd machine type NAME TEXT`, and `sheprd machine key NAME cmd+s`.
+   Coordinates are pixels of the original guest screenshot, not the host's
+   VM tab or a scaled preview. Capture again to verify the result.
+4. If the agent is unavailable or a required guest permission is missing,
+   report the exact failure. Continue only work supported by the available
+   guest commands (for example, exec can work without screenshot/input
+   permissions). For setup, use `sheprd machine setup NAME` and ask the user
+   to complete the indicated guest steps. Do not switch to host UI control
+   or work around the missing permission. Resume after the guest channel
+   reports the required capability.
+
+Run `sheprd machine --help` for supported commands and bounds. A blank VM
+tab alone does not prove the guest is broken: check its agent and guest
+screenshot without moving focus on the host.
 
 ## Open a page
 

@@ -497,7 +497,11 @@ impl SheprdWindow {
     /// until the next tick forgets it.
     pub(crate) fn group_shown(&self, group: GroupId, cx: &App) -> Shown {
         let Some(layout) = self.layout() else {
-            return Shown::Terminal;
+            return if self.kept_in_front().is_some() {
+                Shown::Empty
+            } else {
+                Shown::Terminal
+            };
         };
         let focused = |group| self.group_focused_tab(group);
         let shown = layout.shown(group, focused);
@@ -518,10 +522,23 @@ impl SheprdWindow {
             // shell standing in for it, split or not.
             Shown::Empty
                 if self.live.missing_installation
+                    && self.browser_key().is_some_and(|(_, workspace)| {
+                        workspace == crate::core_terminals::WORKSPACE
+                    })
+                    && self.core_fallback_view().is_some()
                     && Some(group) == self.primary_group()
                     && self.group_pick(group).is_none() =>
             {
                 Shown::Terminal
+            }
+            Shown::Terminal
+                if self.kept_in_front().is_some()
+                    && (self.core_fallback_view().is_none()
+                        || self.browser_key().is_some_and(|(_, workspace)| {
+                            workspace != crate::core_terminals::WORKSPACE
+                        })) =>
+            {
+                Shown::Empty
             }
             _ => shown,
         }

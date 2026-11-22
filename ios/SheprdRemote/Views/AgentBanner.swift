@@ -72,7 +72,13 @@ enum AgentBannerWindows {
         for scene in scenes where windows[ObjectIdentifier(scene)]?.windowScene !== scene {
             let window = PassThroughWindow(windowScene: scene)
             window.windowLevel = .alert
-            let host = UIHostingController(rootView: AgentBanner().environment(model))
+            let host = UIHostingController(
+                // Along the top, as an overlay would put it; the empty
+                // rest takes no touches, so they fall through.
+                rootView: AgentBanner()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .environment(model)
+            )
             host.view.backgroundColor = .clear
             window.rootViewController = host
             window.isHidden = false

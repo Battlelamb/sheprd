@@ -61,6 +61,13 @@ Tests :big[pass]: :huge[214 of 214]. :small[CI took 4 min.]
   and the phone web app show the directives as plain text, so the reply still
   reads well there.
 
+In a local desktop chat, attach any file by putting a normal Markdown link on
+its own line: `[report.pdf](</absolute/path with spaces/report.pdf>)`. Sheprd
+shows a file card with an Open action. This works for videos, documents,
+archives, and other files; keep the file at that path because the card references
+it. Use `![description](path)` for images that should display inline. File cards
+do not transfer files from an SSH host or make them downloadable on the phone.
+
 For a small interactive selection, put a JSON document in a closed `herdr-ui`
 fence. The catalog supports native controls on Linux as well as macOS/Windows:
 

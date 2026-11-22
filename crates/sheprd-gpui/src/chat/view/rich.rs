@@ -13,7 +13,7 @@ use std::ops::Range;
 mod accents;
 mod code;
 mod inline;
-mod links;
+pub(super) mod links;
 mod rhythm;
 
 use super::{

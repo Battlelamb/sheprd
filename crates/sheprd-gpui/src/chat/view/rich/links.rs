@@ -1,7 +1,7 @@
 //! Explicit rich-text links use the pane's existing document-opening policy.
 //! Paths from SSH conversations stay visible and never address this laptop.
 
-use super::*;
+use crate::chat::view::rich::*;
 use crate::{
     chat::{Target, rich::remote_content},
     terminal::{PaneLink, RowLink, file_target},
@@ -10,7 +10,7 @@ use sheprd_chat_protocol::Cursor;
 use std::borrow::Cow;
 
 #[derive(Clone)]
-pub(super) struct Links {
+pub(in crate::chat::view) struct Links {
     view: WeakEntity<SheprdWindow>,
     target: Option<Target>,
     cursor: Option<Cursor>,
@@ -19,7 +19,11 @@ pub(super) struct Links {
 }
 
 impl Links {
-    pub(super) fn new(view: &SheprdWindow, pane_id: &str, cx: &Context<SheprdWindow>) -> Self {
+    pub(in crate::chat::view) fn new(
+        view: &SheprdWindow,
+        pane_id: &str,
+        cx: &Context<SheprdWindow>,
+    ) -> Self {
         let pane = view.chats.pane(pane_id);
         Self {
             view: cx.entity().downgrade(),
@@ -38,7 +42,15 @@ impl Links {
         }
     }
 
+    pub(in crate::chat::view) fn open_attachment(&self, destination: &str, cx: &mut App) {
+        self.open_with(destination, true, cx);
+    }
+
     pub(super) fn open(&self, destination: &str, cx: &mut App) {
+        self.open_with(destination, false, cx);
+    }
+
+    fn open_with(&self, destination: &str, system: bool, cx: &mut App) {
         if let Ok(url) = crate::browser::WebUrl::try_from(destination) {
             cx.open_url(url.as_str());
             return;
@@ -71,7 +83,7 @@ impl Links {
             };
             view.open_file_link(
                 file,
-                view.config.open_files_in == crate::config::FileTarget::Editor,
+                !system && view.config.open_files_in == crate::config::FileTarget::Editor,
                 cx,
             );
         });

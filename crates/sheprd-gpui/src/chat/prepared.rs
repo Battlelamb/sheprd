@@ -23,6 +23,7 @@ use std::{
     rc::Rc,
 };
 
+mod files;
 pub(crate) mod tool;
 
 /// Lines of a tool call's text output shown under it.
@@ -188,6 +189,11 @@ pub(crate) struct ToolSummary {
 #[derive(Debug)]
 pub(crate) enum Part {
     Text(Rc<[Line]>),
+    /// A standalone local file link, opened only when the person asks.
+    File {
+        destination: String,
+        blocks: Rc<[super::rich::Block]>,
+    },
     Rich(Rc<[super::rich::Block]>),
     /// Markdown an agent wrapped in a bubble effect, as `:::slam` does.
     Bubble(super::effects::Bubble, Rc<[super::rich::Block]>),
@@ -245,7 +251,9 @@ impl Body {
                 let (own, blocks): (_, &[super::rich::Block]) = match part {
                     Part::Diagram(id, _) | Part::Remote { id, .. } => (Some(*id), &[]),
                     Part::Html { code } => (Some(code.id), &[]),
-                    Part::Rich(blocks) | Part::Bubble(_, blocks) => (None, blocks),
+                    Part::Rich(blocks) | Part::Bubble(_, blocks) | Part::File { blocks, .. } => {
+                        (None, blocks)
+                    }
                     Part::Text(_) | Part::Widget(_) | Part::Picture { .. } | Part::Screen(_) => {
                         (None, &[])
                     }
@@ -544,6 +552,7 @@ fn message(text: &str, author: Author, visuals: &mut Visuals) -> Vec<Part> {
     };
     let mut lines = text.split_inclusive('\n');
     let (mut diagrams, mut pages, mut widgets, mut bubbles) = (0, 0, 0, 0);
+    let mut attachments = 0;
     let mut screen = None;
     while let Some(line) = lines.next() {
         let trimmed = line.trim_start();
@@ -585,6 +594,15 @@ fn message(text: &str, author: Author, visuals: &mut Visuals) -> Vec<Part> {
                 }
                 continue;
             }
+        }
+        if author == Author::Agent
+            && attachments < sheprd_chat_protocol::MAX_ATTACHMENTS
+            && let Some(part) = files::attachment(line, visuals)
+        {
+            attachments += 1;
+            flush(&mut markdown, &mut parts, visuals);
+            parts.push(part);
+            continue;
         }
         if let Some(part) = picture(line) {
             flush(&mut markdown, &mut parts, visuals);

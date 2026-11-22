@@ -5,6 +5,7 @@ mod brief;
 mod core_routing;
 mod favorite;
 mod like;
+mod unread;
 use crate::{
     control::protocol::{Caller, chat::Reply},
     sidebar::layout_tests::fixture_window,

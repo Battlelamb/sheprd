@@ -39,6 +39,7 @@
             "agent": "Claude",
             "status": "working",
             "favorite": true,
+            "unread": true,
             "summary": {
               "connected": true,
               "status": {
@@ -98,6 +99,7 @@
               "name": "claude",
               "status": "done",
               "favorite": true,
+              "unread": true,
               "pane": "p2",
               "title": "Fix the build",
               "changed_ms": 1770000000000,

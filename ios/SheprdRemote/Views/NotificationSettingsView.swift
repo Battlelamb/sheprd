@@ -31,6 +31,7 @@ struct NotificationSettingsView: View {
                     .onChange(of: genericActivities) { _, generic in
                         Task { await model.tokens.genericChanged(to: generic) }
                     }
+                TestActivityRow()
                 #if DEBUG
                 Button("Start a sample activity") { model.startSample() }
                 if let status = model.sampleStatus {
@@ -40,7 +41,7 @@ struct NotificationSettingsView: View {
             } header: {
                 Text("Live Activities")
             } footer: {
-                Text("Generic shows the agent and what it is doing, without the chat's name, steps, or questions. A computer can also choose this in Sheprd's Remote control settings.")
+                Text("Generic shows the agent and what it is doing, without the chat's name, steps, or questions. A computer can also choose this in Sheprd's Remote control settings. Start Test Activity has this phone start one on itself through the push relay, as a computer does, and shows whether it started.")
             }
             Section {
                 TestPushRow().agentHighlight(.testPush)
@@ -99,6 +100,32 @@ struct DeskHoldView: View {
         }
         .navigationTitle("Hold Alerts at the Desk")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Start Test Activity: this phone starts a Live Activity on itself through
+/// the push relay (`ActivityTest`), which needs no computer online.
+struct TestActivityRow: View {
+    @Environment(AppModel.self) private var model
+    @AppStorage(PushRelaySetting.key, store: PushRelaySetting.store) private var pushRelay = true
+
+    var body: some View {
+        let test = model.activityTest
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                Task { await test.start() }
+            } label: {
+                Label("Start Test Activity", systemImage: "platter.filled.top.iphone")
+            }
+            .buttonStyle(.borderless)
+            .disabled(!pushRelay || test.busy)
+            if let status = test.status {
+                Text(ActivityTest.text(status)).font(.footnote).foregroundStyle(.secondary)
+            } else if !pushRelay {
+                Text("Turn on Use the Push Relay to test Live Activities.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
     }
 }
 

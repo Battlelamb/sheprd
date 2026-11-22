@@ -102,6 +102,8 @@ impl SheprdWindow {
         let browser_tabs = cx.observe_global::<crate::browser::Store>(|_, cx| cx.notify());
         let agent_favorites = crate::agent_favorites::AgentFavorites::current(cx);
         let agent_favorites_changed = Self::observe_agent_favorites(cx);
+        let agent_read = crate::agent_read::AgentRead::current(cx);
+        let agent_read_changed = Self::observe_agent_read(cx);
         let device_tags = crate::device_tags::DeviceTags::current(cx);
         let device_tags_changed = Self::observe_device_tags(cx);
         let worktree_notes = Self::observe_worktree_notes(window, cx);
@@ -140,6 +142,7 @@ impl SheprdWindow {
             _activation: activation,
             _agent_favorites: agent_favorites_changed,
             _agent_guidance: agent_guidance_changed,
+            _agent_read: agent_read_changed,
             _appearance: appearance_change,
             _browser_tabs: browser_tabs,
             _device_tags: device_tags_changed,
@@ -157,6 +160,7 @@ impl SheprdWindow {
             agent_favorites,
             agent_group: None,
             agent_guidance,
+            agent_read,
             agent_sort: preferences::AgentSort::default(),
             agent_sort_modified: false,
             app_update_notes: Default::default(),

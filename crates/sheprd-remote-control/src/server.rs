@@ -182,7 +182,7 @@ pub async fn run(options: Options) -> Result<()> {
         look: web::Look::load(&options.state_dir),
         names: RwLock::new(names),
         near: Mutex::default(),
-        opened: web::attention::Opened::default(),
+        opened: web::attention::Opened::load(crate::app::read::file(&options.state_dir)),
         port: options.port,
         previews: Default::default(),
         privacy: options.privacy,
@@ -222,6 +222,7 @@ pub async fn run(options: Options) -> Result<()> {
         tokio::spawn(crate::fleet::removals::flood(fleet));
     }
     tokio::spawn(web::follow_favorite_boot(state.clone()));
+    tokio::spawn(web::attention::keep(state.clone()));
     tokio::spawn(crate::native::github::checkouts::follow(state.clone()));
     tokio::spawn(crate::native::previews::follow(state.clone()));
     tokio::spawn(crate::native::github::follow_gh_hosts(state.clone()));

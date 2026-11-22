@@ -191,7 +191,7 @@ return mod {
 			grow = true,
 			align = "center",
 			style = { background = theme.surface, gap = 14, padding = { x = 12 } },
-			if sheprd.connected == false then item("circle-alert", sheprd.status, theme.danger) else false,
+			if sheprd.status then item("circle-alert", sheprd.status, theme.danger) else false,
 			if working > 0 then item("bot", `{working} working`, theme.accent) else false,
 			if sheprd.usage then usage(sheprd.usage, theme) else false,
 			ui.spacer(),

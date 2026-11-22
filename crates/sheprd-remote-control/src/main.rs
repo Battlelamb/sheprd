@@ -5,7 +5,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 use sheprd_remote_control::{
-    app::{enroll, favorites, push_status, relay_enroll, shortcuts, tags},
+    app::{enroll, favorites, push_status, read, relay_enroll, shortcuts, tags},
     control::{self, DeviceId},
     desktop, fleet,
     server::{self, FleetAction, Invocation},
@@ -53,6 +53,15 @@ fn main() -> ExitCode {
             return host(state_dir, |state_dir| {
                 let change = read_offer(offer, MAX_INPUT)?;
                 print_json(&favorites::exchange(state_dir, change)?)
+            });
+        }
+        Ok(Invocation::Read { state_dir, offer }) => {
+            return host(state_dir, |state_dir| {
+                let change = read_offer(offer, MAX_INPUT)?;
+                match read::exchange(state_dir, change)? {
+                    Some(unread) => print_json(&unread),
+                    None => Ok(()),
+                }
             });
         }
         Ok(Invocation::Shortcuts { state_dir, offer }) => {

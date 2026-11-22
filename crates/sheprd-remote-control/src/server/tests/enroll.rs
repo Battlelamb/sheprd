@@ -177,3 +177,23 @@ fn favorites_read_or_take_a_change() {
     );
     assert!(parse(args(&["favorites", "--nope"])).is_err());
 }
+
+#[test]
+fn read_reads_or_takes_a_change() {
+    assert_eq!(
+        parse(args(&["read"])).unwrap(),
+        Invocation::Read {
+            state_dir: None,
+            offer: false,
+        }
+    );
+    assert_eq!(
+        parse(args(&["read", "--offer", "--state-dir", "/s"])).unwrap(),
+        Invocation::Read {
+            state_dir: Some("/s".into()),
+            offer: true,
+        }
+    );
+    assert!(parse(args(&["read", "--nope"])).is_err());
+    assert!(USAGE.contains("read [--offer]"));
+}

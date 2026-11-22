@@ -9,6 +9,7 @@ mod actions;
 mod agent_favorites;
 mod agent_guidance;
 mod agent_notes;
+mod agent_read;
 mod agent_skill;
 mod ago;
 mod app;

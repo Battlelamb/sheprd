@@ -131,6 +131,8 @@ mod superset_dots;
 #[cfg(test)]
 mod text_width;
 #[cfg(test)]
+mod unread_agents;
+#[cfg(test)]
 mod update_download_caption;
 #[cfg(test)]
 mod update_notes;
@@ -820,6 +822,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         sidebar_preferences: None,
         sidebar_modified: false,
         agent_favorites: Default::default(),
+        agent_read: Default::default(),
         agent_group: None,
         agent_sort: Default::default(),
         agent_sort_modified: false,
@@ -849,6 +852,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         _browser_tabs: cx.observe_global::<crate::browser::Store>(|_, cx| cx.notify()),
         _agent_favorites: cx
             .observe_global::<crate::agent_favorites::AgentFavorites>(|_, cx| cx.notify()),
+        _agent_read: cx.observe_global::<crate::agent_read::AgentRead>(|_, cx| cx.notify()),
         _device_tags: cx.observe_global::<crate::device_tags::DeviceTags>(|_, cx| cx.notify()),
         _worktree_notes: SheprdWindow::observe_worktree_notes(window, cx),
         prefix_armed: false,

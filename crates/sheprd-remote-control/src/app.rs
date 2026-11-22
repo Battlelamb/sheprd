@@ -12,6 +12,7 @@ pub mod firewall;
 pub mod pairing;
 pub mod push_status;
 pub mod qr;
+pub mod read;
 pub mod relay_enroll;
 pub mod relay_tokens;
 pub mod service;

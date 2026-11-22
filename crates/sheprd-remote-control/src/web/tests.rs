@@ -54,6 +54,7 @@ mod term_history;
 mod terminal;
 mod test_push;
 mod typed;
+mod unread;
 mod update;
 mod uploads;
 mod workspace;

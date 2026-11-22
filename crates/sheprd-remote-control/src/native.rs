@@ -60,11 +60,16 @@ const PING_INTERVAL: Duration = Duration::from_secs(20);
 /// answers every ping, before it is closed as a path that stopped
 /// carrying traffic: two pings unanswered, and some room for a slow pong.
 const QUIET_LIMIT: Duration = Duration::from_secs(45);
-/// How long one write may wait for room to send. A phone whose path went
-/// quiet stops taking bytes, and a write to it would otherwise wait for
-/// the operating system to give up, keeping the socket and its views
+/// How long a small write may wait for room to send. A phone whose path
+/// went quiet stops taking bytes, and a write to it would otherwise wait
+/// for the operating system to give up, keeping the socket and its views
 /// alive past [`QUIET_LIMIT`].
 const WRITE_LIMIT: Duration = Duration::from_secs(10);
+/// The slowest a phone may take a large message, in bytes a second: a
+/// chat's snapshot carries its whole transcript and can run to megabytes,
+/// and a slow but working connection must still get it in one piece, or
+/// each reconnect would ask for it again and the chat would never load.
+const SLOWEST_BYTES_PER_SEC: u64 = 16 * 1024;
 
 /// This computer's home as the state holds it now, for `device`.
 fn home(state: &Shared, device: &DeviceId) -> Home {
@@ -82,6 +87,7 @@ fn home(state: &Shared, device: &DeviceId) -> Home {
     let checkouts = state.lending.checkouts.current();
     let recognized = state.lending.recognized();
     let favorites = state.favorites.current();
+    let seen = state.seen();
     let mut home = Home::project(Sources {
         checkouts: &checkouts,
         computer: &state.computer,
@@ -94,8 +100,9 @@ fn home(state: &Shared, device: &DeviceId) -> Home {
         recognized: &recognized,
         shortcuts_ms: state.shortcuts.current().updated_ms,
         tags: state.tags.current(),
+        unread: &seen.unread,
         version: crate::server::version(),
-        waiting: state.attention().len(),
+        waiting: seen.needing.len(),
     });
     home.preview_terminals(&state.previews.current());
     home.github = Some(state.github.enabled());
@@ -157,7 +164,7 @@ pub(crate) async fn live(
 /// Carries messages between the socket and the session until either ends:
 /// the phone closes, sends a binary or oversized frame, or the session
 /// says `bye`, or the phone stays quiet past [`QUIET_LIMIT`] or takes no
-/// bytes for [`WRITE_LIMIT`]. Logs how it ended and how long the phone
+/// bytes for its [`write_limit`]. Logs how it ended and how long the phone
 /// had been quiet.
 async fn serve(mut socket: WebSocket, state: Shared, device: DeviceId, token: SecretString) {
     let _connected = Connected::new(state.clone(), device.clone());
@@ -173,9 +180,11 @@ async fn serve(mut socket: WebSocket, state: Shared, device: DeviceId, token: Se
             message = outbound.recv() => {
                 let Some(message) = message else { break Ending::SessionEnded };
                 let bye = matches!(message, ServerMessage::Bye { .. });
+                let writing = Instant::now();
                 if let Some(ending) = send(&mut socket, &message).await {
                     break ending;
                 }
+                heard = not_counting(heard, writing.elapsed(), Instant::now());
                 if bye {
                     break Ending::Bye;
                 }
@@ -195,9 +204,11 @@ async fn serve(mut socket: WebSocket, state: Shared, device: DeviceId, token: Se
                         };
                         if let Some(message) = reply {
                             let error = ServerMessage::Error { message: message.to_owned(), view: None };
+                            let writing = Instant::now();
                             if let Some(ending) = send(&mut socket, &error).await {
                                 break ending;
                             }
+                            heard = not_counting(heard, writing.elapsed(), Instant::now());
                         }
                     }
                     Some(Ok(Message::Ping(_) | Message::Pong(_))) => {}
@@ -210,9 +221,11 @@ async fn serve(mut socket: WebSocket, state: Shared, device: DeviceId, token: Se
                 if too_quiet(heard.elapsed()) {
                     break Ending::Quiet;
                 }
+                let writing = Instant::now();
                 if let Some(ending) = bounded(WRITE_LIMIT, socket.send(Message::Ping(Default::default()))).await {
                     break ending;
                 }
+                heard = not_counting(heard, writing.elapsed(), Instant::now());
             }
         }
     };
@@ -239,6 +252,15 @@ enum Ending {
     Unreadable,
 }
 
+/// When the phone was last heard from, with `writing`, the time a write to
+/// it took to go out, not counted as quiet: no ping went out meanwhile for
+/// it to answer, and a large write that went through shows the path works.
+fn not_counting(heard: Instant, writing: Duration, now: Instant) -> Instant {
+    heard
+        .checked_add(writing)
+        .map_or(now, |moved| moved.min(now))
+}
+
 /// Whether a phone quiet for `quiet` has stopped answering pings.
 fn too_quiet(quiet: Duration) -> bool {
     quiet > QUIET_LIMIT
@@ -249,7 +271,18 @@ async fn send(socket: &mut WebSocket, message: &ServerMessage) -> Option<Ending>
     let Ok(text) = serde_json::to_string(message) else {
         return Some(Ending::SendFailed);
     };
-    bounded(WRITE_LIMIT, socket.send(Message::Text(text.into()))).await
+    bounded(
+        write_limit(text.len()),
+        socket.send(Message::Text(text.into())),
+    )
+    .await
+}
+
+/// How long a write of `bytes` may take: [`WRITE_LIMIT`], and the time to
+/// send them at [`SLOWEST_BYTES_PER_SEC`] on top.
+fn write_limit(bytes: usize) -> Duration {
+    let bytes = u64::try_from(bytes).unwrap_or(u64::MAX);
+    WRITE_LIMIT.saturating_add(Duration::from_secs(bytes / SLOWEST_BYTES_PER_SEC))
 }
 
 /// Waits up to `limit` for `write`; how the socket ends when it fails or

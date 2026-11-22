@@ -113,6 +113,7 @@ pub(crate) struct SheprdWindow {
     pub(crate) _activation: Subscription,
     pub(crate) _agent_favorites: Subscription,
     pub(crate) _agent_guidance: Subscription,
+    pub(crate) _agent_read: Subscription,
     pub(crate) _appearance: Subscription,
     pub(crate) _browser_tabs: Subscription,
     pub(crate) _device_tags: Subscription,
@@ -138,6 +139,8 @@ pub(crate) struct SheprdWindow {
     /// group outlives its coordinator's pane. None lists every group.
     pub(crate) agent_group: Option<String>,
     pub(crate) agent_guidance: Entity<crate::agent_guidance::State>,
+    /// Every device's unread agents, as their daemons last answered.
+    pub(crate) agent_read: std::sync::Arc<crate::agent_read::Sets>,
     pub(crate) agent_sort: preferences::AgentSort,
     /// Whether the user chose the sort with the panel toggle, now or in a
     /// stored session. Until then the daemon's `ui.agent_panel_sort` decides,
@@ -777,6 +780,7 @@ impl SheprdWindow {
         self.publish_github_account(cx);
         self.sync_remote_hosts(window, cx);
         self.reach_device_tags(cx);
+        self.report_agent_focus(window, cx);
         self.update_merged_cleanup(window, cx);
         self.follow_removed_front(cx);
         if self.update_git() {

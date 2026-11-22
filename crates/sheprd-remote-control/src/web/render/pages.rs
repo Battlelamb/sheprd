@@ -38,7 +38,9 @@ fn directly_in(root: &str, path: &str) -> bool {
             .file_name()
             .and_then(|name| name.to_str())
             .is_some_and(|name| !name.starts_with('.'))
-        && path.is_dir()
+        && path
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.file_type().is_dir())
 }
 
 fn agents(selected: Agent) -> Markup {

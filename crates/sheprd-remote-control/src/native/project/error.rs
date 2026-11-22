@@ -11,7 +11,7 @@ pub(crate) enum Error {
     #[error("{name} already exists there")]
     Exists { name: String },
     #[error("git could not run on this computer")]
-    Git(#[source] std::io::Error),
+    Git(#[source] sheprd_client::Error),
     #[error("that is not a folder name a project can have")]
     Name,
     #[error("the new project could not be put in place")]

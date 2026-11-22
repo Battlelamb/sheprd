@@ -2,8 +2,8 @@
 //! in a project root, a clone that fails leaving nothing behind, and a
 //! workspace allowed in the new folder.
 
-use super::*;
 use crate::native::project::{CreatedProject, Error, check_name, clone_url, last_lines};
+use crate::native::tests::*;
 use crate::web::tests::{post, send, signed_in};
 use axum::{
     body::Body,
@@ -64,6 +64,13 @@ fn clone_addresses_are_github_names_or_remote_urls() {
         clone_url("sheprd-labs/weather").unwrap(),
         "https://github.com/sheprd-labs/weather.git"
     );
+    assert_eq!(
+        clone_url("owner/.github").unwrap(),
+        "https://github.com/owner/.github.git"
+    );
+    for bad in ["owner/.", "owner/.."] {
+        assert!(matches!(clone_url(bad), Err(Error::Url)));
+    }
     for kept in [
         "https://github.com/sheprd-labs/weather.git",
         "ssh://git@example.com/team/app.git",
@@ -194,4 +201,17 @@ async fn a_clone_git_refuses_leaves_nothing_behind() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert!(error_of(&body).starts_with("git refused: "), "{body}");
     assert_eq!(entries(&root), ["app"]);
+}
+
+#[cfg(unix)]
+#[core::prelude::v1::test]
+fn an_unlisted_symlink_cannot_escape_the_project_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let (state, root) = with_root(dir.path());
+    let outside = dir.path().join("outside");
+    std::fs::create_dir(&outside).unwrap();
+    let link = std::path::Path::new(&root).join("linked");
+    std::os::unix::fs::symlink(&outside, &link).unwrap();
+    let offered = crate::web::folders(&state.hub.layout());
+    assert!(!offered.offers(link.to_str().unwrap()));
 }

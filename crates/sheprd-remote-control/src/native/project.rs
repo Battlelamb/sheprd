@@ -16,10 +16,13 @@ use crate::web::{ApiError, Device, Shared, folders};
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use std::{
-    io::Read,
     path::{Path, PathBuf},
-    process::{Child, Stdio},
-    time::{Duration, Instant},
+    process::Command,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    time::Duration,
 };
 use tokio::sync::Semaphore;
 
@@ -28,8 +31,6 @@ use tokio::sync::Semaphore;
 pub(crate) const CLONE_WAIT: Duration = Duration::from_secs(240);
 /// How long `git init` may run.
 const INIT_WAIT: Duration = Duration::from_secs(15);
-/// How often a running Git is checked on.
-const POLL: Duration = Duration::from_millis(50);
 /// Projects being made at once, across every phone.
 static MAKING: Semaphore = Semaphore::const_new(2);
 /// The most of Git's error output kept, from its end.
@@ -81,11 +82,14 @@ pub(crate) async fn create_project(
     .map_err(|_| Error::Worker)??;
     // Taken only once the request could succeed, so a refused one never
     // holds up another phone's.
-    let _making = MAKING.try_acquire().map_err(|_| Error::Busy)?;
-    let path =
-        tokio::task::spawn_blocking(move || make(Path::new(&root), &name, source.as_deref()))
-            .await
-            .map_err(|_| Error::Worker)??;
+    let making = MAKING.try_acquire().map_err(|_| Error::Busy)?;
+    let path = tokio::task::spawn_blocking(move || {
+        // The worker owns the slot even if the HTTP request is cancelled.
+        let _making = making;
+        make(Path::new(&root), &name, source.as_deref())
+    })
+    .await
+    .map_err(|_| Error::Worker)??;
     let path = path.to_str().ok_or(Error::Root)?.to_owned();
     Ok(Json(CreatedProject { path }))
 }
@@ -149,7 +153,7 @@ pub(crate) fn clone_url(address: &str) -> Result<String, Error> {
 fn github_segment(part: &str) -> bool {
     !part.is_empty()
         && part.len() <= MAX_NAME
-        && !part.starts_with('.')
+        && !matches!(part, "." | "..")
         && part
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
@@ -179,22 +183,28 @@ fn make(root: &Path, name: &str, source: Option<&str>) -> Result<PathBuf, Error>
             )?;
         }
     }
-    // Checked again: another program may have made it while Git ran, and a
-    // rename would replace an empty folder.
-    vacant(root, name)?;
-    std::fs::rename(&work, &target).map_err(Error::Place)?;
+    place(&work, &target).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::AlreadyExists {
+            Error::Exists {
+                name: name.to_owned(),
+            }
+        } else {
+            Error::Place(error)
+        }
+    })?;
     Ok(target)
 }
 
 /// `root/name`, unless something is already there. Blocking.
 fn vacant(root: &Path, name: &str) -> Result<PathBuf, Error> {
     let target = root.join(name);
-    if target.symlink_metadata().is_ok() {
-        return Err(Error::Exists {
+    match target.symlink_metadata() {
+        Ok(_) => Err(Error::Exists {
             name: name.to_owned(),
-        });
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(target),
+        Err(error) => Err(Error::Place(error)),
     }
-    Ok(target)
 }
 
 /// Runs Git in `dir` for at most `wait`, without a terminal to ask for a
@@ -203,60 +213,73 @@ fn git(dir: &Path, args: &[&str], wait: Duration) -> Result<(), Error> {
     let mut command = sheprd_client::new_command("git");
     // A user service's `PATH` is bare; the login shell's finds the user's Git.
     sheprd_client::login_env::apply(&mut command);
-    let mut child = command
+    command
         .args(args)
         .current_dir(dir)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_ALLOW_PROTOCOL", ALLOWED_PROTOCOLS)
-        .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(Error::Git)?;
-    let output = drain(&mut child);
-    let deadline = Instant::now() + wait;
-    let status = loop {
-        match child.try_wait().map_err(Error::Git)? {
-            Some(status) => break status,
-            None if Instant::now() < deadline => std::thread::sleep(POLL),
-            None => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(Error::TimedOut);
-            }
-        }
-    };
-    if status.success() {
-        return Ok(());
-    }
-    let output = output.join().unwrap_or_default();
-    Err(Error::Refused {
-        output: last_lines(&output),
-    })
+        .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes");
+    run(command, wait)
 }
 
-/// Reads Git's error output on its own thread, so a chatty Git never
-/// blocks on a full pipe, keeping only its end.
-fn drain(child: &mut Child) -> std::thread::JoinHandle<Vec<u8>> {
-    let stderr = child.stderr.take();
-    std::thread::spawn(move || {
-        let Some(mut stderr) = stderr else {
-            return Vec::new();
-        };
-        let mut kept = Vec::new();
-        let mut chunk = [0_u8; 4096];
-        while let Ok(read) = stderr.read(&mut chunk) {
-            if read == 0 {
-                break;
+/// Reuse the script runner's process group / Windows job and pipe cleanup.
+/// Its idle limit alone is not a wall-clock deadline when Git is chatty.
+fn run(command: Command, wait: Duration) -> Result<(), Error> {
+    let cancelled = AtomicBool::new(false);
+    let (done, finished) = mpsc::channel();
+    let result = std::thread::scope(|scope| {
+        let cancelled = &cancelled;
+        scope.spawn(move || {
+            if matches!(
+                finished.recv_timeout(wait),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ) {
+                cancelled.store(true, Ordering::Release);
             }
-            kept.extend_from_slice(&chunk[..read]);
-            if kept.len() > MAX_OUTPUT * 4 {
-                kept.drain(..kept.len() - MAX_OUTPUT * 2);
-            }
+        });
+        let result = sheprd_client::run_script_command(
+            command,
+            std::io::empty(),
+            std::io::sink(),
+            sheprd_client::ScriptLimits {
+                output: u64::MAX,
+                idle: wait,
+            },
+            cancelled,
+        );
+        let _ = done.send(());
+        result
+    });
+    match result {
+        Ok(_) => Ok(()),
+        Err(sheprd_client::Error::ScriptCancelled | sheprd_client::Error::ScriptTimeout) => {
+            Err(Error::TimedOut)
         }
-        kept
-    })
+        Err(sheprd_client::Error::ScriptExit { stderr, .. }) => Err(Error::Refused {
+            output: last_lines(stderr.as_bytes()),
+        }),
+        Err(error) => Err(Error::Git(error)),
+    }
+}
+
+/// Atomically publish the finished directory without replacing any entry.
+fn place(source: &Path, target: &Path) -> std::io::Result<()> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        use rustix::fs::{CWD, RenameFlags, renameat_with};
+        renameat_with(CWD, source, CWD, target, RenameFlags::NOREPLACE)?;
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        // MoveFileExW refuses to replace a directory, even an empty one.
+        std::fs::rename(source, target)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    {
+        let _ = (source, target);
+        Err(std::io::ErrorKind::Unsupported.into())
+    }
 }
 
 /// Git's last words, at most [`MAX_OUTPUT`] bytes on a character boundary.
@@ -269,3 +292,6 @@ pub(crate) fn last_lines(output: &[u8]) -> String {
     }
     text[start..].trim().to_owned()
 }
+
+#[cfg(test)]
+mod tests;

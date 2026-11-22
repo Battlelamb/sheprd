@@ -95,6 +95,14 @@ struct ComputerScreen: View {
             } footer: {
                 Text("Over Bluetooth, \(name) knows when you are near it and holds phone alerts while you use it.")
             }
+            Section {
+                Toggle("Let agents open screens", isOn: Binding(
+                    get: { model.agents.allows(computer) },
+                    set: { model.agents.set($0, for: computer, fleet: model.fleet) }
+                ))
+            } footer: {
+                Text("Agents on \(name) can open chats, terminals, and other screens in this app, say which one is in front, and show you notes, while the app is open and unlocked. Nothing else.")
+            }
             ComputerUpdateSection(device: device, name: name)
             Section("Certificate") {
                 Text(Self.grouped(computer.fingerprint.hex))

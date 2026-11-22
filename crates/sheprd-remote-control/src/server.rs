@@ -167,6 +167,7 @@ pub async fn run(options: Options) -> Result<()> {
         changes: Default::default(),
         computer: options::computer_name(),
         connected: Mutex::new(HashMap::new()),
+        drivers: Default::default(),
         favorites: web::Favorites::load(crate::app::favorites::file(&options.state_dir)),
         fingerprint,
         fleet,

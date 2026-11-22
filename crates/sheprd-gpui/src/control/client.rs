@@ -11,6 +11,7 @@ mod hosts;
 mod local;
 mod mods;
 mod open;
+mod phone;
 mod remote;
 mod settings;
 mod tabs;
@@ -575,6 +576,7 @@ pub(crate) fn dispatch(command: ControlCommand, context: &Context) -> crate::Res
         ControlCommand::Automation(command) => hosts::automation(command, context),
         ControlCommand::Remote(command) => remote::remote(command, context),
         ControlCommand::Fleet(command) => fleet::fleet(command, context),
+        ControlCommand::Phone(command) => phone::phone(command, context),
         ControlCommand::Mod(command) => mods::run(command, context),
         ControlCommand::Search {
             files,

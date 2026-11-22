@@ -46,6 +46,12 @@ struct RootView: View {
         .environment(window)
         // Along the top edge on every screen; sheets carry their own.
         .overlay(alignment: .top) { SyncBar().ignoresSafeArea(edges: .top) }
+        // What an agent on a computer showed or opened (`AgentControl`).
+        .overlay(alignment: .top) { AgentBanner() }
+        // The split view reports its own.
+        .onChange(of: wide ? nil : compactFront, initial: true) { _, front in
+            if let front { model.agents.front = front }
+        }
         // Folding or unfolding keeps the open chat or terminal open.
         .onChange(of: wide) { _, nowWide in
             if nowWide {
@@ -105,7 +111,8 @@ struct RootView: View {
             model.talk(saying: talk.words)
         }
         .onChange(of: model.pendingTab) { _, wanted in
-            guard let wanted else { return }
+            // The split view picks its sidebar's tab itself.
+            guard let wanted, !wide else { return }
             tab = wanted
             model.pendingTab = nil
         }
@@ -133,6 +140,12 @@ struct RootView: View {
             showWorkspace(key)
             model.pendingWorkspace = nil
         }
+    }
+
+    /// What the tabs show, for agents asking (`AgentControl`): the
+    /// Workspaces tab's stack holds pages no screen names.
+    private var compactFront: AgentControl.Front {
+        AgentControl.Front(tab: tab, route: tab == .home ? homePath.last : nil, unnamed: tab == .workspaces && !workspacesPath.isEmpty)
     }
 
     /// Goes back to the workspace when it is in the stack, else makes it

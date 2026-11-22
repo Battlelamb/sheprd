@@ -375,6 +375,10 @@ final class Fleet {
     /// When the text shortcuts a computer's home reports were edited; `nil`
     /// from a computer too old to keep them.
     @ObservationIgnored var onShortcutsReported: ((UInt64?, String) -> Void)?
+    /// An agent on `Computer` asks the app to do something (`AgentControl`).
+    @ObservationIgnored var onDrive: ((UInt64, AgentCommand, Computer) -> Void)?
+    /// Whether the person lets agents on a computer drive the app.
+    @ObservationIgnored var agentsAllowed: ((Computer) -> Bool)?
     /// A computer's copy of the text shortcuts, as fetched, or as it stood
     /// after the offer that goes with it.
     @ObservationIgnored var onShortcuts: ((TextShortcuts, _ offered: TextShortcuts?, String) -> Void)?
@@ -754,7 +758,9 @@ final class Fleet {
         let device = computer.device
         let watching = chats.filter { $0.key.device == device }.map { ($0.key.pane, $0.value.cursor, self.background.contains($0.key)) }
         let terminals = terms.filter { $0.key.device == device }.map { ($0.key.pane, $0.value.size) }
+        let agents = agentsAllowed?(computer) == true
         readers[device] = Task {
+            if agents { await link.setAgentControl(true) }
             await link.watch(.home)
             for (pane, cursor, background) in watching { await link.watch(.chat(pane: pane), since: cursor, background: background) }
             for (pane, size) in terminals { await link.watch(.term(pane: pane), size: size) }
@@ -854,6 +860,16 @@ final class Fleet {
         }
     }
 
+    /// Tells `device` whether its agents may drive the app.
+    func setAgentControl(_ allowed: Bool, device: String) {
+        Task { await links[device]?.setAgentControl(allowed) }
+    }
+
+    /// Answers `device`'s `drive` numbered `id`.
+    func driven(_ id: UInt64, _ outcome: AgentOutcome, device: String) {
+        Task { await links[device]?.reply(id: id, outcome: outcome) }
+    }
+
     private func stopLink(_ device: String) {
         stopRelay(device)
         clients[device] = nil
@@ -939,6 +955,8 @@ final class Fleet {
                     store.problem = message
                 }
             }
+        case let .event(.drive(id, command)):
+            onDrive?(id, command, machines[index].computer)
         case let .event(.reload(.term(pane))):
             log.notice("\(self.machines[index].computer.name, privacy: .public) reloads terminal \(pane, privacy: .public)")
         case let .event(.termScreen(screen)):

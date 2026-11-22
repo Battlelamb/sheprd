@@ -244,6 +244,8 @@ final class AppModel {
     let tagFilter = TagFilterStore()
     let agentScopeStore = AgentScopeStore()
     let shortcuts = ShortcutStore()
+    /// Agents on paired computers driving the app, where each is allowed.
+    let agents: AgentControl
     let termKeys = TermKeyStore()
     let bluetooth = NearbyBluetooth()
     /// Bluetooth presence with the computers that have it on.
@@ -262,6 +264,7 @@ final class AppModel {
         tokens = ActivityTokens(sessions: sessions)
         pushTests = PushTests(sessions: sessions, tokens: tokens)
         fleet = Fleet(sessions: sessions)
+        agents = AgentControl()
         hostLinks = HostLinks(sessions: sessions)
         fleetMembership = FleetMembership(sessions: sessions)
         var loaded = false
@@ -274,6 +277,7 @@ final class AppModel {
         }
         // Property observers do not run during `init`.
         tokens.computers = computers
+        fleet.agentsAllowed = { [agents] in agents.allows($0) }
         fleet.sync(computers)
         // Every relay a paired computer named is kept, so it is there to
         // pick from, and to dial, when that computer cannot be asked.
@@ -306,6 +310,10 @@ final class AppModel {
             self?.fleetMembership.online(computer)
         }
         fleet.onTags = { [weak self] in self?.tagsArrived($0, for: $1) }
+        fleet.onDrive = { [weak self] id, command, computer in
+            guard let self else { return }
+            agents.perform(id, command, from: computer, model: self)
+        }
         fleet.onTagsAnswer = { [weak self] in self?.tagsAnswered($0, for: $1) }
         shortcuts.perform = { [weak fleet] actions in
             for action in actions {

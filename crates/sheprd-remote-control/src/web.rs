@@ -92,6 +92,8 @@ pub(crate) struct State {
     pub(crate) computer: String,
     /// Streams open per device.
     pub(crate) connected: Mutex<HashMap<DeviceId, usize>>,
+    /// Phones agents may drive, and drives waiting for them.
+    pub(crate) drivers: crate::native::drive::Drivers,
     /// This computer's favorite agents, which its phones and desktops share.
     pub(crate) favorites: Favorites,
     pub(crate) fingerprint: String,

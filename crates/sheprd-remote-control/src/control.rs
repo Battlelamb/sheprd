@@ -20,6 +20,7 @@ pub mod host_relay;
 pub mod hosts;
 pub mod layout;
 pub mod pairing_link;
+pub mod phone;
 pub mod pull_requests;
 pub mod push;
 pub mod relays;
@@ -326,6 +327,10 @@ pub enum Request {
     /// went (`push`). Read-only, and it names no token, handle, or device.
     /// An older daemon closes without answering.
     PushStatus,
+    /// Agents driving a paired phone's app (`phone`): the phones that let
+    /// them, or a drive, answered once the phone says what it did or
+    /// [`ASK_WAIT`] passes. An older daemon closes without answering.
+    Phone(phone::Ask),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -401,6 +406,7 @@ pub enum Response {
         asks: Vec<github::LeaseAsk>,
     },
     PushStatus(push::PushStatus),
+    Phone(phone::Answer),
 }
 
 /// The daemon's answer to a nearby phone's first step, the same JSON over

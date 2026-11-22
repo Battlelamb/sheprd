@@ -469,6 +469,43 @@ sheprd remote relays token relay.example.org < ~/relay-token.txt
 sheprd remote relays token relay.example.org --clear
 ```
 
+### Phone
+
+Agents bring the person to a screen of the Sheprd phone app, or put a note
+in front of them there. A phone is driven only while the app is open on it
+and its person turned on **Let agents open screens** for this computer (that
+computer's page in the app's Settings; off by default). It refuses while its
+app is locked, and shows which computer's agent opened a screen. Nothing
+pairs, approves, or changes a setting from here. Remote control must be on.
+
+| Command | What it does |
+| --- | --- |
+| `phone [list]` | The phones connected that let agents open screens, by name and device ID, the one used last first. Exits 4 when there are none |
+| `phone state` | The screen in front: `home`, `workspaces`, `pull_requests`, `settings`, `new_workspace`, or one of this computer's `chat`, `term`, `workspace`, or `changes` with its pane or workspace; none for another computer's screen or a form. Says when the app is locked |
+| `phone open [PANE]` | Show a pane of this computer: its chat, else its terminal. Without PANE, your own pane (`HERDR_PANE_ID`); from a Herdr 2 terminal, name it |
+| `phone open home\|workspaces\|prs\|settings\|new-workspace` | Show a tab, or the form starting a workspace on this computer |
+| `phone open chat PANE`, `phone open term PANE` | Show a chat or a terminal |
+| `phone open workspace\|changes [WORKSPACE]` | Show a workspace, or its changes; default your workspace (`HERDR_WORKSPACE_ID`) |
+| `phone show TEXT` | A note on the phone, from this computer's agent (at most 500 characters) |
+
+Every `phone` command takes `--device ID|NAME`; without it, the phone used
+last. Exits 1 when the phone refuses (locked, or agents turned off for this
+computer), 2 for a name two phones share or an empty or overlong note, 5 for
+a pane or workspace not on this computer, and 7 when the phone does not
+answer within a few seconds, as when it went to the background. `--json`
+gives the daemon's answer: `{"answer": "phones", "phones": [{"device",
+"name", "active_ms"}]}`, `{"answer": "no_phone"}`, or `{"answer": "driven",
+"phone", "outcome"}`, where `outcome` is `{"outcome": "done", "state":
+{"screen", "locked"}}` or `{"outcome": "refused", "reason"}` with a `reason`
+of `locked`, `not_found`, `off`, or `other`.
+
+```sh
+sheprd phone open
+sheprd phone open changes
+sheprd phone show "Tests pass; the PR is ready for review"
+sheprd phone state --json
+```
+
 ### Fleet
 
 Your computers and phones as one fleet (`docs/relay-plan.md`, Fleet): a

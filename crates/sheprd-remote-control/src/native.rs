@@ -6,6 +6,7 @@
 pub(crate) mod changes;
 mod convert;
 mod create;
+pub(crate) mod drive;
 pub(crate) mod github;
 mod live;
 mod model;

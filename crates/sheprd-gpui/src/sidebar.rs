@@ -20,6 +20,7 @@ mod order;
 mod rail;
 mod render;
 mod reorder;
+mod repository;
 mod row;
 mod search;
 pub(crate) mod slide;

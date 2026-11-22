@@ -44,7 +44,14 @@ fn holding_a_workspace_row_lifts_it_and_a_release_picks_the_gap(cx: &mut gpui::T
     let second = cx
         .debug_bounds("row-herdr-gpui-sidebar-rendering-regression-investigation")
         .unwrap();
-    assert_eq!(second.top(), first.bottom());
+    assert_eq!(
+        second.top(),
+        first.bottom()
+            + px(super::super::scaled(
+                &crate::config::Config::default().sidebar,
+                7.
+            ))
+    );
 
     // Past the second row's middle, it lands before the third.
     let below = point(first.center().x, second.bottom() - px(2.));

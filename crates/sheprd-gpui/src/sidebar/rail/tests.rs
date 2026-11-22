@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 mod mutes;
 mod omo;
+mod repository_marks;
 
 fn rail_window(
     cx: &mut TestAppContext,

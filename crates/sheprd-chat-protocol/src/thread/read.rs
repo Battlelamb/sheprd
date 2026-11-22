@@ -34,43 +34,44 @@ pub struct Read {
 }
 
 /// The entries from `from` through `to` that `contents` holds, oldest
-/// first, within [`MAX_ENTRIES`] and [`MAX_BYTES`].
+/// first, and the trimmed runs among them, within [`MAX_ENTRIES`] and
+/// [`MAX_BYTES`].
 pub fn read(contents: &Contents, from: EntryId, to: EntryId) -> Read {
-    let mut text = String::new();
-    let mut entries = 0;
-    let mut next = None;
-    let mut ranges = contents
+    // Kept entries and trimmed runs never overlap, so ordering them by
+    // their first id puts each run where it belongs.
+    let mut items: Vec<(EntryId, Option<String>)> = contents
         .trimmed
         .iter()
         .filter(|range| range.to >= from && range.from <= to)
-        .peekable();
-    for entry in contents
-        .entries
-        .iter()
-        .filter(|entry| (from..=to).contains(&entry.id))
-    {
-        while let Some(range) = ranges.next_if(|range| range.from < entry.id) {
-            trimmed(&mut text, range.from.max(from), range.to.min(to));
-        }
-        let Some(line) = handoff::full_line(&entry.kind) else {
-            continue;
+        .map(|range| (range.from.max(from), None))
+        .collect();
+    items.extend(
+        contents
+            .entries
+            .iter()
+            .filter(|entry| (from..=to).contains(&entry.id))
+            .filter_map(|entry| Some((entry.id, Some(handoff::full_line(&entry.kind)?)))),
+    );
+    items.sort_by_key(|(id, _)| *id);
+    let mut text = String::new();
+    let mut used = 0;
+    let mut entries = 0;
+    let mut next = None;
+    for (id, line) in items {
+        let block = match &line {
+            Some(line) => block(id, line),
+            None => trimmed_block(contents, id, to),
         };
-        let block = block(entry.id, &line);
-        if entries == MAX_ENTRIES || (entries > 0 && text.len() + block.len() > MAX_BYTES) {
-            next = Some(entry.id);
+        let size = escaped_len(&block);
+        let full = line.is_some() && entries == MAX_ENTRIES;
+        if full || (!text.is_empty() && used + size > MAX_BYTES) {
+            next = Some(id);
             break;
         }
-        text.push_str(&cut(
-            block,
-            MAX_BYTES.saturating_sub(text.len()),
-            " [cut]\n",
-        ));
-        entries += 1;
-    }
-    if next.is_none() {
-        for range in ranges {
-            trimmed(&mut text, range.from.max(from), range.to.min(to));
-        }
+        let block = cut(block, MAX_BYTES.saturating_sub(used), " [cut]\n");
+        used += escaped_len(&block);
+        text.push_str(&block);
+        entries += usize::from(line.is_some());
     }
     match next {
         Some(id) => {
@@ -110,12 +111,18 @@ pub fn search(contents: &Contents, query: &str) -> Vec<(EntryId, String)> {
         .collect()
 }
 
-fn trimmed(text: &mut String, from: EntryId, to: EntryId) {
-    let _ = if from == to {
-        writeln!(text, "#{}: trimmed, no longer kept", from.0)
+/// The line for the trimmed run that covers `from`, up to `to` at most.
+fn trimmed_block(contents: &Contents, from: EntryId, to: EntryId) -> String {
+    let end = contents
+        .trimmed
+        .iter()
+        .find(|range| range.contains(from))
+        .map_or(from, |range| range.to.min(to));
+    if from == end {
+        format!("#{}: trimmed, no longer kept\n", from.0)
     } else {
-        writeln!(text, "#{}-#{}: trimmed, no longer kept", from.0, to.0)
-    };
+        format!("#{}-#{}: trimmed, no longer kept\n", from.0, end.0)
+    }
 }
 
 /// `line` as entry `id`'s block, its further lines quoted.

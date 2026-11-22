@@ -126,3 +126,27 @@ fn a_read_fits_its_bound_as_json_even_when_every_character_is_escaped() {
     }
     assert_eq!(escaped_len("a\"\n\u{1}é"), 1 + 2 + 2 + 6 + 2);
 }
+
+#[test]
+fn many_trimmed_runs_count_against_the_bound_too() {
+    // Every other id trimmed: thousands of runs between kept entries.
+    let contents = Contents {
+        entries: (0..20_000).map(|at| agent(at * 2 + 2, "hi")).collect(),
+        trimmed: (0..20_000)
+            .map(|at| Trimmed {
+                from: EntryId(at * 2 + 1),
+                to: EntryId(at * 2 + 1),
+            })
+            .collect(),
+    };
+    let read = read(&contents, EntryId(1), EntryId(40_000));
+    assert_eq!(read.entries, MAX_ENTRIES);
+    assert!(escaped_len(&read.text) <= MAX_BYTES + 64);
+    let runs = Contents {
+        entries: Vec::new(),
+        trimmed: contents.trimmed.clone(),
+    };
+    let read = super::read(&runs, EntryId(1), EntryId(40_000));
+    assert!(read.next.is_some());
+    assert!(escaped_len(&read.text) <= MAX_BYTES + 64);
+}

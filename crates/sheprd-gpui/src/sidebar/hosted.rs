@@ -89,6 +89,8 @@ pub struct Stamp {
     section: bool,
     sidebar_visible: bool,
     snapshot: Option<Arc<ClientShellSnapshot>>,
+    /// The status bar's connection message; see `connection_message`.
+    status: Option<String>,
     status_bar_visible: bool,
     theme: u32,
 }
@@ -115,6 +117,7 @@ impl PartialEq for Stamp {
             && self.panel == other.panel
             && self.section == other.section
             && self.sidebar_visible == other.sidebar_visible
+            && self.status == other.status
             && self.status_bar_visible == other.status_bar_visible
             && self.theme == other.theme
     }
@@ -284,6 +287,7 @@ impl SheprdWindow {
             navigation: self.navigation_fits_sidebar(self.viewport_width),
             sidebar_visible: self.sidebar_visible,
             snapshot: self.live.snapshot.clone(),
+            status: self.connection_message(),
             status_bar_visible: self.status_bar_visible,
             theme: self.theme.background,
         }
@@ -388,7 +392,8 @@ impl SheprdWindow {
                 "section": self.activity_section().is_some(),
                 "navigation_in_header": self.navigation_fits_sidebar(self.viewport_width),
                 "sidebar_visible": self.sidebar_visible,
-                "status": self.live.status_text(self.local_error.as_deref()),
+                // The classic status bar's message, absent when it shows none.
+                "status": self.connection_message(),
                 "status_bar_visible": self.status_bar_visible,
                 "usage": self.hosted_usage(),
             "workspaces": self.hosted_workspaces(cx),

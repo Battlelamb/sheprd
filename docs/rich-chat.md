@@ -710,8 +710,13 @@ is out of their reach: the agent pushes and fetches over HTTPS with the
 GitHub CLI's credentials rather than SSH, and stops rather than turning
 off signing when a commit needs a key (`phone.md` and `remote.md`; the
 iPhone and iPad app's `phone-app.md` follows `phone.md`, so says it once
-through it). The transcript shows only the person's
-words. An older program ignores the field, and an older client sends none.
+through it). An older program ignores the origin field, and an older client sends none.
+The transcript shows only the person's words, and keeps what went ahead of
+them in the user entry's optional `note`: the note and, on a live prompt, a
+handed-over conversation; on a replay or a restored log, the note alone. The
+desktop chat's **As sent** header switch (`chat/view/sent.rs`) draws it above
+each prompt. Clients that predate `note` skip it, as serde ignores the
+unknown field, so no revision gates it.
 
 The note's texts are templates (`context/prompts.rs`): the built-in ones in
 `crates/sheprd-acp/prompts`, compiled in, each replaced by a non-empty file

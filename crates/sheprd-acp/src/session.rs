@@ -222,6 +222,9 @@ pub(crate) struct Session<R: FnMut(Update)> {
     /// queue does not carry it, as no client needs it.
     queued_origins: HashMap<CommandId, Origin>,
     ready: bool,
+    /// The note a replayed message from the person held and the entry
+    /// for their words that comes next takes.
+    replayed_note: Option<String>,
     report: R,
     seq: u64,
     subscribers: Vec<Subscriber>,
@@ -239,7 +242,9 @@ impl<R: FnMut(Update)> Session<R> {
         if let Some(mut history) = config.history.take() {
             told = crate::context::hide(&mut history);
             for entry in &mut history.entries {
-                if let sheprd_chat_protocol::EntryKind::User { text, files: 0 } = &mut entry.kind {
+                if let sheprd_chat_protocol::EntryKind::User { text, files: 0, .. } =
+                    &mut entry.kind
+                {
                     *text = crate::project::shown(text).to_owned();
                 }
             }
@@ -301,6 +306,7 @@ impl<R: FnMut(Update)> Session<R> {
             projector,
             queued_origins: HashMap::new(),
             ready: false,
+            replayed_note: None,
             report,
             seq: 0,
             subscribers: Vec::new(),
@@ -660,6 +666,8 @@ pub(crate) fn entry_size(entry: &sheprd_chat_protocol::Entry) -> usize {
                     .sum::<usize>()
         }
         EntryKind::Turn(_) => 32,
+        // What went ahead of the person's words travels with them.
+        EntryKind::User { text, note, .. } => text.len() + note.as_ref().map_or(0, String::len),
         kind => kind.text().map_or(0, str::len),
     }
 }

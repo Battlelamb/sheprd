@@ -7,7 +7,7 @@ const WRAPPED: &str = "<pasted_content id=\"0e15\">\nTask: ship it\n</pasted_con
 #[test]
 fn a_prompt_shows_without_its_paste_envelope() {
     let mut projector = Projector::default();
-    let Change::Push { entry } = projector.prompt(WRAPPED, 0) else {
+    let Change::Push { entry } = projector.prompt(WRAPPED, 0, None) else {
         panic!("a prompt is pushed");
     };
     assert_eq!(entry.kind.text(), Some("Task: ship it"));
@@ -17,7 +17,7 @@ fn a_prompt_shows_without_its_paste_envelope() {
 fn a_prompt_with_files_keeps_its_text_as_written() {
     let mut projector = Projector::default();
     let text = format!("{WRAPPED}\n{}a.png", sheprd_chat_protocol::ATTACHED);
-    let Change::Push { entry } = projector.prompt(&text, 1) else {
+    let Change::Push { entry } = projector.prompt(&text, 1, None) else {
         panic!("a prompt is pushed");
     };
     assert_eq!(entry.kind.text(), Some(text.as_str()));

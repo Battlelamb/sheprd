@@ -84,6 +84,7 @@ fn a_continued_session_marks_the_brief_its_log_replays() {
             kind: EntryKind::User {
                 text: format!("<pasted_content id=\"0e15\">\n{BRIEF}\n</pasted_content>"),
                 files: 0,
+                note: None,
             },
         },
         Entry {
@@ -91,6 +92,7 @@ fn a_continued_session_marks_the_brief_its_log_replays() {
             kind: EntryKind::User {
                 text: "carry on".to_owned(),
                 files: 0,
+                note: None,
             },
         },
     ];

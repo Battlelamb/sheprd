@@ -99,3 +99,36 @@ fn without_the_runtime_the_request_is_refused() {
         Response::Error { .. }
     ));
 }
+
+#[test]
+fn phones_without_an_alert_handle_do_not_crowd_out_one_with() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = with_relay(dir.path());
+    // More plain-token phones than the cap, paired first.
+    let max = u8::try_from(control::test_push::MAX_PHONES).unwrap();
+    for seed in 10..10 + max + 1 {
+        let (older_app, _) = web::tests::signed_in(&state, seed);
+        register(&state, &older_app, json!("9f".repeat(32)));
+    }
+    let (relayed, _) = web::tests::signed_in(&state, 3);
+    register(
+        &state,
+        &relayed,
+        json!({"handle": format!("1a2b3c4d.{}", "A".repeat(160)), "environment": "production"}),
+    );
+    let crate::apns::Delivery::Relay(relays) = &state.apns else {
+        unreachable!()
+    };
+    relays.mark_down(sheprd_apns::RelayHost::Production, web::now_ms());
+    let name = state.auth().devices().get(&relayed).unwrap().name.clone();
+
+    let runtime = runtime();
+    let answer = control::test_push::answer(&state, runtime.handle());
+    assert_eq!(
+        answer.pushes,
+        vec![TestPush {
+            device: name,
+            outcome: Outcome::Unreachable,
+        }]
+    );
+}

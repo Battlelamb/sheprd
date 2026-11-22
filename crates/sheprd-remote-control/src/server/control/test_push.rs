@@ -4,6 +4,7 @@
 //! socket's wait.
 
 use crate::{
+    apns::{Kind, Sent},
     control::{
         ASK_WAIT, DeviceId,
         push::{Outcome, TestPush, TestPushes},
@@ -25,13 +26,14 @@ pub(crate) fn answer(state: &Shared, runtime: &Handle) -> TestPushes {
             pushes: Vec::new(),
         };
     }
-    // Phones that never registered with APNs are left out before any push.
+    // Only phones with an alert handle the push relay takes, before the
+    // cap, so older registrations cannot crowd them out.
     let phones: Vec<(DeviceId, String)> = state
         .auth()
         .devices()
         .records()
         .iter()
-        .filter(|record| record.apns.is_some())
+        .filter(|record| test_push::target(state, record.apns.as_ref()).is_some())
         .take(MAX_PHONES)
         .map(|record| (record.id.clone(), record.name.clone()))
         .collect();
@@ -59,6 +61,13 @@ pub(crate) fn answer(state: &Shared, runtime: &Handle) -> TestPushes {
         })
         .await;
     });
+    // One still unanswered never reached the ledger: note it, so push
+    // status does not keep showing an older result.
+    if outcomes.iter().any(Option::is_none) {
+        state
+            .pushes
+            .record(Kind::Alert, &Sent::Unreachable, crate::web::now_ms());
+    }
     let pushes = phones
         .into_iter()
         .zip(outcomes)

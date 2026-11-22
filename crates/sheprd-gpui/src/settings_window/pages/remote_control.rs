@@ -38,7 +38,7 @@ pub(in crate::settings_window) use relays::Offered;
 pub(in crate::settings_window) use relays::{Standing, public_title, relay_line};
 pub(in crate::settings_window) use test_push::TestPushState;
 #[cfg(test)]
-pub(in crate::settings_window) use test_push::test_push_lines;
+pub(in crate::settings_window) use test_push::{answered, test_push_lines};
 
 /// The page's state while it shows.
 #[derive(Default)]

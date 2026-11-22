@@ -71,6 +71,7 @@ settings-push-relay-test-sending = Sending a test push…
 settings-push-relay-test-off = No test push sent: the daemon has the push relay off. Restart remote control if you just turned it on.
 settings-push-relay-test-none = No test push sent: no paired iPhone has registered for alerts. Open the Sheprd app on the phone and allow notifications.
 settings-push-relay-test-failed = Could not send a test push: { $error }
+settings-push-relay-test-old-daemon = the remote control daemon is older than this Sheprd. Restart remote control, then try again.
 settings-push-relay-test-result = { $outcome ->
     [delivered] { $device }: Apple took it; it should show on the phone now.
     [gone] { $device }: the phone's registration had expired; it registers again when the app opens.

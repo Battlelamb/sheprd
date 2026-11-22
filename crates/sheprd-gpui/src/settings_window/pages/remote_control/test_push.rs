@@ -22,7 +22,10 @@ use sheprd_remote_control::control::{
 pub(in crate::settings_window) enum TestPushState {
     #[default]
     Idle,
-    Sending,
+    /// Waiting for the daemon's answer to test `id`; an answer for any
+    /// other, from before the page was left or an earlier click, is
+    /// dropped.
+    Sending(u64),
     Sent(TestPushes),
     /// Why the daemon could not be asked, as shown.
     Failed(String),
@@ -30,7 +33,7 @@ pub(in crate::settings_window) enum TestPushState {
 
 impl SettingsWindow {
     pub(in crate::settings_window) fn send_test_push(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.remote.test_push, TestPushState::Sending) {
+        if matches!(self.remote.test_push, TestPushState::Sending(_)) {
             return;
         }
         let Some(client) = Supervisor::client(cx) else {
@@ -40,19 +43,17 @@ impl SettingsWindow {
             return;
         };
         let request = client.request(Request::TestPush);
-        self.remote.test_push = TestPushState::Sending;
+        let id = next_test_id();
+        self.remote.test_push = TestPushState::Sending(id);
         cx.notify();
         cx.spawn(async move |this, cx| {
             let answer = request.await;
             let _ = this.update(cx, |this, cx| {
-                this.remote.test_push = match answer {
-                    Ok(control::Response::TestPushed(sent)) => TestPushState::Sent(sent),
-                    Ok(_) => TestPushState::Failed(crate::remote::Error::Unexpected.localize()),
-                    Err(error) => {
-                        tracing::warn!(%error, "Could not send a test push");
-                        TestPushState::Failed(error.localize())
-                    }
-                };
+                if !matches!(this.remote.test_push, TestPushState::Sending(current) if current == id)
+                {
+                    return;
+                }
+                this.remote.test_push = answered(answer);
                 cx.notify();
             });
         })
@@ -67,7 +68,7 @@ impl SettingsWindow {
             return None;
         }
         let theme = &self.theme;
-        let sending = matches!(self.remote.test_push, TestPushState::Sending);
+        let sending = matches!(self.remote.test_push, TestPushState::Sending(_));
         let button = ui::button(
             theme,
             "remote-test-push",
@@ -92,12 +93,37 @@ impl SettingsWindow {
     }
 }
 
+/// A new test's id, never one an earlier test had.
+fn next_test_id() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The state the daemon's answer leaves. One too old to know the request
+/// closes without answering, which only a restart from the binary beside
+/// this Sheprd mends, so the page says so.
+pub(in crate::settings_window) fn answered(
+    answer: Result<control::Response, control::Error>,
+) -> TestPushState {
+    match answer {
+        Ok(control::Response::TestPushed(sent)) => TestPushState::Sent(sent),
+        Ok(_) => TestPushState::Failed(crate::remote::Error::Unexpected.localize()),
+        Err(control::Error::NoAnswer) => {
+            TestPushState::Failed(fl!("settings-push-relay-test-old-daemon"))
+        }
+        Err(error) => {
+            tracing::warn!(%error, "Could not send a test push");
+            TestPushState::Failed(error.localize())
+        }
+    }
+}
+
 /// What the page says about the last test: one line per phone, or why
 /// none was sent.
 pub(in crate::settings_window) fn test_push_lines(state: &TestPushState) -> Vec<String> {
     match state {
         TestPushState::Idle => Vec::new(),
-        TestPushState::Sending => vec![fl!("settings-push-relay-test-sending")],
+        TestPushState::Sending(_) => vec![fl!("settings-push-relay-test-sending")],
         TestPushState::Failed(error) => {
             vec![fl!(
                 "settings-push-relay-test-failed",

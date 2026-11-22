@@ -70,17 +70,12 @@ pub(super) async fn send(
 /// longer knows is forgotten, and the phone registers a new one when it
 /// next opens.
 pub(crate) async fn alert(state: &Shared, device: &DeviceId, id: String) -> Option<Sent> {
-    let registration = Registration::from_stored(
-        state
-            .auth()
-            .devices()
-            .get(device)
-            .and_then(|record| record.apns.as_ref()),
-    );
-    let (token, key) = registration
-        .alerts()
-        .filter(|(token, _)| state.apns.reaches(token))
-        .map(|(token, key)| (token.clone(), *key))?;
+    let stored = state
+        .auth()
+        .devices()
+        .get(device)
+        .and_then(|record| record.apns.clone());
+    let (token, key) = target(state, stored.as_ref())?;
     let badge = u32::try_from(state.attention().len()).unwrap_or(u32::MAX);
     let tag = format!("test-{id}");
     let sealed = Sealed::test(
@@ -105,4 +100,18 @@ pub(crate) async fn alert(state: &Shared, device: &DeviceId, id: String) -> Opti
         _ => {}
     }
     Some(sent)
+}
+
+/// The alert handle and notify key in a device's stored registration
+/// (`DeviceRecord::apns`), when the push relay takes that handle: a phone
+/// with only Live Activities, or a plain token from an app older than the
+/// push relay, has none.
+pub(crate) fn target(
+    state: &Shared,
+    stored: Option<&serde_json::Value>,
+) -> Option<(apns::Recipient, p256::PublicKey)> {
+    Registration::from_stored(stored)
+        .alerts()
+        .filter(|(token, _)| state.apns.reaches(token))
+        .map(|(token, key)| (token.clone(), *key))
 }

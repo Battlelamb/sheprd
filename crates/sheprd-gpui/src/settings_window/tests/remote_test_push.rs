@@ -4,7 +4,7 @@ use super::{
     remote_control::{click, draw, page},
     *,
 };
-use crate::settings_window::pages::remote_control::{TestPushState, test_push_lines};
+use crate::settings_window::pages::remote_control::{TestPushState, answered, test_push_lines};
 use sheprd_remote_control::control::push::{Mode, Outcome, TestPush, TestPushes};
 
 /// `text` without Fluent's isolation marks around its arguments.
@@ -73,4 +73,32 @@ fn each_phone_gets_a_line_or_the_page_says_why_none_went() {
     assert!(plain(&none[0]).contains("no paired iPhone"));
     let off = test_push_lines(&TestPushState::Sent(TestPushes::default()));
     assert!(plain(&off[0]).contains("push relay off"));
+}
+
+#[test]
+fn an_older_daemon_is_told_to_restart() {
+    let state = answered(Err(sheprd_remote_control::control::Error::NoAnswer));
+    let lines = test_push_lines(&state);
+    assert!(
+        plain(&lines[0]).contains("Restart remote control"),
+        "{lines:?}"
+    );
+}
+
+#[gpui::test]
+fn an_answer_after_leaving_the_page_is_dropped(cx: &mut TestAppContext) {
+    let (view, cx, _) = page(cx);
+    view.update(cx, |view, cx| {
+        view.send_test_push(cx);
+        // The page goes away before the daemon answers.
+        view.close_remote_control();
+    });
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| {
+        assert!(
+            matches!(view.remote.test_push, TestPushState::Idle),
+            "{:?}",
+            view.remote.test_push
+        );
+    });
 }

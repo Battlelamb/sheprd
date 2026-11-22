@@ -436,6 +436,31 @@ the phone: Apple sees only "Sheprd", "New activity", and ciphertext.
    - A phone that never paired was never asked to show alerts, so it has
      no alert token: the test asks then, as pairing does, and waits up to
      10 seconds for iOS to hand the token over.
+7. **Test Live Activity.** With the push relay on, Settings >
+   Notifications > Live Activities > Start Test Activity starts a Live
+   Activity on this phone the way a computer does, with no computer
+   online. The phone makes a push relay handle for its push-to-start
+   token (kind `push_to_start`) and posts a `liveactivity` start
+   (`SelfTestActivity`) shaped like the daemon's relayed start: the cover
+   alert ActivityKit requires, and `attributes` and `content-state` each
+   one `sealed` field under `SealedChatActivity.info`.
+   - Both are sealed to the phone's own key and name `this-phone` as the
+     computer, with pane `test-ID`. The widget tries the computers' keys
+     first; only content none of them opens is tried with the own key,
+     and it shows only as a test (`SelfTestActivity.open`): no question or
+     answer buttons. Its token goes to no computer and its link opens no
+     chat. While the push relay is on, the own key is also kept in its own
+     App Group file (`notify-own-key`), as the widget cannot read the
+     keychain on a device.
+   - Settings waits up to 30 seconds for ActivityKit to start an activity
+     with that pane, then says "Started in N s". It runs for 20 seconds,
+     so it can be seen on the Lock Screen and in the Dynamic Island, and
+     ends showing that it worked. A test left running, such as when iOS
+     gave the app no background time, ends when the next test starts.
+   - It says where it stopped otherwise: Live Activities off for Sheprd,
+     no push-to-start token from iOS yet, a push relay answer other than
+     `delivered`, or no activity within 30 seconds, which is also what
+     iOS's limit on push-started activities looks like.
 
 A Live Activity in the question phase also offers up to three answers
 (never the "always" ones) as buttons that answer from the lock screen.

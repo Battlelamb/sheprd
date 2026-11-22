@@ -137,6 +137,8 @@ pub(crate) enum SendButton {
 }
 
 pub(crate) struct ChatPane {
+    /// Whether each prompt shows what was sent to the agent ahead of it.
+    pub(crate) as_sent: bool,
     /// Files the next prompt carries, in the order they were added.
     pub(crate) attachments: Vec<std::path::PathBuf>,
     /// What this chat's buttons chose for its code blocks and HTML fences.
@@ -275,6 +277,7 @@ impl ChatPane {
         let mut prepared = Prepared::default();
         prepared.set_remote_links(!target.is_local());
         Self {
+            as_sent: false,
             attachments: Vec::new(),
             code: Default::default(),
             completion: 0,
@@ -544,6 +547,14 @@ impl ChatPane {
     pub(crate) fn toggle_earlier(&mut self, fold: super::earlier::Earlier) {
         self.toggle_expanded(fold.divider);
         let rows = fold.start + 1;
+        super::glide::splice_in_place(&self.list, 0..rows, rows);
+    }
+
+    /// Shows each prompt with what was sent ahead of it, or stops, then
+    /// measures every row again.
+    pub(crate) fn toggle_as_sent(&mut self) {
+        self.as_sent = !self.as_sent;
+        let rows = self.list_keys.len();
         super::glide::splice_in_place(&self.list, 0..rows, rows);
     }
 

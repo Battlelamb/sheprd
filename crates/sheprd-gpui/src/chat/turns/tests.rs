@@ -6,6 +6,7 @@ fn user(id: u64, text: &str) -> Entry {
         kind: EntryKind::User {
             text: text.into(),
             files: 0,
+            note: None,
         },
     }
 }
@@ -48,6 +49,7 @@ fn a_long_prompt_is_cut_and_its_attachments_left_out() {
         kind: EntryKind::User {
             text: format!("look\n{}a.png", sheprd_chat_protocol::ATTACHED),
             files: 1,
+            note: None,
         },
     };
     let turns = turns(&[user(1, &long), files]);
@@ -77,6 +79,7 @@ fn a_prompt_of_attachments_alone_is_named_by_them() {
         kind: EntryKind::User {
             text: format!("{}a.png", sheprd_chat_protocol::ATTACHED),
             files: 1,
+            note: None,
         },
     };
     assert!(turns(&[files])[0].label.ends_with("a.png"));

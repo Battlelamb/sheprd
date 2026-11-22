@@ -8,6 +8,7 @@ mod addresses;
 mod push_hosts;
 mod push_status;
 mod relay_token;
+mod test_push;
 
 #[test]
 fn remote_requests_have_a_stable_wire_form() {

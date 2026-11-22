@@ -51,7 +51,7 @@ impl SheprdWindow {
         let entries = &chat.session.transcript().entries;
         let index = pinned(entries, chat.glide.top(), !chat.glide.stopped())?;
         let entry = entries.get(index)?;
-        let EntryKind::User { text, files } = &entry.kind else {
+        let EntryKind::User { text, files, .. } = &entry.kind else {
             return None;
         };
         let theme = &self.theme;

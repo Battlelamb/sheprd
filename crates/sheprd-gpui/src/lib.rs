@@ -96,6 +96,8 @@ mod link_handlers;
 mod links;
 mod listening_ports;
 mod local_ports;
+#[cfg(windows)]
+mod localized_fonts;
 mod log_targets;
 mod log_window;
 #[cfg(feature = "moonframe")]

@@ -615,6 +615,15 @@ mode is, starts it empty, and it names no token, handle, or device. Sheprd
 shows it in Settings > Remote control beside the push relay switch, and
 `sheprd remote push-status` prints it.
 
+The control socket's `test_push` request (`server::control::test_push`)
+sends each phone registered for alerts one sealed test alert, as
+`POST /api/apns/test` does for the phone that asks, all at once on the
+daemon's runtime, and answers within `control::ASK_WAIT` with the mode and
+each phone's name and outcome; one the push relay has not answered by then
+counts as `unreachable`. With the push relay off it sends nothing. Sheprd's
+Settings > Remote control > Send Test Push and `sheprd remote test-push`
+ask it.
+
 ## Empty chats
 
 An empty chat opens at its header with the agent's icon and a prompt to start.

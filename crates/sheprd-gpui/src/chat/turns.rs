@@ -102,7 +102,7 @@ pub(crate) fn turns(entries: &[Entry]) -> Vec<Turn> {
     let mut turns: Vec<Turn> = Vec::new();
     for (index, entry) in entries.iter().enumerate() {
         match &entry.kind {
-            EntryKind::User { text, files } => {
+            EntryKind::User { text, files, .. } => {
                 // A prompt of attachments alone is named by them.
                 let label = Some(line(typed(text, *files), MAX_LABEL))
                     .filter(|label| !label.is_empty())

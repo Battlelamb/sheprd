@@ -2,7 +2,7 @@
 //! must both read.
 
 use super::*;
-use crate::control::push::{Last, Mode, Outcome, PushStatus};
+use crate::control::push::{Last, Mode, Outcome, PushStatus, TestPush, TestPushes};
 
 #[test]
 fn push_status_keeps_its_wire_form() {
@@ -53,5 +53,41 @@ fn a_newer_daemons_mode_and_outcome_still_read() {
             mode: Mode::Other,
             ..PushStatus::default()
         }
+    );
+}
+
+#[test]
+fn test_push_keeps_its_wire_form() {
+    assert_eq!(
+        serde_json::to_value(Request::TestPush).unwrap(),
+        json!({"request": "test_push"})
+    );
+    let answer = TestPushes {
+        mode: Mode::PushRelay,
+        pushes: vec![TestPush {
+            device: "iPhone".into(),
+            outcome: Outcome::Refused {
+                status: 403,
+                reason: None,
+            },
+        }],
+    };
+    let value = serde_json::to_value(Response::TestPushed(answer.clone())).unwrap();
+    assert_eq!(
+        value,
+        json!({
+            "response": "test_pushed",
+            "mode": "push_relay",
+            "pushes": [{"device": "iPhone", "outcome": "refused", "status": 403}],
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<Response>(value).unwrap(),
+        Response::TestPushed(answer)
+    );
+    // Off, or with no phone registered, the list is left out.
+    assert_eq!(
+        serde_json::to_value(Response::TestPushed(TestPushes::default())).unwrap(),
+        json!({"response": "test_pushed", "mode": "off"})
     );
 }

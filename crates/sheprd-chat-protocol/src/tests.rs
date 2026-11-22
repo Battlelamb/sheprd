@@ -20,6 +20,7 @@ mod origin;
 mod pull_requests;
 mod questions;
 mod revisions;
+mod sent_notes;
 mod settings;
 mod wire;
 
@@ -35,7 +36,15 @@ fn agent(id: u64, value: &str) -> Entry {
 }
 
 fn user(id: u64, value: &str) -> Entry {
-    text(id, |text| EntryKind::User { text, files: 0 }, value)
+    text(
+        id,
+        |text| EntryKind::User {
+            text,
+            files: 0,
+            note: None,
+        },
+        value,
+    )
 }
 
 fn tool(id: u64, status: ToolStatus) -> Entry {

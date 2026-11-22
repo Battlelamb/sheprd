@@ -62,3 +62,22 @@ settings-push-relay-last-live = { $outcome ->
    *[other] Last Live Activity push { $ago }: an outcome this Sheprd does not know.
 }
 settings-push-relay-last-live-none = No Live Activity push since the daemon started.
+
+# Send Test Push: the daemon sends each paired iPhone one test alert now.
+# $device is the phone's name as paired; $status is an HTTP status code,
+# such as 403; $error is why the daemon could not be asked.
+settings-push-relay-test = Send Test Push
+settings-push-relay-test-sending = Sending a test push…
+settings-push-relay-test-off = No test push sent: the daemon has the push relay off. Restart remote control if you just turned it on.
+settings-push-relay-test-none = No test push sent: no paired iPhone has registered for alerts. Open the Sheprd app on the phone and allow notifications.
+settings-push-relay-test-failed = Could not send a test push: { $error }
+settings-push-relay-test-old-daemon = the remote control daemon is older than this Sheprd. Restart remote control, then try again.
+settings-push-relay-test-result = { $outcome ->
+    [delivered] { $device }: Apple took it; it should show on the phone now.
+    [gone] { $device }: the phone's registration had expired; it registers again when the app opens.
+    [limited] { $device }: held back, too many pushes for that phone.
+    [refused] { $device }: refused ({ $status }).
+    [unreachable] { $device }: could not reach the push relay.
+    [unsent] { $device }: not sent, as it could not be sealed.
+   *[other] { $device }: an outcome this Sheprd does not know.
+}

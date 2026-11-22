@@ -13,6 +13,8 @@ pub enum RemoteCommand {
     /// How iPhone pushes leave the daemon: off, or through the push relay,
     /// and whether the last of each kind worked. Read-only.
     PushStatus,
+    /// Send each paired iPhone one test alert through the push relay.
+    TestPush,
     /// Open the confirmation for revoking a device, by ID or name.
     Revoke {
         device: String,
@@ -51,6 +53,7 @@ pub(super) fn remote(args: &mut Args) -> Result<RemoteCommand, CliError> {
         Some("add-link") => RemoteCommand::AddLink,
         Some("devices" | "list") => RemoteCommand::Devices,
         Some("push-status") => RemoteCommand::PushStatus,
+        Some("test-push") => RemoteCommand::TestPush,
         Some("restart") => RemoteCommand::Restart,
         // A name may be typed unquoted, as `remote revoke Fabien's iPhone`.
         Some("revoke") => RemoteCommand::Revoke {

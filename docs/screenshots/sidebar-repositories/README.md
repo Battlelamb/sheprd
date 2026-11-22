@@ -7,6 +7,9 @@ These are actual application frames, not HTML mockups or generated images.
 - **Before:** `4d2b3fd82`, the parent of the sidebar visibility change.
 - **After:** `84f758688`, with an unused local variable removed from `row.rs`
   during the capture build (no visual effect).
+- The two `after/rail-*.png` captures are refreshed with the divider-spacing
+  follow-up in their containing commit: each divider now sits between rows,
+  with 6 points of clearance on each side, rather than against the next tile.
 - **Window:** 460 × 700 points, captured at 2× resolution (920 × 1400 pixels).
   The normal sidebar width clamp remains active at this narrow window size.
 - **Font:** Menlo, 14 points. **Themes:** Catppuccin Latte and Catppuccin Mocha.

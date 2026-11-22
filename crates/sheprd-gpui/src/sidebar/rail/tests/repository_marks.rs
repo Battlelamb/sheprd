@@ -23,10 +23,13 @@ fn repository_tiles_keep_indices_and_status_columns(cx: &mut TestAppContext) {
         cx.debug_bounds("rail-repository-rail-workspace-ssh:host1-w0")
             .is_some()
     );
-    assert!(
-        cx.debug_bounds("repository-separator-rail-workspace-local-w3")
-            .is_some()
-    );
+    let separator = placed(cx, "repository-separator-rail-workspace-local-w3");
+    let previous = placed(cx, "rail-workspace-local-w2");
+    let root = placed(cx, "rail-workspace-local-w3");
+    assert_eq!(separator.top() - previous.bottom(), px(6.));
+    assert_eq!(root.top() - separator.bottom(), px(6.));
+    assert!(tile.top() - separator.bottom() >= px(6.));
+    assert_eq!(placed(cx, "rail-workspace-local-w4").top(), root.bottom());
     assert!(
         cx.debug_bounds("repository-separator-rail-workspace-local-w4")
             .is_none()

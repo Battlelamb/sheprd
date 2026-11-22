@@ -345,6 +345,15 @@ impl SheprdWindow {
                         columns.height,
                         indicator(workspace.status, font, indicators),
                     ));
+                if position > 0 && !indented {
+                    spaces = spaces.child(
+                        div()
+                            .relative()
+                            .flex_none()
+                            .h(px(13.))
+                            .child(repository::separator(&key, 0., 8., theme).top(px(6.))),
+                    );
+                }
                 spaces = spaces.child(
                     aligned_row(
                         &key,
@@ -358,10 +367,6 @@ impl SheprdWindow {
                         columns,
                         marks,
                     )
-                    .when(position > 0 && !indented, |row| {
-                        row.mt(px(6.))
-                            .child(repository::separator(&key, 0., 8., theme))
-                    })
                     .id(SharedString::from(key.clone()))
                     .debug_selector(|| key)
                     .cursor_pointer()

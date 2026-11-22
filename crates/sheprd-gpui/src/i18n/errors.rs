@@ -46,8 +46,10 @@ mod machine;
 #[cfg(feature = "mcp")]
 mod mcp;
 mod mods;
+mod naming;
 mod nearby;
 mod notification_mutes;
+mod one_shot;
 mod orchestrator;
 mod orchestrator_azure;
 mod overview;

@@ -390,11 +390,14 @@ final class Fleet {
     /// Opens a chat, current at once when it was followed (`WarmChats`).
     func openChat(_ key: PaneKey) -> ChatStore {
         chatViewers[key, default: 0] += 1
-        return follow(key, background: false)
+        let store = follow(key, background: false)
+        store.shown(true)
+        return store
     }
 
     func closeChat(_ store: ChatStore) {
         guard chats[store.key] === store, Self.release(store.key, from: &chatViewers) else { return }
+        store.shown(false)
         save(store)
         warmth.closed(store.key, at: .now)
         rewarm()
@@ -436,7 +439,7 @@ final class Fleet {
 
     private func save(_ store: ChatStore) {
         guard let transcript = store.transcript else { return }
-        cache.save(chat: transcript, cursor: store.cursor, device: store.key.device, pane: store.key.pane)
+        cache.save(chat: transcript, cursor: store.cursor, metThrough: store.effects.ledger.metThrough, device: store.key.device, pane: store.key.pane)
     }
 
     /// Follows the chats `WarmChats` picks and lets go of the rest no

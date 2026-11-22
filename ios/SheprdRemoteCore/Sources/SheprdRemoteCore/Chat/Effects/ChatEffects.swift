@@ -3,7 +3,8 @@ import Foundation
 /// The effects of one chat: which messages' effects were met, and which
 /// play now (`chat/effects.rs` on the desktop).
 ///
-/// An effect plays once, as its message arrives live. A transcript loaded
+/// An effect plays once, as its message arrives live or, when it arrived
+/// while nobody looked, as its chat opens (`catchUp`). A transcript loaded
 /// from the cache, opened again, or sent whole after reconnecting is
 /// history: its effects are only noted, and show at rest with a link that
 /// plays them again. Only agent replies have effects.
@@ -87,6 +88,9 @@ public struct ChatEffects: Hashable, Sendable {
     /// When each bubble last began to play.
     private var started: [BubbleKey: Date] = [:]
     private var playing: Playing?
+    /// The last entry whose effects were met, kept with the chat so the
+    /// next opening plays only what came after it.
+    public private(set) var metThrough: EntryId?
 
     public init() {}
 
@@ -94,12 +98,34 @@ public struct ChatEffects: Hashable, Sendable {
     /// transcript loaded at once is.
     public mutating func history(_ transcript: Transcript) {
         self = Self()
-        for entry in transcript.entries {
-            guard let message = Self.message(entry) else { continue }
-            let count = message.bubbles
-            if count > 0 { bubbles[entry.id] = count }
-            if message.screen != nil { screens.insert(entry.id) }
+        note(transcript) { _ in true }
+        metThrough = transcript.entries.last?.id
+    }
+
+    /// Notes the effects of `transcript` up to `metThrough`, leaving the
+    /// ones after it for `catchUp`. With no entry met yet, the last reply
+    /// is left: a chat opened for the first time plays it once.
+    public mutating func history(_ transcript: Transcript, metThrough: EntryId?) {
+        self = Self()
+        if let metThrough {
+            note(transcript) { $0 <= metThrough }
+        } else {
+            let last = Self.lastReply(in: transcript)
+            note(transcript) { $0 != last }
         }
+        self.metThrough = metThrough
+    }
+
+    /// Plays the effects of the last reply if they were not met yet, as a
+    /// chat coming on screen does, and notes every other one: replies
+    /// missed before it are not played in a burst.
+    @discardableResult
+    public mutating func catchUp(_ transcript: Transcript, now: Date) -> [Began] {
+        let last = Self.lastReply(in: transcript)
+        note(transcript) { $0 != last }
+        let began = last.map { live(transcript, changed: [$0], now: now) } ?? []
+        if let end = transcript.entries.last?.id { metThrough = max(metThrough ?? end, end) }
+        return began
     }
 
     /// Plays the effects new in the entries of `transcript` that `changed`
@@ -136,6 +162,7 @@ public struct ChatEffects: Hashable, Sendable {
                 began.append(.screen(effect, text: message.gist()))
             }
         }
+        if let newest = seen.max() { metThrough = max(metThrough ?? newest, newest) }
         expire(now: now)
         return began
     }
@@ -175,6 +202,20 @@ public struct ChatEffects: Hashable, Sendable {
         let bubbleEnds = started.values.map { $0.addingTimeInterval(BubbleEffect.longest) }
         let screenEnd = playing(at: now).map { $0.since.addingTimeInterval($0.effect.length) }
         return (bubbleEnds + [screenEnd].compactMap { $0 }).filter { $0 > now }.min()
+    }
+
+    /// Notes the effects of the entries `noted` picks without playing them.
+    private mutating func note(_ transcript: Transcript, _ noted: (EntryId) -> Bool) {
+        for entry in transcript.entries where noted(entry.id) {
+            guard let message = Self.message(entry) else { continue }
+            let count = message.bubbles
+            if count > bubbles[entry.id] ?? 0 { bubbles[entry.id] = count }
+            if message.screen != nil { screens.insert(entry.id) }
+        }
+    }
+
+    private static func lastReply(in transcript: Transcript) -> EntryId? {
+        transcript.entries.last { if case .agent = $0.kind { true } else { false } }?.id
     }
 
     private static func message(_ entry: Entry) -> AgentMessage? {

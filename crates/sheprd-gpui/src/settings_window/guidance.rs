@@ -151,9 +151,9 @@ impl SettingsWindow {
         }
         let scroll = self.body_scroll.clone();
         let color = rgba(if self.drafted_is_light(cx) {
-            0xff950013
+            0xff950029
         } else {
-            0xff9f0a21
+            0xff9f0a3d
         });
         Some(
             canvas(

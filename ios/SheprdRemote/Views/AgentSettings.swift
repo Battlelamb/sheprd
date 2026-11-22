@@ -46,7 +46,7 @@ private struct AgentHighlightModifier: ViewModifier {
             .overlay {
                 if model.agents.highlight == target, !LockState.shared.hidesNames {
                     RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .fill(Color.orange.opacity(colorScheme == .dark ? 0.13 : 0.075))
+                        .fill(Color.orange.opacity(colorScheme == .dark ? 0.24 : 0.16))
                         .padding(.horizontal, -9)
                         .padding(.vertical, -8)
                         .allowsHitTesting(false)

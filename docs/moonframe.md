@@ -101,7 +101,7 @@ shows in the log when one appears: `unknown key` names it.
 | `agent_sort` | `grouped` or `priority` |
 | `layout` | The configured sidebar layout's `name` and spacing: `padding`, `gap`, `row_padding`, `style_padding`, `child_indent`, `nest` (how far a device's rows step in under its header), `inset`, `spacing`, `radius`, `outline` (rounded highlights), `tree_lines`, `title_case`, `workspace_details`, `child_details`, `pr_counts` |
 | `panels`, `panel` | The activity panels (`id`, `label`, `icon`, `count`, `unseen`) and the current one's `id`. `icon` is Sheprd's own, the file its classic bar draws, as an `app-` name (`app-sessions`) that Moonframe loads from the assets Sheprd gives it: each `icons/NAME.svg` of Sheprd's is also `icons/app-NAME.svg` there |
-| `connected`, `status` | Whether the daemon answers, and what to say about it |
+| `connected`, `status` | Whether Herdr 1's daemon answers, and the status bar's connection message, the classic window's own, or `null` while it shows none: connected without an error, or a host with no Herdr 1 whose herdr-core runs its terminals |
 | `section`, `sidebar_visible`, `status_bar_visible`, `details_visible`, `navigation_in_header` | What the window shows (`navigation_in_header`: whether Back and Forward fit the left column's header, as Sheprd's own window decides); `details_visible` follows the toggle at the end of the title bar, and the shell shows the details pane by it |
 | `usage` | The status bar's usage as Sheprd's own bar shows it, or `nil` while hidden or empty: `segments` (each provider's `id`, `name`, `locked`, `stale`, `meter` with `used` as a fraction and its `color`, `labels` with `text` and `color`, and `balance`), `busy`, `error`, and the words `unavailable` and `refresh_label` |
 

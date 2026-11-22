@@ -400,6 +400,9 @@ running slots are separate: an unreserved running VM can be claimed and reused
 while slots are full, but an unreserved stopped VM cannot start. `machine open`,
 `setup`, and `claim` return busy (exit 6) with “No VM slots available: 2 of 2 in
 use” when a new slot is needed. `claim --wait` retries capacity as well as ownership.
+An existing reservation can be renewed even when VM slots are full. This keeps
+ownership during preparation; starting the VM still requires a free slot.
+
 Releasing a reservation does not stop its VM or free a running slot.
 
 Reserve a shared VM with `machine claim NAME` before opening or using it,

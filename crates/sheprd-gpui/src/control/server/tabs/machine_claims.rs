@@ -41,14 +41,12 @@ pub(super) fn serve(caller: Caller, op: TabOp, incoming: socket::Incoming, cx: &
         let listed = read.await;
         let response = cx.update(|cx| match listed {
             Ok(listed) if listed.iter().any(|item| item.name == name) => {
-                if !release && let Err(error) = machine::check_capacity(&name) {
-                    return Response::error(ErrorCode::Busy, error.to_string());
-                }
                 cx.default_global::<Reservations>().change(
                     &caller,
                     name.as_str(),
                     release,
                     Instant::now(),
+                    machine::check_capacity(&name),
                 )
             }
             Ok(_) => Response::error(ErrorCode::NotFound, "No such virtual Mac"),
@@ -174,7 +172,14 @@ impl Reservations {
         self.0.retain(|_, lease| lease.until > now);
     }
 
-    fn change(&mut self, caller: &Caller, name: &str, release: bool, now: Instant) -> Response {
+    fn change(
+        &mut self,
+        caller: &Caller,
+        name: &str,
+        release: bool,
+        now: Instant,
+        can_start: crate::machine::Result<()>,
+    ) -> Response {
         self.prune(now);
         let Some(owner) = owner(caller) else {
             return Response::error(ErrorCode::InvalidRequest, "Reserve from a pane or terminal");
@@ -186,6 +191,14 @@ impl Reservations {
                 ErrorCode::Busy,
                 format!("{name} is {}", lease.describe(now)),
             );
+        }
+        // Renewing an owned lease or releasing it needs no running slot.
+        // Expired leases were pruned above and must pass admission again.
+        if !release
+            && !self.0.contains_key(name)
+            && let Err(error) = can_start
+        {
+            return Response::error(ErrorCode::Busy, error.to_string());
         }
         if release {
             self.0.remove(name);

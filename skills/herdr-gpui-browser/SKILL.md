@@ -355,6 +355,9 @@ screencast or a sequence of screenshot/click commands:
 5. Always `sheprd machine release NAME` when finished, including after a failed
    test. Stop any background guest jobs you started before releasing.
 
+An existing reservation can be renewed even when VM slots are full. This keeps
+ownership during preparation; starting the VM still requires a free slot.
+
 Claims last 15 idle minutes. Guest commands renew your claim, as does another
 `machine claim NAME`; renew during long host-side preparation. After expiry or
 an app restart, claim again before continuing. Claims are kept by the running

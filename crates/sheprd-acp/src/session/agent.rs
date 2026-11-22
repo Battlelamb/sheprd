@@ -1,8 +1,6 @@
 //! What the agent sends: responses to the session's requests, session updates,
 //! and its own requests (permission questions).
 
-use std::fmt::Write as _;
-
 use acp::v1 as wire;
 use serde_json::Value;
 use sheprd_chat_protocol::{
@@ -220,6 +218,7 @@ impl<R: FnMut(Update)> Session<R> {
         };
         self.ready = true;
         (self.report)(Update::Opened(id.0.to_string()));
+        self.keep_opened(id.0.as_ref());
         let continued = self.continued(loaded);
         self.emit(Change::Session {
             session: Some(sheprd_chat_protocol::SessionInfo {
@@ -296,25 +295,15 @@ impl<R: FnMut(Update)> Session<R> {
         else {
             return;
         };
-        let what = match joining {
-            super::thread::Joining::Fresh => "the conversation so far",
-            super::thread::Joining::Resume { .. } => "what happened since it last took part",
-        };
-        let mut text = format!(
-            "{} continues this conversation and gets {what} with your next prompt",
-            self.config.agent
-        );
-        if handoff.omitted > 0 {
-            let _ = write!(
-                text,
-                ": {} entries, {} more left out for length.",
-                handoff.kept, handoff.omitted
-            );
-        } else {
-            text.push('.');
-        }
-        let notice = self.projector.notice(NoticeLevel::Info, text);
-        self.emit(notice);
+        let from = self.thread.before();
+        let handoff = self.projector.handoff(sheprd_chat_protocol::HandedOver {
+            from,
+            kept: handoff.kept,
+            omitted: handoff.omitted,
+            resumed: matches!(joining, super::thread::Joining::Resume { .. }),
+            to: agent,
+        });
+        self.emit(handoff);
     }
 
     fn session_update(&mut self, params: Value) {
@@ -532,6 +521,7 @@ impl<R: FnMut(Update)> Session<R> {
         if matches!(self.transcript.status, Status::Working) {
             self.status(Status::Idle);
         }
+        self.keep_entries();
         self.next_queued();
     }
 
@@ -567,5 +557,6 @@ impl<R: FnMut(Update)> Session<R> {
         let notice = self.projector.notice(level, message);
         self.emit(notice);
         self.status(Status::Exited { message: summary });
+        self.keep_entries();
     }
 }

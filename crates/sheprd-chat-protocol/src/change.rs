@@ -87,6 +87,11 @@ pub enum Change {
     PullRequest {
         pull_request: PullRequest,
     },
+    /// The thread's segments changed: an agent took over, or its session
+    /// or model is now known.
+    Thread {
+        thread: crate::thread::Thread,
+    },
 }
 
 impl Transcript {
@@ -168,6 +173,10 @@ impl Transcript {
             Change::Activity { activity } => self.record(activity)?,
             Change::Harnesses { harnesses } => self.harnesses.clone_from(harnesses),
             Change::PullRequest { pull_request } => self.add_pull_request(pull_request)?,
+            Change::Thread { thread } => {
+                thread.validate()?;
+                self.thread = Some(thread.clone());
+            }
         }
         Ok(())
     }

@@ -139,6 +139,7 @@ pub(super) fn opened(keeper: &super::Keeper, session: &str) -> anyhow::Result<()
                 .context("chat program path is not UTF-8")?
                 .to_owned(),
             session: session.to_owned(),
+            thread: keeper.thread.map(|thread| thread.to_string()),
         },
     )?;
     Ok(())
@@ -228,6 +229,7 @@ pub(crate) fn run(endpoint: EndpointId) -> anyhow::Result<()> {
             load: Some(record.session),
             name: None,
             require_load: true,
+            thread: record.thread,
         },
     )
 }

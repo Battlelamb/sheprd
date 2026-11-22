@@ -129,6 +129,18 @@ impl Projector {
         }
     }
 
+    /// Another agent took over the conversation.
+    pub(crate) fn handoff(&mut self, handoff: sheprd_chat_protocol::HandedOver) -> Change {
+        self.close();
+        let id = self.next_id();
+        Change::Push {
+            entry: Entry {
+                id,
+                kind: EntryKind::Handoff(handoff),
+            },
+        }
+    }
+
     /// How a prompt turn ended.
     pub(crate) fn turn(&mut self, summary: TurnSummary) -> Change {
         self.close();

@@ -40,6 +40,8 @@ impl<R: FnMut(Update)> Session<R> {
             .harness
             .zip(self.acp_session.as_ref().map(|id| id.0.to_string()));
         self.keep_leaving();
+        self.thread.leaving(self.config.harness);
+        self.keep_switched(agent);
         let resume = self
             .thread
             .switch(leaving, self.transcript.last_entry_id(), agent);
@@ -68,6 +70,7 @@ impl<R: FnMut(Update)> Session<R> {
         // The conversation stays; what the old agent alone held does not.
         transcript.entries = std::mem::take(&mut self.transcript.entries);
         transcript.truncated = self.transcript.truncated;
+        transcript.thread = self.transcript.thread.take();
         // What the conversation worked on stays listed, added by hand too.
         transcript.pull_requests = std::mem::take(&mut self.transcript.pull_requests);
         // Prompts typed while the old agent started go to the new one.
@@ -99,6 +102,7 @@ impl<R: FnMut(Update)> Session<R> {
                 count: self.remote_clients(),
             });
         }
+        self.thread_changed();
         if self.thread.started() {
             let notice = self.projector.notice(
                 sheprd_chat_protocol::NoticeLevel::Info,

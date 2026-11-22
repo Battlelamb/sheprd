@@ -204,6 +204,18 @@ impl SheprdWindow {
                 );
                 layout_for(self.config.chat.layout).turn(text.into_any_element(), &self.chat_look())
             }
+            // Drawn as a divider, as a turn's end is, never as a message.
+            EntryKind::Handoff(handoff) => {
+                let text = self.render_chat_text(
+                    pane_id,
+                    entry.id,
+                    Region::Body(0),
+                    Cell::default(),
+                    crate::chat::text::handoff(handoff),
+                    cx,
+                );
+                layout_for(self.config.chat.layout).turn(text.into_any_element(), &self.chat_look())
+            }
             EntryKind::Thought { text } => self.render_chat_thought(
                 pane_id,
                 entry,

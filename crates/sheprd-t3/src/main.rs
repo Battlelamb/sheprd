@@ -236,6 +236,7 @@ fn line(kind: &sheprd_chat_protocol::EntryKind) -> String {
         EntryKind::Tool(tool) => format!("[{:?}] {} ({:?})", tool.kind, tool.title, tool.status),
         EntryKind::Notice { text, level, .. } => format!("{level:?}: {}", first(text)),
         EntryKind::Image { .. } => "[picture]".to_owned(),
+        EntryKind::Handoff(handoff) => handoff.notice_text(),
         EntryKind::Turn(_) => String::new(),
     }
 }

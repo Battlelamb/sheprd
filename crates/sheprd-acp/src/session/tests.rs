@@ -20,6 +20,7 @@ mod continued;
 mod flow;
 mod harnesses;
 mod history;
+mod kept;
 mod known;
 mod linked_pictures;
 mod media;
@@ -71,6 +72,7 @@ fn config() -> Config {
         require_load: false,
         settings: None,
         sheprd: None,
+        thread: None,
     }
 }
 
@@ -197,6 +199,17 @@ impl Harness {
 
     fn transcript(&self) -> &Transcript {
         self.session.transcript()
+    }
+
+    fn handoffs(&self) -> Vec<sheprd_chat_protocol::HandedOver> {
+        self.transcript()
+            .entries
+            .iter()
+            .filter_map(|entry| match &entry.kind {
+                EntryKind::Handoff(handoff) => Some(handoff.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     fn notices(&self) -> Vec<(NoticeLevel, String)> {

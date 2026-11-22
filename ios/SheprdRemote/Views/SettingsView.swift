@@ -18,16 +18,22 @@ struct SettingsView: View {
 
     var body: some View {
         List {
-            if let problem = model.tokens.lastError ?? model.message {
+            // The relay's error comes first and opens its controls. A
+            // registration copies it into `tokens.lastError`, so the last
+            // problem shows only when it says something else.
+            let relayError = pushRelay ? model.tokens.pushRelay.lastError : nil
+            let problem = (model.tokens.lastError ?? model.message).flatMap { $0 == relayError ? nil : $0 }
+            if relayError != nil || problem != nil {
                 Section {
-                    ProblemRow(title: "Last problem", detail: problem)
-                }
-            } else if pushRelay, let error = model.tokens.pushRelay.lastError {
-                Section {
-                    NavigationLink {
-                        NotificationSettingsView().makesRoomForConnectionToast()
-                    } label: {
-                        ProblemRow(title: "Push relay refused this \(UIDevice.current.model)", detail: error)
+                    if let relayError {
+                        NavigationLink {
+                            NotificationSettingsView().makesRoomForConnectionToast()
+                        } label: {
+                            ProblemRow(title: "Push relay refused this \(UIDevice.current.model)", detail: relayError)
+                        }
+                    }
+                    if let problem {
+                        ProblemRow(title: "Last problem", detail: problem)
                     }
                 }
             }

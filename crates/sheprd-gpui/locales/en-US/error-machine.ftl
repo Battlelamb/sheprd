@@ -35,3 +35,5 @@ error-machine-unsupported = This computer cannot run virtual Macs.
 error-machine-write = Cannot write { $path }: { $error }
 
 error-machine-name-mismatch = Open { $installed } instead of { $requested } to use the installed machine name.
+
+error-machine-capacity = No VM slots available: { $in_use } of { $limit } in use. Wait for a VM to stop or reuse an unreserved running VM.

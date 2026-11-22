@@ -318,6 +318,10 @@ pub(super) fn machine(
                 }
             };
             #[cfg(target_os = "macos")]
+            if let Err(error) = crate::machine::check_capacity(&name) {
+                return Response::error(ErrorCode::Busy, error.to_string());
+            }
+            #[cfg(target_os = "macos")]
             if setup {
                 crate::machine::guide::begin(&name, cx);
             }

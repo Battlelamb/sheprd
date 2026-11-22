@@ -121,6 +121,7 @@ pub(super) fn list(incoming: socket::Incoming, cx: &mut App) {
         let response = cx.update(|cx| match listed {
             Ok(listings) => Response::Tab {
                 reply: Reply::Machines {
+                    capacity: Some(machine::capacity()),
                     machines: listings
                         .into_iter()
                         .map(|listing| info(listing, cx))

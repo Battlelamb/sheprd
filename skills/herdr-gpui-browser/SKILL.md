@@ -332,7 +332,13 @@ Virtual Macs are shared by every agent and worktree on this computer. Only
 two can run at once. **Reserve before opening or using one**, even for a
 screencast or a sequence of screenshot/click commands:
 
-1. Run `sheprd machine list --json`. `reservation` names the holding pane or
+1. Run `sheprd machine list --json`. Check `capacity.in_use`, `capacity.limit`,
+   and `capacity.available` first. At `2 of 2`, tell the user **“No VM slots
+   available: 2 of 2 in use. Waiting for a slot or an unreserved running VM.”**
+   Do not open a stopped VM or make another to bypass the limit. Starting and
+   saving VMs and a live macOS installer still use slots. Reuse an unreserved running VM if suitable,
+   otherwise wait and recheck. Releasing a claim does not stop its VM.
+   `reservation` names the holding pane or
    terminal and remaining idle seconds; absent means available for reservation,
    not necessarily booted or ready. Choose an existing available machine.
 2. Run `sheprd machine claim NAME`. This atomically reserves it for your pane;

@@ -9,6 +9,9 @@ impl Localize for Error {
             #[cfg(target_os = "macos")]
             Self::Agent(error) => error.localize(),
             Self::Busy(name) => fl!("error-machine-busy", name = name.as_str()),
+            Self::Capacity { in_use, limit } => {
+                fl!("error-machine-capacity", in_use = *in_use, limit = *limit)
+            }
             Self::Cpus { min, max } => fl!("error-machine-cpus", min = *min, max = *max),
             Self::Delete { path, source } => fl!(
                 "error-machine-delete",

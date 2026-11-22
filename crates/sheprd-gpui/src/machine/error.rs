@@ -9,6 +9,10 @@ pub enum Error {
     Agent(#[from] super::agent::Error),
     #[error("{0} is in use: shut it down first")]
     Busy(Name),
+    #[error(
+        "No VM slots available: {in_use} of {limit} in use. Wait for a VM to stop or reuse an unreserved running VM."
+    )]
+    Capacity { in_use: u32, limit: u32 },
     #[error("A machine takes {min} to {max} CPUs on this Mac")]
     Cpus { min: u16, max: u16 },
     #[error("{}: {source}", path.display())]

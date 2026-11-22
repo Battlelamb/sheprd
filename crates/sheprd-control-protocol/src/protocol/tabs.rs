@@ -358,6 +358,8 @@ pub enum Reply {
     },
     Machines {
         machines: Vec<MachineInfo>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        capacity: Option<MachineCapacity>,
     },
     MachineImages {
         images: Vec<MachineImageInfo>,
@@ -410,6 +412,28 @@ impl MachineState {
             Self::Running => "running",
             Self::Saving => "saving",
             Self::Failed => "failed",
+        }
+    }
+}
+
+/// Sheprd's simultaneous macOS VM limit on this computer.
+pub const MAX_ACTIVE_MACHINES: u32 = 2;
+
+/// Slots occupied by Sheprd VMs, including starting and saving machines.
+/// Other applications' VMs are not observable through this count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineCapacity {
+    pub in_use: u32,
+    pub limit: u32,
+    pub available: u32,
+}
+
+impl MachineCapacity {
+    pub fn new(in_use: u32) -> Self {
+        Self {
+            in_use,
+            limit: MAX_ACTIVE_MACHINES,
+            available: MAX_ACTIVE_MACHINES.saturating_sub(in_use),
         }
     }
 }

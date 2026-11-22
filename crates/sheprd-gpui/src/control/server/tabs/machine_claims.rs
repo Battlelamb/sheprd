@@ -40,9 +40,17 @@ pub(super) fn serve(caller: Caller, op: TabOp, incoming: socket::Incoming, cx: &
     cx.spawn(async move |cx: &mut gpui::AsyncApp| {
         let listed = read.await;
         let response = cx.update(|cx| match listed {
-            Ok(listed) if listed.iter().any(|item| item.name == name) => cx
-                .default_global::<Reservations>()
-                .change(&caller, name.as_str(), release, Instant::now()),
+            Ok(listed) if listed.iter().any(|item| item.name == name) => {
+                if !release && let Err(error) = machine::check_capacity(&name) {
+                    return Response::error(ErrorCode::Busy, error.to_string());
+                }
+                cx.default_global::<Reservations>().change(
+                    &caller,
+                    name.as_str(),
+                    release,
+                    Instant::now(),
+                )
+            }
             Ok(_) => Response::error(ErrorCode::NotFound, "No such virtual Mac"),
             Err(error) => Response::error(ErrorCode::Failed, error.to_string()),
         });

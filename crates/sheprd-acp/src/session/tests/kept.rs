@@ -450,7 +450,8 @@ fn restored_tools_keep_their_identity_timing_and_conversation_order() {
     let turn = prompt(&mut first, 1, "run it");
     first.update(json!({
         "sessionUpdate": "tool_call", "toolCallId": "command-1",
-        "title": "command", "kind": "execute", "status": "in_progress"
+        "title": "command", "kind": "execute", "status": "in_progress",
+        "content": [{"type": "diff", "path": "/work/file", "oldText": "before", "newText": "after"}]
     }));
     first.update(json!({
         "sessionUpdate": "tool_call_update", "toolCallId": "command-1", "status": "completed"
@@ -486,6 +487,9 @@ fn restored_tools_keep_their_identity_timing_and_conversation_order() {
         entry.id = EntryId(at as u64 + 1);
         if let EntryKind::Tool(tool) = &mut entry.kind {
             tool.started_ms = None;
+            tool.content = vec![sheprd_chat_protocol::ToolContent::Text {
+                text: "Recovered output".to_owned(),
+            }];
         }
     }
     // Recovery may also contain a missing entry between two saved entries.
@@ -516,6 +520,23 @@ fn restored_tools_keep_their_identity_timing_and_conversation_order() {
                 |entry| matches!(&entry.kind, EntryKind::Tool(tool) if tool.call_id == "command-1"),
             )
             .collect();
-        assert_eq!(tools, vec![&tool]);
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].id, tool.id);
+        let EntryKind::Tool(restored) = &tools[0].kind else {
+            panic!("tool")
+        };
+        assert_eq!(restored.started_ms, saved_tool.started_ms);
+        assert!(
+            saved_tool
+                .content
+                .iter()
+                .any(|content| matches!(content, sheprd_chat_protocol::ToolContent::Diff { .. }))
+        );
+        for content in &saved_tool.content {
+            assert!(restored.content.contains(content));
+        }
+        assert_eq!(restored.content.iter().filter(|content| matches!(
+            content, sheprd_chat_protocol::ToolContent::Text { text } if text == "Recovered output"
+        )).count(), 1);
     }
 }

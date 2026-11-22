@@ -75,7 +75,7 @@ pub(super) struct Keep {
     /// Saved entries still available to match during initial recovery.
     recovery: Vec<Entry>,
     /// Display IDs stay in replay order; writes retain the saved identity.
-    recovered: BTreeMap<EntryId, (EntryId, Option<u64>)>,
+    recovered: BTreeMap<EntryId, Entry>,
     _lock: thread::Lock,
     title: String,
     /// Whether the record is on disk.
@@ -137,7 +137,7 @@ impl Keep {
                 entry.id = EntryId(next);
                 if let Some(at) = recovery.iter().position(|saved| same_entry(saved, entry)) {
                     let saved = recovery.remove(at);
-                    recovered.insert(entry.id, saved_identity(&saved));
+                    recovered.insert(entry.id, saved);
                 }
             }
         }
@@ -227,14 +227,11 @@ impl Keep {
                         .position(|saved| same_entry(saved, entry))
                 {
                     let saved = self.recovery.remove(at);
-                    self.recovered.insert(entry.id, saved_identity(&saved));
+                    self.recovered.insert(entry.id, saved);
                 }
                 let mut entry = entry.clone();
-                if let Some((id, started_ms)) = self.recovered.get(&entry.id) {
-                    entry.id = *id;
-                    if let EntryKind::Tool(tool) = &mut entry.kind {
-                        tool.started_ms = tool.started_ms.or(*started_ms);
-                    }
+                if let Some(saved) = self.recovered.get(&entry.id) {
+                    merge_recovered(saved, &mut entry);
                 }
                 entry
             })
@@ -252,12 +249,41 @@ fn same_entry(saved: &Entry, recovered: &Entry) -> bool {
     }
 }
 
-fn saved_identity(entry: &Entry) -> (EntryId, Option<u64>) {
-    let started = match &entry.kind {
-        EntryKind::Tool(tool) => tool.started_ms,
-        _ => None,
+/// Native logs can reconstruct less than the live tool carried. Retain
+/// its rich previews and metadata, adding only new content and progress.
+fn merge_recovered(saved: &Entry, entry: &mut Entry) {
+    use sheprd_chat_protocol::{ToolKind, ToolStatus};
+    entry.id = saved.id;
+    let (EntryKind::Tool(saved), EntryKind::Tool(recovered)) = (&saved.kind, &mut entry.kind)
+    else {
+        return;
     };
-    (entry.id, started)
+    let mut merged = saved.clone();
+    for content in &recovered.content {
+        if !merged.content.contains(content) {
+            merged.content.push(content.clone());
+        }
+    }
+    for location in &recovered.locations {
+        if !merged.locations.contains(location) {
+            merged.locations.push(location.clone());
+        }
+    }
+    merged.started_ms = merged.started_ms.or(recovered.started_ms);
+    merged.parent = merged.parent.or_else(|| recovered.parent.clone());
+    if merged.kind == ToolKind::Other {
+        merged.kind = recovered.kind;
+    }
+    if merged.title.is_empty() {
+        merged.title.clone_from(&recovered.title);
+    }
+    if matches!(merged.status, ToolStatus::Pending)
+        || (merged.status == ToolStatus::InProgress
+            && matches!(recovered.status, ToolStatus::Completed | ToolStatus::Failed))
+    {
+        merged.status = recovered.status;
+    }
+    *recovered = merged;
 }
 
 /// The current value of the transcript's model setting.

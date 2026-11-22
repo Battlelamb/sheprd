@@ -1,5 +1,5 @@
 use super::*;
-use sheprd_client::{agent_choice::AgentChoice, protocol::ClientShellSnapshot};
+use sheprd_client::protocol::ClientShellSnapshot;
 
 mod agent_times;
 mod api_socket;
@@ -84,6 +84,7 @@ fn herdr_errors_keep_a_bounded_message() {
 #[cfg(unix)]
 #[test]
 fn chat_lines_run_the_program_without_trusting_its_path_as_shell() {
+    use sheprd_client::agent_choice::AgentChoice;
     let launcher = |program: &str, choice| Launcher {
         program: PathBuf::from(program),
         choice,

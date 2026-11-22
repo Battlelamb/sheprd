@@ -181,8 +181,7 @@ struct WorkspaceScreen: View {
         // Keyed on the whole status, so a link that comes back at another
         // address loads again: a phone waking from sleep still shows the
         // address it had, and the first try there fails.
-        // And when the computer's pencil comes or goes, so the count follows it.
-        .task(id: ChangesLoad(status: machine.status, uncommitted: workspace.uncommitted)) {
+        .task(id: machine.status) {
             guard isOnline(machine) else { return }
             while agents.isEmpty, !Task.isCancelled {
                 if let loaded = try? await model.fleet.call(key.device, { client, token in try await client.newOptions(bearer: token) }).agents {
@@ -196,8 +195,9 @@ struct WorkspaceScreen: View {
         .task(id: WorkspacePictureStore.Load(panes: chats.map(\.chat.pane), online: isOnline(machine))) {
             await pictures.load(.init(panes: chats.map(\.chat.pane), online: isOnline(machine)), device: key.device, fleet: model.fleet)
         }
-        // Again on each return, as an agent may have changed more since.
-        .task(id: machine.status) {
+        // Again on each return, as an agent may have changed more since,
+        // and when the computer's pencil comes or goes, so the count follows it.
+        .task(id: ChangesLoad(status: machine.status, uncommitted: workspace.uncommitted)) {
             guard isOnline(machine), workspace.branch != nil else { return }
             let (device, id) = (key.device, key.workspace)
             changedFiles = try? await model.fleet.call(device) { client, token in

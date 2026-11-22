@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
+#[cfg(unix)]
 use std::time::Instant;
 
 #[test]

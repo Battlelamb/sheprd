@@ -130,6 +130,7 @@ mod superset_badges;
 mod superset_dots;
 #[cfg(test)]
 mod text_width;
+#[cfg(test)]
 mod unread_agents;
 #[cfg(test)]
 mod update_download_caption;

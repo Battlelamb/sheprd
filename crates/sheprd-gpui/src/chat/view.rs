@@ -15,6 +15,7 @@ mod entries;
 mod jump;
 mod layout;
 mod loading;
+mod pane_menu;
 mod panels;
 mod pinned;
 mod rail;
@@ -652,6 +653,7 @@ impl SheprdWindow {
         let status = &transcript.status;
         let state = activity::State::of(transcript, self.chat_needs_input(chat));
         let pane_id = chat.target.pane_id.clone();
+        let menu_pane = pane_id.clone();
         let button = |id: &'static str| {
             div()
                 .id(id)
@@ -718,6 +720,14 @@ impl SheprdWindow {
         // The chat container sets the prose size, so the header pins its
         // own chrome: the tabs' mono face at the interface size.
         div()
+            .debug_selector(|| "chat-header".into())
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.open_chat_pane_menu(&menu_pane, event.position, window, cx);
+                }),
+            )
             .flex_none()
             .flex()
             .flex_col()

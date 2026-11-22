@@ -7426,8 +7426,8 @@ dependencies = [
 
 [[package]]
 name = "moonframe"
-version = "1.4.0"
-source = "git+https://github.com/moonframehq/moonframe?rev=210ebdbb81ec862aafc90e707c1acc0610034bb3#210ebdbb81ec862aafc90e707c1acc0610034bb3"
+version = "1.5.0"
+source = "git+https://github.com/moonframehq/moonframe?rev=94a17faf9a85e3a5fc434a725921075aab27e21d#94a17faf9a85e3a5fc434a725921075aab27e21d"
 dependencies = [
  "anstream",
  "anstyle",
@@ -7464,8 +7464,8 @@ dependencies = [
 
 [[package]]
 name = "moonframe-acp"
-version = "1.4.0"
-source = "git+https://github.com/moonframehq/moonframe?rev=210ebdbb81ec862aafc90e707c1acc0610034bb3#210ebdbb81ec862aafc90e707c1acc0610034bb3"
+version = "1.5.0"
+source = "git+https://github.com/moonframehq/moonframe?rev=94a17faf9a85e3a5fc434a725921075aab27e21d#94a17faf9a85e3a5fc434a725921075aab27e21d"
 dependencies = [
  "agent-client-protocol-schema",
  "libc",
@@ -7478,8 +7478,8 @@ dependencies = [
 
 [[package]]
 name = "moonframe-core"
-version = "1.4.0"
-source = "git+https://github.com/moonframehq/moonframe?rev=210ebdbb81ec862aafc90e707c1acc0610034bb3#210ebdbb81ec862aafc90e707c1acc0610034bb3"
+version = "1.5.0"
+source = "git+https://github.com/moonframehq/moonframe?rev=94a17faf9a85e3a5fc434a725921075aab27e21d#94a17faf9a85e3a5fc434a725921075aab27e21d"
 dependencies = [
  "chrono",
  "fluent-bundle",
@@ -7499,16 +7499,16 @@ dependencies = [
 
 [[package]]
 name = "moonframe-history"
-version = "1.4.0"
-source = "git+https://github.com/moonframehq/moonframe?rev=210ebdbb81ec862aafc90e707c1acc0610034bb3#210ebdbb81ec862aafc90e707c1acc0610034bb3"
+version = "1.5.0"
+source = "git+https://github.com/moonframehq/moonframe?rev=94a17faf9a85e3a5fc434a725921075aab27e21d#94a17faf9a85e3a5fc434a725921075aab27e21d"
 dependencies = [
  "tracing",
 ]
 
 [[package]]
 name = "moonframe-packages"
-version = "1.4.0"
-source = "git+https://github.com/moonframehq/moonframe?rev=210ebdbb81ec862aafc90e707c1acc0610034bb3#210ebdbb81ec862aafc90e707c1acc0610034bb3"
+version = "1.5.0"
+source = "git+https://github.com/moonframehq/moonframe?rev=94a17faf9a85e3a5fc434a725921075aab27e21d#94a17faf9a85e3a5fc434a725921075aab27e21d"
 dependencies = [
  "moonframe-core",
  "moonframe-providers",
@@ -7522,7 +7522,7 @@ dependencies = [
 [[package]]
 name = "moonframe-provider"
 version = "0.4.0"
-source = "git+https://github.com/moonframehq/moonframe?rev=210ebdbb81ec862aafc90e707c1acc0610034bb3#210ebdbb81ec862aafc90e707c1acc0610034bb3"
+source = "git+https://github.com/moonframehq/moonframe?rev=94a17faf9a85e3a5fc434a725921075aab27e21d#94a17faf9a85e3a5fc434a725921075aab27e21d"
 dependencies = [
  "serde",
  "serde_json",
@@ -7531,8 +7531,8 @@ dependencies = [
 
 [[package]]
 name = "moonframe-providers"
-version = "1.4.0"
-source = "git+https://github.com/moonframehq/moonframe?rev=210ebdbb81ec862aafc90e707c1acc0610034bb3#210ebdbb81ec862aafc90e707c1acc0610034bb3"
+version = "1.5.0"
+source = "git+https://github.com/moonframehq/moonframe?rev=94a17faf9a85e3a5fc434a725921075aab27e21d#94a17faf9a85e3a5fc434a725921075aab27e21d"
 dependencies = [
  "libc",
  "moonframe-core",
@@ -7546,8 +7546,8 @@ dependencies = [
 
 [[package]]
 name = "moonframe-store"
-version = "1.4.0"
-source = "git+https://github.com/moonframehq/moonframe?rev=210ebdbb81ec862aafc90e707c1acc0610034bb3#210ebdbb81ec862aafc90e707c1acc0610034bb3"
+version = "1.5.0"
+source = "git+https://github.com/moonframehq/moonframe?rev=94a17faf9a85e3a5fc434a725921075aab27e21d#94a17faf9a85e3a5fc434a725921075aab27e21d"
 dependencies = [
  "moonframe-core",
  "rusqlite",

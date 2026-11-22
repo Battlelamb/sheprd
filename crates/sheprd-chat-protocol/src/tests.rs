@@ -6,6 +6,7 @@ mod activities;
 mod agents;
 mod assist;
 mod auto_accept;
+mod briefs;
 mod change;
 mod display;
 mod endpoint;

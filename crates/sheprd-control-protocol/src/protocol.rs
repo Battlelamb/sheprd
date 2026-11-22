@@ -37,8 +37,8 @@ pub enum Placement {
 /// 15: `machine` `agent`, `exec`, `screenshot`, `click`, `type`, and `key`.
 /// 16: `via` on the caller and on feedback, for requests `sheprd mcp` relays.
 /// 17: `chat` `favorite`.
-/// 18: `fleet`. 19: `phone`.
-pub const PROTOCOL_VERSION: u32 = 19;
+/// 18: `fleet`. 19: `chat` `new` `prompt`. 20: `phone`.
+pub const PROTOCOL_VERSION: u32 = 20;
 
 /// Older apps and clients know only tabs, so a tab is left off the wire.
 fn is_tab(placement: &Placement) -> bool {

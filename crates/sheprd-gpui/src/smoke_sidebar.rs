@@ -22,18 +22,21 @@ fn sidebar_fixture_size(
     } else {
         0.
     };
-    fixture_size(
-        width,
-        height
-            + sidebar::DEVICE_FOOTER_HEIGHT
-            + view.activity_title_height()
-            + menus
-            + if style == crate::config::Style::Rounded {
-                160.
-            } else {
-                0.
-            },
-    )
+    // The first three repository roots have two 7px gaps. Their list gets
+    // half the body, so reserve twice those gaps in the window's height.
+    let repository_gaps = 2. * 7.;
+    let height = height
+        + 2. * repository_gaps
+        + sidebar::DEVICE_FOOTER_HEIGHT
+        + view.activity_title_height()
+        + menus
+        + if style == crate::config::Style::Rounded {
+            160.
+        } else {
+            0.
+        };
+    // Native window sizes are integral pixels; font-derived menu heights are not.
+    fixture_size(width, height.ceil())
 }
 
 /// Native check that the icon cascade reaches an installed Nerd Font. Prompts

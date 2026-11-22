@@ -21,6 +21,7 @@ fn smallest_sidebar_fixture_keeps_probed_rows_visible(cx: &mut gpui::TestAppCont
                 });
                 sidebar_fixture_size(view.read(cx), window, 640., 400., style)
             });
+            assert_eq!(f32::from(size.height).fract(), 0.);
             cx.simulate_resize(size);
             cx.run_until_parked();
             cx.update(|window, cx| {

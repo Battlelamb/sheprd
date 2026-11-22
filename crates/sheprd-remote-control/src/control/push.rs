@@ -73,3 +73,25 @@ impl Outcome {
         matches!(self, Self::Delivered)
     }
 }
+
+/// What [`super::Request::TestPush`] answers: the mode, and one test alert
+/// per phone registered for alerts, in the order the phones were paired.
+/// Names each phone as the user named it, never by token or handle.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TestPushes {
+    pub mode: Mode,
+    /// Empty when the push relay is off, or no phone registered for alerts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pushes: Vec<TestPush>,
+}
+
+/// The test alert to one phone.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TestPush {
+    /// The phone's name, as paired.
+    pub device: String,
+    /// What came of it; `unreachable` also when the push relay did not
+    /// answer in time.
+    #[serde(flatten)]
+    pub outcome: Outcome,
+}

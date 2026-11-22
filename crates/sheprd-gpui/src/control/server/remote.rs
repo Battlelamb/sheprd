@@ -161,6 +161,28 @@ pub(super) fn serve(
                 })
             })
         }
+        RemoteOp::TestPush => {
+            let request = client.request(Request::TestPush);
+            cx.spawn(async move |_| match request.await {
+                Ok(sheprd_remote_control::control::Response::TestPushed(answer)) => {
+                    Response::Remote {
+                        reply: Reply::TestPush {
+                            mode: answer.mode,
+                            pushes: answer.pushes,
+                        },
+                    }
+                }
+                Ok(_) => Response::error(
+                    ErrorCode::Failed,
+                    crate::remote::Error::Unexpected.to_string(),
+                ),
+                // An older daemon closes without answering.
+                Err(error) => Response::error(
+                    ErrorCode::Failed,
+                    format!("Could not send a test push: {error}; restart remote control if it is older than this Sheprd"),
+                ),
+            })
+        }
         RemoteOp::AddLink { .. }
         | RemoteOp::Pair { .. }
         | RemoteOp::PushStatus

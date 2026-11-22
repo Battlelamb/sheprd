@@ -15,7 +15,9 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tokio::sync::watch;
+use tokio::{runtime::Handle, sync::watch};
+
+pub(super) mod test_push;
 
 /// How long a client may take to send its request.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -48,6 +50,9 @@ pub(super) fn serve(
     }
     control::release(state_dir);
     let listener = Listener::bind(&address)?;
+    // Test pushes are sent on the daemon's runtime; a socket served
+    // without one, as some tests do, refuses them.
+    let runtime = Handle::try_current().ok();
     // Accepts for the life of the process; not joined.
     thread::Builder::new()
         .name("herdr-remote-control".into())
@@ -56,7 +61,7 @@ pub(super) fn serve(
                 let Ok(connection) = listener.accept() else {
                     continue;
                 };
-                let (state, stop) = (state.clone(), stop.clone());
+                let (state, stop, runtime) = (state.clone(), stop.clone(), runtime.clone());
                 let _ = thread::Builder::new()
                     .name("herdr-remote-control-client".into())
                     .spawn(move || {
@@ -67,7 +72,12 @@ pub(super) fn serve(
                         if let Ok(Some(request)) =
                             read_frame::<_, Request>(&mut BufReader::new(reader))
                         {
-                            let response = answer(&state, &stop, request);
+                            let response = match (request, &runtime) {
+                                (Request::TestPush, Some(runtime)) => {
+                                    Response::TestPushed(test_push::answer(&state, runtime))
+                                }
+                                (request, _) => answer(&state, &stop, request),
+                            };
                             let mut writer = BufWriter::new(writer);
                             let _ = write_frame(&mut writer, &response);
                             let _ = writer.flush();
@@ -89,6 +99,13 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
             return Response::Status(status(state));
         }
         Request::PushStatus => return Response::PushStatus(state.pushes.status(&state.apns)),
+        // `serve` answers it on the daemon's runtime; here there is none.
+        Request::TestPush => {
+            return Response::Error {
+                code: ErrorCode::Unsupported,
+                message: "test pushes need the daemon's runtime".into(),
+            };
+        }
         Request::ChangeAsks => {
             let (asks, layout) = state.changes.take(control::ASK_WAIT);
             return Response::ChangeAsks { asks, layout };
@@ -332,6 +349,18 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
             };
             relay.reload_tokens();
             return Response::Done;
+        }
+        Request::Read { change } => {
+            return match change {
+                None => Response::Read(control::read::Unread {
+                    panes: state.seen().unread,
+                }),
+                Some(change) if change.valid() => Response::Read(state.mark_read(&change)),
+                Some(_) => Response::Error {
+                    code: ErrorCode::Other,
+                    message: "a read change names one to 1024 pane ids".into(),
+                },
+            };
         }
         Request::Favorites { change } => {
             let Some(change) = change else {

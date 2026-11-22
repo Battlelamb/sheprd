@@ -102,6 +102,39 @@ pub(super) fn serve(call: Call<ChatOp>, cx: &mut App) -> Response {
                 },
             }
         }),
+        ChatOp::Unread { switch, pane } => in_window(&caller, cx, |view, window, cx| {
+            let pane = pane
+                .or_else(|| callers_pane(&caller))
+                .or_else(|| view.focused_core_key(window, cx))
+                .or_else(|| {
+                    view.live
+                        .snapshot
+                        .as_ref()
+                        .and_then(|snapshot| snapshot.focused_pane_id.clone())
+                });
+            let Some(pane) = pane else {
+                return Response::error(ErrorCode::InvalidRequest, "Name a pane with --pane");
+            };
+            // The same agents favorites name, by the same keys.
+            let Some(starred) = view.starred_pane(&pane) else {
+                return not_found(format!("Pane {pane} runs no agent this window can mark"));
+            };
+            let agent = crate::agent_read::Agent {
+                endpoint: starred.endpoint,
+                key: starred.key,
+            };
+            let was = view.agent_read.contains(&agent.endpoint, &agent.key);
+            let unread = switch.apply(was);
+            if unread != was {
+                crate::agent_read::AgentRead::set(cx, &agent, !unread);
+            }
+            Response::Chat {
+                reply: Reply::Unread {
+                    pane_id: pane,
+                    unread,
+                },
+            }
+        }),
         ChatOp::View { switch, pane } => in_window(&caller, cx, |view, window, cx| {
             // A herdr-core pane is nobody's Herdr pane: the one holding the
             // keyboard comes before Herdr's focused pane.

@@ -28,6 +28,12 @@ pub enum ChatCommand {
         /// The pane, else the caller's own.
         pane: Option<String>,
     },
+    /// Mark a pane's agent unread (`On`) or read (`Off`).
+    Unread {
+        switch: Switch,
+        /// The pane, else the caller's own.
+        pane: Option<String>,
+    },
     /// The pull requests the caller's chat lists in its rail, as the agent
     /// of that chat.
     PullRequests(ChatPrCommand),
@@ -89,18 +95,12 @@ pub(super) fn chat(args: &mut Args) -> Result<ChatCommand, CliError> {
             return Ok(ChatCommand::New { agent, pane, brief });
         }
         Some("favorite") => {
-            // The pane first, as it may come before the switch.
-            let pane = args.text_option("--pane")?;
-            let switch = match args.verb() {
-                None => Switch::Toggle,
-                Some(word) => match word.to_str() {
-                    Some("on") => Switch::On,
-                    Some("off") => Switch::Off,
-                    Some("toggle") => Switch::Toggle,
-                    _ => return Err(unknown("chat favorite", word)),
-                },
-            };
+            let (switch, pane) = pane_switch(args, "chat favorite")?;
             return Ok(ChatCommand::Favorite { switch, pane });
+        }
+        Some("unread") => {
+            let (switch, pane) = pane_switch(args, "chat unread")?;
+            return Ok(ChatCommand::Unread { switch, pane });
         }
         Some("convert") => {
             return Ok(ChatCommand::Convert {
@@ -116,6 +116,25 @@ pub(super) fn chat(args: &mut Args) -> Result<ChatCommand, CliError> {
         switch,
         pane: args.text_option("--pane")?,
     })
+}
+
+/// `[on|off|toggle] [--pane ID]`, in either order, toggling unless told.
+fn pane_switch(
+    args: &mut Args,
+    command: &'static str,
+) -> Result<(Switch, Option<String>), CliError> {
+    // The pane first, as it may come before the switch.
+    let pane = args.text_option("--pane")?;
+    let switch = match args.verb() {
+        None => Switch::Toggle,
+        Some(word) => match word.to_str() {
+            Some("on") => Switch::On,
+            Some("off") => Switch::Off,
+            Some("toggle") => Switch::Toggle,
+            _ => return Err(unknown(command, word)),
+        },
+    };
+    Ok((switch, pane))
 }
 
 fn pull_requests(args: &mut Args) -> Result<ChatPrCommand, CliError> {

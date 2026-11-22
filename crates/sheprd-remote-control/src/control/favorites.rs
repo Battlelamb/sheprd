@@ -93,12 +93,12 @@ impl Favorites {
     }
 }
 
-fn valid_pane(pane: &str) -> bool {
+pub(crate) fn valid_pane(pane: &str) -> bool {
     !pane.trim().is_empty() && pane.len() <= MAX_PANE_BYTES && !pane.chars().any(char::is_control)
 }
 
 /// Whether `pane` belongs to the primary Herdr 1 session.
-fn primary_pane(pane: &str) -> bool {
+pub(crate) fn primary_pane(pane: &str) -> bool {
     !pane.starts_with(CORE_PREFIX) && !pane.starts_with(SESSION_PREFIX)
 }
 

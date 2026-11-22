@@ -37,6 +37,7 @@ mod remote_relay_deploy;
 mod remote_relay_labels;
 mod remote_relay_tokens;
 mod remote_relays;
+mod remote_test_push;
 mod rtl;
 mod save_now;
 mod scrollbars;

@@ -215,6 +215,9 @@ impl Source {
             own.layouts.apply(&mut next, &boot, &terminals);
             drop(own);
             chats::lift(&mut next, &boot, &terminals);
+            poller
+                .times
+                .stamp_statuses(&boot, &mut next, crate::web::now_ms());
             next
         };
         let tabs = create::tab_panes(&next);

@@ -8,6 +8,7 @@ mod accessibility;
 mod actions;
 mod agent_favorites;
 mod agent_notes;
+mod agent_read;
 mod agent_skill;
 mod ago;
 mod app;
@@ -96,6 +97,8 @@ mod link_handlers;
 mod links;
 mod listening_ports;
 mod local_ports;
+#[cfg(windows)]
+mod localized_fonts;
 mod log_targets;
 mod log_window;
 #[cfg(feature = "moonframe")]

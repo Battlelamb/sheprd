@@ -7,6 +7,7 @@ mod push_hosts;
 mod push_status;
 mod relay_token;
 mod relays;
+mod test_push;
 
 fn status() -> Status {
     Status {

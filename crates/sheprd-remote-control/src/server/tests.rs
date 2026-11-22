@@ -20,6 +20,7 @@ mod push_status_verb;
 mod relay_enroll;
 mod relay_options;
 mod shutdown;
+mod test_push;
 
 fn args(list: &[&str]) -> Vec<OsString> {
     std::iter::once("herdr-remote-control")

@@ -28,18 +28,24 @@ impl SheprdWindow {
         (self.config.ui.size * 1.5 + 4.).max(22.)
     }
 
+    /// Whether the selected host's herdr-core answers, so it runs the
+    /// window's terminals whether or not the host has a Herdr 1.
+    fn selected_core_answers(&self) -> bool {
+        self.sessions(self.selected_endpoint).core_answers
+    }
+
+    /// The connection message the status bar shows, in the classic window
+    /// and in Moonframe's alike. A host with no Herdr 1 at all runs its
+    /// terminals in herdr-core, so its Herdr 1 is never connected and saying
+    /// so would ask the user to install one the window does not need.
+    pub(crate) fn connection_message(&self) -> Option<String> {
+        self.live
+            .connection_message(self.local_error.as_deref(), self.selected_core_answers())
+    }
+
     pub(crate) fn render_status_bar(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        // A host with no Herdr 1 at all runs its terminals in herdr-core, so
-        // its Herdr 1 is never connected and saying so would ask the user to
-        // install one the window does not need.
-        let reports = self
-            .live
-            .reports_herdr_1(self.sessions(self.selected_endpoint).core_answers);
-        let status = (reports
-            && (!matches!(self.live.status, ConnectionStatus::Connected)
-                || self.local_error.is_some()
-                || self.live.error.is_some()))
-        .then(|| self.live.status_text(self.local_error.as_deref()));
+        let reports = self.live.reports_herdr_1(self.selected_core_answers());
+        let status = self.connection_message();
         let items = self.config.status_bar;
         let height = px(self.status_bar_height());
         let usage = self.render_usage(cx);

@@ -67,6 +67,7 @@ mod relocale;
 mod restore;
 mod running;
 mod selection;
+mod sent_notes;
 mod session;
 mod shortcuts;
 mod start;

@@ -170,8 +170,9 @@ impl Projector {
     }
 
     /// The user's own prompt, which ACP does not echo back, ending in
-    /// `files` lines naming the files it carried.
-    pub(crate) fn prompt(&mut self, text: &str, files: usize) -> Change {
+    /// `files` lines naming the files it carried, with what was sent
+    /// ahead of it.
+    pub(crate) fn prompt(&mut self, text: &str, files: usize, note: Option<String>) -> Change {
         self.close();
         let id = self.next_id();
         // The file lines follow the text, so only text alone is unwrapped.
@@ -182,6 +183,7 @@ impl Projector {
                 kind: EntryKind::User {
                     text: bounded(text.to_owned()),
                     files,
+                    note: note.map(bounded),
                 },
             },
         }
@@ -211,12 +213,20 @@ impl Projector {
             if raw.len() <= MAX_ENTRY_TEXT {
                 raw.push_str(&text);
             }
+            // The note a replay gave the entry stays with it.
+            let note = transcript
+                .entry(*entry)
+                .and_then(|entry| match &entry.kind {
+                    EntryKind::User { note, .. } => note.clone(),
+                    _ => None,
+                });
             return Some(Change::Replace {
                 entry: Entry {
                     id: *entry,
                     kind: EntryKind::User {
                         text: bounded(unwrapped(raw).to_owned()),
                         files: 0,
+                        note,
                     },
                 },
             });
@@ -246,6 +256,7 @@ impl Projector {
             Stream::User => EntryKind::User {
                 text: unwrapped(&text).to_owned(),
                 files: 0,
+                note: None,
             },
             Stream::Agent => EntryKind::Agent { text },
             Stream::Thought => EntryKind::Thought { text },

@@ -160,7 +160,7 @@ struct IPadRoot: View {
                 NavigationStack(path: $workspacesPath) { WorkspacesTab(query: $query).toolbar { hideSidebar }.makesRoomForConnectionToast() }
                     .connectionToast(pairing: $pairing)
             }
-            Tab("Pull Requests", systemImage: "arrow.triangle.pull", value: SidebarTab.pullRequests) {
+            Tab("PRs", systemImage: "arrow.triangle.pull", value: SidebarTab.pullRequests) {
                 NavigationStack { PullRequestsList().toolbar { hideSidebar }.makesRoomForConnectionToast() }
                     .connectionToast(pairing: $pairing)
             }
@@ -251,12 +251,14 @@ private struct AttentionList: View {
             let route = Route.chat(item.key, title: item.chat.title)
             ChatRowLabel(item: item).tag(route).contextMenu {
                 windowButton(route)
+                if let read = row.readTarget { ReadMenuButton(target: read) }
                 if let favorite = row.favoriteTarget { FavoriteMenuButton(target: favorite) }
             }
         case let .agent(item):
             if let route = item.route {
                 AgentTerminalRowLabel(item: item).tag(route).contextMenu {
                     windowButton(route)
+                    if let read = row.readTarget { ReadMenuButton(target: read) }
                     if let favorite = row.favoriteTarget { FavoriteMenuButton(target: favorite) }
                 }
             }

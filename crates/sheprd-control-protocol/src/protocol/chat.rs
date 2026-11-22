@@ -37,6 +37,14 @@ pub enum ChatOp {
         #[serde(default)]
         pane: Option<String>,
     },
+    /// Marks a pane's agent unread (`on`), as if it had replied since anyone
+    /// read it, or read (`off`), on every device its host's daemon serves.
+    Unread {
+        switch: Switch,
+        /// The pane, else the caller's own, else the focused one.
+        #[serde(default)]
+        pane: Option<String>,
+    },
     /// Shows the chat view over a pane (`on`), or its terminal (`off`).
     View {
         switch: Switch,
@@ -110,6 +118,11 @@ pub enum Reply {
     Favorite {
         pane_id: String,
         favorite: bool,
+    },
+    /// Whether the pane's agent is unread now.
+    Unread {
+        pane_id: String,
+        unread: bool,
     },
     /// The chat's tab was asked for; it attaches once its program reports.
     Started {

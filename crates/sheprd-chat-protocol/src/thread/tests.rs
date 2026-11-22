@@ -1,4 +1,4 @@
-use super::{file::*, *};
+use crate::thread::{file::*, *};
 use crate::{Entry, EntryKind, NoticeLevel};
 
 fn abs(path: &str) -> PathBuf {
@@ -29,6 +29,7 @@ fn user(id: u64, text: &str) -> Entry {
         kind: EntryKind::User {
             text: text.to_owned(),
             files: 0,
+            note: None,
         },
     }
 }

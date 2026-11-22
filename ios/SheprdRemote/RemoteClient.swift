@@ -118,6 +118,11 @@ final class RemoteClient: Sendable {
     let fingerprint: Fingerprint
     let session: URLSession
 
+    /// The tags of the `Fleet.call` this request belongs to: each request
+    /// gets the next, sent as `PathFailure.tagHeader` so the computer's
+    /// log names it too.
+    @TaskLocal static var callTags: CallTags?
+
     init(origin: String, fingerprint: Fingerprint) {
         self.origin = origin
         self.fingerprint = fingerprint
@@ -194,7 +199,7 @@ final class RemoteClient: Sendable {
         request.timeoutInterval = 60
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await session.upload(for: request, from: image, delegate: UploadWatcher(report: progress))
+        let (data, response) = try await session.upload(for: Self.tagged(request), from: image, delegate: UploadWatcher(report: progress))
         let answer: Answer = try decode(data, response)
         return answer.id
     }
@@ -258,7 +263,7 @@ final class RemoteClient: Sendable {
         request.httpBody = body
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: Self.tagged(request))
         guard let http = response as? HTTPURLResponse else { throw RemoteError.notHTTP }
         guard (200..<300).contains(http.statusCode) else {
             throw RemoteError.status(http.statusCode, Refusal.text(status: http.statusCode, body: data))
@@ -285,6 +290,20 @@ final class RemoteClient: Sendable {
         }
         let _: EmptyAnswer = try await send(
             "POST", "/api/v2/favorites", body: Change(pane: pane, favorite: favorite), bearer: bearer
+        )
+    }
+
+    // MARK: Read marks
+
+    /// Marks the agents in `panes` read or unread on every device; the
+    /// computer's homes say so. An older computer answers 404.
+    func setRead(_ read: Bool, panes: [String], bearer: String) async throws {
+        struct Change: Encodable {
+            let panes: [String]
+            let read: Bool
+        }
+        let _: EmptyAnswer = try await send(
+            "POST", "/api/v2/read", body: Change(panes: panes, read: read), bearer: bearer
         )
     }
 
@@ -604,8 +623,15 @@ final class RemoteClient: Sendable {
     }
 
     private func perform<Answer: Decodable>(_ request: URLRequest) async throws -> Answer {
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: Self.tagged(request))
         return try decode(data, response)
+    }
+
+    private static func tagged(_ request: URLRequest) -> URLRequest {
+        guard let tags = callTags else { return request }
+        var request = request
+        request.setValue(tags.next(), forHTTPHeaderField: PathFailure.tagHeader)
+        return request
     }
 
     private func decode<Answer: Decodable>(_ data: Data, _ response: URLResponse) throws -> Answer {

@@ -66,6 +66,7 @@ fn transcript() -> Transcript {
             kind: EntryKind::User {
                 text: "Make it even out nested splits too.".into(),
                 files: 0,
+                note: None,
             },
         },
         Entry {
@@ -175,6 +176,8 @@ fn home() -> Home {
         shortcuts_ms: 1_770_000_000_000,
         tags: crate::control::tags::ComputerTags::new(["work"], 1_770_000_000_000),
         version: "20261106.1",
+        // The chat and the terminal's agent replied since anyone read them.
+        unread: &["p1".to_owned(), "p2".to_owned()].into(),
         waiting: 1,
     });
     home.preview_terminals(&[("p2".to_owned(), "Fixed the build.\nPushed it.".to_owned())].into());

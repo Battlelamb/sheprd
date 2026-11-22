@@ -7,6 +7,7 @@ mod chat;
 mod chat_brief;
 mod chat_pull_requests;
 mod chat_shortcuts;
+mod chat_unread;
 mod classic;
 mod cloud_batch;
 mod cloud_exec;

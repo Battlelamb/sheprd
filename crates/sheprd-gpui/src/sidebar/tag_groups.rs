@@ -99,6 +99,8 @@ impl SheprdWindow {
         crate::text_shortcuts::Store::reach(cx, &reachable);
         // And their favorite agents.
         crate::agent_favorites::AgentFavorites::reach(cx, &reachable);
+        // And what was read of them.
+        crate::agent_read::AgentRead::reach(cx, &reachable);
         // And hear which relays this computer listens on.
         let window = cx.entity_id();
         crate::relay_sharing::RelaySharing::reach(cx, window, &reachable);

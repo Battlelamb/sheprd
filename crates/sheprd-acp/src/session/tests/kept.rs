@@ -182,6 +182,7 @@ fn a_continued_thread_goes_on_in_its_segment_after_its_entries() {
         kind: EntryKind::User {
             text: "Earlier".to_owned(),
             files: 0,
+            note: None,
         },
     };
     let replayed = sheprd_chat_protocol::Entry {
@@ -272,6 +273,7 @@ fn user_entry(id: u64, text: &str) -> sheprd_chat_protocol::Entry {
         kind: EntryKind::User {
             text: text.to_owned(),
             files: 0,
+            note: None,
         },
     }
 }

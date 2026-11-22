@@ -44,11 +44,6 @@ struct Layout;
 const REFRESH: Duration = Duration::from_secs(2);
 /// Actions waiting for the UI: clicks, so few. More are dropped, not queued.
 const ACTION_QUEUE: usize = 64;
-/// The build's own icon: Sheprd's paw in Moonframe's frame. Regenerate with
-/// `scripts/generate-moonframe-icon.py` after changing `moonframe/assets/icon.svg`.
-const ICON_PNG: &[u8] = include_bytes!("../moonframe/assets/icon.png");
-const ICON_ICNS: &[u8] = include_bytes!("../moonframe/assets/Sheprd-Moonframe.icns");
-
 /// One provider's data: `app.<name>`, published as it changes. Each part of
 /// the state has its own, so a change runs only the views that read that part.
 #[derive(Clone, Default)]
@@ -336,8 +331,6 @@ fn other_window_held() -> bool {
 /// Runs the app in the Luau window until it quits. The app's private entry
 /// points (`app::run_helpers`) have already had their turn.
 pub(crate) fn run() -> ExitCode {
-    // Before the app's startup sets the Dock icon and the About image.
-    crate::embed::icon(ICON_PNG, ICON_ICNS);
     // Read before the event loop, as the app's own startup does.
     let startup = match crate::embed::prepare() {
         Ok(startup) => startup,
@@ -389,7 +382,7 @@ pub(crate) fn run() -> ExitCode {
         .project_dir(env!("CARGO_MANIFEST_DIR"))
         .embedded_app::<Layout>();
     moonframe
-        .icon(ICON_PNG)
+        .icon(crate::app_icon::PNG)
         .assets(crate::embed::assets())
         // Sheprd's own menu bar, as its window has it, with Moonframe's
         // Developer menu.

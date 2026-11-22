@@ -284,6 +284,7 @@ impl Projection {
             Role::User => EntryKind::User {
                 text: crate::project::shown(&text).to_owned(),
                 files: 0,
+                note: None,
             },
             Role::Agent => EntryKind::Agent { text },
             Role::Thought => EntryKind::Thought { text },

@@ -267,7 +267,7 @@ windows-sys          = { features = ["Win32_Foundation", "Win32_System_Pipes"], 
 # dependency, so it runs on the host.
 winresource          = "0.1.34"
 zbus                 = { default-features = false, version = "5.19" }
-x25519-dalek         = { default-features = false, features = ["static_secrets", "zeroize"], version = "2" }
+x25519-dalek         = { default-features = false, features = ["static_secrets", "zeroize"], version = "3" }
 zeroize              = "=1.9.1"
 
 # Line tables keep file:line in backtraces and crash reports while cutting most

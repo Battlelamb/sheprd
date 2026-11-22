@@ -884,7 +884,7 @@ impl Render for SettingsWindow {
             )
             .child(self.footer(cx))
             .children(font_picker);
-        let root = root.children(self.guidance_outline(guide.as_ref(), cx));
+        let root = root.children(self.guidance_highlight(guide.as_ref(), cx));
         let root = root.children(
             guide
                 .as_ref()

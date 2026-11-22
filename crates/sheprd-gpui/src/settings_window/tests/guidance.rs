@@ -45,7 +45,7 @@ fn guidance_navigates_updates_and_clears_without_changing_settings(cx: &mut Test
             .read_with(cx, |view, cx| {
                 assert_eq!(view.section, Section::Sidebar);
                 assert!(view.search_results.is_none());
-                assert!(view.guidance_outline(Some(&guide), cx).is_some());
+                assert!(view.guidance_highlight(Some(&guide), cx).is_some());
             })
             .unwrap();
         assert_eq!(guide.read(cx).target, Some("sidebar-indent"));
@@ -115,7 +115,7 @@ fn guidance_navigates_updates_and_clears_without_changing_settings(cx: &mut Test
         settings
             .read_with(cx, |view, cx| {
                 assert_eq!(view.section, Section::Fonts);
-                assert!(view.guidance_outline(Some(&guide), cx).is_none());
+                assert!(view.guidance_highlight(Some(&guide), cx).is_none());
             })
             .unwrap();
         guidance::apply(

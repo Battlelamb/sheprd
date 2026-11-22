@@ -134,7 +134,7 @@ pub(crate) fn apply(source: WeakEntity<SheprdWindow>, op: UiOp, cx: &mut App) ->
 }
 
 impl SettingsWindow {
-    pub(super) fn guidance_outline(
+    pub(super) fn guidance_highlight(
         &self,
         guide: Option<&Entity<agent_guidance::State>>,
         cx: &App,
@@ -150,7 +150,11 @@ impl SettingsWindow {
             return None;
         }
         let scroll = self.body_scroll.clone();
-        let color = rgb(self.theme.primary());
+        let color = rgba(if self.drafted_is_light(cx) {
+            0xff950013
+        } else {
+            0xff9f0a21
+        });
         Some(
             canvas(
                 |_, _, _| (),
@@ -167,21 +171,7 @@ impl SettingsWindow {
                             bounds: scroll.bounds(),
                         }),
                         |window| {
-                            let width = px(2.);
-                            for bounds in [
-                                Bounds::new(row.origin, size(row.size.width, width)),
-                                Bounds::new(
-                                    point(row.left(), row.bottom() - width),
-                                    size(row.size.width, width),
-                                ),
-                                Bounds::new(row.origin, size(width, row.size.height)),
-                                Bounds::new(
-                                    point(row.right() - width, row.top()),
-                                    size(width, row.size.height),
-                                ),
-                            ] {
-                                window.paint_quad(fill(bounds, color));
-                            }
+                            window.paint_quad(fill(row, color).corner_radii(px(8.)));
                         },
                     );
                 },

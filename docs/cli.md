@@ -107,7 +107,7 @@ Every command accepts:
 | `window size [WIDTHxHEIGHT]` | Print or set the window's size; windows cannot be moved |
 | `window detach\|reconnect` | Detach from, or reconnect to, the selected host |
 | `ui settings [PAGE]` | Open a Settings page; without PAGE, open Settings and list available pages and row IDs |
-| `ui highlight ROW_ID` | Open Settings at that row, scroll it into view, and outline it |
+| `ui highlight ROW_ID` | Open Settings at that row, scroll it into view, and highlight it |
 | `ui guide TEXT [--highlight ROW_ID]` | Update one persistent top banner (three lines maximum), optionally opening and highlighting a Settings row |
 | `ui guide --clear` | Dismiss the banner and highlight; the person can also dismiss it |
 | `ui sidebar\|statusbar\|menubar [on\|off\|toggle]` | For this window and session. `menubar` is the in-window menu bar on Linux and Windows; macOS, whose menus are the system's, exits 8 |
@@ -493,7 +493,7 @@ pairs, approves, or changes a setting from here. Remote control must be on.
 | `phone open workspace\|changes [WORKSPACE]` | Show a workspace, or its changes; default your workspace (`HERDR_WORKSPACE_ID`) |
 | `phone targets` | List Settings page names and highlight targets, without contacting a phone |
 | `phone open settings [PAGE]` | Open Settings or a named page, including nested delivery, desk-hold, and text-shortcuts pages |
-| `phone highlight TARGET` | Open the target's page, scroll to it, and outline the control |
+| `phone highlight TARGET` | Open the target's page, scroll to it, and highlight the control |
 | `phone guide TEXT [--highlight TARGET]` | Replace the persistent top banner, optionally highlighting a control; maximum three lines including the source |
 | `phone guide --clear` | Clear this computer's banner and highlight; tapping the banner also dismisses both |
 | `phone show TEXT` | A note on the phone, from this computer's agent (at most 500 characters) |
@@ -508,7 +508,7 @@ and the stable instructions are not rewritten, preserving their cacheable
 prefix. Desktop or unidentified prompts do not inherit an earlier phone.
 `phone targets --json` lists stable Settings page and highlight names. For
 example, `phone guide "This controls push delivery" --highlight push-relay
---device ID` opens Notifications and outlines the push-relay switch. Guides
+--device ID` opens Notifications and highlights the push-relay switch. Guides
 remain until cleared or dismissed, or the phone backgrounds, locks, or revokes
 that computer's permission. Repeating `guide` updates the existing banner.
 Opening, highlighting, and guiding do not change settings. Keep notes short;

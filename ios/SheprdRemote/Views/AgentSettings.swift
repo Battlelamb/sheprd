@@ -37,6 +37,7 @@ extension View {
 private struct AgentHighlightModifier: ViewModifier {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
     let target: AgentHighlight
 
     func body(content: Content) -> some View {
@@ -44,9 +45,10 @@ private struct AgentHighlightModifier: ViewModifier {
             .id(target)
             .overlay {
                 if model.agents.highlight == target, !LockState.shared.hidesNames {
-                    RoundedRectangle(cornerRadius: 10)
-                        .strokeBorder(.tint, lineWidth: 3)
-                        .padding(-6)
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .fill(Color.orange.opacity(colorScheme == .dark ? 0.13 : 0.075))
+                        .padding(.horizontal, -9)
+                        .padding(.vertical, -8)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }

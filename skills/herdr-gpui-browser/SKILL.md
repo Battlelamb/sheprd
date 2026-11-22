@@ -427,7 +427,7 @@ eligible phones; ask which one when the intended target is unknown.
 Use `phone targets --json` to discover Settings pages and highlight targets.
 `phone open settings notifications --device ID` opens that page;
 `phone guide "This controls push delivery" --highlight push-relay --device ID`
-opens it, scrolls to the switch, outlines it, and shows one persistent top
+opens it, scrolls to the switch, highlights it, and shows one persistent top
 banner. Repeat `phone guide TEXT --device ID` to update the banner, then
 `phone guide --clear --device ID` when finished. The person can dismiss it too.
 Keep text brief: the banner has at most three lines including its source.

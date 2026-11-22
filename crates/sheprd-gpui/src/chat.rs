@@ -70,7 +70,9 @@ pub(super) fn now_ms() -> u64 {
 }
 pub(crate) use convert::Error as ConvertError;
 pub(crate) use pick::short_text;
-pub(crate) use start::{Error as StartError, PROGRAM_ENV, Program};
+pub(crate) use start::{
+    Error as StartError, PROGRAM_ENV, Program, locate as start_program, takes_briefs,
+};
 
 use sheprd_chat_protocol::{ByeReason, EndpointId};
 use std::io;

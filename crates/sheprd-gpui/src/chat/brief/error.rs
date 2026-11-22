@@ -7,6 +7,8 @@ pub enum Error {
     Create(#[source] std::io::Error),
     #[error("Could not keep the brief's file")]
     Keep(#[source] std::io::Error),
+    #[error("This computer's sheprd-acp predates briefs; update Sheprd to start a chat with one")]
+    Unsupported,
     #[error("Could not write the brief's file")]
     Write(#[source] std::io::Error),
     // keep-sorted end

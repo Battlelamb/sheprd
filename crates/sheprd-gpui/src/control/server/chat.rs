@@ -256,9 +256,15 @@ pub(super) fn serve_parked(
     }
     let written = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot = written.clone();
-    let task = cx
-        .background_executor()
-        .spawn(async move { Brief::write(&prompt, None) });
+    let task = cx.background_executor().spawn(async move {
+        // The program found here is the one the chat runs; an older
+        // one would refuse the brief's option and start nothing.
+        if crate::chat::start_program().is_some_and(|program| !crate::chat::takes_briefs(&program))
+        {
+            return Err(crate::chat::brief::Error::Unsupported);
+        }
+        Brief::write(&prompt, None)
+    });
     cx.spawn(async move |cx| {
         let result = task.await;
         cx.update(|_| *slot.borrow_mut() = Some(result));
@@ -273,6 +279,9 @@ pub(super) fn serve_parked(
             let (caller, agent, pane) = request.take()?;
             Some(match result {
                 Ok(brief) => start_new(&caller, agent, pane, Some(brief), cx),
+                Err(error @ crate::chat::brief::Error::Unsupported) => {
+                    Response::error(ErrorCode::Unsupported, error.to_string())
+                }
                 Err(error) => Response::error(ErrorCode::Failed, error.to_string()),
             })
         },

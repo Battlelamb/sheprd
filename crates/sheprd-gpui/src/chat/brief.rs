@@ -15,6 +15,9 @@ pub(crate) use error::Error;
 use sheprd_chat_protocol::Agent;
 use std::{io::Write as _, path::PathBuf};
 
+/// The option that names the brief's file to `sheprd-acp`.
+pub(crate) const FILE_OPTION: &str = "--brief-file";
+
 /// The variable a Herdr tab's typed line reads the brief's file from.
 pub(crate) const FILE_ENV: &str = "SHEPRD_BRIEF_FILE";
 
@@ -52,7 +55,7 @@ impl Brief {
     /// The program's options for it, before the agent's name.
     pub(crate) fn args(&self) -> Vec<String> {
         let mut args = vec![
-            "--brief-file".to_owned(),
+            FILE_OPTION.to_owned(),
             self.file.to_string_lossy().into_owned(),
         ];
         if let Some(from) = self.from {
@@ -76,7 +79,7 @@ impl Brief {
         } else {
             format!("\"${FILE_ENV}\"")
         };
-        let mut words = format!("--brief-file {file} ");
+        let mut words = format!("{FILE_OPTION} {file} ");
         if let Some(from) = self.from {
             words.push_str(&format!("--brief-from {} ", from.name()));
         }

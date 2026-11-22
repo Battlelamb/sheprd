@@ -106,3 +106,28 @@ fn without_a_brief_the_line_is_unchanged() {
         );
     }
 }
+
+/// An older `sheprd-acp` would refuse `--brief-file` and start nothing, so
+/// a brief is handed only to a program whose help lists the option.
+#[cfg(unix)]
+#[test]
+fn only_a_program_that_takes_briefs_is_given_one() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let program = |name: &str, help: &str| {
+        let path = dir.path().join(name);
+        std::fs::write(&path, format!("#!/bin/sh\necho '{help}'\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    };
+    let current = program(
+        "current",
+        "  --brief-file PATH  Send PATH as the first prompt",
+    );
+    assert!(takes_briefs(&current));
+    let older = program("older", "  --choose  Let clients switch agents");
+    assert!(!takes_briefs(&older));
+    assert!(!takes_briefs(std::path::Path::new(
+        "/nonexistent/sheprd-acp"
+    )));
+}

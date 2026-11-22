@@ -192,8 +192,10 @@ pub fn start_sidebar(handle: WindowHandle<SheprdWindow>, cx: &mut App) {
                 cx,
                 |root, window, cx| -> Result<bool> {
                     use crate::sidebar::layout_tests::PaintedProbes;
+                    // The smallest viewport must fit all three probed workspace
+                    // rows, their heading and footer, and the section divider.
                     let (w, h) =
-                        [(1200., 780.), (640., 400.), (1000., 650.), (800., 600.)][(frame % 12) / 3];
+                        [(1200., 780.), (640., 440.), (1000., 650.), (800., 600.)][(frame % 12) / 3];
                     // Retain the glyph fixture's list viewport while reserving
                     // the fixed device footer below both scrollable sections.
                     use crate::config::{Density, LayoutMode, Style};
@@ -201,17 +203,24 @@ pub fn start_sidebar(handle: WindowHandle<SheprdWindow>, cx: &mut App) {
                     let style = [Style::Flat, Style::Rounded][frame / 36];
                     // Rounded rows are taller; grow both sections so the probed
                     // rows stay inside their lists at the smallest size too.
-                    // The activity bar's Workspaces title sits over the
-                    // sidebar, so its height is added back too.
-                    let title = root
-                        .clone()
-                        .downcast::<SheprdWindow>()
-                        .map_err(|_| anyhow!("unexpected root"))?
-                        .read(cx)
-                        .activity_title_height();
+                    // Preserve the same list viewport on platforms whose
+                    // application menu occupies space inside the window too.
+                    let chrome_height = {
+                        let view = root
+                            .clone()
+                            .downcast::<SheprdWindow>()
+                            .map_err(|_| anyhow!("unexpected root"))?;
+                        let view = view.read(cx);
+                        view.activity_title_height()
+                            + if view.menu_bar_shown() {
+                                view.application_bar_height(window)
+                            } else {
+                                0.
+                            }
+                    };
                     let h = h
                         + sidebar::DEVICE_FOOTER_HEIGHT
-                        + title
+                        + chrome_height
                         + if style == Style::Rounded { 160. } else { 0. };
                     let mode = LayoutMode::new(density, style);
                     let compact = density == Density::Compact;

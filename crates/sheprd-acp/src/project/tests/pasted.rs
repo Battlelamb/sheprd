@@ -35,3 +35,40 @@ fn a_replayed_prompt_shows_without_its_paste_envelope() {
     };
     assert_eq!(entry.kind.text(), Some("Task: ship it"));
 }
+
+/// A replay may split an envelope across chunks: the closing tag, even cut
+/// in two, never shows, and the entry ends as the whole message unwrapped.
+#[test]
+fn a_replayed_prompt_split_across_chunks_shows_without_its_envelope() {
+    let mut projector = Projector::default();
+    let mut transcript = Transcript::new("Claude");
+    for chunk in [
+        "<pasted_content id=\"0e15\">",
+        "\nTask: ship",
+        " it\n</pasted_",
+        "content>",
+    ] {
+        let change = projector
+            .text(&transcript, Stream::User, None, chunk.to_owned())
+            .unwrap();
+        transcript.apply(&change).unwrap();
+    }
+    assert_eq!(transcript.entries.len(), 1);
+    assert_eq!(transcript.entries[0].kind.text(), Some("Task: ship it"));
+}
+
+#[test]
+fn a_plain_prompt_split_across_chunks_is_appended_as_before() {
+    let mut projector = Projector::default();
+    let mut transcript = Transcript::new("Claude");
+    let first = projector
+        .text(&transcript, Stream::User, None, "Fix the ".to_owned())
+        .unwrap();
+    transcript.apply(&first).unwrap();
+    let second = projector
+        .text(&transcript, Stream::User, None, "</b> tag".to_owned())
+        .unwrap();
+    assert!(matches!(second, Change::Append { .. }));
+    transcript.apply(&second).unwrap();
+    assert_eq!(transcript.entries[0].kind.text(), Some("Fix the </b> tag"));
+}

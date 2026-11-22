@@ -15,6 +15,19 @@ pub(in crate::chat::view) enum Mode {
     Attachment,
 }
 
+impl Mode {
+    /// A file card supplies its own affordance; its selectable filename reads
+    /// as a label while preserving the same link target and click handling.
+    pub(super) fn highlight(self, mut style: HighlightStyle) -> HighlightStyle {
+        if matches!(self, Self::Attachment) {
+            style.color = None;
+            style.underline = None;
+            style.font_weight.get_or_insert(FontWeight::MEDIUM);
+        }
+        style
+    }
+}
+
 #[derive(Clone)]
 pub(in crate::chat::view) struct Links {
     view: WeakEntity<SheprdWindow>,

@@ -43,18 +43,23 @@ impl SheprdWindow {
                     })
             })
             .flex_none()
-            .w(px(80.))
-            .h(px(80.))
+            .w(px(96.))
+            .h(px(68.))
             .flex()
             .items_center()
             .justify_center()
             .child(match (preview, visuals.shown(id)) {
-                (Some(_), Shown::Ready(drawn)) => img(drawn.texture.clone())
-                    .debug_selector(|| "chat-file-thumbnail".into())
-                    .w(px(80.))
-                    .h(px(80.))
-                    .object_fit(ObjectFit::Contain)
-                    .into_any_element(),
+                (Some(_), Shown::Ready(drawn)) => {
+                    let scale = (96. / drawn.width).min(68. / drawn.height);
+                    img(drawn.texture.clone())
+                        .debug_selector(|| "chat-file-thumbnail".into())
+                        .w(px(drawn.width * scale))
+                        .h(px(drawn.height * scale))
+                        .rounded(px(corners::CONTROL))
+                        .overflow_hidden()
+                        .object_fit(ObjectFit::Contain)
+                        .into_any_element()
+                }
                 _ => crate::icons::icon("icons/file.svg", 32., self.theme.muted),
             });
         let links = Links::new(self, pane_id, cx);
@@ -62,15 +67,17 @@ impl SheprdWindow {
         div()
             .debug_selector(|| "chat-file-card".into())
             .min_w_0()
+            .w(px(440.))
             .max_w_full()
-            .p(px(10.))
-            .rounded(px(corners::CONTROL))
+            .self_start()
+            .p(px(12.))
+            .rounded(px(corners::PANEL + corners::SMALL))
             .border_1()
             .border_color(rgb(self.theme.active))
             .bg(rgb(self.theme.surface))
             .flex()
             .items_center()
-            .gap(px(12.))
+            .gap(px(14.))
             .child(thumbnail)
             .child(
                 div()
@@ -78,14 +85,32 @@ impl SheprdWindow {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .gap(px(6.))
+                    .gap(px(8.))
                     .child(content)
                     .child(
                         div()
                             .id("chat-file-open")
                             .debug_selector(|| "chat-file-open".into())
                             .text_size(self.chat_small_text())
-                            .text_color(rgb(self.theme.muted))
+                            .text_color(rgb(self.theme.subtext()))
+                            .self_start()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.))
+                            .when(local, |button| {
+                                button
+                                    .px(px(8.))
+                                    .py(px(3.))
+                                    .rounded(px(corners::CONTROL))
+                                    .bg(rgb(self.theme.active))
+                                    .hover(|button| {
+                                        button.bg(rgb(crate::config::mix(
+                                            self.theme.active,
+                                            self.theme.foreground,
+                                            8,
+                                        )))
+                                    })
+                            })
                             .child(if local {
                                 fl!("chat-file-open")
                             } else {
@@ -93,6 +118,11 @@ impl SheprdWindow {
                             })
                             .when(local, |button| {
                                 button
+                                    .child(crate::icons::icon(
+                                        "icons/chevron-right.svg",
+                                        12.,
+                                        self.theme.subtext(),
+                                    ))
                                     .cursor_pointer()
                                     .on_mouse_down(MouseButton::Left, |_, _, cx| {
                                         cx.stop_propagation()

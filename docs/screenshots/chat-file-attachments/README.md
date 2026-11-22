@@ -3,7 +3,8 @@
 These macOS captures show the native chat renderer with a synthetic agent
 reply containing standalone links to a real synthetic video and PDF. Their
 Quick Look thumbnails show a video frame and the first PDF page. No personal
-session or file contents are included.
+session or file contents are included. The compact cards have rounded corners,
+rounded preview edges, neutral filename labels, and a separate Open button.
 
 - [Dark theme](dark.png)
 - [Light theme](light.png)
@@ -24,8 +25,8 @@ Set `HERDR_TEST_RICH_CHAT_THEME=light` for light mode, or
 
 These screenshots verify the visible file cards, native thumbnails, and Open
 controls. They do not exercise external media/PDF applications or attachment
-delivery to a live agent. The same sample conversation before thumbnails is
-available in the [previous native capture](https://github.com/sheprd-labs/sheprd/blob/2c2101953199ee796a8c1170bf8a19cb4d639c99/docs/screenshots/chat-file-attachments/dark.png).
+delivery to a live agent. The same sample conversation before the card polish is
+available in the [previous native capture](https://github.com/sheprd-labs/sheprd/blob/810fb82f2c522075cc48ad3f74afc734a4f38e10/docs/screenshots/chat-file-attachments/dark.png).
 No VM or installed app was changed.
 
 Thumbnails are generated only for local PDF/video attachments on macOS.

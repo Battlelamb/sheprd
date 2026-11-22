@@ -10,7 +10,9 @@ use std::{
 };
 
 use anyhow::{Context as _, Result, bail};
-use gpui::{App, AppContext as _, AsyncApp, Context, Window, WindowHandle, px, size};
+use gpui::{
+    AnyWindowHandle, App, AppContext as _, AsyncApp, Context, Window, WindowHandle, px, size,
+};
 use sheprd_chat_protocol::{Entry, EntryId, EntryKind, Status, Transcript};
 use sheprd_client::protocol::{
     AgentStatus, CellData, ClientShellPane, CursorState, FrameData, PaneSurfaceFrame,
@@ -231,6 +233,12 @@ async fn run(
     let mut settled = 0;
     loop {
         timer.timer(Duration::from_millis(100)).await;
+        // An occluded fixture may not receive native frame callbacks. Draw
+        // explicitly so layout and visible thumbnail requests still advance.
+        AnyWindowHandle::from(handle).update(cx, |_, window, cx| {
+            window.refresh();
+            window.draw(cx).clear(cx);
+        })?;
         let ready = handle.update(cx, |view, window, cx| -> Result<bool> {
             fit_surface(view);
             // The window's chat poll does not run here; apply its rule for
@@ -758,7 +766,9 @@ fn visuals_ready(view: &SheprdWindow) -> Result<bool> {
                 for part in parts {
                     ids.extend(match part {
                         Part::Diagram(id, _) => vec![*id],
-                        Part::File { id, .. } if pane.prepared.visuals.wants(*id) => vec![*id],
+                        Part::File {
+                            id, destination, ..
+                        } if view.chat_file_thumbnail(PANE, destination).is_some() => vec![*id],
                         Part::Rich(blocks) | Part::Bubble(_, blocks) => blocks
                             .iter()
                             .flat_map(super::rich::Block::visuals)

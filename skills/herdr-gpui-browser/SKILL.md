@@ -62,7 +62,7 @@ Tests :big[pass]: :huge[214 of 214]. :small[CI took 4 min.]
   reads well there.
 
 In a local desktop chat, attach any file by putting a normal Markdown link on
-its own line: `[report.pdf](</absolute/path with spaces/report.pdf>)`. Sheprd
+its own paragraph (with blank lines around it): `[report.pdf](</absolute/path with spaces/report.pdf>)`. Sheprd
 shows a file card with an Open action. This works for videos, documents,
 archives, and other files; keep the file at that path because the card references
 it. Use `![description](path)` for images that should display inline. File cards

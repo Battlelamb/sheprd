@@ -544,15 +544,22 @@ fn message(text: &str, author: Author, visuals: &mut Visuals) -> Vec<Part> {
     };
     let mut parts = Vec::new();
     let mut markdown = String::new();
-    let flush = |text: &mut String, parts: &mut Vec<Part>, visuals: &mut Visuals| {
+    let mut remaining = if author == Author::Agent {
+        sheprd_chat_protocol::MAX_ATTACHMENTS
+    } else {
+        0
+    };
+    let mut flush = |text: &mut String, parts: &mut Vec<Part>, visuals: &mut Visuals| {
         if !text.trim().is_empty() {
-            parts.push(prose_with(text, breaks, visuals));
+            match super::rich::parse_with(text, breaks, visuals) {
+                Some(blocks) => parts.extend(files::split(blocks, &mut remaining)),
+                None => parts.push(Part::Text(message_lines(text))),
+            }
         }
         text.clear();
     };
     let mut lines = text.split_inclusive('\n');
     let (mut diagrams, mut pages, mut widgets, mut bubbles) = (0, 0, 0, 0);
-    let mut attachments = 0;
     let mut screen = None;
     while let Some(line) = lines.next() {
         let trimmed = line.trim_start();
@@ -594,15 +601,6 @@ fn message(text: &str, author: Author, visuals: &mut Visuals) -> Vec<Part> {
                 }
                 continue;
             }
-        }
-        if author == Author::Agent
-            && attachments < sheprd_chat_protocol::MAX_ATTACHMENTS
-            && let Some(part) = files::attachment(line, visuals)
-        {
-            attachments += 1;
-            flush(&mut markdown, &mut parts, visuals);
-            parts.push(part);
-            continue;
         }
         if let Some(part) = picture(line) {
             flush(&mut markdown, &mut parts, visuals);
@@ -675,8 +673,9 @@ fn message(text: &str, author: Author, visuals: &mut Visuals) -> Vec<Part> {
             }
         }
     }
-    if !markdown.trim().is_empty() || parts.is_empty() {
-        parts.push(prose_with(&markdown, breaks, visuals));
+    flush(&mut markdown, &mut parts, visuals);
+    if parts.is_empty() {
+        parts.push(prose_with("", breaks, visuals));
     }
     parts.extend(screen.map(Part::Screen));
     if cut {

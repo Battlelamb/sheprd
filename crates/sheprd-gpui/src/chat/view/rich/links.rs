@@ -9,6 +9,12 @@ use crate::{
 use sheprd_chat_protocol::Cursor;
 use std::borrow::Cow;
 
+#[derive(Clone, Copy)]
+pub(in crate::chat::view) enum Mode {
+    Configured,
+    Attachment,
+}
+
 #[derive(Clone)]
 pub(in crate::chat::view) struct Links {
     view: WeakEntity<SheprdWindow>,
@@ -16,6 +22,7 @@ pub(in crate::chat::view) struct Links {
     cursor: Option<Cursor>,
     selection_epoch: u64,
     local: bool,
+    pub(in crate::chat::view) mode: Mode,
 }
 
 impl Links {
@@ -27,6 +34,7 @@ impl Links {
         let pane = view.chats.pane(pane_id);
         Self {
             view: cx.entity().downgrade(),
+            mode: Mode::Configured,
             target: pane.map(|pane| pane.target.clone()),
             cursor: pane.and_then(|pane| pane.session.since()),
             selection_epoch: view.selection_epoch,
@@ -47,7 +55,7 @@ impl Links {
     }
 
     pub(super) fn open(&self, destination: &str, cx: &mut App) {
-        self.open_with(destination, false, cx);
+        self.open_with(destination, matches!(self.mode, Mode::Attachment), cx);
     }
 
     fn open_with(&self, destination: &str, system: bool, cx: &mut App) {

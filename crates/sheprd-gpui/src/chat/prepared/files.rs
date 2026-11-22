@@ -1,25 +1,44 @@
-//! Standalone file links become attachment cards without reading the file.
-//! The Markdown stays in the transcript, so older clients can still open it.
+//! Extract file cards from parsed paragraphs, so Markdown reference definitions
+//! are resolved before any prose is separated from a card.
 
 use crate::chat::{
     prepared::Part,
-    rich::{Block, Breaks, Inline, Kind, parse_with},
-    visual::Visuals,
+    rich::{Block, Inline, Kind},
 };
 use crate::terminal::{RowTarget, file_target};
 
-pub(super) fn attachment(line: &str, visuals: &mut Visuals) -> Option<Part> {
-    if !line.trim_start().starts_with('[') {
-        return None;
+pub(super) fn split(blocks: Vec<Block>, remaining: &mut usize) -> Vec<Part> {
+    let mut parts = Vec::new();
+    let mut prose = Vec::new();
+    for block in blocks {
+        if *remaining > 0
+            && let Some(destination) = destination(&block)
+        {
+            let destination = destination.to_owned();
+            if !prose.is_empty() {
+                parts.push(Part::Rich(std::mem::take(&mut prose).into()));
+            }
+            parts.push(Part::File {
+                destination,
+                blocks: vec![block].into(),
+            });
+            *remaining -= 1;
+        } else {
+            prose.push(block);
+        }
     }
-    let blocks = parse_with(line, Breaks::Soft, visuals)?;
-    let [
-        Block::Paragraph {
-            kind: Kind::Paragraph,
-            indent: 0,
-            content,
-        },
-    ] = blocks.as_slice()
+    if !prose.is_empty() || parts.is_empty() {
+        parts.push(Part::Rich(prose.into()));
+    }
+    parts
+}
+
+fn destination(block: &Block) -> Option<&str> {
+    let Block::Paragraph {
+        kind: Kind::Paragraph,
+        indent: 0,
+        content,
+    } = block
     else {
         return None;
     };
@@ -35,12 +54,8 @@ pub(super) fn attachment(line: &str, visuals: &mut Visuals) -> Option<Part> {
         destination = Some(link);
     }
     let destination = destination?;
-    // Source references with a line number remain ordinary prose links.
     let RowTarget::Path { line: None, .. } = file_target(destination)? else {
         return None;
     };
-    Some(Part::File {
-        destination: destination.to_owned(),
-        blocks: blocks.into(),
-    })
+    Some(destination)
 }

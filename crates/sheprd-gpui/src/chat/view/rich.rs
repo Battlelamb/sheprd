@@ -45,14 +45,16 @@ struct RichContext<'a, 'b, 'c> {
 impl SheprdWindow {
     pub(super) fn render_chat_rich(
         &self,
-        pane_id: &str,
+        routing: (&str, links::Mode),
         blocks: &[Block],
         visuals: &Visuals,
         selection: &Scope<'_>,
         voice: Voice,
         cx: &mut Context<Self>,
     ) -> Div {
-        let links = Links::new(self, pane_id, cx);
+        let (pane_id, mode) = routing;
+        let mut links = Links::new(self, pane_id, cx);
+        links.mode = mode;
         let look = self.chat_look();
         let layout = layout_for(self.config.chat.layout);
         let size = voice.size;

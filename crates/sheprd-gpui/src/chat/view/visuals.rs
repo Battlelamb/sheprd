@@ -75,7 +75,14 @@ impl SheprdWindow {
                     Part::Rich(blocks) => {
                         match self.chat_text_scope(pane_id, entry, Region::Body(index)) {
                             Some(scope) => self
-                                .render_chat_rich(pane_id, blocks, visuals, &scope, voice, cx)
+                                .render_chat_rich(
+                                    (pane_id, crate::chat::view::rich::links::Mode::Configured),
+                                    blocks,
+                                    visuals,
+                                    &scope,
+                                    voice,
+                                    cx,
+                                )
                                 .into_any_element(),
                             None => div().into_any_element(),
                         }
@@ -114,7 +121,14 @@ impl SheprdWindow {
                         let content =
                             match self.chat_text_scope(pane_id, entry, Region::Body(index)) {
                                 Some(scope) => self
-                                    .render_chat_rich(pane_id, blocks, visuals, &scope, voice, cx)
+                                    .render_chat_rich(
+                                        (pane_id, crate::chat::view::rich::links::Mode::Attachment),
+                                        blocks,
+                                        visuals,
+                                        &scope,
+                                        voice,
+                                        cx,
+                                    )
                                     .into_any_element(),
                                 None => div().into_any_element(),
                             };

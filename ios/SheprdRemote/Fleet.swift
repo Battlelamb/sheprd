@@ -560,10 +560,11 @@ final class Fleet {
               case let .online(origin) = machine.status
         else { throw FleetError.offline(machines.first { $0.id == device }?.computer.name ?? "The computer") }
         let started = ContinuousClock.now
-        let tag = PathFailure.newTag()
-        let call = PathFailure.call(tag: tag, origin: origin, began: .now)
+        let tags = CallTags()
+        // Before any request went out, as when a token could not be had.
+        let unsent = PathFailure.call(tag: "none", origin: origin, began: .now)
         do {
-            let answer = try await RemoteClient.$callTag.withValue(tag) {
+            let answer = try await RemoteClient.$callTags.withValue(tags) {
                 let token = try await sessions.token(for: machine.computer, at: origin)
                 let client: RemoteClient
                 if let known = clients[device], known.origin == origin, known.fingerprint == machine.computer.fingerprint {
@@ -578,13 +579,15 @@ final class Fleet {
             if elapsed >= Self.slowCall {
                 // An answer that nearly came too late, which the computer
                 // logs as quick when the time went on the way.
+                let call = tags.report(origin: origin) ?? unsent
                 report("slow \(call): answered after \(PathFailure.seconds(elapsed))", device: device)
             }
             return answer
         } catch where PathFailure.isDead(error) {
-            pathFailed(error, call: call, device: device, origin: origin, started: started)
+            pathFailed(error, tags: tags, device: device, origin: origin, started: started)
             throw error
         } catch {
+            let call = tags.report(origin: origin) ?? unsent
             log.error("\(call, privacy: .public) failed: \(String(describing: error), privacy: .public)")
             throw error
         }
@@ -592,9 +595,14 @@ final class Fleet {
 
     /// A call got no answer: the link looks for an address that gives one,
     /// and the client goes, as its open connections use the dead path. The
-    /// call is not sent again, as it may have reached the computer.
-    private func pathFailed(_ error: Error, call: String, device: String, origin: String, started: ContinuousClock.Instant) {
-        let summary = PathFailure.summary(error, after: ContinuousClock.now - started)
+    /// call is not sent again, as it may have reached the computer. The
+    /// report names the request that failed, the call's last, and how long
+    /// it went unanswered.
+    private func pathFailed(_ error: Error, tags: CallTags, device: String, origin: String, started: ContinuousClock.Instant) {
+        let began = tags.requests.last?.began
+        let waited = began.map { Duration.seconds(Date.now.timeIntervalSince($0)) } ?? ContinuousClock.now - started
+        let summary = PathFailure.summary(error, after: waited)
+        let call = tags.report(origin: origin) ?? PathFailure.call(tag: "none", origin: origin, began: .now)
         clients[device] = nil
         Task { await links[device]?.pathFailed(origin, started: started) }
         report("\(PathFailure.route((error as? URLError)?.failingURL)) \(call): \(summary)", device: device)

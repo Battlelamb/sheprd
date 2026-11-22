@@ -147,27 +147,19 @@ pub fn providers(config: &Value) -> Vec<Provider> {
 }
 
 /// The thread's provider and model as chat settings, when T3 named both.
+///
+/// The provider is a setting while another can take the thread, even when
+/// the thread's own provider can no longer run; its models are a setting
+/// while it can.
 pub fn options(thread: &Thread, providers: &[Provider]) -> Vec<ConfigOption> {
     let Some(current) = &thread.header.model_selection else {
         return Vec::new();
     };
-    let Some(provider) = providers
+    let own = providers
         .iter()
-        .find(|provider| provider.instance_id == current.instance_id)
-    else {
-        return Vec::new();
-    };
-    let mut models: Vec<Choice> = provider
-        .models
-        .iter()
-        .map(|model| choice(&model.slug, &model.name))
-        .collect();
-    // A model the list no longer offers is still the one running.
-    if !models.iter().any(|model| model.id == current.model) {
-        models.insert(0, choice(&current.model, &current.model));
-    }
+        .find(|provider| provider.instance_id == current.instance_id);
     let mut options = Vec::new();
-    if providers.len() > 1 {
+    if providers.len() > usize::from(own.is_some()) {
         options.push(ConfigOption {
             category: OptionCategory::Other,
             description: None,
@@ -181,6 +173,18 @@ pub fn options(thread: &Thread, providers: &[Provider]) -> Vec<ConfigOption> {
             },
             name: "Agent".to_owned(),
         });
+    }
+    let Some(own) = own else {
+        return options;
+    };
+    let mut models: Vec<Choice> = own
+        .models
+        .iter()
+        .map(|model| choice(&model.slug, &model.name))
+        .collect();
+    // A model the list no longer offers is still the one running.
+    if !models.iter().any(|model| model.id == current.model) {
+        models.insert(0, choice(&current.model, &current.model));
     }
     options.push(ConfigOption {
         category: OptionCategory::Model,

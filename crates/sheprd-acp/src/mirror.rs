@@ -203,6 +203,33 @@ fn changes(previous: &Transcript, next: &Transcript) -> Option<Vec<Change>> {
             options: next.options.clone(),
         });
     }
+    // A view's composer follows `read_only` from its snapshot alone.
+    if previous.read_only != next.read_only {
+        return None;
+    }
+    for asked in &previous.permissions {
+        match next
+            .permissions
+            .iter()
+            .find(|permission| permission.id == asked.id)
+        {
+            None => changes.push(Change::PermissionResolved { id: asked.id }),
+            // The reducer only adds and removes requests.
+            Some(permission) if permission != asked => return None,
+            Some(_) => {}
+        }
+    }
+    for permission in &next.permissions {
+        if !previous
+            .permissions
+            .iter()
+            .any(|asked| asked.id == permission.id)
+        {
+            changes.push(Change::PermissionAsked {
+                permission: permission.clone(),
+            });
+        }
+    }
     if previous.usage != next.usage {
         changes.push(Change::Usage {
             usage: next.usage.clone(),

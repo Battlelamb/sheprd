@@ -46,6 +46,8 @@ pub(in crate::settings_window) struct FleetPage {
     error: Option<String>,
     /// The person put off inviting the computers reached, for this visit.
     not_now: bool,
+    /// The member `sheprd fleet join` named, to join through first.
+    join_through: Option<String>,
 }
 
 /// What Settings > Fleet opens asking, from `sheprd fleet`.
@@ -62,8 +64,9 @@ pub(crate) enum Pending {
     Invite(String),
     /// Whether to invite every computer reached that is in no fleet.
     InviteAll,
-    /// Whether to join the fleet a computer reached is a member of.
-    Join,
+    /// Whether to join the fleet a computer reached is a member of,
+    /// through this one when named.
+    Join(Option<String>),
 }
 
 /// Opens Settings at Fleet, asking what `pending` says.
@@ -87,7 +90,7 @@ pub(crate) fn open(source: WeakEntity<crate::SheprdWindow>, pending: Pending, cx
                 Pending::Invite(machine) => view.fleet.inviting = Some(machine),
                 Pending::InviteAll => view.fleet.not_now = false,
                 // The card shows while this computer is in no fleet.
-                Pending::Join => {}
+                Pending::Join(machine) => view.fleet.join_through = machine,
             }
             cx.notify();
         });
@@ -182,13 +185,17 @@ impl SettingsWindow {
                 return page.child(row).children(self.fleet_scrub_only(cx));
             }
             let reading = !Fleet::read(cx);
+            // Not while a join runs: this computer may be in that fleet soon.
+            let can_create = !reading && !Fleet::busy(cx);
             let create = ui::button(
                 theme,
                 "fleet-create",
                 fl!("settings-fleet-create"),
-                !reading,
+                can_create,
             )
-            .on_click(cx.listener(|this, _, _, cx| this.fleet_act(Ask::Found, cx)));
+            .when(can_create, |button| {
+                button.on_click(cx.listener(|this, _, _, cx| this.fleet_act(Ask::Found, cx)))
+            });
             let row = ui::row(theme, "fleet-create-row", fl!("settings-fleet-none"))
                 .description(match Fleet::error(cx) {
                     Some(error) => fl!(

@@ -72,9 +72,10 @@ pub(super) fn serve(
         }
         FleetOp::Join { machine } => {
             let in_fleet = crate::fleet::Fleet::view(cx).is_some();
-            let offers: Vec<(String, String)> = crate::fleet::Fleet::all_offers(cx)
+            let offers: Vec<(String, String)> = crate::fleet::Fleet::offers(cx)
                 .into_iter()
-                .map(|(id, machine, _)| (id, machine.label))
+                .flat_map(|offered| offered.through)
+                .map(|(id, machine)| (id, machine.label))
                 .collect();
             let response = match join_pending(in_fleet, &offers, machine.as_deref()) {
                 Ok(pending) => open(&caller, pending, cx),
@@ -182,12 +183,14 @@ pub(super) fn join_pending(
     }
     let named = offers.iter().map(|(id, name)| (id.as_str(), name.as_str()));
     match machine {
-        Some(machine) => pick(named, machine, "computer in a fleet").map(|_| FleetPending::Join),
+        Some(machine) => {
+            pick(named, machine, "computer in a fleet").map(|id| FleetPending::Join(Some(id)))
+        }
         None if offers.is_empty() => Err(Response::error(
             ErrorCode::NotFound,
             "No computer this Sheprd reaches is a member of a fleet; open Settings > Fleet to look again",
         )),
-        None => Ok(FleetPending::Join),
+        None => Ok(FleetPending::Join(None)),
     }
 }
 

@@ -23,11 +23,30 @@ use sheprd_remote_control::control::fleet::{
     View,
     sync::{Admission, Answer, Apply, Ask},
 };
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::atomic::AtomicBool,
-    time::Instant,
-};
+use std::{collections::BTreeMap, sync::atomic::AtomicBool, time::Instant};
+
+/// A fleet this computer may join, and the reached members, by id, it may
+/// join through: never empty.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Offered {
+    pub(crate) offer: Offer,
+    pub(crate) through: Vec<(String, Machine)>,
+}
+
+impl Offered {
+    /// The members to join through, `first` (an id) leading when it is
+    /// one of them, the rest in their order.
+    pub(crate) fn through_first(self, first: Option<&str>) -> Vec<(String, Machine)> {
+        let mut through = self.through;
+        if let Some(at) = through
+            .iter()
+            .position(|(id, _)| Some(id.as_str()) == first)
+        {
+            through[..=at].rotate_right(1);
+        }
+        through
+    }
+}
 
 /// A fleet a reached computer is a member of.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,40 +74,44 @@ impl Offer {
 }
 
 impl Fleet {
-    /// The fleets this computer, in none, may join: one machine for each,
-    /// the first by id that offers it.
-    pub(crate) fn offers(cx: &App) -> Vec<(String, Machine, Offer)> {
+    /// The fleets this computer, in none, may join, each with the reached
+    /// members it may join through, by id.
+    pub(crate) fn offers(cx: &App) -> Vec<Offered> {
         cx.try_global::<Self>()
-            .map(|this| this.offered(this.reached(Instant::now()), true))
+            .map(|this| this.offered(this.reached(Instant::now())))
             .unwrap_or_default()
     }
 
-    /// Every reached machine that offers a fleet, several for one fleet
-    /// included: what `sheprd fleet join MACHINE` may name.
-    pub(crate) fn all_offers(cx: &App) -> Vec<(String, Machine, Offer)> {
-        cx.try_global::<Self>()
-            .map(|this| this.offered(this.reached(Instant::now()), false))
-            .unwrap_or_default()
-    }
-
-    /// The machines among `reached` that offer a fleet, the first for each
-    /// fleet alone when `once`.
-    pub(super) fn offered(
-        &self,
-        reached: BTreeMap<String, Machine>,
-        once: bool,
-    ) -> Vec<(String, Machine, Offer)> {
+    /// The fleets among the machines `reached` offer, in the order of the
+    /// first machine (by id) offering each.
+    pub(super) fn offered(&self, reached: BTreeMap<String, Machine>) -> Vec<Offered> {
         if self.view.is_some() {
             return Vec::new();
         }
-        let mut seen = BTreeSet::new();
-        reached
-            .into_iter()
-            .filter_map(|(id, machine)| {
-                let offer = self.links.get(&id)?.offer.clone()?;
-                (seen.insert(offer.fleet.clone()) || !once).then_some((id, machine, offer))
-            })
-            .collect()
+        let mut offered: Vec<Offered> = Vec::new();
+        for (id, machine) in reached {
+            let Some(offer) = self.links.get(&id).and_then(|link| link.offer.clone()) else {
+                continue;
+            };
+            match offered
+                .iter_mut()
+                .find(|known| known.offer.fleet == offer.fleet)
+            {
+                Some(known) => known.through.push((id, machine)),
+                None => offered.push(Offered {
+                    offer,
+                    through: vec![(id, machine)],
+                }),
+            }
+        }
+        offered
+    }
+
+    /// Whether a join or an invitation runs: another waits for it, as two
+    /// at once could leave a fleet listing a computer that joined another.
+    pub(crate) fn busy(cx: &App) -> bool {
+        cx.try_global::<Self>()
+            .is_some_and(|this| !this.acting.is_empty())
     }
 
     /// Asks every reached machine again, as Settings > Fleet opens, so a
@@ -187,6 +210,11 @@ pub(crate) fn join(
         done(Some(Error::NoDaemon.to_string()), cx);
         return;
     };
+    // One fleet change at a time, and none once this computer is in one.
+    if Fleet::busy(cx) || Fleet::view(cx).is_some() {
+        done(Some(Error::Busy.to_string()), cx);
+        return;
+    }
     Fleet::set_acting(cx, &id, true);
     let executor = cx.background_executor().clone();
     cx.spawn(async move |cx| {
@@ -276,6 +304,12 @@ async fn take_log(
         ours = kept.heads;
     }
     Err(Error::TooLarge)
+}
+
+/// Marks a join or an invitation as running for `machine`, or not.
+#[cfg(test)]
+pub(crate) fn set_acting(cx: &mut App, machine: &str, acting: bool) {
+    Fleet::set_acting(cx, machine, acting);
 }
 
 /// Sets the fleet `machine` offers, as a discovery that just ran would.

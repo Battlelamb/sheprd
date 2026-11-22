@@ -11,6 +11,8 @@ pub enum Error {
     Answer(#[source] serde_json::Error),
     #[error(transparent)]
     Build(#[from] crate::host_build::Error),
+    #[error("Another fleet change is still running, or this computer is in a fleet now")]
+    Busy,
     #[error("The remote control daemon refused: {0}")]
     Daemon(String),
     #[error(

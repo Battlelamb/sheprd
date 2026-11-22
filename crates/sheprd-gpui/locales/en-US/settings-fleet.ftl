@@ -99,6 +99,7 @@ settings-fleet-join-card-description = { $members ->
    *[other] { $hosts } hosts
 }. Joining lets them reach this computer, and this computer reach them. { $machine } admits it at once: this Sheprd reaches it over SSH.
 settings-fleet-join-card-join = Join { $machine }'s fleet
+settings-fleet-join-card-through = Through { $machine }
 settings-fleet-join-card-create = Create my own
 
 settings-fleet-invite-card = { $count ->

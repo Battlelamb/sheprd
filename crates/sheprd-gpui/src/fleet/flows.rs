@@ -381,6 +381,12 @@ pub(crate) fn invite_all(
         done(Some(Error::NoDaemon.to_string()), cx);
         return;
     };
+    // One fleet change at a time: a join under way would leave this
+    // computer in no fleet to invite anyone into.
+    if Fleet::busy(cx) {
+        done(Some(Error::Busy.to_string()), cx);
+        return;
+    }
     for (id, _) in &machines {
         Fleet::set_acting(cx, id, true);
     }

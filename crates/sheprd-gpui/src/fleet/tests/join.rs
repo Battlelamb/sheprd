@@ -37,7 +37,7 @@ fn only_a_member_of_its_fleet_offers_it() {
 }
 
 #[test]
-fn each_fleet_is_offered_once_and_only_to_a_computer_in_none() {
+fn each_fleet_is_offered_once_with_every_member_reached() {
     let offer = |fleet: char| crate::fleet::join::Offer {
         fleet: fleet.to_string().repeat(64),
         members: 1,
@@ -60,21 +60,49 @@ fn each_fleet_is_offered_once_and_only_to_a_computer_in_none() {
     }
     let reached: BTreeMap<_, _> = ["box", "lab", "laptop", "studio"].map(machine).into();
     let offered: Vec<_> = fleet
-        .offered(reached.clone(), true)
+        .offered(reached.clone())
         .into_iter()
-        .map(|(id, _, offer)| (id, offer.fleet.chars().next()))
+        .map(|offered| {
+            let ids: Vec<_> = offered.through.iter().map(|(id, _)| id.clone()).collect();
+            (offered.offer.fleet.chars().next(), ids)
+        })
         .collect();
     assert_eq!(
         offered,
         vec![
-            ("lab".to_owned(), Some('b')),
-            ("laptop".to_owned(), Some('a'))
+            (Some('b'), vec!["lab".to_owned()]),
+            (Some('a'), vec!["laptop".to_owned(), "studio".to_owned()]),
         ]
     );
-    // Named by the command line, any machine offering one counts.
-    assert_eq!(fleet.offered(reached.clone(), false).len(), 3);
     fleet.view = Some(fleet_view(&[]));
-    assert!(fleet.offered(reached, false).is_empty());
+    assert!(fleet.offered(reached).is_empty());
+}
+
+#[test]
+fn the_member_named_leads_and_the_others_keep_their_order() {
+    let offered = crate::fleet::join::Offered {
+        offer: crate::fleet::join::Offer {
+            fleet: "a".repeat(64),
+            members: 3,
+            hosts: 0,
+        },
+        through: vec![machine("laptop"), machine("mini"), machine("studio")],
+    };
+    let ids = |through: Vec<(String, Machine)>| -> Vec<String> {
+        through.into_iter().map(|(id, _)| id).collect()
+    };
+    assert_eq!(
+        ids(offered.clone().through_first(Some("studio"))),
+        ["studio", "laptop", "mini"]
+    );
+    assert_eq!(
+        ids(offered.clone().through_first(None)),
+        ["laptop", "mini", "studio"]
+    );
+    assert_eq!(
+        ids(offered.through_first(Some("gone"))),
+        ["laptop", "mini", "studio"]
+    );
 }
 
 #[test]

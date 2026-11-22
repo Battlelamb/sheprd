@@ -43,11 +43,12 @@ fn join_needs_this_computer_in_no_fleet_and_a_fleet_to_join() {
     let offers = machines(&["studio"]);
     assert_eq!(
         join_pending(false, &offers, None).unwrap(),
-        FleetPending::Join
+        FleetPending::Join(None)
     );
+    // The member named is the one joined through.
     assert_eq!(
         join_pending(false, &offers, Some("studio")).unwrap(),
-        FleetPending::Join
+        FleetPending::Join(Some("id-studio".into()))
     );
     assert!(join_pending(false, &offers, Some("lab")).is_err());
     assert!(join_pending(false, &[], None).is_err());

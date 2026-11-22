@@ -15,6 +15,36 @@ use sheprd_remote_control::control::phone::{Command, Outcome, Phone, PhoneState,
 
 pub(super) fn phone(command: PhoneCommand, context: &Context) -> crate::Result<Output> {
     let (ask, asked) = match command {
+        PhoneCommand::Targets => {
+            return Output::data(
+                format!(
+                    "Pages: {}\nHighlights: {}",
+                    sheprd_remote_control::control::phone::SettingsPage::ALL
+                        .iter()
+                        .map(|page| page.name())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    sheprd_remote_control::control::phone::Highlight::ALL
+                        .iter()
+                        .map(|target| target.name())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                &serde_json::json!({"pages": sheprd_remote_control::control::phone::SettingsPage::ALL, "highlights": sheprd_remote_control::control::phone::Highlight::ALL}),
+            );
+        }
+        PhoneCommand::Guide {
+            device,
+            text,
+            highlight,
+        } => (
+            drive(device, Command::Guide { text, highlight }),
+            Asked::Show,
+        ),
+        PhoneCommand::Highlight { device, target } => {
+            (drive(device, Command::Highlight { target }), Asked::Show)
+        }
+        PhoneCommand::ClearGuide { device } => (drive(device, Command::ClearGuide), Asked::Show),
         PhoneCommand::Phones => (Ask::Phones, Asked::Phones),
         PhoneCommand::State { device } => (drive(device, Command::State), Asked::State),
         PhoneCommand::Show { device, text } => (drive(device, Command::Show { text }), Asked::Show),
@@ -140,6 +170,7 @@ pub(super) fn label(screen: &Screen) -> String {
         Screen::Home => "Home".into(),
         Screen::Workspaces => "Workspaces".into(),
         Screen::PullRequests => "Pull Requests".into(),
+        Screen::SettingsPage { page } => format!("Settings > {}", page.name()),
         Screen::Settings => "Settings".into(),
         Screen::NewWorkspace => "the new workspace form".into(),
         Screen::Chat { pane } => format!("chat {pane}"),

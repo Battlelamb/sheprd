@@ -112,6 +112,7 @@ pub(crate) struct SheprdWindow {
     // keep-sorted start
     pub(crate) _activation: Subscription,
     pub(crate) _agent_favorites: Subscription,
+    pub(crate) _agent_guidance: Subscription,
     pub(crate) _appearance: Subscription,
     pub(crate) _browser_tabs: Subscription,
     pub(crate) _device_tags: Subscription,
@@ -136,6 +137,7 @@ pub(crate) struct SheprdWindow {
     /// The coordinator group the agents panel is narrowed to, by name: a
     /// group outlives its coordinator's pane. None lists every group.
     pub(crate) agent_group: Option<String>,
+    pub(crate) agent_guidance: Entity<crate::agent_guidance::State>,
     pub(crate) agent_sort: preferences::AgentSort,
     /// Whether the user chose the sort with the panel toggle, now or in a
     /// stored session. Until then the daemon's `ui.agent_panel_sort` decides,

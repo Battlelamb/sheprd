@@ -14,9 +14,7 @@ struct NotificationSettingsView: View {
             PushRelaySection()
             if !model.computers.isEmpty {
                 Section {
-                    NavigationLink {
-                        DeskHoldView().makesRoomForConnectionToast()
-                    } label: {
+                    NavigationLink(value: AgentSettingsPage.deskHold) {
                         let held = model.computers.count(where: \.presence)
                         LabeledContent("Hold Alerts at the Desk", value: held == 0 ? "Off" : "\(held) of \(model.computers.count)")
                     }
@@ -29,6 +27,7 @@ struct NotificationSettingsView: View {
                     Label("Live Activities are off for Sheprd. Turn them on in Settings.", systemImage: "exclamationmark.triangle")
                 }
                 Toggle("Keep Generic", isOn: $genericActivities)
+                    .agentHighlight(.liveActivities)
                     .onChange(of: genericActivities) { _, generic in
                         Task { await model.tokens.genericChanged(to: generic) }
                     }
@@ -44,11 +43,12 @@ struct NotificationSettingsView: View {
                 Text("Generic shows the agent and what it is doing, without the chat's name, steps, or questions. A computer can also choose this in Sheprd's Remote control settings.")
             }
             Section {
-                TestPushRow()
+                TestPushRow().agentHighlight(.testPush)
             } footer: {
                 Text("Sends this phone a sealed notification now and shows whether it arrived.")
             }
         }
+        .agentGuideScrolling()
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
     }

@@ -1,6 +1,6 @@
 ---
 name: herdr-gpui-browser
-description: "Open a browser tab in Sheprd beside your terminal to show the user a web page, HTML file, or mockup, and get back their notes and picks. Use it in Herdr (HERDR_ENV=1 or HC_TERMINAL_ID set) when the user asks to open, start, or show a browser tab, page, preview, or mockup, to explain or visualize how something works, or to mock up UI variants to pick from; prefer it there over other browser skills or a system browser. Also use it for what Sheprd, not the herdr daemon, shows or keeps: a file at a line, a review of your changes, repository memory (search before a task, add what you learn), worktree notes, checkpoints and their diffs, your branch's pull request and CI, vulnerability reports and Dependabot alerts, automation approval, forwarding ports, cloud machines, virtual Macs (run, screenshot, click, type), remote control from a phone and showing a screen or note on it, its windows and tabs, waiting on a tab or notes, starting an agent like you, Sheprd settings, themes, fonts, keeping the machine awake."
+description: "Open web pages and mockups beside your terminal in Sheprd and receive the user’s notes. Use it in Herdr (HERDR_ENV=1 or HC_TERMINAL_ID set) when the user asks to open, start, or show a browser tab, page, preview, or mockup, to explain something visually or compare UI variants; prefer it there over other browser skills or a system browser. Also use it for what Sheprd, not the herdr daemon, shows or keeps: a file at a line, a review of your changes, repository memory (search before a task, add what you learn), worktree notes, checkpoints and their diffs, your branch's pull request and CI, vulnerability reports and Dependabot alerts, automation approval, forwarding ports, cloud machines, virtual Macs (run, screenshot, click, type), remote control from a phone and showing a screen or note on it, its windows and tabs, waiting on a tab or notes, starting an agent like you, Sheprd settings navigation, highlighting controls and persistent guidance on desktop or phone, themes, fonts, keeping the machine awake."
 ---
 <!-- herdr-gpui-managed-skill v1: Sheprd keeps this file up to date. Edit a copy under another name to keep your changes. -->
 
@@ -412,19 +412,33 @@ what Sheprd shows or keeps.
 | Bring the user to a screen in the Sheprd phone app (your chat, a terminal, a workspace or its changes, a tab), read which screen it shows, or put a note in front of them there; only while the app is open and they allowed agents on this computer | `sheprd phone open`, `sheprd phone open changes`, `sheprd phone state --json`, `sheprd phone show TEXT` |
 | Add another computer running Sheprd on any network from its pairing link (piped on stdin, never an argument); the user clicks Pair | `sheprd remote add-link < FILE` |
 | Keep this computer's listen token for a private relay (piped on stdin, never an argument), or forget it | `sheprd remote relays token ENDPOINT < FILE`, `sheprd remote relays token ENDPOINT --clear` |
+| Point out a Settings control with a persistent explanation on desktop or phone | `sheprd ui settings --json`, `sheprd ui guide TEXT --highlight ROW_ID`, `sheprd phone targets --json`, `sheprd phone guide TEXT --highlight TARGET --device ID` |
 | Keep the machine awake during a long job | `sheprd caffeine on --for 2h` |
 | Check whether the app runs, and which windows and hosts it has | `sheprd status` |
 
 Phone commands accept `--device ID` (or a unique name). Each native phone
 message's Sheprd note gives its authenticated device ID: pass that ID on
-`phone open`, `phone state`, and `phone show`. A later message can come from
+every phone control command. A later message can come from
 a different phone or the desktop; use the latest message's target, never
 carry one forward after the note says no target is identified. Without
 `--device`, the daemon picks the phone with the latest connection traffic,
 which does not prove the user is looking at it. `sheprd phone --json` lists
 eligible phones; ask which one when the intended target is unknown.
-`phone open settings` opens Settings' root; individual settings pages are
-not addressable yet. Opening a screen never changes a setting.
+Use `phone targets --json` to discover Settings pages and highlight targets.
+`phone open settings notifications --device ID` opens that page;
+`phone guide "This controls push delivery" --highlight push-relay --device ID`
+opens it, scrolls to the switch, outlines it, and shows one persistent top
+banner. Repeat `phone guide TEXT --device ID` to update the banner, then
+`phone guide --clear --device ID` when finished. The person can dismiss it too.
+Keep text brief: the banner has at most three lines including its source.
+`phone highlight TARGET --device ID` just points out a control.
+
+On desktop, `ui settings --json` opens Settings and lists its available page
+names and row IDs. Use `ui settings PAGE`, `ui highlight ROW_ID`, and
+`ui guide TEXT --highlight ROW_ID` for the same flow; repeat `ui guide TEXT`
+to update it and `ui guide --clear` when finished. Guidance belongs to the
+caller's window. These commands navigate and explain; they do not change
+settings. Describe a change as completed only after actually making it.
 
 Automations are Luau scripts `sheprd-automate` runs on a host on a schedule
 or by hand (see `docs/automations.md`). Write one in

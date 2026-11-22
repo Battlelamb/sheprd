@@ -4,7 +4,7 @@
 //! session registers itself and hands answers back. A drive is answered
 //! only by the socket it went to.
 
-use super::wire::ServerMessage;
+use crate::native::wire::ServerMessage;
 use crate::{
     control::{
         ASK_WAIT, DeviceId,
@@ -207,6 +207,12 @@ fn resolve(state: &State, command: Command) -> Result<Drive, Answer> {
     let layout = state.hub.layout();
     let to = match command {
         Command::State => return Ok(Drive::State),
+        Command::Guide { text, highlight } if phone::valid_text(&text) => {
+            return Ok(Drive::Guide { text, highlight });
+        }
+        Command::Guide { .. } => return Err(Answer::Invalid),
+        Command::Highlight { target } => return Ok(Drive::Highlight { target }),
+        Command::ClearGuide => return Ok(Drive::ClearGuide),
         Command::Show { text } if phone::valid_text(&text) => return Ok(Drive::Show { text }),
         Command::Show { .. } => return Err(Answer::Invalid),
         Command::OpenPane { pane } if !phone::valid_id(&pane) => return Err(Answer::Invalid),
@@ -234,6 +240,7 @@ fn resolve(state: &State, command: Command) -> Result<Drive, Answer> {
         | Screen::Workspaces
         | Screen::PullRequests
         | Screen::Settings
+        | Screen::SettingsPage { .. }
         | Screen::NewWorkspace => true,
     };
     if !there {

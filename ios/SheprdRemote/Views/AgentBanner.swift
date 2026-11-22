@@ -7,19 +7,23 @@ import UIKit
 /// tap sends it sooner. It never takes input beyond that tap.
 struct AgentBanner: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         // Nothing shows behind the lock, whose cover is above this window.
-        let banner = LockState.shared.hidesNames ? nil : model.agents.banner
+        let banner = LockState.shared.hidesNames ? nil : (model.agents.guide ?? model.agents.banner)
         Group {
             if let banner {
                 content(banner)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                        if model.agents.guide != nil { model.agents.guideHeight = height }
+                    }
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .animation(.spring(duration: 0.35), value: banner)
+        .animation(reduceMotion ? nil : .spring(duration: 0.35), value: banner)
         .task(id: banner?.id) {
-            guard let banner else { return }
+            guard let banner, model.agents.guide == nil else { return }
             try? await Task.sleep(for: banner.shown)
             if !Task.isCancelled, model.agents.banner?.id == banner.id { model.agents.banner = nil }
         }
@@ -33,11 +37,12 @@ struct AgentBanner: View {
                 if banner.note {
                     Text("From \(banner.computer)'s agent")
                         .font(.caption.weight(.semibold))
+                        .lineLimit(1)
                         .foregroundStyle(.secondary)
                 }
                 Text(banner.text)
                     .font(.subheadline)
-                    .lineLimit(banner.note ? 6 : 1)
+                    .lineLimit(banner.note ? 2 : 1)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
@@ -48,7 +53,7 @@ struct AgentBanner: View {
         .padding(.horizontal, 16)
         .padding(.top, 4)
         .contentShape(.rect)
-        .onTapGesture { model.agents.banner = nil }
+        .onTapGesture { model.agents.banner = nil; model.agents.clearGuide() }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Dismisses it")

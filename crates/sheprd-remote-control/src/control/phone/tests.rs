@@ -108,3 +108,47 @@ fn a_phones_outcome_reads_its_state_and_unknown_refusals() {
         json!({"locked": true})
     );
 }
+
+#[test]
+fn settings_and_guidance_have_stable_wire_targets() {
+    for page in SettingsPage::ALL {
+        assert_eq!(SettingsPage::parse(page.name()), Some(*page));
+        let screen = Screen::SettingsPage { page: *page };
+        assert_eq!(
+            serde_json::to_value(&screen).unwrap(),
+            json!({"screen":"settings_page", "page":page.name()})
+        );
+        assert_eq!(
+            serde_json::from_value::<Screen>(serde_json::to_value(&screen).unwrap()).unwrap(),
+            screen
+        );
+        assert!(screen.is_valid());
+    }
+    for target in Highlight::ALL {
+        assert_eq!(Highlight::parse(target.name()), Some(*target));
+        assert!(SettingsPage::ALL.contains(&target.page()));
+        let drive = Drive::Guide {
+            text: "Look here".into(),
+            highlight: Some(*target),
+        };
+        assert_eq!(
+            serde_json::to_value(&drive).unwrap(),
+            json!({"command":"guide", "text":"Look here", "highlight":target.name()})
+        );
+        assert_eq!(
+            serde_json::from_value::<Drive>(serde_json::to_value(&drive).unwrap()).unwrap(),
+            drive
+        );
+    }
+    assert!(
+        serde_json::from_value::<Screen>(json!({"screen":"settings_page","page":"unknown"}))
+            .is_err()
+    );
+    assert!(
+        serde_json::from_value::<Drive>(json!({"command":"highlight","target":"unknown"})).is_err()
+    );
+    assert_eq!(
+        serde_json::to_value(Drive::ClearGuide).unwrap(),
+        json!({"command":"clear_guide"})
+    );
+}

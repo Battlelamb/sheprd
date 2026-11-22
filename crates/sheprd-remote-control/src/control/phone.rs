@@ -10,8 +10,11 @@
 //! locked. Nothing here pairs, forgets, signs, or approves: those stay the
 //! person's, on the phone or the computer.
 
-use super::DeviceId;
+use crate::control::DeviceId;
+
+mod settings;
 use serde::{Deserialize, Serialize};
+pub use settings::{Highlight, SettingsPage};
 
 /// The longest note `show` puts on a phone, in characters.
 pub const MAX_TEXT_CHARS: usize = 500;
@@ -33,6 +36,9 @@ pub enum Screen {
     PullRequests,
     /// The phone's Settings tab.
     Settings,
+    SettingsPage {
+        page: SettingsPage,
+    },
     /// The form starting a workspace, on this computer.
     NewWorkspace,
     /// A chat (`sheprd-acp` pane, or a terminal agent shown as one).
@@ -62,6 +68,7 @@ impl Screen {
             | Self::Workspaces
             | Self::PullRequests
             | Self::Settings
+            | Self::SettingsPage { .. }
             | Self::NewWorkspace => true,
         }
     }
@@ -91,6 +98,15 @@ pub enum Command {
     OpenPane {
         pane: String,
     },
+    /// Persistent guidance, updated in place; no timeout and at most three lines.
+    Guide {
+        text: String,
+        highlight: Option<Highlight>,
+    },
+    Highlight {
+        target: Highlight,
+    },
+    ClearGuide,
     /// A note the person sees on the phone, from this computer's agent.
     Show {
         text: String,
@@ -103,8 +119,20 @@ pub enum Command {
 #[serde(rename_all = "snake_case", tag = "command")]
 pub enum Drive {
     State,
-    Open { to: Screen },
-    Show { text: String },
+    Open {
+        to: Screen,
+    },
+    Show {
+        text: String,
+    },
+    Guide {
+        text: String,
+        highlight: Option<Highlight>,
+    },
+    Highlight {
+        target: Highlight,
+    },
+    ClearGuide,
 }
 
 /// What the phone shows, as it reports it.

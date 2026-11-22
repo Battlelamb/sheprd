@@ -8,13 +8,14 @@ public enum AgentScreen: Codable, Hashable, Sendable {
     case workspaces
     case pullRequests
     case settings
+    case settingsPage(AgentSettingsPage)
     case newWorkspace
     case chat(pane: String)
     case term(pane: String)
     case workspace(String)
     case changes(workspace: String)
 
-    enum CodingKeys: String, CodingKey { case screen, pane, workspace }
+    enum CodingKeys: String, CodingKey { case screen, pane, workspace, page }
 
     /// A screen this app does not know, from a newer computer.
     public struct Unknown: Error, Hashable {
@@ -28,6 +29,10 @@ public enum AgentScreen: Codable, Hashable, Sendable {
         case "workspaces": self = .workspaces
         case "pull_requests": self = .pullRequests
         case "settings": self = .settings
+        case "settings_page":
+            let name = try c.decode(String.self, forKey: .page)
+            guard let page = AgentSettingsPage(rawValue: name) else { throw Unknown(name: name) }
+            self = .settingsPage(page)
         case "new_workspace": self = .newWorkspace
         case "chat": self = .chat(pane: try c.decode(String.self, forKey: .pane))
         case "term": self = .term(pane: try c.decode(String.self, forKey: .pane))
@@ -44,6 +49,9 @@ public enum AgentScreen: Codable, Hashable, Sendable {
         case .workspaces: try c.encode("workspaces", forKey: .screen)
         case .pullRequests: try c.encode("pull_requests", forKey: .screen)
         case .settings: try c.encode("settings", forKey: .screen)
+        case let .settingsPage(page):
+            try c.encode("settings_page", forKey: .screen)
+            try c.encode(page, forKey: .page)
         case .newWorkspace: try c.encode("new_workspace", forKey: .screen)
         case let .chat(pane):
             try c.encode("chat", forKey: .screen)
@@ -68,10 +76,13 @@ public enum AgentCommand: Hashable, Sendable {
     case open(AgentScreen)
     /// Put a note in front of the person.
     case show(text: String)
+    case guide(text: String, highlight: AgentHighlight?)
+    case highlight(AgentHighlight)
+    case clearGuide
     /// A command, or a screen, this app does not know: refused as `other`.
     case unknown
 
-    enum CodingKeys: String, CodingKey { case command, to, text }
+    enum CodingKeys: String, CodingKey { case command, to, text, highlight, target }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -84,6 +95,15 @@ public enum AgentCommand: Hashable, Sendable {
                 self = .unknown
             }
         case "show": self = .show(text: try c.decode(String.self, forKey: .text))
+        case "clear_guide": self = .clearGuide
+        case "highlight":
+            if let target = AgentHighlight(rawValue: try c.decode(String.self, forKey: .target)) { self = .highlight(target) }
+            else { self = .unknown }
+        case "guide":
+            let name = try c.decodeIfPresent(String.self, forKey: .highlight)
+            let target = name.flatMap(AgentHighlight.init(rawValue:))
+            if name != nil, target == nil { self = .unknown }
+            else { self = .guide(text: try c.decode(String.self, forKey: .text), highlight: target) }
         default: self = .unknown
         }
     }

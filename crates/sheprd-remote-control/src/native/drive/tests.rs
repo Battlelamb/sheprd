@@ -236,3 +236,54 @@ fn a_terminal_agent_the_phone_shows_as_a_chat_opens_as_its_chat() {
     let expected = Screen::Chat { pane: "p2".into() };
     assert_eq!(opened, Ok(Drive::Open { to: expected }));
 }
+
+#[test]
+fn guidance_validates_text_and_routes_named_settings_without_a_pane() {
+    use crate::control::phone::{Highlight, SettingsPage};
+    let dir = tempfile::tempdir().unwrap();
+    let state = offline(dir.path(), layout(EndpointId::random()));
+    for text in [String::new(), " ".into(), "é".repeat(501)] {
+        assert_eq!(
+            resolve(
+                &state,
+                Command::Guide {
+                    text,
+                    highlight: Some(Highlight::PushRelay)
+                }
+            ),
+            Err(Answer::Invalid)
+        );
+    }
+    assert_eq!(
+        resolve(
+            &state,
+            Command::Guide {
+                text: "Push settings".into(),
+                highlight: Some(Highlight::PushRelay)
+            }
+        ),
+        Ok(Drive::Guide {
+            text: "Push settings".into(),
+            highlight: Some(Highlight::PushRelay)
+        })
+    );
+    assert_eq!(
+        resolve(
+            &state,
+            Command::Highlight {
+                target: Highlight::PushRelay
+            }
+        ),
+        Ok(Drive::Highlight {
+            target: Highlight::PushRelay
+        })
+    );
+    assert_eq!(resolve(&state, Command::ClearGuide), Ok(Drive::ClearGuide));
+    for page in SettingsPage::ALL {
+        let to = Screen::SettingsPage { page: *page };
+        assert_eq!(
+            resolve(&state, Command::Open { to: to.clone() }),
+            Ok(Drive::Open { to })
+        );
+    }
+}

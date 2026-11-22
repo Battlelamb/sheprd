@@ -31,7 +31,7 @@ struct IPadRoot: View {
         }
         // Pairing and the nearby card cover the window.
         let covered = pairing || window?.nearby != nil
-        return AgentControl.Front(tab: shown, route: workspaceSheet.map { .workspace($0) } ?? selection, unnamed: covered)
+        return AgentControl.Front(tab: shown, route: workspaceSheet.map { .workspace($0) } ?? selection, unnamed: covered, settingsPage: model.agents.settingsPath.last)
     }
 
     /// The sidebar is shown; ⌘⌃S or its button hides it.
@@ -196,7 +196,7 @@ struct IPadRoot: View {
                     .connectionToast(pairing: $pairing)
             }
             Tab("Settings", systemImage: "gearshape", value: SidebarTab.settings) {
-                NavigationStack { SettingsView().toolbar { hideSidebar }.makesRoomForConnectionToast() }
+                NavigationStack(path: Bindable(model.agents).settingsPath) { SettingsView().toolbar { hideSidebar }.makesRoomForConnectionToast() }
                     .connectionToast(pairing: $pairing)
             }
         }

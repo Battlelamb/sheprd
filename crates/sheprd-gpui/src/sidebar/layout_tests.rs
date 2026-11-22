@@ -605,7 +605,11 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
     let mark_layer = cx.new(|cx| crate::mark_layer::MarkLayer::new(window, hosts, cx));
     let focus = cx.focus_handle();
     let terminal_focus = SheprdWindow::leave_region_with_terminal(&focus, window, cx);
+    let agent_guidance = cx.new(|_| crate::agent_guidance::State::default());
+    let agent_guidance_changed = cx.observe(&agent_guidance, |_, _, cx| cx.notify());
     SheprdWindow {
+        agent_guidance,
+        _agent_guidance: agent_guidance_changed,
         _terminal_focus: terminal_focus,
         chrome_region: None,
         hosted: false,

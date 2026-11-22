@@ -106,6 +106,10 @@ Every command accepts:
 | `window fullscreen [on\|off\|toggle]` | |
 | `window size [WIDTHxHEIGHT]` | Print or set the window's size; windows cannot be moved |
 | `window detach\|reconnect` | Detach from, or reconnect to, the selected host |
+| `ui settings [PAGE]` | Open a Settings page; without PAGE, open Settings and list available pages and row IDs |
+| `ui highlight ROW_ID` | Open Settings at that row, scroll it into view, and outline it |
+| `ui guide TEXT [--highlight ROW_ID]` | Update one persistent top banner (three lines maximum), optionally opening and highlighting a Settings row |
+| `ui guide --clear` | Dismiss the banner and highlight; the person can also dismiss it |
 | `ui sidebar\|statusbar\|menubar [on\|off\|toggle]` | For this window and session. `menubar` is the in-window menu bar on Linux and Windows; macOS, whose menus are the system's, exits 8 |
 | `ui font-size +\|-\|reset\|POINTS` | The terminal font size for this session |
 | `ui traces [--host ID\|--tag TAG\|--all]` | Without options, read prepared replication status, the current `filter`, and indexed `hosts` with stable IDs and device tags. `peers` report `waiting`, `syncing`, `ready`, or `failed` (with `error`). With a filter, open Traces for that host or existing device label, or clear the source filter. Unknown hosts/tags exit 5; usual `--json` and `--window` targeting applies. Cached hosts remain filterable offline. |
@@ -487,6 +491,11 @@ pairs, approves, or changes a setting from here. Remote control must be on.
 | `phone open home\|workspaces\|prs\|settings\|new-workspace` | Show a tab, or the form starting a workspace on this computer |
 | `phone open chat PANE`, `phone open term PANE` | Show a chat or a terminal |
 | `phone open workspace\|changes [WORKSPACE]` | Show a workspace, or its changes; default your workspace (`HERDR_WORKSPACE_ID`) |
+| `phone targets` | List Settings page names and highlight targets, without contacting a phone |
+| `phone open settings [PAGE]` | Open Settings or a named page, including nested delivery, desk-hold, and text-shortcuts pages |
+| `phone highlight TARGET` | Open the target's page, scroll to it, and outline the control |
+| `phone guide TEXT [--highlight TARGET]` | Replace the persistent top banner, optionally highlighting a control; maximum three lines including the source |
+| `phone guide --clear` | Clear this computer's banner and highlight; tapping the banner also dismisses both |
 | `phone show TEXT` | A note on the phone, from this computer's agent (at most 500 characters) |
 
 Every `phone` command takes `--device ID|NAME`; without it, the phone with
@@ -497,7 +506,16 @@ when two phones are connected, and follow the latest message when the user
 switches devices. The note is appended to the new turn; earlier messages
 and the stable instructions are not rewritten, preserving their cacheable
 prefix. Desktop or unidentified prompts do not inherit an earlier phone.
-`phone open settings` opens the root only, not a settings subpage.
+`phone targets --json` lists stable Settings page and highlight names. For
+example, `phone guide "This controls push delivery" --highlight push-relay
+--device ID` opens Notifications and outlines the push-relay switch. Guides
+remain until cleared or dismissed, or the phone backgrounds, locks, or revokes
+that computer's permission. Repeating `guide` updates the existing banner.
+Opening, highlighting, and guiding do not change settings. Keep notes short;
+long text is clipped to the three-line banner. `ui settings --json` discovers
+the desktop's available Settings pages and row IDs; `ui guide` and `ui highlight`
+use those row IDs. Desktop guidance is scoped to the caller's main window and
+shared with its Settings window.
 
 Exits 1 when the phone refuses (locked, or agents turned off for this
 computer) or a name is two phones', 2 for a blank or overlong note, 5 for

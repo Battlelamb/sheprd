@@ -84,4 +84,24 @@ struct AgentControlTests {
         #expect(await computer.sent.last == .driven(id: 2, outcome: .refused(.off)))
         await link.stop()
     }
+
+    @Test func settingsAndGuidanceKeepTypedTargets() throws {
+        for page in AgentSettingsPage.allCases {
+            let screen = AgentScreen.settingsPage(page)
+            #expect(try JSONDecoder().decode(AgentScreen.self, from: JSONEncoder().encode(screen)) == screen)
+            #expect(page.path.last == page)
+            #expect(try event(#"{"type":"drive","id":9,"command":"open","to":{"screen":"settings_page","page":"\#(page.rawValue)"}}"#) == .drive(id: 9, command: .open(screen)))
+        }
+        #expect(AgentSettingsPage.delivery.path == [.notifications, .delivery])
+        #expect(AgentSettingsPage.textShortcuts.path == [.chats, .textShortcuts])
+        for target in AgentHighlight.allCases {
+            #expect(try event(#"{"type":"drive","id":9,"command":"highlight","target":"\#(target.rawValue)"}"#) == .drive(id: 9, command: .highlight(target)))
+        }
+        #expect(try event(#"{"type":"drive","id":9,"command":"guide","text":"Push settings","highlight":"push-relay"}"#) == .drive(id: 9, command: .guide(text: "Push settings", highlight: .pushRelay)))
+        #expect(try event(#"{"type":"drive","id":9,"command":"guide","text":"Done"}"#) == .drive(id: 9, command: .guide(text: "Done", highlight: nil)))
+        #expect(try event(#"{"type":"drive","id":9,"command":"clear_guide"}"#) == .drive(id: 9, command: .clearGuide))
+        for command in [#""command":"highlight","target":"future""#, #""command":"guide","text":"Note","highlight":"future""#, #""command":"open","to":{"screen":"settings_page","page":"future"}"#] {
+            #expect(try event(#"{"type":"drive","id":9,\#(command)}"#) == .drive(id: 9, command: .unknown))
+        }
+    }
 }

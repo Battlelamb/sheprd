@@ -18,6 +18,7 @@ struct RootView: View {
     @State private var windowWidth: CGFloat = 0
     @State private var window = WindowState()
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
     /// The width from which a window gets the split view. An unfolded
@@ -38,6 +39,8 @@ struct RootView: View {
                 tabs
             }
         }
+        .padding(.top, model.agents.guide == nil ? 0 : model.agents.guideHeight)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: model.agents.guide == nil)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
         #if DEBUG
         // The simulator loop's made-up pull request (`-githubDemo`).
@@ -101,9 +104,10 @@ struct RootView: View {
         #endif
         // The microphone never stays open behind the app, or its lock.
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background { model.voice = nil }
+            if phase == .background { model.voice = nil; model.agents.clearGuide() }
         }
         .onChange(of: LockState.shared.locked) { _, locked in
+            if locked { model.agents.clearGuide() }
             guard !locked, let talk = model.pendingTalk else { return }
             model.pendingTalk = nil
             model.talk(saying: talk.words)
@@ -155,7 +159,8 @@ struct RootView: View {
             tab: tab,
             route: tab == .home ? homePath.last : nil,
             // Pairing and the nearby card cover the tab.
-            unnamed: (tab == .workspaces && !workspacesPath.isEmpty) || window.pairing || window.nearby != nil
+            unnamed: (tab == .workspaces && !workspacesPath.isEmpty) || window.pairing || window.nearby != nil,
+            settingsPage: model.agents.settingsPath.last
         )
     }
 
@@ -200,7 +205,7 @@ struct RootView: View {
                     .connectionToast(pairing: $window.pairing)
             }
             Tab("Settings", systemImage: "gearshape", value: RootTab.settings) {
-                NavigationStack { SettingsView().makesRoomForConnectionToast() }
+                NavigationStack(path: Bindable(model.agents).settingsPath) { SettingsView().makesRoomForConnectionToast() }
                     .connectionToast(pairing: $window.pairing)
             }
         }

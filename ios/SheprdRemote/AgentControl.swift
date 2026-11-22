@@ -22,6 +22,20 @@ final class AgentControl {
     var banner: Banner? {
         didSet { if banner != nil, let model = AppModel.current { AgentBannerWindows.install(model: model) } }
     }
+    var guideHeight: CGFloat = 80
+    var settingsPath: [AgentSettingsPage] = []
+    var highlight: AgentHighlight?
+    var guide: Banner? {
+        didSet { if guide != nil, let model = AppModel.current { AgentBannerWindows.install(model: model) } }
+    }
+    private var guidingDevice: String?
+
+    func clearGuide() {
+        guide = nil
+        highlight = nil
+        guidingDevice = nil
+    }
+
     /// What the window shows, as the root view reports it.
     @ObservationIgnored var front = Front()
 
@@ -48,6 +62,7 @@ final class AgentControl {
         /// Something no `AgentScreen` names is on top, such as a page of
         /// the Workspaces tab's stack.
         var unnamed = false
+        var settingsPage: AgentSettingsPage?
     }
 
     func allows(_ computer: Computer) -> Bool { allowed.contains(computer.fingerprint.hex) }
@@ -56,6 +71,7 @@ final class AgentControl {
     func set(_ on: Bool, for computer: Computer, fleet: Fleet) {
         if on { allowed.insert(computer.fingerprint.hex) } else { allowed.remove(computer.fingerprint.hex) }
         fleet.setAgentControl(on, device: computer.device)
+        if !on, guidingDevice == computer.device { clearGuide() }
     }
 
     /// Does what `computer`'s agent asked and answers it.
@@ -70,6 +86,25 @@ final class AgentControl {
             answer(.refused(.other))
         case _ where locked:
             answer(.refused(.locked))
+        case .clearGuide:
+            guard guidingDevice == nil || guidingDevice == computer.device else { return answer(.refused(.other)) }
+            clearGuide()
+            answer(.done(state(for: computer, model: model)))
+        case let .guide(text, target):
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.unicodeScalars.count <= 500 else { return answer(.refused(.other)) }
+            if target == .haptics, !FeedbackSettings.canTap { return answer(.refused(.notFound)) }
+            if guidingDevice != computer.device { clearGuide() }
+            guidingDevice = computer.device
+            guide = Banner(computer: model.displayName(computer), text: text, note: true)
+            if let target { showHighlight(target, model: model) }
+            answerAfterNavigation(computer, model: model, answer: answer)
+        case let .highlight(target):
+            if target == .haptics, !FeedbackSettings.canTap { return answer(.refused(.notFound)) }
+            if guidingDevice != computer.device { clearGuide() }
+            guidingDevice = computer.device
+            guide = Banner(computer: model.displayName(computer), text: guide?.text ?? "Highlighted in Settings", note: true)
+            showHighlight(target, model: model)
+            answerAfterNavigation(computer, model: model, answer: answer)
         case let .show(text):
             banner = Banner(computer: model.displayName(computer), text: text, note: true)
             answer(.done(state(for: computer, model: model)))
@@ -77,10 +112,14 @@ final class AgentControl {
             guard open(screen, on: computer, model: model) else { return answer(.refused(.notFound)) }
             log.notice("an agent on \(computer.name, privacy: .public) opened \(String(describing: screen), privacy: .public)")
             banner = Banner(computer: model.displayName(computer), text: "Opened by an agent on \(model.displayName(computer))", note: false)
-            Task {
-                try? await Task.sleep(for: Self.settle)
-                answer(.done(self.state(for: computer, model: model)))
-            }
+            answerAfterNavigation(computer, model: model, answer: answer)
+        }
+    }
+
+    private func answerAfterNavigation(_ computer: Computer, model: AppModel, answer: @escaping (AgentOutcome) -> Void) {
+        Task {
+            try? await Task.sleep(for: Self.settle)
+            answer(.done(self.state(for: computer, model: model)))
         }
     }
 
@@ -91,7 +130,12 @@ final class AgentControl {
         case .home: showTab(.home, model: model)
         case .workspaces: showTab(.workspaces, model: model)
         case .pullRequests: showTab(.pullRequests, model: model)
-        case .settings: showTab(.settings, model: model)
+        case .settings:
+            settingsPath = []
+            showTab(.settings, model: model)
+        case let .settingsPage(page):
+            settingsPath = page.path
+            showTab(.settings, model: model)
         case .newWorkspace: model.creating = .workspace(device: device)
         case let .chat(pane):
             // A terminal agent this phone does not show as a chat opens
@@ -111,6 +155,12 @@ final class AgentControl {
             model.pendingRoute = .changes(WorkspaceKey(device: device, workspace: workspace))
         }
         return true
+    }
+
+    private func showHighlight(_ target: AgentHighlight, model: AppModel) {
+        highlight = target
+        settingsPath = target.page.path
+        showTab(.settings, model: model)
     }
 
     /// A chat's route, or a terminal agent's conversation when its
@@ -168,7 +218,7 @@ final class AgentControl {
         case .home: .home
         case .workspaces: .workspaces
         case .pullRequests: .pullRequests
-        case .settings: .settings
+        case .settings: front.settingsPage.map(AgentScreen.settingsPage) ?? .settings
         }
     }
 }

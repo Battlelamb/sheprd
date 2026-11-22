@@ -39,10 +39,9 @@ struct PushRelaySection: View {
                     }
                 }
             ))
+            .agentHighlight(.pushRelay)
             if !model.computers.isEmpty {
-                NavigationLink {
-                    PushDeliveryView().makesRoomForConnectionToast()
-                } label: {
+                NavigationLink(value: AgentSettingsPage.delivery) {
                     LabeledContent("Delivery", value: "\(readyCount) of \(model.computers.count) ready")
                 }
             }

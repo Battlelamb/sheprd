@@ -3,6 +3,7 @@
 mod catalog;
 #[cfg(feature = "cloud")]
 mod cloud_devices;
+pub(crate) mod guidance;
 #[cfg(feature = "cloud")]
 // Add Device records the request instead in unit tests.
 #[cfg_attr(test, allow(dead_code, unused_imports))]
@@ -80,15 +81,17 @@ struct SettingsWindowHandle {
 impl Global for SettingsWindowHandle {}
 
 pub(crate) fn open(source: WeakEntity<SheprdWindow>, cx: &mut App) {
-    cx.defer(move |cx| {
-        open_with(source, cx, |view, window, cx| {
-            view.initialize_theme_browser(window, cx);
-            view.initialize_controls(cx);
-            #[cfg(windows)]
-            view.refresh_launch_at_login(None, cx);
-            view.reload(cx);
-            view.watch_config(cx);
-        })
+    cx.defer(move |cx| open_now(source, cx));
+}
+
+fn open_now(source: WeakEntity<SheprdWindow>, cx: &mut App) {
+    open_with(source, cx, |view, window, cx| {
+        view.initialize_theme_browser(window, cx);
+        view.initialize_controls(cx);
+        #[cfg(windows)]
+        view.refresh_launch_at_login(None, cx);
+        view.reload(cx);
+        view.watch_config(cx);
     });
 }
 
@@ -158,6 +161,7 @@ fn open_with(
 
 struct SettingsWindow {
     caption: crate::caption::Caption,
+    _guidance: Option<Subscription>,
     config: Config,
     /// The config as the last successful load read it, which sidebar saves
     /// diff against; previews change only `config`.
@@ -332,6 +336,7 @@ impl SettingsWindow {
         );
         Self {
             caption: Default::default(),
+            _guidance: None,
             loaded_config: config.clone(),
             config,
             theme,
@@ -490,6 +495,7 @@ impl SettingsWindow {
         };
         self._source = Some(cx.observe(&owner, Self::source_changed));
         self.source = source;
+        self._guidance = None;
         self.new_window_target = owner
             .read(cx)
             .endpoints
@@ -757,6 +763,15 @@ impl SettingsWindow {
 impl Render for SettingsWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.caption.sync(window, &self.theme);
+        let guide = self
+            .source
+            .upgrade()
+            .map(|source| source.read(cx).agent_guidance.clone());
+        if self._guidance.is_none()
+            && let Some(guide) = &guide
+        {
+            self._guidance = Some(cx.observe(guide, |_, _, cx| cx.notify()));
+        }
         let searching = self.search_results.clone();
         let heading = if searching.is_some() {
             fl!("settings-results")
@@ -825,6 +840,11 @@ impl Render for SettingsWindow {
             .text_start()
             .children(header)
             .child(
+                div().flex_none().h(px(guide
+                    .as_ref()
+                    .map_or(0., |guide| 92. * guide.read(cx).shown()))),
+            )
+            .child(
                 div().flex_1().min_h_0().row().child(navigation).child(
                     self.scroll_area(
                         scrollbar::Pane::Body,
@@ -864,6 +884,12 @@ impl Render for SettingsWindow {
             )
             .child(self.footer(cx))
             .children(font_picker);
+        let root = root.children(self.guidance_outline(guide.as_ref(), cx));
+        let root = root.children(
+            guide
+                .as_ref()
+                .and_then(|guide| crate::agent_guidance::banner(guide, &self.theme, window, cx)),
+        );
         let border = self.theme.active;
         crate::titlebar::frame(window, border, root)
     }

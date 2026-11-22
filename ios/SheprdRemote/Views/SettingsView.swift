@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var showingComputers = false
     @State private var showingRelays = false
     @State private var showingGitHub = false
+    @State private var showingNotifications = false
     #endif
 
     var body: some View {
@@ -86,6 +87,8 @@ struct SettingsView: View {
         .task { if UserDefaults.standard.bool(forKey: "openRelays") { showingRelays = true } }
         .navigationDestination(isPresented: $showingGitHub) { GitHubSettingsView().makesRoomForConnectionToast() }
         .task { if UserDefaults.standard.bool(forKey: "openGitHub") { showingGitHub = true } }
+        .navigationDestination(isPresented: $showingNotifications) { NotificationSettingsView().makesRoomForConnectionToast() }
+        .task { if UserDefaults.standard.bool(forKey: "openNotifications") { showingNotifications = true } }
         #endif
     }
 

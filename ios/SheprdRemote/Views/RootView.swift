@@ -194,7 +194,8 @@ extension RootView {
     /// tab, `-newWorkspace YES` opens the new workspace form,
     /// `-openComputer YES` opens the first computer's page from Workspaces,
     /// `-editComputers YES` opens Settings > Computers in Edit, and
-    /// `-openRelays YES` opens Settings' relays. In a
+    /// `-openRelays YES` opens Settings' relays, and `-openNotifications YES`
+    /// Settings > Notifications. In a
     /// chat, `-session YES` opens its session sheet and `-draft TEXT`
     /// types into the composer. `-voiceSay TEXT` runs a spoken command as
     /// if it were heard, as the simulator has no microphone, and

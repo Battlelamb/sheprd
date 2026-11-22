@@ -30,7 +30,7 @@ mod shortcuts;
 mod stream;
 mod tags;
 mod terminal;
-mod test_push;
+pub(crate) mod test_push;
 mod typed;
 mod update;
 mod uploads;

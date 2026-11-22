@@ -1,5 +1,6 @@
 //! `POST /api/apns/test`: the phone asks this computer to send it one
 //! sealed alert now, through the push relay, to see notifications arrive.
+//! Sheprd asks the same for every phone through `Request::TestPush`.
 //! The answer is what the relay said; the phone's extension records the id when the alert opens, so the
 //! app can tell whether, and how fast, it came.
 
@@ -8,6 +9,7 @@ use crate::apns::{
     self, Registration, Sent,
     alert::{Sealed, valid_test_id},
 };
+use crate::control::DeviceId;
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 
@@ -45,47 +47,62 @@ pub(super) async fn send(
     if !valid_test_id(&request.id) {
         return Err(ApiError::Invalid("that test id is not valid"));
     }
+    let sent = alert(&state, &device, request.id)
+        .await
+        .ok_or(ApiError::Invalid(
+            "this phone has not registered for alerts",
+        ))?;
+    let answer = match sent {
+        Sent::Delivered => TestAnswer::Delivered,
+        Sent::Gone => TestAnswer::Gone,
+        Sent::Limited => TestAnswer::Limited,
+        Sent::Refused { status } => TestAnswer::Refused { status },
+        Sent::Unreachable => TestAnswer::Unreachable,
+        Sent::Unsent => return Err(ApiError::Invalid("the test push could not be sealed")),
+    };
+    Ok(Json(answer))
+}
+
+/// Sends `device` one sealed test alert with `id` through the push relay,
+/// as the phone's own test and Sheprd's (`Request::TestPush`) both ask,
+/// and notes it in the ledger. `None` when the phone registered no alert
+/// handle the push relay takes, so nothing went out. A handle APNs no
+/// longer knows is forgotten, and the phone registers a new one when it
+/// next opens.
+pub(crate) async fn alert(state: &Shared, device: &DeviceId, id: String) -> Option<Sent> {
     let registration = Registration::from_stored(
         state
             .auth()
             .devices()
-            .get(&device)
+            .get(device)
             .and_then(|record| record.apns.as_ref()),
     );
     let (token, key) = registration
         .alerts()
         .filter(|(token, _)| state.apns.reaches(token))
-        .map(|(token, key)| (token.clone(), *key))
-        .ok_or(ApiError::Invalid(
-            "this phone has not registered for alerts",
-        ))?;
+        .map(|(token, key)| (token.clone(), *key))?;
     let badge = u32::try_from(state.attention().len()).unwrap_or(u32::MAX);
+    let tag = format!("test-{id}");
     let sealed = Sealed::test(
-        request.id.clone(),
+        id,
         apns::computer_id(&state.fingerprint),
         &state.computer,
         badge,
     );
-    let tag = format!("test-{}", request.id);
     let sent = state.apns.alert(&token, &key, sealed, &tag, now_ms()).await;
     state.pushes.record(apns::Kind::Alert, &sent, now_ms());
-    let answer = match sent {
-        Sent::Delivered => TestAnswer::Delivered,
+    match &sent {
         Sent::Gone => {
-            let state = state.clone();
+            let (state, device) = (state.clone(), device.clone());
             let _ = tokio::task::spawn_blocking(move || {
                 crate::server::forget(&state, &device, &token);
             })
             .await;
-            TestAnswer::Gone
         }
-        Sent::Limited => TestAnswer::Limited,
-        Sent::Refused { status } => TestAnswer::Refused { status },
         Sent::Unreachable => {
             tracing::warn!(delivery = state.apns.name(), "could not send a test push");
-            TestAnswer::Unreachable
         }
-        Sent::Unsent => return Err(ApiError::Invalid("the test push could not be sealed")),
-    };
-    Ok(Json(answer))
+        _ => {}
+    }
+    Some(sent)
 }

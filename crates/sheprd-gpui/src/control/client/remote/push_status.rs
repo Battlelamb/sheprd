@@ -3,7 +3,7 @@
 //! command line output is.
 
 use sheprd_control_protocol::protocol::remote::HostPush;
-use sheprd_remote_control::control::push::{Last, Mode, Outcome, PushStatus};
+use sheprd_remote_control::control::push::{Last, Mode, Outcome, PushStatus, TestPush};
 
 pub(super) fn text(
     enabled: bool,
@@ -109,4 +109,30 @@ fn outcome(outcome: &Outcome) -> String {
         Outcome::Unsent => "not sent: it could not be sealed".to_owned(),
         Outcome::Other => "an outcome this Sheprd does not know".to_owned(),
     }
+}
+
+/// `remote test-push` as text: one line per phone, or why none was sent.
+pub(super) fn test_text(mode: Mode, pushes: &[TestPush]) -> String {
+    if mode != Mode::PushRelay {
+        return format!(
+            "No test push sent: iPhone pushes are {}. Turn on the push relay in Settings > Remote control",
+            self::mode(mode)
+        );
+    }
+    if pushes.is_empty() {
+        return "No test push sent: no paired iPhone has registered for alerts. Open the Sheprd app on the phone and allow notifications".to_owned();
+    }
+    pushes
+        .iter()
+        .map(|push| {
+            let name = crate::notifications::safe_text(&push.device, 64);
+            match &push.outcome {
+                Outcome::Delivered => {
+                    format!("{name}: Apple took it; it should show on the phone now")
+                }
+                outcome => format!("{name}: {}", self::outcome(outcome)),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }

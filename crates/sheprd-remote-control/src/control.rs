@@ -326,6 +326,11 @@ pub enum Request {
     /// went (`push`). Read-only, and it names no token, handle, or device.
     /// An older daemon closes without answering.
     PushStatus,
+    /// Sends each phone registered for alerts one sealed test alert now,
+    /// through the push relay, as the phone's own Send Test Push does, and
+    /// answers what came of each, within [`ASK_WAIT`]. An older daemon
+    /// closes without answering.
+    TestPush,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -401,6 +406,7 @@ pub enum Response {
         asks: Vec<github::LeaseAsk>,
     },
     PushStatus(push::PushStatus),
+    TestPushed(push::TestPushes),
 }
 
 /// The daemon's answer to a nearby phone's first step, the same JSON over

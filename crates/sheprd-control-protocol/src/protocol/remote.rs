@@ -8,7 +8,11 @@
 use serde::{Deserialize, Serialize};
 use sheprd_remote_control::{
     app::pairing::LinkText,
-    control::{Device, Status, push::PushStatus, relays::ListenToken},
+    control::{
+        Device, Status,
+        push::{Mode, PushStatus, TestPush},
+        relays::ListenToken,
+    },
 };
 
 /// Asking the daemon, and for `revoke` the device list first, takes up to
@@ -34,6 +38,10 @@ pub enum RemoteOp {
     /// relay) and how the last of each kind went. Read-only: the push
     /// relay is turned on in Settings.
     PushStatus,
+    /// Has the daemon send each paired iPhone registered for alerts one
+    /// test alert now, through the push relay, and answers what came of
+    /// each. It only notifies the user's own phones.
+    TestPush,
     /// Opens the confirmation for revoking a device, by ID or name.
     Revoke {
         device: String,
@@ -58,9 +66,11 @@ impl RemoteOp {
     pub fn wait_seconds(&self) -> u64 {
         match self {
             Self::PushStatus => HOSTS_WAIT_SECONDS,
-            Self::Status | Self::Devices | Self::Revoke { .. } | Self::RelayToken { .. } => {
-                DAEMON_WAIT_SECONDS
-            }
+            Self::Status
+            | Self::Devices
+            | Self::Revoke { .. }
+            | Self::RelayToken { .. }
+            | Self::TestPush => DAEMON_WAIT_SECONDS,
             Self::AddLink { .. } | Self::Pair { .. } | Self::Restart => 0,
         }
     }
@@ -100,6 +110,14 @@ pub enum Reply {
         /// [`MAX_PUSH_HOSTS`]; left out when there are none.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         hosts: Vec<HostPush>,
+    },
+    /// The test alerts the daemon sent: how it sends pushes, and what came
+    /// of the alert to each phone, named as paired. Empty when the push
+    /// relay is off or no phone registered for alerts.
+    TestPush {
+        mode: Mode,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pushes: Vec<TestPush>,
     },
     /// A listen token was kept or forgotten for `relay`, as the app
     /// normalized its address; `token` is whether one is now kept.

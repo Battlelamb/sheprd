@@ -39,7 +39,9 @@ pub struct Read {
 pub fn read(contents: &Contents, from: EntryId, to: EntryId) -> Read {
     // Kept entries and trimmed runs never overlap, so ordering them by
     // their first id puts each run where it belongs.
-    let mut items: Vec<(EntryId, Option<String>)> = contents
+    // Only ids are gathered first; an entry's text is made only once the
+    // read reaches it.
+    let mut items: Vec<(EntryId, Option<&crate::Entry>)> = contents
         .trimmed
         .iter()
         .filter(|range| range.to >= from && range.from <= to)
@@ -50,20 +52,23 @@ pub fn read(contents: &Contents, from: EntryId, to: EntryId) -> Read {
             .entries
             .iter()
             .filter(|entry| (from..=to).contains(&entry.id))
-            .filter_map(|entry| Some((entry.id, Some(handoff::full_line(&entry.kind)?)))),
+            .map(|entry| (entry.id, Some(entry))),
     );
     items.sort_by_key(|(id, _)| *id);
     let mut text = String::new();
     let mut used = 0;
     let mut entries = 0;
     let mut next = None;
-    for (id, line) in items {
-        let block = match &line {
-            Some(line) => block(id, line),
+    for (id, entry) in items {
+        let block = match entry {
+            Some(entry) => match handoff::full_line(&entry.kind) {
+                Some(line) => block(id, &line),
+                None => continue,
+            },
             None => trimmed_block(contents, id, to),
         };
         let size = escaped_len(&block);
-        let full = line.is_some() && entries == MAX_ENTRIES;
+        let full = entry.is_some() && entries == MAX_ENTRIES;
         if full || (!text.is_empty() && used + size > MAX_BYTES) {
             next = Some(id);
             break;
@@ -71,7 +76,7 @@ pub fn read(contents: &Contents, from: EntryId, to: EntryId) -> Read {
         let block = cut(block, MAX_BYTES.saturating_sub(used), " [cut]\n");
         used += escaped_len(&block);
         text.push_str(&block);
-        entries += usize::from(line.is_some());
+        entries += usize::from(entry.is_some());
     }
     match next {
         Some(id) => {

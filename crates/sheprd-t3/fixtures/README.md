@@ -56,3 +56,33 @@ repeated `capabilities` blocks, and the payloads of bookkeeping events
 sit on one line. Every value is as the server sent it, apart from
 `getConfig`'s trimming above. No real agent, account, token, ticket,
 pairing code, or user data is involved.
+
+## `launch.json`
+
+Adding a project and launching threads, on one socket, recorded from the
+same sandbox, version, and fake agents as `steer.json`, in the same format.
+`/tmp/t3rec/work/repo` was a fresh Git repository with one commit on
+`main`, and `/tmp/t3rec/work/repo-wt` a worktree of it on branch `feature`.
+The shell's first snapshot also lists the sandbox's earlier `Sandbox`
+project and its threads.
+
+| Request | What |
+| --- | --- |
+| 1 | `orchestration.subscribeShell`, open throughout and interrupted last |
+| 2 | `projects.mutate` `project.create` for the repository: the project |
+| 3 | Request 2 again, same `commandId` and `projectId`: the same answer |
+| 4 | `project.create` with a new `commandId` and `projectId` for the same root: refused (`ProjectConflictError`) |
+| 5 | `orchestration.launchThread` with `workspaceStrategy` `root` and an initial message: `{threadId, projection, resumed: false, sequence}` |
+| 6 | `orchestration.subscribeThread` on that thread until its run completes, then interrupted |
+| 7 | `launchThread` with `existing_worktree` and no initial message: no `sequence`, `worktreePath` set |
+| 8 | `launchThread` with `worktree` from `main` on branch `t3-new`: `branch` set, `worktreePath` null until the shell's `thread.updated` names T3's own worktree under its home |
+| 9 | Request 5 again, same `commandId`: the same thread and `sequence`, `resumed: true`, and the projection as it is now |
+| 10 | `launchThread` for an unknown project: a `Failure` exit |
+
+Each change to a project also brings a shell `snapshot` value carrying
+`resolvedRepositoryIdentityRoots` and only the projects under those roots,
+with no threads: a partial snapshot, not a replacement of the first.
+
+The layout is compacted as in `steer.json`; in addition, the shell's
+thread and project summaries sit one to a line. Every value is as the
+server sent it.

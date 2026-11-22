@@ -79,4 +79,5 @@ fn server_text_cannot_drive_the_terminal() {
     assert_eq!(plain("é 日本"), "é 日本");
 }
 
+mod new;
 mod steer;

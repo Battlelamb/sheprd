@@ -609,10 +609,30 @@ pub fn shared_script_command(
     script: &str,
     lane: mux::Lane,
 ) -> Result<(Command, Option<SshChannel>)> {
+    shared_command(target, &format!("/bin/sh -c {}", quote(script)), lane)
+}
+
+/// [`shared_script_command`] for a Windows host, whose login shell is
+/// `cmd.exe` or PowerShell: `script` runs under `powershell.exe`, encoded so
+/// neither shell reinterprets it. PowerShell writes progress records to
+/// stderr as CLIXML, so callers reading output should discard stderr.
+pub fn shared_powershell_command(
+    target: &str,
+    script: &str,
+    lane: mux::Lane,
+) -> Result<(Command, Option<SshChannel>)> {
+    shared_command(target, &powershell::encoded_command(script), lane)
+}
+
+fn shared_command(
+    target: &str,
+    remote_command: &str,
+    lane: mux::Lane,
+) -> Result<(Command, Option<SshChannel>)> {
     validate_target(target)?;
     let (command, channel) = mux::command(
         target,
-        &format!("/bin/sh -c {}", quote(script)),
+        remote_command,
         lane,
         Instant::now() + SHARED_WAIT,
         || false,

@@ -181,6 +181,7 @@ mod upload_chips;
 mod usage;
 mod window;
 mod window_state;
+mod windows_host;
 mod words;
 mod worktree;
 mod worktree_banner;

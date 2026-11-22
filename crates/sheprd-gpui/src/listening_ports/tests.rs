@@ -17,6 +17,7 @@ mod process_owner;
 mod repeated_scans;
 mod ssh_links;
 mod status_bar;
+mod windows_hosts;
 mod wsl_hosts;
 
 /// The ports one workspace was found with, whichever daemon it named.

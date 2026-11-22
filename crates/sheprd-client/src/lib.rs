@@ -100,7 +100,7 @@ pub use sessions::{
 pub use ssh::mux::Lane as SshLane;
 pub use ssh::{
     Bridge, SshChannel, connect_command, remote_socket, script_command, serve_command,
-    shared_script_command,
+    shared_powershell_command, shared_script_command,
 };
 pub use ssh::{
     Destination, FORWARD_READY, HostKeyFingerprint, HostKeyScan, HostKeys, HostProbe,
@@ -115,7 +115,7 @@ pub use surface_images::{
 pub use terminal_attach::TerminalAttach;
 pub use transport::Stream;
 #[cfg(windows)]
-pub use transport::pipe_available;
+pub use transport::{overlapped_stdout, pipe_available};
 pub use upload::{
     remove_uploaded_files, remove_uploaded_files_with, upload_files, upload_files_with,
 };

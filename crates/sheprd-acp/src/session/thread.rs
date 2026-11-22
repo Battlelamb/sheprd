@@ -162,6 +162,7 @@ impl Thread {
         agent: Agent,
         loaded: bool,
         entries: &[Entry],
+        reading: handoff::Reading,
     ) -> Option<(Joining, Handoff)> {
         self.replaying = false;
         let joining = match self.joining.take()? {
@@ -178,17 +179,29 @@ impl Thread {
             .filter(|held| *held != agent)
             .collect();
         let built = match joining {
-            Joining::Fresh => handoff::build(
+            Joining::Fresh => handoff::build_with(
                 entries,
                 Scope::Full {
                     first_prompt: self.first_prompt.as_deref(),
                 },
                 &others,
                 handoff::BUDGET,
+                reading,
             ),
             Joining::Resume { seen } => {
                 let since = entries.partition_point(|entry| entry.id <= seen);
-                handoff::build(&entries[since..], Scope::Since, &others, handoff::BUDGET)
+                // What it saw before it left, it still holds.
+                let reading = handoff::Reading {
+                    trimmed: 0,
+                    ..reading
+                };
+                handoff::build_with(
+                    &entries[since..],
+                    Scope::Since,
+                    &others,
+                    handoff::BUDGET,
+                    reading,
+                )
             }
         };
         let Some(built) = built else {

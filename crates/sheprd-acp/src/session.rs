@@ -139,6 +139,8 @@ pub(crate) struct Config {
     pub cwd: PathBuf,
     /// Exit when the agent does, rather than leave its last words on screen.
     pub exit_with_agent: bool,
+    /// How the agent running gets the server that reads the chat's thread.
+    pub given: crate::thread_mcp::Given,
     /// The built-in agent running, or `None` for a custom command.
     pub harness: Option<Agent>,
     /// The conversation so far, for a continued session whose agent does

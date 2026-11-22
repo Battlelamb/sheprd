@@ -33,6 +33,7 @@ mod questions;
 mod resume;
 mod settings;
 mod streaming;
+mod thread_read;
 mod threads;
 
 type Reports = Rc<RefCell<Vec<Activity>>>;
@@ -61,6 +62,7 @@ fn config() -> Config {
         choices: None,
         cwd: PathBuf::from("/work"),
         exit_with_agent: false,
+        given: crate::thread_mcp::Given::Not,
         harness: Some(Agent::Claude),
         history: None,
         known: Default::default(),

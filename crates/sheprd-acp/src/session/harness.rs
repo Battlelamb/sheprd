@@ -117,7 +117,14 @@ impl<R: FnMut(Update)> Session<R> {
 
     /// The agent [`super::Flow::Launch`] asked for started: open the ACP
     /// connection to it.
-    pub(crate) fn launched(&mut self, outbox: rpc::Outbox, pid: u32) {
+    /// `given` is how it gets the server that reads the chat's thread.
+    pub(crate) fn launched(
+        &mut self,
+        outbox: rpc::Outbox,
+        pid: u32,
+        given: crate::thread_mcp::Given,
+    ) {
+        self.config.given = given;
         (self.report)(Update::Started(pid));
         self.outbox = outbox;
         self.start();

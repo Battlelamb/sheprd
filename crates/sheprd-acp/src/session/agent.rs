@@ -128,7 +128,7 @@ impl<R: FnMut(Update)> Session<R> {
                 self.acp_session = Some(id.clone());
                 self.request(
                     "session/load",
-                    &wire::LoadSessionRequest::new(id, cwd),
+                    &wire::LoadSessionRequest::new(id, cwd).mcp_servers(self.mcp_servers()),
                     Pending::LoadSession,
                 );
             }
@@ -149,10 +149,24 @@ impl<R: FnMut(Update)> Session<R> {
                 }
                 self.request(
                     "session/new",
-                    &wire::NewSessionRequest::new(cwd),
+                    &wire::NewSessionRequest::new(cwd).mcp_servers(self.mcp_servers()),
                     Pending::NewSession,
                 );
             }
+        }
+    }
+
+    /// The MCP servers an ACP agent's session gets: the one reading the
+    /// chat's thread, when the agent takes it in its session.
+    fn mcp_servers(&self) -> Vec<wire::McpServer> {
+        match &self.config.given {
+            crate::thread_mcp::Given::InSession(server) => {
+                vec![wire::McpServer::Stdio(
+                    wire::McpServerStdio::new(crate::thread_mcp::NAME, &server.program)
+                        .args(server.args.clone()),
+                )]
+            }
+            _ => Vec::new(),
         }
     }
 
@@ -175,7 +189,7 @@ impl<R: FnMut(Update)> Session<R> {
                 let cwd = self.config.cwd.clone();
                 self.request(
                     "session/new",
-                    &wire::NewSessionRequest::new(cwd),
+                    &wire::NewSessionRequest::new(cwd).mcp_servers(self.mcp_servers()),
                     Pending::NewSession,
                 );
                 return;
@@ -291,8 +305,16 @@ impl<R: FnMut(Update)> Session<R> {
         let Some(agent) = self.config.harness else {
             return;
         };
-        let Some((joining, handoff)) = self.thread.opened(agent, loaded, &self.transcript.entries)
-        else {
+        // The thread's file holds the whole conversation, which the
+        // transcript's window may not.
+        let kept = self.kept_conversation();
+        let tool = kept.is_some() && self.config.given.reads();
+        let (entries, trimmed) = match &kept {
+            Some(contents) => (contents.entries.as_slice(), trimmed(contents)),
+            None => (self.transcript.entries.as_slice(), 0),
+        };
+        let reading = sheprd_chat_protocol::handoff::Reading { tool, trimmed };
+        let Some((joining, handoff)) = self.thread.opened(agent, loaded, entries, reading) else {
             return;
         };
         let from = self.thread.before();
@@ -559,4 +581,13 @@ impl<R: FnMut(Update)> Session<R> {
         self.status(Status::Exited { message: summary });
         self.keep_entries();
     }
+}
+
+/// How many entries the thread's file no longer keeps.
+fn trimmed(contents: &sheprd_chat_protocol::thread::file::Contents) -> usize {
+    contents
+        .trimmed
+        .iter()
+        .map(|range| usize::try_from(range.to.0 - range.from.0 + 1).unwrap_or(usize::MAX))
+        .fold(0, usize::saturating_add)
 }

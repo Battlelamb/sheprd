@@ -150,6 +150,10 @@ pub(super) fn devices(context: &Context) -> crate::Result<Output> {
 
 pub(super) fn machine(command: MachineCommand, context: &Context) -> crate::Result<Output> {
     match command {
+        MachineCommand::Claim { name, wait } => machine_agent::claim(name, wait, context),
+        MachineCommand::Release { name } => {
+            context.act(Request::Tab, TabOp::MachineRelease { name })
+        }
         MachineCommand::Open { name } => {
             let response = context.call(Request::Tab, TabOp::Machine { name })?;
             opened("the machine", response)
@@ -264,13 +268,14 @@ fn image_line(image: &MachineImageInfo) -> String {
 
 fn machine_line(machine: &MachineInfo) -> String {
     format!(
-        "{}\t{}\t{} CPUs\t{} GB\t{}\t{:.1} GB on disk",
+        "{}\t{}\t{} CPUs\t{} GB\t{}\t{:.1} GB on disk\t{}",
         machine.name,
         machine.state.name(),
         machine.cpus,
         machine.memory_gib,
         machine.display,
         machine.disk_bytes as f64 / 1e9,
+        machine.reservation.as_deref().unwrap_or("available"),
     )
 }
 

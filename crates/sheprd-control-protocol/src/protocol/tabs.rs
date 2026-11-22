@@ -127,6 +127,14 @@ pub enum TabOp {
         modifiers: Vec<MachineModifier>,
     },
     MachineList,
+    /// Reserve a virtual Mac for this pane, or renew its reservation.
+    MachineClaim {
+        name: String,
+    },
+    /// Release only this pane's reservation.
+    MachineRelease {
+        name: String,
+    },
     /// Make the virtual Mac called `name` from image `image`. Without an
     /// image, open Settings > Virtual Macs, where the user confirms making
     /// one from Apple's macOS (named `name`, if given).
@@ -208,6 +216,8 @@ impl TabOp {
             | Self::MachineImageDelete { .. }
             | Self::MachineImageList
             | Self::MachineImageSave { .. }
+            | Self::MachineClaim { .. }
+            | Self::MachineRelease { .. }
             | Self::MachineList
             | Self::MachineNew { .. }
             | Self::MachineSet { .. }
@@ -407,6 +417,9 @@ impl MachineState {
 /// A virtual Mac installed on this computer.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MachineInfo {
+    /// Active reservation, absent when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reservation: Option<String>,
     pub name: String,
     pub state: MachineState,
     /// What it boots with next.

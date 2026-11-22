@@ -3,6 +3,7 @@
 //! every window.
 mod arrive;
 mod machine_agent;
+mod machine_claims;
 mod machines;
 mod page;
 
@@ -31,6 +32,21 @@ pub(super) fn serve(
         ));
         return;
     }
+    #[cfg(target_os = "macos")]
+    {
+        let machine = match &call.op {
+            TabOp::MachineSet { name, .. }
+            | TabOp::MachineSuspend { name }
+            | TabOp::MachineDelete { name } => Some(name),
+            TabOp::MachineImageSave { machine, .. } => Some(machine),
+            _ => None,
+        };
+        if let Some(name) = machine
+            && let Some(response) = machine_claims::check(&caller, name, cx)
+        {
+            return incoming.respond(response);
+        }
+    }
     match call.op {
         TabOp::List { pages } => incoming.respond(list(pages, cx)),
         TabOp::Focus { id } => incoming.respond(focus(&caller, id, cx)),
@@ -51,7 +67,7 @@ pub(super) fn serve(
         | TabOp::MachineExec { .. }
         | TabOp::MachineKey { .. }
         | TabOp::MachineScreenshot { .. }
-        | TabOp::MachineType { .. }) => machine_agent::serve(op, incoming, cx),
+        | TabOp::MachineType { .. }) => machine_agent::serve(&caller, op, incoming, cx),
         TabOp::MachineDelete { name } => machines::delete(&caller, name, incoming, cx),
         TabOp::MachineImageDelete { name } => {
             machines::image_delete(&caller, name, incoming, cx);
@@ -59,6 +75,9 @@ pub(super) fn serve(
         TabOp::MachineImageList => machines::image_list(incoming, cx),
         TabOp::MachineImageSave { machine, image } => {
             machines::image_save(machine, image, incoming, cx);
+        }
+        op @ (TabOp::MachineClaim { .. } | TabOp::MachineRelease { .. }) => {
+            machine_claims::serve(caller, op, incoming, cx);
         }
         TabOp::MachineList => machines::list(incoming, cx),
         TabOp::MachineNew { name, image } => machines::new(&caller, name, image, incoming, cx),

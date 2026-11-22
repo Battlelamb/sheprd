@@ -70,6 +70,23 @@ pub(crate) fn resolve_name(name: &Name) -> Result<Name> {
     resolve_name_in(&root()?, name)
 }
 
+/// Restored tabs may contain old aliases. Refuse to boot a disk under a
+/// different live-state key, even when the filesystem accepts the alias.
+pub(super) fn require_installed_name(name: &Name) -> Result<()> {
+    require_installed_name_in(&root()?, name)
+}
+
+fn require_installed_name_in(root: &Path, name: &Name) -> Result<()> {
+    let installed = resolve_name_in(root, name)?;
+    if installed != *name {
+        return Err(Error::NameMismatch {
+            requested: name.clone(),
+            installed,
+        });
+    }
+    Ok(())
+}
+
 fn resolve_name_in(root: &Path, name: &Name) -> Result<Name> {
     let requested = root.join(name.as_str());
     let metadata = fs::metadata(&requested).map_err(|source| read_error(&requested, source))?;

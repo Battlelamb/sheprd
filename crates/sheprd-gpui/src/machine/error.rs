@@ -37,6 +37,8 @@ pub enum Error {
     InvalidName,
     #[error("A machine takes {min} to {max} GB of memory on this Mac")]
     Memory { min: u16, max: u16 },
+    #[error("Open {installed} instead of {requested} to use the installed machine name")]
+    NameMismatch { requested: Name, installed: Name },
     #[error("No state directory to keep machines in")]
     NoStateDir,
     #[error("No machine is installed at {}", .0.display())]

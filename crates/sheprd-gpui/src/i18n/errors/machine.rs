@@ -28,6 +28,14 @@ impl Localize for Error {
             Self::InvalidDisplay => fl!("error-machine-invalid-display"),
             Self::InvalidName => fl!("error-machine-invalid-name"),
             Self::Memory { min, max } => fl!("error-machine-memory", min = *min, max = *max),
+            Self::NameMismatch {
+                requested,
+                installed,
+            } => fl!(
+                "error-machine-name-mismatch",
+                requested = requested.as_str(),
+                installed = installed.as_str()
+            ),
             Self::NoStateDir => fl!("error-machine-no-state-dir"),
             Self::NotInstalled(path) => fl!(
                 "error-machine-not-installed",

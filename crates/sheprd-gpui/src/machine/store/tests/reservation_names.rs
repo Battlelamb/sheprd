@@ -1,6 +1,6 @@
 use crate::machine::{
     Name,
-    store::{resolve_name_in, tests::installed},
+    store::{require_installed_name_in, resolve_name_in, tests::installed},
 };
 
 #[test]
@@ -10,13 +10,18 @@ fn reservations_use_the_installed_directory_spelling() {
     let name = Name::try_from("one".to_owned()).unwrap();
     let upper = Name::try_from("ONE".to_owned()).unwrap();
     assert_eq!(resolve_name_in(root.path(), &name).unwrap(), name);
+    require_installed_name_in(root.path(), &name).unwrap();
     if root.path().join("ONE").exists() {
         // The alternate spelling reaches the same real folder on default macOS volumes.
         assert_eq!(resolve_name_in(root.path(), &upper).unwrap(), name);
+        assert!(
+            matches!(require_installed_name_in(root.path(), &upper), Err(crate::machine::Error::NameMismatch { requested, installed }) if requested == upper && installed == name)
+        );
     } else {
         // A case-sensitive volume can hold two genuinely separate machines.
         installed(root.path(), "ONE");
         assert_eq!(resolve_name_in(root.path(), &upper).unwrap(), upper);
+        require_installed_name_in(root.path(), &upper).unwrap();
         assert_eq!(resolve_name_in(root.path(), &name).unwrap(), name);
     }
 }

@@ -297,10 +297,13 @@ pub fn start_sidebar(handle: WindowHandle<SheprdWindow>, cx: &mut App) {
                             0.
                         };
                         let expected_width = px(sidebar::LABEL_WIDTH + extra_width - icon_reserve);
+                        // As in the child-label probe, truncation may leave
+                        // one glyph plus the ellipsis short of the column.
+                        // Rounded rows have narrower columns than flat ones.
                         if p.glyph_text != p.cached
                             || (expected_short && p.glyph_text != input)
                             || (!expected_short
-                                && (p.width < px(150.) || !p.glyph_text.ends_with('\u{2026}')))
+                                && (p.width <= expected_width - px(16.) || !p.glyph_text.ends_with('\u{2026}')))
                             || p.clipped
                             || !sidebar::layout_tests::within_device_pixel(p.bounds.size.width, expected_width, window.scale_factor())
                             || p.mask.size.width != p.bounds.size.width
@@ -374,7 +377,10 @@ pub fn start_sidebar(handle: WindowHandle<SheprdWindow>, cx: &mut App) {
                                         || p.glyph_text.strip_suffix('\u{2026}').is_some_and(
                                             |kept| input.starts_with(kept.trim_end()),
                                         );
-                                    if p.glyph_text != p.cached
+                                    // As in the child-label probe, truncation may leave
+                        // one glyph plus the ellipsis short of the column.
+                        // Rounded rows have narrower columns than flat ones.
+                        if p.glyph_text != p.cached
                                         || !shown
                                         || p.clipped
                                         || p.width > p.bounds.size.width

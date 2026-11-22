@@ -495,6 +495,7 @@ pub(crate) const REPO_KEY: &str = if cfg!(windows) {
 /// The native glyph fixture has four root repositories (three gaps).
 /// Its workspace list gets half the flexible height, so reserve twice
 /// their spacing to keep the same rows visible at the smallest viewport.
+#[cfg(feature = "integration-test")]
 pub(crate) fn fixture_repository_height(config: &crate::config::Config) -> f32 {
     2. * 3. * crate::sidebar::repository::gap(config)
 }

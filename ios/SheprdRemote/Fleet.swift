@@ -776,6 +776,12 @@ final class Fleet {
         return origin == relay
     }
 
+    /// The local address of `device`'s relay proxy while it listens, which
+    /// reaches a computer no direct address does.
+    func relayOrigin(_ device: String) -> String? {
+        relayOrigins[device]
+    }
+
     private func origins(_ computer: Computer) -> [String] {
         computer.origins + (relayOrigins[computer.device].map { [$0] } ?? [])
     }

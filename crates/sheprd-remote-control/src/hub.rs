@@ -23,6 +23,8 @@ pub(crate) use api::ApiMethod;
 pub(crate) use attach::TermHold;
 pub(crate) use chat::{Chat, Event, Summary, View};
 pub(crate) use convert::Error as ConvertError;
+#[cfg(test)]
+pub(crate) use core::project_spaces;
 pub(crate) use core::{Keeper, TabRef, arrangeable};
 #[cfg(test)]
 pub(crate) use layout::TerminalAgent;

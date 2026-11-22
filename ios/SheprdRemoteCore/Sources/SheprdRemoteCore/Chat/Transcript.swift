@@ -65,6 +65,8 @@ public struct Transcript: Codable, Hashable, Sendable {
     /// Waiting for an answer, oldest first.
     public var permissions: [Permission] = []
     public var plan: [PlanEntry] = []
+    /// Pull requests the agent worked on, in the order first seen.
+    public var pullRequests: [ChatPullRequest] = []
     public var queued: [Queued] = []
     public var readOnly = false
     public var session: SessionInfo?
@@ -79,6 +81,7 @@ public struct Transcript: Codable, Hashable, Sendable {
         case activities, agent, clients, commands, entries, harnesses, modes, options, permissions, plan, queued, session, status
         case truncated, turn, usage, briefs
         case autoAccept = "auto_accept"
+        case pullRequests = "pull_requests"
         case readOnly = "read_only"
     }
 
@@ -96,6 +99,7 @@ public struct Transcript: Codable, Hashable, Sendable {
         options = try c.decodeIfPresent([ConfigOption].self, forKey: .options) ?? []
         permissions = try c.decodeIfPresent([Permission].self, forKey: .permissions) ?? []
         plan = try c.decodeIfPresent([PlanEntry].self, forKey: .plan) ?? []
+        pullRequests = try c.decodeIfPresent([ChatPullRequest].self, forKey: .pullRequests) ?? []
         queued = try c.decodeIfPresent([Queued].self, forKey: .queued) ?? []
         readOnly = try c.decodeIfPresent(Bool.self, forKey: .readOnly) ?? false
         session = try c.decodeIfPresent(SessionInfo.self, forKey: .session)

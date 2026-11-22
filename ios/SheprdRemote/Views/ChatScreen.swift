@@ -103,7 +103,7 @@ struct ChatScreen: View {
                 }
             }
             // The desktop rail's sections: sub-agents, shells, the plan,
-            // and changed files, once the agent reports any.
+            // changed files, and pull requests, once the agent reports any.
             if let transcript = store?.transcript, transcript.hasActivityPanel {
                 ToolbarItem(placement: .topBarTrailing) {
                     AgentPanelButton(transcript: transcript) { showingPanel = true }

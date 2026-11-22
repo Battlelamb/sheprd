@@ -176,6 +176,8 @@ pub enum Error {
     LinkedFileMissing { path: PathBuf },
     #[error(transparent)]
     LinkHandlers(#[from] crate::link_handlers::Error),
+    #[error(transparent)]
+    LinkInput(#[from] crate::control::link_input::Error),
     #[error("This link names a file on another computer, {host}. It is not opened from here.")]
     LinkOnAnotherHost { host: String },
     #[error(transparent)]
@@ -217,6 +219,8 @@ pub enum Error {
     MissingStateRoot,
     #[error(transparent)]
     Mods(#[from] crate::mods::Error),
+    #[error(transparent)]
+    Naming(#[from] crate::naming::Error),
     #[error(transparent)]
     Nearby(#[from] crate::remote::nearby::Error),
     #[error("No current daemon snapshot.")]

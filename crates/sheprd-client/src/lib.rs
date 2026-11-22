@@ -28,6 +28,7 @@ mod local_network;
 pub mod local_path;
 pub mod login_env;
 mod method;
+pub mod one_shot;
 mod options;
 pub mod private_endpoint;
 pub mod private_file;

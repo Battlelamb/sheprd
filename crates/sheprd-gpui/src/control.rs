@@ -8,6 +8,7 @@
 
 pub(crate) mod brief;
 mod client;
+pub(crate) mod link_input;
 pub(crate) mod listen_token;
 mod server;
 

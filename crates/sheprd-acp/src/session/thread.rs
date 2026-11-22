@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use sheprd_chat_protocol::{
     Agent, Entry, EntryId, EntryKind,
     handoff::{self, Handoff, Scope},
+    thread::file::Trimmed,
 };
 
 /// How the agent starting now takes over the conversation.
@@ -162,7 +163,8 @@ impl Thread {
         agent: Agent,
         loaded: bool,
         entries: &[Entry],
-        reading: handoff::Reading,
+        tool: bool,
+        trimmed: &[Trimmed],
     ) -> Option<(Joining, Handoff)> {
         self.replaying = false;
         let joining = match self.joining.take()? {
@@ -186,14 +188,18 @@ impl Thread {
                 },
                 &others,
                 handoff::BUDGET,
-                reading,
+                handoff::Reading {
+                    tool,
+                    trimmed: count(trimmed, None),
+                },
             ),
             Joining::Resume { seen } => {
                 let since = entries.partition_point(|entry| entry.id <= seen);
-                // What it saw before it left, it still holds.
+                // What it saw before it left, it still holds: only what was
+                // trimmed since is gone for it.
                 let reading = handoff::Reading {
-                    trimmed: 0,
-                    ..reading
+                    tool,
+                    trimmed: count(trimmed, Some(seen)),
                 };
                 handoff::build_with(
                     &entries[since..],
@@ -248,3 +254,18 @@ impl Thread {
         self.handoff = Some(text);
     }
 }
+
+/// How many ids `trimmed` holds, only those after `after` when given.
+fn count(trimmed: &[Trimmed], after: Option<EntryId>) -> usize {
+    trimmed
+        .iter()
+        .filter_map(|range| {
+            let from = after.map_or(range.from.0, |after| range.from.0.max(after.0 + 1));
+            (from <= range.to.0).then(|| range.to.0 - from + 1)
+        })
+        .map(|ids| usize::try_from(ids).unwrap_or(usize::MAX))
+        .fold(0, usize::saturating_add)
+}
+
+#[cfg(test)]
+mod tests;

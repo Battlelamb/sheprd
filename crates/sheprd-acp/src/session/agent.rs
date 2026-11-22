@@ -310,11 +310,11 @@ impl<R: FnMut(Update)> Session<R> {
         let kept = self.kept_conversation();
         let tool = kept.is_some() && self.config.given.reads();
         let (entries, trimmed) = match &kept {
-            Some(contents) => (contents.entries.as_slice(), trimmed(contents)),
-            None => (self.transcript.entries.as_slice(), 0),
+            Some(contents) => (contents.entries.as_slice(), contents.trimmed.as_slice()),
+            None => (self.transcript.entries.as_slice(), &[][..]),
         };
-        let reading = sheprd_chat_protocol::handoff::Reading { tool, trimmed };
-        let Some((joining, handoff)) = self.thread.opened(agent, loaded, entries, reading) else {
+        let Some((joining, handoff)) = self.thread.opened(agent, loaded, entries, tool, trimmed)
+        else {
             return;
         };
         let from = self.thread.before();
@@ -581,13 +581,4 @@ impl<R: FnMut(Update)> Session<R> {
         self.status(Status::Exited { message: summary });
         self.keep_entries();
     }
-}
-
-/// How many entries the thread's file no longer keeps.
-fn trimmed(contents: &sheprd_chat_protocol::thread::file::Contents) -> usize {
-    contents
-        .trimmed
-        .iter()
-        .map(|range| usize::try_from(range.to.0 - range.from.0 + 1).unwrap_or(usize::MAX))
-        .fold(0, usize::saturating_add)
 }

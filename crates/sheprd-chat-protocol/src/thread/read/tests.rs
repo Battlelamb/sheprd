@@ -107,3 +107,22 @@ fn a_search_finds_ids_newest_first_ignoring_case() {
     );
     assert!(search(&contents(), "  ").is_empty());
 }
+
+#[test]
+fn a_read_fits_its_bound_as_json_even_when_every_character_is_escaped() {
+    // Control characters take six bytes each in JSON.
+    let contents = Contents {
+        entries: vec![
+            agent(1, &"\u{1}".repeat(MAX_BYTES)),
+            agent(2, &"\"".repeat(MAX_BYTES)),
+        ],
+        trimmed: Vec::new(),
+    };
+    for id in [1, 2] {
+        let read = read(&contents, EntryId(id), EntryId(id));
+        let encoded = serde_json::to_string(&read.text).unwrap();
+        assert!(encoded.len() <= MAX_BYTES + 64, "{}", encoded.len());
+        assert!(read.text.contains(" [cut]"));
+    }
+    assert_eq!(escaped_len("a\"\n\u{1}é"), 1 + 2 + 2 + 6 + 2);
+}

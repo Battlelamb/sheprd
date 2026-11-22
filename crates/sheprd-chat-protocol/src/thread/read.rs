@@ -15,8 +15,8 @@ use crate::{EntryId, handoff};
 
 /// The most entries one read returns.
 pub const MAX_ENTRIES: usize = 64;
-/// The most text one read returns: within the MCP server's 256 KiB message
-/// bound, with room for the envelope and escaping.
+/// The most text one read returns, counted as JSON escapes it: within the
+/// MCP server's 256 KiB message bound, with room for the envelope.
 pub const MAX_BYTES: usize = 160 * 1024;
 /// The most ids one search returns, newest first.
 pub const MAX_HITS: usize = 64;
@@ -131,17 +131,37 @@ fn block(id: EntryId, line: &str) -> String {
     block
 }
 
-/// `text` cut to `max` bytes on a character boundary, ending with `mark`
-/// when cut.
+/// `text` cut to `max` bytes as JSON escapes it, on a character boundary,
+/// ending with `mark` when cut.
 fn cut(text: String, max: usize, mark: &str) -> String {
-    if text.len() <= max {
+    if escaped_len(&text) <= max {
         return text;
     }
-    let mut end = max.saturating_sub(mark.len());
-    while !text.is_char_boundary(end) {
-        end -= 1;
+    let room = max.saturating_sub(escaped_len(mark));
+    let mut used = 0;
+    let mut end = 0;
+    for (at, character) in text.char_indices() {
+        used += escaped(character);
+        if used > room {
+            break;
+        }
+        end = at + character.len_utf8();
     }
     format!("{}{mark}", &text[..end])
+}
+
+/// What `text` weighs inside a JSON string.
+fn escaped_len(text: &str) -> usize {
+    text.chars().map(escaped).sum()
+}
+
+/// What `character` weighs inside a JSON string.
+fn escaped(character: char) -> usize {
+    match character {
+        '"' | '\\' | '\n' | '\r' | '\t' | '\u{8}' | '\u{c}' => 2,
+        '\0'..='\u{1f}' => 6,
+        other => other.len_utf8(),
+    }
 }
 
 #[cfg(test)]

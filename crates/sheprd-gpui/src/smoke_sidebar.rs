@@ -199,21 +199,26 @@ pub fn start_sidebar(handle: WindowHandle<SheprdWindow>, cx: &mut App) {
                     use crate::config::{Density, LayoutMode, Style};
                     let density = [Density::Comfortable, Density::Normal, Density::Compact][frame / 12 % 3];
                     let style = [Style::Flat, Style::Rounded][frame / 36];
+                    let mode = LayoutMode::new(density, style);
                     // Rounded rows are taller; grow both sections so the probed
                     // rows stay inside their lists at the smallest size too.
                     // The activity bar's Workspaces title sits over the
                     // sidebar, so its height is added back too.
-                    let title = root
+                    let view = root
                         .clone()
                         .downcast::<SheprdWindow>()
-                        .map_err(|_| anyhow!("unexpected root"))?
-                        .read(cx)
-                        .activity_title_height();
+                        .map_err(|_| anyhow!("unexpected root"))?;
+                    let view = view.read(cx);
+                    let title = view.activity_title_height();
+                    let mut config = view.config.clone();
+                    config.layout.mode = mode;
+                    let repository_spacing =
+                        sidebar::layout_tests::fixture_repository_height(&config);
                     let h = h
                         + sidebar::DEVICE_FOOTER_HEIGHT
                         + title
+                        + repository_spacing
                         + if style == Style::Rounded { 160. } else { 0. };
-                    let mode = LayoutMode::new(density, style);
                     let compact = density == Density::Compact;
                     if frame % 3 == 0 {
                         window.resize(fixture_size(w, h));

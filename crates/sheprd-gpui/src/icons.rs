@@ -394,6 +394,8 @@ impl AssetSource for Icons {
     }
 }
 
+pub(crate) mod hosted;
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]

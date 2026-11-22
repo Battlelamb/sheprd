@@ -13,6 +13,7 @@ mod automations;
 mod backdrop;
 mod caffeine;
 mod chat;
+mod chat_brief;
 mod chat_protocol;
 mod chat_pull_requests;
 mod client;
@@ -46,8 +47,10 @@ mod machine;
 #[cfg(feature = "mcp")]
 mod mcp;
 mod mods;
+mod naming;
 mod nearby;
 mod notification_mutes;
+mod one_shot;
 mod orchestrator;
 mod orchestrator_azure;
 mod overview;

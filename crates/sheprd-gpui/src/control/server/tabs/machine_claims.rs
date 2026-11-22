@@ -51,6 +51,62 @@ pub(super) fn serve(caller: Caller, op: TabOp, incoming: socket::Incoming, cx: &
     .detach();
 }
 
+/// Normalize on a worker before checking the app-thread reservation and
+/// dispatching a filesystem mutation. Never check the caller's raw spelling.
+#[cfg(target_os = "macos")]
+pub(super) fn guarded(
+    caller: Caller,
+    name: String,
+    incoming: socket::Incoming,
+    cx: &mut App,
+    run: impl FnOnce(&Caller, String, socket::Incoming, &mut App) + 'static,
+) {
+    let read = cx.background_executor().spawn(async move {
+        let name = crate::machine::Name::try_from(name)?;
+        crate::machine::resolve_name(&name)
+    });
+    cx.spawn(async move |cx: &mut gpui::AsyncApp| {
+        let resolved = read.await;
+        cx.update(|cx| match resolved {
+            Ok(name) => {
+                if let Some(response) = check(&caller, name.as_str(), cx) {
+                    incoming.respond(response);
+                } else {
+                    run(&caller, name.to_string(), incoming, cx);
+                }
+            }
+            Err(error) => {
+                let code = match &error {
+                    crate::machine::Error::InvalidName => ErrorCode::InvalidRequest,
+                    crate::machine::Error::NotInstalled(_) => ErrorCode::NotFound,
+                    crate::machine::Error::Read { source, .. }
+                        if source.kind() == std::io::ErrorKind::NotFound =>
+                    {
+                        ErrorCode::NotFound
+                    }
+                    _ => ErrorCode::Failed,
+                };
+                incoming.respond(Response::error(code, error.to_string()));
+            }
+        });
+    })
+    .detach();
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(super) fn guarded(
+    _: Caller,
+    _: String,
+    incoming: socket::Incoming,
+    _: &mut App,
+    _: impl FnOnce(&Caller, String, socket::Incoming, &mut App) + 'static,
+) {
+    incoming.respond(Response::error(
+        ErrorCode::Unsupported,
+        "Virtual Macs need an Apple silicon Mac",
+    ));
+}
+
 #[cfg(any(target_os = "macos", test))]
 use std::{
     collections::BTreeMap,

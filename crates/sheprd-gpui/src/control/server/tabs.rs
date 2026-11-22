@@ -32,21 +32,6 @@ pub(super) fn serve(
         ));
         return;
     }
-    #[cfg(target_os = "macos")]
-    {
-        let machine = match &call.op {
-            TabOp::MachineSet { name, .. }
-            | TabOp::MachineSuspend { name }
-            | TabOp::MachineDelete { name } => Some(name),
-            TabOp::MachineImageSave { machine, .. } => Some(machine),
-            _ => None,
-        };
-        if let Some(name) = machine
-            && let Some(response) = machine_claims::check(&caller, name, cx)
-        {
-            return incoming.respond(response);
-        }
-    }
     match call.op {
         TabOp::List { pages } => incoming.respond(list(pages, cx)),
         TabOp::Focus { id } => incoming.respond(focus(&caller, id, cx)),
@@ -68,13 +53,23 @@ pub(super) fn serve(
         | TabOp::MachineKey { .. }
         | TabOp::MachineScreenshot { .. }
         | TabOp::MachineType { .. }) => machine_agent::serve(&caller, op, incoming, cx),
-        TabOp::MachineDelete { name } => machines::delete(&caller, name, incoming, cx),
+        TabOp::MachineDelete { name } => {
+            machine_claims::guarded(caller, name, incoming, cx, machines::delete)
+        }
         TabOp::MachineImageDelete { name } => {
             machines::image_delete(&caller, name, incoming, cx);
         }
         TabOp::MachineImageList => machines::image_list(incoming, cx),
         TabOp::MachineImageSave { machine, image } => {
-            machines::image_save(machine, image, incoming, cx);
+            machine_claims::guarded(
+                caller,
+                machine,
+                incoming,
+                cx,
+                move |_, name, incoming, cx| {
+                    machines::image_save(name, image, incoming, cx);
+                },
+            );
         }
         op @ (TabOp::MachineClaim { .. } | TabOp::MachineRelease { .. }) => {
             machine_claims::serve(caller, op, incoming, cx);
@@ -86,8 +81,14 @@ pub(super) fn serve(
             cpus,
             memory_gib,
             display,
-        } => machines::set(name, (cpus, memory_gib, display), incoming, cx),
-        TabOp::MachineSuspend { name } => machines::suspend(name, incoming, cx),
+        } => machine_claims::guarded(caller, name, incoming, cx, move |_, name, incoming, cx| {
+            machines::set(name, (cpus, memory_gib, display), incoming, cx);
+        }),
+        TabOp::MachineSuspend { name } => {
+            machine_claims::guarded(caller, name, incoming, cx, |_, name, incoming, cx| {
+                machines::suspend(name, incoming, cx)
+            })
+        }
         TabOp::Orchestrator { repo, action } => {
             arrive::orchestrator(&caller, repo, action, incoming, watches, cx)
         }

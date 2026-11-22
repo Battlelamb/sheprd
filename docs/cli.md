@@ -489,8 +489,17 @@ pairs, approves, or changes a setting from here. Remote control must be on.
 | `phone open workspace\|changes [WORKSPACE]` | Show a workspace, or its changes; default your workspace (`HERDR_WORKSPACE_ID`) |
 | `phone show TEXT` | A note on the phone, from this computer's agent (at most 500 characters) |
 
-Every `phone` command takes `--device ID|NAME`; without it, the phone used
-last. Exits 1 when the phone refuses (locked, or agents turned off for this
+Every `phone` command takes `--device ID|NAME`; without it, the phone with
+the most recent connection traffic is selected. This is not proof of user
+attention. Each native phone chat prompt carries the authenticated device
+ID in its Sheprd note. Agents should pass that ID explicitly, including
+when two phones are connected, and follow the latest message when the user
+switches devices. The note is appended to the new turn; earlier messages
+and the stable instructions are not rewritten, preserving their cacheable
+prefix. Desktop or unidentified prompts do not inherit an earlier phone.
+`phone open settings` opens the root only, not a settings subpage.
+
+Exits 1 when the phone refuses (locked, or agents turned off for this
 computer) or a name is two phones', 2 for a blank or overlong note, 5 for
 a pane or workspace not on this computer, and 7 when the phone does not
 answer within a few seconds, as when it went to the background. `--json`

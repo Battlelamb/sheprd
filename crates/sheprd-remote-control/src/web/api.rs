@@ -2,7 +2,7 @@
 //! chats, and push subscriptions. Auth calls that write to disk run on the
 //! blocking pool.
 
-use super::{
+use crate::web::{
     ApiError, Device, Peer, Shared, TypedFrom,
     fragments::folders,
     render::{now_ms, urlencode},
@@ -364,7 +364,7 @@ pub(super) async fn origins(State(state): State<Shared>, _device: Device) -> Jso
 
 pub(super) async fn command(
     State(state): State<Shared>,
-    _device: Device,
+    device: Device,
     TypedFrom(origin): TypedFrom,
     Path(pane): Path<String>,
     Json(command): Json<Command>,
@@ -377,7 +377,7 @@ pub(super) async fn command(
         } => Command::Prompt {
             text,
             attachments: state.uploads.resolve(&attachments, now_ms())?,
-            origin: Some(origin),
+            origin: Some(TypedFrom::authenticated(origin, &device.0)),
         },
         command => command,
     };

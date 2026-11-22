@@ -35,6 +35,13 @@ text file as embedded text when it takes embedded context, and anything else
 as a link to the file. Its optional `Origin` says where it was typed (the
 device and the connection), which the program tells the agent so it answers
 in a form the person can see there; a program that predates it ignores it.
+The optional `Origin.phone` is the native phone's authenticated device ID on
+the receiving computer. The remote daemon supplies it, replacing anything
+claimed by the client, for ordinary prompts and a new chat's first prompt.
+The program repeats the current target on each identified turn, including
+when the person switches phones, and tells the agent to use `--device`.
+These notes belong to the new turn, never to a rewritten system prompt or
+an earlier message, so the conversation's cacheable prefix stays intact.
 
 Sub-agents and background shells the agent started are `Activity` records
 in `activities`, keyed by the tool call that started them: a label (the

@@ -415,6 +415,17 @@ what Sheprd shows or keeps.
 | Keep the machine awake during a long job | `sheprd caffeine on --for 2h` |
 | Check whether the app runs, and which windows and hosts it has | `sheprd status` |
 
+Phone commands accept `--device ID` (or a unique name). Each native phone
+message's Sheprd note gives its authenticated device ID: pass that ID on
+`phone open`, `phone state`, and `phone show`. A later message can come from
+a different phone or the desktop; use the latest message's target, never
+carry one forward after the note says no target is identified. Without
+`--device`, the daemon picks the phone with the latest connection traffic,
+which does not prove the user is looking at it. `sheprd phone --json` lists
+eligible phones; ask which one when the intended target is unknown.
+`phone open settings` opens Settings' root; individual settings pages are
+not addressable yet. Opening a screen never changes a setting.
+
 Automations are Luau scripts `sheprd-automate` runs on a host on a schedule
 or by hand (see `docs/automations.md`). Write one in
 `.herdr/automations/NAME.luau`, check it with `sheprd-automate check FILE`

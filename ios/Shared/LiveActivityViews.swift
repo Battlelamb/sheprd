@@ -240,9 +240,16 @@ private struct GeekCard: View {
                         Text(step).foregroundStyle(.white.opacity(0.45)).lineLimit(1)
                     }
                 }
-                HStack(spacing: 6) {
+                HStack(alignment: .top, spacing: 6) {
                     Text(mark).foregroundStyle(Palette.phase(state.phase))
-                    Text(state.step).lineLimit(1)
+                    // The answer buttons below answer this question, so it
+                    // shows whole, never the step, which can move on while
+                    // the question waits.
+                    if state.phase == .question, let question = state.question {
+                        Text(question).lineLimit(3)
+                    } else {
+                        Text(state.step).lineLimit(1)
+                    }
                 }
                 if let summary = state.summary, state.phase == .finished || state.phase == .failed {
                     Text("# \(summary)").foregroundStyle(.secondary).lineLimit(2)
@@ -349,6 +356,10 @@ enum IslandParts {
                 Text(phaseHeadline(state.phase))
                     .font(.subheadline)
                     .foregroundStyle(Palette.phase(state.phase))
+                // Minimal offers answers here, so the question shows with them.
+                if style == .minimal, state.phase == .question, let question = state.question {
+                    Text(question).font(.subheadline).lineLimit(3)
+                }
             case .standard, .complete:
                 Group {
                     switch state.phase {
@@ -375,9 +386,9 @@ enum IslandParts {
                     .foregroundStyle(.secondary)
                 }
             case .geek:
-                Text("\(state.phase == .question ? "?" : "$") \(state.step)")
+                Text(state.phase == .question ? "? \(state.question ?? state.step)" : "$ \(state.step)")
                     .font(.system(.footnote, design: .monospaced))
-                    .lineLimit(2)
+                    .lineLimit(3)
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))

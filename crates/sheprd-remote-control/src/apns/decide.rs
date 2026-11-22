@@ -147,10 +147,12 @@ fn tool_step(chat: &Chat<'_>, before: &Transcript, tool: &Tool) -> Option<Live> 
         return None;
     }
     let step = Step::of(tool);
-    if step.step == current_step(before) {
+    let new = !turn_tools(before).any(|known| known.call_id == tool.call_id);
+    // A new call counts even when its step reads like the one shown, as a
+    // command run again does: its counts changed.
+    if step.step == current_step(before) && !new {
         return None;
     }
-    let new = !turn_tools(before).any(|known| known.call_id == tool.call_id);
     let mut state = state(before, phase(before), step);
     if new {
         state.detail.steps = Some(state.detail.steps.unwrap_or(0).saturating_add(1));

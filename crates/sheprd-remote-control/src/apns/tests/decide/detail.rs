@@ -89,3 +89,28 @@ fn a_new_turn_starts_with_no_detail() {
     let live = decide(&idle(), &change).unwrap();
     assert_eq!(live.state.detail, Detail::default());
 }
+
+/// A command run again reads the same, but it is a new call: the counts
+/// move, so it is sent. The same call again is not.
+#[test]
+fn a_repeated_command_still_counts() {
+    let mut before = running();
+    before.entries.push(Entry {
+        id: EntryId(2),
+        kind: tool("cargo test", ToolStatus::InProgress),
+    });
+    let again = |id: &str| {
+        let EntryKind::Tool(mut call) = tool("cargo test", ToolStatus::InProgress) else {
+            unreachable!()
+        };
+        call.call_id = id.to_owned();
+        push(3, EntryKind::Tool(call))
+    };
+    let live = decide(&before, &again("second")).unwrap();
+    assert_eq!(live.state.step, "cargo test");
+    assert_eq!(live.state.detail.steps, Some(2));
+    assert!(
+        decide(&before, &again("cargo test")).is_none(),
+        "the same call again"
+    );
+}

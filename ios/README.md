@@ -459,9 +459,22 @@ orders copies it handles at once (`AlertGate`), so a copy that arrives
 again, from a retry, a failover, or a second sender, shows once:
 
 - Without Apple's notification filtering entitlement, which is the case
-  today, the copy replaces the first one silently: no sound, and the first
-  is removed. One the person already dismissed comes back silently.
-- With it, the copy is dropped. The account holder requests
+  today, a copy is silent. While the first still shows, the copy takes its
+  place: they share the APNs collapse id, which iOS uses as the
+  notification's identifier. When the person already dismissed or opened
+  the first, the copy is noted (`RetractedAlerts`) and taken back
+  (`AlertSweep`): by the extension a moment after showing it, or at its
+  next run, and by the app at launch, whenever it becomes active (any
+  window), and on a background push. The list is a file in the App Group,
+  changed only under `NSFileCoordinator`, so the app and the extension
+  never overwrite each other. A sweep reads what is shown, checks, and
+  removes while holding it, and the extension forgets a delivered copy's
+  identifier under the same hold before showing another alert there, so a
+  newer alert for the same chat, under the same identifier, is never taken
+  back. A copy counts as replaced only once the extension marked it
+  delivered: until then another event under its identifier proves nothing,
+  as the copy may still land on top of it.
+- With the entitlement, the copy is dropped. The account holder requests
   `com.apple.developer.usernotifications.filtering` for
   `so.pen.herdr.remote.notifications` at
   https://developer.apple.com/contact/request/notification-service . Once

@@ -106,4 +106,32 @@ struct BriefTests {
             #expect(PastedEnvelope.unwrap(text) == text)
         }
     }
+
+    /// A heading or list inside a fenced code block is code: no section
+    /// starts there, so the sheet never splits the block.
+    @Test func codeInAFenceIsNeverASection() {
+        let outline = BriefOutline("""
+        Set up the project.
+
+        ## Steps
+        - Install
+        - Run
+
+        ```sh
+        # Install dependencies
+        Steps:
+        - not an item
+        ```
+
+        ~~~
+        # Also code
+        ~~~
+
+        ## Done when
+        - It runs
+        """)
+        #expect(outline.goal == "Set up the project.")
+        #expect(outline.sections.map(\.title) == ["Steps", "Done when"])
+        #expect(outline.sections.map(\.count) == [2, 1])
+    }
 }

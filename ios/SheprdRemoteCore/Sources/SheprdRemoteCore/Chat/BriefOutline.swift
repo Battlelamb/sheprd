@@ -72,8 +72,22 @@ public struct BriefOutline: Hashable, Sendable {
 
     private static func sections(_ lines: [String]) -> [Section] {
         var found: [Section] = []
+        // Lines inside a fenced code block are code, never sections: the
+        // sheet cuts the brief at each section, so a false one would split
+        // a code block.
+        var fence: Substring?
         for (index, line) in lines.enumerated() {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if let open = fence {
+                if Self.fence(trimmed).map({ $0.first == open.first && $0.count >= open.count }) == true {
+                    fence = nil
+                }
+                continue
+            }
+            if let opened = Self.fence(trimmed) {
+                fence = opened
+                continue
+            }
             if let title = heading(trimmed) {
                 found.append(Section(title: title, count: 0, kind: kind(title), line: index))
             } else if let title = label(trimmed), index + 1 < lines.count, isItem(lines[index + 1]) {
@@ -99,7 +113,7 @@ public struct BriefOutline: Hashable, Sendable {
                 if paragraph.isEmpty { return title }
                 break
             }
-            if isItem(line) || label(trimmed) != nil { break }
+            if isItem(line) || label(trimmed) != nil || fence(trimmed) != nil { break }
             paragraph.append(trimmed)
         }
         var joined = paragraph.joined(separator: " ")
@@ -120,6 +134,14 @@ public struct BriefOutline: Hashable, Sendable {
             index = next
         }
         return text
+    }
+
+    /// The run of backticks or tildes that opens or closes a fenced code
+    /// block on `line`, if it is one.
+    private static func fence(_ line: String) -> Substring? {
+        guard let mark = line.first, mark == "`" || mark == "~" else { return nil }
+        let run = line.prefix { $0 == mark }
+        return run.count >= 3 ? run : nil
     }
 
     private static func heading(_ line: String) -> String? {

@@ -250,7 +250,7 @@ struct GitHubSettingsRow: View {
             LabeledContent {
                 if let login { Text(verbatim: login) }
             } label: {
-                Label("GitHub", systemImage: "arrow.triangle.pull")
+                Label { Text("GitHub") } icon: { SettingsIcon(symbol: "arrow.triangle.pull", color: .black) }
             }
         }
         .task {

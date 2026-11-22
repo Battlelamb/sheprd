@@ -22,6 +22,7 @@ pub mod layout;
 pub mod pairing_link;
 pub mod pull_requests;
 pub mod push;
+pub mod read;
 pub mod relays;
 pub mod shortcuts;
 pub mod tags;
@@ -248,6 +249,12 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         change: Option<favorites::Change>,
     },
+    /// Which agents' replies were read here: marks panes read or unread,
+    /// if `change` says so, and answers with the panes unread now (`read`).
+    Read {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        change: Option<read::Change>,
+    },
     /// This computer's text shortcuts: offers Sheprd's copy, if any, and
     /// answers with the ones that stand (`shortcuts`).
     Shortcuts {
@@ -376,6 +383,7 @@ pub enum Response {
     Fleet(Box<fleet::sync::Answer>),
     Tags(tags::ComputerTags),
     Favorites(favorites::Favorites),
+    Read(read::Unread),
     Shortcuts(shortcuts::TextShortcuts),
     /// The relays the daemon listens on, its own and those shared with it.
     Relays {

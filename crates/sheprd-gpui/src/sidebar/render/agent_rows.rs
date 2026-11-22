@@ -205,6 +205,7 @@ impl SheprdWindow {
         };
         let focused = selected && agent.focused();
         let star = self.agent_star(index, &agent, cx);
+        let unread = self.unread_dot(index, &agent, cx);
         Cell::new(
             rows,
             RowData::Agent(AgentRow {
@@ -228,6 +229,7 @@ impl SheprdWindow {
         .highlighted(menu_open)
         .row()
         .when_some(star, |row, star| row.relative().child(star))
+        .when_some(unread, |row, dot| row.relative().child(dot))
         .when(gap > 0., |row| row.mt(px(gap)))
         .id(SharedString::from(format!("agent-{endpoint_id}-{id}")))
         .role(Role::ListItem)

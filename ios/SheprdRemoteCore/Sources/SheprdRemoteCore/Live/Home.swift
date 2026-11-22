@@ -16,7 +16,7 @@ public struct Home: Codable, Hashable, Sendable {
     public var github: Bool?
     /// Whether the computer's Herdr daemon is reachable.
     public var connected: Bool
-    /// Permission requests waiting across its chats: the badge.
+    /// Agents waiting for an answer or with a reply no one read: the badge.
     public var waiting: Int
     /// The computer's CPU and memory; absent until it first read them, and
     /// from older computers.
@@ -171,6 +171,9 @@ public struct Home: Codable, Hashable, Sendable {
         /// Starred on some device; lists show it first. Older computers
         /// leave it out, and so does an unstarred chat.
         public var favorite: Bool? = nil
+        /// It replied since anyone last read it, on any device. Older
+        /// computers leave it out, and so does a chat read.
+        public var unread: Bool? = nil
         /// Absent until the daemon has linked the chat.
         public var summary: Summary?
 
@@ -313,9 +316,12 @@ public struct Home: Codable, Hashable, Sendable {
             /// Its pane was starred on some device; absent when not, and
             /// from older computers.
             public var favorite: Bool? = nil
+            /// It finished since anyone last looked at it, on any device;
+            /// absent when not, and from older computers.
+            public var unread: Bool? = nil
 
             enum CodingKeys: String, CodingKey {
-                case name, status, pane, title, preview, transcript, favorite
+                case name, status, pane, title, preview, transcript, favorite, unread
                 case changedMs = "changed_ms"
             }
 

@@ -6,6 +6,7 @@ mod browser_zoom;
 mod chat;
 mod chat_pull_requests;
 mod chat_shortcuts;
+mod chat_unread;
 mod cloud_batch;
 mod cloud_exec;
 mod cloud_images;

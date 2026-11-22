@@ -288,6 +288,20 @@ final class RemoteClient: Sendable {
         )
     }
 
+    // MARK: Read marks
+
+    /// Marks the agents in `panes` read or unread on every device; the
+    /// computer's homes say so. An older computer answers 404.
+    func setRead(_ read: Bool, panes: [String], bearer: String) async throws {
+        struct Change: Encodable {
+            let panes: [String]
+            let read: Bool
+        }
+        let _: EmptyAnswer = try await send(
+            "POST", "/api/v2/read", body: Change(panes: panes, read: read), bearer: bearer
+        )
+    }
+
     // MARK: Text shortcuts
 
     /// The computer's text shortcuts. An older computer answers 404, and

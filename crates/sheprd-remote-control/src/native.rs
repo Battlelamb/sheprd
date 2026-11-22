@@ -69,6 +69,7 @@ fn home(state: &Shared, device: &DeviceId) -> Home {
     let checkouts = state.lending.checkouts.current();
     let recognized = state.lending.recognized();
     let favorites = state.favorites.current();
+    let seen = state.seen();
     let mut home = Home::project(Sources {
         checkouts: &checkouts,
         computer: &state.computer,
@@ -81,8 +82,9 @@ fn home(state: &Shared, device: &DeviceId) -> Home {
         recognized: &recognized,
         shortcuts_ms: state.shortcuts.current().updated_ms,
         tags: state.tags.current(),
+        unread: &seen.unread,
         version: crate::server::version(),
-        waiting: state.attention().len(),
+        waiting: seen.needing.len(),
     });
     home.preview_terminals(&state.previews.current());
     home.github = Some(state.github.enabled());

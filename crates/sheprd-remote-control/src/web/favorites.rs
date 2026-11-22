@@ -82,8 +82,8 @@ impl Kept {
     }
 }
 
-/// Watches the primary Herdr 1 session and forgets its panes' stars when
-/// it restarts, as its pane ids start over.
+/// Watches the primary Herdr 1 session and forgets its panes' stars and
+/// read marks when it restarts, as its pane ids start over.
 pub(crate) async fn follow_boot(state: Shared) {
     let mut primary = state.hub.watch_primary();
     loop {
@@ -91,6 +91,10 @@ pub(crate) async fn follow_boot(state: Shared) {
             let layout = primary.borrow_and_update();
             (layout.connected && !layout.boot.is_empty()).then(|| layout.boot.clone())
         };
+        // Read marks follow the same boot, in memory.
+        if let Some(boot) = &boot {
+            state.opened.follow_boot(boot);
+        }
         if let Some(boot) = boot
             && state.favorites.current().boot.as_deref() != Some(boot.as_str())
         {

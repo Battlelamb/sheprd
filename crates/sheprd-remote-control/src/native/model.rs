@@ -17,7 +17,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use sheprd_chat_protocol::{Cursor, Permission, Status, Transcript};
 use sheprd_client::protocol::{AgentStatus, ClientShellWorktree};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 /// What this daemon offers phones. Raised when the phone starts to rely on
 /// something new; `Home.requiredAPI` in `SheprdRemoteCore` is what the
@@ -44,7 +44,7 @@ pub(crate) struct Home {
     pub(crate) github_hosts: Vec<LentHost>,
     /// Whether the Herdr daemon is reachable now.
     pub(crate) connected: bool,
-    /// Agents that need an answer or finished unseen: the app's badge.
+    /// Agents that need an answer or have a reply no one read: the app's badge.
     pub(crate) waiting: usize,
     /// This computer's CPU and memory; absent until first read, and from
     /// older servers.
@@ -159,6 +159,9 @@ pub(crate) struct Chat {
     /// Starred on some device (`control::favorites`); lists show it first.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) favorite: bool,
+    /// It replied since anyone last read it (`control::read`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) unread: bool,
     /// Absent until the daemon's connection to the chat is up.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) summary: Option<ChatSummary>,
@@ -263,6 +266,9 @@ pub(crate) struct TerminalAgent {
     /// Its pane was starred on some device (`control::favorites`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) favorite: bool,
+    /// It finished since anyone last looked at it (`control::read`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) unread: bool,
     /// The pane it runs in; absent from older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) pane: Option<String>,
@@ -423,7 +429,12 @@ impl From<Summary> for ChatSummary {
     }
 }
 
-fn chat(row: &ChatRow, summaries: &mut HashMap<String, Summary>, favorites: &Favorites) -> Chat {
+fn chat(
+    row: &ChatRow,
+    summaries: &mut HashMap<String, Summary>,
+    favorites: &Favorites,
+    unread: &BTreeSet<String>,
+) -> Chat {
     let summary = summaries.remove(&row.pane);
     // Herdr may know an ACP chat only as `acp`, without the display name
     // `herdr-acp` reported; the chat's own transcript names its agent.
@@ -446,11 +457,16 @@ fn chat(row: &ChatRow, summaries: &mut HashMap<String, Summary>, favorites: &Fav
         agent,
         status: row.status,
         favorite: favorites.contains(&row.pane),
+        unread: unread.contains(&row.pane),
         summary: summary.map(ChatSummary::from),
     }
 }
 
-fn terminal(terminal: &hub::Terminal, favorites: &Favorites) -> Terminal {
+fn terminal(
+    terminal: &hub::Terminal,
+    favorites: &Favorites,
+    unread: &BTreeSet<String>,
+) -> Terminal {
     Terminal {
         tab: terminal.tab.clone(),
         label: terminal.label.clone(),
@@ -472,6 +488,7 @@ fn terminal(terminal: &hub::Terminal, favorites: &Favorites) -> Terminal {
             name: agent.name.clone(),
             status: agent.status,
             favorite: favorites.contains(&agent.pane),
+            unread: unread.contains(&agent.pane),
             pane: Some(agent.pane.clone()),
             title: agent.title.clone(),
             changed_ms: agent.changed_ms,
@@ -501,6 +518,8 @@ pub(crate) struct Sources<'a> {
     pub(crate) recognized: &'a Recognized,
     pub(crate) shortcuts_ms: u64,
     pub(crate) tags: ComputerTags,
+    /// The panes with a reply no one read, from [`crate::web::State::seen`].
+    pub(crate) unread: &'a BTreeSet<String>,
     pub(crate) version: &'a str,
     /// The panes wanting the user, from [`crate::web::State::attention`].
     pub(crate) waiting: usize,
@@ -537,6 +556,7 @@ impl Home {
             recognized,
             shortcuts_ms,
             tags,
+            unread,
             version,
             waiting,
         } = sources;
@@ -565,12 +585,12 @@ impl Home {
                 chats: workspace
                     .chats
                     .iter()
-                    .map(|row| chat(row, &mut summaries, favorites))
+                    .map(|row| chat(row, &mut summaries, favorites, unread))
                     .collect(),
                 terminals: workspace
                     .terminals
                     .iter()
-                    .map(|row| terminal(row, favorites))
+                    .map(|row| terminal(row, favorites, unread))
                     .collect(),
             })
             .collect();

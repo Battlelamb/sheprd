@@ -46,9 +46,9 @@ pub(super) const MAX_PARTS: usize = saved::MAX_SAVED.div_ceil(sync::MAX_ANSWER_B
 /// Asks `target` for what this computer lacks, from `heads`, naming no
 /// fleet and with a fresh nonce: its answer, when it proves it is one of
 /// `hosts` (the fleet's computers and Sheprd hosts) in `fleet`, with the
-/// host it proved to be; `None` for a machine in no fleet, or one that
-/// does not prove it, which learns nothing; [`Error::OtherFleet`] for one
-/// in another fleet.
+/// host it proved to be; `None` for one that does not prove it, which
+/// learns nothing; [`Error::NotInFleet`] for a machine in no fleet, and
+/// [`Error::OtherFleet`] for one in another.
 async fn ask_proven(
     executor: &BackgroundExecutor,
     target: &ConnectTarget,
@@ -71,7 +71,7 @@ async fn ask_proven(
         Ok(theirs) if theirs.fleet == fleet => {
             Ok(sync::proven_host(&theirs, &nonce, hosts).map(|host| (theirs, host)))
         }
-        Ok(theirs) if theirs.fleet.is_empty() => Ok(None),
+        Ok(theirs) if theirs.fleet.is_empty() => Err(Error::NotInFleet),
         Ok(_) => Err(Error::OtherFleet),
         // A machine with no Sheprd daemon: the caller decides.
         Err(error) => Err(error),
@@ -220,6 +220,15 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
                         proven_as = host;
                         return Ok((standing, Vec::new(), view.heads.clone()));
                     }
+                    // Sheprd in no fleet: a computer to invite, unless it
+                    // is also a plain host of this fleet, whose agent is
+                    // still kept current.
+                    Err(Error::NotInFleet) => {
+                        let (standing, host) =
+                            super::plain::sync(&client, &executor, &machine, &view).await?;
+                        proven_as = host;
+                        return Ok((beside_daemon(standing), Vec::new(), view.heads.clone()));
+                    }
                     // A host the fleet removed that is in another fleet
                     // now has forgotten this one.
                     Err(Error::OtherFleet) => {
@@ -269,7 +278,8 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
                 let (next, again) =
                     match ask_proven(&executor, target, ours.heads.clone(), &fleet, &hosts).await {
                         Ok(Some(answer)) => answer,
-                        Ok(None) | Err(Error::NoProgram | Error::OtherFleet) => {
+                        Ok(None)
+                        | Err(Error::NoProgram | Error::NotInFleet | Error::OtherFleet) => {
                             return Ok((Standing::Outside, Vec::new(), Vec::new()));
                         }
                         Err(error) => return Err(error),
@@ -351,6 +361,16 @@ pub(super) fn sync(cx: &mut App, id: String, machine: Machine, fleet: String) {
         });
     })
     .detach();
+}
+
+/// Where a machine whose Sheprd is in no fleet stands, given what the
+/// plain host sync found of its relay agent: a plain host of this fleet,
+/// or one the fleet removed, stays one; any other is a computer to invite.
+pub(crate) fn beside_daemon(plain: Standing) -> Standing {
+    match plain {
+        Standing::Agent | Standing::Removed => plain,
+        _ => Standing::Outside,
+    }
 }
 
 /// Invites the computer `machine` to join: it signs its own bundle for the

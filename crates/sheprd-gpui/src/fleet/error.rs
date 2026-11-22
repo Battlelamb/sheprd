@@ -31,6 +31,8 @@ pub enum Error {
     NoRelays,
     #[error("The other computer's fleet did not admit this one")]
     NotAdmitted,
+    #[error("The computer is in no fleet")]
+    NotInFleet,
     #[error(
         "The relay agent runs on the host, but no relay lets it listen; check the relays' listen tokens"
     )]

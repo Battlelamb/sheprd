@@ -112,3 +112,15 @@ fn a_machine_in_another_fleet_is_asked_rarely() {
     let (elsewhere, now) = link(Standing::Elsewhere, OUTSIDE, &[]);
     assert!(elsewhere.due(&[], now));
 }
+
+#[test]
+fn sheprd_in_no_fleet_stays_a_plain_host_of_this_one() {
+    use crate::fleet::flows::beside_daemon;
+    // Its relay agent belongs to this fleet: keep it current.
+    assert_eq!(beside_daemon(Standing::Agent), Standing::Agent);
+    assert_eq!(beside_daemon(Standing::Removed), Standing::Removed);
+    // No agent of this fleet: a computer to invite.
+    for plain in [Standing::NoDaemon, Standing::Outside, Standing::Unchecked] {
+        assert_eq!(beside_daemon(plain), Standing::Outside);
+    }
+}

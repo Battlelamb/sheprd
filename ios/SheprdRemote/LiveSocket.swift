@@ -79,10 +79,11 @@ enum LiveSocket {
                 }
             }
             let keepalive = Task {
+                var health = LiveKeepalive()
                 while !Task.isCancelled {
                     try? await Task.sleep(for: keepaliveInterval)
                     guard !Task.isCancelled else { return }
-                    let finding = await LiveKeepalive.check(
+                    let finding = await health.check(
                         pong: { await completes(within: pongLimit) { task.sendPing(pongReceiveHandler: $0) } },
                         probe: { await client.ping() }
                     )
@@ -95,7 +96,7 @@ enum LiveSocket {
                     case .dead:
                         // A path that stopped carrying traffic: closing the
                         // socket ends the reader, and the link races again.
-                        log.notice("no pong or answer at \(client.origin, privacy: .public): closing")
+                        log.notice("socket pong deadline or address check failed at \(client.origin, privacy: .public): closing")
                         task.cancel(with: .goingAway, reason: nil)
                         return
                     }

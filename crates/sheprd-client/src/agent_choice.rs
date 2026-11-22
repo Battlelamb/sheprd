@@ -34,41 +34,12 @@ impl AgentChoice {
 
     /// [`Self::of`], giving up as [`Self::Fixed`] after `deadline`.
     pub fn of_within(program: &Path, deadline: Duration) -> Self {
-        use std::io::Read as _;
-        let mut command = crate::new_command(program);
-        command
-            .arg("--help")
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null());
-        let Ok(mut child) = command.spawn() else {
-            return Self::Fixed;
-        };
-        let (sender, receiver) = std::sync::mpsc::channel();
-        if let Some(stdout) = child.stdout.take() {
-            // Read apart, so the deadline holds while the read blocks. A
-            // child the program started may keep the pipe open past the
-            // kill below; the read then ends when that child does.
-            let _ = std::thread::Builder::new()
-                .name("acp-help".to_owned())
-                .spawn(move || {
-                    let mut help = Vec::new();
-                    let _ = stdout.take(HELP_LIMIT).read_to_end(&mut help);
-                    let _ = sender.send(help);
-                });
-        }
-        let help = receiver.recv_timeout(deadline).unwrap_or_default();
-        let _ = child.kill();
-        let _ = child.wait();
-        Self::from_help(&help)
+        Self::from_help(&help(program, deadline))
     }
 
     /// The choice a program whose help reads `help` offers.
     pub fn from_help(help: &[u8]) -> Self {
-        if help
-            .windows(CHOOSE.len())
-            .any(|word| word == CHOOSE.as_bytes())
-        {
+        if lists(help, CHOOSE) {
             Self::Open
         } else {
             Self::Fixed
@@ -82,6 +53,51 @@ impl AgentChoice {
             Self::Open => Some(CHOOSE),
         }
     }
+}
+
+/// Whether `program`'s `--help` lists `option`, such as a newer flag an
+/// older program would refuse. Blocking for up to [`HELP_DEADLINE`]: run it
+/// off the UI thread.
+pub fn offers(program: &Path, option: &str) -> bool {
+    lists(&help(program, HELP_DEADLINE), option)
+}
+
+/// Whether a program whose help reads `help` lists `option`.
+fn lists(help: &[u8], option: &str) -> bool {
+    help.windows(option.len())
+        .any(|word| word == option.as_bytes())
+}
+
+/// What `program --help` prints, at most [`HELP_LIMIT`] bytes within
+/// `deadline`; nothing when it does not start or answer in time.
+fn help(program: &Path, deadline: Duration) -> Vec<u8> {
+    use std::io::Read as _;
+    let mut command = crate::new_command(program);
+    command
+        .arg("--help")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    let Ok(mut child) = command.spawn() else {
+        return Vec::new();
+    };
+    let (sender, receiver) = std::sync::mpsc::channel();
+    if let Some(stdout) = child.stdout.take() {
+        // Read apart, so the deadline holds while the read blocks. A
+        // child the program started may keep the pipe open past the
+        // kill below; the read then ends when that child does.
+        let _ = std::thread::Builder::new()
+            .name("acp-help".to_owned())
+            .spawn(move || {
+                let mut help = Vec::new();
+                let _ = stdout.take(HELP_LIMIT).read_to_end(&mut help);
+                let _ = sender.send(help);
+            });
+    }
+    let help = receiver.recv_timeout(deadline).unwrap_or_default();
+    let _ = child.kill();
+    let _ = child.wait();
+    help
 }
 
 #[cfg(test)]

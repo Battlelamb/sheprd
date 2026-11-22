@@ -34,6 +34,8 @@ pub enum Error {
     #[error(transparent)]
     Chat(#[from] crate::chat::Error),
     #[error(transparent)]
+    ChatBrief(#[from] crate::control::brief::Error),
+    #[error(transparent)]
     ChatPullRequests(#[from] crate::chat::pull_requests::Error),
     #[error("{source}; removing {}: {cleanup}", path.display())]
     Cleanup {

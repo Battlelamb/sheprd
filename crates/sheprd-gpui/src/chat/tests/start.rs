@@ -73,19 +73,19 @@ fn a_file_that_cannot_run_is_not_the_program() {
 #[test]
 fn the_typed_line_names_only_the_agent() {
     for agent in Agent::ALL {
-        let line = command_line(*agent, AgentChoice::Open);
+        let line = command_line(*agent, AgentChoice::Open, None);
         assert!(line.contains(PROGRAM_ENV));
         assert!(line.ends_with(&format!("{agent}'")) || line.ends_with(agent.name()));
         assert!(!line.contains('/'), "{line}");
     }
     if cfg!(unix) {
         assert_eq!(
-            command_line(Agent::Claude, AgentChoice::Open),
+            command_line(Agent::Claude, AgentChoice::Open, None),
             r#" sh -c 'exec "$HERDR_ACP" --choose claude'"#
         );
     } else {
         assert_eq!(
-            command_line(Agent::Claude, AgentChoice::Open),
+            command_line(Agent::Claude, AgentChoice::Open, None),
             "& $env:HERDR_ACP --choose claude"
         );
     }
@@ -226,7 +226,11 @@ fn a_new_chat_opens_a_tab_and_types_the_fixed_line(cx: &mut gpui::TestAppContext
             pane_id: "w1:p9".into(),
             events: vec![
                 // The fixture's program was never asked for its help.
-                ClientPaneInputEvent::TextCommit(command_line(Agent::Claude, AgentChoice::Fixed)),
+                ClientPaneInputEvent::TextCommit(command_line(
+                    Agent::Claude,
+                    AgentChoice::Fixed,
+                    None
+                )),
                 crate::menu::enter_key(),
             ],
         }
@@ -309,7 +313,7 @@ fn an_agent_the_host_lacks_does_not_start(cx: &mut gpui::TestAppContext) {
 fn a_fixed_choice_starts_the_agent_alone() {
     if cfg!(unix) {
         assert_eq!(
-            command_line(Agent::Codex, AgentChoice::Fixed),
+            command_line(Agent::Codex, AgentChoice::Fixed, None),
             r#" sh -c 'exec "$HERDR_ACP" codex'"#
         );
     }

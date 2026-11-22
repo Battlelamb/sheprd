@@ -69,6 +69,7 @@ mod selection;
 mod session;
 mod shortcuts;
 mod start;
+mod start_brief;
 mod stop;
 mod streaming;
 mod subagents;

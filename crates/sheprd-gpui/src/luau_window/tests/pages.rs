@@ -54,6 +54,6 @@ fn shell_leaves_native_pages_unpainted() {
             "{:?}",
             workspace.shell().error()
         );
-        assert!(contains_main(workspace.shell().view().expect("shell view")));
+        assert!(workspace.shell().view().is_some_and(contains_main));
     }
 }

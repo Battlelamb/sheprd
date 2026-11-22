@@ -171,3 +171,18 @@ fn a_socket_quiet_past_two_pings_is_closed() {
     assert!(!too_quiet(QUIET_LIMIT));
     assert!(too_quiet(QUIET_LIMIT + Duration::from_secs(1)));
 }
+
+/// A phone whose path went quiet stops taking bytes: a write that waits
+/// past its limit ends the socket rather than holding it open.
+#[tokio::test]
+async fn a_write_that_cannot_go_out_ends_the_socket() {
+    let limit = Duration::from_millis(20);
+    let stuck = std::future::pending::<Result<(), ()>>();
+    assert!(matches!(bounded(limit, stuck).await, Some(Ending::Stalled)));
+    assert!(matches!(
+        bounded(limit, async { Err::<(), _>(()) }).await,
+        Some(Ending::SendFailed)
+    ));
+    assert!(bounded(limit, async { Ok::<(), ()>(()) }).await.is_none());
+    assert!(WRITE_LIMIT < QUIET_LIMIT);
+}

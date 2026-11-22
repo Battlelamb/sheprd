@@ -51,9 +51,6 @@ const INTERVAL: Duration = Duration::from_secs(2);
 const RETRY: Duration = Duration::from_secs(30);
 /// macOS hosts spend one second of this measuring CPU.
 const STEP_TIMEOUT: Duration = Duration::from_secs(10);
-/// A Windows host's first answer also waits for SSH and for PowerShell to
-/// load its CIM module.
-const WINDOWS_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// CPU samples kept for the sparklines.
 pub(crate) const HISTORY: usize = 16;
 /// Hosts are few; an unbounded endpoint list still cannot start more workers.
@@ -133,7 +130,7 @@ impl Source {
     /// measure CPU usage up to the next.
     fn windows(target: &str, gpu: bool) -> Result<Self> {
         let mut session = WindowsSession::connect(target, &windows::script(gpu)).map_err(remote)?;
-        let text = session.sample(WINDOWS_CONNECT_TIMEOUT).map_err(remote)?;
+        let text = session.sample(STEP_TIMEOUT).map_err(remote)?;
         let ticks = sample::parse(&text, None)?.ticks;
         Ok(Self::Windows {
             session,
@@ -191,15 +188,12 @@ impl Source {
                 ticks,
             } => {
                 // The script knows whether to probe the GPU from its start.
-                let timeout = if *probing == gpu {
-                    STEP_TIMEOUT
-                } else {
+                if *probing != gpu {
                     *session =
                         WindowsSession::connect(target, &windows::script(gpu)).map_err(remote)?;
                     *probing = gpu;
-                    WINDOWS_CONNECT_TIMEOUT
-                };
-                let text = session.sample(timeout).map_err(remote)?;
+                }
+                let text = session.sample(STEP_TIMEOUT).map_err(remote)?;
                 let answer = sample::parse(&text, *ticks)?;
                 *ticks = answer.ticks;
                 Ok(answer.sample)

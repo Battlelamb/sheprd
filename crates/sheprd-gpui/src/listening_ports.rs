@@ -152,10 +152,6 @@ enum Scanner {
     Windows(WindowsSession),
 }
 
-/// How long a Windows host's first answer may take: SSH, PowerShell's
-/// start, and compiling its environment reader.
-const WINDOWS_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-
 /// The scanner for `host`. `windows` is whether it answered as a Windows
 /// host before, so a reconnect goes straight to PowerShell.
 fn open(host: &Host, windows: bool) -> Result<Scanner> {
@@ -189,7 +185,7 @@ fn open(host: &Host, windows: bool) -> Result<Scanner> {
 /// as one: an SSH failure, or a host with no PowerShell, gives none.
 fn windows_scanner(target: &str) -> Result<Scanner> {
     let mut session = WindowsSession::connect(target, &windows::script()).map_err(failed)?;
-    session.sample(WINDOWS_CONNECT_TIMEOUT).map_err(failed)?;
+    session.sample(STEP_TIMEOUT).map_err(failed)?;
     Ok(Scanner::Windows(session))
 }
 
@@ -235,10 +231,7 @@ fn scan(scanner: &mut Scanner) -> Result<Scan> {
             let output = shell.run(scan::COMMAND, STEP_TIMEOUT).map_err(failed)?;
             parse(&output.stdout)
         }
-        // This machine's first answer also waits for PowerShell to start.
-        Scanner::Windows(session) => {
-            parse(&session.sample(WINDOWS_CONNECT_TIMEOUT).map_err(failed)?)
-        }
+        Scanner::Windows(session) => parse(&session.sample(STEP_TIMEOUT).map_err(failed)?),
     }
 }
 

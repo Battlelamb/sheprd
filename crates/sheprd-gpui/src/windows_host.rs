@@ -39,6 +39,12 @@ const LIMIT: usize = 256 * 1024;
 /// How often a wait checks that the process is still running.
 const POLL: Duration = Duration::from_millis(250);
 
+/// How long the first answer may take: SSH, PowerShell loading its modules,
+/// and a script compiling C#, on a slow or busy machine. Waiting less would
+/// start it all again on every retry and might never get an answer. An SSH
+/// connection that fails ends `ssh`, which is noticed at once.
+const FIRST_ANSWER: Duration = Duration::from_secs(120);
+
 /// The loop around a feature's lines. sshd ends only its own session process
 /// when the connection does, not the shell it started, and a write to the
 /// closed connection can fail silently; so the script ends itself when that
@@ -107,6 +113,8 @@ pub(crate) struct Session {
     child: Child,
     output: mpsc::Receiver<std::io::Result<Vec<u8>>>,
     buffer: Vec<u8>,
+    /// Whether an answer has come yet; see [`FIRST_ANSWER`].
+    answered: bool,
     /// The SSH host's shared channel, if any. Fields drop after
     /// `Drop::drop` reaps the child, so it is freed only then.
     _channel: Option<sheprd_client::SshChannel>,
@@ -172,15 +180,22 @@ impl Session {
             child,
             output,
             buffer: Vec::new(),
+            answered: false,
             _channel: None,
         })
     }
 
     /// The newest whole answer, without its [`END`] line, waiting up to
-    /// `timeout` for one when none has arrived since the last. Older answers
-    /// are dropped, so a caller that fell behind never reads a stale one.
-    /// Any failure leaves the session unusable.
+    /// `timeout` for one when none has arrived since the last, or up to
+    /// [`FIRST_ANSWER`] for the first. Older answers are dropped, so a caller
+    /// that fell behind never reads a stale one. Any failure leaves the
+    /// session unusable.
     pub fn sample(&mut self, timeout: Duration) -> Result<String> {
+        let timeout = if self.answered {
+            timeout
+        } else {
+            timeout.max(FIRST_ANSWER)
+        };
         let deadline = Instant::now() + timeout;
         loop {
             // Take what has already arrived without waiting.
@@ -194,6 +209,7 @@ impl Session {
                 }
             }
             if let Some(text) = take_latest(&mut self.buffer) {
+                self.answered = true;
                 return Ok(text);
             }
             if self.buffer.len() > LIMIT {

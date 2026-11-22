@@ -148,3 +148,40 @@ fn a_compressed_script_runs_as_itself() {
         assert_eq!(session.sample(limit).unwrap().trim(), "it's here");
     }
 }
+
+/// The first answer may take longer than later ones (PowerShell loading
+/// modules, a script compiling C#): it is waited for past `timeout`, so a
+/// slow machine is not restarted forever.
+#[test]
+fn a_slow_first_answer_is_waited_for() {
+    #[cfg(windows)]
+    let mut command = {
+        let mut command = std::process::Command::new("powershell.exe");
+        command
+            .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"])
+            .arg(script(
+                "Start-Sleep -Seconds 3",
+                "    [void]$herdrOut.AppendLine('late')",
+                Duration::from_secs(1),
+            ));
+        command.stderr(Stdio::null());
+        command
+    };
+    #[cfg(not(windows))]
+    let mut command = {
+        let mut command = std::process::Command::new("/bin/sh");
+        command.args([
+            "-c",
+            "sleep 3; while :; do printf 'late\n@@herdr-answer-end\n'; sleep 1; done",
+        ]);
+        command
+    };
+    let mut session = Session::start(&mut command).unwrap();
+    let step = Duration::from_millis(500);
+    assert_eq!(session.sample(step).unwrap().trim(), "late");
+    // Later answers keep to the step, a period apart.
+    assert_eq!(
+        session.sample(Duration::from_secs(30)).unwrap().trim(),
+        "late"
+    );
+}

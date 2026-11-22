@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use super::*;
 use crate::web::tests::{post, send, state};
@@ -107,4 +107,79 @@ fn a_request_dropped_before_its_answer_is_logged() {
     assert!(log.contains("request ended unanswered"), "{log}");
     assert!(log.contains("call=\"3fa9c2d1\""), "{log}");
     assert!(log.contains("peer=192.168.1.50"), "{log}");
+}
+
+/// Over a real connection: a client that hangs up while the handler still
+/// works drops it, and the line names the call. This is what tells a send
+/// that reached the computer from one that never did.
+#[test]
+fn a_client_hanging_up_mid_request_is_logged_with_its_call() {
+    use axum::{Router, middleware, routing::get};
+    use tokio::{
+        io::AsyncWriteExt,
+        net::{TcpListener, TcpStream},
+        sync::oneshot,
+    };
+    let log = logged(|| {
+        // One thread, so the subscriber `logged` sets sees the server too.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            // The handler says when it starts, and when it is dropped: the
+            // same drop that ends the middleware, and so writes its line.
+            let (entered, handler_entered) = oneshot::channel::<()>();
+            let (dropped, handler_dropped) = oneshot::channel::<()>();
+            let signals = std::sync::Arc::new(std::sync::Mutex::new(Some((entered, dropped))));
+            let app = Router::new()
+                .route(
+                    "/slow",
+                    get(move || {
+                        let signals = signals.clone();
+                        async move {
+                            let Some((entered, dropped)) = signals.lock().unwrap().take() else {
+                                return;
+                            };
+                            let _on_drop = OnDrop(Some(dropped));
+                            let _ = entered.send(());
+                            std::future::pending::<()>().await;
+                        }
+                    }),
+                )
+                .layer(middleware::from_fn(requests));
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move { axum::serve(listener, app).await });
+            let mut client = TcpStream::connect(address).await.unwrap();
+            client
+                .write_all(
+                    b"GET /slow HTTP/1.1\r\nhost: phone\r\nx-sheprd-request: 3fa9c2d1\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            handler_entered.await.unwrap();
+            drop(client);
+            // The connection's task sees the hang-up and drops the handler.
+            tokio::time::timeout(std::time::Duration::from_secs(5), handler_dropped)
+                .await
+                .expect("the handler outlived its client")
+                .unwrap();
+            server.abort();
+        });
+    });
+    assert!(log.contains("request ended unanswered"), "{log}");
+    assert!(log.contains("call=\"3fa9c2d1\""), "{log}");
+    assert!(log.contains("route=/slow"), "{log}");
+}
+
+/// Sends on its channel when dropped.
+struct OnDrop(Option<tokio::sync::oneshot::Sender<()>>);
+
+impl Drop for OnDrop {
+    fn drop(&mut self) {
+        if let Some(sender) = self.0.take() {
+            let _ = sender.send(());
+        }
+    }
 }

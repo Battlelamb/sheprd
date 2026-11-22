@@ -118,9 +118,10 @@ final class RemoteClient: Sendable {
     let fingerprint: Fingerprint
     let session: URLSession
 
-    /// The tag of the `Fleet.call` this request belongs to, sent as
-    /// `PathFailure.tagHeader` so the computer's log names it too.
-    @TaskLocal static var callTag: String?
+    /// The tags of the `Fleet.call` this request belongs to: each request
+    /// gets the next, sent as `PathFailure.tagHeader` so the computer's
+    /// log names it too.
+    @TaskLocal static var callTags: CallTags?
 
     init(origin: String, fingerprint: Fingerprint) {
         self.origin = origin
@@ -613,9 +614,9 @@ final class RemoteClient: Sendable {
     }
 
     private static func tagged(_ request: URLRequest) -> URLRequest {
-        guard let tag = callTag else { return request }
+        guard let tags = callTags else { return request }
         var request = request
-        request.setValue(tag, forHTTPHeaderField: PathFailure.tagHeader)
+        request.setValue(tags.next(), forHTTPHeaderField: PathFailure.tagHeader)
         return request
     }
 

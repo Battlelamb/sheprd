@@ -126,6 +126,8 @@ fn a_client_before_pull_requests_gets_the_count_in_their_place() {
     assert_eq!(current.message(message.clone()), Some(message));
 }
 
+mod briefs;
+
 fn handoff_entry() -> Entry {
     Entry {
         id: sheprd_chat_protocol::EntryId(4),
@@ -145,7 +147,7 @@ fn a_client_before_threads_gets_handoffs_as_notices_and_no_thread() {
         Agent,
         thread::{Thread, ThreadId},
     };
-    let mut downgrade = Downgrade::new(3);
+    let mut downgrade = Downgrade::new(4);
     let epoch = Cursor::new_epoch();
     let thread = Thread::new(ThreadId::random(), Agent::Claude);
     let mut transcript = Transcript::new("Codex");

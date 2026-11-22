@@ -40,6 +40,9 @@ pub struct Transcript {
     /// come, without asking.
     #[serde(default)]
     pub auto_accept: bool,
+    /// Prompts another agent wrote, oldest first (revision 4).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub briefs: Vec<crate::Brief>,
     /// How many attached clients watch, not counting the program's own view.
     #[serde(default)]
     pub clients: u32,
@@ -215,7 +218,7 @@ pub enum EntryKind {
     /// How a prompt turn ended: how long it took and what it used.
     Turn(TurnSummary),
     /// Another agent took over the conversation, and what it was handed.
-    /// Clients before protocol revision 4 get a [`Self::Notice`] instead.
+    /// Clients before protocol revision 5 get a [`Self::Notice`] instead.
     Handoff(HandedOver),
     /// Something the program says about the session, or an imported system event.
     Notice {
@@ -282,7 +285,7 @@ pub struct HandedOver {
 }
 
 impl HandedOver {
-    /// What a client before revision 4 shows instead, as a notice.
+    /// What a client before revision 5 shows instead, as a notice.
     pub fn notice_text(&self) -> String {
         let what = if self.resumed {
             "what happened since it last took part"
@@ -304,7 +307,7 @@ impl HandedOver {
         text
     }
 
-    /// The entry as a client before revision 4 reads it.
+    /// The entry as a client before revision 5 reads it.
     pub fn as_notice(&self) -> EntryKind {
         EntryKind::Notice {
             answers: Vec::new(),

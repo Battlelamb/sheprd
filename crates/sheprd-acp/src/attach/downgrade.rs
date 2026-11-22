@@ -13,7 +13,7 @@ use sheprd_chat_protocol::{Change, Entry, EntryKind, REVISION, ServerMessage, Tr
 
 /// The revision that added threads: `Change::Thread`, `Transcript::thread`,
 /// and `EntryKind::Handoff`.
-const THREADS: u32 = 4;
+const THREADS: u32 = 5;
 
 #[derive(Debug)]
 pub(crate) struct Downgrade {
@@ -83,6 +83,7 @@ fn since(change: &Change) -> u32 {
         Change::Activity { .. } => 1,
         Change::Harnesses { .. } => 2,
         Change::PullRequest { .. } => 3,
+        Change::Brief { .. } => 4,
         Change::Thread { .. } => THREADS,
         _ => 0,
     }

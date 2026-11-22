@@ -91,11 +91,11 @@ its session, so a cursor from an earlier run always gets a snapshot.
 `Hello` also carries the `REVISION` the client reads: additions within one
 protocol version that an older client could not decode. Revision 1 adds
 `Change::Activity`; revision 2 adds `Change::Harnesses`; revision 3 adds
-`Change::PullRequest`; revision 4 adds threads: `Change::Thread`,
-`Transcript::thread`, and `EntryKind::Handoff`. A client that sends no revision always starts from a
+`Change::PullRequest`; revision 4 adds `Change::Brief`; revision 5 adds
+threads: `Change::Thread`, `Transcript::thread`, and `EntryKind::Handoff`. A client that sends no revision always starts from a
 snapshot, and each change it could not read reaches it as `Change::Clients`
 with the count it already holds, so its cursor still moves one step at a time.
-A client before revision 4 gets each handoff entry as the `Notice` it stands
+A client before revision 5 gets each handoff entry as the `Notice` it stands
 for, and no `thread`.
 
 Clients send `Command`s with a client-chosen `CommandId`; the program answers

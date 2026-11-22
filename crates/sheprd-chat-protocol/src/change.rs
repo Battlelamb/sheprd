@@ -87,6 +87,10 @@ pub enum Change {
     PullRequest {
         pull_request: PullRequest,
     },
+    /// A user entry already pushed turns out to be another agent's brief.
+    Brief {
+        brief: crate::Brief,
+    },
     /// The thread's segments changed: an agent took over, or its session
     /// or model is now known.
     Thread {
@@ -133,6 +137,7 @@ impl Transcript {
                     self.entries.drain(..keep);
                     self.truncated = true;
                 }
+                self.drop_briefs_before(*before);
             }
             Change::Status { status } => self.status = status.clone(),
             Change::PermissionAsked { permission } => {
@@ -173,6 +178,7 @@ impl Transcript {
             Change::Activity { activity } => self.record(activity)?,
             Change::Harnesses { harnesses } => self.harnesses.clone_from(harnesses),
             Change::PullRequest { pull_request } => self.add_pull_request(pull_request)?,
+            Change::Brief { brief } => self.add_brief(*brief)?,
             Change::Thread { thread } => {
                 thread.validate()?;
                 self.thread = Some(thread.clone());

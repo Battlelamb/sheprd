@@ -92,7 +92,7 @@ pub(super) fn separator(key: &str, gap: f32, inset: f32, theme: &Theme) -> Div {
         .bg(rgb(mix(theme.surface, theme.muted, 30)))
 }
 
-fn initials(name: &str) -> String {
+pub(crate) fn initials(name: &str) -> String {
     let mut words = name
         .split(|character: char| !character.is_alphanumeric())
         .filter(|word| !word.is_empty());

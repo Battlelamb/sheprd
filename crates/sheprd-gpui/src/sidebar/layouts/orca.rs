@@ -272,7 +272,7 @@ impl RowLayout for Orca {
                 label,
             )
             .when_some(repository.filter(|_| !meta), |title, name| {
-                title.fixed(line * 1.4, Tile::new(name, theme).chip(label, line))
+                title.shrink(line * 1.4, Tile::new(name, theme).chip(label, line))
             })
             .when(muted, |line| {
                 line.fixed(dirty_size, parts::muted(label, dirty_size, theme))
@@ -287,7 +287,7 @@ impl RowLayout for Orca {
             });
         let details = Line::new(width, GAP)
             .when_some(repository, |details, name| {
-                details.fixed(line * 1.4, Tile::new(name, theme).chip(label, line))
+                details.shrink(line * 1.4, Tile::new(name, theme).chip(label, line))
             })
             .when_some(cx.host, |line, host| {
                 let chip = div().rounded(px(4.)).bg(rgb(theme.active));

@@ -86,7 +86,10 @@ fn holding_a_workspace_row_lifts_it_and_a_release_picks_the_gap(cx: &mut gpui::T
     assert_eq!(cx.debug_bounds(passed).unwrap().top(), first.top());
     // The card's bottom edge passing the second row's resting middle is
     // enough, though that row now paints higher.
-    let past = point(below.x, first.center().y + second.size.height / 2. + px(2.));
+    let past = point(
+        below.x,
+        first.center().y + second.center().y - first.bottom() + px(2.),
+    );
     cx.simulate_mouse_move(past, MouseButton::Left, Modifiers::default());
     cx.update(|window, cx| full_draw(window, cx).clear(cx));
     assert_eq!(

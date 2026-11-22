@@ -146,6 +146,8 @@ fn orca_chips_fit_existing_lines_and_follow_the_icon_setting(cx: &mut gpui::Test
         view.config.layout.mode = crate::config::LayoutMode::Orca;
         view.sidebar_split = Some(0.9);
         view.sidebar_width = Some(180.);
+        Arc::make_mut(view.live.snapshot.as_mut().unwrap()).workspaces[4].branch =
+            Some("sidebar-child".into());
         view
     });
     cx.simulate_resize(size(px(800.), px(900.)));

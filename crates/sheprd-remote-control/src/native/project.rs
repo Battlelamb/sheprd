@@ -183,7 +183,7 @@ fn make(root: &Path, name: &str, source: Option<&str>) -> Result<PathBuf, Error>
             )?;
         }
     }
-    place(&work, &target).map_err(|error| {
+    sheprd_client::filesystem::rename_noreplace(&work, &target).map_err(|error| {
         if error.kind() == std::io::ErrorKind::AlreadyExists {
             Error::Exists {
                 name: name.to_owned(),
@@ -259,26 +259,6 @@ fn run(command: Command, wait: Duration) -> Result<(), Error> {
             output: last_lines(stderr.as_bytes()),
         }),
         Err(error) => Err(Error::Git(error)),
-    }
-}
-
-/// Atomically publish the finished directory without replacing any entry.
-fn place(source: &Path, target: &Path) -> std::io::Result<()> {
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    {
-        use rustix::fs::{CWD, RenameFlags, renameat_with};
-        renameat_with(CWD, source, CWD, target, RenameFlags::NOREPLACE)?;
-        Ok(())
-    }
-    #[cfg(windows)]
-    {
-        // MoveFileExW refuses to replace a directory, even an empty one.
-        std::fs::rename(source, target)
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-    {
-        let _ = (source, target);
-        Err(std::io::ErrorKind::Unsupported.into())
     }
 }
 

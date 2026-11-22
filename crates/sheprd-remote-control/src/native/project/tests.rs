@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use crate::native::project::{Error, place, run};
+use crate::native::project::{Error, run};
+use sheprd_client::filesystem::rename_noreplace;
 use std::time::{Duration, Instant};
 
 #[test]
@@ -12,14 +13,14 @@ fn publishing_refuses_an_empty_directory_created_after_the_vacancy_check() {
     let target = dir.path().join("project");
     assert!(!target.exists());
     std::fs::create_dir(&target).unwrap();
-    assert!(place(&work, &target).is_err());
+    assert!(rename_noreplace(&work, &target).is_err());
     assert_eq!(std::fs::read_dir(&target).unwrap().count(), 0);
     assert_eq!(
         std::fs::read_to_string(work.join("kept")).unwrap(),
         "project"
     );
     std::fs::remove_dir(&target).unwrap();
-    place(&work, &target).unwrap();
+    rename_noreplace(&work, &target).unwrap();
     assert!(!work.exists());
     assert_eq!(
         std::fs::read_to_string(target.join("kept")).unwrap(),
@@ -35,7 +36,7 @@ fn publishing_refuses_a_dangling_symlink() {
     std::fs::create_dir(&work).unwrap();
     let target = dir.path().join("project");
     std::os::unix::fs::symlink("missing", &target).unwrap();
-    assert!(place(&work, &target).is_err());
+    assert!(rename_noreplace(&work, &target).is_err());
     assert_eq!(
         std::fs::read_link(target).unwrap(),
         std::path::Path::new("missing")

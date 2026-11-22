@@ -1,6 +1,6 @@
 //! `phone`: agents driving a paired phone's app.
 use super::{Args, CliError, unknown};
-use sheprd_remote_control::control::phone::Screen;
+use sheprd_remote_control::control::phone::{self, Screen};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PhoneCommand {
@@ -43,13 +43,19 @@ pub(super) fn phone(args: &mut Args) -> Result<PhoneCommand, CliError> {
             target: target(args)?,
         },
         // A note may be typed unquoted, as `phone show tests pass`.
-        Some("show") => PhoneCommand::Show {
-            device,
-            text: args.words()?.ok_or(CliError::MissingArgument {
+        Some("show") => {
+            let text = args.words()?.ok_or(CliError::MissingArgument {
                 command: "phone show",
                 what: "TEXT",
-            })?,
-        },
+            })?;
+            // Refused here, so a bad note is a usage error, not the phone's.
+            if !phone::valid_text(&text) {
+                return Err(CliError::InvalidValue(
+                    "TEXT: at most 500 characters, not blank",
+                ));
+            }
+            PhoneCommand::Show { device, text }
+        }
         _ => return Err(unknown("phone", verb)),
     })
 }

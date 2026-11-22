@@ -17,8 +17,11 @@ final class AgentControl {
         didSet { UserDefaults.standard.set(allowed.sorted(), forKey: Self.key) }
     }
     private static let key = "agentControl"
-    /// The note on screen, from an agent or about what one opened.
-    var banner: Banner?
+    /// The note on screen, from an agent or about what one opened. It
+    /// shows in a window of its own above every sheet (`AgentBannerWindows`).
+    var banner: Banner? {
+        didSet { if banner != nil, let model = AppModel.current { AgentBannerWindows.install(model: model) } }
+    }
     /// What the window shows, as the root view reports it.
     @ObservationIgnored var front = Front()
 
@@ -85,18 +88,20 @@ final class AgentControl {
     private func open(_ screen: AgentScreen, on computer: Computer, model: AppModel) -> Bool {
         let device = computer.device
         switch screen {
-        case .home: model.pendingTab = .home
-        case .workspaces: model.pendingTab = .workspaces
-        case .pullRequests: model.pendingTab = .pullRequests
-        case .settings: model.pendingTab = .settings
+        case .home: showTab(.home, model: model)
+        case .workspaces: showTab(.workspaces, model: model)
+        case .pullRequests: showTab(.pullRequests, model: model)
+        case .settings: showTab(.settings, model: model)
         case .newWorkspace: model.creating = .workspace(device: device)
         case let .chat(pane):
-            guard let route = Self.chat(pane, on: device, fleet: model.fleet) else { return false }
+            // A terminal agent this phone does not show as a chat opens
+            // in its terminal.
+            guard let route = Self.chat(pane, on: device, fleet: model.fleet) ?? Self.term(pane, on: device, fleet: model.fleet)
+            else { return false }
             model.pendingRoute = route
         case let .term(pane):
-            guard let terminal = model.fleet.terminalItems.first(where: { $0.computer.device == device && $0.terminal.panes.contains { $0.pane == pane } })
-            else { return false }
-            model.pendingRoute = .term(PaneKey(device: device, pane: pane), title: terminal.terminal.label)
+            guard let route = Self.term(pane, on: device, fleet: model.fleet) else { return false }
+            model.pendingRoute = route
         case let .workspace(workspace):
             guard Self.lists(workspace, on: device, fleet: model.fleet) else { return false }
             model.pendingTab = .home
@@ -117,6 +122,20 @@ final class AgentControl {
         let terminal = fleet.terminalItems.first { $0.computer.device == device && $0.agent?.pane == pane }
         if case let .chat(key, title)? = terminal?.route { return .chat(key, title: title) }
         return nil
+    }
+
+    /// The route of the terminal holding `pane`.
+    private static func term(_ pane: String, on device: String, fleet: Fleet) -> Route? {
+        guard let terminal = fleet.terminalItems.first(where: { $0.computer.device == device && $0.terminal.panes.contains { $0.pane == pane } })
+        else { return nil }
+        return .term(PaneKey(device: device, pane: pane), title: terminal.terminal.label)
+    }
+
+    /// Shows `tab` at its root: an agent asking for a tab means the tab,
+    /// not the page last open in it.
+    private func showTab(_ tab: RootTab, model: AppModel) {
+        model.pendingTabRoot = true
+        model.pendingTab = tab
     }
 
     private static func lists(_ workspace: String, on device: String, fleet: Fleet) -> Bool {

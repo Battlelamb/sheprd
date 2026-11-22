@@ -84,5 +84,14 @@ fn phone_show_takes_the_rest_as_its_note() {
         parse(&["phone", "show"]),
         Err(CliError::MissingArgument { .. })
     ));
+    assert!(matches!(
+        parse(&["phone", "show", "   "]),
+        Err(CliError::InvalidValue(_))
+    ));
+    let long = "é".repeat(501);
+    assert!(matches!(
+        parse(&["phone", "show", &long]),
+        Err(CliError::InvalidValue(_))
+    ));
     assert!(parse(&["phone", "tap"]).is_err());
 }

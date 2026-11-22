@@ -223,3 +223,16 @@ fn a_socket_that_closes_ends_its_drives_at_once() {
     assert!(started.elapsed() < Duration::from_secs(10));
     assert!(drivers.phones(|_| Some("p".into())).is_empty());
 }
+
+#[test]
+fn a_terminal_agent_the_phone_shows_as_a_chat_opens_as_its_chat() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut layout = layout(EndpointId::random());
+    let terminal = &mut layout.workspaces[0].terminals[0];
+    terminal.agents = terminal.agent.clone().into_iter().collect();
+    let state = offline(dir.path(), layout);
+    let opened = resolve(&state, Command::OpenPane { pane: "p2".into() });
+    assert!(state.hub.observable("p2"));
+    let expected = Screen::Chat { pane: "p2".into() };
+    assert_eq!(opened, Ok(Drive::Open { to: expected }));
+}

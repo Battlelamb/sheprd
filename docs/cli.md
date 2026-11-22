@@ -490,7 +490,7 @@ pairs, approves, or changes a setting from here. Remote control must be on.
 
 Every `phone` command takes `--device ID|NAME`; without it, the phone used
 last. Exits 1 when the phone refuses (locked, or agents turned off for this
-computer), 2 for a name two phones share or an empty or overlong note, 5 for
+computer) or a name is two phones', 2 for a blank or overlong note, 5 for
 a pane or workspace not on this computer, and 7 when the phone does not
 answer within a few seconds, as when it went to the background. `--json`
 gives the daemon's answer: `{"answer": "phones", "phones": [{"device",

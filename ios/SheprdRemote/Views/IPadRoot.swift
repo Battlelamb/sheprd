@@ -29,7 +29,9 @@ struct IPadRoot: View {
         case .pullRequests: .pullRequests
         case .settings: .settings
         }
-        return AgentControl.Front(tab: shown, route: workspaceSheet.map { .workspace($0) } ?? selection)
+        // Pairing and the nearby card cover the window.
+        let covered = pairing || window?.nearby != nil
+        return AgentControl.Front(tab: shown, route: workspaceSheet.map { .workspace($0) } ?? selection, unnamed: covered)
     }
 
     /// The sidebar is shown; ⌘⌃S or its button hides it.
@@ -75,6 +77,12 @@ struct IPadRoot: View {
         .sheet(isPresented: $pairing) { PairView() }
         .onChange(of: model.pendingTab) { _, wanted in
             guard let wanted else { return }
+            // An agent's open shows the tab itself, not a page beside it.
+            if model.pendingTabRoot {
+                workspaceSheet = nil
+                selection = nil
+                model.pendingTabRoot = false
+            }
             tab = switch wanted {
             case .home: .chats
             case .workspaces: .workspaces

@@ -101,6 +101,9 @@ final class AppModel {
     /// A tab to switch to, from a Control or an intent; the root view
     /// shows it and clears it.
     var pendingTab: RootTab?
+    /// Whether `pendingTab` opens at its root, as an agent's open does:
+    /// the pages on top of it close. Cleared with `pendingTab`.
+    var pendingTabRoot = false
     /// Something to tell the person once, such as a first prompt that
     /// did not go; the root view shows it and clears it.
     var notice: String?

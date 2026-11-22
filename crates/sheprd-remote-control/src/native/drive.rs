@@ -211,7 +211,9 @@ fn resolve(state: &State, command: Command) -> Result<Drive, Answer> {
         Command::Show { .. } => return Err(Answer::Invalid),
         Command::OpenPane { pane } if !phone::valid_id(&pane) => return Err(Answer::Invalid),
         Command::OpenPane { pane } => {
-            if layout.chat(&pane).is_some() {
+            // A terminal agent's conversation is its chat, as the phone
+            // shows it; the phone falls back to the terminal otherwise.
+            if layout.chat(&pane).is_some() || state.hub.observable(&pane) {
                 Screen::Chat { pane }
             } else if layout.terminal(&pane).is_some() {
                 Screen::Term { pane }

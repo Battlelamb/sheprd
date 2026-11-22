@@ -218,10 +218,13 @@ pub fn start_sidebar(handle: WindowHandle<SheprdWindow>, cx: &mut App) {
                                 0.
                             }
                     };
-                    let h = h
+                    // Font-derived chrome can be fractional; native windows
+                    // settle on whole pixels, which the resize check compares.
+                    let h = (h
                         + sidebar::DEVICE_FOOTER_HEIGHT
                         + chrome_height
-                        + if style == Style::Rounded { 160. } else { 0. };
+                        + if style == Style::Rounded { 160. } else { 0. })
+                    .ceil();
                     let mode = LayoutMode::new(density, style);
                     let compact = density == Density::Compact;
                     if frame % 3 == 0 {

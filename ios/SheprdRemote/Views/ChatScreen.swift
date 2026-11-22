@@ -135,6 +135,7 @@ struct ChatScreen: View {
             #if DEBUG
             if key == .sample {
                 store = ChatStore(key: key, sample: .sample)
+                if UserDefaults.standard.bool(forKey: "session") { showingSession = true }
                 return
             }
             if key == .activitySample {

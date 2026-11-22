@@ -157,3 +157,5 @@ fn remote_rich_document_link_never_opens_an_identically_named_local_file(cx: &mu
 
 mod attachments;
 mod markdown;
+
+mod thumbnails;

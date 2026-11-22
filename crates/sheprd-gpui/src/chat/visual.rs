@@ -15,6 +15,7 @@ use gpui::{RenderImage, SvgRenderer};
 use image::{ImageFormat, ImageReader, Limits};
 use sheprd_chat_protocol::{Image, ImageType};
 mod remote;
+pub(crate) mod thumbnail;
 
 use std::{
     cell::RefCell,
@@ -69,6 +70,8 @@ pub(crate) enum Error {
     Panicked,
     #[error("the diagram could not be drawn")]
     Raster(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error(transparent)]
+    Thumbnail(#[from] thumbnail::Error),
     // keep-sorted end
 }
 
@@ -99,15 +102,17 @@ pub(crate) enum Source {
     Diagram(Arc<str>),
     /// A picture on the web, asked for by the user.
     Remote(crate::browser::WebUrl),
+    Thumbnail(crate::window::FileLink),
 }
 
 impl Source {
-    /// Code and math count against the rich budget; math also against the
+    /// Code, math, and thumbnails count against the rich budget; math also against the
     /// texture budget.
     fn kind(&self) -> Kind {
         match self {
             Self::Code { .. } => Kind::Code,
             Self::Math { .. } => Kind::Math,
+            Self::Thumbnail(_) => Kind::Thumbnail,
             Self::Image(_) | Self::Diagram(_) | Self::Remote(_) => Kind::Other,
         }
     }
@@ -248,6 +253,7 @@ enum Work {
     Math(Arc<str>, MathMode, Arc<DiagramStyle>),
     Diagram(Arc<str>, Arc<DiagramStyle>, SvgRenderer),
     Remote(crate::browser::WebUrl),
+    Thumbnail(crate::window::FileLink),
 }
 
 impl Job {
@@ -264,6 +270,7 @@ impl Job {
             .unwrap_or(Err(Error::Panicked))
             .map(Output::Image),
             Work::Remote(url) => remote::fetch(&url).map(Output::Image),
+            Work::Thumbnail(file) => thumbnail::draw(&file).map(Output::Image),
             Work::Diagram(source, style, renderer) => {
                 // The renderer is a third-party parser fed untrusted text; a
                 // panic in it fails this diagram rather than the app.
@@ -349,6 +356,7 @@ enum Kind {
     Code,
     Math,
     Other,
+    Thumbnail,
 }
 
 struct Item {
@@ -631,6 +639,7 @@ impl Visuals {
                     Some(Source::Code { language, source }) => Work::Code(language, source),
                     Some(Source::Image(image)) => Work::Image(image),
                     Some(Source::Remote(url)) => Work::Remote(url),
+                    Some(Source::Thumbnail(file)) => Work::Thumbnail(file),
                     None => continue,
                 };
                 self.tickets += 1;

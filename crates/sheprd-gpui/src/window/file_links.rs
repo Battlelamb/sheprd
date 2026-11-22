@@ -186,6 +186,17 @@ fn opened(path: &Path) -> Option<PathBuf> {
 }
 
 impl FileLink {
+    /// A regular, non-executable local file for a background thumbnail job.
+    /// Use the same symlink/network policy as the explicit file opener.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn thumbnail_path(&self) -> Option<PathBuf> {
+        let home = crate::config::home().ok();
+        let real = real_path(&self.resolve(home.as_deref())?).ok()?;
+        let metadata = std::fs::metadata(&real).ok()?;
+        (metadata.is_file() && !executable(&metadata) && metadata.len() <= 1024 * 1024 * 1024)
+            .then_some(real)
+    }
+
     /// Whether the path is there for a click to open. This reads the disk,
     /// so it runs off the UI thread.
     pub(crate) fn found(&self) -> bool {

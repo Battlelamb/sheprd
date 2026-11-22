@@ -191,6 +191,7 @@ pub(crate) enum Part {
     Text(Rc<[Line]>),
     /// A standalone local file link, opened only when the person asks.
     File {
+        id: VisualId,
         destination: String,
         blocks: Rc<[super::rich::Block]>,
     },
@@ -251,9 +252,8 @@ impl Body {
                 let (own, blocks): (_, &[super::rich::Block]) = match part {
                     Part::Diagram(id, _) | Part::Remote { id, .. } => (Some(*id), &[]),
                     Part::Html { code } => (Some(code.id), &[]),
-                    Part::Rich(blocks) | Part::Bubble(_, blocks) | Part::File { blocks, .. } => {
-                        (None, blocks)
-                    }
+                    Part::File { id, blocks, .. } => (Some(*id), &blocks[..]),
+                    Part::Rich(blocks) | Part::Bubble(_, blocks) => (None, blocks),
                     Part::Text(_) | Part::Widget(_) | Part::Picture { .. } | Part::Screen(_) => {
                         (None, &[])
                     }

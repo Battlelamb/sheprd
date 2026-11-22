@@ -115,6 +115,7 @@ impl SheprdWindow {
                         self.render_chat_html(pane_id, entry, index, code, visuals, cx)
                     }
                     Part::File {
+                        id,
                         blocks,
                         destination,
                     } => {
@@ -132,7 +133,7 @@ impl SheprdWindow {
                                     .into_any_element(),
                                 None => div().into_any_element(),
                             };
-                        self.render_chat_file(pane_id, destination, content, cx)
+                        self.render_chat_file(pane_id, (*id, destination), content, visuals, cx)
                     }
                     Part::Picture { alt } => self.render_chat_picture_caption(alt),
                     Part::Remote { id, url, alt } => self.render_chat_remote_picture(

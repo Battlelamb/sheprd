@@ -19,6 +19,7 @@ pub(super) fn split(blocks: Vec<Block>, remaining: &mut usize) -> Vec<Part> {
                 parts.push(Part::Rich(std::mem::take(&mut prose).into()));
             }
             parts.push(Part::File {
+                id: crate::chat::visual::VisualId::of(("file-thumbnail", &destination)),
                 destination,
                 blocks: vec![block].into(),
             });

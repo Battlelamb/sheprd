@@ -83,13 +83,18 @@ sheprd browser open http://localhost:3000
 
 - A local file opens in a split next to your terminal: the user sees both,
   and the keyboard stays with your pane, so they can keep talking to you
-  while the page updates. Later files you open join the same split.
+  while the page updates. Later files you open join the same split. If your
+  terminal is not on screen, Sheprd opens a tab instead and reports that fallback.
 - A web address opens as a tab in your own workspace (`HERDR_WORKSPACE_ID`,
   which Herdr sets in every pane, or the workspace of your Herdr 2 tab) and the window switches to it. The
   terminal keeps running underneath; the user returns to it by clicking its
   tab.
 - Add `--tab` to open a file as a tab instead, or `--beside` to put a web
   address in the split.
+- Relative paths (`./mockup/index.html`) and absolute paths
+  (`/tmp/mockup/index.html`) are supported by the local CLI. The address bar
+  shows the canonical file path, even though the page loads through Sheprd's
+  private preview scheme. A displayed `/private/tmp/...` path on macOS is normal.
 - A local file is served with the other files in its folder, so relative
   links to CSS, scripts, and images work. Keep the page and its assets in a
   dedicated folder: never your home directory, and nothing in a hidden
@@ -233,6 +238,15 @@ The commands exit with:
 | 6 | A dialog is open in Sheprd, or it is busy | Try again later, or tell the user |
 | 7 | Sheprd did not answer in time | Try again once |
 | 8 | Not available on this platform or this version | Print the URL or path for the user instead |
+
+A successful open means the tab was accepted, not that the page has finished
+loading. Before capturing a new page, focus its tab and wait for its expected
+content. `--no-focus` followed immediately by a capture can return a blank page.
+If the user sees blank content but `browser text` and `browser screenshot`
+return the expected page, do not rewrite a valid local path or claim the page
+is visible: those commands inspect WebKit, not the composited desktop window.
+Check a window/desktop capture for visibility and report the rendering issue.
+Do not restart the user's app without agreement.
 
 If the command is not found, browser tabs are not available to you: print
 the URL instead.

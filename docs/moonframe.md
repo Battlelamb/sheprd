@@ -72,6 +72,12 @@ terminals. The terminals keep the keyboard: they take it when the window opens
 or comes back to the front, and after a click anywhere in the layout, so only
 a field (the search, a note) holds it instead.
 
+On macOS native browser pages sit below GPUI. The toolkit root background and
+Luau shell must stay transparent; the native window supplies the base and
+Sheprd's main region paints around page rectangles. Sidebar, toolbar and
+popover backgrounds remain solid. Adding a full-window background to the shell
+hides loaded pages, even when WebKit text and page captures look correct.
+
 ## Changing it
 
 In `just run-moonframe`, saving a file reloads the window. To keep a change of

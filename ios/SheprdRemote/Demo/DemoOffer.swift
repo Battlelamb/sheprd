@@ -12,9 +12,14 @@ private struct DemoOffer: ViewModifier {
             .overlay {
                 if model.shownComputers.isEmpty {
                     ContentUnavailableView {
-                        Label("No computers yet", systemImage: "desktopcomputer")
+                        Label("A companion to Sheprd", systemImage: "desktopcomputer")
                     } description: {
-                        Text("In Sheprd, open Remote control > Pair device, then scan its code here.")
+                        // The app shows nothing on its own: say what else it needs.
+                        Text("""
+                        This app follows the agents Sheprd runs on your Mac, Linux, or Windows computer. \
+                        Install Sheprd for free from [sheprd.org](https://sheprd.org), open Remote control \
+                        > Pair device, then scan its code here.
+                        """)
                     } actions: {
                         Button("Pair a Computer") { pairing = true }.buttonStyle(.glassProminent)
                         Button("Explore the Demo") {

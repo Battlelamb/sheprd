@@ -124,7 +124,7 @@ struct WorkspacesTab: View {
         .overlay {
             if model.shownComputers.isEmpty {
                 ContentUnavailableView("No computers yet", systemImage: "desktopcomputer",
-                                       description: Text("Pair one in Settings to see its workspaces here."))
+                                       description: Text("Install Sheprd on your computer from [sheprd.org](https://sheprd.org), then pair it from Home to see its workspaces here."))
             }
         }
     }

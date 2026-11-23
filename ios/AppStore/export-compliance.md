@@ -1,10 +1,9 @@
 # Export compliance
 
 The app's Info.plist declares `ITSAppUsesNonExemptEncryption = false`, so App
-Store Connect asks nothing per build. This is what that rests on; a person
-responsible for the app must confirm it before the first App Store release,
-and again for France, which App Store Connect asks about separately. This is
-an inventory, not legal advice.
+Store Connect asks nothing per build. The app's owner reviewed this inventory
+and confirmed that declaration on 22 November 2026. Review it again when the
+app adds cryptography. This is an inventory, not legal advice.
 
 ## What the app encrypts with
 

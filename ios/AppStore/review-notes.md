@@ -46,7 +46,7 @@ About the app's capabilities:
 
 ## Before submitting
 
-- Fill in the contact name, email, and phone in App Review Information.
+- Contact email: sheprd@pen.so (`metadata.toml`). Add a name and phone in App Review Information.
 - Attach a short screen recording of pairing a real computer, in case the
   reviewer asks for one.
 - Check that the build's What to Test notes are not pasted here: they list

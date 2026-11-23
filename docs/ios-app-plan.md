@@ -822,6 +822,9 @@ sides.
 
 ### Presence, exactly
 
+On by default for newly paired computers on the phone and for older phone
+records without a saved presence setting. Saved choices are preserved; the
+phone switch is Settings > Notifications > Hold Alerts at the Desk.
 On by default on the desktop, `[remote] presence` (Settings > Remote
 control, "Hold phone alerts while I'm here"), which `presence = false`
 turns off.

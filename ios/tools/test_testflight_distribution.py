@@ -45,13 +45,21 @@ class DistributionTests(unittest.TestCase):
             nonlocal slept
             slept += seconds
 
+        def authenticated(request):
+            def checked(*args):
+                issued_at = args[-1]
+                if slept - issued_at >= 600:
+                    raise http_error(401)
+                return request(*args)
+            return checked
+
         with mock.patch.multiple(
             distribution.asc,
-            bearer_from_env=lambda: "token",
+            bearer_from_env=lambda: slept,
             app_id=lambda bundle_id, bearer: "app",
-            get=api.get,
-            get_all=api.get_all,
-            send=api.send,
+            get=authenticated(api.get),
+            get_all=authenticated(api.get_all),
+            send=authenticated(api.send),
         ):
             distribution.distribute(
                 "bundle", "42", sleep=fake_sleep, clock=lambda: slept
@@ -106,6 +114,18 @@ class DistributionTests(unittest.TestCase):
                 },
             ),
         )
+
+    def test_assigns_groups_after_initial_token_expires(self):
+        processing = [{"id": "build", "attributes": {"version": "42", "processingState": "PROCESSING"}}]
+        valid = [{"id": "build", "attributes": {"version": "42", "processingState": "VALID"}}]
+        polls = 600 // distribution.POLL_SECONDS + 1
+        api = FakeApi(
+            [processing] * polls + [valid],
+            {"data": [{"id": "external", "attributes": {"isInternalGroup": False}}]},
+        )
+
+        self.assertGreater(self.run_distribution(api), 600)
+        self.assertEqual(api.sent[0][2]["data"], [{"type": "betaGroups", "id": "external"}])
 
     def test_no_external_groups_is_a_successful_no_op(self):
         api = FakeApi(

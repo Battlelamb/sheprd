@@ -47,14 +47,13 @@ def find_build(app_id: str, build_number: str, bearer: str):
 def wait_for_build(
     app_id: str,
     build_number: str,
-    bearer: str,
     sleep=time.sleep,
     clock=time.monotonic,
 ):
     deadline = clock() + BUILD_TIMEOUT
     while True:
         try:
-            build = find_build(app_id, build_number, bearer)
+            build = find_build(app_id, build_number, asc.bearer_from_env())
             if build:
                 state = build.get("attributes", {}).get("processingState")
                 if state == "VALID":
@@ -95,14 +94,13 @@ def external_groups(app_id: str, bearer: str) -> list:
 
 
 def distribute(bundle_id: str, build_number: str, sleep=time.sleep, clock=time.monotonic) -> None:
-    bearer = asc.bearer_from_env()
-    app = asc.app_id(bundle_id, bearer)
+    app = asc.app_id(bundle_id, asc.bearer_from_env())
     if app is None:
         sys.exit(f"testflight-distribution: App Store Connect has no app {bundle_id}")
 
     print(f"Waiting for build {build_number} to finish processing…", flush=True)
-    build = wait_for_build(app, build_number, bearer, sleep=sleep, clock=clock)
-    groups = external_groups(app, bearer)
+    build = wait_for_build(app, build_number, sleep=sleep, clock=clock)
+    groups = external_groups(app, asc.bearer_from_env())
     if not groups:
         print("No external TestFlight groups found; no groups were changed.")
         return
@@ -113,7 +111,7 @@ def distribute(bundle_id: str, build_number: str, sleep=time.sleep, clock=time.m
         "POST",
         f"builds/{build['id']}/relationships/betaGroups",
         {"data": [{"type": "betaGroups", "id": group["id"]} for group in groups]},
-        bearer,
+        asc.bearer_from_env(),
     )
 
 

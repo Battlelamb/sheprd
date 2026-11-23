@@ -109,6 +109,63 @@ fn a_desktop_adopted_chat_stays_in_its_herdr_1_worktree_after_its_labels_are_rel
 }
 
 #[test]
+fn adopted_tabs_use_the_followed_sessions_workspace_and_edit_scope() {
+    for doc in [None, Some(document())] {
+        let dir = tempfile::tempdir().unwrap();
+        let (source, fake) = fake_sharing(
+            dir.path(),
+            doc,
+            ["t1", "t2", "t3", "t4"].map(record).to_vec(),
+        );
+        let sessions = crate::hub::sessions::Sessions::offline_with_target(
+            "work",
+            sheprd_client::ConnectTarget::Socket("/work.sock".into()),
+        );
+        *lock(&source.poller) = super::super::super::poller::Poller::following(sessions);
+        let path = dir.path().join("browser-tabs.json");
+        let mut saved: Value = serde_json::from_str(SAVED).unwrap();
+        for (id, scope, pane) in [
+            (5, SCOPE, "t2"),
+            (6, "local:/work.sock", "t3"),
+            (7, "local:/unfollowed.sock", "t4"),
+        ] {
+            saved["tabs"].as_array_mut().unwrap().push(json!({
+                "id":id,"scope":scope,"workspace_id":"w9","title":"chat",
+                "location":{"kind":"core_terminal","panes":pane}
+            }));
+        }
+        std::fs::write(path, saved.to_string()).unwrap();
+        let layout = source.poll().unwrap();
+        let named = &layout.workspace("herdr:work:w9").unwrap().terminals[0].tab;
+        assert_eq!(layout.workspace("w9").unwrap().terminals.len(), 1);
+        assert_eq!(
+            layout.workspace(UNLISTED).unwrap().terminals[0].panes[0].pane,
+            id("t4")
+        );
+        assert!(source.saved_target(named, &id("t2")).is_none());
+        let (tab, address) = source.saved_target(named, &id("t3")).unwrap();
+        assert_eq!(
+            tab,
+            TabRef::Named {
+                session: "work".into(),
+                id: 6
+            }
+        );
+        source
+            .arrange_saved(&tab, &address, &Op::RenameTab(Some("work chat".into())))
+            .unwrap();
+        let layout = source.poll().unwrap();
+        assert_eq!(
+            layout.workspace("herdr:work:w9").unwrap().terminals[0].label,
+            "work chat"
+        );
+        assert_eq!(layout.workspace("w9").unwrap().terminals[0].label, "chat");
+        drop(source);
+        fake.server.join().unwrap();
+    }
+}
+
+#[test]
 fn a_never_written_document_leaves_the_saved_tabs_in_charge() {
     let dir = tempfile::tempdir().unwrap();
     let (source, fake) = fake_sharing(dir.path(), None, vec![record("t1")]);

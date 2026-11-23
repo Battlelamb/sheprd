@@ -174,24 +174,40 @@ impl Source {
         // Take ownership before starting a split's shell. A running desktop
         // must receive the intent without a speculative terminal being made.
         let _owner = self.tabs.as_deref().map(file_owner).transpose()?;
-        let use_doc = {
+        let (session, tab, scope) = {
             let poller = lock(&self.poller);
-            poller.shared().is_some()
-                && !matches!(tab, TabRef::File(id)
-                if poller.local_tab_holds(self.scope.as_deref(), *id, address))
+            match tab {
+                TabRef::Named { session, id } => {
+                    let target = crate::hub::sessions::join_id(Some(session), &id.to_string());
+                    if !poller.local_tab_holds(self.scope.as_deref(), &target, address) {
+                        return Err(Error::Changed.into());
+                    }
+                    let scope = poller
+                        .named_scopes
+                        .get(session)
+                        .ok_or(Error::Changed)?
+                        .clone();
+                    (Some(session.as_str()), *id, scope)
+                }
+                TabRef::File(id)
+                    if poller.shared().is_none()
+                        || poller.local_tab_holds(
+                            self.scope.as_deref(),
+                            &id.to_string(),
+                            address,
+                        ) =>
+                {
+                    (None, *id, self.scope.clone().ok_or(Error::NoTabs)?)
+                }
+                _ if poller.shared().is_some() => {
+                    drop(poller);
+                    return self.arrange_doc(tab, address, op);
+                }
+                _ => return Err(Error::Changed.into()),
+            }
         };
-        if use_doc {
-            return self.arrange_doc(tab, address, op);
-        }
-        let TabRef::File(tab) = *tab else {
-            // The document was read when the phone named its tab.
-            return Err(Error::Changed.into());
-        };
-        let (path, scope) = self
-            .tabs
-            .as_deref()
-            .zip(self.scope.as_deref())
-            .ok_or(Error::NoTabs)?;
+        let scope = scope.as_str();
+        let path = self.tabs.as_deref().ok_or(Error::NoTabs)?;
         match op {
             Op::RenameWorkspace { workspace, name } => {
                 edit_owned_file(path, |bytes| {
@@ -219,11 +235,14 @@ impl Source {
         if let Some(axis) = axis(op) {
             let record = self.record(address)?;
             let workspace = lock(&self.poller).saved_workspace(scope, tab);
-            let labels = workspace
+            let mut labels = workspace
                 .as_deref()
                 .filter(|id| sheprd_session::tab_workspace(id))
                 .map(|id| BTreeMap::from([(WORKSPACE_LABEL, id)]))
                 .unwrap_or_default();
+            if let Some(name) = session {
+                labels.insert(SESSION_LABEL, name);
+            }
             let new = self.start_beside(&record, labels)?;
             let split = TerminalId::new(new.address.as_str())
                 .map_err(Error::from)

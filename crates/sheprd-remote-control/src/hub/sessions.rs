@@ -146,6 +146,19 @@ impl Sessions {
             .cloned()
     }
 
+    /// Desktop tab scopes for the other local sockets this daemon follows.
+    pub(super) fn local_scopes(&self) -> std::collections::BTreeMap<String, String> {
+        lock(&self.list)
+            .iter()
+            .filter_map(|session| {
+                let ConnectTarget::Socket(path) = session.api.target() else {
+                    return None;
+                };
+                Some((session.name.clone(), format!("local:{}", path.display())))
+            })
+            .collect()
+    }
+
     fn layouts(&self) -> Vec<(String, Arc<Layout>)> {
         lock(&self.list)
             .iter()

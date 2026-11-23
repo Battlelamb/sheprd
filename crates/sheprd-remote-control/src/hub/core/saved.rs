@@ -25,6 +25,10 @@ pub(crate) enum TabRef {
     Doc(String),
     /// One of Sheprd's saved tabs, by the id Sheprd gave it; 0 for a workspace change.
     File(u64),
+    Named {
+        session: String,
+        id: u64,
+    },
 }
 
 impl Source {
@@ -35,11 +39,18 @@ impl Source {
         let address = self.terminal(pane).ok()?.1.address;
         let poller = lock(&self.poller);
         let id = if let Some(id) = tab.strip_prefix(LOCAL_TAB) {
-            let id = id.parse().ok()?;
             if !poller.local_tab_holds(self.scope.as_deref(), id, &address) {
                 return None;
             }
-            TabRef::File(id)
+            let (session, id) = crate::hub::sessions::split_id(id);
+            let id = id.parse().ok()?;
+            match session {
+                Some(name) => TabRef::Named {
+                    session: name.to_owned(),
+                    id,
+                },
+                None => TabRef::File(id),
+            }
         } else {
             let id = tab.strip_prefix(SAVED_TAB)?;
             match poller.shared() {
@@ -73,7 +84,7 @@ impl Hub {
     /// for a tab of the shared document no saved tab holds.
     pub(crate) fn desktop_tab(&self, tab: &TabRef, terminal: &str) -> Option<u64> {
         match tab {
-            TabRef::File(id) => Some(*id),
+            TabRef::File(id) | TabRef::Named { id, .. } => Some(*id),
             TabRef::Doc(_) => self.core.as_ref()?.saved_tab_holding(terminal),
         }
     }

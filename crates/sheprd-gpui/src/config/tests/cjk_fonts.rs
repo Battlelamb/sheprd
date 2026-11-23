@@ -126,7 +126,7 @@ fn the_setting_names_the_script_before_the_system() -> anyhow::Result<()> {
 }
 
 #[test]
-fn interface_faces_search_icons_then_cjk_and_the_terminal_only_icons() -> anyhow::Result<()> {
+fn interface_faces_search_symbols_then_cjk_then_patched_text() -> anyhow::Result<()> {
     let mut config = Config::parse("language = 'ko'\n[tabs]\nfallback = ['Menlo']")?;
     let families = || {
         let mut families: Vec<String> = every_family(PLATFORM_CJK_FONTS).into_iter().collect();

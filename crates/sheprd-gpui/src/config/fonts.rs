@@ -403,6 +403,23 @@ pub fn symbol_fallbacks(installed: impl IntoIterator<Item = String>) -> Vec<Stri
     families
 }
 
+/// Orders the automatic cascade of the sidebar, tab, and interface faces.
+/// Symbols-only faces cannot claim letters, so they lead. Native CJK faces come
+/// before patched text Nerd Fonts, which may claim Hangul with half-width
+/// advances even when their glyphs need the full width. A CJK face that maps
+/// the Private Use Area may then draw an icon a patched face also has; only
+/// the terminal draws prompts, and it keeps the icon cascade alone.
+pub(super) fn interface_fallbacks(detected: &[String], cjk: &[String]) -> Vec<String> {
+    let (symbols, patched_text): (Vec<_>, Vec<_>) =
+        detected.iter().partition(|family| is_symbols_only(family));
+    symbols
+        .into_iter()
+        .chain(cjk)
+        .chain(patched_text)
+        .cloned()
+        .collect()
+}
+
 impl Config {
     /// Gives every face the config left alone an automatic icon-font cascade
     /// and replaces a default family this machine lacks. `installed`
@@ -488,17 +505,7 @@ impl Config {
         if terminal.fallbacks.is_none() {
             terminal.fallbacks = Some(detected.clone());
         }
-        // Symbols-only faces cannot claim letters. Search the native CJK faces
-        // before broader patched text faces, which may claim Hangul with
-        // half-width advances even when their glyphs need the full width.
-        let (symbols, patched_text) =
-            detected.split_at(detected.partition_point(|family| is_symbols_only(family)));
-        let interface: Vec<_> = symbols
-            .iter()
-            .chain(&cjk)
-            .chain(patched_text)
-            .cloned()
-            .collect();
+        let interface = interface_fallbacks(&detected, &cjk);
         for face in [sidebar, tabs, ui] {
             if face.fallbacks.is_none() {
                 face.fallbacks = Some(interface.clone());

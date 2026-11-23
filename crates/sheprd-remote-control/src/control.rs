@@ -601,6 +601,11 @@ pub enum PairingState {
     /// No phone has claimed the token yet.
     Waiting {
         expires_in_ms: u64,
+        /// The code a nearby phone or computer agreed on over Bluetooth and
+        /// shows already, before it claims: the dialog shows it too, so
+        /// both screens show it at once. The claim brings it again.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        nearby_code: Option<String>,
     },
     /// A phone claimed it: the dialog shows its name and the matching code
     /// and asks the user.

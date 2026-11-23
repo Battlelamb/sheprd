@@ -229,7 +229,10 @@ pub(super) async fn claim_status(
         // the approval, with what came of it.
         let pairing = match pairing {
             PairingState::Approved { device } if auth.pairings().fleet_settling(&device) => {
-                PairingState::Waiting { expires_in_ms: 0 }
+                PairingState::Waiting {
+                    expires_in_ms: 0,
+                    nearby_code: None,
+                }
             }
             pairing => pairing,
         };

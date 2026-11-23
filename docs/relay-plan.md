@@ -1080,14 +1080,20 @@ through. B's daemon admits that tunnel key, sees that the device has an
 SSH key, splices the session to its SSH server instead of serving the
 API, and marks the device seen.
 
-**Joining the fleet in the same step** (built). Pairing leaves both
-computers in one fleet, whichever of them was in it (Fleet, Joining):
+**Joining the fleet in the same step** (the protocol is built; Sheprd's
+page no longer uses it). Add Device > Nearby Sheprd only pairs: it claims
+as soon as both screens show the code, with no fleet, so the other
+computer shows Allow at once. Pairing is pairing; joining a fleet is
+Settings > Fleet's, later (Invite on a machine this computer reaches).
+The daemons still carry and check a claim's fleet, as below, for peers
+that send one:
 
 - B names its fleet in the sealed offer while it is a live computer
   member (`fleet::bluetooth::hint`: the id, and its computer and host
   counts for the words, never trusted).
-- Once both screens show the code, A's page knows both fleets and the
-  child waits for its choice (`PairInput::Claim`) before it claims:
+- Once both screens show the code, the child waits for the page's claim
+  (`PairInput::Claim`). Sheprd's page sends it at once with no fleet; a
+  claim with one carries:
 
   | A | B | A's page offers | The claim carries |
   | --- | --- | --- | --- |
@@ -2410,8 +2416,8 @@ manual multi-machine and phone steps left unticked in its QA list.
      through the fleet, its pairing is superseded; a removed member's
      pairings go with it (phase 2).
    - **Bringing existing machines in:** saved devices, cloud machines,
-     and computers paired over Bluetooth show under Machines this Sheprd
-     reaches, to Share or Invite; paired phones join from the phone
+     and computers paired over Bluetooth show under Connected machines,
+     by the name Devices gives them, to Share or Invite; paired phones join from the phone
      (phase 5). Nothing is spread without that step.
 7. **Bluetooth on Linux and Windows:** scanning in `crates/sheprd-nearby`,
    then the transport measurement and its verdict here.

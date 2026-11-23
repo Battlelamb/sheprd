@@ -59,6 +59,11 @@ fn answer(call: LendCall) -> crate::Result<LendAnswer> {
         ..Caller::default()
     };
     Ok(match call.request {
+        // Pictures cross only as `Picture` and `Frame`, written where this
+        // command chooses: never at a path the borrower names.
+        LendRequest::Tab {
+            op: TabOp::MachineScreenshot { .. } | TabOp::MachinePeek { .. },
+        } => refusal("Ask for a picture or a frame instead"),
         LendRequest::Tab { op } if op.lendable() => LendAnswer::Response {
             response: send(&Request::Tab(Call { caller, op }))?,
         },
@@ -153,3 +158,6 @@ fn picture(png: &[u8]) -> crate::Result<LendAnswer> {
         height,
     })
 }
+
+#[cfg(test)]
+mod tests;

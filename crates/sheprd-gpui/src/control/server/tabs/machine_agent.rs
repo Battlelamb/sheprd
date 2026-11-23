@@ -32,8 +32,7 @@ pub(super) fn serve(_: &Caller, _: TabOp, incoming: socket::Incoming, _: &mut Ap
 
 #[cfg(target_os = "macos")]
 pub(super) fn serve(caller: &Caller, op: TabOp, incoming: socket::Incoming, cx: &mut App) {
-    // Watching changes nothing, so it needs no claim.
-    let peek = matches!(op, TabOp::MachinePeek { .. });
+    let peek = !needs_claim(caller, &op);
     let (name, work) = match op {
         TabOp::MachinePeek { name, path } => (name, Work::Screenshot(path.into())),
         TabOp::MachineAgent { name } => (name, Work::Hello),
@@ -88,6 +87,15 @@ pub(super) fn serve(caller: &Caller, op: TabOp, incoming: socket::Incoming, cx: 
         return incoming.respond(response);
     }
     work.run(name, incoming, cx);
+}
+
+/// Whether `op` from `caller` must hold the machine's claim when one is
+/// held. Watching from a borrowing computer changes nothing, so a lent peek
+/// needs none; anyone else's peek is a screenshot, claim and all.
+#[cfg(any(target_os = "macos", test))]
+fn needs_claim(caller: &Caller, op: &TabOp) -> bool {
+    let lent = caller.via.as_ref().and_then(|via| via.lend()).is_some();
+    !(lent && matches!(op, TabOp::MachinePeek { .. }))
 }
 
 /// A request, read and checked.

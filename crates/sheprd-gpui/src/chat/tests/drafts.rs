@@ -1,5 +1,6 @@
 //! What is typed in a chat's composer and not sent is kept, comes back in a
-//! new composer for the same chat, as after a restart, and goes once sent.
+//! new composer for the same chat, as after a restart, and goes once sent,
+//! unless another window kept newer text this composer never saw.
 
 use super::{
     overlay::{attach_with, open, poll},
@@ -59,7 +60,21 @@ fn an_unsent_draft_comes_back_and_goes_once_sent(cx: &mut TestAppContext) {
     poll(&view, &program, cx);
     assert_eq!(composer_text(&view, cx).as_deref(), Some("half a thought"));
 
-    // Sent, it goes, and so does its pencil.
+    // Another window's newer text survives this one sending its older text.
+    let chat = view.read_with(cx, |view, _| {
+        view.chats
+            .panes()
+            .next()
+            .unwrap()
+            .target
+            .endpoint
+            .as_str()
+            .to_owned()
+    });
+    let newer = cx.update(|_, cx| {
+        let seen = view.read(cx).chats.panes().next().unwrap().draft_seen;
+        Drafts::record(cx, &place, &chat, "half a thought, edited elsewhere", seen)
+    });
     cx.update(|window, cx| {
         let focus = view
             .read(cx)
@@ -77,6 +92,45 @@ fn an_unsent_draft_comes_back_and_goes_once_sent(cx: &mut TestAppContext) {
             command: Command::Prompt { text, .. },
             ..
         }) => assert_eq!(text, "half a thought"),
+        other => panic!("a prompt, got {other:?}"),
+    }
+    poll(&view, &program, cx);
+    let marked = cx.update(|_, cx| Drafts::current(cx));
+    assert!(marked.contains(&place), "the newer draft is kept");
+
+    // A composer that saw the newer draft sends it, and its pencil goes.
+    view.update(cx, |view, _| {
+        for pane in view.chats.panes_mut() {
+            pane.composer = None;
+            pane.composer_typed = None;
+        }
+    });
+    poll(&view, &program, cx);
+    assert_eq!(
+        composer_text(&view, cx).as_deref(),
+        Some("half a thought, edited elsewhere")
+    );
+    assert_eq!(
+        view.read_with(cx, |view, _| view.chats.panes().next().unwrap().draft_seen),
+        newer
+    );
+    cx.update(|window, cx| {
+        let focus = view
+            .read(cx)
+            .chats
+            .panes()
+            .next()
+            .unwrap()
+            .input_focus(cx)
+            .unwrap();
+        window.focus(&focus, cx);
+    });
+    cx.simulate_keystrokes("enter");
+    match read(&mut stream) {
+        Some(ClientMessage::Command {
+            command: Command::Prompt { text, .. },
+            ..
+        }) => assert_eq!(text, "half a thought, edited elsewhere"),
         other => panic!("a prompt, got {other:?}"),
     }
     poll(&view, &program, cx);

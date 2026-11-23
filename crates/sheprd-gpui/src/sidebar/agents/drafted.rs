@@ -9,6 +9,16 @@ use crate::{SheprdWindow, browser::scope, core_terminals::Host};
 use gpui::{prelude::*, *};
 use sheprd_backend::TerminalId;
 
+/// The room one mark at a row's bottom end takes: its slot and the inset
+/// before it.
+const MARK_SLOT: f32 = 16.;
+
+/// How much narrower a drafted agent's text lays out, so it ends before the
+/// pencil and, when both show, the unread dot after it.
+pub(in crate::sidebar) fn draft_reserve(unread: bool) -> f32 {
+    MARK_SLOT * if unread { 2. } else { 1. }
+}
+
 impl SheprdWindow {
     /// Where the chat of `agent`, on the host at `index`, keeps its draft:
     /// the place `chat::drafts` names for the same pane.
@@ -58,7 +68,7 @@ impl SheprdWindow {
                 .aria_label(fl!("chat-drafts-mark"))
                 .absolute()
                 .bottom(px(2.))
-                .inset_e(px(if unread { 16. } else { 2. }))
+                .inset_e(px(if unread { MARK_SLOT + 2. } else { 2. }))
                 .size(px(14.))
                 .flex()
                 .items_center()

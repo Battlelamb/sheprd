@@ -136,7 +136,7 @@ impl SheprdWindow {
         let shortcuts = crate::text_shortcuts::Store::current(cx);
         // What a composer about to be made starts with: the draft its chat
         // kept, read before the panes are borrowed.
-        let drafts: Vec<(String, String)> = self
+        let drafts: Vec<(String, (String, u64))> = self
             .chats
             .panes()
             .filter(|pane| {
@@ -178,8 +178,11 @@ impl SheprdWindow {
                     changed = true;
                     let composer = cx.new(MultilineInput::new);
                     let pane_id = pane.target.pane_id.clone();
-                    if let Some((_, text)) = drafts.iter().find(|(id, _)| *id == pane_id) {
+                    pane.draft_seen = None;
+                    if let Some((_, (text, version))) = drafts.iter().find(|(id, _)| *id == pane_id)
+                    {
                         composer.update(cx, |input, cx| input.set_text_at(text, text.len(), cx));
+                        pane.draft_seen = Some(*version);
                     }
                     pane.composer_typed = Some(cx.subscribe_in(
                         &composer,

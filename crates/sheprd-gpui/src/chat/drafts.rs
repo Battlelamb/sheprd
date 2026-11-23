@@ -21,6 +21,8 @@ const MAX_FIELD_BYTES: usize = 1024;
 const MAX_FILE_BYTES: u64 =
     (MAX_DRAFTS * (6 * (MAX_TEXT_BYTES + 3 * MAX_FIELD_BYTES) + 128) + 64) as u64;
 const FILE: &str = "chat-drafts.json";
+/// How long typing must pause before the drafts are written.
+const SAVE_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// The pane a draft was typed in, named so the sidebar can find its row for
 /// any listed host, not only the one the window shows.
@@ -55,6 +57,9 @@ struct Draft {
     /// The chat's endpoint id, so another chat in the pane does not get it.
     chat: String,
     text: String,
+    /// Which edit this is, so a composer that never saw it cannot clear it.
+    #[serde(default)]
+    version: u64,
 }
 
 impl Draft {
@@ -96,11 +101,21 @@ fn bounded(text: &str) -> &str {
     &text[..end]
 }
 
+/// What a composer holds of the stored draft at its place: the version it
+/// restored or last wrote, which only it may clear.
+pub(crate) type Seen = Option<u64>;
+
 /// The app's drafts, oldest edit first.
 #[derive(Default)]
 pub(crate) struct Drafts {
     drafts: Vec<Draft>,
     marks: Arc<Marks>,
+    /// The last version given out.
+    version: u64,
+    /// Edits not yet handed to the writer.
+    dirty: bool,
+    /// Whether a save is already waiting out [`SAVE_DELAY`].
+    save_pending: bool,
     writer: Option<state_file::Writer<Saved>>,
     quitting: bool,
 }
@@ -118,7 +133,7 @@ impl Drafts {
     }
 
     fn at(path: Option<PathBuf>) -> Self {
-        let drafts = path
+        let drafts: Vec<Draft> = path
             .as_deref()
             .map(|path| {
                 state_file::read(path, MAX_FILE_BYTES)
@@ -136,11 +151,13 @@ impl Drafts {
                 .ok()
         });
         let marks = Arc::new(drafts.iter().map(|draft| draft.place.clone()).collect());
+        let version = drafts.iter().map(|draft| draft.version).max().unwrap_or(0);
         Self {
             drafts,
             marks,
+            version,
             writer,
-            quitting: false,
+            ..Self::default()
         }
     }
 
@@ -148,6 +165,8 @@ impl Drafts {
         cx.set_global(self);
         cx.on_app_quit(|cx| {
             let drafts = cx.global_mut::<Self>();
+            // What was typed within the last moment is saved too.
+            drafts.flush();
             drafts.quitting = true;
             let writer = drafts.writer.take();
             cx.background_executor().spawn(async move {
@@ -159,46 +178,61 @@ impl Drafts {
         .detach();
     }
 
-    /// The draft typed in `chat` at `place`, if any.
-    fn text(&self, place: &Place, chat: &str) -> Option<&str> {
-        self.drafts
-            .iter()
-            .find(|draft| draft.place == *place && draft.chat == chat)
-            .map(|draft| draft.text.as_str())
+    fn at_place(&self, place: &Place) -> Option<&Draft> {
+        self.drafts.iter().find(|draft| draft.place == *place)
     }
 
-    /// Whether [`Self::set`] would change anything.
-    fn differs(&self, place: &Place, chat: &str, text: &str) -> bool {
+    /// The draft typed in `chat` at `place`, with its version.
+    fn text(&self, place: &Place, chat: &str) -> Option<(&str, u64)> {
+        self.at_place(place)
+            .filter(|draft| draft.chat == chat)
+            .map(|draft| (draft.text.as_str(), draft.version))
+    }
+
+    /// What [`Self::set`] would leave the composer holding, when it would
+    /// change nothing.
+    fn unchanged(&self, place: &Place, chat: &str, text: &str, seen: Seen) -> Option<Seen> {
         let text = bounded(text);
-        match self.drafts.iter().find(|draft| draft.place == *place) {
-            Some(draft) => draft.chat != chat || draft.text != text,
-            None => !text.trim().is_empty(),
+        match self.at_place(place) {
+            Some(draft) if draft.chat == chat && draft.text == text => Some(Some(draft.version)),
+            // Only a composer that saw the stored draft may clear it: another
+            // window's newer text stays when this one sends older text.
+            Some(draft) if draft.chat == chat && text.trim().is_empty() => {
+                (seen != Some(draft.version)).then_some(None)
+            }
+            Some(_) => None,
+            None => text.trim().is_empty().then_some(None),
         }
     }
 
     /// Keeps `text` as the draft of `chat` at `place`, replacing whatever
-    /// that place held; blank text removes it. Returns whether anything
-    /// changed.
-    fn set(&mut self, place: &Place, chat: &str, text: &str) -> bool {
+    /// that place held; blank text removes it, if `seen` is the version
+    /// stored. Returns the version the composer now holds.
+    fn set(&mut self, place: &Place, chat: &str, text: &str, seen: Seen) -> Seen {
         if !place.valid() || chat.is_empty() || chat.len() > MAX_FIELD_BYTES {
-            return false;
+            return None;
         }
-        if !self.differs(place, chat, text) {
-            return false;
+        if let Some(held) = self.unchanged(place, chat, text, seen) {
+            return held;
         }
         self.drafts.retain(|draft| draft.place != *place);
         let text = bounded(text);
-        if !text.trim().is_empty() {
+        let held = if text.trim().is_empty() {
+            None
+        } else {
+            self.version += 1;
             self.drafts.push(Draft {
                 place: place.clone(),
                 chat: chat.to_owned(),
                 text: text.to_owned(),
+                version: self.version,
             });
             if self.drafts.len() > MAX_DRAFTS {
                 let excess = self.drafts.len() - MAX_DRAFTS;
                 self.drafts.drain(..excess);
             }
-        }
+            Some(self.version)
+        };
         // A new set only when a pencil comes or goes, not with each key.
         let marks: Marks = self
             .drafts
@@ -208,12 +242,13 @@ impl Drafts {
         if marks != *self.marks {
             self.marks = Arc::new(marks);
         }
-        self.save();
-        true
+        self.dirty = true;
+        held
     }
 
-    fn save(&self) {
-        if self.quitting {
+    /// Hands the drafts to the writer, if anything changed since.
+    fn flush(&mut self) {
+        if !std::mem::take(&mut self.dirty) || self.quitting {
             return;
         }
         if let Some(writer) = &self.writer {
@@ -223,6 +258,25 @@ impl Drafts {
         }
     }
 
+    /// Saves a moment after typing stops rather than with each key, so the
+    /// drafts are copied and written once a pause, not once a keystroke.
+    fn save_soon(cx: &mut App) {
+        let drafts = cx.global_mut::<Self>();
+        if drafts.save_pending || drafts.writer.is_none() {
+            return;
+        }
+        drafts.save_pending = true;
+        cx.spawn(async move |cx: &mut gpui::AsyncApp| {
+            cx.background_executor().timer(SAVE_DELAY).await;
+            cx.update(|cx| {
+                let drafts = cx.global_mut::<Self>();
+                drafts.save_pending = false;
+                drafts.flush();
+            });
+        })
+        .detach();
+    }
+
     /// The places holding a draft, shared until one comes or goes.
     pub(crate) fn current(cx: &App) -> Arc<Marks> {
         cx.try_global::<Self>()
@@ -230,35 +284,39 @@ impl Drafts {
             .unwrap_or_default()
     }
 
-    /// The draft to show in a new composer for `chat` at `place`. A draft
-    /// another chat left in that place is dropped, so its pencil goes.
-    fn restore(cx: &mut App, place: &Place, chat: &str) -> Option<String> {
+    /// The draft to show in a new composer for `chat` at `place`, with its
+    /// version. A draft another chat left in that place is dropped, so its
+    /// pencil goes.
+    fn restore(cx: &mut App, place: &Place, chat: &str) -> Option<(String, u64)> {
         let drafts = cx.try_global::<Self>()?;
-        if let Some(text) = drafts.text(place, chat) {
-            return Some(text.to_owned());
+        if let Some((text, version)) = drafts.text(place, chat) {
+            return Some((text.to_owned(), version));
         }
-        Self::record(cx, place, chat, "");
+        Self::record(cx, place, chat, "", None);
         None
     }
 
     /// [`Self::set`], touching the global only when something changes, so
     /// windows are not told of every key that leaves the draft as it was.
     /// Creates an unsaved store for fixtures that never installed one.
-    fn record(cx: &mut App, place: &Place, chat: &str, text: &str) {
-        if cx
+    pub(super) fn record(cx: &mut App, place: &Place, chat: &str, text: &str, seen: Seen) -> Seen {
+        if let Some(held) = cx
             .try_global::<Self>()
-            .is_some_and(|drafts| !drafts.differs(place, chat, text))
+            .and_then(|drafts| drafts.unchanged(place, chat, text, seen))
         {
-            return;
+            return held;
         }
         if !cx.has_global::<Self>() {
             cx.set_global(Self::default());
         }
-        cx.global_mut::<Self>().set(place, chat, text);
+        let held = cx.global_mut::<Self>().set(place, chat, text, seen);
+        Self::save_soon(cx);
+        held
     }
 
     #[cfg(test)]
     fn finish(&mut self) {
+        self.flush();
         if let Some(writer) = self.writer.take() {
             writer.finish();
         }
@@ -292,15 +350,16 @@ impl SheprdWindow {
         }
     }
 
-    /// The draft a new composer for the chat in `pane_id` starts with.
-    pub(super) fn restored_chat_draft(&self, pane_id: &str, cx: &mut App) -> Option<String> {
+    /// The draft a new composer for the chat in `pane_id` starts with, and
+    /// its version.
+    pub(super) fn restored_chat_draft(&self, pane_id: &str, cx: &mut App) -> Option<(String, u64)> {
         let target = &self.chats.pane(pane_id)?.target;
         let place = self.chat_draft_place(target)?;
         Drafts::restore(cx, &place, target.endpoint.as_str())
     }
 
     /// Keeps what the composer of the chat in `pane_id` now holds.
-    pub(super) fn save_chat_draft(&self, pane_id: &str, cx: &mut App) {
+    pub(super) fn save_chat_draft(&mut self, pane_id: &str, cx: &mut App) {
         let Some(pane) = self.chats.pane(pane_id) else {
             return;
         };
@@ -311,7 +370,11 @@ impl SheprdWindow {
             return;
         };
         let text = composer.read(cx).text().to_owned();
-        Drafts::record(cx, &place, pane.target.endpoint.as_str(), &text);
+        let chat = pane.target.endpoint.as_str().to_owned();
+        let seen = Drafts::record(cx, &place, &chat, &text, pane.draft_seen);
+        if let Some(pane) = self.chats.pane_mut(pane_id) {
+            pane.draft_seen = seen;
+        }
     }
 }
 

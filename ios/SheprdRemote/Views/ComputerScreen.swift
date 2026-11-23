@@ -23,7 +23,8 @@ struct ComputerScreen: View {
 
     private func page(_ computer: Computer) -> some View {
         let name = model.displayName(computer)
-        let status = model.fleet.machines.first { $0.id == device }?.status
+        let machine = model.fleet.machines.first { $0.id == device }
+        let status = machine?.status
         let addresses = Self.addresses(computer)
         let connected: String? = if case let .online(origin) = status, addresses.contains(where: { $0.origin == origin }) { origin } else { nil }
         let relayed = model.fleet.throughRelay(device)
@@ -33,7 +34,7 @@ struct ComputerScreen: View {
                     Image(systemName: computer.via == nil ? "laptopcomputer" : "server.rack")
                         .font(.system(size: 44, weight: .thin)).foregroundStyle(.tint)
                     Text(name).font(.title2.bold())
-                    if let status { ComputerStatusLine(status: status).font(.subheadline) }
+                    if let shown = machine?.presentedStatus { ComputerStatusLine(status: shown).font(.subheadline) }
                 }
                 .frame(maxWidth: .infinity)
                 .listRowBackground(Color.clear)

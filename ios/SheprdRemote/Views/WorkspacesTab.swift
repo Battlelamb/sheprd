@@ -234,7 +234,7 @@ struct MachineStatus: View {
     var machine: Fleet.Machine
 
     var body: some View {
-        switch machine.status {
+        switch machine.presentedStatus {
         case .online:
             HStack(spacing: 6) {
                 if let waiting = machine.home?.waiting, waiting > 0 {

@@ -86,6 +86,7 @@ final class Fleet {
     struct Machine: Identifiable {
         var computer: Computer
         var status: LinkStatus = .connecting
+        var lastKnownStatus: LinkStatus?
         var home: Home?
         /// `home` came from the cache and the link has not refreshed it.
         var stale = true
@@ -98,6 +99,7 @@ final class Fleet {
         /// changed in between as it happened.
         var watching = false
         var id: String { computer.device }
+        var presentedStatus: LinkStatus { status.presented(lastKnown: lastKnownStatus) }
         /// The computer answered and runs a Sheprd too old for this app. A
         /// cached `home` may predate an update, so only a fresh one counts.
         var needsUpdate: Bool { !stale && home?.needsUpdate == true }
@@ -211,6 +213,7 @@ final class Fleet {
             }
             return Machine(
                 computer: computer,
+                lastKnownStatus: cache.lastLinkStatus(computer.device),
                 home: cache.home(computer.device),
                 updated: cache.homeDate(computer.device),
                 answers: cache.answers(computer.device)
@@ -842,6 +845,10 @@ final class Fleet {
         case let .status(status):
             log.notice("\(self.machines[index].computer.name, privacy: .public) is \(String(describing: status), privacy: .public)")
             machines[index].status = status
+            if status != .connecting, machines[index].lastKnownStatus != status {
+                machines[index].lastKnownStatus = status
+                cache.save(linkStatus: status, for: device)
+            }
             if case .online = status {} else {
                 machines[index].watching = false
                 onOffline?(device)

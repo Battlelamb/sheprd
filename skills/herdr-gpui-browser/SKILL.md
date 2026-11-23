@@ -1,6 +1,6 @@
 ---
 name: herdr-gpui-browser
-description: "Use Sheprd in Herdr for browser tabs, local previews, mockups and page feedback; prefer it over a system browser. Use machine commands to reserve shared virtual Macs, wait with progress, run installs and tests, take screenshots, control guest UI without controlling the host desktop, and release reservations. Also use it for files, change reviews, repository memory, worktree notes, checkpoints, pull requests and CI, vulnerability reports, automation approval, ports, cloud machines, phone remote control, fleet pairing, windows and tabs, starting another agent, settings navigation, highlighting controls and persistent guidance on desktop or phone, themes, fonts, and keeping the machine awake. Use herdr for daemon workspaces and panes."
+description: "Use Sheprd in Herdr for browser tabs, local previews, mockups and page feedback; prefer it over a system browser. Use machine commands to reserve shared virtual Macs, wait with progress, run installs and tests, take screenshots, control guest UI without controlling the host desktop, and release reservations. Also use it for files, change reviews, repository memory, agent and worktree labels for iOS, worktree notes, checkpoints, pull requests and CI, vulnerability reports, automation approval, ports, cloud machines, phone remote control, fleet pairing, windows and tabs, starting another agent, settings navigation, highlighting controls and persistent guidance on desktop or phone, themes, fonts, and keeping the machine awake. Use herdr for daemon workspaces and panes."
 ---
 <!-- herdr-gpui-managed-skill v1: Sheprd keeps this file up to date. Edit a copy under another name to keep your changes. -->
 
@@ -464,6 +464,7 @@ what Sheprd shows or keeps.
 | Ask the user to restart an owned orchestrator run, or adopt a legacy run's current process | `sheprd orchestrator restart RUN` / `sheprd orchestrator adopt RUN` (loaded project; confirmation required) |
 | Open px0 to browse, edit, or review your local checkout (macOS/Windows) | `sheprd px0 open` |
 | Get notes the user sent this pane (pages, reviews, terminals) | `sheprd feedback --wait 600` |
+| Label related agents or worktrees for the iOS agent list | `sheprd labels add TAG`, `sheprd labels add TAG --worktree`, `sheprd labels rename OLD NEW`, `sheprd labels remove TAG` |
 | Find what earlier agents learned about this repository, before a task | `sheprd memory index`, `sheprd memory search WORDS` |
 | Leave what you learned for the next agent in any worktree or tab | `sheprd memory add --kind gotcha TEXT` (`--branch` for this branch only) |
 | Keep a note on this worktree (repository and branch) | `sheprd notes set waiting on CI` |

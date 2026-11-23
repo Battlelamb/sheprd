@@ -256,6 +256,7 @@ pub(super) fn terminal(
         .iter()
         .filter(|record| record.status.is_some())
         .map(|record| TerminalAgent {
+            boot: boot.to_owned(),
             name: record
                 .status
                 .as_ref()

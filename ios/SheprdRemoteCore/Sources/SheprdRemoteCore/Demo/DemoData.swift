@@ -69,11 +69,11 @@ public enum DemoData {
           "waiting": 1, "working": 2, "version": "demo",
           "load": {"cores": 12, "cpu": 38, "load5_tenths": 31, "memory": 54},
           "workspaces": [
-            {"id": "w1", "label": "forecast", "branch": "main", "cwd": "/Users/demo/forecast", "session": "default",
+            {"id": "w1", "label": "forecast", "labels": ["Widgets"], "branch": "main", "cwd": "/Users/demo/forecast", "session": "default",
              "worktree": {"key": "/Users/demo/forecast/.git", "label": "forecast", "is_linked_worktree": false},
              "pull_request": {"number": 412, "url": "https://example.com/forecast/pull/412", "tone": "waiting"},
              "chats": [
-               {"pane": "c2", "tab": "t2", "title": "Ship the widget fix", "agent": "Claude", "status": "working",
+               {"pane": "c2", "tab": "t2", "title": "Ship the widget fix", "labels": ["Release"], "agent": "Claude", "status": "working",
                 "summary": {"connected": true, "status": {"state": "working"}, "question": \#(question),
                             "questions": 1, "last_text": "Tests pass. Pushing the branch for review.",
                             "turn_started_ms": \#(started), "usage_percent": 31}},
@@ -86,7 +86,7 @@ public enum DemoData {
                {"tab": "t3", "label": "zsh", "cwd": "/Users/demo/forecast", "zoomed": false, "actions": [],
                 "panes": [{"pane": "p3", "label": null, "cwd": "/Users/demo/forecast", "focused": true}]}
              ]},
-            {"id": "w4", "label": "chart legend", "branch": "feat/chart-legend", "cwd": "/Users/demo/forecast-legend",
+            {"id": "w4", "label": "chart legend", "labels": ["Widgets"], "branch": "feat/chart-legend", "cwd": "/Users/demo/forecast-legend",
              "session": "default", "uncommitted": true, "unopened_commits": 2,
              "worktree": {"key": "/Users/demo/forecast/.git", "label": "forecast", "is_linked_worktree": true},
              "chats": [

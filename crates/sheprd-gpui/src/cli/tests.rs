@@ -41,6 +41,25 @@ mod usage_pick;
 mod worktrees;
 
 #[test]
+fn labels_reach_control_with_the_requested_scope() {
+    use sheprd_remote_control::control::labels::{Command, Edit, Target};
+    let parsed =
+        LaunchOptions::parse(["labels", "add", "Release", "--workspace", "w1", "--json"]).unwrap();
+    let LaunchMode::Control(invocation) = parsed.mode else {
+        panic!("expected control")
+    };
+    assert!(invocation.json);
+    assert_eq!(
+        invocation.command,
+        control::ControlCommand::Labels(Command {
+            target: Some(Target::Workspace("w1".into())),
+            worktree: true,
+            edit: Edit::Add("Release".into()),
+        })
+    );
+}
+
+#[test]
 fn build_info_is_an_informational_mode() {
     assert_eq!(
         LaunchOptions::parse(["--build-info"]).unwrap().mode,

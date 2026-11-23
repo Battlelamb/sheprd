@@ -83,6 +83,7 @@ pub enum ControlCommand {
     Review,
     Chat(ChatCommand),
     Px0,
+    Labels(sheprd_remote_control::control::labels::Command),
     Notes(NotesCommand),
     Memory(MemoryCommand),
     /// `sheprd mcp`: an MCP server on stdio, or a client's configuration.
@@ -206,6 +207,10 @@ pub const FAMILIES: &[(&str, &str)] = &[
         "Native views of herdr-acp chats: start one, list them, show or hide one",
     ),
     ("px0", "Open px0 on the caller's local checkout"),
+    (
+        "labels",
+        "Manage agent and worktree tags shown on paired phones",
+    ),
     ("notes", "Notes kept on worktrees"),
     (
         "memory",
@@ -405,6 +410,11 @@ fn command(family: &'static str, args: &mut Args) -> Result<ControlCommand, CliE
             tabs::open_only(args)?;
             ControlCommand::Px0
         }
+        "labels" => ControlCommand::Labels(
+            sheprd_remote_control::control::labels::Command::parse(args.take_all()).map_err(
+                |_| CliError::InvalidValue(sheprd_remote_control::control::labels::USAGE),
+            )?,
+        ),
         "notes" => ControlCommand::Notes(work::notes(args)?),
         "memory" => ControlCommand::Memory(memory::memory(args)?),
         #[cfg(feature = "mcp")]

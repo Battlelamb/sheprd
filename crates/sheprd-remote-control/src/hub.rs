@@ -28,9 +28,9 @@ pub(crate) use convert::Error as ConvertError;
 pub(crate) use core::project_spaces;
 pub(crate) use core::{Keeper, TabRef, arrangeable};
 pub(crate) use launcher::Launcher;
-#[cfg(test)]
-pub(crate) use layout::TerminalAgent;
-pub(crate) use layout::{Chat as ChatRow, Job, Layout, Terminal, TerminalPane, Workspace};
+pub(crate) use layout::{
+    Chat as ChatRow, Job, Layout, Terminal, TerminalAgent, TerminalPane, Workspace,
+};
 pub(crate) use new_workspace::NewWorkspace;
 pub(crate) use observed::observable;
 pub(crate) use row_summary::RowSummary;

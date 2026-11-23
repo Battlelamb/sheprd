@@ -80,6 +80,8 @@ pub(crate) struct Terminal {
 /// An agent Herdr detects in a terminal tab, outside any chat.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TerminalAgent {
+    /// The snapshot boot scopes Herdr 1 pane numbers across restarts.
+    pub(crate) boot: String,
     pub(crate) name: Option<String>,
     pub(crate) status: AgentStatus,
     /// The pane it runs in, which a phone opens for it.
@@ -293,6 +295,7 @@ pub(crate) fn project_with(snapshot: &ClientShellSnapshot, listed: Chats) -> Lay
                         .iter()
                         .filter(|agent| agent.tab_id == tab.tab_id)
                         .map(|agent| TerminalAgent {
+                            boot: snapshot.boot_id.clone(),
                             name: agent_kind(agent),
                             status: agent.agent_status,
                             pane: agent.pane_id.clone(),

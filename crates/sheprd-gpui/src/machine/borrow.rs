@@ -100,7 +100,7 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Answered> {
-        if self.menu.page.is_some() || !self.open_menu(window, cx) {
+        if self.menu.page.is_some() || self.menu.machine_borrow.is_some() {
             return None;
         }
         let answered = Answered::default();
@@ -110,11 +110,41 @@ impl SheprdWindow {
             machine,
             answered: answered.clone(),
         });
-        self.menu.page = Some(Page::BorrowMachine);
-        window.activate_window();
         cx.notify();
         self.close_borrow_when_cancelled(answered.clone(), window, cx);
         Some(answered)
+    }
+
+    /// Invite the user to review a pending request without interrupting input.
+    pub(crate) fn borrow_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let ask = self.menu.machine_borrow.as_ref()?;
+        let label = fl!("machine-borrow-title", host = safe_text(&ask.host, 64));
+        let control = button(
+            &self.theme,
+            "review-machine-borrow",
+            label,
+            Tone::Primary,
+            true,
+        )
+        .occlude()
+        .children(self.overlay_probe(crate::browser::Overlay::Notice(
+            crate::window::NoticeCard::BorrowMachine,
+        )))
+        .on_click(cx.listener(|this, _, window, cx| {
+            cx.stop_propagation();
+            if let Some(ask) = this.menu.machine_borrow.take()
+                && !ask.answered.cancelled()
+                && this.open_menu(window, cx)
+            {
+                this.menu.machine_borrow = Some(ask);
+                this.menu.page = Some(Page::BorrowMachine);
+                cx.notify();
+            }
+        }));
+        Some(
+            self.chrome_stop(crate::window::chrome_focus::Region::Notices, control)
+                .into_any_element(),
+        )
     }
 
     /// Closes the question once its request ends unanswered, so a stale
@@ -136,7 +166,11 @@ impl SheprdWindow {
                         .is_some_and(|ask| ask.answered.same(&answered));
                     if ours && answered.cancelled() {
                         view.menu.machine_borrow = None;
-                        view.dismiss_menu(window, cx);
+                        if view.menu.page == Some(Page::BorrowMachine) {
+                            view.dismiss_menu(window, cx);
+                        } else {
+                            cx.notify();
+                        }
                         return false;
                     }
                     ours

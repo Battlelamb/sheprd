@@ -3633,9 +3633,9 @@ Agents running in the app's panes can open a page for you:
 
 ```sh
 sheprd browser open http://localhost:3000   # macOS: /Applications/Herdr.app/Contents/MacOS/Herdr
-sheprd browser open design/mockup.html      # in a split beside the agent's terminal
+sheprd browser open design/mockup.html      # a background tab
 sheprd browser open --no-focus https://example.com/docs
-sheprd browser open --tab design/mockup.html # a tab, like a web address
+sheprd browser open --beside design/mockup.html # explicitly show a split
 sheprd browser reload                       # reload the pages this pane opened
 sheprd browser feedback --wait 600          # wait for the notes you send it
 sheprd browser --help
@@ -3687,10 +3687,8 @@ and opens the page in that workspace, once per request:
   all open; a workspace holds at most 32 tokens, so a burst of long addresses
   can be refused until earlier ones expire.
 
-A local file opened from a pane goes beside that pane's terminal, since it is
-usually a mockup or explainer the agent wrote for you to read while you talk
-to it; a web address takes a tab of the group in use. `--beside` and `--tab`
-choose instead. Beside means an editor group next to the group showing the
+Local files and web addresses both open in a background tab. Use `--focus`
+to select it, or `--beside` for a visible split. Beside means an editor group next to the group showing the
 caller's terminal: the group the page already belongs to, the group beside
 the terminal when the window is split, or a new group split off to its
 right. The terminal's group stays in use and keeps the keyboard, so you can

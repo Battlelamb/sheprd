@@ -21,7 +21,7 @@ json=0
 
 usage() {
     cat <<'EOF'
-Usage: sheprd browser open [--no-focus] [--tab] URL
+Usage: sheprd browser open [--focus|--no-focus] [--tab] URL
        sheprd browser reload
        sheprd browser feedback [--wait SECONDS]
        sheprd labels [list|add TAG|rename OLD NEW|remove TAG] [--worktree] [--pane ID | --workspace ID]
@@ -33,7 +33,8 @@ Herdr 2 terminal (HC_TERMINAL_ID), of the workspace that shows it.
   open URL      An http or https address, or a bare host such as
                 localhost:3000. An address on this host's localhost is
                 forwarded to the user's machine first.
-  --no-focus    Accepted for compatibility; tabs never switch focus.
+  --focus       Show the page immediately when the user asks.
+  --no-focus    Open the tab in the background (default).
   --tab         Accepted: a page from this host always opens as a tab.
   reload        Reload the tabs this pane opened.
   feedback      Herdr 2: return notes sent to this terminal (exit 4 if none).
@@ -143,10 +144,12 @@ send() {
 }
 
 open_page() {
+    action=open-background
     target=
     for arg in "$@"; do
         case $arg in
-            --no-focus) ;;
+            --no-focus) action=open-background ;;
+            --focus) action=open ;;
             # A page from a host always opens as a tab.
             --tab) ;;
             --beside) fail 8 unsupported "A page opened from an SSH host opens as a tab; --beside is not available here." ;;
@@ -179,7 +182,7 @@ open_page() {
     esac
     [ "${#target}" -le $((CHUNK * CHUNKS)) ] ||
         fail 2 usage "Addresses longer than $((CHUNK * CHUNKS)) characters cannot be sent from an SSH host."
-    send open-background "$target"
+    send "$action" "$target"
     if core_terminal; then
         done_message "Asked Sheprd to open $target; a window showing this terminal opens it."
     else

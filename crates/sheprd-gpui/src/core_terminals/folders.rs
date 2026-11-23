@@ -236,15 +236,4 @@ impl SheprdWindow {
     pub(crate) fn shows_core_tab(&self) -> bool {
         self.core_terminals.shown.is_some()
     }
-
-    /// The folder the focused workspace's herdr-core tabs started in, for a
-    /// workspace with no Herdr pane to name one.
-    pub(crate) fn core_launch_root(&self) -> Option<String> {
-        let (scope, workspace) = self.browser_key()?;
-        self.core_terminals
-            .launch_root(&scope, &workspace)?
-            .into_os_string()
-            .into_string()
-            .ok()
-    }
 }

@@ -20,17 +20,8 @@ impl SheprdWindow {
             self.show_flash(Flash::warning(fl!("machine-no-workspace")), cx);
             return;
         };
-        let existing = cx.try_global::<Store>().and_then(|store| {
-            store
-                .in_workspace(&scope, &workspace)
-                .find(|tab| matches!(&tab.location, Some(Location::Machine { name: open }) if *open == name))
-                .map(|tab| tab.id)
-        });
-        let opened = existing.or_else(|| {
-            Store::update(cx, {
-                let name = name.clone();
-                |store| store.open(scope, &workspace, Some(Location::Machine { name }), None)
-            })
+        let opened = Store::update(cx, |store| {
+            store.open_location(scope, &workspace, Location::Machine { name: name.clone() })
         });
         let Some(id) = opened else {
             self.show_flash(Flash::warning(fl!("machine-too-many-tabs")), cx);

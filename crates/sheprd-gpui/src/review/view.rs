@@ -93,9 +93,15 @@ pub(crate) fn pick_agent(snapshot: &ClientShellSnapshot) -> Option<Agent> {
             .find(|workspace| workspace.focused)
             .map(|workspace| workspace.workspace_id.as_str())
     })?;
-    let agent = snapshot
-        .focused_pane_id
-        .as_deref()
+    workspace_agent(snapshot, workspace, snapshot.focused_pane_id.as_deref())
+}
+
+fn workspace_agent(
+    snapshot: &ClientShellSnapshot,
+    workspace: &str,
+    pane: Option<&str>,
+) -> Option<Agent> {
+    let agent = pane
         .and_then(|pane| crate::agent_notes::agent(snapshot, pane))
         .filter(|agent| agent.workspace_id == workspace)
         .or_else(|| {

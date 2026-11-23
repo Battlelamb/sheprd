@@ -116,6 +116,8 @@ pub(crate) struct MenuState {
     /// Whether to borrow another computer's virtual Mac. Dropping it
     /// unanswered declines.
     pub(crate) machine_borrow: Option<crate::machine::borrow::Ask>,
+    #[cfg(target_os = "macos")]
+    pub(crate) machine_settings_request: Option<crate::machine::settings_request::Request>,
     pub(super) devices_scroll: ScrollHandle,
     /// The picker line to scroll into view once the list has been laid out:
     /// on the frame it first appears, GPUI drops a scroll request unapplied.
@@ -417,6 +419,8 @@ impl MenuState {
             remote_revoke: None,
             remote_host_ask: None,
             machine_borrow: None,
+            #[cfg(target_os = "macos")]
+            machine_settings_request: None,
             devices_scroll: ScrollHandle::new(),
             devices_reveal: std::cell::Cell::new(None),
             usage_scroll: ScrollHandle::new(),

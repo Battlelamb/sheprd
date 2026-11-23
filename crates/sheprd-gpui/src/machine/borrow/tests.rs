@@ -28,3 +28,19 @@ fn a_cancelled_request_is_seen_by_its_question_only() {
     assert!(answered.same(&answered.clone()));
     assert!(!answered.same(&other));
 }
+
+#[gpui::test]
+fn a_borrow_request_waits_for_a_click_without_taking_focus(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            let original = cx.focus_handle();
+            window.focus(&original, cx);
+            let ask = view.ask_to_borrow("mini".into(), "mini".into(), "work".into(), window, cx);
+            assert!(original.is_focused(window));
+            assert!(view.menu.page.is_none());
+            assert!(view.notice_shown(crate::window::NoticeCard::BorrowMachine));
+            assert!(ask.is_some_and(|ask| ask.take().is_none()));
+        })
+    });
+}

@@ -33,8 +33,12 @@ use std::{
 /// Ends each answer on a line of its own.
 const END: &str = "@@herdr-answer-end"; // i18n: data
 
-/// Output an answer may reach.
+/// Output an answer, or what has come of an unfinished one, may reach.
 const LIMIT: usize = 256 * 1024;
+
+/// Chunks the reader may hold before the session takes them; also how many
+/// one pass of [`Session::sample`] takes without waiting.
+const CHANNEL: usize = 64;
 
 /// How often a wait checks that the process is still running.
 const POLL: Duration = Duration::from_millis(250);
@@ -197,23 +201,23 @@ impl Session {
             timeout.max(FIRST_ANSWER)
         };
         let deadline = Instant::now() + timeout;
+        let mut latest = None;
         loop {
-            // Take what has already arrived without waiting.
-            loop {
+            // Take what has already arrived without waiting, at most a full
+            // channel's worth, so a host that never stops printing cannot
+            // keep this loop from its checks.
+            for _ in 0..CHANNEL {
                 match self.output.try_recv() {
-                    Ok(Ok(chunk)) => self.buffer.extend_from_slice(&chunk),
+                    Ok(Ok(chunk)) => latest = add(&mut self.buffer, &chunk)?.or(latest),
                     Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => {
                         return Err(Error::Closed.into());
                     }
                     Err(mpsc::TryRecvError::Empty) => break,
                 }
             }
-            if let Some(text) = take_latest(&mut self.buffer) {
+            if let Some(text) = latest {
                 self.answered = true;
                 return Ok(text);
-            }
-            if self.buffer.len() > LIMIT {
-                return Err(Error::Size.into());
             }
             // A child of the child, such as `ssh`'s, can keep the pipe open
             // after the process itself has exited; that is closed too.
@@ -225,7 +229,7 @@ impl Session {
                 return Err(Error::Timeout.into());
             }
             match self.output.recv_timeout(left.min(POLL)) {
-                Ok(Ok(chunk)) => self.buffer.extend_from_slice(&chunk),
+                Ok(Ok(chunk)) => latest = add(&mut self.buffer, &chunk)?,
                 Ok(Err(_)) | Err(mpsc::RecvTimeoutError::Disconnected) => {
                     return Err(Error::Closed.into());
                 }
@@ -233,6 +237,19 @@ impl Session {
             }
         }
     }
+}
+
+/// Adds `chunk` to `buffer` and returns the newest whole answer it
+/// completed, removing it and every one before it. Neither an answer nor
+/// what is left of an unfinished one may pass [`LIMIT`], so `buffer` never
+/// holds more than that and one chunk.
+fn add(buffer: &mut Vec<u8>, chunk: &[u8]) -> Result<Option<String>> {
+    buffer.extend_from_slice(chunk);
+    let latest = take_latest(buffer);
+    if buffer.len() > LIMIT || latest.as_ref().is_some_and(|text| text.len() > LIMIT) {
+        return Err(Error::Size.into());
+    }
+    Ok(latest)
 }
 
 /// A pipe for the child's stdout: the end read here, and the child's.
@@ -251,7 +268,7 @@ fn stdout() -> Result<(std::io::PipeReader, Stdio)> {
 fn read_on_thread(
     mut source: impl Read + Send + 'static,
 ) -> Result<mpsc::Receiver<std::io::Result<Vec<u8>>>> {
-    let (sender, output) = mpsc::sync_channel(64);
+    let (sender, output) = mpsc::sync_channel(CHANNEL);
     thread::Builder::new()
         .name("herdr-windows-host".into())
         .spawn(move || {
@@ -278,7 +295,7 @@ fn read_on_thread(
 
 /// The last whole answer in `buffer`, removed with every one before it; None
 /// until one has arrived.
-pub(crate) fn take_latest(buffer: &mut Vec<u8>) -> Option<String> {
+fn take_latest(buffer: &mut Vec<u8>) -> Option<String> {
     let mut latest = None;
     while let Some(text) = take_answer(buffer) {
         latest = Some(text);

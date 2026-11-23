@@ -185,3 +185,70 @@ fn a_slow_first_answer_is_waited_for() {
         "late"
     );
 }
+
+const MARK: &[u8] = b"@@herdr-answer-end\n";
+
+#[test]
+fn a_chunk_completing_several_answers_keeps_the_newest() {
+    let mut buffer = Vec::new();
+    let chunk = [b"a\n".as_slice(), MARK, b"b\n", MARK, b"c"].concat();
+    assert_eq!(add(&mut buffer, &chunk).unwrap().as_deref(), Some("b\n"));
+    assert_eq!(buffer, b"c");
+}
+
+/// A finished answer larger than [`LIMIT`] is refused, not returned.
+#[test]
+fn an_oversized_answer_is_refused() {
+    let mut buffer = Vec::new();
+    let chunk = [vec![b'x'; LIMIT + 1].as_slice(), b"\n", MARK].concat();
+    assert!(matches!(
+        add(&mut buffer, &chunk),
+        Err(crate::Error::WindowsHost(Error::Size))
+    ));
+}
+
+/// An answer that never ends is refused once it passes [`LIMIT`], so the
+/// buffer never holds more than that and one chunk.
+#[test]
+fn an_unfinished_answer_is_refused_past_the_limit() {
+    let mut buffer = Vec::new();
+    let chunk = vec![b'x'; 8192];
+    let mut added = 0;
+    let error = loop {
+        match add(&mut buffer, &chunk) {
+            Ok(None) => added += chunk.len(),
+            Ok(Some(_)) => panic!("no answer ended"),
+            Err(error) => break error,
+        }
+        assert!(added <= LIMIT, "{added}");
+    };
+    assert!(matches!(error, crate::Error::WindowsHost(Error::Size)));
+    assert!(buffer.len() <= LIMIT + chunk.len());
+}
+
+/// A process that prints without end is refused rather than read forever.
+#[test]
+fn a_process_that_never_stops_printing_is_refused() {
+    #[cfg(windows)]
+    let mut command = {
+        let mut command = std::process::Command::new("powershell.exe");
+        command
+            .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"])
+            .arg("$x = 'x' * 8000; while ($true) { [Console]::Out.Write($x) }");
+        command.stderr(Stdio::null());
+        command
+    };
+    #[cfg(not(windows))]
+    let mut command = {
+        let mut command = std::process::Command::new("/bin/sh");
+        command.args(["-c", "yes xxxxxxxxxxxxxxxx"]);
+        command
+    };
+    let mut session = Session::start(&mut command).unwrap();
+    let started = Instant::now();
+    assert!(matches!(
+        session.sample(Duration::from_secs(60)),
+        Err(crate::Error::WindowsHost(Error::Size))
+    ));
+    assert!(started.elapsed() < Duration::from_secs(60));
+}

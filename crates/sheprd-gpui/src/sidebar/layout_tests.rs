@@ -49,6 +49,8 @@ mod device_tag_groups;
 #[cfg(test)]
 mod devices_layout;
 #[cfg(test)]
+mod drafted_agents;
+#[cfg(test)]
 mod favorite_agents;
 #[cfg(test)]
 mod fold_all_hosts;
@@ -618,6 +620,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         _terminal_focus: terminal_focus,
         chrome_region: None,
         hosted: false,
+        chat_drafts: Default::default(),
         chat_rail_width: crate::panel_resize::CHAT_RAIL,
         chat_turns: Default::default(),
         chats: Default::default(),
@@ -856,6 +859,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         _agent_favorites: cx
             .observe_global::<crate::agent_favorites::AgentFavorites>(|_, cx| cx.notify()),
         _agent_read: cx.observe_global::<crate::agent_read::AgentRead>(|_, cx| cx.notify()),
+        _chat_drafts: SheprdWindow::observe_chat_drafts(cx),
         _device_tags: cx.observe_global::<crate::device_tags::DeviceTags>(|_, cx| cx.notify()),
         _worktree_notes: SheprdWindow::observe_worktree_notes(window, cx),
         prefix_armed: false,

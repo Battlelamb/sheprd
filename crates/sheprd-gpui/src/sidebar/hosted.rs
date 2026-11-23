@@ -71,6 +71,8 @@ pub struct Stamp {
     agent_read: Arc<crate::agent_read::Sets>,
     agent_sort: AgentSort,
     agents_list: bool,
+    /// The chats holding a draft, replaced only as one comes or goes.
+    chat_drafts: Arc<crate::chat::drafts::Marks>,
     /// The chat whose turns the layout shows; see `chat::turns`.
     chat_turns: Option<crate::chat::turns::TurnsStamp>,
     connected: bool,
@@ -106,6 +108,7 @@ impl PartialEq for Stamp {
             && Arc::ptr_eq(&self.agent_read, &other.agent_read)
             && self.agent_sort == other.agent_sort
             && self.agents_list == other.agents_list
+            && Arc::ptr_eq(&self.chat_drafts, &other.chat_drafts)
             && self.chat_turns == other.chat_turns
             && self.connected == other.connected
             && self.details_visible == other.details_visible
@@ -150,12 +153,13 @@ fn panel_id(panel: ActivityPanel) -> &'static str {
 
 /// An agent as the window's agents list labels it: the place it runs (its
 /// workspace, and its tab when that earns a place), its pane's name, the
-/// word its integration chose for its status, and whether it has a reply no
-/// one read (`crate::agent_read`).
+/// word its integration chose for its status, whether it has a reply no
+/// one read (`crate::agent_read`), and whether its chat holds a draft not
+/// sent (`crate::chat::drafts`).
 fn agent_state(
     agent: &Listed<'_>,
     show_state: bool,
-    unread: bool,
+    (unread, drafted): (bool, bool),
     (endpoint, host): (&str, Option<&str>),
 ) -> Value {
     let place = agent.place();
@@ -166,6 +170,7 @@ fn agent_state(
     };
     json!({
         "core": agent.is_core(),
+        "drafted": drafted,
         "endpoint": endpoint,
         "focused": agent.focused(),
         "host": host,
@@ -275,6 +280,7 @@ impl SheprdWindow {
             agent_read: self.agent_read.clone(),
             agent_sort: self.agent_sort,
             agents_list: self.hosted_agents_list(),
+            chat_drafts: self.chat_drafts.clone(),
             chat_turns: self.hosted_chat_turns_stamp(),
             connected: self.live.status.is_connected(),
             details_visible: self.details_visible,
@@ -318,7 +324,13 @@ impl SheprdWindow {
                 let unread = agent
                     .favorite_key()
                     .is_some_and(|key| self.agent_read.contains(&endpoint.id, &key));
-                Some(agent_state(&agent, shows, unread, (&endpoint.id, host)))
+                let drafted = self.drafted(index, &agent);
+                Some(agent_state(
+                    &agent,
+                    shows,
+                    (unread, drafted),
+                    (&endpoint.id, host),
+                ))
             })
             .collect()
     }

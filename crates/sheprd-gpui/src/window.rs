@@ -115,6 +115,8 @@ pub(crate) struct SheprdWindow {
     pub(crate) _agent_read: Subscription,
     pub(crate) _appearance: Subscription,
     pub(crate) _browser_tabs: Subscription,
+    /// Another window may keep or send a draft this one marks.
+    pub(crate) _chat_drafts: Subscription,
     pub(crate) _device_tags: Subscription,
     pub(crate) _host_theme: Subscription,
     /// Another window may mute or unmute what this one shows.
@@ -163,6 +165,8 @@ pub(crate) struct SheprdWindow {
     pub(crate) browser: crate::browser::Browser,
     pub(crate) catalog: endpoint::Catalog,
     pub(crate) cell_width: f32,
+    /// The chats holding an unsent draft, on any listed host.
+    pub(crate) chat_drafts: std::sync::Arc<crate::chat::drafts::Marks>,
     /// Native views of the `herdr-acp` chats in this daemon's panes.
     /// The rail beside an agent chat, shared by every chat in the window.
     pub(crate) chat_rail_width: crate::panel_resize::PanelWidth,

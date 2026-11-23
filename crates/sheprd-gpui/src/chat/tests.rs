@@ -32,6 +32,7 @@ mod convert;
 mod core_convert;
 mod core_panes;
 mod discovery;
+mod drafts;
 mod earlier;
 mod effects;
 mod embeds;

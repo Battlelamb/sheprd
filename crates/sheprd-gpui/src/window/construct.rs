@@ -104,6 +104,8 @@ impl SheprdWindow {
         let agent_favorites_changed = Self::observe_agent_favorites(cx);
         let agent_read = crate::agent_read::AgentRead::current(cx);
         let agent_read_changed = Self::observe_agent_read(cx);
+        let chat_drafts = crate::chat::drafts::Drafts::current(cx);
+        let chat_drafts_changed = Self::observe_chat_drafts(cx);
         let device_tags = crate::device_tags::DeviceTags::current(cx);
         let device_tags_changed = Self::observe_device_tags(cx);
         let worktree_notes = Self::observe_worktree_notes(window, cx);
@@ -142,6 +144,7 @@ impl SheprdWindow {
             _agent_read: agent_read_changed,
             _appearance: appearance_change,
             _browser_tabs: browser_tabs,
+            _chat_drafts: chat_drafts_changed,
             _device_tags: device_tags_changed,
             _host_theme: host_theme,
             _notification_mutes: notification_mutes,
@@ -170,6 +173,7 @@ impl SheprdWindow {
             browser,
             catalog,
             cell_width: 9.,
+            chat_drafts,
             chat_rail_width: crate::panel_resize::CHAT_RAIL,
             chat_turns: Default::default(),
             chats: Default::default(),

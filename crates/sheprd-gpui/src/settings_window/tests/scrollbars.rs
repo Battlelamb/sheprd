@@ -33,7 +33,20 @@ fn overflowing_panes_show_a_thumb_that_drags_them(cx: &mut TestAppContext) {
             (thumb.top() - area.top()).abs() < px(1.),
             "{pane} starts at the top"
         );
-        assert!(thumb.right() <= area.right(), "{pane} sits inside the pane");
+        let expected_right = if pane == "settings-sections-thumb" {
+            // The navigation list is padded, but its thumb belongs at the
+            // panel edge rather than beside the padded row content.
+            cx.debug_bounds("settings-navigation-resize")
+                .unwrap()
+                .right()
+                - px(4.)
+        } else {
+            area.right() - px(3.)
+        };
+        assert!(
+            (thumb.right() - expected_right).abs() <= px(1.),
+            "{pane} is aligned: thumb={thumb:?}, area={area:?}, expected_right={expected_right:?}"
+        );
     }
 
     // Dragging the body's thumb down scrolls the body, and the thumb follows.

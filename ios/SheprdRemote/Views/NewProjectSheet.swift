@@ -63,6 +63,10 @@ struct NewProjectSheet: View {
                         if let computer = model.fleet.machines.first(where: { $0.id == device })?.computer {
                             Text("Project on \(model.displayName(computer))")
                         }
+                    } footer: {
+                        if cloning {
+                            Text("Cloning uses the selected computer’s Git credentials. For a private repository, make sure that computer has access.")
+                        }
                     }
                 }
                 if let options {
@@ -167,9 +171,16 @@ private struct ProjectRepositories: View {
                 let matches = repos.filter { query.isEmpty || $0.fullName.localizedCaseInsensitiveContains(query) }
                 if matches.isEmpty { Text("No repositories found") }
                 ForEach(matches) { repo in
-                    Button(repo.fullName) {
+                    Button {
                         select(repo)
                         dismiss()
+                    } label: {
+                        VStack(alignment: .leading) {
+                            Text(verbatim: repo.fullName)
+                            if repo.isPrivate {
+                                Text("Private").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
             }

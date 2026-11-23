@@ -48,12 +48,17 @@ impl Hub {
             let cwd = PathBuf::from(new.cwd);
             // Git, not a workspace's folder, says which repository `cwd`
             // is: a workspace's folder follows its shell elsewhere.
-            let checkout = on_core(move || Ok(Checkout::of(&cwd))).await?;
-            let repository = checkout.and_then(|checkout| {
-                herdr_1_repository(&self.layout(), &checkout, session, |id| {
-                    self.kept_workspace(id)
-                })
-            });
+            let layout = self.layout();
+            let owner = self.core.clone();
+            let session = session.map(str::to_owned);
+            let repository = on_core(move || {
+                Ok(Checkout::of(&cwd).and_then(|checkout| {
+                    herdr_1_repository(&layout, &checkout, session.as_deref(), |id| {
+                        owner.as_ref().is_some_and(|core| core.keeps_workspace(id))
+                    })
+                }))
+            })
+            .await?;
             if let Some(source) = repository {
                 let worktree = Worktree {
                     base: source.base.as_deref(),
@@ -277,9 +282,7 @@ impl Checkout {
         )
         .ok()?;
         let branch = git(cwd, &["symbolic-ref", "--quiet", "HEAD"]).ok();
-        Self::parse(&dirs, branch.as_deref(), |path| {
-            std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
-        })
+        Self::parse(&dirs, branch.as_deref(), canonical_path)
     }
 
     /// From `rev-parse`'s common and Git directories and `symbolic-ref`'s
@@ -302,6 +305,10 @@ impl Checkout {
             branch,
         })
     }
+}
+
+fn canonical_path(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
 }
 
 /// Where Herdr 1 makes a new worktree in `checkout` from, among
@@ -344,7 +351,8 @@ pub(super) fn herdr_1_repository(
             eligible.find(|workspace| {
                 workspace.worktree.is_none()
                     && !workspace.cwd.is_empty()
-                    && Path::new(&workspace.cwd).join(".git") == checkout.common_dir
+                    && canonical_path(&Path::new(&workspace.cwd).join(".git"))
+                        == checkout.common_dir
             })
         })?;
     Some(Source {

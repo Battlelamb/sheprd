@@ -51,7 +51,7 @@ impl Source {
     }
 
     /// Whether Sheprd keeps workspace `id` for this core.
-    pub(super) fn keeps_workspace(&self, id: &str) -> bool {
+    pub(in crate::hub) fn keeps_workspace(&self, id: &str) -> bool {
         lock(&self.poller).keeps(self.scope.as_deref(), id)
     }
 

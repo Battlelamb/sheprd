@@ -117,6 +117,25 @@ fn a_checkout_before_its_first_worktree_uses_the_existing_workspace() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn a_symlink_to_the_checkout_matches_before_worktree_metadata_arrives() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = dir.path().join("app");
+    std::fs::create_dir_all(app.join(".git")).unwrap();
+    let alias = dir.path().join("alias");
+    std::os::unix::fs::symlink(&app, &alias).unwrap();
+    let checkout = Checkout {
+        common_dir: std::fs::canonicalize(app.join(".git")).unwrap(),
+        ..main_checkout()
+    };
+    let workspaces = layout(vec![workspace("w1", alias.to_str().unwrap(), None)]);
+    assert_eq!(
+        repository(&workspaces, &checkout, None).as_deref(),
+        Some("w1")
+    );
+}
+
 #[test]
 fn a_repository_is_looked_for_in_the_session_asked_for() {
     let layout = layout(vec![

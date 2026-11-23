@@ -99,7 +99,10 @@ final class ActivityTest {
         // The activity shows once the app leaves the screen, when iOS
         // suspends it soon after; ending it needs the background time.
         let background = UIApplication.shared.beginBackgroundTask(withName: "Test activity")
-        try? await Task.sleep(for: Self.shown)
+        // Halfway it moves on a step, so an update shows in the style too.
+        try? await Task.sleep(for: Self.shown / 2)
+        await Self.progress(activity, from: SelfTestActivity.started(at: sent))
+        try? await Task.sleep(for: Self.shown / 2)
         await Self.end(activity, from: SelfTestActivity.started(at: sent))
         status = .ended(seconds: seconds)
         UIApplication.shared.endBackgroundTask(background)
@@ -139,6 +142,16 @@ final class ActivityTest {
         activity.attributes.opened(activity.content.state).flatMap { SelfTestActivity.id(of: $0.facts) }
     }
 
+    /// Moves the test activity `id` on a step, sealed to the own key as
+    /// its start was.
+    private nonisolated static func progress(_ id: String, from start: ChatActivityState) async {
+        guard let activity = Activity<ChatActivityAttributes>.activities.first(where: { $0.id == id }),
+              let own = try? NotifyKey.own(),
+              let sealed = try? SelfTestActivity.seal(SelfTestActivity.progressed(from: start), to: own.publicKey)
+        else { return }
+        await activity.update(.init(state: .sealed(sealed), staleDate: nil))
+    }
+
     /// Ends the test activity `id` showing that it worked, and leaves it on
     /// the Lock Screen for a minute. By id and off this actor, since an
     /// activity it holds cannot be sent to ActivityKit.
@@ -168,7 +181,7 @@ final class ActivityTest {
         case .sending: "Sending…"
         case .waiting: "Sent. Waiting for the activity to start…"
         case let .running(seconds):
-            "Started in \(format(seconds)) s. Go to the Home Screen or lock the phone to see it; it finishes in \(Int(shown.components.seconds)) seconds."
+            "Started in \(format(seconds)) s, in the \(LiveActivityStyleSetting.current.title) style. Go to the Home Screen or lock the phone to see it; it moves on a step, then finishes in \(Int(shown.components.seconds)) seconds."
         case let .ended(seconds):
             "Started in \(format(seconds)) s, and finished. Live Activities work on this phone."
         case let .failed(why): why

@@ -329,6 +329,7 @@ fn serve(incoming: socket::Incoming, state: &mut State, cx: &mut App) {
         .request
         .via()
         .and_then(|via| relay::refusal(via, cx))
+        .or_else(|| relay::lent(&incoming.request, cx))
     {
         incoming.respond(refusal);
         return;

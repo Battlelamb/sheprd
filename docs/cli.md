@@ -152,6 +152,7 @@ Sheprd** entry, which both Windows installers add, runs this command through
 | `code edit FILE[:LINE]` | Your terminal editor, in a new pane beside yours |
 | `devices` | The Devices overview |
 | `machine [open [NAME]]` | The virtual Mac called NAME (default `default`) in a tab, started or resumed if it is not running. Closing the tab leaves it running; quitting Sheprd saves it (Apple silicon Macs) |
+| `machine start NAME` | Start it without a tab, resuming it if it was saved; `machine agent` tells when it is ready |
 | `machine claim NAME [--wait S]` | Atomically reserve for the calling pane/terminal for 15 idle minutes; repeat to renew. Busy exits 6. `--wait` (1–600 seconds) retries with progress on stderr every five seconds, preserving JSON stdout |
 | `machine release NAME` | Release your own reservation when finished; another owner gets exit 6 |
 | `machine list` | Sheprd VM slots in use, total limit, and slots available, followed by each machine's reservation owner and idle seconds remaining (or unreserved), state, CPUs, memory, display, and disk use, which counts blocks shared with its image. Exits 4 when there are none |
@@ -170,6 +171,7 @@ Sheprd** entry, which both Windows installers add, runs this command through
 | `machine click NAME X Y [--right] [--double]` | Click at a point of the machine's screen, in the screenshot's pixels |
 | `machine type NAME TEXT` | Type text in the machine as from a keyboard, at most 4096 characters at once |
 | `machine key NAME KEY` | Press a key in the machine, with modifiers: `return`, `escape`, `tab`, `cmd+q`, `cmd+shift+4` |
+| `machine --host HOST VERB ...` | `open`, `start`, `claim`, `release`, `list`, `suspend`, `agent`, `exec`, `screenshot`, `click`, `type`, or `key` run by the Sheprd on another Mac this window reaches (a host ID or label), when both slots here are busy (see [Virtual Macs on other computers](#virtual-macs-on-other-computers)). Exits 6 when the user declines, 8 when HOST has no Sheprd running, is too old, or cannot be reached |
 | `orchestrator [--repo PATH]` | Show the Issues section narrowed to your checkout's project, or PATH's |
 | `orchestrator restart RUN [--repo PATH]` | Open the user's confirmation to restart a loaded, owned Herdr 2 run in this project with its saved prompt/model and existing checkout; requires the running app |
 | `orchestrator adopt RUN [--repo PATH]` | Read the current process of a loaded legacy run and prepare the user's adoption confirmation; grants no authority until confirmed and revalidated |
@@ -397,9 +399,10 @@ run `sheprd config set tab_labels.agent_title true`.
 
 ### Working inside a virtual Mac
 
-`machine list --json` includes `capacity: {"in_use": 2, "limit": 2, "available": 0}`
-when all Sheprd VM slots are occupied. Starting and saving VMs, and a live macOS installer, count until they
-stop. This counts Sheprd's VMs, not VMs in other applications. Reservations and
+`machine list --json` includes `capacity: {"in_use": 2, "limit": 2, "available": 0, "others": 0}`
+when all VM slots are occupied. Starting and saving VMs, and a live macOS installer, count until they
+stop. macOS allows two VMs whoever runs them, so `in_use` also counts the VMs of other
+programs, such as Tart's CI runners, and `others` says how many of those there are. Reservations and
 running slots are separate: an unreserved running VM can be claimed and reused
 while slots are full, but an unreserved stopped VM cannot start. `machine open`,
 `setup`, and `claim` return busy (exit 6) with “No VM slots available: 2 of 2 in
@@ -420,6 +423,30 @@ VMs are busy, tell the user you are waiting, try `machine claim NAME --wait 60`,
 and report when acquired. This does not boot the machine or promise guest
 readiness. No FIFO queue is promised.
 
+
+### Virtual Macs on other computers
+
+When both slots here are busy, `machine --host HOST` borrows a virtual Mac
+on another Mac this window reaches, by its host ID or label. This app runs
+the request there with `sheprd machine lend` over its connection to that
+host, so that Mac's own Sheprd runs the machine and keeps its claims, which
+name this computer and the pane that asked. Nothing is copied: the other
+Mac makes machines from its own images.
+
+Opening, starting, or claiming a machine there first asks the user in this
+window: **Use once**, **Always use HOST** (kept in `[machine] borrow_from`),
+or **Wait for a slot here**. Waiting or closing the dialog exits 6. `open`
+starts the machine there and shows it here in a tab drawn from its frames,
+which come a few times a second and shrink on a slow link; clicks and keys
+in that tab reach the machine unless an agent holds it. A screenshot's
+`PATH` is on this computer.
+
+A Mac lends unless `[machine] lend = false`, and never while it keeps Tart
+VMs or runs VMs of other programs, which share its two slots: `machine
+list --json` there names why in `lending`. Exits 8 when the host has no
+Sheprd running, has one too old to lend, or cannot be reached.
+
+### Sheprd Agent
 
 `machine agent`, `exec`, `screenshot`, `click`, `type`, and `key` work
 inside a running virtual Mac through Sheprd Agent, a small app in the guest

@@ -842,6 +842,16 @@ size = 12
 # enabled = false
 # seconds = 10
 
+# Virtual Macs shared with your other computers.
+# macOS runs two at once per Mac; when they are busy, `sheprd machine
+# --host HOST` borrows one from another Mac this window reaches.
+# [machine]
+# Let your other computers borrow this Mac's virtual Macs. A Mac that keeps
+# Tart VMs, or runs other programs' VMs, never lends.
+# lend = true
+# Hosts, by ID or label, to borrow from without asking each time.
+# borrow_from = []
+
 # Zen mode (View > Toggle Zen Mode, or `toggle_zen_mode`) hides the
 # header, sidebar, tab strips, status bar, and notices, and every group but
 # the one in use, for this window and session. Toasts and menus still show.

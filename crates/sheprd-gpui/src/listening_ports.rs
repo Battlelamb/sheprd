@@ -10,6 +10,7 @@
 //! unreachable host never blocks rendering or delays another host.
 // i18n: migrated
 
+mod command_line;
 mod core;
 pub(crate) use core::Place;
 mod error;

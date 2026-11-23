@@ -50,8 +50,9 @@ public static class HerdrEnvironment {
 /// Each answer: `L <pid> <address:port> <process>` per listening socket (at
 /// most 1024), IPv6 addresses bracketed; then, for each of the first 128
 /// listening processes whose environment names a Herdr workspace or a
-/// herdr-core terminal, its `E` or `C` line and its `A` command line, as
-/// [`super::scan::COMMAND`] prints them.
+/// herdr-core terminal, its `E` or `C` line as [`super::scan::COMMAND`]
+/// prints them, and a `W` line with its command line as Windows quotes it,
+/// which the parser splits by Windows' rules rather than at every space.
 // i18n: data
 const BODY: &str = r#"    $herdrNames = @{}
     foreach ($herdrProcess in Get-Process) { $herdrNames[$herdrProcess.Id] = $herdrProcess.ProcessName }
@@ -80,7 +81,7 @@ const BODY: &str = r#"    $herdrNames = @{}
         $herdrArgs = [string](Get-CimInstance Win32_Process -Filter "ProcessId=$herdrPid").CommandLine
         $herdrArgs = $herdrArgs -replace '[\r\n]', ' '
         if ($herdrArgs.Length -gt 1024) { $herdrArgs = $herdrArgs.Substring(0, 1024) }
-        [void]$herdrOut.AppendLine('A ' + $herdrPid + ' ' + $herdrArgs)
+        [void]$herdrOut.AppendLine('W ' + $herdrPid + ' ' + $herdrArgs)
     }"#;
 
 /// The scan script, answering every [`INTERVAL`], as the worker scans.

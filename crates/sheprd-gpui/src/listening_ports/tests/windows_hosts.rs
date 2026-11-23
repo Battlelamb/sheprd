@@ -5,13 +5,19 @@ use crate::listening_ports::windows::script;
 
 /// One answer as the Windows script prints it, with CRLF line endings: a
 /// dev server in workspace `w1`, its IPv4 and IPv6 sockets, a listener
-/// without a workspace, and a socket path with a space.
+/// without a workspace, a socket path with a space, and Claude Code's own
+/// listener in the same workspace, run by a Node installed under a folder
+/// with a space.
 const ANSWER: &str = "L 4242 0.0.0.0:5173 node\r\n\
 L 4242 [::]:5173 node\r\n\
 L 4242 127.0.0.1:9229 node\r\n\
 L 900 0.0.0.0:445 System\r\n\
+L 777 127.0.0.1:61000 node\r\n\
 E 4242 w1 C:\\Users\\Ada Lovelace\\.config\\herdr\\herdr.sock\r\n\
-A 4242 \"C:\\Program Files\\nodejs\\node.exe\" vite\r\n";
+W 4242 \"C:\\Program Files\\nodejs\\node.exe\" node_modules\\vite\\bin\\vite.js\r\n\
+E 777 w1 C:\\Users\\Ada Lovelace\\.config\\herdr\\herdr.sock\r\n\
+W 777 \"C:\\Program Files\\nodejs\\node.exe\" \
+\"C:\\Users\\Ada Lovelace\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js\"\r\n";
 
 #[test]
 fn a_windows_answer_reads_like_any_host() {
@@ -29,6 +35,8 @@ fn a_windows_answer_reads_like_any_host() {
         "C:\\Users\\Ada Lovelace\\.config\\herdr\\herdr.sock"
     );
     assert!(!scan.pids.contains_key(&900), "no workspace, not listed");
+    // The agent's listener names its workspace but is no page to open.
+    assert_eq!(scan.pids.get(&777).unwrap().workspace, "w1");
 }
 
 /// The daemon's socket path is the Windows host's own, whatever this machine

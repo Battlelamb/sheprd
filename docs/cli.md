@@ -148,7 +148,9 @@ Sheprd** entry, which both Windows installers add, runs this command through
 | `code edit FILE[:LINE]` | Your terminal editor, in a new pane beside yours |
 | `devices` | The Devices overview |
 | `machine [open [NAME]]` | The virtual Mac called NAME (default `default`) in a tab, started or resumed if it is not running. Closing the tab leaves it running; quitting Sheprd saves it (Apple silicon Macs) |
-| `machine list` | Each machine's state, CPUs, memory, display, and disk use, which counts blocks shared with its image. Exits 4 when there are none |
+| `machine claim NAME [--wait S]` | Atomically reserve for the calling pane/terminal for 15 idle minutes; repeat to renew. Busy exits 6. `--wait` (1–600 seconds) retries with progress on stderr every five seconds, preserving JSON stdout |
+| `machine release NAME` | Release your own reservation when finished; another owner gets exit 6 |
+| `machine list` | Sheprd VM slots in use, total limit, and slots available, followed by each machine's reservation owner and idle seconds remaining (or unreserved), state, CPUs, memory, display, and disk use, which counts blocks shared with its image. Exits 4 when there are none |
 | `machine set NAME [--cpus N] [--memory GB] [--display fit\|WxH]` | What it boots with next, after it next shuts down |
 | `machine suspend NAME` | Save it and stop it; it resumes where it was when next shown |
 | `machine delete NAME` | Ask in Settings to delete it and free its disk; the user confirms there |
@@ -390,6 +392,30 @@ An unnamed tab shows its number. To show its agent's terminal title instead,
 run `sheprd config set tab_labels.agent_title true`.
 
 ### Working inside a virtual Mac
+
+`machine list --json` includes `capacity: {"in_use": 2, "limit": 2, "available": 0}`
+when all Sheprd VM slots are occupied. Starting and saving VMs, and a live macOS installer, count until they
+stop. This counts Sheprd's VMs, not VMs in other applications. Reservations and
+running slots are separate: an unreserved running VM can be claimed and reused
+while slots are full, but an unreserved stopped VM cannot start. `machine open`,
+`setup`, and `claim` return busy (exit 6) with “No VM slots available: 2 of 2 in
+use” when a new slot is needed. `claim --wait` retries capacity as well as ownership.
+An existing reservation can be renewed even when VM slots are full. This keeps
+ownership during preparation; starting the VM still requires a free slot.
+
+Releasing a reservation does not stop its VM or free a running slot.
+
+Reserve a shared VM with `machine claim NAME` before opening or using it,
+and release it with `machine release NAME` after stopping your guest jobs.
+Claims are shared across windows, expire after 15 idle minutes, and clear
+when Sheprd quits. Guest commands renew the holder's claim and refuse other
+panes while it is held. These coordinate this app's callers, not external
+SSH/VM tools. After expiry or restart, reserve again. `machine list --json`
+includes an optional `reservation` string identifying the owner. When both
+VMs are busy, tell the user you are waiting, try `machine claim NAME --wait 60`,
+and report when acquired. This does not boot the machine or promise guest
+readiness. No FIFO queue is promised.
+
 
 `machine agent`, `exec`, `screenshot`, `click`, `type`, and `key` work
 inside a running virtual Mac through Sheprd Agent, a small app in the guest

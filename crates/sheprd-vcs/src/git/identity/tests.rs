@@ -55,8 +55,14 @@ fn a_main_checkout_and_its_linked_worktree_share_one_key() {
     assert_eq!(main.label, "app");
     assert_eq!((main.linked, linked.linked), (false, true));
     assert_eq!(linked.branch.as_deref(), Some("feature"));
-    assert_eq!(Path::new(&main.root), repo.canonicalize().unwrap());
-    assert_eq!(Path::new(&linked.root), linked_dir.canonicalize().unwrap());
+    assert_eq!(
+        Path::new(&main.root).canonicalize().unwrap(),
+        repo.canonicalize().unwrap()
+    );
+    assert_eq!(
+        Path::new(&linked.root).canonicalize().unwrap(),
+        linked_dir.canonicalize().unwrap()
+    );
     for (folder, expected) in [(&repo, &main), (&linked_dir, &linked)] {
         let nested = folder.join("src/nested");
         std::fs::create_dir_all(&nested).unwrap();

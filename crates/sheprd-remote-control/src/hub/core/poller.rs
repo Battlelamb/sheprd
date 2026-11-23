@@ -196,6 +196,22 @@ impl Poller {
             .map(|tab| tab.id)
     }
 
+    /// Whether the file owns this pane beside the current shared document.
+    pub(super) fn local_tab_holds(&self, scope: Option<&str>, id: u64, address: &str) -> bool {
+        let Some(kept) = self.kept(scope) else {
+            return false;
+        };
+        let target = format!("{}{id}", super::saved::LOCAL_TAB);
+        kept.tabs().into_iter().any(|tab| {
+            tab.target == target
+                && tab
+                    .panes
+                    .terminals()
+                    .into_iter()
+                    .any(|pane| pane.as_str() == address)
+        })
+    }
+
     /// The workspace of `scope`'s saved tab `tab`.
     pub(super) fn saved_workspace(&self, scope: &str, tab: u64) -> Option<String> {
         self.saved
@@ -221,11 +237,13 @@ fn kept<'a>(
     saved: Option<&'a (SystemTime, Option<SavedTabs>)>,
     scope: Option<&'a str>,
 ) -> Option<Kept<'a>> {
+    let saved = saved.and_then(|(_, saved)| saved.as_ref());
     if let Some(shared) = shared {
         return Some(Kept::Doc {
             spaces: &shared.spaces,
             tabs: &shared.tabs,
+            local: saved.zip(scope),
         });
     }
-    Kept::file(saved.and_then(|(_, saved)| saved.as_ref()), scope)
+    Kept::file(saved, scope)
 }

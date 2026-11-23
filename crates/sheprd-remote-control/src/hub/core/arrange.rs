@@ -21,7 +21,7 @@ use super::{
     HubError, Result, Source, lock,
     own::OWN_TAB,
     projection,
-    saved::{SAVED_TAB, TabRef},
+    saved::{TabRef, is_saved_tab},
 };
 use crate::{control::layout::Op, hub::Hub};
 use sheprd_backend::TerminalId;
@@ -174,7 +174,13 @@ impl Source {
         // Take ownership before starting a split's shell. A running desktop
         // must receive the intent without a speculative terminal being made.
         let _owner = self.tabs.as_deref().map(file_owner).transpose()?;
-        if lock(&self.poller).shared().is_some() {
+        let use_doc = {
+            let poller = lock(&self.poller);
+            poller.shared().is_some()
+                && !matches!(tab, TabRef::File(id)
+                if poller.local_tab_holds(self.scope.as_deref(), *id, address))
+        };
+        if use_doc {
             return self.arrange_doc(tab, address, op);
         }
         let TabRef::File(tab) = *tab else {
@@ -305,7 +311,7 @@ impl Hub {
             return Err(Error::Fixed.into());
         }
         let core = self.core.as_ref().ok_or(super::Error::Disconnected)?;
-        if tab.starts_with(SAVED_TAB) {
+        if is_saved_tab(tab) {
             let (tab, terminal) = core
                 .saved_target(tab, pane)
                 .ok_or(super::Error::Unsupported)?;

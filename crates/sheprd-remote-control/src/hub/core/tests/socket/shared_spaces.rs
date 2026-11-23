@@ -76,6 +76,39 @@ fn the_written_document_lists_kept_workspaces_and_tabs_over_the_saved_tabs() {
 }
 
 #[test]
+fn a_desktop_adopted_chat_stays_in_its_herdr_1_worktree_after_its_labels_are_released() {
+    let dir = tempfile::tempdir().unwrap();
+    let (source, fake) = fake_sharing(
+        dir.path(),
+        Some(document()),
+        vec![record("t1"), record("t2")],
+    );
+    let path = dir.path().join("browser-tabs.json");
+    let mut saved: Value = serde_json::from_str(SAVED).unwrap();
+    saved["tabs"].as_array_mut().unwrap().push(json!({
+        "id": 5, "scope": SCOPE, "workspace_id": "w9", "title": "phone chat",
+        "location": {"kind": "core_terminal", "panes": "t2"}
+    }));
+    std::fs::write(&path, saved.to_string()).unwrap();
+    let layout = source.poll().unwrap();
+    assert!(layout.workspace(UNLISTED).is_none());
+    let tab = &layout.workspace("w9").unwrap().terminals[0].tab;
+    let (target, address) = source.saved_target(tab, &id("t2")).unwrap();
+    assert_eq!(target, TabRef::File(5));
+    assert!(source.saved_target(tab, &id("t1")).is_none());
+    source
+        .arrange_saved(&target, &address, &Op::RenameTab(Some("new name".into())))
+        .unwrap();
+    assert_eq!(
+        source.poll().unwrap().workspace("w9").unwrap().terminals[0].label,
+        "new name"
+    );
+    assert_eq!(shared(&fake).tabs().len(), 1);
+    drop(source);
+    fake.server.join().unwrap();
+}
+
+#[test]
 fn a_never_written_document_leaves_the_saved_tabs_in_charge() {
     let dir = tempfile::tempdir().unwrap();
     let (source, fake) = fake_sharing(dir.path(), None, vec![record("t1")]);

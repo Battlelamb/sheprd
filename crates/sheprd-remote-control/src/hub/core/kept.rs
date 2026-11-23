@@ -4,7 +4,7 @@
 //! them for every client; until then, Sheprd's saved tabs on this computer
 //! do, for this computer's scope.
 
-use super::saved::SAVED_TAB;
+use super::saved::{LOCAL_TAB, SAVED_TAB};
 use sheprd_backend::TerminalId;
 use sheprd_session::{
     SavedTabs,
@@ -18,7 +18,11 @@ use std::collections::{BTreeMap, HashSet};
 pub(super) enum Kept<'a> {
     /// The core's shared document, with its tabs as the poller remapped
     /// them for recovered chats.
-    Doc { spaces: &'a Spaces, tabs: &'a [Tab] },
+    Doc {
+        spaces: &'a Spaces,
+        tabs: &'a [Tab],
+        local: Option<(&'a SavedTabs, &'a str)>,
+    },
     /// Sheprd's saved tabs of `scope`, while the document was never written.
     File {
         saved: &'a SavedTabs,
@@ -89,32 +93,52 @@ impl<'a> Kept<'a> {
     /// they watch is listed where it types.
     pub(super) fn tabs(self) -> Vec<KeptTab<'a>> {
         match self {
-            Self::Doc { tabs, .. } => tabs
-                .iter()
-                .map(|tab| KeptTab {
-                    active: None,
-                    name: tab.name.as_deref().filter(|name| !name.trim().is_empty()),
-                    names: Some(&tab.names),
-                    panes: &tab.panes,
-                    target: format!("{SAVED_TAB}{}", tab.id),
-                    title: &tab.title,
-                    workspace_id: &tab.workspace_id,
-                    zoomed: tab.zoomed.is_some(),
-                })
-                .collect(),
-            Self::File { saved, scope } => saved
-                .core_tabs(scope)
-                .map(|tab| KeptTab {
-                    active: saved.tab_active(scope, tab.id),
-                    name: saved.tab_name(scope, tab.id),
-                    names: saved.pane_names(scope, tab.id),
-                    panes: tab.panes,
-                    target: format!("{SAVED_TAB}{}", tab.id),
-                    title: tab.title,
-                    workspace_id: tab.workspace_id,
-                    zoomed: saved.tab_zoomed(scope, tab.id).is_some(),
-                })
-                .collect(),
+            Self::Doc {
+                spaces,
+                tabs,
+                local,
+            } => {
+                let mut kept: Vec<_> = tabs
+                    .iter()
+                    .map(|tab| KeptTab {
+                        active: None,
+                        name: tab.name.as_deref().filter(|name| !name.trim().is_empty()),
+                        names: Some(&tab.names),
+                        panes: &tab.panes,
+                        target: format!("{SAVED_TAB}{}", tab.id),
+                        title: &tab.title,
+                        workspace_id: &tab.workspace_id,
+                        zoomed: tab.zoomed.is_some(),
+                    })
+                    .collect();
+
+                if let Some((saved, scope)) = local {
+                    // Herdr 1 owns these workspaces. Only their tabs are in
+                    // the desktop file, even after shared spaces are enabled.
+                    let shared_panes: HashSet<_> =
+                        tabs.iter().flat_map(|tab| tab.panes.terminals()).collect();
+                    let kept_ids: HashSet<_> = spaces
+                        .workspaces()
+                        .iter()
+                        .map(|w| w.id.as_str())
+                        .chain(saved.workspaces(scope).map(|w| w.id.as_str()))
+                        .collect();
+                    kept.extend(file_tabs(saved, scope, LOCAL_TAB).filter(|tab| {
+                        tab.workspace_id != sheprd_session::DEFAULT_WORKSPACE
+                            && !tab
+                                .workspace_id
+                                .starts_with(sheprd_session::spaces::ID_PREFIX)
+                            && !kept_ids.contains(tab.workspace_id)
+                            && !tab
+                                .panes
+                                .terminals()
+                                .iter()
+                                .any(|pane| shared_panes.contains(pane))
+                    }));
+                }
+                kept
+            }
+            Self::File { saved, scope } => file_tabs(saved, scope, SAVED_TAB).collect(),
         }
     }
 
@@ -126,6 +150,23 @@ impl<'a> Kept<'a> {
             .map(|terminal| terminal.as_str().to_owned())
             .collect()
     }
+}
+
+fn file_tabs<'a>(
+    saved: &'a SavedTabs,
+    scope: &'a str,
+    prefix: &'static str,
+) -> impl Iterator<Item = KeptTab<'a>> {
+    saved.core_tabs(scope).map(move |tab| KeptTab {
+        active: saved.tab_active(scope, tab.id),
+        name: saved.tab_name(scope, tab.id),
+        names: saved.pane_names(scope, tab.id),
+        panes: tab.panes,
+        target: format!("{prefix}{}", tab.id),
+        title: tab.title,
+        workspace_id: tab.workspace_id,
+        zoomed: saved.tab_zoomed(scope, tab.id).is_some(),
+    })
 }
 
 /// `tab` with each recovered chat's terminal replaced by the one that took

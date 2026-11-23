@@ -92,7 +92,7 @@ pub(super) fn serve(caller: &Caller, op: TabOp, incoming: socket::Incoming, cx: 
 /// Whether `op` from `caller` must hold the machine's claim when one is
 /// held. Watching from a borrowing computer changes nothing, so a lent peek
 /// needs none; anyone else's peek is a screenshot, claim and all.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 fn needs_claim(caller: &Caller, op: &TabOp) -> bool {
     let lent = caller.via.as_ref().and_then(|via| via.lend()).is_some();
     !(lent && matches!(op, TabOp::MachinePeek { .. }))

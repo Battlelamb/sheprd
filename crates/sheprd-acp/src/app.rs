@@ -393,6 +393,7 @@ pub(crate) fn run_owned(
             .ok()
     });
     let settings_dir = crate::known::dir();
+    let picks_dir = settings_dir.clone();
     let settings = carried_settings(harness, options.load.is_some(), &mut notices);
     let config = Config {
         agent: agent.display,
@@ -460,6 +461,9 @@ pub(crate) fn run_owned(
             });
             if let Some(dir) = crate::briefs::dir() {
                 session.keep_briefs(dir);
+            }
+            if let Some(dir) = picks_dir {
+                session.keep_picks(dir);
             }
             for (level, text) in notices {
                 session.notice(level, text);

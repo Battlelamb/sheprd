@@ -79,6 +79,12 @@ struct RepositoriesTests {
         #expect(checkout?.session == "work")
     }
 
+    @Test func aRenamedGroupOfUnassignedTerminalsOffersNoProjectWorktree() {
+        var group = Self.workspace("core:terminals")
+        group.label = "iOS top space"
+        #expect(Self.home([group]).repositories.first?.ownCheckout == nil)
+    }
+
     @Test func listsOneNamedSessionAsBeforeSessionsWereNamed() {
         let home = Self.home([
             Self.workspace("a", session: "default"),

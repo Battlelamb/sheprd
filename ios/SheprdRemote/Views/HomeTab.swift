@@ -24,9 +24,18 @@ struct HomeTab: View {
             agents: unreadOnly ? agents.filter(\.unread) : agents
         )
         Group {
-            if query.isEmpty { self.chats(sections, unread: unread) } else { SearchResults(query: query, workspacesAsRoutes: true) }
+            // With no search field, a search left from before the last
+            // computer went must not hide the offer to pair.
+            if query.isEmpty || !model.hasComputers {
+                self.chats(sections, unread: unread)
+            } else {
+                SearchResults(query: query, workspacesAsRoutes: true)
+            }
         }
         .searchable($query, when: model.hasComputers)
+        .onChange(of: model.hasComputers) { _, has in
+            if !has { query = "" }
+        }
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { window?.home = true }
         .onDisappear { window?.home = false }

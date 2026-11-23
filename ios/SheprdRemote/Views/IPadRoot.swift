@@ -196,9 +196,13 @@ struct IPadRoot: View {
 
     private var chats: some View {
         Group {
-            if query.isEmpty { AttentionList(selection: $selection) } else { SearchResults(query: query) }
+            // The offer to pair shows whatever search was left behind.
+            if query.isEmpty || !model.hasComputers { AttentionList(selection: $selection) } else { SearchResults(query: query) }
         }
         .searchable($query, when: model.hasComputers)
+        .onChange(of: model.hasComputers) { _, has in
+            if !has { query = "" }
+        }
         .navigationDestination(for: WorkspaceKey.self) { WorkspaceScreen(key: $0).makesRoomForConnectionToast() }
         .nearbyBanner()
         .demoOffer(pairing: $pairing)

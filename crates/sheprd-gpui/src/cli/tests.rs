@@ -27,6 +27,7 @@ mod memory;
 mod menu_bar;
 mod mods;
 mod open_command;
+mod phone;
 mod pr_create;
 mod pr_merge;
 mod px0;
@@ -78,7 +79,7 @@ fn browser_commands_never_start_the_gui() {
         browser(BrowserCommand::Open {
             target: "localhost:3000".into(),
             workspace: None,
-            focus: true,
+            focus: false,
             placement: None,
         })
     );
@@ -87,7 +88,7 @@ fn browser_commands_never_start_the_gui() {
         browser(BrowserCommand::Open {
             target: "demo.html".into(),
             workspace: None,
-            focus: true,
+            focus: false,
             placement: Some(control::Placement::Beside),
         })
     );
@@ -96,7 +97,7 @@ fn browser_commands_never_start_the_gui() {
         browser(BrowserCommand::Open {
             target: "demo.html".into(),
             workspace: None,
-            focus: true,
+            focus: false,
             placement: Some(control::Placement::Tab),
         })
     );

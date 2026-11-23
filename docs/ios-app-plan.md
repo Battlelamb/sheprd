@@ -822,8 +822,9 @@ sides.
 
 ### Presence, exactly
 
-Opt-in on the desktop with `[remote] presence = true` (Settings > Remote
-control, "Hold phone alerts while I'm here"); macOS only for now.
+On by default on the desktop, `[remote] presence` (Settings > Remote
+control, "Hold phone alerts while I'm here"), which `presence = false`
+turns off.
 
 - **Advertising.** While remote control runs with presence on, Sheprd
   keeps `sheprd-nearby` running and sends it
@@ -897,6 +898,16 @@ control, "Hold phone alerts while I'm here"); macOS only for now.
     wins, and they go in order once the mark is lifted or lapses.
   - A clear drops the held alert for its chat and still goes.
   - Live Activity pushes are never held.
+- **Linked hosts.** The SSH and cloud machines this computer paired the
+  phone with hold its alerts too, as the phone's owner is at this
+  computer whichever host an agent runs on.
+  - Each change and renewal of a device's mark also goes to every host
+    the device is paired with (`devices` lists the phone's id on each),
+    by running `sheprd-remote-control presence --device ID --near|--away`
+    there over the app's shared SSH connection.
+  - One run per host at a time; the newest mark per device wins while
+    one runs. A failed run is retried after 30 s, and a host that cannot
+    be reached lets a near mark lapse after 120 s, as here.
 - **Fixture.** `Fixtures/presence/prove.json` holds both sides from fixed
   values.
   - **The hello:** `device_id`, `hint_day`, and `hint`.

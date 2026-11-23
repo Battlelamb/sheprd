@@ -10,6 +10,7 @@ pub mod fleet;
 pub mod hosts;
 pub mod lend;
 pub mod mods;
+pub mod phone;
 pub mod remote;
 pub mod settings;
 pub mod tabs;
@@ -37,9 +38,10 @@ pub enum Placement {
 /// 15: `machine` `agent`, `exec`, `screenshot`, `click`, `type`, and `key`.
 /// 16: `via` on the caller and on feedback, for requests `sheprd mcp` relays.
 /// 17: `chat` `favorite`.
-/// 18: `fleet`. 19: `chat` `new` `prompt`. 20: `machine` `start` and `on`
-/// (a virtual Mac on another computer), `via` `lend`, and `lending`.
-pub const PROTOCOL_VERSION: u32 = 20;
+/// 18: `fleet`. 19: `chat` `new` `prompt`. 20: `phone`. 21: Settings navigation and agent guidance.
+/// 22: `machine` `start` and `on` (a virtual Mac on another computer),
+/// `via` `lend`, and `lending`.
+pub const PROTOCOL_VERSION: u32 = 22;
 
 /// Older apps and clients know only tabs, so a tab is left off the wire.
 fn is_tab(placement: &Placement) -> bool {
@@ -75,6 +77,7 @@ macro_rules! relay {
             Request::Cloud(call) => $($borrow)+ call.caller.via,
             Request::Remote(call) => $($borrow)+ call.caller.via,
             Request::Fleet(call) => $($borrow)+ call.caller.via,
+            Request::Phone(call) => $($borrow)+ call.caller.via,
             Request::Mod(call) => $($borrow)+ call.caller.via,
         }
     };
@@ -123,6 +126,8 @@ pub enum Request {
     Mod(Call<mods::ModOp>),
     #[serde(rename = "fleet")]
     Fleet(Call<fleet::FleetOp>),
+    #[serde(rename = "phone")]
+    Phone(Call<phone::Ask>),
 }
 
 /// A `herdr-gpui://` link the shell started a second copy of the app with.
@@ -154,6 +159,7 @@ impl Request {
             Self::Cloud(call) => call.op.wait_seconds(),
             Self::Remote(call) => call.op.wait_seconds(),
             Self::Fleet(call) => call.op.wait_seconds(),
+            Self::Phone(_) => phone::WAIT_SECONDS,
             _ => 0,
         };
         wait.min(MAX_WAIT_SECONDS)
@@ -393,6 +399,9 @@ pub enum Response {
     },
     Fleet {
         reply: fleet::Reply,
+    },
+    Phone {
+        answer: phone::Answer,
     },
     Error {
         code: ErrorCode,

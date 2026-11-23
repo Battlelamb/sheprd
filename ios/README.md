@@ -58,6 +58,8 @@ just ios-test      # Swift package tests on the Mac, no simulator
 just ios-build     # unsigned simulator build of the app and its extensions
 just ios-generate  # then open ios/SheprdRemote.xcodeproj
 python3 ios/tools/test_branding.py  # generated names and stable deployed identities
+python3 ios/tools/test_privacy.py   # every bundle's privacy manifest
+python3 ios/tools/test_app_store.py # the App Store listing's limits
 ```
 
 - **Fixtures:** the package tests decode the JSON fixtures that the
@@ -246,6 +248,25 @@ app, once the repository's `testflight` environment holds these secrets:
   variables. Any it does not find set come from `pass`: the issuer ID from
   `apple/app-store-connect-issuer-id` and the key from
   `herdr-gpui/apple-api-key-KEYID`.
+
+## App Store
+
+`AppStore/` holds what App Store Connect asks for, entered there by hand:
+the listing (`metadata.toml`, checked by `tools/test_app_store.py`), the notes
+for App Review, the App Privacy answers, and the export compliance inventory.
+The privacy policy and support pages are `website/site/privacy/` and
+`website/site/support/`. `tools/store_screenshots.sh` takes the screenshots
+from the demo.
+
+### The demo
+
+With no computer paired, Home offers Explore the Demo (`SheprdRemote/Demo/`):
+two made-up computers from `DemoData` in the package, with chats, a waiting
+question, and a terminal. `Fleet` starts no link for them and refuses every
+call with `FleetError.demo`, so nothing is sent; widgets, the badge, and
+Spotlight ignore them, and pairing a computer ends it. App Review uses it, as
+the app shows nothing without a computer. In the simulator, `-demo YES`
+starts it and `-demoChat PANE` opens one of its chats.
 
 ## Pair
 

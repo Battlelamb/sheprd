@@ -88,6 +88,8 @@ jobs:
           python3 tools/test_branding.py
           python3 tools/test_testflight_notes.py
           python3 tools/test_signing.py
+          python3 tools/test_privacy.py
+          python3 tools/test_app_store.py
           xcodebuild -project SheprdRemote.xcodeproj -scheme SheprdRemote \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO -quiet build

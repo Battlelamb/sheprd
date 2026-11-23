@@ -955,6 +955,10 @@ impl Render for SheprdWindow {
             // After every chat, which record where they are as they paint.
             root.extend([self.chat_turns_sweep(cx).into_any_element()]);
         }
+        root.extend(
+            crate::agent_guidance::banner(&self.agent_guidance, &self.theme, window, cx)
+                .map(IntoElement::into_any_element),
+        );
         crate::titlebar::frame(window, self.theme.active, root)
     }
 }

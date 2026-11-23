@@ -101,7 +101,7 @@ fn an_open_reaches_the_window_as_typed() {
         request.action,
         Action::Open {
             address: "localhost:3000/app?x=1".into(),
-            focus: true
+            focus: false
         }
     );
 }

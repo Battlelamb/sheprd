@@ -159,12 +159,13 @@ pub(super) fn parse(args: &mut Args) -> Result<BrowserCommand, CliError> {
         Some("open") => {}
         _ => return Err(CliError::UnknownBrowserCommand(command)),
     }
-    let (mut target, mut workspace, mut focus) = (None, None, true);
+    let (mut target, mut workspace) = (None, None);
     let mut placement = None;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--help" | "-h") => return Ok(BrowserCommand::Help),
-            Some("--no-focus") => focus = false,
+            // Kept for callers written before background opening was the default.
+            Some("--no-focus") => {}
             Some("--beside") => placement = Some(Placement::Beside),
             Some("--tab") => placement = Some(Placement::Tab),
             Some("--workspace") => {
@@ -185,7 +186,7 @@ pub(super) fn parse(args: &mut Args) -> Result<BrowserCommand, CliError> {
     Ok(BrowserCommand::Open {
         target: target.ok_or(CliError::MissingUrl)?,
         workspace,
-        focus,
+        focus: false,
         placement,
     })
 }

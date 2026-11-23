@@ -3641,6 +3641,10 @@ sheprd browser feedback --wait 600          # wait for the notes you send it
 sheprd browser --help
 ```
 
+Command-opened tabs preserve the current tab and keyboard focus; select the
+new tab when ready. `--no-focus` remains accepted for compatibility. Tabs
+created manually in the app still take focus.
+
 The tab joins the caller's own workspace, which Herdr names in the pane's
 `HERDR_WORKSPACE_ID`, and remembers the caller's `HERDR_PANE_ID` so notes on
 the page go back to it. The command talks to the running app over a socket at

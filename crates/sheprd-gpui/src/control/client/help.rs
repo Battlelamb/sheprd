@@ -22,6 +22,8 @@ sheprd browser open URL|FILE [--workspace ID] [--no-focus] [--beside|--tab]
     next to that terminal,
     which stays in view and keeps the keyboard; a web address takes a tab of
     the group in use. --beside and --tab choose instead.
+    Opening preserves the current tab and keyboard focus. --no-focus is
+    still accepted for compatibility. Select the tab when ready.
 sheprd browser reload
     Reload the pages this pane opened, for example after editing the file.
 sheprd browser feedback [--wait SECONDS]

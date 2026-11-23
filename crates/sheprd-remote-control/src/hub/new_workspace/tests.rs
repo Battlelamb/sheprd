@@ -86,9 +86,10 @@ fn a_workspace_whose_shell_moved_to_another_repository_is_not_that_repository() 
 }
 
 #[test]
-fn a_folder_herdr_1_shows_as_no_repository_grows_nothing() {
+fn a_plain_folder_and_a_kept_workspace_do_not_claim_the_repository() {
     let layout = layout(vec![
-        workspace("w1", "/code/app", None),
+        workspace("w1", "/code/other", None),
+        workspace("core:terminals", "/code/app", None),
         workspace("space-3", "/code/app", Some(false)),
         workspace("herdr:dev:w4", "/code/app", Some(false)),
     ]);
@@ -96,6 +97,23 @@ fn a_folder_herdr_1_shows_as_no_repository_grows_nothing() {
     assert_eq!(
         herdr_1_repository(&layout, &main_checkout(), None, kept),
         None
+    );
+}
+
+#[test]
+fn a_checkout_before_its_first_worktree_uses_the_existing_workspace() {
+    let workspaces = layout(vec![workspace("w1", "/code/app", None)]);
+    assert_eq!(
+        repository(&workspaces, &main_checkout(), None).as_deref(),
+        Some("w1")
+    );
+    let indexed = layout(vec![
+        workspace("w1", "/code/app", None),
+        workspace("w2", "/code/app", Some(false)),
+    ]);
+    assert_eq!(
+        repository(&indexed, &main_checkout(), None).as_deref(),
+        Some("w2")
     );
 }
 

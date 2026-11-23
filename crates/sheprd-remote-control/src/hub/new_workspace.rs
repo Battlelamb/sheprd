@@ -324,15 +324,29 @@ pub(super) fn herdr_1_repository(
         (true, Some(branch)) => Some(branch.clone()),
         (true, None) => return None,
     };
-    let workspace = layout.workspaces.iter().find(|workspace| {
+    let mut eligible = layout.workspaces.iter().filter(|workspace| {
         sessions::split_id(&workspace.id).0 == session
             && !sessions::in_wsl(&workspace.id)
             && !core::is_new_workspace(&workspace.id)
+            && workspace.id != core::UNLISTED
             && !kept(&workspace.id)
-            && workspace.worktree.as_ref().is_some_and(|tree| {
+    });
+    let workspace = eligible
+        .clone()
+        .find(|workspace| {
+            workspace.worktree.as_ref().is_some_and(|tree| {
                 !tree.is_linked_worktree && Path::new(&tree.key) == checkout.common_dir
             })
-    })?;
+        })
+        .or_else(|| {
+            // Before the first worktree, Herdr can omit repository metadata.
+            // worktree.create discovers Git and groups the original workspace too.
+            eligible.find(|workspace| {
+                workspace.worktree.is_none()
+                    && !workspace.cwd.is_empty()
+                    && Path::new(&workspace.cwd).join(".git") == checkout.common_dir
+            })
+        })?;
     Some(Source {
         workspace: workspace.id.clone(),
         base,

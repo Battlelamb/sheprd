@@ -49,6 +49,25 @@ fn overflowing_panes_show_a_thumb_that_drags_them(cx: &mut TestAppContext) {
         );
     }
 
+    // The sections thumb lives beyond the padded list bounds, so verify that
+    // it still owns the navigation scroll gesture rather than only painting
+    // in the expected place.
+    let thumb = cx.debug_bounds("settings-sections-thumb").unwrap();
+    // The resize grip owns the few pixels where the panel edge and the thumb
+    // meet; begin on the thumb's scrollable side.
+    let from = point(thumb.left() + px(1.), thumb.center().y);
+    let to = from + point(px(0.), px(120.));
+    cx.simulate_mouse_down(from, MouseButton::Left, Default::default());
+    cx.simulate_mouse_move(to, Some(MouseButton::Left), Default::default());
+    cx.simulate_mouse_move(to, Some(MouseButton::Left), Default::default());
+    cx.simulate_mouse_up(to, MouseButton::Left, Default::default());
+    draw(cx);
+    let navigation_scrolled = view.read_with(cx, |view, _| view.navigation_scroll.offset().y);
+    assert!(
+        navigation_scrolled < px(0.),
+        "the sections list scrolled: {navigation_scrolled:?}"
+    );
+
     // Dragging the body's thumb down scrolls the body, and the thumb follows.
     let thumb = cx.debug_bounds("settings-body-thumb").unwrap();
     let from = thumb.center();

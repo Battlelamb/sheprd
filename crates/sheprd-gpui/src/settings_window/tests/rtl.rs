@@ -25,6 +25,18 @@ fn the_section_list_leads_from_the_right_and_resizes_by_its_left_edge(cx: &mut T
     // The edge faces the page, on the list's left.
     let edge = cx.debug_bounds("settings-navigation-resize").unwrap();
     assert!((edge.left() - px(1200. - 184.)).abs() <= px(1.), "{edge:?}");
+
+    let thumb = cx.debug_bounds("settings-sections-thumb").unwrap();
+    let from = thumb.center();
+    let to = from + point(px(0.), px(120.));
+    cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::default());
+    cx.simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::default());
+    cx.simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::default());
+    cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
+    draw(cx);
+    let navigation_scrolled = view.read_with(cx, |view, _| view.navigation_scroll.offset().y);
+    assert!(navigation_scrolled < px(0.), "{navigation_scrolled:?}");
+
     let start = edge.center();
     cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
     cx.simulate_mouse_move(

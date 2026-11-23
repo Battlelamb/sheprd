@@ -44,6 +44,11 @@ it lists Herdr 2 work beside Herdr 1's.
 herdr-core reports no Git facts, so the app asks Git for each kept workspace's
 folder on a worker (`sheprd_vcs::git::identity`): its branch, its repository's
 common directory as the worktree key, and whether it is a linked worktree.
+An unnamed root space follows its first terminal's live folder, using the
+checkout's top-level folder inside Git and `~` for the home directory, as
+Herdr does. The lookup runs on that terminal's host in the same background
+worker. Explicit names and linked worktree names stay fixed; naming does not
+change the saved launch folder or checkout identity.
 
 Remote kept workspaces read their Git identity on their own SSH, cloud or WSL
 host and keep separate metadata caches, even when paths coincide. Worktree

@@ -7,6 +7,7 @@
 //! features read, so a reader moved onto it works on both backends.
 
 mod core;
+mod names;
 
 pub use core::CoreWorkspace;
 

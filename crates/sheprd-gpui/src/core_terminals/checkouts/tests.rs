@@ -31,6 +31,7 @@ fn a_folder_no_longer_listed_is_forgotten() {
         key: "/src/app/.git".into(),
         label: "app".into(),
         linked: false,
+        root: "/src/app".into(),
     };
     checkouts.seed("/src/app", Some(identity));
     assert_eq!(checkouts.get("/src/app").unwrap().label, "app");

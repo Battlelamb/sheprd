@@ -42,6 +42,15 @@ impl SheprdWindow {
                         .map(|workspace| workspace.cwd.clone())
                         .collect()
                 });
+            if let Some(store) = cx.try_global::<Store>() {
+                folders.extend(
+                    self.core_name_folders(store, &scope, cx)
+                        .into_values()
+                        .flatten(),
+                );
+                folders.sort();
+                folders.dedup();
+            }
             // The shown pane's checkout, for the Git and pull request chips.
             if let Some(folder) = self.shown_core_folder()
                 && self
@@ -101,12 +110,16 @@ impl SheprdWindow {
                         self.core_terminals.host_of(*tab) == super::Host::Remote(scope.clone())
                     })
                     .and_then(|_| self.shown_core_folder());
+                let name_folders = self.core_name_folders(store, &scope, cx);
                 if let Some(remote) = self.core_terminals.remote.get_mut(&scope) {
                     let mut folders: Vec<_> = store
                         .kept_workspaces(&scope)
                         .filter(|workspace| !workspace.cwd.is_empty())
                         .map(|workspace| workspace.cwd.clone())
                         .collect();
+                    folders.extend(name_folders.into_values().flatten());
+                    folders.sort();
+                    folders.dedup();
                     if let Some(folder) = shown_folder
                         && !folders.contains(&folder)
                     {
@@ -230,6 +243,12 @@ impl SheprdWindow {
         let mut session = Session::core(workspaces, tabs, focused, |terminal| {
             self.core_terminals.reported(&host, terminal)
         });
+        crate::core_terminals::names::apply(
+            &mut session,
+            &self.core_name_folders(store, scope, cx),
+            checkouts,
+            &std::env::var("HOME").unwrap_or_default(),
+        );
         // Which agent each is, and what to call it, by the policy the
         // Overview and the attention service name agents with.
         for agent in &mut session.agents {

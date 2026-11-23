@@ -1,4 +1,5 @@
-use super::*;
+use crate::git::identity::{Identity, identity, repository_name};
+use std::{path::Path, time::Instant};
 use std::{process::Command, time::Duration};
 
 fn run(dir: &Path, args: &[&str]) {
@@ -54,6 +55,13 @@ fn a_main_checkout_and_its_linked_worktree_share_one_key() {
     assert_eq!(main.label, "app");
     assert_eq!((main.linked, linked.linked), (false, true));
     assert_eq!(linked.branch.as_deref(), Some("feature"));
+    assert_eq!(Path::new(&main.root), repo.canonicalize().unwrap());
+    assert_eq!(Path::new(&linked.root), linked_dir.canonicalize().unwrap());
+    for (folder, expected) in [(&repo, &main), (&linked_dir, &linked)] {
+        let nested = folder.join("src/nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert_eq!(probe(&nested).as_ref(), Some(expected));
+    }
     assert!(Path::new(&main.key).is_absolute());
     run(&linked_dir, &["checkout", "-q", "--detach"]);
     assert_eq!(probe(&linked_dir).unwrap().branch, None, "detached");

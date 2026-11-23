@@ -18,6 +18,8 @@ pub struct Identity {
     pub label: String,
     /// A linked worktree rather than the repository's main checkout.
     pub linked: bool,
+    /// The top-level folder of this checkout, including a linked worktree's own root.
+    pub root: String,
 }
 
 /// `dir`'s checkout, or `None` when it is no Git checkout. Read-only: two
@@ -34,6 +36,7 @@ pub fn identity(
             "--path-format=absolute",
             "--git-common-dir",
             "--git-dir",
+            "--show-toplevel",
         ],
         "rev-parse",
         deadline,
@@ -45,7 +48,7 @@ pub fn identity(
         Err(error) => return Err(error),
     };
     let mut lines = dirs.lines();
-    let (Some(common), Some(own)) = (lines.next(), lines.next()) else {
+    let (Some(common), Some(own), Some(root)) = (lines.next(), lines.next(), lines.next()) else {
         return Ok(None);
     };
     // Unlike `rev-parse --abbrev-ref HEAD`, this answers on a branch with
@@ -64,6 +67,7 @@ pub fn identity(
         key: common.to_owned(),
         label: repository_name(Path::new(common)),
         linked: Path::new(own) != Path::new(common),
+        root: root.to_owned(),
     }))
 }
 

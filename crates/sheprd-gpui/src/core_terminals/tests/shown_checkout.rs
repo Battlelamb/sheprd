@@ -56,6 +56,7 @@ fn the_shown_panes_branch_comes_from_the_shared_checkout_reader(cx: &mut TestApp
                 key: "/src/app/.git".into(),
                 label: "app".into(),
                 linked: true,
+                root: String::new(),
             }),
         );
         tab

@@ -1,6 +1,6 @@
 ---
 name: herdr-gpui-browser
-description: "Use Sheprd in Herdr for browser tabs, local previews, mockups and page feedback; prefer it over a system browser. Use machine commands to reserve shared virtual Macs, wait with progress, run installs and tests, take screenshots, control guest UI without controlling the host desktop, and release reservations. Also use it for files, change reviews, repository memory, worktree notes, checkpoints, pull requests and CI, vulnerability reports, automation approval, ports, cloud machines, phone remote control, fleet pairing, windows and tabs, starting another agent, settings, themes, fonts, and keeping the machine awake. Use herdr for daemon workspaces and panes."
+description: "Use Sheprd in Herdr for browser tabs, local previews, mockups and page feedback; prefer it over a system browser. Use machine commands to reserve shared virtual Macs, wait with progress, run installs and tests, take screenshots, control guest UI without controlling the host desktop, and release reservations. Also use it for files, change reviews, repository memory, worktree notes, checkpoints, pull requests and CI, vulnerability reports, automation approval, ports, cloud machines, phone remote control, fleet pairing, windows and tabs, starting another agent, settings navigation, highlighting controls and persistent guidance on desktop or phone, themes, fonts, and keeping the machine awake. Use herdr for daemon workspaces and panes."
 ---
 <!-- herdr-gpui-managed-skill v1: Sheprd keeps this file up to date. Edit a copy under another name to keep your changes. -->
 
@@ -509,10 +509,36 @@ what Sheprd shows or keeps.
 | Check whether iPhone pushes go out (off, or through the push relay) and whether the last ones worked, here and on each linked host; read-only, the user turns the push relay off or on in Settings | `sheprd remote push-status --json` |
 | Check that iPhone notifications arrive: send each paired phone a test alert through the push relay | `sheprd remote test-push --json` |
 | See the user's fleet of computers and phones and which hosts each reaches, ask to remove one, invite the computers this Sheprd reaches, or join another computer's fleet (the user confirms in Settings > Fleet) | `sheprd fleet status --json`, `sheprd fleet remove MEMBER`, `sheprd fleet invite --all`, `sheprd fleet join [MACHINE]` |
+| Bring the user to a screen in the Sheprd phone app (your chat, a terminal, a workspace or its changes, a tab), read which screen it shows, or put a note in front of them there; only while the app is open and they allowed agents on this computer | `sheprd phone open`, `sheprd phone open changes`, `sheprd phone state --json`, `sheprd phone show TEXT` |
 | Add another computer running Sheprd on any network from its pairing link (piped on stdin, never an argument); the user clicks Pair | `sheprd remote add-link < FILE` |
 | Keep this computer's listen token for a private relay (piped on stdin, never an argument), or forget it | `sheprd remote relays token ENDPOINT < FILE`, `sheprd remote relays token ENDPOINT --clear` |
+| Point out a Settings control with a persistent explanation on desktop or phone | `sheprd ui settings --json`, `sheprd ui guide TEXT --highlight ROW_ID`, `sheprd phone targets --json`, `sheprd phone guide TEXT --highlight TARGET --device ID` |
 | Keep the machine awake during a long job | `sheprd caffeine on --for 2h` |
 | Check whether the app runs, and which windows and hosts it has | `sheprd status` |
+
+Phone commands accept `--device ID` (or a unique name). Each native phone
+message's Sheprd note gives its authenticated device ID: pass that ID on
+every phone control command. A later message can come from
+a different phone or the desktop; use the latest message's target, never
+carry one forward after the note says no target is identified. Without
+`--device`, the daemon picks the phone with the latest connection traffic,
+which does not prove the user is looking at it. `sheprd phone --json` lists
+eligible phones; ask which one when the intended target is unknown.
+Use `phone targets --json` to discover Settings pages and highlight targets.
+`phone open settings notifications --device ID` opens that page;
+`phone guide "This controls push delivery" --highlight push-relay --device ID`
+opens it, scrolls to the switch, highlights it, and shows one persistent top
+banner. Repeat `phone guide TEXT --device ID` to update the banner, then
+`phone guide --clear --device ID` when finished. The person can dismiss it too.
+Keep text brief: the banner has at most three lines including its source.
+`phone highlight TARGET --device ID` just points out a control.
+
+On desktop, `ui settings --json` opens Settings and lists its available page
+names and row IDs. Use `ui settings PAGE`, `ui highlight ROW_ID`, and
+`ui guide TEXT --highlight ROW_ID` for the same flow; repeat `ui guide TEXT`
+to update it and `ui guide --clear` when finished. Guidance belongs to the
+caller's window. These commands navigate and explain; they do not change
+settings. Describe a change as completed only after actually making it.
 
 Automations are Luau scripts `sheprd-automate` runs on a host on a schedule
 or by hand (see `docs/automations.md`). Write one in

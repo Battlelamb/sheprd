@@ -106,6 +106,7 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
                 message: "test pushes need the daemon's runtime".into(),
             };
         }
+        Request::Phone(ask) => return Response::Phone(crate::native::drive::answer(state, ask)),
         Request::ChangeAsks => {
             let (asks, layout) = state.changes.take(control::ASK_WAIT);
             return Response::ChangeAsks { asks, layout };

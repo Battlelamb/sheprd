@@ -135,10 +135,13 @@ impl SheprdWindow {
         });
         let window_closed = Self::give_back_torn_tabs(cx);
         let terminal_focus = Self::leave_region_with_terminal(&focus, window, cx);
+        let agent_guidance = cx.new(|_| crate::agent_guidance::State::default());
+        let agent_guidance_changed = cx.observe(&agent_guidance, |_, _, cx| cx.notify());
         let mut this = Self {
             // keep-sorted start
             _activation: activation,
             _agent_favorites: agent_favorites_changed,
+            _agent_guidance: agent_guidance_changed,
             _agent_read: agent_read_changed,
             _appearance: appearance_change,
             _browser_tabs: browser_tabs,
@@ -156,6 +159,7 @@ impl SheprdWindow {
             activity: Default::default(),
             agent_favorites,
             agent_group: None,
+            agent_guidance,
             agent_read,
             agent_sort: preferences::AgentSort::default(),
             agent_sort_modified: false,

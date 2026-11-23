@@ -20,6 +20,7 @@ pub mod host_relay;
 pub mod hosts;
 pub mod layout;
 pub mod pairing_link;
+pub mod phone;
 pub mod pull_requests;
 pub mod push;
 pub mod read;
@@ -338,6 +339,10 @@ pub enum Request {
     /// answers what came of each, within [`ASK_WAIT`]. An older daemon
     /// closes without answering.
     TestPush,
+    /// Agents driving a paired phone's app (`phone`): the phones that let
+    /// them, or a drive, answered once the phone says what it did or
+    /// [`ASK_WAIT`] passes. An older daemon closes without answering.
+    Phone(phone::Ask),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -415,6 +420,7 @@ pub enum Response {
     },
     PushStatus(push::PushStatus),
     TestPushed(push::TestPushes),
+    Phone(phone::Answer),
 }
 
 /// The daemon's answer to a nearby phone's first step, the same JSON over

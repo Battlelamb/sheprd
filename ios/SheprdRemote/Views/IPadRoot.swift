@@ -22,6 +22,18 @@ struct IPadRoot: View {
 
     /// The workspace a chat or terminal's header opened, over the window.
     @State private var workspaceSheet: WorkspaceKey?
+    private var front: AgentControl.Front {
+        let shown: RootTab = switch tab {
+        case .chats: .home
+        case .workspaces: .workspaces
+        case .pullRequests: .pullRequests
+        case .settings: .settings
+        }
+        // Pairing and the nearby card cover the window.
+        let covered = pairing || window?.nearby != nil
+        return AgentControl.Front(tab: shown, route: workspaceSheet.map { .workspace($0) } ?? selection, unnamed: covered, settingsPage: model.agents.settingsPath.last)
+    }
+
     /// The sidebar is shown; ⌘⌃S or its button hides it.
     @State private var sidebarShown = true
 
@@ -63,6 +75,25 @@ struct IPadRoot: View {
         .animation(.snappy, value: sidebarShown)
         .background { ChatKeys(selection: $selection, tab: $tab, sidebarShown: $sidebarShown) }
         .sheet(isPresented: $pairing) { PairView() }
+        .onChange(of: model.pendingTab) { _, wanted in
+            guard let wanted else { return }
+            // An agent's open shows the tab itself, not a page beside it.
+            if model.pendingTabRoot {
+                workspaceSheet = nil
+                selection = nil
+                model.pendingTabRoot = false
+            }
+            tab = switch wanted {
+            case .home: .chats
+            case .workspaces: .workspaces
+            case .pullRequests: .pullRequests
+            case .settings: .settings
+            }
+            model.pendingTab = nil
+        }
+        // What the window shows, for agents asking (`AgentControl`): the
+        // workspace sheet over the tab beside the sidebar.
+        .onChange(of: front, initial: true) { _, front in model.agents.front = front }
         // From a chat or terminal's header: the workspace in a sheet,
         // which closes once a tab is picked or started, and that tab opens
         // beside the sidebar.
@@ -165,7 +196,7 @@ struct IPadRoot: View {
                     .connectionToast(pairing: $pairing)
             }
             Tab("Settings", systemImage: "gearshape", value: SidebarTab.settings) {
-                NavigationStack { SettingsView().toolbar { hideSidebar }.makesRoomForConnectionToast() }
+                NavigationStack(path: Bindable(model.agents).settingsPath) { SettingsView().toolbar { hideSidebar }.makesRoomForConnectionToast() }
                     .connectionToast(pairing: $pairing)
             }
         }

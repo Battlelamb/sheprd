@@ -23,6 +23,9 @@ const REMEMBERED: [OptionCategory; 3] = [
 
 #[derive(Debug, Default)]
 pub(super) struct Picks {
+    /// The settings being carried into the session pick a model or
+    /// thinking, so they are remembered once all are set.
+    carries_choice: bool,
     /// Where the picks are kept; `None` keeps none.
     dir: Option<PathBuf>,
     /// The picks applied once the agent starting now opens its session.
@@ -92,9 +95,36 @@ impl<R: FnMut(Update)> Session<R> {
         }
     }
 
-    /// The agent took a setting, or the settings carried into its session
-    /// are all set: what it runs with now is the agent's picks for the
-    /// next chat, kept when they changed.
+    /// Notes whether the settings about to be carried into the session
+    /// pick a model or thinking; a mode alone leaves the picks as they are.
+    pub(super) fn note_carried(&mut self) {
+        let agent = self.config.harness;
+        let carried = self
+            .config
+            .settings
+            .as_ref()
+            .filter(|settings| agent.is_some_and(|agent| settings.is_for(agent)));
+        self.picks.carries_choice = carried.is_some_and(|settings| {
+            settings.options.iter().any(|setting| {
+                self.transcript
+                    .options
+                    .iter()
+                    .any(|option| option.id == setting.id && REMEMBERED.contains(&option.category))
+            })
+        });
+    }
+
+    /// The carried settings are all set: when they picked a model or
+    /// thinking, what the agent runs with now is its picks, set here or
+    /// already the session's own.
+    pub(super) fn remember_carried(&mut self) {
+        if std::mem::take(&mut self.picks.carries_choice) {
+            self.remember_picks();
+        }
+    }
+
+    /// The agent took a setting: what it runs with now is the agent's
+    /// picks for the next chat, kept when they changed.
     pub(super) fn remember_picks(&mut self) {
         let (Some(dir), Some(agent)) = (&self.picks.dir, self.config.harness) else {
             return;

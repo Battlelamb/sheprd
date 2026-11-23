@@ -248,6 +248,7 @@ impl<R: FnMut(Update)> Session<R> {
         }
         self.carry_picks(loaded);
         self.carry_deferred();
+        self.note_carried();
         self.carry_next();
         self.next_queued();
     }

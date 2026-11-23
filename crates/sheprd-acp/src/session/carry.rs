@@ -74,9 +74,7 @@ impl<R: FnMut(Update)> Session<R> {
                 }
             }
             self.config.settings = None;
-            // What the agent runs with now is what was asked for, set here
-            // or already the session's own, so it is the agent's picks.
-            self.remember_picks();
+            self.remember_carried();
             self.next_queued();
             return;
         }

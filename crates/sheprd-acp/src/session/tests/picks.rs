@@ -293,3 +293,54 @@ fn answer(harness: &mut Harness, agent: u64, id: i64, result: Value) {
         },
     ));
 }
+
+#[test]
+fn a_mode_picked_while_a_continued_chat_starts_leaves_the_picks() {
+    let root = tempfile::tempdir().unwrap();
+    crate::known::save_picked(
+        root.path(),
+        Agent::Claude,
+        &picked("claude", "sonnet", "high"),
+    )
+    .unwrap();
+    let known = crate::known::Settings {
+        modes: Some(sheprd_chat_protocol::Modes {
+            available: ["default", "plan"]
+                .map(|id| sheprd_chat_protocol::Mode {
+                    description: None,
+                    id: id.into(),
+                    name: id.into(),
+                })
+                .into(),
+            current: "default".into(),
+        }),
+        options: crate::project::options(Some(&options("opus", "low"))),
+    };
+    let mut harness = harness_with(Config {
+        known: [(Agent::Claude, known)].into(),
+        load: Some("old".into()),
+        ..config()
+    });
+    harness.session.keep_picks(root.path().to_owned());
+    harness.session.start();
+    harness.command(0, Command::SetMode { id: "plan".into() });
+    let id = harness.last_request("initialize")["id"].as_i64().unwrap();
+    harness.respond(
+        id,
+        json!({"protocolVersion": 1, "agentCapabilities": {"loadSession": true}}),
+    );
+    let id = harness.last_request("session/load")["id"].as_i64().unwrap();
+    harness.respond(
+        id,
+        json!({"configOptions": options("opus", "low"),
+            "modes": {"currentModeId": "default", "availableModes": [
+                {"id": "default", "name": "Default"}, {"id": "plan", "name": "Plan"}]}}),
+    );
+    let mode = harness.last_request("session/set_mode");
+    harness.respond(mode["id"].as_i64().unwrap(), json!({}));
+    assert_eq!(harness.transcript().modes.as_ref().unwrap().current, "plan");
+    assert_eq!(
+        crate::known::picked(root.path(), Agent::Claude),
+        Some(picked("claude", "sonnet", "high"))
+    );
+}

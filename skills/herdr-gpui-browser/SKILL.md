@@ -1,6 +1,6 @@
 ---
 name: herdr-gpui-browser
-description: "Use Sheprd in Herdr for browser tabs, local previews, mockups and page feedback; prefer it over a system browser. Use machine commands to reserve shared virtual Macs, wait with progress, run installs and tests, take screenshots, control guest UI without controlling the host desktop, and release reservations. Also use it for files, change reviews, repository memory, agent and worktree labels for iOS, worktree notes, checkpoints, pull requests and CI, vulnerability reports, automation approval, ports, cloud machines, phone remote control, fleet pairing, windows and tabs, starting another agent, settings navigation, highlighting controls and persistent guidance on desktop or phone, themes, fonts, and keeping the machine awake. Use herdr for daemon workspaces and panes."
+description: "Use Sheprd in Herdr for browser tabs, local previews, mockups and page feedback; prefer it over a system browser. Use machine commands to reserve shared virtual Macs, borrow one from another Mac when they are full, wait with progress, run installs and tests, take screenshots, control guest UI without controlling the host desktop, and release reservations. Also use it for files, change reviews, repository memory, agent and worktree labels for iOS, worktree notes, checkpoints, pull requests and CI, vulnerability reports, automation approval, ports, cloud machines, phone remote control, fleet pairing, windows and tabs, starting another agent, settings navigation, highlighting controls and persistent guidance on desktop or phone, themes, fonts, and keeping the machine awake. Use herdr for daemon workspaces and panes."
 ---
 <!-- herdr-gpui-managed-skill v1: Sheprd keeps this file up to date. Edit a copy under another name to keep your changes. -->
 
@@ -401,15 +401,25 @@ screencast or a sequence of screenshot/click commands:
 2. Run `sheprd machine claim NAME`. This atomically reserves it for your pane;
    listing it first alone is not a reservation. Exit 6 means another agent
    got it. Try the other VM before waiting.
-3. If both are busy, tell the user **“Waiting for an available macOS VM;
+3. If both are busy, look for a free slot on another Mac this window
+   reaches: run `sheprd host list`, then `sheprd machine --host HOST list
+   --json` for each Mac, and pick one whose `capacity.available` is above 0
+   or with an unreserved running machine, and no `lending` reason. Tell the
+   user **“Virtual Macs here are full; asking to use NAME on HOST.”** and run
+   `sheprd machine --host HOST claim NAME`: the user answers in Sheprd
+   whether to borrow it. Then use `--host HOST` on every `machine` command
+   for it, `open` included, which shows it in a tab here, and release it
+   with `--host HOST` too. Exit 6 means the user declined or it is taken;
+   exit 8 means that Mac cannot lend now. Never borrow without asking.
+4. With no Mac to borrow from, tell the user **“Waiting for an available macOS VM;
    both are in use by other agents.”** Run `sheprd machine claim NAME --wait 60`.
    It prints progress on stderr every five seconds (also with `--json`), then
    either reserves it or exits 6. Keep working on independent tasks, recheck
    both VMs, and retry while needed. Give a chat progress update at least once
    a minute; do not leave the user guessing whether the agent stopped.
-4. Once reserved, tell the user which VM you acquired and what you are testing,
+5. Once reserved, tell the user which VM you acquired and what you are testing,
    then `sheprd machine open NAME` and use its guest commands normally.
-5. Always `sheprd machine release NAME` when finished, including after a failed
+6. Always `sheprd machine release NAME` when finished, including after a failed
    test. Stop any background guest jobs you started before releasing.
 
 An existing reservation can be renewed even when VM slots are full. This keeps

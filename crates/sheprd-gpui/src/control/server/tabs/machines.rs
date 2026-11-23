@@ -38,6 +38,11 @@ pub(super) fn set(_: String, _: Changes, incoming: socket::Incoming, _: &mut App
 }
 
 #[cfg(not(target_os = "macos"))]
+pub(super) fn start(_: &Caller, _: String, incoming: socket::Incoming, _: &mut App) {
+    unsupported(incoming);
+}
+
+#[cfg(not(target_os = "macos"))]
 pub(super) fn suspend(_: String, incoming: socket::Incoming, _: &mut App) {
     unsupported(incoming);
 }
@@ -115,13 +120,19 @@ fn failed(error: &machine::Error) -> Response {
 
 #[cfg(target_os = "macos")]
 pub(super) fn list(incoming: socket::Incoming, cx: &mut App) {
-    let read = cx.background_executor().spawn(async { machine::list() });
+    let read = cx
+        .background_executor()
+        .spawn(async { (machine::list(), machine::lend::Survey::read()) });
     cx.spawn(async move |cx: &mut gpui::AsyncApp| {
-        let listed = read.await;
+        let (listed, survey) = read.await;
         let response = cx.update(|cx| match listed {
             Ok(listings) => Response::Tab {
                 reply: Reply::Machines {
-                    capacity: Some(machine::capacity()),
+                    capacity: Some(survey.capacity(machine::capacity().in_use)),
+                    lending: Some(survey.lending(
+                        crate::control::server::relay::lends(cx),
+                        machine::capacity().in_use,
+                    )),
                     machines: listings
                         .into_iter()
                         .map(|listing| info(listing, cx))
@@ -170,6 +181,51 @@ pub(super) fn set(name: String, changes: Changes, incoming: socket::Incoming, cx
             ) => Response::error(ErrorCode::InvalidRequest, error.localize()),
             Err(error) => failed(&error),
         });
+    })
+    .detach();
+}
+
+/// Starts machine `name` without a tab, as a borrowed machine does: no one
+/// is at its screen. Answers once it is on its way; `machine agent` tells
+/// when it is ready.
+#[cfg(target_os = "macos")]
+pub(super) fn start(caller: &Caller, name: String, incoming: socket::Incoming, cx: &mut App) {
+    let Some((name, incoming)) = named(name, incoming) else {
+        return;
+    };
+    let caller = caller.clone();
+    let read = cx
+        .background_executor()
+        .spawn(async { machine::lend::Survey::read() });
+    cx.spawn(async move |cx: &mut gpui::AsyncApp| {
+        let survey = read.await;
+        let response = cx.update(|cx| {
+            if let Some(refusal) = machine_claims::not_lending(&caller, survey, cx) {
+                return refusal;
+            }
+            match machine::status(&name) {
+                Status::Running | Status::Starting => {
+                    return Response::done(format!("{name} is running")); // i18n: data
+                }
+                Status::Saving => {
+                    return Response::error(
+                        ErrorCode::Busy,
+                        format!("{name} is saving; start it once it stops"), // i18n: data
+                    );
+                }
+                Status::Stopped | Status::Failed(_) => {}
+            }
+            let capacity = survey.capacity(machine::capacity().in_use);
+            if let Err(error) = machine::check_capacity_in(&name, capacity) {
+                return Response::error(ErrorCode::Busy, error.to_string());
+            }
+            machine::start(&name, cx);
+            match machine::status(&name) {
+                Status::Failed(reason) => Response::error(ErrorCode::Failed, reason),
+                _ => Response::done(format!("Starting {name}")), // i18n: data
+            }
+        });
+        incoming.respond(response);
     })
     .detach();
 }

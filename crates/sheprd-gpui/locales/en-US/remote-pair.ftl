@@ -22,6 +22,11 @@ remote-pair-try-again = Try again
 # A phone that gave no name.
 remote-pair-unnamed = A device
 
+# A phone or computer nearby agreed on a code over Bluetooth and shows it;
+# its request to be allowed follows.
+remote-pair-nearby-code = A device nearby shows this code:
+remote-pair-nearby-next = Check that it matches. The device asks to be allowed next; Allow then appears here.
+
 remote-pair-scan = Scan with your phone's camera
 remote-pair-choose-address = Choose how your phone reaches this computer. Up/Down changes the QR address.
 # $seconds until the QR code is replaced.

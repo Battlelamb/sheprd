@@ -356,7 +356,8 @@ impl Pages {
             | Location::Orchestrator { .. }
             | Location::Devices
             | Location::CoreTerminal { .. }
-            | Location::Machine { .. } => None,
+            | Location::Machine { .. }
+            | Location::RemoteMachine { .. } => None,
         };
         // Only a local page, which the agent wrote, gets `herdr.send`.
         let bridge = if root.is_some() {

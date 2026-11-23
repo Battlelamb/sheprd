@@ -20,6 +20,7 @@ mod links;
 mod local_ports;
 mod machine;
 mod machine_agent;
+mod machine_remote;
 #[cfg(feature = "mcp")]
 mod mcp;
 mod memory;

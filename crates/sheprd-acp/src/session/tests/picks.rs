@@ -4,7 +4,7 @@ use std::path::Path;
 
 use sheprd_chat_protocol::{OptionValue, Setting, Settings};
 
-use super::harnesses::{launch, requests, set_agent};
+use super::harnesses::{choosing, launch, requests, set_agent};
 use super::*;
 
 fn options(model: &str, effort: &str) -> Value {
@@ -163,23 +163,16 @@ fn switching_agents_brings_back_the_new_agents_picks() {
     set_agent(&mut harness, Agent::Codex);
     let agent = launch(&mut harness);
     let id = requests(&agent)[0]["id"].as_i64().unwrap();
-    let answer = |harness: &mut Harness, id: i64, result: Value| {
-        harness.input(Input::Agent(
-            HarnessId(1),
-            Inbound::Response {
-                id: wire::RequestId::Number(id),
-                result: Ok(result),
-            },
-        ));
-    };
     answer(
         &mut harness,
+        1,
         id,
         json!({"protocolVersion": 1, "agentCapabilities": {}}),
     );
     let id = requests(&agent)[0]["id"].as_i64().unwrap();
     answer(
         &mut harness,
+        1,
         id,
         json!({"sessionId": "c1", "configOptions": options("opus", "low")}),
     );
@@ -188,4 +181,115 @@ fn switching_agents_brings_back_the_new_agents_picks() {
     assert_eq!(sent[0]["method"], "session/set_config_option");
     assert_eq!(sent[0]["params"]["configId"], "model");
     assert_eq!(sent[0]["params"]["value"], "sonnet");
+}
+
+#[test]
+fn switching_back_to_a_resumed_session_keeps_what_it_ran_with() {
+    let root = tempfile::tempdir().unwrap();
+    let mut harness = choosing();
+    harness.session.keep_picks(root.path().to_owned());
+    let turn = prompt(&mut harness, 1, "hello");
+    harness.respond(turn, json!({"stopReason": "end_turn"}));
+    set_agent(&mut harness, Agent::Codex);
+    let codex = launch(&mut harness);
+    let id = requests(&codex)[0]["id"].as_i64().unwrap();
+    answer(
+        &mut harness,
+        1,
+        id,
+        json!({"protocolVersion": 1, "agentCapabilities": {}}),
+    );
+    let id = requests(&codex)[0]["id"].as_i64().unwrap();
+    answer(&mut harness, 1, id, json!({"sessionId": "c1"}));
+    // Picked in another chat while this one ran Codex.
+    crate::known::save_picked(
+        root.path(),
+        Agent::Claude,
+        &picked("claude", "sonnet", "high"),
+    )
+    .unwrap();
+    set_agent(&mut harness, Agent::Claude);
+    let claude = launch(&mut harness);
+    let id = requests(&claude)[0]["id"].as_i64().unwrap();
+    answer(
+        &mut harness,
+        2,
+        id,
+        json!({"protocolVersion": 1, "agentCapabilities": {"loadSession": true}}),
+    );
+    let open = requests(&claude).remove(0);
+    assert_eq!(open["method"], "session/load");
+    // Nothing shows the other chat's picks while it resumes.
+    assert_eq!(
+        harness
+            .transcript()
+            .options
+            .iter()
+            .find(|option| option.id == "model"),
+        None
+    );
+    answer(
+        &mut harness,
+        2,
+        open["id"].as_i64().unwrap(),
+        json!({"configOptions": options("opus", "low")}),
+    );
+    let sent = requests(&claude);
+    assert!(
+        sent.iter()
+            .all(|message| message["method"] != "session/set_config_option"),
+        "{sent:?}"
+    );
+}
+
+#[test]
+fn a_pick_made_while_starting_is_kept_even_when_the_session_had_it() {
+    let root = tempfile::tempdir().unwrap();
+    crate::known::save_picked(
+        root.path(),
+        Agent::Claude,
+        &picked("claude", "opus", "high"),
+    )
+    .unwrap();
+    let known = crate::known::Settings {
+        modes: None,
+        options: crate::project::options(Some(&options("opus", "low"))),
+    };
+    let mut harness = harness_with(Config {
+        known: [(Agent::Claude, known)].into(),
+        ..config()
+    });
+    harness.session.keep_picks(root.path().to_owned());
+    harness.session.start();
+    harness.command(
+        0,
+        Command::SetOption {
+            id: "effort".into(),
+            value: OptionValue::Choice { id: "low".into() },
+        },
+    );
+    let id = harness.last_request("initialize")["id"].as_i64().unwrap();
+    harness.respond(id, json!({"protocolVersion": 1, "agentCapabilities": {}}));
+    let id = harness.last_request("session/new")["id"].as_i64().unwrap();
+    // The new session already runs low thinking: nothing needs setting.
+    harness.respond(
+        id,
+        json!({"sessionId": "s1", "configOptions": options("opus", "low")}),
+    );
+    assert!(sent_options(&harness).is_empty());
+    assert_eq!(
+        crate::known::picked(root.path(), Agent::Claude),
+        Some(picked("claude", "opus", "low"))
+    );
+}
+
+/// Answers request `id` as the `agent`-th agent the chat started.
+fn answer(harness: &mut Harness, agent: u64, id: i64, result: Value) {
+    harness.input(Input::Agent(
+        HarnessId(agent),
+        Inbound::Response {
+            id: wire::RequestId::Number(id),
+            result: Ok(result),
+        },
+    ));
 }

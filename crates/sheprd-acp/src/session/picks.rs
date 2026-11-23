@@ -51,6 +51,12 @@ impl<R: FnMut(Update)> Session<R> {
         let Some(picked) = crate::known::picked(dir, agent) else {
             return;
         };
+        // A continued session shows what it ran with; the picks wait in
+        // case it cannot continue and a new one opens instead.
+        if self.config.load.is_some() {
+            self.picks.pending = Some(picked);
+            return;
+        }
         let mut options = self.transcript.options.clone();
         for Setting { id, value } in &picked.options {
             let Some(option) = options
@@ -75,17 +81,20 @@ impl<R: FnMut(Update)> Session<R> {
         self.picks.pending = Some(picked);
     }
 
-    /// The session opened: the picks are carried into it unless the chat
-    /// already carries settings, which are newer.
-    pub(super) fn carry_picks(&mut self) {
+    /// The session opened: the picks are carried into a new one unless
+    /// the chat already carries settings, which are newer. A continued
+    /// session, such as the one a switch back to an agent resumes, keeps
+    /// its own: picks from another chat would replace what it ran with.
+    pub(super) fn carry_picks(&mut self, loaded: bool) {
         let picked = self.picks.pending.take();
-        if self.config.settings.is_none() {
+        if !loaded && self.config.settings.is_none() {
             self.config.settings = picked;
         }
     }
 
-    /// The agent took a setting: what it runs with now is the agent's
-    /// picks for the next chat, kept when they changed.
+    /// The agent took a setting, or the settings carried into its session
+    /// are all set: what it runs with now is the agent's picks for the
+    /// next chat, kept when they changed.
     pub(super) fn remember_picks(&mut self) {
         let (Some(dir), Some(agent)) = (&self.picks.dir, self.config.harness) else {
             return;

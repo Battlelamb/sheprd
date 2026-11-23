@@ -246,7 +246,7 @@ impl<R: FnMut(Update)> Session<R> {
             // A continued session keeps its own settings.
             self.config.settings = None;
         }
-        self.carry_picks();
+        self.carry_picks(loaded);
         self.carry_deferred();
         self.carry_next();
         self.next_queued();

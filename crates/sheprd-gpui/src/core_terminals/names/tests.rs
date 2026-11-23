@@ -1,7 +1,6 @@
 use crate::core_terminals::{checkouts::Checkouts, names::apply};
 use sheprd_session::{CoreWorkspace, Session, Worktree};
 use sheprd_vcs::git::Identity;
-use std::collections::BTreeMap;
 
 fn session(custom_label: bool, linked: bool) -> Session {
     Session::core(
@@ -51,9 +50,10 @@ fn root_names_follow_checkouts_and_plain_folders_without_changing_identity() {
                 ("/tmp/notes", "notes"),
                 ("/Users/me", "~"),
             ] {
-                let folders = BTreeMap::from([("root".into(), Some(cwd.into()))]);
-                apply(&mut session, &folders, Some(&checkouts), "/Users/me");
+                session.workspaces[0].cwd = cwd.into();
+                apply(&mut session, Some(&checkouts), "/Users/me");
                 let mut expected_workspace = original.clone();
+                expected_workspace.cwd = cwd.into();
                 if !custom && !linked {
                     expected_workspace.label = expected.into();
                 }
@@ -78,8 +78,8 @@ fn missing_live_folders_use_the_saved_folder_and_stale_answers_are_not_used() {
     );
     let mut session = session(false, false);
     for cwd in [None, Some("/new/src")] {
-        let folders = BTreeMap::from([("root".into(), cwd.map(str::to_owned))]);
-        apply(&mut session, &folders, Some(&checkouts), "");
+        session.workspaces[0].cwd = cwd.unwrap_or("/original").into();
+        apply(&mut session, Some(&checkouts), "");
         assert_eq!(
             session.workspaces[0].label,
             if cwd.is_some() { "src" } else { "original" }
@@ -89,11 +89,12 @@ fn missing_live_folders_use_the_saved_folder_and_stale_answers_are_not_used() {
 
 #[test]
 fn home_naming_uses_the_owning_hosts_home() {
-    let folders = BTreeMap::from([("root".into(), Some("/home/alice".into()))]);
     let mut local = session(false, false);
     let mut remote = session(false, false);
-    apply(&mut local, &folders, None, "/Users/alice");
-    apply(&mut remote, &folders, None, "/home/alice");
+    local.workspaces[0].cwd = "/home/alice".into();
+    remote.workspaces[0].cwd = "/home/alice".into();
+    apply(&mut local, None, "/Users/alice");
+    apply(&mut remote, None, "/home/alice");
     assert_eq!(local.workspaces[0].label, "alice");
     assert_eq!(remote.workspaces[0].label, "~");
 }

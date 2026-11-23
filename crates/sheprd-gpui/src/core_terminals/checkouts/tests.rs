@@ -1,4 +1,4 @@
-use super::*;
+use crate::core_terminals::checkouts::*;
 
 #[test]
 fn folders_are_asked_once_then_again_when_stale() {
@@ -16,7 +16,11 @@ fn folders_are_asked_once_then_again_when_stale() {
     // A finished batch lands on the next poll.
     let (send, receive) = mpsc::sync_channel(1);
     send.send(Answers {
-        folders: vec![(folder.clone(), None)],
+        folders: vec![Answer {
+            cwd: folder.clone(),
+            identity: None,
+            upstream: None,
+        }],
         home: None,
     })
     .unwrap();
@@ -68,4 +72,35 @@ fn home_answers_are_cached_per_host_and_survive_a_failed_lookup() {
     assert!(!receive(&mut remote, None));
     assert_eq!(remote.home(), Some("/home/alice"));
     assert!(!receive(&mut remote, Some("/home/alice")));
+}
+
+#[test]
+fn one_answer_keeps_home_identity_and_upstream_counts_together() {
+    let mut checkouts = Checkouts::default();
+    let folder = "/work/repo/src".to_owned();
+    let now = Instant::now();
+    checkouts.asked = Some(now);
+    for counts in [Some((3, 2)), None] {
+        let (send, receive) = mpsc::sync_channel(1);
+        send.send(Answers {
+            home: Some("/home/alice".into()),
+            folders: vec![Answer {
+                cwd: folder.clone(),
+                upstream: counts,
+                identity: Some(Identity {
+                    branch: Some("feature".into()),
+                    key: "/work/repo/.git".into(),
+                    label: "repo".into(),
+                    linked: false,
+                    root: "/work/repo".into(),
+                }),
+            }],
+        })
+        .unwrap();
+        checkouts.asking = Some(receive);
+        assert!(checkouts.poll(vec![folder.clone()], now));
+        assert_eq!(checkouts.home(), Some("/home/alice"));
+        assert_eq!(checkouts.get(&folder).unwrap().root, "/work/repo");
+        assert_eq!(checkouts.upstream(&folder), counts);
+    }
 }

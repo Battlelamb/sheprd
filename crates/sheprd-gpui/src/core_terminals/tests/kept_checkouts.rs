@@ -215,7 +215,7 @@ fn root_space_tracks_its_first_terminal_checkout(cx: &mut TestAppContext) {
 fn root_naming_uses_tree_order_and_ignores_mirrors(cx: &mut TestAppContext) {
     let (view, cx, _) = window(cx);
     cx.update(|_, cx| {
-        view.update(cx, |view, cx| {
+        view.update(cx, |view, _| {
             let scope = crate::browser::scope(&view.endpoints[0]);
             let mut store = crate::browser::Store::default();
             let terminal = |id| TerminalId::new(id).unwrap();
@@ -257,8 +257,8 @@ fn root_naming_uses_tree_order_and_ignores_mirrors(cx: &mut TestAppContext) {
                     });
             }
             assert_eq!(
-                view.core_name_folders(&store, &scope, cx).get("selection"),
-                Some(&None),
+                view.core_workspace_cwd(&store, &scope, "selection"),
+                None,
                 "a missing first terminal does not select a later one"
             );
             view.core_terminals
@@ -275,8 +275,8 @@ fn root_naming_uses_tree_order_and_ignores_mirrors(cx: &mut TestAppContext) {
                     title: None,
                 });
             assert_eq!(
-                view.core_name_folders(&store, &scope, cx).get("selection"),
-                Some(&Some("/code/first".into()))
+                view.core_workspace_cwd(&store, &scope, "selection"),
+                Some("/code/first")
             );
         })
     });

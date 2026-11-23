@@ -1919,6 +1919,14 @@ maximize/restore, and the shadow.
 
 ## Herdr 2 Terminals
 
+App-kept spaces follow the current directory of their oldest driving tab's
+first pane. Changing directory refreshes the automatic name, repository,
+branch, and Git/PR lookup; a name you chose stays unchanged. A new tab in an
+empty split group uses that space's current folder. Local checkout rows also
+show ahead/behind counts against the configured upstream, without fetching.
+The last known folder is saved, so closing the last terminal or restarting
+the app preserves it and the automatic name.
+
 Herdr 2 (herdr-core) runs terminals that stay alive like Herdr's, but streams
 their raw output, so Sheprd emulates each one itself and draws it with the
 same painter as a Herdr pane. That lets a tab split into native panes. Herdr 1
@@ -3889,9 +3897,11 @@ code-tunnel serve-web --host 127.0.0.1 --port <port> \
   or remove `port` to have a new one picked (VS Code then starts without the
   settings it kept). The app sends nothing to a port it does not hold, since
   the token must reach only its own server. It asks that server for its
-  version alone, never with the token, once its own `serve-web` says it
-  listens there, and counts the answer only if `serve-web` still runs after
-  it; a page, which must carry the token, is made only while it runs.
+  version with the token, since current VS Code releases authenticate every
+  route. This happens only once its own `serve-web` says it listens there,
+  and the answer counts only if that process still runs afterward. Windows
+  use the worker's answer without another probe; a page is made only while
+  the process still runs.
 - The connection token is made once and kept in `vscode-token` in the app's
   state folder (`~/.local/state/herdr/gpui` unless `XDG_STATE_HOME` is set),
   readable only by you on macOS; on Windows it has your profile folder's

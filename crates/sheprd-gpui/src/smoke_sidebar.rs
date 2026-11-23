@@ -1,5 +1,5 @@
 //! Daemon-free sidebar fixture driver.
-use super::*;
+use crate::smoke::*;
 
 #[path = "smoke_sidebar/quota.rs"]
 mod quota;
@@ -8,32 +8,35 @@ mod quota;
 #[path = "smoke_sidebar/tests.rs"]
 mod tests;
 
-const GLYPH_SIZES: &[(f32, f32)] = &[(1200., 780.), (640., 400.), (1000., 650.), (800., 600.)];
-
-fn glyph_fixture_size(
+fn sidebar_fixture_size(
     view: &SheprdWindow,
     window: &Window,
     width: f32,
     height: f32,
     style: crate::config::Style,
 ) -> Size<Pixels> {
-    // Keep the original list viewport after reserving the device footer,
-    // activity title, and the menu bar drawn inside Windows/Linux windows.
-    let menu = if view.menu_bar_shown() {
+    // Keep the same list viewport on platforms whose menu bar lives inside
+    // the window. Rounded rows need more room in both scrollable sections.
+    let menus = if view.menu_bar_shown() {
         view.application_bar_height(window)
     } else {
         0.
     };
-    // Rounded rows need more room in both scrollable sections.
-    let rounded = if style == crate::config::Style::Rounded {
-        160.
-    } else {
-        0.
-    };
-    fixture_size(
-        width,
-        height + sidebar::DEVICE_FOOTER_HEIGHT + view.activity_title_height() + menu + rounded,
-    )
+    // The first three repository roots have two 7px gaps. Their list gets
+    // half the body, so reserve twice those gaps in the window's height.
+    let repository_gaps = 2. * 7.;
+    let height = height
+        + 2. * repository_gaps
+        + sidebar::DEVICE_FOOTER_HEIGHT
+        + view.activity_title_height()
+        + menus
+        + if style == crate::config::Style::Rounded {
+            160.
+        } else {
+            0.
+        };
+    // Native window sizes are integral pixels; font-derived menu heights are not.
+    fixture_size(width, height.ceil())
 }
 
 /// Native check that the icon cascade reaches an installed Nerd Font. Prompts
@@ -224,15 +227,14 @@ pub fn start_sidebar(handle: WindowHandle<SheprdWindow>, cx: &mut App) {
                 cx,
                 |root, window, cx| -> Result<bool> {
                     use crate::sidebar::layout_tests::PaintedProbes;
-                    let (w, h) = GLYPH_SIZES[(frame % 12) / 3];
+                    let (w, h) =
+                        [(1200., 780.), (640., 400.), (1000., 650.), (800., 600.)][(frame % 12) / 3];
                     use crate::config::{Density, LayoutMode, Style};
                     let density = [Density::Comfortable, Density::Normal, Density::Compact][frame / 12 % 3];
                     let style = [Style::Flat, Style::Rounded][frame / 36];
-                    let view = root
-                        .clone()
-                        .downcast::<SheprdWindow>()
+                    let view = root.clone().downcast::<SheprdWindow>()
                         .map_err(|_| anyhow!("unexpected root"))?;
-                    let size = glyph_fixture_size(view.read(cx), window, w, h, style);
+                    let size = sidebar_fixture_size(view.read(cx), window, w, h, style);
                     let mode = LayoutMode::new(density, style);
                     let compact = density == Density::Compact;
                     if frame % 3 == 0 {
@@ -313,8 +315,7 @@ pub fn start_sidebar(handle: WindowHandle<SheprdWindow>, cx: &mut App) {
                         let expected_width = px(sidebar::LABEL_WIDTH + extra_width - icon_reserve);
                         if p.glyph_text != p.cached
                             || (expected_short && p.glyph_text != input)
-                            || (!expected_short
-                                && (p.width < px(150.) || !p.glyph_text.ends_with('\u{2026}')))
+                            || (!expected_short && !p.fills_truncated_column())
                             || p.clipped
                             || !sidebar::layout_tests::within_device_pixel(p.bounds.size.width, expected_width, window.scale_factor())
                             || p.mask.size.width != p.bounds.size.width

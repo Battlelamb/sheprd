@@ -217,6 +217,15 @@ pub(crate) fn check_capacity(name: &Name) -> Result<()> {
     check_capacity_for(status(name), capacity())
 }
 
+/// [`check_capacity`] against `capacity`, which also counts other
+/// programs' VMs ([`super::lend::Survey`]).
+pub(crate) fn check_capacity_in(
+    name: &Name,
+    capacity: crate::control::protocol::tabs::MachineCapacity,
+) -> Result<()> {
+    check_capacity_for(status(name), capacity)
+}
+
 fn check_capacity_for(
     status: Status,
     capacity: crate::control::protocol::tabs::MachineCapacity,

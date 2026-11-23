@@ -1,6 +1,8 @@
 # Virtual Macs on other computers
 
-**Plan; nothing here is built.** macOS runs at most two virtual Macs per
+**Phase 1 is built** (forwarding, lending, the borrow dialog, and watching);
+placement and copying images are not. Where the build differs from the
+first plan, the sections below say what was built. macOS runs at most two virtual Macs per
 computer, so two agents testing in VMs fill this Mac. This plan lets an
 agent use a free virtual Mac on another Mac the window already reaches,
 with the same `sheprd machine` commands and the same claims.
@@ -28,28 +30,30 @@ with the same `sheprd machine` commands and the same claims.
 | Question | Decision |
 | --- | --- |
 | Who runs a remote VM | That Mac's own Sheprd. Nothing here can run it: the framework, the view, and vsock are per process. |
-| How this app reaches it | `sheprd machine ... --json` over the existing host connection (SSH, through relays when needed), as `remote_update` runs `sheprd update`. No new daemon, transport, or crate. |
+| How this app reaches it | `sheprd machine lend` over the existing host connection (SSH, through relays when needed, sharing one login per host), as `remote_update` runs `sheprd update`: one request as JSON on its stdin, one answer as JSON on its stdout (`sheprd-control-protocol` `protocol/lend.rs`). No new daemon, transport, or crate. |
 | Why not the remote control API | Fleet members do not get the remote control API on each other's daemons (`docs/relay-plan.md`, What joining grants). SSH is the access the user already granted. |
-| Who may borrow | Every Mac lends by default: `[machine] lend`, on unless set off (Settings > Virtual Macs). A Mac that runs VMs of other programs, such as Tart CI runners, never lends, whatever the setting: their VMs share its two slots (Hosts that never lend). |
+| Who may borrow | Every Mac lends by default: `[machine] lend`, on unless set off (in the config file; Settings does not show it yet). A Mac that runs VMs of other programs, such as Tart CI runners, never lends, whatever the setting: their VMs share its two slots (Hosts that never lend). |
 | Who decides to borrow | The user, once per host. The first time placement would use another Mac, the app asks: "Virtual Macs here are full. Use a free slot on mini-2?" with **Use once**, **Always use mini-2**, and **Wait for a slot here**. An agent cannot answer it. |
 | What is copied | Nothing by default: each Mac makes machines from its own images. When the only way is copying an image, the app measures the link first and asks, with the size and the time it would take (Copying an image). |
-| Remote app not running | Skipped by placement; a named host answers exit 3, "Sheprd is not running on mini-2". Never launched over SSH: it needs the user's GUI login. |
+| Remote app not running | A named host answers exit 8, "Sheprd is not running on mini-2"; placement will skip it. Never launched over SSH: it needs the user's GUI login. |
 
 ## Commands
 
-Every `machine` subcommand takes `--host HOST`, a host ID or label as
-`host update` takes. Without it, nothing changes: this computer.
+`open`, `start`, `claim`, `release`, `list`, `suspend`, `agent`, `exec`,
+`screenshot`, `click`, `type`, and `key` take `--host HOST`, a host ID or
+label as `host update` takes (built: `TabOp::MachineOn`). Making, deleting,
+and changing a machine stay with its own Sheprd. Without `--host`, nothing
+changes: this computer.
 
-| Command | Change |
+| Command | State |
 | --- | --- |
-| `machine list --all` | Each lending host's capacity and machines, this computer first. A host that does not answer is listed with its reason, not left out. |
-| `machine claim --any [--image IMAGE] [--wait S]` | Places the claim: an unreserved running machine here, then a stopped one with a free slot here, then the same on lending hosts, most free slots first. Prints the host and name it got. `--wait` polls every host every five seconds from this app, not one long SSH command. |
-| `machine start NAME` | Boots without a tab, which is what a forwarded `open` does: nobody is at the other Mac. Locally, `open` keeps opening a tab. |
-| `machine screenshot NAME -` | Writes the PNG to stdout, so a forwarded screenshot comes back in one exchange. The local side bounds it (64 MiB, as the agent's reply), checks it is a PNG of the size claimed, and writes PATH here. |
+| `machine start NAME` | Built. Boots without a tab, which is what a forwarded `open` does: nobody is at the other Mac. Locally, `open` keeps opening a tab. |
+| `machine lend` | Built, hidden. What the borrower runs there. Screenshots and frames are composed by this command from a screenshot the app writes into a private folder, since the control socket's messages stay under 256 KB; the borrower bounds the answer (96 MiB), checks the PNG is the size it says, and writes PATH here. |
+| `machine list --all` | Phase 2. Each lending host's capacity and machines, this computer first. A host that does not answer is listed with its reason, not left out. |
+| `machine claim --any [--image IMAGE] [--wait S]` | Phase 2. Places the claim: an unreserved running machine here, then a stopped one with a free slot here, then the same on lending hosts, most free slots first. `--wait` polls every host every five seconds from this app, not one long SSH command. |
 
-Claims, `exec`, `click`, `type`, `key`, `agent`, `release`, and `set`
-forward unchanged apart from the owner below. Exit codes stay those of
-`docs/cli.md`; a host that cannot be reached is exit 8.
+Exit codes stay those of `docs/cli.md`; a host that cannot be reached,
+has no Sheprd running, or has one too old to lend is exit 8.
 
 ## Asking before borrowing
 
@@ -64,10 +68,13 @@ CPUs and memory, and how the host is reached (direct, LAN, relay).
   and removes them.
 - **Wait for a slot here** turns the claim into `--wait` on this Mac.
 
-Until the user answers, `claim --any` prints "Virtual Macs here are full;
-asking to use mini-2" on stderr every five seconds, as `--wait` does, and
-exits 6 if the dialog is dismissed. The skill tells the agent to relay that
-line to the user, who may be in the chat rather than at the window.
+Built: opening, starting, or claiming on a host not in `borrow_from` asks
+(`machine/borrow.rs`, the menu's `Page::BorrowMachine`); the request waits
+up to two minutes for the answer, and **Wait for a slot here** or closing
+the dialog exits 6. The skill tells the agent to say it is asking, as the
+user may be in the chat rather than at the window. The dialog does not yet
+show the machine's CPUs and memory or how the host is reached, and
+Settings does not yet list `borrow_from`.
 
 ## Hosts that never lend
 
@@ -76,23 +83,28 @@ would see a free slot that a CI job takes a minute later. So a host does
 not lend, and `list --all` says why, when any of these holds:
 
 - Another program's VM is running (Counting every VM on a host).
-- Tart has VMs (`tart list` answers with any, or `~/.tart/vms` is not
-  empty), even when none runs: a CI runner starts them on demand.
+- Tart has VMs (`$TART_HOME/vms`, else `~/.tart/vms`, is not empty), even
+  when none runs: a CI runner starts them on demand.
 - `[machine] lend = false`.
 
-The check runs on the lending Mac when asked, so a forwarded claim is
-refused there (exit 6, "mini-2 runs Tart VMs and does not lend") even if
-this app's cached answer was older.
+The check runs on the lending Mac when a borrower claims or starts a
+machine there (`machine/lend.rs`, `machine_claims::not_lending`), and
+refuses with the reason (exit 8). With lending off, a borrower may still
+list and release, so it learns why and can let go; `machine list --json`
+reports `lending`.
 
 ## Owners across computers
 
-A forwarded command arrives over SSH, with no pane. It carries a hidden
-`--owner remote:COMPUTER:PANE` (or `:TERMINAL`), where `COMPUTER` is this
-app's fleet or device ID. The lending app:
+A forwarded request arrives over SSH, with no pane. `machine lend` sends
+it to the app as relayed by the borrower (`Via::Lend { borrower, owner }`,
+where `borrower` is this computer's host name and `owner` the pane or
+terminal that asked), with no pane, terminal, or window of the lending
+computer. The lending app:
 
-- Accepts `--owner` only from a caller with no pane or terminal and only
-  while it lends, so a local agent cannot pose as another pane.
-- Keeps it as its own `Owner` variant, which never equals a local one.
+- Serves only virtual Mac work from it (`TabOp::lendable`,
+  `control/server/relay.rs`), never a tab, dialog, or deletion.
+- Keeps its claims under their own `Owner` field, which never equals a
+  local pane's.
 - Applies the same rules: 15 idle minutes, renewed by guest commands, only
   the owner releases.
 
@@ -103,11 +115,12 @@ A borrower that quits leaves its claims to expire; the VM keeps running.
 
 Placement trusts `capacity`, so it must count all VMs, not only Sheprd's.
 Each running Virtualization.framework VM is one
-`com.apple.Virtualization.VirtualMachine` XPC process (to be confirmed on
-macOS 26). `capacity` reports `in_use` from those, plus Sheprd's own
-starting machines and installer, with `others` naming how many belong to
-other programs. A start the framework refuses for the limit becomes
-`Error::Capacity`, so placement moves on rather than failing the claim.
+`com.apple.Virtualization.VirtualMachine` XPC process (seen on macOS 26).
+Built: `machine/lend.rs` counts them, and `capacity` reports `in_use` as
+the larger of those and Sheprd's own machines and installer, with
+`others` naming how many belong to other programs. Claims and starts check
+against it, so a slot a Tart VM holds is no longer offered. Not yet: a
+start the framework refuses for the limit becoming `Error::Capacity`.
 
 ## Watching a remote machine
 
@@ -115,21 +128,22 @@ A tab for a machine on another Mac, from the start. The real view cannot
 cross processes, so the tab draws the guest's screen from Sheprd Agent and
 sends input back through it, as `machine click`, `type`, and `key` do.
 
-- One long-lived forwarded command, `machine watch NAME --owner ...`, on
-  the lending Mac streams frames on stdout and reads input on stdin, framed
-  as the agent's wire is (4-byte length, JSON or PNG). One SSH channel, not
-  a command per frame.
-- Sheprd Agent gains a `frame` request: the screen scaled to a width the
-  watcher asks for, as JPEG, and nothing when it has not changed since the
-  last frame. Kept in step with `macos/sheprd-machine-agent/main.swift`.
+- Built differently: each frame is one `machine lend` run, on the SSH
+  connection the host already shares, rather than one long-lived stream,
+  so a stalled frame never wedges a channel and nothing new is kept open.
+- Built differently: the lending Sheprd makes the frame from Sheprd
+  Agent's PNG (`machine/remote/frame.rs`): the screen scaled to the width
+  asked for, as JPEG, and nothing when its pixels have not changed. Sheprd
+  Agent is unchanged, so machines saved as images keep working.
 - The watcher asks for frames one at a time, so a slow link lowers the
   frame rate instead of queuing: at most one frame in flight, the latest
   one drawn. It starts at the tab's width and halves it while frames take
   longer than half a second.
-- Watching does not need the claim; input does. A tab without the claim
-  shows the screen read-only, and says who holds it.
-- The tab says it is remote and how it is reached, and shows the frame
-  rate when it falls below a few per second.
+- Watching does not need the claim. Clicks and keys go as "a person
+  watching" and follow the claim's rules: while an agent holds the
+  machine, they are refused and the tab says who holds it.
+- The tab says which host it is on, and says the link is slow when a
+  frame takes over a second. Frames come only while the tab is drawn.
 
 ## Copying an image
 
@@ -158,31 +172,34 @@ nothing here retries on a slower path by itself.
 
 | Piece | Where |
 | --- | --- |
-| `host: Option<String>` on machine requests, `claim --any`, `list --all`, `start`, screenshot to stdout, `--owner` | `sheprd-control-protocol` `protocol/tabs.rs`, `control/client/tabs*` |
-| Forwarding: resolve the host, run the script, parse the answer, map exit codes | new `control/server/tabs/machine_remote.rs`, reusing `remote_update::fetch::script` (moved to a shared module, not copied) |
-| Lending hosts and their last answer, read on demand and at most every few minutes | new `machine/hosts.rs`, off the UI thread |
-| Placement order | pure function in `machine/placement.rs`, tested without hosts |
-| Remote owners | `machine_claims.rs` `Owner` |
-| All-VM count | `machine/vm.rs` `capacity` |
-| `lend` and `borrow_from` settings, hosts that never lend | `machine/settings.rs`, new `machine/lend.rs`, Settings > Virtual Macs |
-| The borrow and copy dialogs | new `machine/borrow.rs` |
-| Remote watching tab and `machine watch` | new `machine/watch.rs`; `frame` in `machine/agent/wire.rs` and the Swift agent |
-| Link measurement and image copy | new `machine/transfer.rs`, off the UI thread |
+| `TabOp::MachineOn`, `MachineStart`, `Via::Lend`, `Lending`, `capacity.others`, the lend wire | `sheprd-control-protocol` `protocol/tabs.rs`, `protocol.rs`, `protocol/lend.rs` |
+| `--host`, `start`, and the hidden `lend` | `cli/control/tabs.rs`, `control/client/tabs.rs`, `control/client/tabs/lend.rs` |
+| Forwarding: resolve the host, ask, run, map exit codes, write screenshots | `control/server/tabs/machine_remote.rs`, running `machine/remote/link.rs` with `remote_update::script` |
+| Lent requests: what is served, and while lending is off | `control/server/relay.rs` (`lent`) |
+| Remote owners and the lending check at a claim or start | `control/server/tabs/machine_claims.rs` |
+| All-VM count, Tart, and whether a Mac lends | `machine/lend.rs` |
+| `[machine] lend` and `borrow_from` | `config/machine.rs` (Settings does not show them yet) |
+| The borrow dialog | `machine/borrow.rs` |
+| Frames, and the watcher's pacing and input | `machine/remote/frame.rs`, `machine/remote/watch.rs` |
+| The remote machine tab | `browser/remote_machine_tab.rs`, `Location::RemoteMachine` |
+| Phase 2 and 3: lending hosts' last answers, placement, link measurement, image copy | not built |
 
-Tests: placement order and ties; owner spoofing refused from a pane and
-while not lending; forwarded exit codes and bounds against a fake host
-script; screenshot over stdout rejected when oversized or not a PNG;
-capacity with other programs' VMs; a Tart host refusing a forwarded claim;
-the borrow dialog's three answers and dismissal; the watcher keeping one
-frame in flight and dropping stale ones; the copy refused below its speed
-floor and cleaned up after cancel.
+Tests built: lent requests limited to virtual Mac work and to listing and
+releasing while lending is off; borrower names bounded; forwarded exit
+codes; answers parsed strictly; pictures written only when they are the
+PNG they say; capacity and lending with other programs' VMs and Tart's
+folder; the borrow answer and dismissal; frame scaling, change detection,
+and pacing; click mapping through the letterbox; key mapping; `--host`
+parsing, including words after `--`. Still to test: placement order, and
+the copy refused below its speed floor and cleaned up after cancel.
 
 ## Skill and docs
 
-`skills/herdr-gpui-browser/SKILL.md`, "Sharing the two macOS VMs":
-`machine claim --any`, and when both slots here are full, tell the user
-which host it got ("No local VM slots; using `default` on mini-2"). Keep
-"never bypass a busy claim". `docs/cli.md` gets the rows above.
+Built: `skills/herdr-gpui-browser/SKILL.md`, "Sharing the two macOS VMs",
+looks for a free slot on another Mac with `--host` before waiting, tells
+the user it is asking, and never borrows without asking. `docs/cli.md`
+has the commands and "Virtual Macs on other computers". Phase 2 replaces
+the skill's manual search with `machine claim --any`.
 
 ## Phases
 

@@ -301,7 +301,12 @@ impl SheprdWindow {
     pub(crate) fn remote_dialog_open(&self) -> bool {
         matches!(
             self.menu.page,
-            Some(Page::RemoteControl | Page::RevokeDevice | Page::RemoteHostAsk)
+            Some(
+                Page::RemoteControl
+                    | Page::RevokeDevice
+                    | Page::RemoteHostAsk
+                    | Page::BorrowMachine
+            )
         )
     }
 
@@ -311,6 +316,8 @@ impl SheprdWindow {
             Some(Page::RemoteControl) => Some(self.render_pairing(cx)),
             Some(Page::RevokeDevice) => Some(self.render_revoke(cx)),
             Some(Page::RemoteHostAsk) => Some(self.render_host_ask(cx)),
+            // Another computer's virtual Mac, borrowed from here.
+            Some(Page::BorrowMachine) => Some(self.render_borrow_machine(cx)),
             _ => None,
         }
     }
@@ -725,14 +732,14 @@ enum Action {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Tone {
+pub(crate) enum Tone {
     Plain,
     Primary,
     Danger,
 }
 
 /// A dialog button; the caller adds `.on_click` when it is enabled.
-pub(super) fn button(
+pub(crate) fn button(
     theme: &Theme,
     id: &'static str,
     label: impl Into<SharedString>,

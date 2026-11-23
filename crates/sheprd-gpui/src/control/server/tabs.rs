@@ -4,6 +4,7 @@
 mod arrive;
 mod machine_agent;
 mod machine_claims;
+mod machine_remote;
 mod machines;
 mod page;
 
@@ -84,6 +85,14 @@ pub(super) fn serve(
         } => machine_claims::guarded(caller, name, incoming, cx, move |_, name, incoming, cx| {
             machines::set(name, (cpus, memory_gib, display), incoming, cx);
         }),
+        TabOp::MachineStart { name } => {
+            machine_claims::guarded(caller, name, incoming, cx, |caller, name, incoming, cx| {
+                machines::start(caller, name, incoming, cx);
+            });
+        }
+        TabOp::MachineOn { host, request } => {
+            machine_remote::serve(caller, host, *request, incoming, watches, cx);
+        }
         TabOp::MachineSuspend { name } => {
             machine_claims::guarded(caller, name, incoming, cx, |_, name, incoming, cx| {
                 machines::suspend(name, incoming, cx)
@@ -112,7 +121,7 @@ fn kind(tab: &Tab) -> TabKind {
         Some(Location::Code { .. }) => TabKind::Code,
         Some(Location::Devices) => TabKind::Devices,
         Some(Location::CoreTerminal { .. }) => TabKind::CoreTerminal,
-        Some(Location::Machine { .. }) => TabKind::Machine,
+        Some(Location::Machine { .. } | Location::RemoteMachine { .. }) => TabKind::Machine,
     }
 }
 
@@ -139,6 +148,7 @@ fn location(tab: &Tab) -> Option<String> {
             .collect::<Vec<_>>()
             .join(","),
         Location::Machine { name } => name.to_string(),
+        Location::RemoteMachine { endpoint, name } => format!("{endpoint}:{name}"),
         Location::Devices => return None,
     })
 }

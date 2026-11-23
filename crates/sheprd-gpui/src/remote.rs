@@ -12,6 +12,7 @@
 
 pub(crate) mod changes;
 mod dialog;
+pub(crate) use dialog::{Tone as DialogTone, button as dialog_button};
 pub(crate) mod host_push;
 mod indicator;
 pub(crate) use indicator::MENU_WIDTH;

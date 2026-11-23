@@ -12,6 +12,7 @@ mod earlier;
 mod effects;
 mod embeds;
 mod entries;
+mod files;
 mod jump;
 mod layout;
 mod loading;

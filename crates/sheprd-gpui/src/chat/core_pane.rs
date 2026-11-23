@@ -221,6 +221,7 @@ impl SheprdWindow {
         &mut self,
         agent: Agent,
         tab: TabId,
+        group: Option<crate::browser::GroupId>,
         cx: &gpui::App,
     ) -> Result<(), super::StartError> {
         let store = cx
@@ -234,7 +235,17 @@ impl SheprdWindow {
             .chat_split_at(tab)
             .and_then(|terminal| self.core_terminals.info(tab, &terminal))
             .and_then(|info| info.cwd.clone());
-        self.start_core_chat_tab(agent, scope, workspace, cwd, None, cx)
+        self.start_core_chat_tab(
+            agent,
+            Purpose::Tab {
+                scope,
+                workspace,
+                group,
+            },
+            cwd,
+            None,
+            cx,
+        )
     }
 
     /// Explicit CLI pane keys resolve against the owning core, including
@@ -290,30 +301,39 @@ impl SheprdWindow {
         &mut self,
         agent: Agent,
         carry: Option<&Settings>,
+        group: Option<crate::browser::GroupId>,
         cx: &gpui::App,
     ) -> Result<(), super::StartError> {
         self.kept_in_front().ok_or(super::StartError::NoWorkspace)?;
         let (scope, workspace) = self.browser_key().ok_or(super::StartError::NoWorkspace)?;
         let cwd = self.front_workspace_cwd();
-        self.start_core_chat_tab(agent, scope, workspace, cwd, carry, cx)
+        self.start_core_chat_tab(
+            agent,
+            Purpose::Tab {
+                scope,
+                workspace,
+                group,
+            },
+            cwd,
+            carry,
+            cx,
+        )
     }
 
-    /// Opens a tab of kept workspace `workspace` in `scope` running a chat
-    /// with `agent` in `cwd`.
+    /// Starts a chat for the captured workspace and group in `purpose`.
     pub(crate) fn start_core_chat_tab(
         &mut self,
         agent: Agent,
-        scope: crate::browser::Scope,
-        workspace: String,
+        purpose: Purpose,
         cwd: Option<std::path::PathBuf>,
         carry: Option<&Settings>,
         cx: &gpui::App,
     ) -> Result<(), super::StartError> {
-        let host = crate::core_terminals::Host::of(&scope);
+        let host = self.purpose_host(&purpose);
         let mut spawn = self.prepare_core_chat(agent, &host, carry)?;
         spawn.cwd = cwd;
         self.chats.last_started = Some(agent);
-        self.start_core_program(Purpose::Tab { scope, workspace }, spawn, cx);
+        self.start_core_program(purpose, spawn, cx);
         Ok(())
     }
 

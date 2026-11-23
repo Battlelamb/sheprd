@@ -34,6 +34,7 @@ impl SheprdWindow {
         if let Some(index) = self.core_host() {
             let scope = scope(&self.endpoints[index]);
             self.keep_default_workspace(self.live_at(index).missing_installation, &scope, cx);
+            self.keep_core_workspace_folders(&scope, cx);
             let mut folders: Vec<String> =
                 cx.try_global::<Store>().map_or_else(Vec::new, |store| {
                     store
@@ -87,6 +88,7 @@ impl SheprdWindow {
                     .is_some_and(super::Hub::cooling);
             if self.keep_default_workspace(missing, &scope, cx) {
                 let purpose = super::Purpose::Tab {
+                    group: None,
                     scope,
                     workspace: super::WORKSPACE.to_owned(),
                 };
@@ -94,7 +96,10 @@ impl SheprdWindow {
             }
         }
         if let Some(store) = cx.try_global::<Store>() {
-            for scope in self.remote_core_scopes(store) {
+            let scopes = self.remote_core_scopes(store);
+            for scope in scopes {
+                self.keep_core_workspace_folders(&scope, cx);
+                let store = cx.global::<Store>();
                 let shown_folder = self
                     .core_terminals
                     .shown

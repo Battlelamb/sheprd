@@ -429,8 +429,10 @@ impl SheprdWindow {
     /// Herdr-core chats open in a new tab, like Herdr 1 chats.
     pub(crate) fn start_chat_or_flash(&mut self, agent: Agent, cx: &mut Context<Self>) {
         let started = match self.core_chat_group_tab(None, cx) {
-            Some(tab) => self.start_core_chat_in_tab(agent, tab, cx),
-            None if self.kept_in_front().is_some() => self.start_kept_core_chat(agent, None, cx),
+            Some(tab) => self.start_core_chat_in_tab(agent, tab, None, cx),
+            None if self.kept_in_front().is_some() => {
+                self.start_kept_core_chat(agent, None, None, cx)
+            }
             None => self.start_chat(agent, None, None),
         };
         if let Err(error) = started {
@@ -444,18 +446,20 @@ impl SheprdWindow {
     /// Herdr-core chats use the same group ownership as terminal tabs.
     pub(crate) fn start_chat_in(&mut self, agent: Agent, group: GroupId, cx: &mut Context<Self>) {
         if let Some(tab) = self.core_chat_group_tab(Some(group), cx) {
-            match self.start_core_chat_in_tab(agent, tab, cx) {
-                Ok(()) => self.expect_new_tab_in(group),
-                Err(error) => self.flash_chat_error(&error, cx),
+            if let Err(error) = self.start_core_chat_in_tab(agent, tab, Some(group), cx) {
+                self.flash_chat_error(&error, cx);
             }
             cx.notify();
             return;
         }
-        let started = if self.kept_in_front().is_some() {
-            self.start_kept_core_chat(agent, None, cx)
-        } else {
-            self.start_chat(agent, None, None)
-        };
+        if self.kept_in_front().is_some() {
+            if let Err(error) = self.start_kept_core_chat(agent, None, Some(group), cx) {
+                self.flash_chat_error(&error, cx);
+            }
+            cx.notify();
+            return;
+        }
+        let started = self.start_chat(agent, None, None);
         match started {
             Ok(()) => self.expect_new_tab_in(group),
             Err(error) => self.flash_chat_error(&error, cx),

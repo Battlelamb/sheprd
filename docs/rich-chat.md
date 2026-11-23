@@ -104,7 +104,8 @@ button per agent in the strip instead, and those chats can switch too.
 
 In a Herdr 2 (herdr-core) tab, starting a chat from the tab strip's launcher
 or the group menu opens a new chat tab in that group, using the terminal's
-current folder. This leaves room for an editor in another group without
+current folder. The requested group stays with the start while the agent
+launches, even if you switch to the editor meanwhile. This leaves room for an editor in another group without
 adding a terminal beside the chat. `sheprd chat new --pane` can still split
 a core pane explicitly; a tab can hold several chats and plain terminals. The window picks the chat's endpoint before `sheprd-acp` starts:
 it passes the id in `HERDR_ACP_ENDPOINT` and labels the terminal `acp=<id>`

@@ -97,6 +97,27 @@ impl CoreTerminals {
 }
 
 impl SheprdWindow {
+    /// Keeps the last observed folder through terminal closure and app restart.
+    pub(crate) fn keep_core_workspace_folders(&self, scope: &Scope, cx: &mut App) {
+        let changes: Vec<_> = cx
+            .try_global::<crate::browser::Store>()
+            .into_iter()
+            .flat_map(|store| {
+                store.kept_workspaces(scope).filter_map(|workspace| {
+                    let cwd = self.core_workspace_cwd(store, scope, &workspace.id)?;
+                    (cwd != workspace.cwd).then(|| (workspace.id.clone(), cwd.to_owned()))
+                })
+            })
+            .collect();
+        if !changes.is_empty() {
+            crate::browser::Store::update(cx, |store| {
+                for (id, cwd) in changes {
+                    store.follow_kept_folder(scope, &id, &cwd);
+                }
+            });
+        }
+    }
+
     /// A workspace follows its oldest driving tab's first pane, independent
     /// of focus and split groups. The saved folder covers tabs not yet read.
     pub(super) fn core_workspace_cwd<'a>(

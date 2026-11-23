@@ -1912,6 +1912,8 @@ first pane. Changing directory refreshes the automatic name, repository,
 branch, and Git/PR lookup; a name you chose stays unchanged. A new tab in an
 empty split group uses that space's current folder. Local checkout rows also
 show ahead/behind counts against the configured upstream, without fetching.
+The last known folder is saved, so closing the last terminal or restarting
+the app preserves it and the automatic name.
 
 Herdr 2 (herdr-core) runs terminals that stay alive like Herdr's, but streams
 their raw output, so Sheprd emulates each one itself and draws it with the

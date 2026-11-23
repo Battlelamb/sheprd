@@ -59,6 +59,24 @@ fn main() -> ExitCode {
                 print_json(&relays(state_dir, offer)?)
             });
         }
+        Ok(Invocation::Labels { command, json }) => {
+            let Some(dir) = enroll::default_state_dir() else {
+                return fail(&sheprd_remote_control::app::Error::NoStateDir);
+            };
+            return match command.run(&dir) {
+                Ok(tags) if json => match print_json(&serde_json::json!({"tags":tags})) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(error) => fail(&error),
+                },
+                Ok(tags) => {
+                    for tag in tags {
+                        println!("{tag}");
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(error) => fail(&error),
+            };
+        }
         Ok(Invocation::Favorites { state_dir, offer }) => {
             return host(state_dir, |state_dir| {
                 let change = read_offer(offer, MAX_INPUT)?;

@@ -358,6 +358,7 @@ async fn follow_home(state: Shared, device: DeviceId, out: Outbound) {
     let mut load = state.load.clone();
     let mut tags = state.tags.subscribe();
     let mut shortcuts = state.shortcuts.subscribe();
+    let mut labels = state.labels.subscribe();
     let mut favorites = state.favorites.subscribe();
     let mut opened = state.opened.changed();
     let mut lending = state.lending.watch();
@@ -386,6 +387,7 @@ async fn follow_home(state: Shared, device: DeviceId, out: Outbound) {
                 changed = pull_requests.changed() => if changed.is_err() { return } else { break },
                 changed = tags.changed() => if changed.is_err() { return } else { break },
                 changed = shortcuts.changed() => if changed.is_err() { return } else { break },
+                changed = labels.changed() => if changed.is_err() { return } else { break },
                 changed = favorites.changed() => if changed.is_err() { return } else { break },
                 changed = opened.changed() => if changed.is_err() { return } else { break },
                 changed = previews.changed() => if changed.is_err() { return } else { break },

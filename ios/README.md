@@ -12,7 +12,7 @@ The bundle-ID changes below are for an independently signed fork only.
 
 The native app for Sheprd's remote control (`docs/ios-app-plan.md`).
 - **What it shows:** the chats and terminal tabs running in Sheprd on every
-  paired computer, merged into one list, with what needs you first.
+  paired computer, merged into one list, with what needs you first. Agent and worktree labels appear together on each row. Agents manage them with `sheprd labels` on the host.
 - **What you can do:** answer questions in place, open a chat or a terminal,
   and send prompts.
 - **Chat text:** an agent's replies are Markdown with the desktop's text sizes

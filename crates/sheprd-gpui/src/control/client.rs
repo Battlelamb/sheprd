@@ -8,6 +8,7 @@ mod events;
 mod fleet;
 mod help;
 mod hosts;
+mod labels;
 mod local;
 mod mods;
 mod open;
@@ -556,6 +557,7 @@ pub(crate) fn dispatch(command: ControlCommand, context: &Context) -> crate::Res
         ControlCommand::Review => tabs::review(context),
         ControlCommand::Chat(command) => chat::chat(command, context),
         ControlCommand::Px0 => tabs::px0(context),
+        ControlCommand::Labels(command) => labels::run(command),
         ControlCommand::Notes(command) => work::notes(command, context),
         ControlCommand::Memory(command) => work::memory(command, context),
         #[cfg(feature = "mcp")]

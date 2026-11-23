@@ -18,6 +18,7 @@ pub mod fleet;
 pub mod github;
 pub mod host_relay;
 pub mod hosts;
+pub mod labels;
 pub mod layout;
 pub mod pairing_link;
 pub mod phone;
@@ -243,6 +244,11 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         offer: Option<tags::ComputerTags>,
     },
+    Labels {
+        target: labels::Target,
+        worktree: bool,
+        edit: labels::Edit,
+    },
     /// This computer's favorite agents: stars or unstars one pane, if
     /// `change` says so, and answers with the favorites that stand
     /// (`favorites`).
@@ -392,6 +398,9 @@ pub enum Response {
     Enrolled(hosts::Enrolled),
     Fleet(Box<fleet::sync::Answer>),
     Tags(tags::ComputerTags),
+    Labels {
+        tags: Vec<String>,
+    },
     Favorites(favorites::Favorites),
     Read(read::Unread),
     Shortcuts(shortcuts::TextShortcuts),

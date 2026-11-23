@@ -16,6 +16,15 @@ struct DemoDataTests {
         #expect(DemoData.home(of: "someone-else") == nil)
     }
 
+    @Test func worktreeAndAgentLabelsAppearTogether() throws {
+        let home = try #require(DemoData.home(of: DemoData.studio.device))
+        let workspace = try #require(home.workspaces.first)
+        let agent = try #require(workspace.chats.first)
+        #expect(workspace.rowLabels(agent: agent.labels) == ["Release", "Widgets"])
+        #expect(workspace.rowLabels(agent: ["widgets"]) == ["widgets"])
+        #expect(home.workspaces.last?.rowLabels(agent: nil) == ["Widgets"])
+    }
+
     @Test func computersAreTheirOwnAndMatchNoRealOne() {
         let devices = DemoData.computers.map(\.device)
         #expect(Set(devices).count == devices.count)

@@ -24,6 +24,7 @@ usage() {
 Usage: sheprd browser open [--no-focus] [--tab] URL
        sheprd browser reload
        sheprd browser feedback [--wait SECONDS]
+       sheprd labels [list|add TAG|rename OLD NEW|remove TAG] [--worktree] [--pane ID | --workspace ID]
 
 Run on an SSH host, this asks the Sheprd window connected to this host to
 open URL in a browser tab of your workspace (HERDR_WORKSPACE_ID), or, in a
@@ -338,6 +339,13 @@ case ${1:-} in
     feedback)
         shift
         core_feedback "$@"
+        ;;
+    labels)
+        shift
+        find_remote_control
+        [ -x "$program" ] || fail 8 unsupported "Agent labels require sheprd-remote-control on this host."
+        if [ "$json" = 1 ]; then set -- "$@" --json; fi
+        exec "$program" labels "$@"
         ;;
     browser)
         shift

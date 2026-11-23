@@ -363,6 +363,11 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
                 },
             };
         }
+        Request::Labels {
+            target,
+            worktree,
+            edit,
+        } => return state.labels.answer(&state.hub, target, worktree, edit),
         Request::Favorites { change } => {
             let Some(change) = change else {
                 return Response::Favorites(state.favorites.current());

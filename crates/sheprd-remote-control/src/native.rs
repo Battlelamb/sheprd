@@ -95,6 +95,7 @@ fn home(state: &Shared, device: &DeviceId) -> Home {
         computer: &state.computer,
         favorites: &favorites,
         fingerprint: &state.fingerprint,
+        labels: &state.labels.current(),
         layout: &layout,
         load: *state.load.borrow(),
         summaries,

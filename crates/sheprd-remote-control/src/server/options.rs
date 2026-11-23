@@ -140,6 +140,10 @@ pub enum Invocation {
         state_dir: Option<PathBuf>,
         offer: bool,
     },
+    Labels {
+        command: crate::control::labels::Command,
+        json: bool,
+    },
     /// Reads this computer's favorite agents, making the change
     /// (`control::favorites::Change`) given on standard input, if any.
     Favorites {
@@ -217,6 +221,7 @@ Usage: sheprd-remote-control serve --state-dir DIR [options]
        sheprd-remote-control relay-enroll [--state-dir DIR] < REQUEST.json
        sheprd-remote-control push-status [--state-dir DIR]
        sheprd-remote-control presence --device ID --near|--away [--state-dir DIR]
+       sheprd-remote-control labels [list|add TAG|rename OLD NEW|remove TAG] [--worktree] [--pane ID | --workspace ID] [--json]
        sheprd-remote-control tags [--offer] [--state-dir DIR] [< TAGS.json]
        sheprd-remote-control shortcuts [--offer] [--state-dir DIR] [< SHORTCUTS.json]
        sheprd-remote-control favorites [--offer] [--state-dir DIR] [< CHANGE.json]
@@ -330,6 +335,25 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
             });
         }
         Some("presence") => return parse_presence(args),
+        Some("labels") => {
+            let mut words = Vec::new();
+            let mut json = false;
+            for word in args {
+                if word == "--help" || word == "-h" {
+                    return Ok(Invocation::Help);
+                }
+                if word == "--json" {
+                    json = true;
+                } else {
+                    words.push(word);
+                }
+            }
+            let command =
+                crate::control::labels::Command::parse(words).map_err(|_| ParseError::Value {
+                    option: crate::control::labels::USAGE,
+                })?;
+            return Ok(Invocation::Labels { command, json });
+        }
         Some("favorites") => {
             return parse_edited(args, |state_dir, offer| Invocation::Favorites {
                 state_dir,

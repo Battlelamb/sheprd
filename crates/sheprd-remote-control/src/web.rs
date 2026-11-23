@@ -19,6 +19,7 @@ mod github;
 mod hosts;
 mod indicators;
 mod kept;
+pub(crate) mod labels;
 mod log;
 mod nearby;
 mod origins;
@@ -97,6 +98,7 @@ pub(crate) struct State {
     pub(crate) drivers: crate::native::drive::Drivers,
     /// This computer's favorite agents, which its phones and desktops share.
     pub(crate) favorites: Favorites,
+    pub(crate) labels: labels::Labels,
     pub(crate) fingerprint: String,
     /// The fleet, when its key could be read or made.
     pub(crate) fleet: Option<Arc<crate::fleet::Fleet>>,

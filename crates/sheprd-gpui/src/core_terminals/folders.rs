@@ -148,6 +148,7 @@ impl SheprdWindow {
             .and_then(|terminal| self.core_terminals.listed(&host, terminal))
             .and_then(|info| info.cwd.as_deref())
             .and_then(std::path::Path::to_str)
+            .filter(|cwd| !cwd.is_empty())
             .or_else(|| {
                 store
                     .kept_workspace(scope, workspace)

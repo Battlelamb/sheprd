@@ -34,6 +34,7 @@ mod marks;
 pub(crate) mod menu;
 pub(crate) mod moves;
 pub(crate) mod mutes;
+mod names;
 mod phone;
 mod processes;
 mod programs;

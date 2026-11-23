@@ -162,3 +162,39 @@ async fn unlisted_agents_do_not_share_worktree_labels() {
         ["Release"]
     );
 }
+
+#[tokio::test]
+async fn worktree_labels_are_shared_by_checkout_within_a_wsl_distribution() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut layout = layout(EndpointId::random());
+    let native = &layout.workspaces[0];
+    let mut workspaces = vec![native.clone()];
+    for session in ["dev@Ubuntu", "review@Ubuntu", "dev@Debian"] {
+        let mut workspace = native.clone();
+        workspace.id = format!("herdr:{session}:w1");
+        workspace.session = Some(session.into());
+        workspace.chats.clear();
+        workspace.terminals.clear();
+        workspaces.push(workspace);
+    }
+    layout.workspaces = workspaces;
+    let state = offline(dir.path(), layout);
+    let response = state.labels.answer(
+        &state.hub,
+        Target::Workspace("herdr:dev@Ubuntu:w1".into()),
+        true,
+        Edit::Add("Release".into()),
+    );
+    assert!(matches!(response, Response::Labels { .. }));
+    let home = home(&state, &DeviceId("test".into()));
+    assert_eq!(home.workspaces.len(), 4);
+    for workspace in home.workspaces {
+        match workspace.id.as_str() {
+            "herdr:dev@Ubuntu:w1" | "herdr:review@Ubuntu:w1" => {
+                assert_eq!(workspace.labels, ["Release"])
+            }
+            "w1" | "herdr:dev@Debian:w1" => assert!(workspace.labels.is_empty()),
+            id => panic!("unexpected workspace {id}"),
+        }
+    }
+}

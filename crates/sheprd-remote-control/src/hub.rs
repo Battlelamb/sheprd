@@ -34,6 +34,7 @@ pub(crate) use layout::{
 pub(crate) use new_workspace::NewWorkspace;
 pub(crate) use observed::observable;
 pub(crate) use row_summary::RowSummary;
+pub(crate) use sessions::wsl_distribution;
 
 use serde_json::{Value, json};
 use sheprd_chat_protocol::{Agent, Command, EndpointId, Rejection};

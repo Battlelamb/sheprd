@@ -27,7 +27,7 @@ struct HomeTab: View {
             // With no search field, a search left from before the last
             // computer went must not hide the offer to pair.
             if query.isEmpty || !model.hasComputers {
-                self.chats(sections, unread: unread)
+                self.chats(sections)
             } else {
                 SearchResults(query: query, workspacesAsRoutes: true)
             }
@@ -42,13 +42,18 @@ struct HomeTab: View {
         #if DEBUG
         .task { if let text = UserDefaults.standard.string(forKey: "homeSearch") { query = text } }
         #endif
-        .toolbar { if model.hasComputers { toolbar(sections) } }
+        .toolbar { if model.hasComputers { toolbar(sections, unread: unread) } }
     }
 
     @ToolbarContentBuilder
-    private func toolbar(_ sections: [AgentSort.Section<HomeRow>]) -> some ToolbarContent {
+    private func toolbar(_ sections: [AgentSort.Section<HomeRow>], unread: [PaneKey]) -> some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) { AgentSortMenu(sort: $sort) }
         ToolbarItem(placement: .topBarLeading) { AgentFilterMenu() }
+        if query.isEmpty, !unread.isEmpty || unreadOnly {
+            ToolbarItem(placement: .topBarLeading) {
+                UnreadMenu(unread: unread, only: $unreadOnly)
+            }
+        }
         if query.isEmpty, sections.count > 1 {
             ToolbarItem(placement: .topBarTrailing) {
                 let shown = sections.map { ChatList.key($0, sort: sort) }
@@ -71,8 +76,8 @@ struct HomeTab: View {
         }
     }
 
-    private func chats(_ sections: [AgentSort.Section<HomeRow>], unread: [PaneKey]) -> some View {
-        ChatList(sections: sections, unread: unread, unreadOnly: $unreadOnly)
+    private func chats(_ sections: [AgentSort.Section<HomeRow>]) -> some View {
+        ChatList(sections: sections)
             .nearbyBanner()
             .fleetOffer()
             .demoOffer(pairing: $pairing)

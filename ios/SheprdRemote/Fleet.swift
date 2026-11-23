@@ -33,10 +33,13 @@ struct ChatItem: Identifiable, Hashable {
 
 enum FleetError: Error, LocalizedError {
     case offline(String)
+    /// A call to one of the demo's computers (`DemoFleet`).
+    case demo
 
     var errorDescription: String? {
         switch self {
         case let .offline(name): "\(name) is not connected."
+        case .demo: "This is a demo, so nothing is sent. Pair a computer to use it for real."
         }
     }
 }
@@ -106,6 +109,8 @@ final class Fleet {
     }
 
     private(set) var machines: [Machine] = []
+    /// The demo's computers are shown (`DemoFleet`), as none is paired.
+    private(set) var demo = false
     private var drafts = DraftMarks<PaneKey>()
     private var links: [String: ComputerLink] = [:]
     private var readers: [String: Task<Void, Never>] = [:]
@@ -184,6 +189,11 @@ final class Fleet {
 
     /// Follows `computers`: new ones get a link, forgotten ones lose theirs.
     func sync(_ computers: [Computer]) {
+        // The demo stands in for paired computers until there is one.
+        if demo {
+            guard !computers.isEmpty else { return }
+            endDemo()
+        }
         let wanted = Set(computers.map(\.device))
         for machine in machines where !wanted.contains(machine.id) {
             carrier?.forget(machine.id)
@@ -226,6 +236,21 @@ final class Fleet {
         rewarm()
     }
 
+    /// Shows the demo's computers, while none is paired.
+    func startDemo() {
+        guard machines.isEmpty else { return }
+        demo = true
+        machines = DemoFleet.machines()
+    }
+
+    /// Hides the demo's computers, and forgets the chats followed on them.
+    func endDemo() {
+        guard demo else { return }
+        demo = false
+        machines = []
+        for key in chats.keys where DemoFleet.owns(key.device) { drop(key, saving: false) }
+    }
+
     /// The app came to the foreground: links connect and catch up.
     func activate() {
         active = true
@@ -256,6 +281,7 @@ final class Fleet {
     /// Keeps what a chat's composer holds across launches; `nil` removes it,
     /// unless another window's composer still holds a draft of that chat.
     func save(draft: Cache.Draft?, for key: PaneKey, by composer: UUID? = nil) {
+        guard !DemoFleet.owns(key.device) else { return }
         let emptied = drafts.set(key, drafted: draft != nil, by: composer)
         guard draft != nil || emptied else { return }
         cache.save(draft: draft, device: key.device, pane: key.pane)
@@ -330,6 +356,7 @@ final class Fleet {
     /// push from one computer adds to the others' counts rather than
     /// replacing them; the badge to show.
     func recordBadge() -> Int {
+        guard !demo else { return 0 }
         let defaults = UserDefaults(suiteName: "group.so.pen.herdr.remote")
         var counts = BadgeCounts.load(from: defaults)
         for machine in machines {
@@ -343,6 +370,8 @@ final class Fleet {
     /// Writes what widgets, Controls, Siri, Spotlight, and the share
     /// extension show, and reloads the widgets when it changed.
     func publishSummary() {
+        // Widgets, Siri, and Spotlight offer only real computers' chats.
+        guard !demo else { return }
         let chats = chatItems.map { item in
             WidgetSummary.Chat(
                 device: item.computer.device,
@@ -402,6 +431,7 @@ final class Fleet {
 
     /// Opens a chat, current at once when it was followed (`WarmChats`).
     func openChat(_ key: PaneKey) -> ChatStore {
+        if let sample = DemoFleet.transcript(key) { return ChatStore(key: key, sample: sample) }
         chatViewers[key, default: 0] += 1
         let store = follow(key, background: false)
         store.shown(true)
@@ -467,6 +497,11 @@ final class Fleet {
     }
 
     func openTerm(_ key: PaneKey) -> TermStore {
+        if DemoFleet.owns(key.device) {
+            let store = TermStore(key: key)
+            if let screen = DemoFleet.screen(key) { store.apply(screen) }
+            return store
+        }
         termViewers[key, default: 0] += 1
         if let open = terms[key] { return open }
         let store = TermStore(key: key)
@@ -570,6 +605,7 @@ final class Fleet {
         _ device: String,
         _ body: @Sendable (RemoteClient, String) async throws -> Answer
     ) async throws -> Answer {
+        if DemoFleet.owns(device) { throw FleetError.demo }
         guard let machine = machines.first(where: { $0.id == device }),
               case let .online(origin) = machine.status
         else { throw FleetError.offline(machines.first { $0.id == device }?.computer.name ?? "The computer") }
@@ -709,7 +745,7 @@ final class Fleet {
     // MARK: Links
 
     private func startLink(_ computer: Computer) {
-        guard links[computer.device] == nil else { return }
+        guard links[computer.device] == nil, !DemoFleet.owns(computer.device) else { return }
         let link = ComputerLink(
             fingerprint: computer.fingerprint.hex,
             origins: origins(computer),

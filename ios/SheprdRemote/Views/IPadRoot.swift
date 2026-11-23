@@ -41,36 +41,14 @@ struct IPadRoot: View {
     /// sidebar column draws a bar of its own over the stacks of the tabs
     /// inside it, hiding their search and buttons.
     var body: some View {
-        HStack(spacing: 0) {
-            // Kept alive while hidden, so each tab's stack, search, and
-            // place in Settings are where the person left them.
-            sidebar
-                .frame(width: 360)
-                .frame(width: sidebarShown ? 360 : 0, alignment: .trailing)
-                .clipped()
-                .opacity(sidebarShown ? 1 : 0)
-                .allowsHitTesting(sidebarShown)
-                .accessibilityHidden(!sidebarShown)
-            if sidebarShown {
-                Divider().ignoresSafeArea()
+        Group {
+            if model.hasComputers {
+                columns
+            } else {
+                // Nothing to list yet: the offer to install, pair, or
+                // explore the demo, across the window, with no sidebar.
+                NavigationStack { chats }
             }
-            detail
-                // A chat or terminal leads to its workspace, to start
-                // another tab there.
-                .environment(\.offersWorkspace, true)
-                .frame(maxWidth: .infinity)
-                .overlay(alignment: .topLeading) {
-                    if !sidebarShown {
-                        Button("Show Sidebar", systemImage: "sidebar.left") { sidebarShown = true }
-                            .labelStyle(.iconOnly)
-                            .font(.title3)
-                            .padding(10)
-                            .glassEffect(in: .circle)
-                            .padding(.leading, 12)
-                            .padding(.top, 4)
-                            .transition(.opacity)
-                    }
-                }
         }
         .animation(.snappy, value: sidebarShown)
         .background { ChatKeys(selection: $selection, tab: $tab, sidebarShown: $sidebarShown) }
@@ -206,6 +184,40 @@ struct IPadRoot: View {
         .environment(\.routeOpener, RouteOpener(current: selection) { [selection = $selection] in selection.wrappedValue = $0 })
     }
 
+    private var columns: some View {
+        HStack(spacing: 0) {
+            // Kept alive while hidden, so each tab's stack, search, and
+            // place in Settings are where the person left them.
+            sidebar
+                .frame(width: 360)
+                .frame(width: sidebarShown ? 360 : 0, alignment: .trailing)
+                .clipped()
+                .opacity(sidebarShown ? 1 : 0)
+                .allowsHitTesting(sidebarShown)
+                .accessibilityHidden(!sidebarShown)
+            if sidebarShown {
+                Divider().ignoresSafeArea()
+            }
+            detail
+                // A chat or terminal leads to its workspace, to start
+                // another tab there.
+                .environment(\.offersWorkspace, true)
+                .frame(maxWidth: .infinity)
+                .overlay(alignment: .topLeading) {
+                    if !sidebarShown {
+                        Button("Show Sidebar", systemImage: "sidebar.left") { sidebarShown = true }
+                            .labelStyle(.iconOnly)
+                            .font(.title3)
+                            .padding(10)
+                            .glassEffect(in: .circle)
+                            .padding(.leading, 12)
+                            .padding(.top, 4)
+                            .transition(.opacity)
+                    }
+                }
+        }
+    }
+
     /// On each tab's first screen; screens pushed above lead with Back.
     private var hideSidebar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
@@ -215,25 +227,33 @@ struct IPadRoot: View {
 
     private var chats: some View {
         Group {
-            if query.isEmpty { AttentionList(selection: $selection) } else { SearchResults(query: query) }
+            // The offer to pair shows whatever search was left behind.
+            if query.isEmpty || !model.hasComputers { AttentionList(selection: $selection) } else { SearchResults(query: query) }
         }
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Workspaces, chats, terminals")
+        .searchable($query, when: model.hasComputers)
+        .onChange(of: model.hasComputers) { _, has in
+            if !has { query = "" }
+        }
         .navigationDestination(for: WorkspaceKey.self) { WorkspaceScreen(key: $0).makesRoomForConnectionToast() }
         .nearbyBanner()
+        .demoOffer(pairing: $pairing)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            hideSidebar
-            ToolbarItem(placement: .topBarLeading) { AgentSortMenu(sort: $sort) }
-            ToolbarItem(placement: .topBarLeading) { AgentFilterMenu() }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Talk to Sheprd", systemImage: "waveform") { model.talk() }
-                    .disabled(model.fleet.machines.isEmpty)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("New Workspace", systemImage: "plus") { model.creating = .workspace(device: nil) }
-                    .keyboardShortcut("n", modifiers: .command)
-                    .disabled(model.fleet.machines.isEmpty)
-            }
+        .toolbar { if model.hasComputers { chatsToolbar } }
+    }
+
+    @ToolbarContentBuilder
+    private var chatsToolbar: some ToolbarContent {
+        hideSidebar
+        ToolbarItem(placement: .topBarLeading) { AgentSortMenu(sort: $sort) }
+        ToolbarItem(placement: .topBarLeading) { AgentFilterMenu() }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button("Talk to Sheprd", systemImage: "waveform") { model.talk() }
+                .disabled(model.fleet.machines.isEmpty)
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button("New Workspace", systemImage: "plus") { model.creating = .workspace(device: nil) }
+                .keyboardShortcut("n", modifiers: .command)
+                .disabled(model.fleet.machines.isEmpty)
         }
     }
 }

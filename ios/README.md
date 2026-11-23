@@ -242,6 +242,12 @@ app, once the repository's `testflight` environment holds these secrets:
   before it; with none to go on, the notes list the latest 20 commits. The
   upload fails if the notes cannot be set within 30 minutes, though the
   build stays uploaded; the next build's notes then cover both.
+- **External groups:** after App Store Connect finishes processing a build,
+  the upload automatically adds it to every existing external beta group for
+  the app. Internal-only groups are left alone; create groups and invite
+  testers in App Store Connect as usual. Apple may still require Beta App
+  Review before external testers can install a build; this workflow does not
+  submit the build for review.
 - **Running it locally:** `just ios-testflight` does the same with the same
   variables. Any it does not find set come from `pass`: the issuer ID from
   `apple/app-store-connect-issuer-id` and the key from

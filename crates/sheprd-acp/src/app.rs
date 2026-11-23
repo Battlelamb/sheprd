@@ -459,6 +459,9 @@ pub(crate) fn run_owned(
                     }
                 }
             });
+            if let Some(brief) = &brief {
+                session.link_delegation(&brief.text);
+            }
             if let Some(dir) = crate::briefs::dir() {
                 session.keep_briefs(dir);
             }

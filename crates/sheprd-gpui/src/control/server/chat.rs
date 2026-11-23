@@ -208,6 +208,18 @@ fn start_new(
         // The brief is the asking chat's agent's, whatever agent it starts.
         if let Some(brief) = &mut brief {
             brief.from = like.as_ref().map(|(agent, _)| *agent);
+            brief.parent = own.as_deref().and_then(|key| {
+                let pane = view.chats.pane(key)?;
+                let transcript = pane.session.transcript();
+                let turn = transcript.turn?;
+                if let Some((root, _)) = transcript.delegated_brief() {
+                    return Some(root.clone());
+                }
+                Some(sheprd_chat_protocol::brief::Delegation {
+                    endpoint: pane.target.endpoint.clone(),
+                    started_ms: turn.started_ms,
+                })
+            });
         }
         let carry = like
             .as_ref()

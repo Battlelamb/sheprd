@@ -42,6 +42,16 @@ final class ActivityTests: XCTestCase {
         XCTAssertEqual(state.headline, "Working")
     }
 
+    func testDelegatedAgentsRoundTripWithTheirLatestOutcome() throws {
+        let state = try JSONDecoder().decode(ChatActivityState.self, from: Data(
+            #"{"phase":"working","step":"Review","startedAt":1,"agents":{"done":1,"total":5,"latest":"Finished · Parser"}}"#.utf8
+        ))
+        XCTAssertEqual(state.agents?.fraction, 0.2)
+        XCTAssertEqual(state.agents?.label, "1 of 5 agents done")
+        XCTAssertEqual(state.agents?.latest, "Finished · Parser")
+        XCTAssertEqual(try JSONDecoder().decode(ChatActivityState.self, from: JSONEncoder().encode(state)), state)
+    }
+
     func testQuestionUpdateDecodes() throws {
         let state = try decode(ChatActivityState.self, aps("update")["content-state"])
         XCTAssertEqual(state.phase, .question)

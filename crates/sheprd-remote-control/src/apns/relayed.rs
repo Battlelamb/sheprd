@@ -98,6 +98,7 @@ impl Live {
         texts.extend(state.detail.activity.as_mut());
         texts.extend(state.question.as_mut());
         texts.extend(state.summary.as_mut());
+        texts.extend(state.detail.agents.as_mut().and_then(|a| a.latest.as_mut()));
         if let Event::Start { attributes, .. } = &mut self.event {
             texts.extend([&mut attributes.chat_title, &mut attributes.workspace]);
         }

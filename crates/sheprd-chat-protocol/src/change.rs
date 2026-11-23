@@ -110,6 +110,12 @@ impl Transcript {
                 {
                     return Err(Error::EntryOrder { id: entry.id, last });
                 }
+                if matches!(entry.kind, EntryKind::User { .. })
+                    && let Some(task) = self.delegation.as_mut()
+                    && std::mem::replace(&mut task.prompted, true)
+                {
+                    self.delegation = None;
+                }
                 self.entries.push(entry.clone());
             }
             Change::Append { id, text } => {

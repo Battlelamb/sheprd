@@ -49,6 +49,7 @@ pub(super) async fn run(state: Arc<State>) {
         tokio::select! {
             event = events.recv() => match event {
                 Ok((pane, Event::Reset { transcript, cursor })) => {
+                    live.snapshot(&state, &pane, &transcript);
                     transcripts.insert(pane, Base {
                         transcript: Transcript::clone(&transcript),
                         cursor: Some(cursor),
@@ -60,6 +61,7 @@ pub(super) async fn run(state: Arc<State>) {
                             continue;
                         };
                         let (transcript, cursor) = link.base();
+                        live.snapshot(&state, &pane, &transcript);
                         transcripts.insert(pane.clone(), Base { transcript, cursor });
                     }
                     let Some(base) = transcripts.get_mut(&pane) else {

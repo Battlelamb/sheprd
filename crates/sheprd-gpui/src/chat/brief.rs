@@ -28,6 +28,7 @@ pub(crate) struct Brief {
     pub(crate) file: PathBuf,
     /// The agent of the chat that asked, when it is one.
     pub(crate) from: Option<Agent>,
+    pub(crate) parent: Option<sheprd_chat_protocol::brief::Delegation>,
 }
 
 impl Brief {
@@ -42,7 +43,11 @@ impl Brief {
         file.write_all(text.as_bytes()).map_err(Error::Write)?;
         file.as_file().sync_all().map_err(Error::Write)?;
         let (_, file) = file.keep().map_err(|error| Error::Keep(error.error))?;
-        Ok(Self { file, from })
+        Ok(Self {
+            file,
+            from,
+            parent: None,
+        })
     }
 
     /// Deletes the file of a brief whose chat did not start. Blocking.

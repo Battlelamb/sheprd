@@ -21,6 +21,7 @@ fn a_brief_is_written_privately_and_discarded() {
 #[test]
 fn the_program_is_told_the_file_and_who_wrote_it() {
     let brief = Brief {
+        parent: None,
         file: PathBuf::from("/tmp/b.md"),
         from: Some(Agent::Codex),
     };
@@ -56,6 +57,7 @@ fn the_program_is_told_the_file_and_who_wrote_it() {
 #[test]
 fn a_typed_line_reads_the_file_from_the_environment() {
     let brief = Brief {
+        parent: None,
         file: PathBuf::from("/a path/with 'quotes'.md"),
         from: Some(Agent::Claude),
     };

@@ -315,8 +315,7 @@ pub fn start_sidebar(handle: WindowHandle<SheprdWindow>, cx: &mut App) {
                         let expected_width = px(sidebar::LABEL_WIDTH + extra_width - icon_reserve);
                         if p.glyph_text != p.cached
                             || (expected_short && p.glyph_text != input)
-                            || (!expected_short
-                                && (p.width < px(150.) || !p.glyph_text.ends_with('\u{2026}')))
+                            || (!expected_short && !p.fills_truncated_column())
                             || p.clipped
                             || !sidebar::layout_tests::within_device_pixel(p.bounds.size.width, expected_width, window.scale_factor())
                             || p.mask.size.width != p.bounds.size.width

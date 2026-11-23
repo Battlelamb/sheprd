@@ -26,36 +26,39 @@ struct HomeTab: View {
         Group {
             if query.isEmpty { self.chats(sections, unread: unread) } else { SearchResults(query: query, workspacesAsRoutes: true) }
         }
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Workspaces, chats, terminals")
+        .searchable($query, when: model.hasComputers)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { window?.home = true }
         .onDisappear { window?.home = false }
         #if DEBUG
         .task { if let text = UserDefaults.standard.string(forKey: "homeSearch") { query = text } }
         #endif
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) { AgentSortMenu(sort: $sort) }
-            ToolbarItem(placement: .topBarLeading) { AgentFilterMenu() }
-            if query.isEmpty, sections.count > 1 {
-                ToolbarItem(placement: .topBarTrailing) {
-                    let shown = sections.map { ChatList.key($0, sort: sort) }
-                    let folded = model.collapsed.home.allCollapsed(shown)
-                    Button(
-                        folded ? "Expand All" : "Collapse All",
-                        systemImage: folded ? "rectangle.expand.vertical" : "rectangle.compress.vertical"
-                    ) {
-                        withAnimation(.snappy) { model.collapsed.home.toggleAll(shown) }
-                    }
+        .toolbar { if model.hasComputers { toolbar(sections) } }
+    }
+
+    @ToolbarContentBuilder
+    private func toolbar(_ sections: [AgentSort.Section<HomeRow>]) -> some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) { AgentSortMenu(sort: $sort) }
+        ToolbarItem(placement: .topBarLeading) { AgentFilterMenu() }
+        if query.isEmpty, sections.count > 1 {
+            ToolbarItem(placement: .topBarTrailing) {
+                let shown = sections.map { ChatList.key($0, sort: sort) }
+                let folded = model.collapsed.home.allCollapsed(shown)
+                Button(
+                    folded ? "Expand All" : "Collapse All",
+                    systemImage: folded ? "rectangle.expand.vertical" : "rectangle.compress.vertical"
+                ) {
+                    withAnimation(.snappy) { model.collapsed.home.toggleAll(shown) }
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Talk to Sheprd", systemImage: "waveform") { model.talk() }
-                    .disabled(model.fleet.machines.isEmpty)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("New Workspace", systemImage: "plus") { model.creating = .workspace(device: nil) }
-                    .disabled(model.fleet.machines.isEmpty)
-            }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button("Talk to Sheprd", systemImage: "waveform") { model.talk() }
+                .disabled(model.fleet.machines.isEmpty)
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button("New Workspace", systemImage: "plus") { model.creating = .workspace(device: nil) }
+                .disabled(model.fleet.machines.isEmpty)
         }
     }
 

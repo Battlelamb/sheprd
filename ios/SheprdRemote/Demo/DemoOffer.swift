@@ -21,6 +21,8 @@ private struct DemoOffer: ViewModifier {
                     } description: {
                         // The app shows nothing on its own: say what else it needs.
                         Text("This app requires Sheprd running on your computer or server. Install Sheprd, open Remote control > Pair device, then scan its code here.")
+                            // A readable measure across an iPad's window.
+                            .frame(maxWidth: 420)
                     } actions: {
                         VStack(spacing: 12) {
                             Button { installing = true } label: {
@@ -107,6 +109,15 @@ private struct SafariView: UIViewControllerRepresentable {
 }
 
 extension View {
+    /// The search of a first list, while there is anything to search.
+    @ViewBuilder func searchable(_ query: Binding<String>, when shown: Bool) -> some View {
+        if shown {
+            searchable(text: query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Workspaces, chats, terminals")
+        } else {
+            self
+        }
+    }
+
     /// The empty list's pairing and demo offer, and the demo's bar.
     func demoOffer(pairing: Binding<Bool>) -> some View {
         modifier(DemoOffer(pairing: pairing))

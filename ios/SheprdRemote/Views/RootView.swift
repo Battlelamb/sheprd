@@ -104,6 +104,10 @@ struct RootView: View {
             model.pendingTalk = nil
             model.talk(saying: talk.words)
         }
+        // Forgetting the last computer leaves only Home, which offers pairing.
+        .onChange(of: model.hasComputers) { _, has in
+            if !has { tab = .home }
+        }
         .onChange(of: model.pendingTab) { _, wanted in
             guard let wanted else { return }
             tab = wanted
@@ -162,7 +166,8 @@ struct RootView: View {
                     HomeTab(pairing: $window.pairing).makesRoomForConnectionToast().withRoutes()
                 }
                 .environment(\.offersWorkspace, true)
-                .slidesTabBar(hidden: !homePath.isEmpty)
+                // No tabs until there is something to show in them.
+                .slidesTabBar(hidden: !homePath.isEmpty || !model.hasComputers)
                 .connectionToast(pairing: $window.pairing)
             }
             .badge(model.fleet.waiting)

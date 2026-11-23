@@ -340,6 +340,11 @@ final class AppModel {
     /// it runs. Settings and pairing still read `computers`.
     var shownComputers: [Computer] { fleet.demo ? DemoFleet.computers : computers }
 
+    /// Whether there is anything to list: a paired computer or the demo.
+    /// Until then the app shows only its offer to install, pair, or explore
+    /// the demo, with no search, buttons, or tabs leading nowhere.
+    var hasComputers: Bool { !shownComputers.isEmpty }
+
     /// Shows the demo's made-up computers until one is paired (`DemoFleet`).
     func startDemo() {
         guard computers.isEmpty else { return }

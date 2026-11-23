@@ -55,7 +55,7 @@ struct WorkspacesTab: View {
         .task { if UserDefaults.standard.bool(forKey: "openComputer") { details = model.computers.first?.device } }
         #endif
         .toolbar {
-            if query.isEmpty, !ComputerTags.all(in: model.computers).isEmpty || model.computers.count > 1 {
+            if query.isEmpty, !ComputerTags.all(in: model.shownComputers).isEmpty || model.shownComputers.count > 1 {
                 ToolbarItem(placement: .topBarLeading) { TagFilterMenu() }
             }
             if query.isEmpty, machines.count > 1 {

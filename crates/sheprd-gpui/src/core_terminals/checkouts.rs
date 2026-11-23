@@ -16,12 +16,16 @@ const REFRESH: Duration = Duration::from_secs(10);
 /// How long one folder's answer may take.
 const DEADLINE: Duration = Duration::from_secs(5);
 
-type Answers = Vec<(String, Option<Identity>)>;
+struct Answers {
+    folders: Vec<(String, Option<Identity>)>,
+    home: Option<String>,
+}
 
 /// What the folders last answered, and the batch being asked.
 #[derive(Default)]
 pub(super) struct Checkouts {
     known: HashMap<String, Option<Identity>>,
+    home: Option<String>,
     asking: Option<mpsc::Receiver<Answers>>,
     asked: Option<Instant>,
 }
@@ -31,6 +35,10 @@ impl Checkouts {
     /// Git checkout.
     pub(super) fn get(&self, cwd: &str) -> Option<&Identity> {
         self.known.get(cwd)?.as_ref()
+    }
+
+    pub(super) fn home(&self) -> Option<&str> {
+        self.home.as_deref()
     }
 
     /// Takes a finished batch and starts the next one when `folders` holds
@@ -49,7 +57,11 @@ impl Checkouts {
         if let Some(asking) = &self.asking {
             match asking.try_recv() {
                 Ok(answers) => {
-                    for (cwd, identity) in answers {
+                    if let Some(home) = answers.home {
+                        changed |= self.home.as_ref() != Some(&home);
+                        self.home = Some(home);
+                    }
+                    for (cwd, identity) in answers.folders {
                         changed |= self.known.get(&cwd) != Some(&identity);
                         self.known.insert(cwd, identity);
                     }
@@ -67,11 +79,13 @@ impl Checkouts {
         if folders.is_empty() || !(unasked || stale) {
             return changed;
         }
+        let home = self.home.clone();
         let (send, receive) = mpsc::sync_channel(1);
         let started = std::thread::Builder::new()
             .name("herdr-core-checkouts".into())
             .spawn(move || {
-                let answers = folders
+                let home = home.or_else(|| home_on(&target));
+                let folders = folders
                     .into_iter()
                     .map(|cwd| {
                         let deadline = Instant::now() + DEADLINE;
@@ -95,7 +109,7 @@ impl Checkouts {
                         (cwd, identity)
                     })
                     .collect();
-                let _ = send.send(answers);
+                let _ = send.send(Answers { folders, home });
             });
         match started {
             Ok(_) => self.asking = Some(receive),
@@ -112,6 +126,27 @@ impl Checkouts {
         self.known.insert(cwd.to_owned(), identity);
         self.asked = Some(Instant::now());
     }
+}
+
+/// Runs only on the checkout worker. A remote home is read on that host,
+/// never inferred from a path or borrowed from the desktop environment.
+fn home_on(target: &sheprd_client::ConnectTarget) -> Option<String> {
+    if !target.is_remote() {
+        return sheprd_client::local_path::home_dir()
+            .map(|home| home.to_string_lossy().into_owned());
+    }
+    let host = sheprd_remote::teleport::Host::new(target).ok()?;
+    let output = host
+        .exec(
+            "sh",
+            &["-c", "printf '%s' \"$HOME\""],
+            DEADLINE,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .ok()?;
+    String::from_utf8(output)
+        .ok()
+        .filter(|home| home.starts_with('/') && !home.chars().any(char::is_control))
 }
 
 #[cfg(test)]

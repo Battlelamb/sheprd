@@ -86,3 +86,14 @@ fn missing_live_folders_use_the_saved_folder_and_stale_answers_are_not_used() {
         );
     }
 }
+
+#[test]
+fn home_naming_uses_the_owning_hosts_home() {
+    let folders = BTreeMap::from([("root".into(), Some("/home/alice".into()))]);
+    let mut local = session(false, false);
+    let mut remote = session(false, false);
+    apply(&mut local, &folders, None, "/Users/alice");
+    apply(&mut remote, &folders, None, "/home/alice");
+    assert_eq!(local.workspaces[0].label, "alice");
+    assert_eq!(remote.workspaces[0].label, "~");
+}

@@ -47,7 +47,9 @@ common directory as the worktree key, and whether it is a linked worktree.
 An unnamed root space follows its first terminal's live folder, using the
 checkout's top-level folder inside Git and `~` for the home directory, as
 Herdr does. The lookup runs on that terminal's host in the same background
-worker. Explicit names and linked worktree names stay fixed; naming does not
+worker, which also caches that host's home directory. The last reported folder
+keeps naming a space during a disconnect; it does not make cached agent status
+current. Explicit names and linked worktree names stay fixed; naming does not
 change the saved launch folder or checkout identity.
 
 Remote kept workspaces read their Git identity on their own SSH, cloud or WSL

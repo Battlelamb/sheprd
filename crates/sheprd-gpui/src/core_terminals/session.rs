@@ -243,11 +243,16 @@ impl SheprdWindow {
         let mut session = Session::core(workspaces, tabs, focused, |terminal| {
             self.core_terminals.reported(&host, terminal)
         });
+        let home = if local.is_some() {
+            sheprd_client::local_path::home_dir().map(|home| home.to_string_lossy().into_owned())
+        } else {
+            checkouts.and_then(|known| known.home()).map(str::to_owned)
+        };
         crate::core_terminals::names::apply(
             &mut session,
             &self.core_name_folders(store, scope, cx),
             checkouts,
-            &std::env::var("HOME").unwrap_or_default(),
+            home.as_deref().unwrap_or_default(),
         );
         // Which agent each is, and what to call it, by the policy the
         // Overview and the attention service name agents with.

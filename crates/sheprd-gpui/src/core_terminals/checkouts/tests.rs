@@ -8,10 +8,18 @@ fn folders_are_asked_once_then_again_when_stale() {
     checkouts.poll(vec![folder.clone()], now);
     let asking = checkouts.asking.take().unwrap();
     let answers = asking.recv_timeout(Duration::from_secs(30)).unwrap();
-    assert_eq!(answers.len(), 1);
+    assert_eq!(answers.folders.len(), 1);
+    assert_eq!(
+        answers.home,
+        sheprd_client::local_path::home_dir().map(|home| home.to_string_lossy().into_owned())
+    );
     // A finished batch lands on the next poll.
     let (send, receive) = mpsc::sync_channel(1);
-    send.send(vec![(folder.clone(), None)]).unwrap();
+    send.send(Answers {
+        folders: vec![(folder.clone(), None)],
+        home: None,
+    })
+    .unwrap();
     checkouts.asking = Some(receive);
     assert!(checkouts.poll(vec![folder.clone()], now));
     assert!(
@@ -37,4 +45,27 @@ fn a_folder_no_longer_listed_is_forgotten() {
     assert_eq!(checkouts.get("/src/app").unwrap().label, "app");
     assert!(checkouts.poll(Vec::new(), Instant::now()));
     assert!(checkouts.get("/src/app").is_none());
+}
+
+#[test]
+fn home_answers_are_cached_per_host_and_survive_a_failed_lookup() {
+    fn receive(checkouts: &mut Checkouts, home: Option<&str>) -> bool {
+        let (send, receiver) = mpsc::sync_channel(1);
+        send.send(Answers {
+            folders: Vec::new(),
+            home: home.map(str::to_owned),
+        })
+        .unwrap();
+        checkouts.asking = Some(receiver);
+        checkouts.poll(Vec::new(), Instant::now())
+    }
+    let mut local = Checkouts::default();
+    let mut remote = Checkouts::default();
+    assert!(receive(&mut local, Some("/Users/alice")));
+    assert!(receive(&mut remote, Some("/home/alice")));
+    assert_eq!(local.home(), Some("/Users/alice"));
+    assert_eq!(remote.home(), Some("/home/alice"));
+    assert!(!receive(&mut remote, None));
+    assert_eq!(remote.home(), Some("/home/alice"));
+    assert!(!receive(&mut remote, Some("/home/alice")));
 }

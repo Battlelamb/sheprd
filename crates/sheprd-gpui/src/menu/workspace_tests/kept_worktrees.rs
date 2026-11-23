@@ -51,6 +51,7 @@ fn window<'a>(
                     key: Path::new(MAIN).join(".git").display().to_string(),
                     label: "app".into(),
                     linked,
+                    root: folder.into(),
                 }),
             );
             let location =

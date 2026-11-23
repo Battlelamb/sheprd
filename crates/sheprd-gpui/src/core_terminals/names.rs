@@ -10,6 +10,8 @@ use sheprd_session::Session;
 use std::collections::BTreeMap;
 
 impl SheprdWindow {
+    /// Names use the last listed directory even while disconnected; unlike
+    /// agent status, a cached folder does not claim a process is still running.
     /// Keep an entry even when the first terminal has no live folder: a
     /// later tab must not become the naming terminal while it reconnects.
     pub(super) fn core_name_folders(
@@ -29,7 +31,7 @@ impl SheprdWindow {
             {
                 folders.entry(tab.workspace_id.clone()).or_insert_with(|| {
                     self.core_terminals
-                        .reported(&host, panes.first())
+                        .listed(&host, panes.first())
                         .and_then(|info| info.cwd.as_ref())
                         .map(|cwd| cwd.to_string_lossy().into_owned())
                         .filter(|cwd| !cwd.is_empty())
@@ -41,7 +43,7 @@ impl SheprdWindow {
         {
             folders.entry(WORKSPACE.to_owned()).or_insert_with(|| {
                 self.core_terminals
-                    .reported(&host, view.read(cx).terminal())
+                    .listed(&host, view.read(cx).terminal())
                     .and_then(|info| info.cwd.as_ref())
                     .map(|cwd| cwd.to_string_lossy().into_owned())
                     .filter(|cwd| !cwd.is_empty())

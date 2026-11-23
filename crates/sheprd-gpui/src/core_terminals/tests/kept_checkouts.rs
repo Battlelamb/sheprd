@@ -147,6 +147,8 @@ fn mods_follow_the_tab_shown_in_a_kept_workspace(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+// No live backend: the last reported folder must keep naming the space
+// during a disconnect, without treating cached agents as still running.
 fn root_space_tracks_its_first_terminal_checkout(cx: &mut TestAppContext) {
     let (view, cx, id) = window(cx);
     cx.update(|_, cx| {

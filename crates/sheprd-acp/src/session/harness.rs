@@ -79,6 +79,8 @@ impl<R: FnMut(Update)> Session<R> {
         super::known::seed(&self.config.known, Some(agent), &mut transcript);
         self.transcript = transcript;
         self.projector = self.projector.restart();
+        // Settings carried into the chat were for the agent it started with.
+        self.config.settings = None;
 
         // A new epoch: no client's cursor or logged change applies to the
         // new transcript, so every client replaces what it holds.
@@ -106,6 +108,7 @@ impl<R: FnMut(Update)> Session<R> {
             );
             self.emit(notice);
         }
+        self.recall_picks();
         (self.report)(Update::Harness(agent));
         self.report_activity();
         self.launch = Some(agent);

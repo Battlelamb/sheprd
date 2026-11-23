@@ -180,17 +180,17 @@ enum Overlap {
     /// Both ends, for tests that drive both here.
     Both,
     /// The other end only, for a child that needs it and a reader here that
-    /// blocks; see [`overlapped_stdout`].
+    /// blocks; see [`overlapped_output`].
     Peer,
 }
 
-/// A pipe for a child's stdout, which the child writes through an overlapped
-/// handle and this process reads with plain blocking reads: this end, and
-/// the child's. OpenSSH for Windows' `ssh.exe` stops delivering output into
-/// a synchronous pipe or a file once its stdin has ended; into an overlapped
-/// pipe it keeps going. Drop the command once the child is spawned, so that
-/// an exited child reads as closed.
-pub fn overlapped_stdout() -> io::Result<(File, Stdio)> {
+/// A pipe for a child's stdout or stderr, which the child writes through an
+/// overlapped handle and this process reads with plain blocking reads: this
+/// end, and the child's. OpenSSH for Windows' `ssh.exe` stops delivering
+/// output into a synchronous pipe or a file once its stdin has ended; into
+/// an overlapped pipe it keeps going. Drop the command once the child is
+/// spawned, so that an exited child reads as closed.
+pub fn overlapped_output() -> io::Result<(File, Stdio)> {
     let (reader, stdout) = private_pipe(Direction::Inbound, Overlap::Peer)?;
     Ok((File::from(reader), stdout.into()))
 }

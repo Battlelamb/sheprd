@@ -13,7 +13,7 @@
 //!
 //! On a Windows client, OpenSSH's `ssh.exe` stops delivering output into a
 //! synchronous pipe or a file once its stdin has ended, so its stdout there
-//! is an overlapped pipe (`sheprd_client::overlapped_stdout`).
+//! is an overlapped pipe (`sheprd_client::overlapped_output`).
 
 mod error;
 #[cfg(test)]
@@ -255,7 +255,7 @@ fn add(buffer: &mut Vec<u8>, chunk: &[u8]) -> Result<Option<String>> {
 /// A pipe for the child's stdout: the end read here, and the child's.
 #[cfg(windows)]
 fn stdout() -> Result<(std::fs::File, Stdio)> {
-    sheprd_client::overlapped_stdout().map_err(|error| Error::Start(error).into())
+    sheprd_client::overlapped_output().map_err(|error| Error::Start(error).into())
 }
 
 #[cfg(not(windows))]

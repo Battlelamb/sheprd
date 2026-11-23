@@ -12,6 +12,7 @@
 
 pub(crate) mod changes;
 mod dialog;
+pub(crate) mod host_presence;
 pub(crate) mod host_push;
 mod indicator;
 pub(crate) use indicator::MENU_WIDTH;

@@ -67,35 +67,52 @@ struct WorkspaceScreen: View {
                 NavigationLink {
                     ComputerScreen(device: key.device).makesRoomForConnectionToast()
                 } label: {
-                    ComputerRow(computer: machine.computer, name: model.displayName(machine.computer), status: machine.status)
+                    WorkspaceRowLabel {
+                        ComputerRow(computer: machine.computer, name: model.displayName(machine.computer), status: machine.status)
+                    }
                 }
                 if let pullRequest = workspace.pullRequest, let url = URL(string: pullRequest.url) {
                     // Plain text and a chevron, like the rows below, not a
                     // tinted web link.
-                    Link(destination: url) { PullRequestRow(pullRequest: pullRequest) }.tint(.primary)
+                    Link(destination: url) {
+                        WorkspaceRowLabel { PullRequestRow(pullRequest: pullRequest) }
+                    }.tint(.primary)
                 }
                 if workspace.branch != nil {
                     RouteLink(.changes(key)) {
-                        ChangesRow(count: changedFiles, uncommitted: workspace.uncommitted ?? false)
+                        WorkspaceRowLabel(showsDisclosure: opener == nil) {
+                            ChangesRow(count: changedFiles, uncommitted: workspace.uncommitted ?? false)
+                        }
                     }
                 }
             }
+            .navigationLinkIndicatorVisibility(.hidden)
             Section {
                 ForEach(chats) { item in
-                    RouteLink(.chat(item.key, title: item.chat.title)) { ChatRowLabel(item: item, showsComputer: false, showsWorkspace: false, showsPullRequest: false) }
-                        .closeSwipe(.chat(item.key, title: item.chat.title), closing: $closing)
-                        .summarizeSwipe(item.key)
+                    RouteLink(.chat(item.key, title: item.chat.title)) {
+                        WorkspaceRowLabel(showsDisclosure: opener == nil) {
+                            ChatRowLabel(item: item, showsComputer: false, showsWorkspace: false, showsPullRequest: false)
+                        }
+                    }
+                    .closeSwipe(.chat(item.key, title: item.chat.title), closing: $closing)
+                    .summarizeSwipe(item.key)
                 }
                 ForEach(terminals.filter { $0.agent != nil }) { item in
                     if let route = item.route {
-                        RouteLink(route) { AgentTerminalRowLabel(item: item, showsComputer: false, showsWorkspace: false, showsPullRequest: false) }
-                            .closeSwipe(item.closeTarget, closing: $closing)
+                        RouteLink(route) {
+                            WorkspaceRowLabel(showsDisclosure: opener == nil) {
+                                AgentTerminalRowLabel(item: item, showsComputer: false, showsWorkspace: false, showsPullRequest: false)
+                            }
+                        }
+                        .closeSwipe(item.closeTarget, closing: $closing)
                     }
                 }
                 ForEach(terminals.filter { $0.agent == nil }) { item in
                     if let pane = item.terminal.firstPane {
                         RouteLink(.term(PaneKey(device: key.device, pane: pane.pane), title: item.terminal.label)) {
-                            TerminalRowLabel(terminal: item.terminal)
+                            WorkspaceRowLabel(showsDisclosure: opener == nil) {
+                                TerminalRowLabel(terminal: item.terminal)
+                            }
                         }
                         .closeSwipe(item.closeTarget, closing: $closing)
                     }
@@ -105,6 +122,7 @@ struct WorkspaceScreen: View {
                 Text(count == 1 ? "1 tab" : "\(count) tabs")
                     .contentTransition(.numericText(value: Double(count)))
             }
+            .navigationLinkIndicatorVisibility(.hidden)
             WorkspacePictures(pictures: pictures, chats: chats, open: show)
             launcher(workspace, online: isOnline(machine))
             endings(workspace, online: isOnline(machine))
@@ -634,6 +652,32 @@ private struct Summary: View {
     }
 }
 
+private struct WorkspaceRowLabel<Content: View>: View {
+    var showsDisclosure = true
+    @ViewBuilder var content: Content
+    @ScaledMetric private var disclosureWidth = 12
+
+    var body: some View {
+        HStack(spacing: 8) {
+            content.frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: "chevron.forward")
+                .font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                .frame(width: disclosureWidth)
+                .opacity(showsDisclosure ? 1 : 0)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+private struct WorkspaceRowStatus<Content: View>: View {
+    @ViewBuilder var content: Content
+    @ScaledMetric private var width = 28
+
+    var body: some View {
+        content.frame(minWidth: width)
+    }
+}
+
 /// The computer the workspace is on, and whether the phone reaches it now;
 /// opens that computer's page.
 private struct ComputerRow: View {
@@ -647,7 +691,9 @@ private struct ComputerRow: View {
                 .foregroundStyle(.tint)
                 .frame(width: 28, height: 28).background(.tint.opacity(0.15), in: .rect(cornerRadius: 28 * 0.28))
             Text(name).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-            ComputerStatusLine(status: status).font(.subheadline).labelStyle(.iconOnly).imageScale(.small)
+            WorkspaceRowStatus {
+                ComputerStatusLine(status: status).font(.subheadline).labelStyle(.iconOnly).imageScale(.small)
+            }
         }
         .accessibilityElement(children: .combine)
     }
@@ -666,8 +712,9 @@ private struct PullRequestRow: View {
                 .frame(width: 28, height: 28).background(tone.color.opacity(0.15), in: .rect(cornerRadius: 28 * 0.28))
             Text(verbatim: "Pull request #\(pullRequest.number)").foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: tone.symbol).foregroundStyle(tone.color).imageScale(.large)
-            Image(systemName: "chevron.forward").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+            WorkspaceRowStatus {
+                Image(systemName: tone.symbol).foregroundStyle(tone.color).imageScale(.large)
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Pull request \(pullRequest.number), \(tone.label)")
@@ -697,7 +744,9 @@ private struct ChangesRow: View {
             }
             Text("Changes").frame(maxWidth: .infinity, alignment: .leading)
             if let count {
-                Text(count, format: .number).foregroundStyle(.secondary).monospacedDigit()
+                WorkspaceRowStatus {
+                    Text(count, format: .number).foregroundStyle(.secondary).monospacedDigit()
+                }
             }
         }
         .accessibilityElement(children: .ignore)

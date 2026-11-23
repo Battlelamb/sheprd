@@ -323,7 +323,7 @@ pub(super) fn machine(
             }
             #[cfg(target_os = "macos")]
             if setup {
-                crate::machine::guide::begin(&name, cx);
+                crate::machine::guide::begin(&name, crate::machine::guide::Opening::Shown, cx);
             }
             #[cfg(not(target_os = "macos"))]
             let _ = setup;

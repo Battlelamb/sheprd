@@ -45,7 +45,7 @@ class AppStoreListingTests(unittest.TestCase):
         notes = (IOS / "AppStore" / LISTING["review"]["notes_file"]).read_text()
         demo = (IOS / "SheprdRemote/Demo/DemoOffer.swift").read_text()
         self.assertIn("Explore the Demo", notes)
-        self.assertIn('"Explore the Demo"', demo)
+        self.assertIn('Explore the Demo"', demo)
         self.assertIn("Explore the Demo", LISTING["description"])
 
 

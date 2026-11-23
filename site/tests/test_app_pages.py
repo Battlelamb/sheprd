@@ -31,7 +31,7 @@ class AppPagesTests(unittest.TestCase):
         self.assertIn("Explore the Demo", html)
         self.assertIn('href="/privacy/"', html)
         demo = (ROOT / "ios/SheprdRemote/Demo/DemoOffer.swift").read_text()
-        self.assertIn('"Explore the Demo"', demo)
+        self.assertIn('Explore the Demo"', demo)
 
 
 if __name__ == "__main__":

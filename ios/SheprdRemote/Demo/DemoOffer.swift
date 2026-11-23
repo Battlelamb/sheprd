@@ -1,3 +1,4 @@
+import SafariServices
 import SwiftUI
 
 /// With no computer paired, the first list says so and offers pairing one
@@ -6,6 +7,10 @@ import SwiftUI
 private struct DemoOffer: ViewModifier {
     @Environment(AppModel.self) private var model
     @Binding var pairing: Bool
+    @State private var installing = false
+
+    /// How to install Sheprd on each platform (website/docs/install.md).
+    static let installGuide = URL(string: "https://sheprd.org/docs/install/") ?? URL(filePath: "/")
 
     func body(content: Content) -> some View {
         content
@@ -15,19 +20,34 @@ private struct DemoOffer: ViewModifier {
                         Label("A companion to Sheprd", systemImage: "desktopcomputer")
                     } description: {
                         // The app shows nothing on its own: say what else it needs.
-                        Text("""
-                        This app follows the agents Sheprd runs on your Mac, Linux, or Windows computer. \
-                        Install Sheprd for free from [sheprd.org](https://sheprd.org), open Remote control \
-                        > Pair device, then scan its code here.
-                        """)
+                        Text("This app requires Sheprd running on your computer or server. Install Sheprd, open Remote control > Pair device, then scan its code here.")
                     } actions: {
-                        Button("Pair a Computer") { pairing = true }.buttonStyle(.glassProminent)
-                        Button("Explore the Demo") {
-                            withAnimation(.snappy) { model.startDemo() }
+                        VStack(spacing: 12) {
+                            Button { installing = true } label: {
+                                Label("Install Sheprd", systemImage: "arrow.down.circle")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.glass)
+                            Button { pairing = true } label: {
+                                Label("Pair a Computer", systemImage: "qrcode.viewfinder")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.glassProminent)
+                            Button("No computer yet? Explore the Demo") {
+                                withAnimation(.snappy) { model.startDemo() }
+                            }
+                            .buttonStyle(.plain)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 4)
                         }
-                        .buttonStyle(.glass)
+                        .controlSize(.large)
+                        .frame(maxWidth: 300)
                     }
                 }
+            }
+            .sheet(isPresented: $installing) {
+                SafariView(url: Self.installGuide).ignoresSafeArea()
             }
             .safeAreaInset(edge: .bottom) {
                 if model.fleet.demo, !Self.barHidden {
@@ -73,6 +93,17 @@ private struct DemoBar: View {
         .padding(.bottom, 6)
         .accessibilityElement(children: .contain)
     }
+}
+
+/// Safari in a sheet, for pages of ours the app links to.
+private struct SafariView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+
+    func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
 }
 
 extension View {

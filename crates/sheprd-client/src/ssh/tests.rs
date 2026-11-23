@@ -295,16 +295,23 @@ fn marker_consumes_banners_not_protocol_bytes() {
 }
 #[test]
 fn child_guard_reaps_on_drop() {
+    // A child that would run for a minute, from programs every machine has.
+    #[cfg(unix)]
     let child = Command::new("sleep").arg("60").spawn().unwrap();
-    let id = child.id();
+    #[cfg(windows)]
+    let child = Command::new("ping")
+        .args(["-n", "60", "127.0.0.1"])
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    let started = Instant::now();
     drop(ChildGuard(child));
+    // The guard waits for the child, so a drop that returns this soon killed
+    // it and reaped it.
     assert!(
-        !Command::new("kill")
-            .args(["-0", &id.to_string()])
-            .stderr(Stdio::null())
-            .status()
-            .unwrap()
-            .success()
+        started.elapsed() < Duration::from_secs(30),
+        "{:?}",
+        started.elapsed()
     );
 }
 #[test]

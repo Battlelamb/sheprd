@@ -158,6 +158,10 @@ mod descendants_tests;
 #[path = "script_tests/late_input.rs"]
 mod late_input_tests;
 
+#[cfg(test)]
+#[path = "script_tests/ssh_output.rs"]
+mod ssh_output_tests;
+
 /// Streams a script child's pipes under the output and idle bounds. On Unix
 /// the child leads its own process group, so stopping it reaches its
 /// descendants too. On Windows the child is `wsl.exe` or `ssh`, and killing it
@@ -323,10 +327,21 @@ mod runner {
         // pipes open, and a terminal's signals never reach it.
         #[cfg(unix)]
         command.process_group(0);
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        command.stdin(Stdio::piped());
+        #[cfg(unix)]
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        // OpenSSH for Windows' `ssh.exe` stops delivering output into a
+        // synchronous pipe once its stdin has ended, as it does here after the
+        // input, on stderr as on stdout; see `overlapped_output`. The command,
+        // dropped when spawned, takes the child's ends with it, so an exited
+        // child reads as closed.
+        #[cfg(windows)]
+        let (stdout, stderr) = {
+            let (stdout, out) = crate::overlapped_output().map_err(Error::ScriptSpawn)?;
+            let (stderr, err) = crate::overlapped_output().map_err(Error::ScriptSpawn)?;
+            command.stdout(out).stderr(err);
+            (stdout, stderr)
+        };
         // Dropping the guard kills and reaps the child on every early return.
         #[cfg(unix)]
         let mut child = ChildGuard(command.spawn().map_err(Error::ScriptSpawn)?);
@@ -351,11 +366,7 @@ mod runner {
             child.0.stderr.take(),
         );
         #[cfg(windows)]
-        let pipes = (
-            child.0.stdin().take(),
-            child.0.stdout().take(),
-            child.0.stderr().take(),
-        );
+        let pipes = (child.0.stdin().take(), Some(stdout), Some(stderr));
         let (Some(stdin), Some(stdout), Some(stderr)) = pipes else {
             return Err(Error::ScriptIo(ErrorKind::BrokenPipe.into()));
         };

@@ -3,7 +3,7 @@
 //! is a linked worktree, and its branch. herdr-core reports none of this, so
 //! the app asks Git for the workspaces it keeps for Herdr 2.
 
-use super::git;
+use crate::git::git;
 use std::{path::Path, time::Instant};
 
 /// A folder's checkout.
@@ -43,8 +43,10 @@ pub fn identity(
         cancelled,
     ) {
         Ok(dirs) => dirs,
-        // Not a checkout, or one Git cannot read: no identity to show.
-        Err(crate::Error::Git(super::Error::Failed { .. })) => return Ok(None),
+        // Only a confirmed non-checkout clears a previously known identity.
+        Err(crate::Error::Git(crate::git::Error::Failed { .. })) if outside_repository(dir) => {
+            return Ok(None);
+        }
         Err(error) => return Err(error),
     };
     let mut lines = dirs.lines();
@@ -69,6 +71,28 @@ pub fn identity(
         linked: Path::new(own) != Path::new(common),
         root: root.to_owned(),
     }))
+}
+
+/// A failed Git child alone cannot prove a folder is outside Git: a broken
+/// checkout, permission error, or unavailable executable must not erase a
+/// previous identity. Confirm absence through readable ancestor directories.
+fn outside_repository(dir: &str) -> bool {
+    if std::env::var_os("GIT_DIR").is_some() {
+        return false;
+    }
+    let Ok(dir) = std::fs::canonicalize(dir) else {
+        return false;
+    };
+    if !dir.is_dir() {
+        return false;
+    }
+    for ancestor in dir.ancestors() {
+        match std::fs::symlink_metadata(ancestor.join(".git")) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            _ => return false,
+        }
+    }
+    true
 }
 
 /// The repository's folder name from its common Git directory: the folder

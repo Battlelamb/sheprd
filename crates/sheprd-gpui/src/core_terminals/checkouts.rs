@@ -4,6 +4,9 @@
 //! thread, one batch at a time, and again every so often, as a branch
 //! changes under a running shell.
 
+mod lookup;
+
+use lookup::Lookup;
 use sheprd_vcs::git::Identity;
 use std::{
     collections::HashMap,
@@ -18,7 +21,7 @@ const DEADLINE: Duration = Duration::from_secs(5);
 
 struct Answer {
     cwd: String,
-    identity: Option<Identity>,
+    identity: Lookup,
     upstream: Option<(usize, usize)>,
 }
 
@@ -78,6 +81,15 @@ impl Checkouts {
                         upstream,
                     } in answers.folders
                     {
+                        let identity = match identity {
+                            Lookup::Ready(identity) => identity,
+                            Lookup::Unavailable => {
+                                // Remember the attempt to retain the normal retry interval,
+                                // but never replace a previous successful answer.
+                                self.known.entry(cwd).or_insert(None);
+                                continue;
+                            }
+                        };
                         changed |= self.upstream.get(&cwd).copied() != upstream;
                         if let Some(counts) = upstream {
                             self.upstream.insert(cwd.clone(), counts);
@@ -112,30 +124,15 @@ impl Checkouts {
                     .into_iter()
                     .map(|cwd| {
                         let deadline = Instant::now() + DEADLINE;
-                        let identity = if target.is_remote() {
-                            sheprd_remote::teleport::Host::new(&target)
-                                .ok()
-                                .and_then(|host| {
-                                    sheprd_remote::work::identity_before(
-                                        &host,
-                                        &cwd,
-                                        deadline,
-                                        &std::sync::atomic::AtomicBool::new(false),
-                                    )
+                        let identity = lookup::read(&target, &cwd, deadline);
+                        let upstream =
+                            if matches!(&identity, Lookup::Ready(Some(_))) && !target.is_remote() {
+                                sheprd_vcs::git::upstream::read(&cwd, deadline, &|| false)
                                     .ok()
-                                })
-                        } else {
-                            sheprd_vcs::git::identity(&cwd, deadline, &|| false)
-                                .ok()
-                                .flatten()
-                        };
-                        let upstream = if identity.is_some() && !target.is_remote() {
-                            sheprd_vcs::git::upstream::read(&cwd, deadline, &|| false)
-                                .ok()
-                                .flatten()
-                        } else {
-                            None
-                        };
+                                    .flatten()
+                            } else {
+                                None
+                            };
                         Answer {
                             cwd,
                             identity,

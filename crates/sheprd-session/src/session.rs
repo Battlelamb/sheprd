@@ -33,6 +33,13 @@ pub struct Session {
     pub workspaces: Vec<Workspace>,
 }
 
+/// Path rules of the host that owns a terminal, independent of its viewer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FolderStyle {
+    Posix,
+    Windows,
+}
+
 /// A workspace: a folder and the tabs opened in it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Workspace {

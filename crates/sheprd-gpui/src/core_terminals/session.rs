@@ -255,6 +255,11 @@ impl SheprdWindow {
             &mut session,
             checkouts,
             home.as_deref().unwrap_or_default(),
+            if local.is_some() && cfg!(windows) {
+                sheprd_session::FolderStyle::Windows
+            } else {
+                sheprd_session::FolderStyle::Posix
+            },
         );
         for workspace in &mut session.workspaces {
             workspace.ahead_behind =

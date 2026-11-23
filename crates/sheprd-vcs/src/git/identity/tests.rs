@@ -79,3 +79,20 @@ fn a_bare_repository_is_named_without_its_suffix() {
     assert_eq!(repository_name(Path::new("/src/app.git")), "app");
     assert_eq!(repository_name(Path::new("/")), "");
 }
+
+#[test]
+fn failed_discovery_is_not_a_confirmed_plain_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let read = |path: &Path| {
+        identity(
+            path.to_str().unwrap(),
+            Instant::now() + Duration::from_secs(5),
+            &|| false,
+        )
+    };
+    assert!(read(&dir.path().join("missing")).is_err());
+    std::fs::write(dir.path().join(".git"), "broken git file").unwrap();
+    let nested = dir.path().join("src/nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    assert!(read(&nested).is_err());
+}

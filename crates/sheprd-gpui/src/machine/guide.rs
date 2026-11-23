@@ -85,7 +85,11 @@ struct Guide {
     asking: bool,
     /// Not shown yet: see [`Opening::Quiet`].
     quiet: bool,
-    /// When a quiet guide first saw its machine running.
+    /// Opened quietly and not asked for since: the agent's first answer
+    /// settles it, even after [`QUIET`] showed it.
+    from_image: bool,
+    /// Since when a quiet guide has seen its machine running without a
+    /// break: a stop or a suspend starts the wait over.
     running_since: Option<Instant>,
     saving: bool,
     saved: Option<Name>,
@@ -132,6 +136,7 @@ pub(crate) fn begin(name: &Name, opening: Opening, cx: &mut App) {
         let mut guides = guides.borrow_mut();
         if let Some(guide) = guides.get_mut(name) {
             guide.quiet &= opening == Opening::Quiet;
+            guide.from_image &= opening == Opening::Quiet;
             return None;
         }
         let generation = OPENED.get() + 1;
@@ -141,6 +146,7 @@ pub(crate) fn begin(name: &Name, opening: Opening, cx: &mut App) {
             Guide {
                 generation,
                 quiet: opening == Opening::Quiet,
+                from_image: opening == Opening::Quiet,
                 ..Guide::default()
             },
         );
@@ -249,7 +255,8 @@ enum Answered {
     Same,
     /// A step moved on, or a quiet guide shows.
     Changed { ready: bool },
-    /// A quiet guide's machine was set up already: it closes for good.
+    /// A guide opened quietly found its machine set up already: it closes
+    /// for good.
     Settled,
 }
 
@@ -261,7 +268,9 @@ impl Guide {
         };
         let ready = permissions == (true, true);
         let quiet = std::mem::take(&mut self.quiet);
-        if quiet && ready {
+        // The first answer of a guide opened quietly speaks for the image,
+        // however long the agent took to give it.
+        if ready && self.from_image && self.permissions.is_none() {
             return Answered::Settled;
         }
         self.signed_in = true;
@@ -274,9 +283,12 @@ impl Guide {
         }
     }
 
-    /// Shows a quiet guide whose machine has run for [`QUIET`] at `now`
-    /// without the agent answering; whether it did.
+    /// Shows a quiet guide whose machine has run for [`QUIET`] without a
+    /// break at `now`, the agent never answering; whether it did.
     fn waited(&mut self, running: bool, now: Instant) -> bool {
+        if !running {
+            self.running_since = None;
+        }
         if !self.quiet || !running {
             return false;
         }

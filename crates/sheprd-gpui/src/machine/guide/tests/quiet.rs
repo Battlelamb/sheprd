@@ -4,6 +4,7 @@ use super::*;
 fn quiet() -> Guide {
     Guide {
         quiet: true,
+        from_image: true,
         ..Guide::default()
     }
 }
@@ -48,6 +49,49 @@ fn a_quiet_guide_shows_once_the_agent_stays_silent() {
     assert!(!guide.waited(true, start + QUIET * 2));
 }
 
+/// Time the machine spends stopped or suspended does not count: the wait
+/// starts over once it runs again.
+#[test]
+fn a_stop_starts_the_wait_over() {
+    let mut guide = quiet();
+    let start = Instant::now();
+    assert!(!guide.waited(true, start));
+    assert!(!guide.waited(true, start + QUIET / 2));
+    assert!(!guide.waited(false, start + QUIET / 2));
+    assert!(guide.running_since.is_none());
+    let resumed = start + QUIET * 3;
+    assert!(!guide.waited(true, resumed));
+    assert!(!guide.waited(true, resumed + QUIET / 2));
+    assert!(guide.quiet);
+    assert!(guide.waited(true, resumed + QUIET));
+}
+
+/// An agent slower than [`QUIET`] still settles the guide its wait showed,
+/// as its first answer speaks for the image.
+#[test]
+fn a_late_first_answer_still_settles() {
+    let mut guide = quiet();
+    let start = Instant::now();
+    assert!(!guide.waited(true, start));
+    assert!(guide.waited(true, start + QUIET));
+    assert_eq!(guide.answered(Some((true, true))), Answered::Settled);
+}
+
+/// Once the agent has answered short of set up, the user is going through
+/// the steps: finishing them shows the last one rather than closing.
+#[test]
+fn a_guide_that_saw_a_missing_step_does_not_settle() {
+    let mut guide = quiet();
+    assert_eq!(
+        guide.answered(Some((false, false))),
+        Answered::Changed { ready: false }
+    );
+    assert_eq!(
+        guide.answered(Some((true, true))),
+        Answered::Changed { ready: true }
+    );
+}
+
 /// A guide shown at once moves on with the agent, and notes the machine
 /// ready the first time both permissions are there.
 #[test]
@@ -76,6 +120,8 @@ fn asking_shows_a_quiet_guide(cx: &mut gpui::TestAppContext) {
         assert_eq!(shown(&name), None);
         begin(&name, Opening::Shown, cx);
         assert_eq!(shown(&name).map(|shown| shown.step), Some(Step::SignIn));
+        let settles = with(&name, |guide| guide.answered(Some((true, true))));
+        assert_eq!(settles, Some(Answered::Changed { ready: true }));
         begin(&name, Opening::Quiet, cx);
         assert!(shown(&name).is_some());
         forget(&name);

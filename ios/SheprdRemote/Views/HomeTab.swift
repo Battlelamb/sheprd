@@ -63,16 +63,9 @@ struct HomeTab: View {
         ChatList(sections: sections, unread: unread, unreadOnly: $unreadOnly)
             .nearbyBanner()
             .fleetOffer()
+            .demoOffer(pairing: $pairing)
             .overlay {
-                if model.computers.isEmpty {
-                    ContentUnavailableView {
-                        Label("No computers yet", systemImage: "desktopcomputer")
-                    } description: {
-                        Text("In Sheprd, open Remote control > Pair device, then scan its code here.")
-                    } actions: {
-                        Button("Pair a computer") { pairing = true }.buttonStyle(.glassProminent)
-                    }
-                } else if model.fleet.chatItems.isEmpty, model.fleet.agentTerminals.isEmpty,
+                if !model.shownComputers.isEmpty, model.fleet.chatItems.isEmpty, model.fleet.agentTerminals.isEmpty,
                           // Unpaired computers' cards fill Home instead.
                           !model.fleet.machines.contains(where: { $0.status == .revoked }) {
                     ContentUnavailableView("No chats", systemImage: "bubble.left.and.text.bubble.right",

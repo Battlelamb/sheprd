@@ -205,6 +205,13 @@ extension RootView {
     /// `-sampleChat activity` one running sub-agents, shells, and a plan.
     func followLaunchArguments() async {
         let defaults = UserDefaults.standard
+        // `-demo YES` explores the demo, as its button does, and
+        // `-demoChat PANE` then opens one of its chats (`DemoData`).
+        if defaults.bool(forKey: "demo") { model.startDemo() }
+        if let pane = defaults.string(forKey: "demoChat"),
+           let item = model.fleet.chatItems.first(where: { $0.key.pane == pane && DemoFleet.owns($0.key.device) }) {
+            model.pendingRoute = .chat(item.key, title: item.chat.title)
+        }
         if let link = defaults.string(forKey: "pairLink"),
            !model.computers.contains(where: { (try? PairingLink(link))?.fingerprint == $0.fingerprint }) {
             let pairing = PairingModel()

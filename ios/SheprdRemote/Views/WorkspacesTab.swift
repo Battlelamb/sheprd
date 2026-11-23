@@ -122,7 +122,7 @@ struct WorkspacesTab: View {
         .refreshable { model.fleet.networkChanged() }
         .nearbyBanner()
         .overlay {
-            if model.computers.isEmpty {
+            if model.shownComputers.isEmpty {
                 ContentUnavailableView("No computers yet", systemImage: "desktopcomputer",
                                        description: Text("Pair one in Settings to see its workspaces here."))
             }
@@ -131,7 +131,7 @@ struct WorkspacesTab: View {
 
     /// The computers the filter leaves.
     private var machines: [Fleet.Machine] {
-        let shown = model.tagFilter.shown(among: model.computers)
+        let shown = model.tagFilter.shown(among: model.shownComputers)
         return model.fleet.machines.filter { shown.contains($0.computer.device) }
     }
 

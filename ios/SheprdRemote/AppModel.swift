@@ -336,6 +336,21 @@ final class AppModel {
         paths.start(queue: .main)
     }
 
+    /// The computers the lists show: the paired ones, or the demo's while
+    /// it runs. Settings and pairing still read `computers`.
+    var shownComputers: [Computer] { fleet.demo ? DemoFleet.computers : computers }
+
+    /// Shows the demo's made-up computers until one is paired (`DemoFleet`).
+    func startDemo() {
+        guard computers.isEmpty else { return }
+        fleet.startDemo()
+    }
+
+    func endDemo() {
+        fleet.endDemo()
+        fleet.sync(computers)
+    }
+
     /// Keeps `computer`; whether it was saved.
     @discardableResult
     func add(_ computer: Computer) -> Bool {

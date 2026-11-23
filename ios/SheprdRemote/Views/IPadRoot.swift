@@ -189,6 +189,7 @@ struct IPadRoot: View {
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Workspaces, chats, terminals")
         .navigationDestination(for: WorkspaceKey.self) { WorkspaceScreen(key: $0).makesRoomForConnectionToast() }
         .nearbyBanner()
+        .demoOffer(pairing: $pairing)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             hideSidebar

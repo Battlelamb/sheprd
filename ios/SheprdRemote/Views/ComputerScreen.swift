@@ -13,7 +13,7 @@ struct ComputerScreen: View {
     @AppStorage(PushRelaySetting.key, store: PushRelaySetting.store) private var pushRelay = true
 
     var body: some View {
-        if let computer = model.computers.first(where: { $0.device == device }) {
+        if let computer = model.shownComputers.first(where: { $0.device == device }) {
             page(computer)
         } else {
             ContentUnavailableView("Forgotten", systemImage: "laptopcomputer.slash",

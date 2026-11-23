@@ -365,13 +365,20 @@ fn resolves_platform_alias(family: &str) -> bool {
     }
 }
 
+fn is_symbols_only(family: &str) -> bool {
+    // i18n: data
+    const SYMBOLS_PREFIX: &str = "symbols nerd font";
+    family
+        .get(..SYMBOLS_PREFIX.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(SYMBOLS_PREFIX))
+}
+
 /// Ranks an installed Nerd Font family for the automatic cascade. Symbols-only
 /// faces carry the icon ranges without replacing any text glyph, and `Mono`
 /// variants keep every icon inside a single terminal cell, so both come first.
 fn fallback_rank(family: &str) -> u8 {
     let lowercase = family.to_lowercase();
-    // i18n: data
-    let symbols = lowercase.starts_with("symbols nerd font");
+    let symbols = is_symbols_only(family);
     let mono = lowercase.ends_with(" mono");
     match (symbols, mono) {
         (true, true) => 0,
@@ -481,11 +488,20 @@ impl Config {
         if terminal.fallbacks.is_none() {
             terminal.fallbacks = Some(detected.clone());
         }
-        // Icons first, so a CJK family that also maps the Private Use Area
-        // never draws a prompt icon.
+        // Symbols-only faces cannot claim letters. Search the native CJK faces
+        // before broader patched text faces, which may claim Hangul with
+        // half-width advances even when their glyphs need the full width.
+        let (symbols, patched_text) =
+            detected.split_at(detected.partition_point(|family| is_symbols_only(family)));
+        let interface: Vec<_> = symbols
+            .iter()
+            .chain(&cjk)
+            .chain(patched_text)
+            .cloned()
+            .collect();
         for face in [sidebar, tabs, ui] {
             if face.fallbacks.is_none() {
-                face.fallbacks = Some(detected.iter().chain(&cjk).cloned().collect());
+                face.fallbacks = Some(interface.clone());
             }
         }
     }

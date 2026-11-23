@@ -13,7 +13,7 @@ use crate::{
     control::protocol::{
         ErrorCode, Response,
         lend::{LendAnswer, LendCall, LendRequest, MAX_FRAME_WIDTH, MIN_FRAME_WIDTH},
-        tabs::TabOp,
+        tabs::{MAX_MACHINE_TYPE_CHARS, TabOp},
     },
     teleport::Host,
 };
@@ -96,6 +96,50 @@ impl Watch {
             }
             Err(problem) => self.problem = Some(problem),
         }
+    }
+}
+
+/// The most input waiting to be sent; beyond it, keys are dropped and the
+/// tab says so, as a link that slow cannot keep up with typing anyway.
+const MAX_QUEUED: usize = 256;
+
+/// Clicks and keys waiting for the one before them: each is its own run on
+/// the other computer, and runs in parallel would arrive in any order.
+#[derive(Debug, Default)]
+pub(crate) struct Inputs {
+    queue: std::collections::VecDeque<TabOp>,
+    sending: bool,
+}
+
+impl Inputs {
+    /// Queues `op`. `Ok(true)` when nothing is being sent, so the caller
+    /// starts sending; `Err` when the queue is full and `op` was dropped.
+    pub(crate) fn push(&mut self, op: TabOp) -> Result<bool, ()> {
+        if self.queue.len() >= MAX_QUEUED {
+            return Err(());
+        }
+        self.queue.push_back(op);
+        Ok(!std::mem::replace(&mut self.sending, true))
+    }
+
+    /// The next input to send, with the text typed after it in one, so a
+    /// slow link types a word at once; `None` when all is sent, which ends
+    /// the sending.
+    pub(crate) fn next(&mut self) -> Option<TabOp> {
+        let Some(mut op) = self.queue.pop_front() else {
+            self.sending = false;
+            return None;
+        };
+        if let TabOp::MachineType { text, .. } = &mut op {
+            while let Some(TabOp::MachineType { text: more, .. }) = self.queue.front() {
+                if text.chars().count() + more.chars().count() > MAX_MACHINE_TYPE_CHARS {
+                    break;
+                }
+                text.push_str(more);
+                self.queue.pop_front();
+            }
+        }
+        Some(op)
     }
 }
 

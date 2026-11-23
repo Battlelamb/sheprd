@@ -26,20 +26,48 @@ pub(crate) enum Answer {
     Dismissed,
 }
 
-/// Where the answer lands, for the request that asked.
+/// Where the answer lands, for the request that asked, and whether that
+/// request is still there to take it.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Answered(Arc<Mutex<Option<Answer>>>);
+pub(crate) struct Answered(Arc<Mutex<State>>);
+
+#[derive(Debug, Default)]
+struct State {
+    answer: Option<Answer>,
+    /// The request ended, cancelled or out of time: the question is moot.
+    cancelled: bool,
+}
+
+/// How often an open question checks whether its request ended.
+const CHECK: std::time::Duration = std::time::Duration::from_millis(250);
 
 impl Answered {
+    fn state(&self) -> std::sync::MutexGuard<'_, State> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     pub(crate) fn take(&self) -> Option<Answer> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner).take()
+        self.state().answer.take()
     }
 
     fn set(&self, answer: Answer) {
-        let mut slot = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        if slot.is_none() {
-            *slot = Some(answer);
+        let mut state = self.state();
+        if state.answer.is_none() {
+            state.answer = Some(answer);
         }
+    }
+
+    /// The request that asked ended: its question closes.
+    pub(crate) fn cancel(&self) {
+        self.state().cancelled = true;
+    }
+
+    fn cancelled(&self) -> bool {
+        self.state().cancelled
+    }
+
+    fn same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
     }
 }
 
@@ -85,7 +113,40 @@ impl SheprdWindow {
         self.menu.page = Some(Page::BorrowMachine);
         window.activate_window();
         cx.notify();
+        self.close_borrow_when_cancelled(answered.clone(), window, cx);
         Some(answered)
+    }
+
+    /// Closes the question once its request ends unanswered, so a stale
+    /// one neither blocks the next nor saves a choice nobody waits for.
+    fn close_borrow_when_cancelled(
+        &mut self,
+        answered: Answered,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor().timer(CHECK).await;
+                let open = this.update_in(cx, |view, window, cx| {
+                    let ours = view
+                        .menu
+                        .machine_borrow
+                        .as_ref()
+                        .is_some_and(|ask| ask.answered.same(&answered));
+                    if ours && answered.cancelled() {
+                        view.menu.machine_borrow = None;
+                        view.dismiss_menu(window, cx);
+                        return false;
+                    }
+                    ours
+                });
+                if !matches!(open, Ok(true)) {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     pub(crate) fn answer_borrow(
@@ -96,6 +157,7 @@ impl SheprdWindow {
     ) {
         if let Some(ask) = self.menu.machine_borrow.take() {
             if answer == Answer::Always
+                && !ask.answered.cancelled()
                 && let Some(hosts) = self.config.machine.adding(&ask.key)
             {
                 self.save_preference(move || save_borrow_from(&hosts), cx);

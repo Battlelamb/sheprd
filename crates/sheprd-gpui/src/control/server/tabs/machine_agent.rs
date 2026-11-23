@@ -32,7 +32,10 @@ pub(super) fn serve(_: &Caller, _: TabOp, incoming: socket::Incoming, _: &mut Ap
 
 #[cfg(target_os = "macos")]
 pub(super) fn serve(caller: &Caller, op: TabOp, incoming: socket::Incoming, cx: &mut App) {
+    // Watching changes nothing, so it needs no claim.
+    let peek = matches!(op, TabOp::MachinePeek { .. });
     let (name, work) = match op {
+        TabOp::MachinePeek { name, path } => (name, Work::Screenshot(path.into())),
         TabOp::MachineAgent { name } => (name, Work::Hello),
         TabOp::MachineExec {
             name,
@@ -81,7 +84,7 @@ pub(super) fn serve(caller: &Caller, op: TabOp, incoming: socket::Incoming, cx: 
     if let Err(message) = work.check() {
         return incoming.respond(Response::error(ErrorCode::InvalidRequest, message));
     }
-    if let Some(response) = machine_claims::check(caller, name.as_str(), cx) {
+    if !peek && let Some(response) = machine_claims::check(caller, name.as_str(), cx) {
         return incoming.respond(response);
     }
     work.run(name, incoming, cx);

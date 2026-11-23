@@ -52,6 +52,7 @@ pub(super) fn serve(
         | TabOp::MachineClick { .. }
         | TabOp::MachineExec { .. }
         | TabOp::MachineKey { .. }
+        | TabOp::MachinePeek { .. }
         | TabOp::MachineScreenshot { .. }
         | TabOp::MachineType { .. }) => machine_agent::serve(&caller, op, incoming, cx),
         TabOp::MachineDelete { name } => {

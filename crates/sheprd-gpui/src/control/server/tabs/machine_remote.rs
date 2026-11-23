@@ -170,6 +170,7 @@ fn machine_name(op: &TabOp) -> &str {
         | TabOp::MachineExec { name, .. }
         | TabOp::MachineKey { name, .. }
         | TabOp::MachineRelease { name }
+        | TabOp::MachinePeek { name, .. }
         | TabOp::MachineScreenshot { name, .. }
         | TabOp::MachineStart { name }
         | TabOp::MachineSuspend { name }
@@ -201,6 +202,16 @@ struct Running {
     answer: Arc<Mutex<Option<Response>>>,
     /// The tab to open here once the machine there started.
     open: Option<(String, String)>,
+}
+
+impl Drop for Job {
+    /// A request that ends while its question is open, cancelled or out of
+    /// time, closes the question.
+    fn drop(&mut self) {
+        if let Stage::Asking(answered) = &self.stage {
+            answered.cancel();
+        }
+    }
 }
 
 impl Drop for Running {

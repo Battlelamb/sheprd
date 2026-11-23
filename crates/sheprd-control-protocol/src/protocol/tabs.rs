@@ -135,6 +135,14 @@ pub enum TabOp {
         modifiers: Vec<MachineModifier>,
     },
     MachineList,
+    /// A PNG of the screen of the virtual Mac called `name`, written to
+    /// `path`, for someone watching it: unlike a screenshot it needs no
+    /// claim, as it changes nothing, so a machine an agent holds can still
+    /// be watched.
+    MachinePeek {
+        name: String,
+        path: String,
+    },
     /// `request`, a virtual Mac request, run by the Sheprd on `host`, a
     /// connected host's ID or label: borrowing a virtual Mac there. A
     /// screenshot's path is this computer's, and an opened machine shows
@@ -230,6 +238,7 @@ impl TabOp {
                 | Self::MachineExec { .. }
                 | Self::MachineKey { .. }
                 | Self::MachineList
+                | Self::MachinePeek { .. }
                 | Self::MachineRelease { .. }
                 | Self::MachineScreenshot { .. }
                 | Self::MachineStart { .. }
@@ -240,8 +249,10 @@ impl TabOp {
 
     /// Whether `machine --host` may forward it: what the other computer
     /// lends, and opening a machine, which starts it there and shows it here.
+    /// A watcher's peek is not: its path is the lending computer's.
     pub fn forwardable(&self) -> bool {
-        self.lendable() || matches!(self, Self::Machine { .. })
+        (self.lendable() && !matches!(self, Self::MachinePeek { .. }))
+            || matches!(self, Self::Machine { .. })
     }
 
     /// Whether it may take one of a computer's VM slots, which borrowing
@@ -262,6 +273,7 @@ impl TabOp {
             Self::MachineAgent { .. }
             | Self::MachineClick { .. }
             | Self::MachineKey { .. }
+            | Self::MachinePeek { .. }
             | Self::MachineScreenshot { .. } => MACHINE_AGENT_WAIT_SECONDS,
             Self::MachineType { .. } => MACHINE_AGENT_WAIT_SECONDS + MACHINE_TYPE_SECONDS,
             Self::MachineOn { request, .. } => request

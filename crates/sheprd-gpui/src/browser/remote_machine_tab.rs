@@ -22,6 +22,8 @@ struct Watches {
     watches: HashMap<TabId, Watch>,
     /// Where each tab last drew its frame area, for clicks.
     areas: HashMap<TabId, Bounds<Pixels>>,
+    /// Each tab's clicks and keys, sent one at a time in order.
+    inputs: HashMap<TabId, watch::Inputs>,
 }
 
 impl Global for Watches {}
@@ -219,6 +221,7 @@ impl SheprdWindow {
                     if !exists {
                         watches.watches.remove(&id);
                         watches.areas.remove(&id);
+                        watches.inputs.remove(&id);
                         return Step::Stop;
                     }
                     let Some(watch) = watches.watches.get(&id) else {
@@ -312,30 +315,69 @@ impl SheprdWindow {
         );
     }
 
-    /// Sends `op` to tab `id`'s machine, naming it there.
+    /// Queues `op` for tab `id`'s machine, and starts sending unless input
+    /// is already on its way: one at a time, so it arrives in order.
     fn remote_machine_input(&mut self, id: TabId, op: TabOp, cx: &mut Context<Self>) {
-        let Some(Location::RemoteMachine { endpoint, name }) = cx
-            .try_global::<Store>()
-            .and_then(|store| store.get(id))
-            .and_then(|tab| tab.location.clone())
-        else {
-            return;
-        };
-        let Some((host, label)) = self.remote_machine_host(&endpoint) else {
-            return;
-        };
-        let op = named(op, name.to_string());
-        let sent = cx
-            .background_executor()
-            .spawn(async move { watch::input(&host, &label, op, &Default::default()) });
-        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
-            let problem = sent.await;
-            let _ = this.update(cx, |_, cx| {
+        let pushed = cx
+            .default_global::<Watches>()
+            .inputs
+            .entry(id)
+            .or_default()
+            .push(op);
+        match pushed {
+            Ok(true) => self.send_remote_input(id, cx),
+            Ok(false) => {}
+            Err(()) => {
                 if let Some(watch) = cx.default_global::<Watches>().watches.get_mut(&id) {
-                    watch.problem = problem;
+                    watch.problem = Some(fl!("machine-remote-input-full"));
                 }
                 cx.notify();
-            });
+            }
+        }
+    }
+
+    /// Sends tab `id`'s queued input until none is left.
+    fn send_remote_input(&mut self, id: TabId, cx: &mut Context<Self>) {
+        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            loop {
+                let next = this.update(cx, |view, cx| {
+                    let op = cx
+                        .default_global::<Watches>()
+                        .inputs
+                        .get_mut(&id)
+                        .and_then(watch::Inputs::next)?;
+                    let target = cx
+                        .try_global::<Store>()
+                        .and_then(|store| store.get(id))
+                        .and_then(|tab| tab.location.clone());
+                    let Some(Location::RemoteMachine { endpoint, name }) = target else {
+                        // The tab closed: what it queued goes with it.
+                        cx.default_global::<Watches>().inputs.remove(&id);
+                        return None;
+                    };
+                    let (host, label) = view.remote_machine_host(&endpoint)?;
+                    Some((host, label, named(op, name.to_string())))
+                });
+                let Ok(Some((host, label, op))) = next else {
+                    // Without a host to send to, the rest cannot go either.
+                    let _ = this.update(cx, |_, cx| {
+                        if let Some(inputs) = cx.default_global::<Watches>().inputs.get_mut(&id) {
+                            while inputs.next().is_some() {}
+                        }
+                    });
+                    break;
+                };
+                let problem = cx
+                    .background_executor()
+                    .spawn(async move { watch::input(&host, &label, op, &Default::default()) })
+                    .await;
+                let _ = this.update(cx, |_, cx| {
+                    if let Some(watch) = cx.default_global::<Watches>().watches.get_mut(&id) {
+                        watch.problem = problem;
+                    }
+                    cx.notify();
+                });
+            }
         })
         .detach();
     }

@@ -63,7 +63,7 @@ fn answer(call: LendCall) -> crate::Result<LendAnswer> {
             response: send(&Request::Tab(Call { caller, op }))?,
         },
         LendRequest::Tab { .. } => refusal("Another computer may only ask for virtual Mac work"),
-        LendRequest::Picture { name } => match screenshot(caller, name)? {
+        LendRequest::Picture { name } => match screenshot(caller, name, false)? {
             Ok(png) => picture(&png)?,
             Err(response) => LendAnswer::Response { response },
         },
@@ -71,7 +71,7 @@ fn answer(call: LendCall) -> crate::Result<LendAnswer> {
             if !(MIN_FRAME_WIDTH..=MAX_FRAME_WIDTH).contains(&width) {
                 return Ok(refusal("A frame is 160 to 3840 pixels wide"));
             }
-            match screenshot(caller, name)? {
+            match screenshot(caller, name, true)? {
                 Ok(png) => {
                     let frame = crate::machine::remote::frame::make(&png, width, since.as_deref())
                         .map_err(crate::machine::Error::from)?;
@@ -97,16 +97,29 @@ fn refusal(message: &str) -> LendAnswer {
 }
 
 /// The machine's screen as a PNG, or the app's refusal. The app writes it
-/// into a folder only this user reads, removed when this returns.
-fn screenshot(caller: Caller, name: String) -> crate::Result<Result<Vec<u8>, Response>> {
+/// into a folder only this user reads, removed when this returns. A
+/// watcher's frame (`watching`) needs no claim; an agent's screenshot does.
+fn screenshot(
+    caller: Caller,
+    name: String,
+    watching: bool,
+) -> crate::Result<Result<Vec<u8>, Response>> {
     let folder = tempfile::Builder::new().prefix("sheprd-lend-").tempdir()?;
     let path = folder.path().join("screen.png");
     let Some(text) = path.to_str() else {
         return Err(crate::Error::InvalidLocalPage);
     };
-    let op = TabOp::MachineScreenshot {
-        name,
-        path: text.to_owned(),
+    let path_text = text.to_owned();
+    let op = if watching {
+        TabOp::MachinePeek {
+            name,
+            path: path_text,
+        }
+    } else {
+        TabOp::MachineScreenshot {
+            name,
+            path: path_text,
+        }
     };
     match send(&Request::Tab(Call { caller, op }))? {
         Response::Tab {

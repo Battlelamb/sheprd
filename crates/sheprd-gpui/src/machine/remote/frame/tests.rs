@@ -43,3 +43,11 @@ fn a_picture_that_is_not_a_png_is_refused() {
         Err(Error::Decode(_))
     ));
 }
+
+#[test]
+fn the_same_screen_at_another_width_is_a_new_frame() {
+    let small = make(&png(400, 200, 3), 200, None).unwrap();
+    let wide = make(&png(400, 200, 3), 400, Some(&small.hash)).unwrap();
+    assert!(wide.jpeg.is_some());
+    assert_ne!(wide.hash, small.hash);
+}

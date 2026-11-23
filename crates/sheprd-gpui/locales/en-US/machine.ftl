@@ -21,3 +21,4 @@ machine-borrow-wait = Wait for a slot here
 machine-remote-connecting = Connecting to { $name } on { $host }…
 machine-remote-badge = On { $host }
 machine-remote-badge-slow = On { $host }, slow link
+machine-remote-input-full = Too much input is waiting for the other computer; some keys were dropped.

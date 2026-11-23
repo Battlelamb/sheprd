@@ -40,4 +40,10 @@ fn only_machine_work_is_lendable() {
         request: Box::new(TabOp::MachineList),
     };
     assert!(!nested.forwardable());
+    let peek = TabOp::MachinePeek {
+        name: name(),
+        path: "/tmp/x.png".to_owned(),
+    };
+    assert!(peek.lendable());
+    assert!(!peek.forwardable());
 }

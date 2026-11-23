@@ -27,3 +27,42 @@ fn keys_have_the_names_machine_key_takes() {
     assert_eq!(key_name("backspace"), Some("delete"));
     assert_eq!(key_name("f13"), None);
 }
+
+fn typed(text: &str) -> TabOp {
+    TabOp::MachineType {
+        name: "default".to_owned(),
+        text: text.to_owned(),
+    }
+}
+
+fn key(key: &str) -> TabOp {
+    TabOp::MachineKey {
+        name: "default".to_owned(),
+        key: key.to_owned(),
+        modifiers: Vec::new(),
+    }
+}
+
+#[test]
+fn input_goes_in_order_one_run_at_a_time() {
+    let mut inputs = Inputs::default();
+    assert_eq!(inputs.push(typed("h")), Ok(true));
+    assert_eq!(inputs.push(typed("i")), Ok(false));
+    assert_eq!(inputs.push(key("return")), Ok(false));
+    assert_eq!(inputs.push(typed("x")), Ok(false));
+    assert_eq!(inputs.next(), Some(typed("hi")));
+    assert_eq!(inputs.next(), Some(key("return")));
+    assert_eq!(inputs.next(), Some(typed("x")));
+    assert_eq!(inputs.next(), None);
+    // Sending ended: the next input starts it again.
+    assert_eq!(inputs.push(key("tab")), Ok(true));
+}
+
+#[test]
+fn a_full_queue_drops_input() {
+    let mut inputs = Inputs::default();
+    for _ in 0..MAX_QUEUED {
+        assert!(inputs.push(key("a")).is_ok());
+    }
+    assert_eq!(inputs.push(key("b")), Err(()));
+}

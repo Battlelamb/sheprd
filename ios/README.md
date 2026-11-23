@@ -343,12 +343,34 @@ longer have, which shows as not reported).
   builds. The simulator has no App Attest, so the push relay cannot be used
   there.
 
+## Live Activity styles
+
+Settings > Notifications > Live Activities > Style picks how an activity
+looks on this phone (`LiveActivityStyle`, kept in the App Group so the widget
+draws with it), each previewed working, waiting, and finished:
+
+- **Private**: the agent and working, waiting, or done. Computers send it
+  generic, as below.
+- **Minimal**: the chat, its computer, and its status.
+- **Standard**, the default: the step in words (`activity`, with an `icon`
+  kind) and the answer buttons.
+- **Complete**: Standard with the steps before it in words, the plan, and the
+  turn's counts (`steps`, `files`).
+- **Geek**: the commands themselves, without their shell wrapper.
+
+The daemon says each step in words from the tool call's kind and, for a
+command, its first words (`apns/activity.rs`), and sends it beside the step,
+so every style is drawn from the same push; an older computer sends only the
+step, which the words fall back to. Changing the style redraws the activities
+showing. Start Test Activity, on the same page, plays a test in the chosen
+style.
+
 ## Live Activity detail
 
 Detailed, the default, shows the chat and its current step. Generic shows the
 agent and what it is doing in general. A computer chooses in Sheprd's Settings >
-Remote control (`live_activities` in `[remote]`), and a phone chooses with Keep
-Generic in its Settings. The stricter choice wins. Turning on Keep Generic ends
+Remote control (`live_activities` in `[remote]`), and a phone chooses with the
+Private style. The stricter choice wins. Turning on Private ends
 the activities showing, since a title set when one starts cannot change, and the
 app ends any naming a chat that a computer starts before it hears. A computer that is away
 hears at the next sync, and while the app is closed such an activity can show

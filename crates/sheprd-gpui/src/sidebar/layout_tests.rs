@@ -400,6 +400,13 @@ pub(crate) fn within_device_pixel(actual: Pixels, expected: Pixels, scale: f32) 
 }
 
 impl PaintedText {
+    /// Truncation keeps the longest prefix that fits beside the ellipsis. The
+    /// next glyph need not fit, so the fixture allows one glyph plus an ellipsis
+    /// of unused room, just as its child-row checks do.
+    pub(crate) fn fills_truncated_column(&self) -> bool {
+        self.glyph_text.ends_with('\u{2026}') && self.width > self.bounds.size.width - px(16.)
+    }
+
     /// `bar` is the width of the activity bar left of the sidebar, if any;
     /// `scale` is the window's device pixels per logical pixel; see
     /// [`within_device_pixel`].
@@ -466,7 +473,7 @@ impl PaintedText {
             // can fall one glyph plus the ellipsis short. Segoe UI on Windows
             // leaves 13px where macOS's system font left under 12.
             ensure!(
-                self.width > self.bounds.size.width - px(16.),
+                self.fills_truncated_column(),
                 "child glyph width {:?} did not fill label width {:?}",
                 self.width,
                 self.bounds.size.width
@@ -491,14 +498,6 @@ pub(crate) const REPO_KEY: &str = if cfg!(windows) {
 } else {
     "/fixture/agent-launcher/.git"
 };
-
-/// The native glyph fixture has four root repositories (three gaps).
-/// Its workspace list gets half the flexible height, so reserve twice
-/// their spacing to keep the same rows visible at the smallest viewport.
-#[cfg(feature = "integration-test")]
-pub(crate) fn fixture_repository_height(config: &crate::config::Config) -> f32 {
-    2. * 3. * crate::sidebar::repository::gap(config)
-}
 
 pub(crate) fn snapshot(workspace_count: usize) -> ClientShellSnapshot {
     snapshot_with_repo_key(workspace_count, REPO_KEY)

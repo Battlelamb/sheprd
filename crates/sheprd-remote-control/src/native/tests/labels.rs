@@ -107,3 +107,58 @@ async fn concurrent_labels_keep_both_edits_and_ignore_other_boots() {
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn unlisted_agents_do_not_share_worktree_labels() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut layout = layout(EndpointId::random());
+    let mut checkout = layout.workspaces[0].clone();
+    checkout.chats.clear();
+    checkout.terminals.clear();
+    // Both rows advertise /work, even though the unlisted terminal is elsewhere.
+    let unlisted = &mut layout.workspaces[0];
+    unlisted.id = "core:terminals".into();
+    unlisted.terminals[0].cwd = Some("/elsewhere".into());
+    unlisted.terminals[0].panes[0].cwd = Some("/elsewhere".into());
+    layout.workspaces.push(checkout);
+    let state = offline(dir.path(), layout);
+    let add = |target, worktree, name: &str| {
+        state
+            .labels
+            .answer(&state.hub, target, worktree, Edit::Add(name.into()))
+    };
+    assert!(matches!(
+        add(Target::Workspace("w1".into()), true, "Release"),
+        Response::Labels { .. }
+    ));
+    for target in [
+        Target::Workspace("core:terminals".into()),
+        Target::Pane("p1".into()),
+        Target::Pane("p2".into()),
+    ] {
+        assert!(matches!(add(target, true, "Mixed"), Response::Error { .. }));
+    }
+    assert!(matches!(
+        add(Target::Pane("p2".into()), false, "Review"),
+        Response::Labels { .. }
+    ));
+    let home = home(&state, &DeviceId("test".into()));
+    let group = home
+        .workspaces
+        .iter()
+        .find(|w| w.id == "core:terminals")
+        .unwrap();
+    assert!(group.labels.is_empty());
+    assert_eq!(
+        group.terminals[0].agent.as_ref().unwrap().labels,
+        ["Review"]
+    );
+    assert_eq!(
+        home.workspaces
+            .iter()
+            .find(|w| w.id == "w1")
+            .unwrap()
+            .labels,
+        ["Release"]
+    );
+}

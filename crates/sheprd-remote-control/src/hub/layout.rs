@@ -41,6 +41,14 @@ pub(crate) struct Workspace {
     pub(crate) terminals: Vec<Terminal>,
 }
 
+impl Workspace {
+    /// The unlisted core group takes its cwd from one terminal and can span checkouts.
+    pub(crate) fn checkout_folder(&self) -> Option<&str> {
+        let (_, id) = super::sessions::split_id(&self.id);
+        (id != super::core::UNLISTED && !self.cwd.is_empty()).then_some(self.cwd.as_str())
+    }
+}
+
 /// A pane running `herdr-acp`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Chat {

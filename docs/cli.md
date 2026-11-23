@@ -197,7 +197,7 @@ share at least two of its keywords and were not shown yet in that chat.
 
 | Command | What it does |
 | --- | --- |
-| `labels [list\|add TAG\|rename OLD NEW\|remove TAG] [--worktree] [--pane ID\|--workspace ID]` | Manage labels on the calling agent, or on its checkout with `--worktree`. An explicit pane or workspace uses the local remote-control daemon’s ID. A workspace selects the checkout directly. iOS shows the combined labels on chat and terminal agent rows. Names are case-insensitive, with up to eight labels of 24 characters per target. Renaming or removing affects only the selected target. Requires Remote control on the host. |
+| `labels [list\|add TAG\|rename OLD NEW\|remove TAG] [--worktree] [--pane ID\|--workspace ID]` | Manage labels on the calling agent, or on its checkout with `--worktree`. An explicit pane or workspace uses the local remote-control daemon’s ID. A workspace selects the checkout directly. The group of unlisted Herdr 2 terminals can span folders and supports only individual agent labels. iOS shows the combined labels on chat and terminal agent rows. Names are case-insensitive, with up to eight labels of 24 characters per target. Renaming or removing affects only the selected target. Requires Remote control on the host. |
 | `notes [list]` | Every worktree note |
 | `notes get\|clear`, `notes set TEXT` | The note on your checkout (its repository and branch) |
 | `memory [list] [--all] [--limit N]` | What agents learned about the current directory's repository: pinned entries first, then the most recently used, of the repository and the current branch (`--all`: every branch's). Exits 4 when there are none (no app needed) |

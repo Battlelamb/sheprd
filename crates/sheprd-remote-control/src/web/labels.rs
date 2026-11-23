@@ -126,13 +126,14 @@ pub(crate) fn chat_key(endpoint: &str) -> String {
 }
 
 pub(crate) fn worktree_key(w: &Workspace) -> Option<String> {
+    let cwd = w.checkout_folder()?;
     let session = if hub::in_wsl(&w.id) {
         w.session.as_deref()?
     } else {
         ""
     };
-    (!w.cwd.is_empty() && w.cwd.len() <= 4096 && !w.cwd.chars().any(char::is_control))
-        .then(|| format!("worktree:{session}:{}", w.cwd))
+    (cwd.len() <= 4096 && !cwd.chars().any(char::is_control))
+        .then(|| format!("worktree:{session}:{cwd}"))
 }
 
 fn resolve(hub: &Hub, layout: &Layout, target: Target, worktree: bool) -> Option<String> {

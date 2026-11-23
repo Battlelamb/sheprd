@@ -431,7 +431,10 @@ final class Fleet {
 
     /// Opens a chat, current at once when it was followed (`WarmChats`).
     func openChat(_ key: PaneKey) -> ChatStore {
-        if let sample = DemoFleet.transcript(key) { return ChatStore(key: key, sample: sample) }
+        if let sample = DemoFleet.transcript(key) {
+            DemoFleet.markOpened(key, in: &machines)
+            return ChatStore(key: key, sample: sample)
+        }
         chatViewers[key, default: 0] += 1
         let store = follow(key, background: false)
         store.shown(true)

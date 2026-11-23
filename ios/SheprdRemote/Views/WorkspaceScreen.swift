@@ -68,7 +68,7 @@ struct WorkspaceScreen: View {
                     ComputerScreen(device: key.device).makesRoomForConnectionToast()
                 } label: {
                     WorkspaceRowLabel {
-                        ComputerRow(computer: machine.computer, name: model.displayName(machine.computer), status: machine.status)
+                        ComputerRow(computer: machine.computer, name: model.displayName(machine.computer), status: machine.presentedStatus)
                     }
                 }
                 if let pullRequest = workspace.pullRequest, let url = URL(string: pullRequest.url) {

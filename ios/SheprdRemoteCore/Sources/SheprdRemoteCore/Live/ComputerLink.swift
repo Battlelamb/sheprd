@@ -1,7 +1,7 @@
 import Foundation
 
 /// How a computer is reached right now.
-public enum LinkStatus: Hashable, Sendable {
+public enum LinkStatus: Codable, Hashable, Sendable {
     case connecting
     case online(origin: String)
     /// Nothing answered, or the connection dropped; it retries by itself
@@ -12,6 +12,13 @@ public enum LinkStatus: Hashable, Sendable {
     /// The computer's Sheprd has no live API for this app: update Sheprd
     /// there. It keeps retrying, so an update is picked up by itself.
     case outdated
+
+    /// A reconnect attempt does not change what the person last saw until
+    /// the computer answers or the attempt fails.
+    public func presented(lastKnown: LinkStatus?) -> LinkStatus {
+        if case .connecting = self, let lastKnown, lastKnown != .connecting { return lastKnown }
+        return self
+    }
 }
 
 /// What a link reports: its status, and what its socket says.

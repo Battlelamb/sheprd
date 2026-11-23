@@ -129,9 +129,8 @@ sheprd browser open http://localhost:3000
   while the page updates. Later files you open join the same split. If your
   terminal is not on screen, Sheprd opens a tab instead and reports that fallback.
 - A web address opens as a tab in your own workspace (`HERDR_WORKSPACE_ID`,
-  which Herdr sets in every pane, or the workspace of your Herdr 2 tab) and the window switches to it. The
-  terminal keeps running underneath; the user returns to it by clicking its
-  tab.
+  which Herdr sets in every pane, or the workspace of your Herdr 2 tab). It
+  stays in the background until the user selects it.
 - Add `--tab` to open a file as a tab instead, or `--beside` to put a web
   address in the split.
 - Relative paths (`./mockup/index.html`) and absolute paths
@@ -147,8 +146,9 @@ sheprd browser open http://localhost:3000
   images load. Links to other Markdown files in the folder open rendered too.
 - Opening the same page again from the same pane reuses and reloads its tab.
   After editing a file, run `sheprd browser reload` instead.
-- Add `--no-focus` to add the tab without switching to it, for example when
-  the user is typing in your pane.
+- Command-opened pages preserve the current tab and keyboard focus.
+  `--no-focus` is still accepted for compatibility. Manually creating a tab
+  in the app selects it.
 - When the user finds a page too small or too large, zoom its tab:
   `sheprd browser zoom TAB 150` (or `+`, `-`, `reset`), with `TAB` from
   `sheprd browser list`. The tab keeps its zoom; the user zooms with

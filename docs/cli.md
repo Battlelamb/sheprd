@@ -572,19 +572,25 @@ command line.
 | --- | --- |
 | `fleet [status]` | The fleet as this computer's daemon keeps it: its id, the members (computers and phones, who admitted each, which is this computer), the hosts (who added each, how many computers may reach each, and the `ssh` target this computer reaches it by when it may), members cut off by a removal whose history has not arrived, and members that signed in two places. Exits 4 when this computer is in no fleet, and 1, with the reason, when its daemon cannot be read |
 | `fleet members`, `fleet hosts` | One of those lists. JSON is `{"members": [...]}` or `{"hosts": [...]}` |
-| `fleet open` | Show Settings > Fleet, where a fleet is created, computers this Sheprd reaches are invited, and hosts are shared with the computers ticked |
+| `fleet open` | Show Settings > Fleet, where a fleet is created or, from a computer in none, joined through a member this Sheprd reaches; computers this Sheprd reaches are invited, one by one or all at once; and hosts are shared with the computers ticked |
 | `fleet remove MEMBER` | Ask in Settings > Fleet to remove a member, named by its ID from `fleet status` or its name (a name two members share is refused). The user picks why there: a compromised member takes the members and hosts it added with it |
 | `fleet remove-host HOST` | Ask in Settings > Fleet to remove a host everywhere, by its ID or name; the user confirms there |
 | `fleet scrub MACHINE` | Ask in Settings > Fleet to remove every way a fleet reaches a machine this Sheprd connects to, named by its device ID or name: `sheprd-remote-control fleet scrub` and `sheprd-relay-agent fleet scrub` over SSH, each when installed, remove its `sheprd-fleet:` lines and the agent's entries. The last resort for a host no member can reach or a fleet that is gone; nothing is signed, and the user confirms there |
+| `fleet invite MACHINE`, `fleet invite --all` | Ask in Settings > Fleet to invite a computer this Sheprd reaches over SSH that is in no fleet, named by its device ID or name, or, with `--all`, offer to invite every such computer at once; the user confirms there. Refused when this computer is no member |
+| `fleet join [MACHINE]` | Offer in Settings > Fleet to join the fleet a computer this Sheprd reaches over SSH is a member of, while this computer is in none; MACHINE, by device ID or name, must be one. The member admits it over SSH once the user clicks Join there. Refused when this computer is in a fleet already |
 
 `--json` for `status` gives the daemon's view: `fleet`, `me`, `members`,
 `hosts` (each with `grants` and an optional `target`), `removed`,
 `suspended`, `equivocating`, `pending`, and `heads`. `remove`,
-`remove-host`, and `scrub` exit 5 when nothing of that name is there.
+`remove-host`, `scrub`, `invite`, and `join` exit 5 when nothing of that
+name is there, and `invite --all` and `join` when there is nothing to
+invite or join.
 
 ```sh
 sheprd fleet status --json
 sheprd fleet remove "old laptop"
+sheprd fleet invite --all
+sheprd fleet join studio
 ```
 
 ### Mods

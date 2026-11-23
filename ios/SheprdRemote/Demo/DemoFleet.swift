@@ -20,6 +20,20 @@ enum DemoFleet {
         }
     }
 
+    /// Opening a chat reads its reply in the in-memory demo, just as a
+    /// paired computer reports it read in the next home it sends.
+    static func markOpened(_ key: PaneKey, in machines: inout [Fleet.Machine]) {
+        guard let machine = machines.firstIndex(where: { $0.id == key.device }),
+              var home = machines[machine].home else { return }
+        for workspace in home.workspaces.indices {
+            if let chat = home.workspaces[workspace].chats.firstIndex(where: { $0.pane == key.pane && $0.unread == true }) {
+                home.workspaces[workspace].chats[chat].unread = false
+                machines[machine].home = home
+                return
+            }
+        }
+    }
+
     /// What a demo chat shows when opened; nil for any other chat. The
     /// longer ones are the simulator loop's samples.
     static func transcript(_ key: PaneKey, now: Date = .now) -> Transcript? {

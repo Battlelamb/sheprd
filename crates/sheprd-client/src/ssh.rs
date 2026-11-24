@@ -130,7 +130,7 @@ pub enum HostProbe {
 
 /// Every candidate reports its client and server status, one block each, so
 /// the choice between them stays with the same rules the bridge applies.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn probe_command(session: &str) -> String {
     format!("/bin/sh -c {}", quote(&probe_script(session)))
 }

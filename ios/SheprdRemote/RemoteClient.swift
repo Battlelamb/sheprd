@@ -155,6 +155,10 @@ final class RemoteClient: Sendable {
         return try await send("GET", "/api/pair/claim/\(escaped)")
     }
 
+    func pairVoice<Body: Encodable, Answer: Decodable>(_ body: Body, bearer: String) async throws -> Answer {
+        try await send("POST", "/api/v2/pair/voice", body: body, bearer: bearer, timeout: 18)
+    }
+
     /// Whether this address answers at all, within three seconds.
     func ping() async -> Bool {
         (try? await fingerprint()) != nil

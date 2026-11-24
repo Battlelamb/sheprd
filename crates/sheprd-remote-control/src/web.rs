@@ -284,6 +284,7 @@ pub(crate) fn router(state: Shared) -> Router {
             "/api/v2/fleet/sync",
             post(fleet::sync).layer(DefaultBodyLimit::max(fleet::MAX_SYNC_BODY)),
         )
+        .route("/api/v2/pair/voice", post(api::pair_voice))
         .route("/api/v2/github/token", get(crate::native::github::token))
         .route("/api/v2/home", get(crate::native::get_home))
         .route("/api/v2/hosts", get(hosts::list))

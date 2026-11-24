@@ -27,6 +27,7 @@ struct PairView: View {
                         VStack(alignment: .leading, spacing: 20) {
                             Label("Paired with \(name)", systemImage: "checkmark.circle.fill")
                                 .font(.title3.bold()).foregroundStyle(.green)
+                            if pairing.voiceExchangeFailed { Text("Paired. The voice account could not be shared. Connect it in Settings → Voice.") }
                             AlsoPairing(computer: computer) { dismiss() }
                             Spacer()
                         }
@@ -113,7 +114,7 @@ struct PairView: View {
 
     private func codeView(_ code: String) -> some View {
         VStack(spacing: 20) {
-            Text("Check that the computer shows the same code, then choose Allow there.")
+            Text("Check that the computer shows the same code, then choose Allow there. Pairing also shares your speaking voice and key with a device that has none.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
             Text(spaced(code))

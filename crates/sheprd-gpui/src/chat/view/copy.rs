@@ -62,16 +62,15 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = &self.theme;
+        let words: std::sync::Arc<str> = text.into();
         let button = self
             .chat_copy_button(
                 ("chat-copy", id),
                 format!("chat-copy-{id}"),
-                String::from(text),
+                words.clone(),
                 fl!("chat-copy-message-done"),
                 cx,
             )
-            .invisible()
-            .group_hover("chat-agent-message", |button| button.visible())
             .flex()
             .items_center()
             .gap(px(4.))
@@ -85,8 +84,42 @@ impl SheprdWindow {
                     .text_color(rgb(theme.muted)),
             )
             .child(fl!("chat-copy"));
+        let read = div()
+            .id(("chat-read-aloud", id))
+            .role(Role::Button)
+            .aria_label(fl!("settings-voice-read"))
+            .cursor_pointer()
+            .text_color(rgb(theme.muted))
+            .text_size(px((self.chat_text_size() - 2.).max(10.)))
+            .px(px(4.))
+            .child(fl!("settings-voice-read"))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |_, _, _, cx| {
+                cx.stop_propagation();
+                let words = words.clone();
+                let generation = crate::voice::next();
+                let job = cx
+                    .background_executor()
+                    .spawn(async move { crate::voice::read_message(&words, generation) });
+                cx.spawn(async move |this, cx| {
+                    if let Err(error) = job.await {
+                        let _ = this.update(cx, |this, cx| {
+                            this.show_flash(Flash::warning(error.to_string()), cx)
+                        });
+                    }
+                })
+                .detach();
+            }));
+        let actions = div()
+            .id(("chat-message-actions", id))
+            .flex()
+            .items_center()
+            .invisible()
+            .group_hover("chat-agent-message", |row| row.visible())
+            .child(button)
+            .child(read);
         layout_for(self.config.chat.layout)
-            .copy(button, placement, &self.chat_look())
+            .copy(actions, placement, &self.chat_look())
             .when(placement == CopyPlacement::Footer, |copy| {
                 copy.debug_selector(move || format!("chat-copy-footer-{id}"))
             })

@@ -4,9 +4,8 @@
 //! only this user reaches it. No Tokio: Sheprd calls [`request`] from a
 //! background thread.
 //!
-//! Secrets never cross it except a pairing offer's URL, whose token is
-//! valid for one minute and one claim. Device keys and session tokens stay
-//! in the daemon.
+//! Pairing offers, borrowed GitHub tokens and approved voice accounts are
+//! sensitive. Device keys and session tokens stay in the daemon.
 
 use sheprd_chat_protocol::{read_frame, write_frame};
 pub mod app_update;
@@ -28,6 +27,7 @@ pub mod read;
 pub mod relays;
 pub mod shortcuts;
 pub mod tags;
+pub mod voice;
 use serde::{Deserialize, Serialize};
 use std::{
     io::{BufReader, BufWriter, Write},
@@ -292,8 +292,13 @@ pub enum Request {
         instance: u32,
         update: app_update::AppUpdate,
     },
-    /// Takes the phones' questions about workspaces, waiting up to
-    /// [`ASK_WAIT`] for one. Sheprd sends it while a phone is connected.
+    /// Takes pending exchanges during approved voice account pairings.
+    VoiceAsks,
+    VoiceAnswer {
+        id: changes::AskId,
+        answer: Option<voice::Answer>,
+    },
+    /// Takes phones' workspace questions, waiting up to [`ASK_WAIT`].
     ChangeAsks,
     /// What Sheprd found for an [`changes::Ask`].
     ChangeAnswer {
@@ -412,6 +417,9 @@ pub enum Response {
         /// A phone asked to update since the last report. Taken by reading.
         requested: bool,
     },
+    VoiceAsks {
+        asks: Vec<voice::Ask>,
+    },
     ChangeAsks {
         asks: Vec<changes::Ask>,
         /// Changes phones ask for in Herdr 2 tabs' layouts. An older
@@ -508,6 +516,8 @@ pub struct Status {
     /// (`Request::GitHubLeaseAsks`); an older daemon has none.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub github_asks: usize,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub voice_asks: usize,
     /// Each relay this computer listens on, by endpoint; absent when it
     /// listens on none, or the daemon is older.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]

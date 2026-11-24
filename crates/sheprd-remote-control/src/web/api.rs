@@ -250,6 +250,7 @@ pub(super) async fn claim_status(
         PairingState::Approved { device } => {
             let mut approved = json!({
                 "state": "approved",
+                "voice_exchange": true,
                 "device": device.0,
                 "origins": state.origins(),
                 "fingerprint": state.fingerprint,
@@ -570,4 +571,55 @@ pub(super) async fn unsubscribe_push(
     })
     .await?;
     Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub(super) struct VoiceExchange {
+    claim: String,
+    #[serde(flatten)]
+    offer: crate::control::voice::Offer,
+}
+
+/// The approved claim alone is public polling information. A fresh, matching
+/// device session proves possession of the device key before any secret moves.
+pub(super) async fn pair_voice(
+    State(state): State<Shared>,
+    Device(device): Device,
+    headers: HeaderMap,
+    Json(request): Json<VoiceExchange>,
+) -> Result<impl axum::response::IntoResponse, ApiError> {
+    if headers.contains_key(header::ORIGIN) || request.claim.len() > 128 {
+        return Err(ApiError::Unauthorized);
+    }
+    let now = now_ms();
+    {
+        let mut auth = state.auth();
+        let approved = auth.claim_status(&ClaimId(request.claim), now)?;
+        if !matches!(approved, PairingState::Approved { device: paired } if paired == device)
+            || !auth.devices().get(&device).is_some_and(|record| {
+                record.via.is_none()
+                    && record.app.is_none()
+                    && record.ssh.is_none()
+                    && now.saturating_sub(record.created_ms) < 120_000
+            })
+        {
+            return Err(ApiError::Unauthorized);
+        }
+    }
+    if !request.offer.valid() {
+        return Err(ApiError::Invalid("invalid voice account"));
+    }
+    let mut pending = state.changes.ask_voice(request.offer)?;
+    let answer = tokio::time::timeout(Duration::from_secs(15), pending.answer())
+        .await
+        .ok()
+        .flatten()
+        .flatten()
+        .ok_or(ApiError::Invalid(
+            "The desktop could not access its voice account.",
+        ))?;
+    if state.auth().devices().get(&device).is_none() {
+        return Err(ApiError::Unauthorized);
+    }
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(answer)))
 }

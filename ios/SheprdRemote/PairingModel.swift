@@ -45,6 +45,7 @@ final class PairingModel {
 
     private func start(_ onPaired: @escaping (Computer) -> Void, _ work: @escaping () async throws -> Computer) {
         task?.cancel()
+        voiceExchangeFailed = false
         task = Task {
             do {
                 let computer = try await work()
@@ -173,6 +174,33 @@ final class PairingModel {
         )
     }
 
+    private func exchangeVoice(_ client: RemoteClient, device: String, key: DeviceKey, claim: String) async {
+        struct Offer: Encodable {
+            let claim: String
+            let has_account: Bool
+            let account: SpeechAccount?
+        }
+        struct Answer: Decodable {
+            let account: SpeechAccount?
+            let wants_account: Bool
+        }
+        do {
+            let local = try SpeechAccount.load()
+            let session = try await client.startSession(device: device, key: key)
+            let answer: Answer = try await client.pairVoice(Offer(claim: claim, has_account: local != nil, account: nil), bearer: session.token)
+            if answer.wants_account, let local, try SpeechAccount.load() == local {
+                let _: Answer = try await client.pairVoice(Offer(claim: claim, has_account: true, account: local), bearer: session.token)
+            }
+            if let account = answer.account, try SpeechAccount.load() == nil {
+                try SpeechAccount.save(account)
+            }
+        } catch {
+            voiceExchangeFailed = true
+        }
+    }
+
+    private(set) var voiceExchangeFailed = false
+
     /// Claims `token` with a new device key, then waits for Allow. A nearby
     /// claim must carry the code this phone computed.
     private func claim(
@@ -212,6 +240,9 @@ final class PairingModel {
                 throw Failure.expired
             case let .approved(approval):
                 guard approval.fingerprint == fingerprint else { throw Failure.certificateChanged }
+                if approval.voice_exchange == true {
+                    await exchangeVoice(client, device: approval.device, key: key, claim: claim.claim)
+                }
                 return Computer(
                     device: approval.device,
                     name: approval.computer,

@@ -8,6 +8,7 @@ import SwiftUI
 struct VoiceSheet: View {
     @Environment(AppModel.self) private var model
     @Bindable var session: VoiceSession
+    @State private var keyboardText = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -66,6 +67,15 @@ struct VoiceSheet: View {
 
     @ViewBuilder private var footer: some View {
         switch session.phase {
+        case .keyboard:
+            TextField("Dictate with Wispr Flow or type", text: $keyboardText, axis: .vertical)
+                .accessibilityIdentifier("voice-keyboard-command")
+                .textFieldStyle(.roundedBorder)
+            Button("Review Command") {
+                let words = keyboardText
+                keyboardText = ""
+                Task { await session.submitKeyboard(words) }
+            }.disabled(keyboardText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         case .preparing, .listening:
             HStack {
                 VoiceWave(levels: session.listener.levels)

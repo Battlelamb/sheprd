@@ -106,7 +106,7 @@ Every command accepts:
 | `window fullscreen [on\|off\|toggle]` | |
 | `window size [WIDTHxHEIGHT]` | Print or set the window's size; windows cannot be moved |
 | `window detach\|reconnect` | Detach from, or reconnect to, the selected host |
-| `ui settings [PAGE]` | Open a Settings page; without PAGE, open Settings and list available pages and row IDs |
+| `ui settings [PAGE]` | Open a Settings page, such as `ui settings voice` for speech accounts. Omit PAGE to list pages and row IDs |
 | `ui highlight ROW_ID` | Open Settings at that row, scroll it into view, and highlight it |
 | `ui guide TEXT [--highlight ROW_ID]` | Update one persistent top banner (three lines maximum), optionally opening and highlighting a Settings row |
 | `ui guide --clear` | Dismiss the banner and highlight; the person can also dismiss it |

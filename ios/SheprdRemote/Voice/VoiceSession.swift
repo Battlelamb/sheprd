@@ -11,6 +11,7 @@ import SheprdVoice
 final class VoiceSession: Identifiable {
     enum Phase: Equatable {
         case preparing
+        case keyboard
         case listening
         case thinking
         /// A plan, or a question about one, waiting on the person.
@@ -178,8 +179,18 @@ final class VoiceSession: Identifiable {
 
     // MARK: Hearing
 
+    func submitKeyboard(_ words: String) async {
+        guard phase == .keyboard, !words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        heard(words)
+        await finish()
+    }
+
     private func listen() async {
         guard !cancelled else { return }
+        if UserDefaults.standard.bool(forKey: "voiceKeyboardInput") {
+            phase = .keyboard
+            return
+        }
         phase = .preparing
         do {
             try await listener.start(names: catalog.vocabulary) { [weak self] text in self?.heard(text) }
@@ -297,12 +308,16 @@ final class VoiceSession: Identifiable {
         case let .workspace(workspace):
             phase = .ready
             if let question = workspace.question {
-                await speaker.say(question.words, always: VoiceSettings.confirms)
-                if question.answerable, phase == .ready { listenAgain() }
+                let silent = !VoiceSettings.speaks && !VoiceSettings.confirms
+                let completed = await speaker.say(question.words, always: VoiceSettings.confirms)
+                if question.answerable, phase == .ready, silent || completed { listenAgain() }
             } else if VoiceSettings.confirms, plan.confirmableByVoice, let words = plan.readBack {
-                readAloud = plan
-                await speaker.say(words, always: true)
-                if phase == .ready { listenAgain(forYes: true) }
+                let spoken = plan
+                readAloud = nil
+                if await speaker.say(words, always: true), phase == .ready, spoken.runsTheSame(as: plan), !cancelled {
+                    readAloud = spoken
+                    listenAgain(forYes: true)
+                }
             }
         default:
             phase = .ready

@@ -165,6 +165,14 @@ and nothing goes through your phone.
    - Avoid `simctl openurl`: its confirmation alert needs a tap, and it
      keeps the app inactive until the simulator restarts.
 
+## Speaking voices and dictation
+
+In Settings > Voice, tap Change to open the provider sheet. The active provider is marked In use. Choose Apple on-device speech or connect a personal ElevenLabs, OpenAI, Deepgram or OpenRouter account. Preview uses a sample sentence and the provider bills your account. OpenRouter sign-in opens the browser, then asks for the authorization code using PKCE. ElevenLabs can load the first 100 account voices, or accept a voice ID. Use This Voice saves the active account.
+
+Direct pairing exchanges accounts over pinned TLS after approval and proof of the device key. If one side has a cloud voice, the other imports it. Two configured devices keep their own accounts. Disconnect forgets the key on that device. Revoke it at the provider to invalidate paired copies.
+
+For Wispr Flow, select Use Keyboard for Voice Commands, switch to the installed Flow keyboard, dictate, and tap Review Command. The ordinary chat composer accepts keyboard dictation too.
+
 ## Voice commands
 
 The waveform button on Home, the Talk to Sheprd Control (for the Action

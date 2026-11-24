@@ -301,7 +301,9 @@ impl SheprdWindow {
     pub(crate) fn remote_dialog_open(&self) -> bool {
         matches!(
             self.menu.page,
-            Some(Page::RemoteControl | Page::RevokeDevice | Page::RemoteHostAsk)
+            Some(
+                Page::RemoteControl | Page::RevokeDevice | Page::RemoteHostAsk | Page::ShareSession
+            )
         )
     }
 
@@ -311,6 +313,7 @@ impl SheprdWindow {
             Some(Page::RemoteControl) => Some(self.render_pairing(cx)),
             Some(Page::RevokeDevice) => Some(self.render_revoke(cx)),
             Some(Page::RemoteHostAsk) => Some(self.render_host_ask(cx)),
+            Some(Page::ShareSession) => Some(self.render_share_session(cx)),
             _ => None,
         }
     }

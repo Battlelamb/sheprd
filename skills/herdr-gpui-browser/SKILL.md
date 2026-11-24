@@ -411,6 +411,7 @@ what Sheprd shows or keeps.
 | See the user's fleet of computers and phones and which hosts each reaches, or ask to remove one (the user confirms in Settings > Fleet) | `sheprd fleet status --json`, `sheprd fleet remove MEMBER` |
 | Add another computer running Sheprd on any network from its pairing link (piped on stdin, never an argument); the user clicks Pair | `sheprd remote add-link < FILE` |
 | Keep this computer's listen token for a private relay (piped on stdin, never an argument), or forget it | `sheprd remote relays token ENDPOINT < FILE`, `sheprd remote relays token ENDPOINT --clear` |
+| List active read-only shared sessions, or open the Share this session dialog for the user to preview and confirm | `sheprd remote shares --json`, `sheprd remote share [--pane ID]` |
 | Keep the machine awake during a long job | `sheprd caffeine on --for 2h` |
 | Check whether the app runs, and which windows and hosts it has | `sheprd status` |
 

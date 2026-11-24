@@ -10,6 +10,7 @@ pub mod gateway;
 pub mod link;
 mod model;
 mod projection;
+pub(crate) mod service;
 mod storage;
 pub mod worker;
 

@@ -37,6 +37,8 @@ chat-needs-input = Needs input
 # $count is how many windows show this chat.
 chat-watching = { $count } watching
 chat-reconnecting = Reconnecting…
+chat-share = Share
+chat-sharing = Sharing
 chat-show-chat = Chat
 chat-jump-to-end = Scroll to the latest message
 chat-jump-waiting = New output below

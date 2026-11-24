@@ -20,10 +20,12 @@ pub(crate) mod nearby;
 pub(crate) mod public_relays;
 pub(crate) mod relay_token;
 mod revoke;
+mod share;
 pub(crate) mod supervisor;
 
 pub(crate) use dialog::{PairingDialog, addresses};
 pub(crate) use revoke::Revoke;
+pub(crate) use share::ShareDialog;
 pub use sheprd_remote_control::app::Error;
 pub(crate) use sheprd_remote_control::app::{Result, pairing, qr, service};
 use sheprd_remote_control::control::Device;

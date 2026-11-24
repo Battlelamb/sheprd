@@ -1,11 +1,15 @@
 # Implementation progress
 
 The phased build was authorized on 2026-11-22. Host policy, read projection,
-a bounded worker and an encrypted relay gateway are implemented. A native
-reference peer exercises the gateway against real loopback relays, including
-admission using a decoded HTTPS invitation. Daemon startup
-and the app's UI do not yet enable sharing. The [plan](../session-sharing-plan.md)
-remains the roadmap; [gateway v0](gateway.md) records the implemented wire flow.
+a bounded worker, an encrypted relay gateway, daemon control wiring (`sharing::service`
+over live `Hub` chats and trusted `Relays`), the native **Share this session**
+dialog with live guest preview, chat header Share/Sharing control, and
+`sheprd remote share` / `sheprd remote shares` CLI commands are implemented.
+No share route starts on daemon boot; shares are created only after explicit
+owner confirmation in the dialog. The browser viewer bundle and native
+"Shared with me" recipient view remain follow-up work. The
+[plan](../session-sharing-plan.md) remains the roadmap;
+[gateway v0](gateway.md) records the implemented wire flow.
 
 ## Host boundary
 

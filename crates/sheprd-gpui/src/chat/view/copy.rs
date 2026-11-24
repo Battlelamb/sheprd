@@ -63,6 +63,7 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = &self.theme;
+        let compact = placement == CopyPlacement::Floating;
         let words: std::sync::Arc<str> = text.into();
         let button = self
             .chat_copy_button(
@@ -84,7 +85,9 @@ impl SheprdWindow {
                     .size(px(11.))
                     .text_color(rgb(theme.muted)),
             )
-            .child(fl!("chat-copy"));
+            .role(Role::Button)
+            .aria_label(fl!("chat-copy"))
+            .when(!compact, |b| b.child(fl!("chat-copy")));
         let target = crate::voice::Kind::Message {
             window: cx.entity_id(),
             pane: pane.to_owned().into(),
@@ -104,7 +107,21 @@ impl SheprdWindow {
             .text_color(rgb(theme.muted))
             .text_size(px((self.chat_text_size() - 2.).max(10.)))
             .px(px(4.))
-            .child(label)
+            .flex()
+            .items_center()
+            .justify_center()
+            .when(!compact, |b| b.child(label))
+            .when(compact && playing, |b| {
+                b.child(div().size(px(9.)).rounded(px(1.)).bg(rgb(theme.muted)))
+            })
+            .when(compact && !playing, |b| {
+                b.child(
+                    svg()
+                        .path("icons/play.svg")
+                        .size(px(12.))
+                        .text_color(rgb(theme.muted)),
+                )
+            })
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |_, _, _, cx| {
                 cx.stop_propagation();

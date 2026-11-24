@@ -97,6 +97,8 @@ pub(crate) fn state_lending(
         changes: Default::default(),
         computer: "Studio".into(),
         connected: Mutex::new(HashMap::new()),
+        drivers: Default::default(),
+        labels: labels::Labels::load(dir),
         favorites: Favorites::load(crate::app::favorites::file(dir)),
         fingerprint: authority.fingerprint().to_owned(),
         fleet: None,

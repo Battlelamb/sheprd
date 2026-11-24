@@ -2,6 +2,7 @@ use super::*;
 use gpui::TestAppContext;
 
 mod connection;
+mod drafted;
 mod edge;
 mod focus;
 mod icons;

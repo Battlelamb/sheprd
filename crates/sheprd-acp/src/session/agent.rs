@@ -72,6 +72,7 @@ impl<R: FnMut(Update)> Session<R> {
                 if let Some(options) = value.get("configOptions") {
                     let options = project::options(Some(options));
                     self.emit(Change::Options { options });
+                    self.remember_picks();
                 }
             }
             Err(error) => {
@@ -245,7 +246,9 @@ impl<R: FnMut(Update)> Session<R> {
             // A continued session keeps its own settings.
             self.config.settings = None;
         }
+        self.carry_picks(loaded);
         self.carry_deferred();
+        self.note_carried();
         self.carry_next();
         self.next_queued();
     }

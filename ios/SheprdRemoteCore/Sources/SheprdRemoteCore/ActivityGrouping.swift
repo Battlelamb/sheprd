@@ -1,8 +1,10 @@
 import Foundation
 
-/// The phone chooses independently for each paired computer. Reading a
-/// missing preference gives new and existing pairings one shared activity.
+/// The phone defaults to grouping by host. An explicit choice for a
+/// particular host takes precedence over the phone-wide default.
 public enum ActivityGrouping {
+    public static let defaultKey = "multipleLiveActivities.default"
+
     public static func key(for computer: Fingerprint) -> String {
         "multipleLiveActivities." + computer.hex
     }
@@ -15,6 +17,7 @@ public enum ActivityGrouping {
     }
 
     public static func single(for computer: Fingerprint, in defaults: UserDefaults = .standard) -> Bool {
-        !defaults.bool(forKey: key(for: computer))
+        let override = defaults.object(forKey: key(for: computer)) as? Bool
+        return !(override ?? defaults.bool(forKey: defaultKey))
     }
 }

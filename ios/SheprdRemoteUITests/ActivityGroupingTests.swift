@@ -3,33 +3,39 @@ import XCTest
 
 final class ActivityGroupingTests: XCTestCase {
     @MainActor
-    func testEachComputerKeepsItsOwnChoice() throws {
+    func testHostsCanFollowOrOverrideTheDefaultGrouping() throws {
         try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .phone, "Exercises the settings flow on iPhone.")
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-demo", "YES", "-hideDemoBar", "YES", "-tab", "settings",
                                "-openNotifications", "YES", "-provisionalAlerts", "YES", "-AppleLanguages", "(en)"]
         app.launch()
-        let studio = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Studio, ")).firstMatch
-        let laptop = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "MacBook Air, ")).firstMatch
-        XCTAssertTrue(studio.waitForExistence(timeout: 10))
-        if !studio.label.hasSuffix("One per computer") {
-            studio.tap()
-            app.buttons["One per computer"].tap()
+        func row(_ label: String) -> XCUIElement {
+            app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", label + ", ")).firstMatch
         }
-        XCTAssertTrue(laptop.label.hasSuffix("One per computer"))
-        studio.tap()
-        app.buttons["Multiple"].tap()
+        func choose(_ option: String, on row: XCUIElement) {
+            row.tap()
+            app.buttons[option].tap()
+        }
+        let grouping = row("Default grouping")
+        let studio = row("Studio")
+        let laptop = row("MacBook Air")
+        XCTAssertTrue(grouping.waitForExistence(timeout: 10))
+        choose("One per agent", on: grouping)
+        choose("One per host", on: studio)
+        choose("Use default", on: laptop)
         app.terminate()
         app.launch()
-        XCTAssertTrue(studio.waitForExistence(timeout: 10))
-        XCTAssertTrue(studio.label.hasSuffix("Multiple"))
-        XCTAssertTrue(laptop.label.hasSuffix("One per computer"))
+        XCTAssertTrue(grouping.waitForExistence(timeout: 10))
+        XCTAssertTrue(grouping.label.hasSuffix("One per agent"))
+        XCTAssertTrue(studio.label.hasSuffix("One per host"))
+        XCTAssertTrue(laptop.label.hasSuffix("Use default"))
         let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "Activity grouping per computer"
+        shot.name = "Per-agent default with a per-host override"
         shot.lifetime = .keepAlways
         add(shot)
-        studio.tap()
-        app.buttons["One per computer"].tap()
+        choose("Use default", on: studio)
+        choose("One per host", on: grouping)
+        XCTAssertTrue(studio.label.hasSuffix("Use default"))
     }
 }

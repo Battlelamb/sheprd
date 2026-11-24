@@ -62,6 +62,12 @@ final class ActivityTests: XCTestCase {
         defaults.set(true, forKey: ActivityGrouping.key(for: first))
         XCTAssertFalse(ActivityGrouping.single(for: first, in: try XCTUnwrap(UserDefaults(suiteName: suite))))
         XCTAssertTrue(ActivityGrouping.single(for: second, in: defaults))
+        defaults.set(true, forKey: ActivityGrouping.defaultKey)
+        XCTAssertFalse(ActivityGrouping.single(for: second, in: defaults))
+        defaults.set(false, forKey: ActivityGrouping.key(for: first))
+        XCTAssertTrue(ActivityGrouping.single(for: first, in: defaults))
+        defaults.removeObject(forKey: ActivityGrouping.key(for: first))
+        XCTAssertFalse(ActivityGrouping.single(for: first, in: defaults))
     }
 
     func testOnlySharedStartsFromBeforeAnExplicitResetAreRetired() {

@@ -93,6 +93,35 @@ fn two_phones_can_receive_one_or_multiple_cards_for_the_same_overlapping_turns()
 }
 
 #[test]
+fn host_grouping_spans_worktrees_and_agent_grouping_uses_the_pane() {
+    let reg = Registration {
+        single_activity: true,
+        ..Default::default()
+    };
+    let mut host = host::Cards::default();
+    let mut agents = host::Cards::default();
+    let first = start("first-agent");
+    let card = host.offer(&first, &reg, || None, 0).unwrap();
+    for (pane, workspace, now) in [
+        ("second-agent", "repo", 15_000),
+        ("third-agent", "other worktree", 30_000),
+    ] {
+        let mut next = start(pane);
+        if let Event::Start { attributes, .. } = &mut next.event {
+            workspace.clone_into(&mut attributes.workspace);
+        }
+        let combined = host.offer(&next, &reg, || None, now).unwrap();
+        assert_eq!(combined.pane, card.pane);
+        assert!(matches!(combined.event, Event::Update { .. }));
+        assert_eq!(combined.state.detail.focus.unwrap().workspace, workspace);
+        assert_eq!(
+            agents.offer(&next, &Registration::default(), || None, now),
+            Some(next)
+        );
+    }
+}
+
+#[test]
 fn a_delayed_token_for_an_ended_host_card_cannot_swallow_the_next_start() {
     let mut cards = host::Cards::default();
     let mut reg = Registration {

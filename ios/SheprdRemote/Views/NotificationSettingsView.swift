@@ -9,6 +9,7 @@ struct NotificationSettingsView: View {
     @Environment(AppModel.self) private var model
     @AppStorage(LiveActivityStyleSetting.key, store: LiveActivityStyleSetting.store)
     private var style = LiveActivityStyle.standardChoice.rawValue
+    @AppStorage(ActivityGrouping.defaultKey) private var defaultMultiple = false
     @State private var showingStyle = false
 
     var body: some View {
@@ -27,6 +28,13 @@ struct NotificationSettingsView: View {
             Section {
                 if !ActivityAuthorizationInfo().areActivitiesEnabled {
                     Label("Live Activities are off for Sheprd. Turn them on in Settings.", systemImage: "exclamationmark.triangle")
+                }
+                Picker("Default grouping", selection: $defaultMultiple) {
+                    Text("One per host").tag(false)
+                    Text("One per agent").tag(true)
+                }
+                .onChange(of: defaultMultiple) {
+                    Task { await model.tokens.sync() }
                 }
                 ForEach(model.shownComputers) { computer in
                     ActivityGroupingPicker(computer: computer, label: model.displayName(computer))
@@ -47,7 +55,7 @@ struct NotificationSettingsView: View {
             } header: {
                 Text("Live Activities")
             } footer: {
-                Text("One per computer combines overlapping work. Multiple gives each independent chat or terminal agent its own activity. Changes apply to new activities. The Private style hides chat names and steps. A computer can also limit detail in its Remote control settings.")
+                Text("One per host combines work across all worktrees on that computer. One per agent gives each independent chat or terminal agent its own activity. Delegated workers count toward their coordinator’s progress. Changes apply to new activities. The Private style hides chat names and steps. A computer can also limit detail in its Remote control settings.")
             }
             Section {
                 TestPushRow().agentHighlight(.testPush)
@@ -67,20 +75,21 @@ struct NotificationSettingsView: View {
 /// Both settings pages edit the same preference for this computer's identity.
 struct ActivityGroupingPicker: View {
     @Environment(AppModel.self) private var model
-    @AppStorage private var multiple: Bool
+    @AppStorage private var multiple: Bool?
     let computer: Computer
     let label: String
 
     init(computer: Computer, label: String) {
         self.computer = computer
         self.label = label
-        _multiple = AppStorage(wrappedValue: false, ActivityGrouping.key(for: computer.fingerprint))
+        _multiple = AppStorage(ActivityGrouping.key(for: computer.fingerprint))
     }
 
     var body: some View {
         Picker(label, selection: $multiple) {
-            Text("One per computer").tag(false)
-            Text("Multiple").tag(true)
+            Text("Use default").tag(nil as Bool?)
+            Text("One per host").tag(false as Bool?)
+            Text("One per agent").tag(true as Bool?)
         }
         .onChange(of: multiple) {
             Task { await model.tokens.sync(only: computer.fingerprint) }

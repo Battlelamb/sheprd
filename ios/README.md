@@ -372,13 +372,14 @@ longer have, which shows as not reported).
 
 ## Live Activity styles
 
-Under Settings > Notifications > Live Activities, each paired computer defaults
-to **One per computer**. Its overlapping chats and terminal agents share a card
-that shows progress and opens the pane it currently features. A waiting question
-takes priority. Choose **Multiple** for separate cards per independent chat or
-terminal agent. Delegated workers still contribute to their coordinator's count.
-The choice applies to new activities on this phone and syncs when an offline
-computer reconnects. Older computers continue sending individual cards.
+In Settings > Notifications > Live Activities, **Default grouping** applies to
+current and future hosts. **One per host** is the default and combines all
+worktrees on each computer. **One per agent** gives each independent chat or
+terminal agent its own activity. Delegated workers contribute to their
+coordinator’s progress. To override the default for a host, select its name
+and choose a grouping. Choose **Use default** to make it follow the default
+again. Choices apply to new activities and sync when an offline host reconnects.
+Older computers continue sending individual cards.
 
 Settings > Notifications > Live Activities > Style picks how an activity
 looks on this phone (`LiveActivityStyle`, kept in the App Group so the widget

@@ -7,7 +7,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use sheprd_apns::{Priority, Push, PushType};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::{Arc, Mutex, PoisonError},
 };
 use tokio::sync::Mutex as AsyncMutex;
@@ -58,8 +58,10 @@ struct Report {
     end: bool,
     question: bool,
     question_revision: Option<u64>,
+    /// Host focus can move between several pending panes. Retain the alert
+    /// receipts across focus changes until the run stops waiting.
     #[serde(skip)]
-    alerted: bool,
+    alerted: VecDeque<u64>,
     working: u32,
     waiting: u32,
     done: u32,
@@ -114,14 +116,15 @@ impl Card {
         if self.token_gone && self.ended() && !r.end {
             self.retire();
         }
-        let previous = self.reports.get(slot);
-        r.alerted = r.question
-            && previous.is_some_and(|old| {
-                old.alerted
-                    && old.run == r.run
-                    && old.question
-                    && old.question_revision == r.question_revision
-            });
+        let mut previous = self.reports.get_mut(slot);
+        if let Some(old) = previous.as_deref_mut()
+            && r.question
+            && old.question
+            && r.run == old.run
+        {
+            r.alerted = std::mem::take(&mut old.alerted);
+        }
+        let previous = previous.as_deref();
         if let Some(previous) = previous.filter(|p| p.run != r.run) {
             // A restarted daemon can only reconstruct currently observable
             // panes. Credit earlier completions missing from its new snapshot.
@@ -227,7 +230,12 @@ impl Card {
                 .collect();
             aps["attributes"] = json!({"shared":{"group":marker,"card":self.nonce}});
         }
-        if start || (focus.question && !focus.alerted) {
+        if start
+            || (focus.question
+                && !focus
+                    .alerted
+                    .contains(&focus.question_revision.unwrap_or_default()))
+        {
             aps["alert"] = json!({"title":"Sheprd","body":"New activity"});
         }
         if event == "end" {
@@ -256,7 +264,15 @@ impl Card {
             .filter(|r| !r.end && r.question)
             .max_by_key(|r| r.arrival)
         {
-            focus.alerted = true;
+            let revision = focus.question_revision.unwrap_or_default();
+            if !focus.alerted.contains(&revision) {
+                // Bound receipts even for a host that keeps asking new
+                // questions without ever reporting a quiet moment.
+                if focus.alerted.len() >= 256 {
+                    focus.alerted.pop_front();
+                }
+                focus.alerted.push_back(revision);
+            }
         }
         self.dirty = false;
         self.started = true;

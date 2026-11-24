@@ -206,4 +206,9 @@ async fn a_second_question_from_one_host_alerts_even_if_the_resolution_was_paced
     assert!(last(&f)["alert"].is_object());
     send(&f, &host, question(3, 102)).await;
     assert!(last(&f)["alert"].is_null());
+    // The second pane resolves while the first question is still pending.
+    send(&f, &host, question(4, 101)).await;
+    assert!(last(&f)["alert"].is_null());
+    send(&f, &host, question(5, 103)).await;
+    assert!(last(&f)["alert"].is_object());
 }

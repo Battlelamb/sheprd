@@ -3,11 +3,13 @@
 //! plugins' sections. Sections are ordered by `[panel] order`, then name;
 //! each header folds its section, kept here so folding never runs Lua; and a
 //! mod whose view returns nil has no section. The panel shows while any mod
-//! has a section and the user has not hidden it (Toggle Mod Panel), slides in
-//! and out, and resizes from its left edge like the notes panel.
+//! has a section and the user has not hidden it (Toggle Mod Panel). The
+//! right-edge rail stays visible when the panel is collapsed.
 
 use super::render::{Axis, Painter};
-use crate::{SheprdWindow, motion, panel_resize::PanelDrag, window::chrome_focus::Region};
+use crate::{
+    SheprdWindow, i18n::fl, motion, panel_resize::PanelDrag, window::chrome_focus::Region,
+};
 use gpui::{prelude::*, *};
 use sheprd_mods::Place;
 use std::collections::BTreeSet;
@@ -17,12 +19,14 @@ use std::collections::BTreeSet;
 const MIN_CONTENT: f32 = 240.;
 /// The narrowest the panel is drawn.
 const MIN_PANEL: f32 = 160.;
+const RAIL_WIDTH: f32 = 28.;
 
 /// Whether the panel shows, and which sections are folded.
 #[derive(Debug, Default)]
 pub(super) struct PanelState {
     /// Hidden with Toggle Mod Panel, for this window and session.
     hidden: bool,
+    collapsed: bool,
     /// Sections folded to their header, by mod name.
     folded: BTreeSet<String>,
     motion: motion::Toggle,
@@ -66,12 +70,20 @@ impl SheprdWindow {
     /// Sets the panel opening or closing to match its sections and the
     /// user's choice; whether it is moving, so the window draws again.
     pub(crate) fn update_mod_panel(&mut self) -> bool {
-        let open = !self.mods.panel.hidden && !self.mods.panel_sections().is_empty();
+        let open = self.mod_panel_expanded();
         let now = motion::now();
         let first = !std::mem::replace(&mut self.mods.panel.placed, true);
         let was = self.mods.panel.motion.is_open();
         self.mods.panel.motion.set(open, now, first);
         was != open || self.mods.panel.motion.moving(now)
+    }
+
+    pub(crate) fn mod_panel_expanded(&self) -> bool {
+        self.mod_panel_available() && !self.mods.panel.collapsed
+    }
+
+    fn mod_panel_available(&self) -> bool {
+        !self.mods.panel.hidden && !self.mods.panel_sections().is_empty()
     }
 
     /// The panel's width in this window: its chosen or default width,
@@ -80,14 +92,17 @@ impl SheprdWindow {
     fn mod_panel_width_now(&self) -> Option<f32> {
         let beside =
             self.viewport_width - self.sidebar_column_width(self.viewport_width).unwrap_or(0.);
-        let width = self.mod_panel_width.width(beside).min(beside - MIN_CONTENT);
+        let width = self
+            .mod_panel_width
+            .width(beside)
+            .min(beside - MIN_CONTENT - RAIL_WIDTH);
         (width >= MIN_PANEL).then_some(width)
     }
 
     /// Whether the panel is drawn now, opening or open, for the focus
     /// regions; only beside the terminals, never over a section or app.
     pub(crate) fn mod_panel_shown(&self) -> bool {
-        self.mods.panel.motion.is_open()
+        self.mod_panel_available()
             && !self.zen_layout()
             && self.activity_section().is_none()
             && self.mod_app().is_none()
@@ -104,7 +119,8 @@ impl SheprdWindow {
     ) -> AnyElement {
         let now = motion::now();
         let shown = self.mods.panel.motion.shown(now);
-        if shown <= 0. || self.zen_layout() {
+        let show_rail = self.mod_panel_available();
+        if (shown <= 0. && !show_rail) || self.zen_layout() {
             return content;
         }
         let Some(width) = self.mod_panel_width_now() else {
@@ -113,32 +129,32 @@ impl SheprdWindow {
         if self.mods.panel.motion.moving(now) {
             window.request_animation_frame();
         }
-        let panel = self
-            .resizable_panel(
-                self.render_mod_panel(cx),
-                "mod-panel-resize",
-                PanelDrag::ModPanel,
-                None,
-                cx,
-            )
-            // Narrowed to the room beside the sidebar, past the drag's cap.
-            .w(px(width));
-        // Clipped to the share that has slid in, revealed from its left edge.
-        let slide = div()
-            .relative()
-            .flex_none()
-            .h_full()
-            .w(px(width * shown))
-            .overflow_hidden()
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .bottom_0()
-                    .left_0()
-                    .w(px(width))
-                    .child(panel),
-            );
+        let slide = (shown > 0.).then(|| {
+            let panel = self
+                .resizable_panel(
+                    self.render_mod_panel(cx),
+                    "mod-panel-resize",
+                    PanelDrag::ModPanel,
+                    None,
+                    cx,
+                )
+                .w(px(width));
+            div()
+                .relative()
+                .flex_none()
+                .h_full()
+                .w(px(width * shown))
+                .overflow_hidden()
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left_0()
+                        .w(px(width))
+                        .child(panel),
+                )
+        });
         div()
             .flex()
             .flex_1()
@@ -146,8 +162,56 @@ impl SheprdWindow {
             .min_w_0()
             .min_h_0()
             .child(div().flex().flex_1().min_w_0().min_h_0().child(content))
-            .child(slide)
+            .children(slide)
+            .children(show_rail.then(|| self.render_mod_panel_rail(cx)))
             .into_any_element()
+    }
+
+    fn render_mod_panel_rail(&self, cx: &mut Context<Self>) -> Div {
+        let theme = &self.theme;
+        let collapsed = self.mods.panel.collapsed;
+        let label = if collapsed {
+            fl!("layout-mod-panel-expand")
+        } else {
+            fl!("layout-mod-panel-collapse")
+        };
+        div()
+            .debug_selector(|| "mod-panel-rail".into())
+            .h_full()
+            .w(px(RAIL_WIDTH))
+            .flex_none()
+            .bg(self.fill().panel(theme.sidebar_background()))
+            .border_l_1()
+            .border_color(rgb(theme.active))
+            .child(
+                self.chrome_stop(Region::ModPanel, div().id("mod-panel-rail-toggle"))
+                    .debug_selector(|| "mod-panel-rail-toggle".into())
+                    .role(Role::Button)
+                    .aria_expanded(!collapsed)
+                    .aria_label(label)
+                    .flex()
+                    .w_full()
+                    .h(px(RAIL_WIDTH))
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .hover(|style| style.bg(rgb(theme.active)))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.mods.panel.collapsed = !this.mods.panel.collapsed;
+                        this.update_mod_panel();
+                        cx.notify();
+                    }))
+                    .child(
+                        svg()
+                            .path(if collapsed {
+                                "icons/chevron-left.svg"
+                            } else {
+                                "icons/chevron-right.svg"
+                            })
+                            .size(px(14.))
+                            .text_color(rgb(theme.muted)),
+                    ),
+            )
     }
 
     fn render_mod_panel(&self, cx: &mut Context<Self>) -> Stateful<Div> {

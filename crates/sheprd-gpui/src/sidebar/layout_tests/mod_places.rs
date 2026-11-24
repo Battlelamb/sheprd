@@ -97,11 +97,32 @@ fn a_panel_header_folds_its_section(cx: &mut gpui::TestAppContext) {
     assert!(cx.debug_bounds("mod-panel-second-body").is_some());
 }
 
+#[gpui::test]
+fn the_right_edge_control_collapses_and_expands_the_panel(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = panel_fixture(cx, false);
+    let rail = cx.debug_bounds("mod-panel-rail").unwrap();
+    let panel = cx.debug_bounds("mod-panel").unwrap();
+    assert!(rail.size.width < px(32.));
+    assert!((panel.right() - rail.left()).abs() <= px(1.));
+    let toggle = cx.debug_bounds("mod-panel-rail-toggle").unwrap().center();
+
+    for expanded in [false, true] {
+        cx.simulate_click(toggle, Modifiers::default());
+        cx.update(|window, cx| full_draw(window, cx).clear(cx));
+        assert_eq!(
+            view.read_with(cx, |view, _| view.mod_panel_expanded()),
+            expanded
+        );
+        assert_eq!(cx.debug_bounds("mod-panel-rail"), Some(rail));
+    }
+}
+
 /// A hidden panel takes no room, and Toggle Mod Panel brings it back.
 #[gpui::test]
 fn toggle_mod_panel_hides_and_shows_it(cx: &mut gpui::TestAppContext) {
     let (view, cx) = panel_fixture(cx, true);
     assert!(cx.debug_bounds("mod-panel").is_none());
+    assert!(cx.debug_bounds("mod-panel-rail").is_none());
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
             view.command(crate::controls::Command::ToggleModPanel, window, cx);

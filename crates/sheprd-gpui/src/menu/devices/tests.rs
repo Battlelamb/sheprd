@@ -26,22 +26,23 @@ mod rail;
 mod scope;
 mod selection;
 mod session_chip;
+mod tailscale_address;
 mod version_warning;
 
 #[test]
 fn only_a_present_herdr_is_saved_without_a_terminal() {
-    assert_eq!(Offer::for_probe(HostProbe::Running), None);
-    assert_eq!(Offer::for_probe(HostProbe::Stopped), None);
+    assert_eq!(Offer::for_probe(&HostProbe::Running), None);
+    assert_eq!(Offer::for_probe(&HostProbe::Stopped), None);
     // herdr-core alone is a whole setup: saved as it is, nothing installed.
-    assert_eq!(Offer::for_probe(HostProbe::Core), None);
-    assert_eq!(Offer::for_probe(HostProbe::Missing), Some(Offer::Install));
-    assert_eq!(Offer::for_probe(HostProbe::Outdated), Some(Offer::Update));
+    assert_eq!(Offer::for_probe(&HostProbe::Core), None);
+    assert_eq!(Offer::for_probe(&HostProbe::Missing), Some(Offer::Install));
+    assert_eq!(Offer::for_probe(&HostProbe::Outdated), Some(Offer::Update));
     assert_eq!(
-        Offer::for_probe(HostProbe::SshFailed(sheprd_client::SshFailure::HostKey)),
+        Offer::for_probe(&HostProbe::SshFailed(sheprd_client::SshFailure::HostKey)),
         Some(Offer::Terminal)
     );
     assert_eq!(
-        Offer::for_probe(HostProbe::SshFailed(sheprd_client::SshFailure::Auth)),
+        Offer::for_probe(&HostProbe::SshFailed(sheprd_client::SshFailure::Auth)),
         Some(Offer::InstallKey)
     );
     // Without Fluent's isolation marks around each name.
@@ -73,6 +74,7 @@ fn open_form(view: &mut SheprdWindow, step: Step, cx: &mut Context<SheprdWindow>
         highlight: None,
         suggestion_scroll: gpui::ScrollHandle::new(),
         error: None,
+        ssh_failure: None,
         host_keys: sheprd_client::HostKeys::Verify,
     });
     view.menu.page = Some(Page::AddDevice);

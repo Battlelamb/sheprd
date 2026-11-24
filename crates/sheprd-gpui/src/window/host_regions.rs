@@ -244,6 +244,9 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) {
         root.extend(self.render_tab_ghost(cx));
+        // A refused host has no terminal to hang its card on, so the address
+        // reaches the user from here or not at all.
+        root.extend(self.render_tailscale_prompt());
         root.extend(self.render_core_note(cx).map(IntoElement::into_any_element));
         root.extend(self.render_toasts(window, cx));
         root.extend(self.render_file_transfer(window, cx));

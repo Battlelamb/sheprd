@@ -6,6 +6,8 @@ status: shipped
 
 # Terminals
 
+Sheprd keeps terminals in workspaces. Each pane can run on Herdr or tmux, locally or on a connected host.
+
 ## Choosing a terminal backend
 
 Herdr 1 and Herdr 2 are included by default. To add tmux to the desktop and its chat helper, build both with `cargo build --locked -p sheprd-gpui -p sheprd-acp --features tmux`. On macOS, `just bundle release tmux` builds the app bundle. A build without the feature preserves saved tmux pane addresses for the next tmux-enabled build. Its new terminals follow the existing Herdr preference.
@@ -26,7 +28,7 @@ The other values are `"herdr"` and `"herdr-core"`. Existing configurations using
 
 On macOS or Linux, tmux can run locally. Saved POSIX SSH hosts, WSL distributions and cloud hosts run tmux on the host itself. With tmux selected, Add Device recognizes it when probing an SSH host or WSL distribution.
 
-tmux panes use the native terminal view for input, scrollback, selection, search, splits and read-only mirrors. Sheprd chats can report their agent status and title to tmux. Personal tmux servers have separate inventories. Phone terminal control, Teleport, and core-backed automation and agent recovery still depend on Herdr services.
+tmux panes use the native terminal view for input, scrollback, selection, search, splits and read-only mirrors. Sheprd chats can report their agent status and title to tmux. After a host reboot, reopening a saved tmux pane starts its login shell in the original launch folder or resumes its Sheprd chat with the provider’s saved session and conversation history. Closing the owning pane removes its recovery record. Personal tmux servers have separate inventories. Phone terminal control, Teleport, and core-backed automations still depend on Herdr services.
 
 ## Herdr 2 terminals
 

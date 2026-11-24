@@ -8,14 +8,14 @@
 //! or a pending update makes `wsl.exe` print nothing and never exit.
 #[cfg(any(windows, test))]
 use crate::ssh::{CANDIDATES, quote};
-use crate::{Result, session_socket, ssh::Bridge};
+use crate::{HostProbe, Result, session_socket, ssh::Bridge};
 #[cfg(windows)]
 use crate::{
     limits::POLL,
     sessions::{
         RemoteSession, delete_command, delete_script, parse_session_list, session_list_script,
     },
-    ssh::{self, ChildGuard, HostProbe},
+    ssh::{self, ChildGuard},
     transport::Stream,
 };
 #[cfg(not(windows))]
@@ -209,7 +209,7 @@ pub fn list_running_distros() -> Result<Vec<String>> {
 /// What a distribution offers for `session`, learned without installing,
 /// upgrading, or starting anything beyond the distribution itself. Blocks for
 /// at most the probe timeout: call it from a background thread.
-pub fn probe_distro(distro: &str, session: &str) -> Result<crate::HostProbe> {
+pub fn probe_distro(distro: &str, session: &str) -> Result<HostProbe> {
     probe_terminals(distro, session, false)
 }
 
@@ -226,7 +226,7 @@ pub fn probe_terminals(distro: &str, session: &str, tmux: bool) -> Result<HostPr
 }
 
 #[cfg(not(windows))]
-pub fn probe_terminals(distro: &str, session: &str, _tmux: bool) -> Result<crate::HostProbe> {
+pub fn probe_terminals(distro: &str, session: &str, _tmux: bool) -> Result<HostProbe> {
     validate(distro, session)?;
     Err(Error::Unsupported.into())
 }

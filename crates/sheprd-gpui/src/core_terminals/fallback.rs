@@ -63,7 +63,7 @@ pub(crate) enum Fallback {
 impl super::CoreTerminals {
     /// The address of the shell shown in place of Herdr 1, such as `t3`,
     /// once herdr-core has listed it.
-    pub(super) fn fallback_terminal(&self) -> Option<&TerminalId> {
+    pub(crate) fn fallback_terminal(&self) -> Option<&TerminalId> {
         match &self.fallback {
             Fallback::Shown(id, _) => Some(self.infos.named(id).map_or(id, |info| &info.id)),
             _ => None,

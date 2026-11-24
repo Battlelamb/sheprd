@@ -71,6 +71,9 @@ impl TmuxTerminal {
             "#{pane_id}",
         ]);
         let response = tmux.run(cmd)?;
+        if response.iter().all(u8::is_ascii_whitespace) {
+            return Err(Error::MissingPane);
+        }
         let mut facts = std::str::from_utf8(&response)
             .map_err(|_| Error::Invalid)?
             .split_whitespace();

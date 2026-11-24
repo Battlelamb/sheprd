@@ -703,7 +703,7 @@ impl SheprdWindow {
         self.start_on_provider(purpose, spawn, file, None, cx)
     }
 
-    fn start_on_provider(
+    pub(crate) fn start_on_provider(
         &mut self,
         mut purpose: Purpose,
         mut spawn: Spawn,

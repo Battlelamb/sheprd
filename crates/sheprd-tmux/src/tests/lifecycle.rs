@@ -189,4 +189,59 @@ done"#
     drop(short);
     drop(cleanup);
     assert!(tmux.terminals().unwrap().is_empty());
+    rebooted_shell(&tmux);
+}
+
+/// Simulate the absent server and old boot stamp left by a cold boot. Only
+/// the sandbox child's private state directory is used, including on the
+/// CommandHost path. The actual reopen goes through the desktop's trait.
+fn rebooted_shell(tmux: &Tmux) {
+    use std::{fs, thread, time::Instant};
+    let folder = tempfile::tempdir().unwrap();
+    let request = Spawn {
+        cwd: Some(folder.path().canonicalize().unwrap()),
+        ..Default::default()
+    };
+    let id = tmux.spawn(&request).unwrap().id;
+    let file = sheprd_chat_protocol::restore::restore_dir()
+        .unwrap()
+        .join("tmux")
+        .join(format!("{id}.shell"));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !file.is_file() {
+        assert!(
+            Instant::now() < deadline,
+            "shell did not register for recovery"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    let mut stop = tmux.command();
+    stop.args(["kill-session", "-t", &Tmux::target(&id).unwrap()]);
+    tmux.run(stop).unwrap();
+    let size = Size::new(80, 24).unwrap();
+    assert!(tmux.attach(&id, size, Role::Active).is_err());
+    let original = fs::read_to_string(&file).unwrap();
+    let (_, recipe) = original.split_once('\n').unwrap();
+    fs::write(&file, format!("previous-boot\n{recipe}")).unwrap();
+    assert!(tmux.attach(&id, size, Role::Observer).is_err());
+    let restored = tmux.attach(&id, size, Role::Active).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !tmux
+        .terminals()
+        .unwrap()
+        .iter()
+        .any(|info| info.id == id && info.cwd == request.cwd)
+    {
+        assert!(
+            Instant::now() < deadline,
+            "restored shell did not enter its saved folder"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    let pid = tmux.root_pid(&id).unwrap();
+    drop(restored);
+    drop(tmux.attach(&id, size, Role::Active).unwrap());
+    assert_eq!(tmux.root_pid(&id).unwrap(), pid);
+    tmux.kill(&id).unwrap();
+    assert!(!file.exists());
 }

@@ -26,18 +26,26 @@ impl Tmux {
         let Some(host) = &self.target else {
             return run(command);
         };
-        let script = remote_script(&command)?;
-        let mut output = None;
-        host.with_command(
-            &script,
-            persistent,
-            Box::new(|command| {
-                output = Some(run(command)?);
-                Ok(())
-            }),
-        )?;
-        output.ok_or(Error::Invalid)
+        with_script(host.as_ref(), &remote_script(&command)?, persistent, run)
     }
+}
+
+pub(super) fn with_script<T>(
+    host: &dyn CommandHost,
+    script: &str,
+    persistent: bool,
+    run: impl FnOnce(Command) -> Result<T>,
+) -> Result<T> {
+    let mut output = None;
+    host.with_command(
+        script,
+        persistent,
+        Box::new(|command| {
+            output = Some(run(command)?);
+            Ok(())
+        }),
+    )?;
+    output.ok_or(Error::Invalid)
 }
 
 pub(super) fn remote_script(cmd: &Command) -> Result<String> {

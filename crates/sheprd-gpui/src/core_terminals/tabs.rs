@@ -175,10 +175,10 @@ impl SheprdWindow {
                 self.core_terminals
                     .owner(&host, &terminal, self.config.herdr_2_scrollback)
             else {
-                if let Some(hub) = self.core_hub(&host) {
-                    if !terminal.is_tmux() {
-                        hub.connect(Start::Join);
-                    }
+                if !terminal.is_tmux()
+                    && let Some(hub) = self.core_hub(&host)
+                {
+                    hub.connect(Start::Join);
                 }
                 continue;
             };
@@ -228,17 +228,14 @@ impl SheprdWindow {
         for (tab, view) in stale {
             let host = tab.map_or(Host::Local, |tab| self.core_terminals.host_of(tab));
             let terminal = view.read(cx).terminal().clone();
-            if terminal.is_tmux() && self.core_terminals.reported(&host, &terminal).is_none() {
-                continue;
-            }
             let Some(backend) =
                 self.core_terminals
                     .owner(&host, &terminal, self.config.herdr_2_scrollback)
             else {
-                if let Some(hub) = self.core_hub(&host) {
-                    if !terminal.is_tmux() {
-                        hub.connect(Start::Join);
-                    }
+                if !terminal.is_tmux()
+                    && let Some(hub) = self.core_hub(&host)
+                {
+                    hub.connect(Start::Join);
                 }
                 continue;
             };
@@ -542,14 +539,13 @@ impl SheprdWindow {
                 .core_terminals
                 .owner(&host, &terminal, self.config.herdr_2_scrollback)
                 .is_none()
+                && !terminal.is_tmux()
                 && let Some(hub) = self.core_hub(&host)
             {
-                if !terminal.is_tmux() {
-                    hub.connect(Start::Join);
-                }
+                hub.connect(Start::Join);
             }
             // Ends it now, or puts it back to wait for the core.
-            if self.core_terminals.hub_of(&host).is_some() {
+            if terminal.is_tmux() || self.core_terminals.hub_of(&host).is_some() {
                 self.end_core_terminal(&host, terminal);
             } else {
                 unreached.push((host, terminal));

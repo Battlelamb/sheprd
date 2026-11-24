@@ -15,7 +15,12 @@ closing a driving pane ends its session. Tmux reports the live working directory
 and pane process ID. A Sheprd chat publishes its status, title and endpoint
 through the session environment, including while its view is detached. The
 tmux server owns the programs and their scrollback. Stopping that server or
-rebooting the host ends those sessions.
+rebooting the host ends those processes. When an owning view reopens after a new
+host boot, the adapter recreates its managed shell or ACP chat with the same
+pane ID. The ACP helper records the endpoint, built-in agent, session ID and
+provider history directories on the machine that runs the chat. It requires
+the provider to load that exact session. Shell screen contents and arbitrary
+programs have no comparable continuation protocol.
 
 The desktop's terminal worker depends on `Backend` and `Terminal`.
 `WatchBackend` adds an ordered event stream for herdr-core. The tmux desktop
@@ -38,7 +43,7 @@ turn and approvals can be implemented against the T3 server. The existing
 | Scheduled automations | `sheprd-automate/src/drive.rs` selects Herdr or herdr-core independently of the desktop preference | Extend the automation drive with the same owned-agent operations and persist the selected backend in each run. |
 | Converting an existing CLI agent into a chat | `sheprd-core-client/src/convert.rs` verifies the current process and its recorded conversation | Supply tmux process-bound session evidence before interrupting an agent or sending its resume command. |
 | Agent notes and remote browser requests | The desktop delivers notes and acknowledges remote requests through herdr-core | Route replies through the owning backend and verify that the same agent still owns the receiving pane. |
-| Recovery after a server restart | A saved tmux address can reattach for the lifetime of its server | Persist a resumable chat identity independently of a running terminal and reopen it explicitly after a host restart. |
+| Recovery after stopping tmux within the same host boot | Automatic chat recovery is scoped to host reboots and saved owning panes | A same-boot restore needs proof that the old agent has exited. |
 | Personal tmux servers | The desktop lists Sheprd's dedicated server | Moonmux demonstrates read-only discovery on other sockets. External pane identities need the host, server lifetime and pane ID, and explicit ownership before a destructive operation. |
 
 ## Where it stands

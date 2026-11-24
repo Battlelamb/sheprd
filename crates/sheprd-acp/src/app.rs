@@ -317,33 +317,17 @@ pub(crate) fn run_owned(
     };
     let listens = endpoint.is_some();
     let target = Target::from_env();
-    let mut keeper = if target.is_none() && std::env::var_os("HC_TERMINAL_ID").is_some() {
-        crate::restore::Keeper::core(
-            sheprd_chat_protocol::restore::restore_dir(),
-            endpoint.as_ref(),
-            &options.agent,
-            adapter(&options),
-            &cwd,
-            |name| std::env::var_os(name),
-        )
-    } else {
-        crate::restore::Keeper::new(
-            sheprd_chat_protocol::restore::restore_dir(),
-            target.as_ref(),
-            endpoint.as_ref(),
-            &options.agent,
-            adapter(&options),
-            &cwd,
-        )
-    };
-    if let Some(keeper) = &mut keeper {
-        keeper.child = Some(agent_process.id());
-    }
-    if target.is_none()
-        && let Some(keeper) = &keeper
+    let keeper = crate::restore::keeper(
+        target.as_ref(),
+        endpoint.as_ref(),
+        &options.agent,
+        adapter(&options),
+        &cwd,
+        agent_process.id(),
+    );
+    if let Some(keeper) = &keeper
         && let Err(error) = keeper.agent_started(agent_process.id())
     {
-        // A later restore then refuses rather than guessing the agent ended.
         notices.push((
             NoticeLevel::Warning,
             format!("This chat cannot be restored if it is lost: {error:#}"),
@@ -361,8 +345,9 @@ pub(crate) fn run_owned(
         None => None,
     };
     let report = reporter.as_ref().map(Reporter::handle);
-    let mut session_keeper = keeper.clone();
-    let switch_keeper = keeper.clone();
+    let mut session_keeper = keeper.as_ref().map(|k| k.copy());
+    let keep_history = keeper.is_some();
+    let switch_keeper = keeper.as_ref().map(|k| k.copy());
     let adapter = adapter(&options);
 
     let harness = match &options.agent {
@@ -462,6 +447,9 @@ pub(crate) fn run_owned(
                     }
                 }
             });
+            if keep_history && let Some(dir) = sheprd_chat_protocol::endpoint_dir() {
+                session.keep_history(dir.join("conversations"));
+            }
             if let Some(dir) = crate::briefs::dir() {
                 session.keep_briefs(dir);
             }

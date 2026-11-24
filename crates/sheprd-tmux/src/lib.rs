@@ -4,6 +4,8 @@ pub use agent::AgentReport;
 mod control;
 mod host;
 pub use host::{CommandHost, CommandTask};
+mod recovery;
+pub use recovery::ChatRecovery;
 mod terminal;
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -27,6 +29,8 @@ pub enum Error {
     Terminal(#[from] sheprd_terminal::Error),
     #[error("tmux terminal already exists")]
     NameTaken,
+    #[error("the tmux pane is missing")]
+    MissingPane,
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -66,20 +70,22 @@ impl Tmux {
     }
 
     fn run(&self, command: Command) -> Result<Vec<u8>> {
-        self.with_command(command, false, |command| {
-            let mut out = Vec::new();
-            sheprd_client::run_script_command(
-                command,
-                std::io::empty(),
-                &mut out,
-                sheprd_client::ScriptLimits {
-                    output: 4 << 20,
-                    idle: Duration::from_secs(5),
-                },
-                &false.into(),
-            )?;
-            Ok(out)
-        })
+        self.with_command(command, false, Self::output)
+    }
+
+    fn output(command: Command) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        sheprd_client::run_script_command(
+            command,
+            std::io::empty(),
+            &mut out,
+            sheprd_client::ScriptLimits {
+                output: 4 << 20,
+                idle: Duration::from_secs(5),
+            },
+            &false.into(),
+        )?;
+        Ok(out)
     }
 
     pub fn named_id(name: &str) -> Result<TerminalId> {
@@ -91,6 +97,121 @@ impl Tmux {
             )
         ))?)
     }
+}
+
+impl Tmux {
+    fn spawn_id(&self, id: TerminalId, spawn: &Spawn, guard: Option<&str>) -> Result<TerminalInfo> {
+        let metadata = URL_SAFE_NO_PAD
+            .encode(serde_json::to_vec(&(&spawn.name, &spawn.labels)).map_err(|_| Error::Invalid)?);
+        let mut cmd = self.command();
+        cmd.args([
+            "start-server",
+            ";",
+            "set-option",
+            "-g",
+            "history-limit",
+            &self.scrollback.clamp(1, 100_000).to_string(),
+            ";",
+            "set-option",
+            "-g",
+            "status",
+            "off",
+            ";",
+        ]);
+        cmd.args([
+            "new-session",
+            "-d",
+            "-s",
+            id.as_str(),
+            "-x",
+            "80",
+            "-y",
+            "24",
+        ]);
+        // tmux parses trailing semicolons even in argv. Quote the whole
+        // program once for the shell and keep user data out of tmux syntax.
+        let mut shell = guard.unwrap_or_default().to_owned();
+        if let Some(cwd) = &spawn.cwd {
+            shell.push_str(&format!(
+                "cd {} || exit 1\n",
+                sheprd_client::shell_quote(cwd.to_str().ok_or(Error::Invalid)?)
+            ));
+        }
+        if spawn.argv.is_empty() {
+            shell.push_str(&self.keep_shell_script(&id, spawn)?);
+        }
+        shell.push_str(
+            "unset HC_TERMINAL_ID HC_TERMINAL_SOCKET HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID HERDR_SOCKET_PATH
+exec /usr/bin/env --",
+        );
+        for (key, value) in &spawn.env {
+            if key.is_empty() || key.contains('=') || key.starts_with('-') {
+                return Err(Error::Invalid);
+            }
+            shell.push(' ');
+            shell.push_str(&sheprd_client::shell_quote(&format!("{key}={value}")));
+        }
+        shell.push_str(&format!(" SHEPRD_TERMINAL_ID={id}"));
+        if spawn.argv.is_empty() {
+            shell.push_str(" \"${SHELL:-/bin/sh}\" -l");
+        } else {
+            for word in &spawn.argv {
+                shell.push(' ');
+                shell.push_str(&sheprd_client::shell_quote(word));
+            }
+        }
+        // Force POSIX shell syntax even when the login shell is fish.
+        cmd.args(["-e", &format!("SHEPRD_TMUX_METADATA={metadata}")]);
+        if !spawn.argv.is_empty() && guard.is_none() {
+            // An archive script may finish before the GUI attaches. Create an
+            // empty pane and enable retention before starting its program.
+            let pane = format!("={}:", id.as_str());
+            cmd.args([
+                "",
+                ";",
+                "set-option",
+                "-w",
+                "-t",
+                &pane,
+                "remain-on-exit",
+                "on",
+                ";",
+                "respawn-pane",
+                "-k",
+                "-t",
+                &pane,
+            ]);
+        }
+        cmd.args(["--", "/bin/sh", "-c", &shell]);
+        match self.run(cmd) {
+            Err(Error::Command(sheprd_client::Error::ScriptExit { stderr, .. }))
+                if stderr.contains("duplicate session:") =>
+            {
+                return Err(Error::NameTaken);
+            }
+            result => {
+                result?;
+            }
+        }
+        Ok(TerminalInfo {
+            id,
+            agent: AgentStatus::Unknown,
+            cwd: spawn.cwd.clone(),
+            foreground: None,
+            labels: spawn.labels.clone(),
+            name: spawn.name.clone(),
+            reporter: None,
+            state: RunState::Running,
+            title: None,
+        })
+    }
+}
+
+fn missing(error: &Error) -> bool {
+    no_server(error)
+        || matches!(error, Error::MissingPane)
+        || matches!(error, Error::Command(sheprd_client::Error::ScriptExit {stderr, ..})
+        if stderr.contains("can't find session:") || stderr.contains("can't find pane:"))
 }
 
 fn no_server(error: &Error) -> bool {
@@ -180,115 +301,31 @@ impl Backend for Tmux {
             Some(name) => Self::named_id(name)?,
             None => TerminalId::new(format!("{PREFIX}{}", Uuid::new_v4()))?,
         };
-        let metadata = URL_SAFE_NO_PAD
-            .encode(serde_json::to_vec(&(&spawn.name, &spawn.labels)).map_err(|_| Error::Invalid)?);
-        let mut cmd = self.command();
-        cmd.args([
-            "start-server",
-            ";",
-            "set-option",
-            "-g",
-            "history-limit",
-            &self.scrollback.clamp(1, 100_000).to_string(),
-            ";",
-            "set-option",
-            "-g",
-            "status",
-            "off",
-            ";",
-        ]);
-        cmd.args([
-            "new-session",
-            "-d",
-            "-s",
-            id.as_str(),
-            "-x",
-            "80",
-            "-y",
-            "24",
-        ]);
-        // tmux parses trailing semicolons even in argv. Quote the whole
-        // program once for the shell and keep user data out of tmux syntax.
-        let mut shell = String::new();
-        if let Some(cwd) = &spawn.cwd {
-            shell.push_str(&format!(
-                "cd {} || exit 1\n",
-                sheprd_client::shell_quote(cwd.to_str().ok_or(Error::Invalid)?)
-            ));
+        if spawn.name.is_some()
+            && spawn.argv.is_empty()
+            && let Some(saved) = self.recover(&id)?
+        {
+            return Ok(saved);
         }
-        shell.push_str(
-            "unset HC_TERMINAL_ID HC_TERMINAL_SOCKET HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID HERDR_SOCKET_PATH
-exec /usr/bin/env --",
-        );
-        for (key, value) in &spawn.env {
-            if key.is_empty() || key.contains('=') || key.starts_with('-') {
-                return Err(Error::Invalid);
-            }
-            shell.push(' ');
-            shell.push_str(&sheprd_client::shell_quote(&format!("{key}={value}")));
-        }
-        shell.push_str(&format!(" SHEPRD_TERMINAL_ID={id}"));
-        if spawn.argv.is_empty() {
-            shell.push_str(" \"${SHELL:-/bin/sh}\" -l");
-        } else {
-            for word in &spawn.argv {
-                shell.push(' ');
-                shell.push_str(&sheprd_client::shell_quote(word));
-            }
-        }
-        // Force POSIX shell syntax even when the login shell is fish.
-        cmd.args(["-e", &format!("SHEPRD_TMUX_METADATA={metadata}")]);
-        if !spawn.argv.is_empty() {
-            // An archive script may finish before the GUI attaches. Create an
-            // empty pane and enable retention before starting its program.
-            let pane = format!("={}:", id.as_str());
-            cmd.args([
-                "",
-                ";",
-                "set-option",
-                "-w",
-                "-t",
-                &pane,
-                "remain-on-exit",
-                "on",
-                ";",
-                "respawn-pane",
-                "-k",
-                "-t",
-                &pane,
-            ]);
-        }
-        cmd.args(["--", "/bin/sh", "-c", &shell]);
-        match self.run(cmd) {
-            Err(Error::Command(sheprd_client::Error::ScriptExit { stderr, .. }))
-                if stderr.contains("duplicate session:") =>
-            {
-                return Err(Error::NameTaken);
-            }
-            result => {
-                result?;
-            }
-        }
-        Ok(TerminalInfo {
-            id,
-            agent: AgentStatus::Unknown,
-            cwd: spawn.cwd.clone(),
-            foreground: None,
-            labels: spawn.labels.clone(),
-            name: spawn.name.clone(),
-            reporter: None,
-            state: RunState::Running,
-            title: None,
-        })
+        self.spawn_id(id, spawn, None)
     }
 
     fn attach(&self, id: &TerminalId, size: Size, role: Role) -> Result<TmuxTerminal> {
-        TmuxTerminal::attach(self, id, size, role)
+        match TmuxTerminal::attach(self, id, size, role) {
+            Err(error) if role == Role::Active && missing(&error) => match self.recover(id) {
+                Ok(Some(_)) | Err(Error::NameTaken) => TmuxTerminal::attach(self, id, size, role),
+                Ok(None) => Err(error),
+                Err(other) => Err(other),
+            },
+            result => result,
+        }
     }
 
     fn kill(&self, id: &TerminalId) -> Result<()> {
         let mut cmd = self.command();
         cmd.args(["kill-session", "-t", &Self::target(id)?]);
+        // Fence a recovery that read its recipe but has not started its pane.
+        self.forget(id)?;
         match self.run(cmd) {
             Err(error) if no_server(&error) => Ok(()),
             Err(Error::Command(sheprd_client::Error::ScriptExit { stderr, .. }))
@@ -297,7 +334,8 @@ exec /usr/bin/env --",
                 Ok(())
             }
             other => other.map(drop),
-        }
+        }?;
+        self.forget(id)
     }
 }
 

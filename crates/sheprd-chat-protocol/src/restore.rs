@@ -402,7 +402,8 @@ fn read_bounded(path: &Path) -> Result<Vec<u8>, Error> {
 
 /// Writes `bytes` to `path` through a temporary file in `dir` and a rename,
 /// with the directory and file private to this user on Unix.
-fn write_private(dir: &Path, path: &Path, bytes: &[u8]) -> Result<(), Error> {
+/// Atomically replace a chat state file inside its private directory.
+pub fn write_private(dir: &Path, path: &Path, bytes: &[u8]) -> Result<(), Error> {
     create_private_dir(dir)?;
     // Unique per write, and never an existing file: two windows of one app
     // may stamp the same chat at once.

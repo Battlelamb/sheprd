@@ -18,6 +18,11 @@ The adapter uses the dedicated `tmux -L sheprd` server and recognizes session na
 of the form `tmux-<UUID>`. Named spawns reuse a deterministic address. Dropping a view
 disconnects its client. Closing the owning pane ends the named session.
 
+After a host reboot, opening a saved driving pane recreates its shell in the
+original launch directory or runs `sheprd-acp --resume` for its exact agent
+session. The helper stores its record privately on the terminal host. Closing
+the pane clears the record. Observing a missing pane cannot launch a process.
+
 ## Live test
 
 Choose an installed tmux explicitly. The test starts a private server in an isolated

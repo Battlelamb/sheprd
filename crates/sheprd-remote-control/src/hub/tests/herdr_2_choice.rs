@@ -61,3 +61,25 @@ fn the_phone_and_desktop_resolve_the_same_backend_setting() {
         }
     );
 }
+
+#[cfg(feature = "tmux")]
+#[test]
+fn scrollback_reads_overrides_then_settings_and_clamps() {
+    use crate::hub::wake::{DEFAULT_SCROLLBACK, scrollback};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config-gpui.toml");
+    let overrides = sheprd_client::settings_files::overrides_path(&path);
+    assert_eq!(scrollback(&path), DEFAULT_SCROLLBACK);
+
+    std::fs::write(&path, "herdr_2_scrollback = 25000\n").unwrap();
+    assert_eq!(scrollback(&path), 25_000);
+
+    std::fs::write(&overrides, "herdr_2_scrollback = 500\n").unwrap();
+    assert_eq!(scrollback(&path), 1_000);
+
+    std::fs::write(&overrides, "herdr_2_scrollback = 999999\n").unwrap();
+    assert_eq!(scrollback(&path), 100_000);
+
+    std::fs::write(&overrides, "herdr_2_scrollback = -5\n").unwrap();
+    assert_eq!(scrollback(&path), DEFAULT_SCROLLBACK);
+}

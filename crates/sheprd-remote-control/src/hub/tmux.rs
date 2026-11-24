@@ -14,6 +14,12 @@ fn preferred() -> bool {
         .is_some_and(|p| super::wake::chosen(&p) == sheprd_backend::TerminalBackend::Tmux)
 }
 
+fn scrollback() -> usize {
+    super::wake::settings_path().map_or(super::wake::DEFAULT_SCROLLBACK, |p| {
+        super::wake::scrollback(&p)
+    })
+}
+
 impl super::Hub {
     pub(super) async fn wants_tmux_chat(&self, workspace: &str) -> bool {
         self.search_program
@@ -49,7 +55,7 @@ pub(super) fn open_chat(
         labels,
         ..Default::default()
     };
-    let info = sheprd_tmux::Tmux::new(0).spawn(&spawn)?;
+    let info = sheprd_tmux::Tmux::new(scrollback()).spawn(&spawn)?;
     Ok(crate::control::favorites::tmux_pane(info.id.as_str()))
 }
 
@@ -118,13 +124,14 @@ pub(super) fn with_chats(
 /// Scan once per service start. Each pane is claimed on its owning host
 /// before exec, and only if its private chat record belongs to an older boot.
 fn recover_chats(lifetime: &watch::Sender<Arc<Layout>>) {
-    let Some(dir) = sheprd_chat_protocol::restore::restore_dir() else {
+    let Some(dir) = sheprd_chat_protocol::restore::restore_dir_with(sheprd_client::login_env::var)
+    else {
         return;
     };
     let Ok(records) = std::fs::read_dir(dir.join("tmux")) else {
         return;
     };
-    let backend = sheprd_tmux::Tmux::new(0);
+    let backend = sheprd_tmux::Tmux::new(scrollback());
     let mut remaining = MAX_CHATS;
     for entry in records.flatten() {
         if remaining == 0 || lifetime.is_closed() {

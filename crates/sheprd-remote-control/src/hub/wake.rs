@@ -125,24 +125,38 @@ fn core_program(answering: bool) -> Option<PathBuf> {
     find(sheprd_core_client::PROGRAM, login.as_deref())
 }
 
+/// Lines of scrollback kept when the user's config names none.
+#[cfg(feature = "tmux")]
+pub(super) const DEFAULT_SCROLLBACK: usize = 10_000;
+#[cfg(feature = "tmux")]
+const MIN_SCROLLBACK: usize = 1_000;
+#[cfg(feature = "tmux")]
+const MAX_SCROLLBACK: usize = 100_000;
+
 /// Sheprd's settings on this computer.
 pub(super) fn settings_path() -> Option<PathBuf> {
     let root = sheprd_client::local_path::config_root().ok()?;
     Some(root.join("herdr/config-gpui.toml"))
 }
 
-/// Whether the settings at `path` say new terminals use Herdr 2: the
-/// user's overrides first, then the file itself, off when neither says.
-pub(super) fn chosen(path: &std::path::Path) -> sheprd_backend::TerminalBackend {
-    use sheprd_backend::TerminalBackend;
+fn read_settings(path: &std::path::Path) -> (Option<toml::Table>, Option<toml::Table>) {
     fn read(path: &std::path::Path) -> Option<toml::Table> {
         sheprd_client::settings_files::read(path)
             .ok()??
             .parse()
             .ok()
     }
-    let overrides = read(&sheprd_client::settings_files::overrides_path(path));
-    let settings = read(path);
+    (
+        read(&sheprd_client::settings_files::overrides_path(path)),
+        read(path),
+    )
+}
+
+/// Whether the settings at `path` say new terminals use Herdr 2: the
+/// user's overrides first, then the file itself, off when neither says.
+pub(super) fn chosen(path: &std::path::Path) -> sheprd_backend::TerminalBackend {
+    use sheprd_backend::TerminalBackend;
+    let (overrides, settings) = read_settings(path);
     let value = |key| {
         overrides
             .as_ref()
@@ -154,6 +168,27 @@ pub(super) fn chosen(path: &std::path::Path) -> sheprd_backend::TerminalBackend 
         .and_then(toml::Value::as_bool)
         .unwrap_or(false);
     TerminalBackend::selected(backend, legacy, cfg!(feature = "tmux"))
+}
+
+/// Configured scrollback lines from `path` (overrides first, then settings),
+/// clamped to the desktop's bounds or defaulting to [`DEFAULT_SCROLLBACK`].
+#[cfg(feature = "tmux")]
+pub(super) fn scrollback(path: &std::path::Path) -> usize {
+    let (overrides, settings) = read_settings(path);
+    let value = overrides
+        .as_ref()
+        .and_then(|table| table.get("herdr_2_scrollback"))
+        .or_else(|| {
+            settings
+                .as_ref()
+                .and_then(|table| table.get("herdr_2_scrollback"))
+        });
+    value
+        .and_then(toml::Value::as_integer)
+        .and_then(|lines| usize::try_from(lines).ok())
+        .map_or(DEFAULT_SCROLLBACK, |lines| {
+            lines.clamp(MIN_SCROLLBACK, MAX_SCROLLBACK)
+        })
 }
 
 /// `program` where the daemon looks, else on the login shell's `login`

@@ -104,20 +104,17 @@ impl Tmux {
         let metadata = URL_SAFE_NO_PAD
             .encode(serde_json::to_vec(&(&spawn.name, &spawn.labels)).map_err(|_| Error::Invalid)?);
         let mut cmd = self.command();
-        cmd.args([
-            "start-server",
-            ";",
-            "set-option",
-            "-g",
-            "history-limit",
-            &self.scrollback.clamp(1, 100_000).to_string(),
-            ";",
-            "set-option",
-            "-g",
-            "status",
-            "off",
-            ";",
-        ]);
+        cmd.args(["start-server", ";"]);
+        if self.scrollback > 0 {
+            cmd.args([
+                "set-option",
+                "-g",
+                "history-limit",
+                &self.scrollback.clamp(1, 100_000).to_string(),
+                ";",
+            ]);
+        }
+        cmd.args(["set-option", "-g", "status", "off", ";"]);
         cmd.args([
             "new-session",
             "-d",

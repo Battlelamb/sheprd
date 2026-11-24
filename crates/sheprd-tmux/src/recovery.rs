@@ -128,6 +128,7 @@ impl Tmux {
             return super::host::with_script(host.as_ref(), &script, false, Self::output);
         }
         let mut cmd = sheprd_client::new_command("/bin/sh");
+        sheprd_client::login_env::apply(&mut cmd);
         cmd.args(["-c", &script]);
         Self::output(cmd)
     }
@@ -294,5 +295,60 @@ mod tests {
         let mut bad = saved();
         bad.chat.as_mut().unwrap().helper = "/bin/sh".into();
         assert!(bad.spawn(&id).is_err());
+    }
+
+    #[test]
+    fn local_recovery_uses_the_login_shell_state_directory() {
+        let id = Tmux::named_id("login-state").unwrap();
+        if let Ok(state_dir) = std::env::var("SHEPRD_TMUX_LOGIN_STATE_CHILD") {
+            let file = PathBuf::from(&state_dir)
+                .join("herdr/acp/restore/tmux")
+                .join(format!("{id}.shell"));
+            assert!(file.is_file());
+            let read = Tmux::new(100).recovery_command("read", &id, "").unwrap();
+            assert_eq!(String::from_utf8(read).unwrap(), "saved-recipe\n");
+            Tmux::new(100).forget(&id).unwrap();
+            assert!(!file.exists());
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let state_dir = dir.path().join("custom-state");
+        let fallback_home = dir.path().join("home");
+        let file = state_dir
+            .join("herdr/acp/restore/tmux")
+            .join(format!("{id}.shell"));
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::create_dir_all(&fallback_home).unwrap();
+        fs::write(&file, "old-boot\nsaved-recipe\n").unwrap();
+        let shell = dir.path().join("login-shell.sh");
+        fs::write(
+            &shell,
+            format!(
+                "#!/bin/sh\nexport XDG_STATE_HOME={}\nwhile [ \"$#\" -gt 1 ]; do shift; done\nexec /bin/sh -c \"$1\"\n",
+                shell_quote(state_dir.to_str().unwrap())
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&shell, fs::Permissions::from_mode(0o700)).unwrap();
+        let out = sheprd_client::new_command(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "recovery::tests::local_recovery_uses_the_login_shell_state_directory",
+                "--nocapture",
+            ])
+            .env_remove("TERM")
+            .env_remove("XDG_STATE_HOME")
+            .env("HOME", &fallback_home)
+            .env("SHELL", &shell)
+            .env("SHEPRD_TMUX_LOGIN_STATE_CHILD", &state_dir)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 }

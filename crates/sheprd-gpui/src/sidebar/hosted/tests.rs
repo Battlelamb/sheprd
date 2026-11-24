@@ -3,6 +3,7 @@ use gpui::TestAppContext;
 
 mod connection;
 mod device_gpu;
+mod device_load;
 mod drafted;
 mod edge;
 mod focus;

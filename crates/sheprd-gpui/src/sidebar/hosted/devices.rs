@@ -4,8 +4,9 @@
 //! Rows come from each device's sessions, as the window's own sidebar reads
 //! them: Herdr 1's workspaces, then those the app keeps for herdr-core.
 
-use super::{hex, load_state, status_name};
+use super::{hex, status_name};
 use crate::{
+    config::status_bar::Detail,
     endpoint::Endpoint,
     session_model::Sessions,
     sidebar::workspaces::{
@@ -98,15 +99,19 @@ impl SheprdWindow {
                 let selected = index == self.selected_endpoint;
                 let live = if selected { &self.live } else { &endpoint.live };
                 let host = crate::usage::Host::load_of(&endpoint.connection.target);
+                // As the classic row: CPU and memory, and the GPU's line when
+                // the sidebar shows it. `sidebar_load` chooses shares beside
+                // the name, or lines under it with their graphs.
+                let detail = self.config.sidebar_load;
                 let (load, gpu) = (
-                    self.config.show_system_load,
-                    self.config.show_sidebar_gpu_load,
+                    self.config.show_system_load.then_some(detail),
+                    self.config.show_sidebar_gpu_load.then_some(detail),
                 );
-                let reading = host
+                let load = host
                     .as_ref()
-                    .filter(|_| load || gpu)
+                    .filter(|_| load.is_some() || gpu.is_some())
                     .and_then(|host| self.system_load.get(host))
-                    .and_then(|load| load.latest().copied());
+                    .map(|reading| crate::system_load::host_load(reading, &self.theme, load, gpu));
                 let folded = multi && endpoint.collapsed;
                 let sessions = self.sessions(index);
                 let rows = if folded {
@@ -120,7 +125,9 @@ impl SheprdWindow {
                     "enabled": endpoint.enabled,
                     "id": endpoint.id,
                     "label": endpoint.label,
-                    "load": reading.as_ref().map(|reading| load_state(reading, load, gpu)),
+                    "load": load,
+                    // Whether the load takes lines of its own under the name.
+                    "load_lines": detail == Detail::Detailed,
                     "removing": self.device_removing(endpoint),
                     "search": search_rows(endpoint, &sessions, cx),
                     "selected": selected,

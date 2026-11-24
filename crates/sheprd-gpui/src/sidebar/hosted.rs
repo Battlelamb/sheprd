@@ -13,7 +13,7 @@ use super::{
     agents::{listed::Listed, status_style, status_text},
     layout::{HeaderCase, Highlight},
 };
-use crate::{config::Theme, preferences::AgentSort, system_load::Sample, window::SheprdWindow};
+use crate::{config::Theme, preferences::AgentSort, window::SheprdWindow};
 use gpui::App;
 use serde_json::{Value, json};
 use sheprd_client::protocol::{AgentStatus, ClientShellSnapshot};
@@ -266,16 +266,6 @@ fn build_state() -> Value {
         "branch": env!("HERDR_BUILD_BRANCH"),
         "pr": Some(env!("HERDR_BUILD_PR")).filter(|pr| !pr.is_empty()),
         "worktree": env!("HERDR_BUILD_WORKTREE") == "1",
-    })
-}
-
-/// A host row's load: `cpu` and `memory` when `load`, and the GPU's busy
-/// share as `gpu` when `gpu`, as the classic row's gauges show them.
-fn load_state(sample: &Sample, load: bool, gpu: bool) -> Value {
-    json!({
-        "cpu": sample.cpu.filter(|_| load),
-        "gpu": sample.gpu.and_then(|card| card.busy).filter(|_| gpu),
-        "memory": sample.memory.map(|memory| memory.percent()).filter(|_| load),
     })
 }
 

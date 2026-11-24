@@ -9,6 +9,7 @@
 -- (`mods/agents`); the highlight is `sheprd-row`'s.
 local icon_button = use "icon-button"
 local row = use "sheprd-row"
+local gauge = use "sheprd-gauge"
 local status_dot = use "sheprd-status-dot"
 local subhead = use "sheprd-subhead"
 
@@ -448,25 +449,86 @@ local function compact_row(workspace: any, theme: any)
 	}
 end
 
--- A device's header, as Sheprd lists several: its fold arrow, its name, its
--- machine's load, and whether it is connected. A click selects it, a right
--- click opens its menu.
-local function device_header(device: any, layout: any, theme: any)
-	local load = device.load
+-- A share on a device's header, while its load is compact.
+local function share(value: number?, class: string, tooltip: string, theme: any)
+	if not value then
+		return false
+	end
+	return ui.text { `{math.floor(value + 0.5)}%`, class = class, tooltip = tooltip, style = { color = theme.muted } }
+end
+
+-- A line of a device's load under its name, as Sheprd's own row has them:
+-- two gauges, the first a sparkline and the second a meter, whose labels
+-- and shares keep their widths so the lines' columns line up.
+local function load_line(class: string, first: any, second: any, indent: number)
+	if not first and not second then
+		return false
+	end
 	return ui.row {
-		class = "sheprd-device",
-		selected = device.selected,
+		class = class,
 		align = "center",
 		shrink = false,
-		msg = { select_device = device.id },
-		context = { menu = "device", endpoint = device.id },
-		to = LINK,
-		style = {
-			gap = 6,
-			padding = { x = (layout.padding or 8) + (layout.inset or 0), y = 3 },
-			background = if device.selected then theme.active else nil,
-			opacity = if device.enabled == false then 0.6 else nil,
-		},
+		style = { gap = 10, clip = true },
+		ui.row { width = indent - 10, shrink = false },
+		-- A card that reports its memory alone keeps the first column's room.
+		if first then gauge(first) elseif second then ui.row { width = 0 } else false,
+		if second then gauge(second) else false,
+	}
+end
+
+-- The lines under a device's name: CPU and memory, then the GPU and its
+-- video memory, each only when Sheprd sends it (`device.load`).
+local function load_lines(load: any, indent: number)
+	local gpu = load.gpu
+	local function part(class: string, name: string, value: number?, color: string?, from: any, graph: string): any
+		if not value then
+			return nil
+		end
+		return {
+			class = class,
+			name = name,
+			value = value,
+			color = color,
+			label_color = from.label_color,
+			history = if graph == "history" then from.history else nil,
+			meter = if graph == "meter" then from.meter else nil,
+			track = from.track,
+			-- Four glyphs: `VRAM`, and `100%`.
+			label_width = if graph == "meter" then 34 else nil,
+			share_width = 34,
+		}
+	end
+	return load_line(
+		"sheprd-device-load",
+		part("sheprd-device-cpu", load.cpu_label, load.cpu, load.cpu_color, load, "history"),
+		part("sheprd-device-memory", load.memory_label, load.memory, load.memory_color, load, "meter"),
+		indent
+	),
+		if gpu
+			then load_line(
+				"sheprd-device-gpu-line",
+				part("sheprd-device-gpu", gpu.busy_label, gpu.busy, gpu.busy_color, gpu, "history"),
+				part("sheprd-device-vram", gpu.memory_label, gpu.memory, gpu.memory_color, gpu, "meter"),
+				indent
+			)
+			else false
+end
+
+-- A device's header, as Sheprd lists several: its fold arrow, its name, its
+-- machine's load, and whether it is connected. A click selects it, a right
+-- click opens its menu. The load is shares beside the name, or, once
+-- `sidebar_load` is detailed (`device.load_lines`), lines of its own under
+-- the name with their graphs: CPU and memory, then the GPU and video memory.
+local function device_header(device: any, layout: any, theme: any)
+	local load = device.load
+	local lines = load and device.load_lines
+	local gpu = load and load.gpu
+	local padding = (layout.padding or 8) + (layout.inset or 0)
+	local head = ui.row {
+		class = "sheprd-device-head",
+		align = "center",
+		shrink = false,
+		style = { gap = 6 },
 		ui.row {
 			class = "sheprd-device-fold",
 			shrink = false,
@@ -477,15 +539,10 @@ local function device_header(device: any, layout: any, theme: any)
 		},
 		ui.icon { if device.id == "local" then "laptop" else "server", size = "small", style = { color = theme.subtext } },
 		ui.row { grow = true, ui.text { device.label, class = "sheprd-device-label", truncate = true, weight = "bold", style = { color = theme.foreground } } },
-		if load and load.cpu
-			then ui.text { `{math.floor(load.cpu + 0.5)}%`, class = "sheprd-device-cpu", tooltip = "CPU", style = { color = theme.muted } }
-			else false,
-		if load and load.memory
-			then ui.text { `{math.floor(load.memory + 0.5)}%`, class = "sheprd-device-memory", tooltip = "Memory", style = { color = theme.muted } }
-			else false,
-		if load and load.gpu
-			then ui.text { `{math.floor(load.gpu + 0.5)}%`, class = "sheprd-device-gpu", tooltip = "GPU", style = { color = theme.muted } }
-			else false,
+		if load and not lines then share(load.cpu, "sheprd-device-cpu", "CPU", theme) else false,
+		if load and not lines then share(load.memory, "sheprd-device-memory", "Memory", theme) else false,
+		if gpu and not lines then share(gpu.busy, "sheprd-device-gpu", "GPU", theme) else false,
+		if gpu and not lines then share(gpu.memory, "sheprd-device-vram", "Video memory", theme) else false,
 		ui.row {
 			class = "sheprd-device-status",
 			width = 7,
@@ -494,6 +551,28 @@ local function device_header(device: any, layout: any, theme: any)
 			tooltip = if device.connected then "Connected" else "Not connected",
 			style = { radius = 4, background = if device.connected then theme.success else theme.muted },
 		},
+	}
+	local cpu_line, gpu_line = false, false
+	if lines then
+		-- Under the name, past the fold arrow and the device's icon.
+		cpu_line, gpu_line = load_lines(load, 32)
+	end
+	return ui.column {
+		class = "sheprd-device",
+		selected = device.selected,
+		shrink = false,
+		msg = { select_device = device.id },
+		context = { menu = "device", endpoint = device.id },
+		to = LINK,
+		style = {
+			gap = 2,
+			padding = { x = padding, y = 3 },
+			background = if device.selected then theme.active else nil,
+			opacity = if device.enabled == false then 0.6 else nil,
+		},
+		head,
+		cpu_line,
+		gpu_line,
 	}
 end
 

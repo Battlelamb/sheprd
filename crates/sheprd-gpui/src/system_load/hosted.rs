@@ -1,7 +1,8 @@
-//! The status bar's load as data, for a layout that draws the bar itself:
-//! what [`SheprdWindow::render_system_load`] and
-//! [`SheprdWindow::render_gpu_load`] draw, with the same sparklines, meters,
-//! shares and colors, and nothing when they draw nothing.
+//! A host's load as data, for a layout that draws the status bar and the
+//! sidebar's host rows itself: what [`SheprdWindow::render_system_load`],
+//! [`SheprdWindow::render_gpu_load`] and the classic host row draw, with the
+//! same sparklines, meters, shares and colors, and nothing when they draw
+//! nothing.
 
 use super::{
     HISTORY, Reading,
@@ -16,13 +17,9 @@ use crate::{
 use serde_json::{Value, json};
 
 impl SheprdWindow {
-    /// The selected host's load: `cpu` and `memory` as percentages, their
-    /// `cpu_color` and `memory_color`, and while the bar is detailed the
-    /// CPU `history` (oldest first, [`HISTORY`] bars, `false` for those not
-    /// sampled yet) and the memory `meter`. `null` while hidden or before
-    /// the host's first answer; `unavailable` when it never answered.
-    /// While `show_gpu_load` is on and the host has a card, `gpu` holds
-    /// its line (see [`gpu`]); alone when CPU and memory are hidden.
+    /// The selected host's load, as the status bar shows it: see
+    /// [`host_load`]. CPU and memory while `show_system_load` is on, the
+    /// GPU while `show_gpu_load` is, each at its own detail.
     pub(crate) fn hosted_load(&self) -> Value {
         let Some(reading) = self
             .selected_host()
@@ -30,41 +27,62 @@ impl SheprdWindow {
         else {
             return Value::Null;
         };
-        let gpu = gpu(reading, &self.theme, self.config.status_bar.gpu_detail)
-            .filter(|_| self.config.show_gpu_load);
-        if !self.config.show_system_load {
-            return gpu.map_or(Value::Null, |gpu| json!({ "gpu": gpu }));
-        }
-        let theme = &self.theme;
-        let Some(sample) = reading.latest() else {
-            return match reading.error() {
-                Some(_) => json!({ "unavailable": fl!("system-load-unavailable") }),
-                None => Value::Null,
-            };
-        };
-        let share = share(reading, theme);
-        let memory = sample.memory.map(|memory| memory.percent());
-        let mut load = json!({
-            "cpu": sample.cpu,
-            "cpu_color": sample.cpu.map(|cpu| share(cpu, CPU_WARN)),
-            "cpu_label": fl!("system-load-cpu"),
-            "label_color": hex(theme.muted),
-            "memory": memory,
-            "memory_color": memory.map(|used| share(used, MEMORY_WARN)),
-            "memory_label": fl!("system-load-memory"),
-        });
-        if self.config.status_bar.system_load == Detail::Detailed {
-            load["history"] = history(reading.history(), CPU_WARN, theme);
-            load["track"] = hex(theme.active).into();
-            if let Some(used) = memory {
-                load["meter"] = meter(used, MEMORY_WARN, theme);
-            }
-        }
-        if let Some(gpu) = gpu {
-            load["gpu"] = gpu;
-        }
-        load
+        let bar = &self.config.status_bar;
+        host_load(
+            reading,
+            &self.theme,
+            self.config.show_system_load.then_some(bar.system_load),
+            self.config.show_gpu_load.then_some(bar.gpu_detail),
+        )
     }
+}
+
+/// A host's load, for the status bar or its row in the sidebar: `cpu` and
+/// `memory` as percentages, their `cpu_color` and `memory_color`, and while
+/// `load` is detailed the CPU `history` (oldest first, [`HISTORY`] bars,
+/// `false` for those not sampled yet) and the memory `meter`. `null` while
+/// hidden or before the host's first answer; `unavailable` when it never
+/// answered. While `gpu_detail` shows the GPU and the host has a card,
+/// `gpu` holds its line (see [`gpu`]); alone when `load` hides CPU and
+/// memory.
+pub(crate) fn host_load(
+    reading: &Reading,
+    theme: &Theme,
+    load: Option<Detail>,
+    gpu_detail: Option<Detail>,
+) -> Value {
+    let gpu = gpu_detail.and_then(|detail| gpu(reading, theme, detail));
+    let Some(detail) = load else {
+        return gpu.map_or(Value::Null, |gpu| json!({ "gpu": gpu }));
+    };
+    let Some(sample) = reading.latest() else {
+        return match reading.error() {
+            Some(_) => json!({ "unavailable": fl!("system-load-unavailable") }),
+            None => Value::Null,
+        };
+    };
+    let share = share(reading, theme);
+    let memory = sample.memory.map(|memory| memory.percent());
+    let mut load = json!({
+        "cpu": sample.cpu,
+        "cpu_color": sample.cpu.map(|cpu| share(cpu, CPU_WARN)),
+        "cpu_label": fl!("system-load-cpu"),
+        "label_color": hex(theme.muted),
+        "memory": memory,
+        "memory_color": memory.map(|used| share(used, MEMORY_WARN)),
+        "memory_label": fl!("system-load-memory"),
+    });
+    if detail == Detail::Detailed {
+        load["history"] = history(reading.history(), CPU_WARN, theme);
+        load["track"] = hex(theme.active).into();
+        if let Some(used) = memory {
+            load["meter"] = meter(used, MEMORY_WARN, theme);
+        }
+    }
+    if let Some(gpu) = gpu {
+        load["gpu"] = gpu;
+    }
+    load
 }
 
 /// The GPU's line as the bar draws it (`render::gpu_line`): its `busy`

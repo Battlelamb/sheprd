@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    system_load::{Gpu, Memory},
+    system_load::{Gpu, Memory, Sample},
     usage::Host,
 };
 use sheprd_client::ConnectTarget;
@@ -59,14 +59,14 @@ fn each_device_carries_its_own_gpu_while_the_sidebar_shows_it(cx: &mut TestAppCo
 
         // The GPU alone: CPU and memory are hidden.
         let gpu_only = loads(view, cx);
-        assert_eq!(gpu_only[0]["gpu"].as_f64(), Some(30.));
-        assert_eq!(gpu_only[1]["gpu"].as_f64(), Some(70.));
+        assert_eq!(gpu_only[0]["gpu"]["busy"].as_f64(), Some(30.));
+        assert_eq!(gpu_only[1]["gpu"]["busy"].as_f64(), Some(70.));
         assert!(gpu_only.iter().all(|load| load["cpu"].is_null()));
 
         view.config.show_system_load = true;
         let both = loads(view, cx);
         assert_eq!(both[1]["cpu"].as_f64(), Some(20.));
-        assert_eq!(both[1]["gpu"].as_f64(), Some(70.));
+        assert_eq!(both[1]["gpu"]["busy"].as_f64(), Some(70.));
 
         // The sidebar's own setting hides it; the status bar's does not count.
         view.config.show_sidebar_gpu_load = false;

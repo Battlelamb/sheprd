@@ -6,7 +6,7 @@ import Testing
 @Suite struct CreateTests {
     @Test func newOptionsListAgentsAndOfferedFolders() throws {
         let options = try JSONDecoder().decode(NewOptions.self, from: WireTests.fixture("new"))
-        #expect(options.agents.first == AgentChoice(id: "claude", name: "Claude"))
+        #expect(options.agents.first == AgentChoice(id: "antigravity", name: "Antigravity"))
         #expect(options.roots.first?.path == "/Users/me/code")
         // Recent first, and a folder both lists hold appears once.
         #expect(options.folders == ["/Users/me/code/herdr-gpui", "/Users/me/code/moltis"])

@@ -182,6 +182,7 @@ Usage:
                         its endpoint ID once ready. Stop with Ctrl+C.
 
 Agents:
+  antigravity agy acp
   claude     claude itself, or with --acp claude-agent-acp
              (or npx @agentclientprotocol/claude-agent-acp)
   codex      codex app-server, or with --acp codex-acp
@@ -196,8 +197,8 @@ Options:
   --acp          Use the agent's ACP adapter, not the agent itself
                  (also HERDR_ACP_ADAPTER=1)
   --choose       Let clients switch to another installed agent whenever
-                 the agent is idle (Ctrl+O here); the new agent is handed
-                 the conversation; not with --load
+                 the agent is idle (Ctrl+O here); the new agent gets the
+                 conversation; not with --load
   --cwd DIR      Run the session in DIR instead of the current directory
   --load ID      Continue the agent's session ID instead of starting a new one
   --resume ID    Continue session ID, and stop rather than start a new one

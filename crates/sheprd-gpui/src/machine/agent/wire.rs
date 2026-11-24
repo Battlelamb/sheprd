@@ -4,7 +4,7 @@
 
 use super::{Error, Result};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use sheprd_control_protocol::protocol::tabs::{MachineButton, MachineModifier};
+use sheprd_control_protocol::protocol::tabs::{AgentCapabilities, MachineButton, MachineModifier};
 use std::io::{Read, Write};
 
 /// The vsock port the agent listens on.
@@ -65,8 +65,22 @@ pub(crate) struct Hello {
     pub(crate) width: u32,
     pub(crate) height: u32,
     pub(crate) scale: f64,
+    #[serde(default)]
     pub(crate) accessibility: bool,
+    #[serde(default)]
     pub(crate) screen_recording: bool,
+    #[serde(default)]
+    pub(crate) capabilities: Option<AgentCapabilities>,
+}
+
+impl Hello {
+    /// Common capabilities reported by the agent, falling back to legacy macOS
+    /// permission booleans when talking to an older macOS guest agent.
+    pub(crate) fn effective_capabilities(&self) -> AgentCapabilities {
+        self.capabilities.unwrap_or_else(|| {
+            AgentCapabilities::from_macos_permissions(self.accessibility, self.screen_recording)
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]

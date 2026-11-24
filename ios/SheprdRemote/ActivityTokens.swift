@@ -256,44 +256,17 @@ final class ActivityTokens {
         let credential = viaPushRelay ? await pushRelay.usableCredential() : nil
         guard PushRelaySetting.isOn == viaPushRelay else { return changed }
         guard let computer = computers.first(where: { $0.fingerprint == fingerprint }) else { return forgotten }
-        let recipient = { (token: String?, kind: PushRelayKind) -> API.PushRecipient? in
-            // Without the push relay nothing reaches a token, so none goes out.
-            guard let token, viaPushRelay else { return nil }
-            guard let credential, let handle = self.pushRelay.handle(for: token, kind: kind, credential: credential) else {
-                return nil
-            }
-            return .pushRelayHandle(handle, environment: credential.environment)
-        }
-        let activities = running.values
-            .filter { $0.attributes.fingerprint == computer.fingerprint }
-            .compactMap { running in
-                recipient(running.token, .activity).map { API.APNsRegistration.Activity(pane: running.attributes.pane, token: $0) }
-            }
-        let alert = recipient(alert, .alert)
-        // Each computer seals to its own notify key. Without one, alerts
-        // would arrive sealed to nobody: send neither, and the computer
-        // sends this phone nothing through APNs. Through the push relay,
-        // Live Activity content is sealed to it too.
-        let needsKey = alert != nil || viaPushRelay
-        let notifyKey = needsKey ? try? NotifyKey.loadOrCreate(for: computer.fingerprint).registered : nil
-        let generic = LiveActivityStyleSetting.current.asksGeneric
-        // With the push relay off, the computer drops every handle it holds,
-        // so it stops pushing even if revoking them at the push relay failed.
-        let registration = viaPushRelay
-            ? API.APNsRegistration(
-                pushToStart: recipient(pushToStart, .pushToStart),
-                activities: activities,
-                alert: notifyKey == nil ? nil : alert,
-                notifyKey: notifyKey,
-                genericActivities: generic
-            )
-            : .pushRelayOff(genericActivities: generic)
         do {
             let relay = relayOrigin(computer.device).map { [$0] } ?? []
             let session = try await sessions.session(for: computer, fallback: relay)
             guard PushRelaySetting.isOn == viaPushRelay else { return changed }
             guard computers.contains(where: { $0.fingerprint == fingerprint }) else { return forgotten }
-            let answer = try await session.client.registerAPNs(registration, singleActivity: ActivityGrouping.single(for: fingerprint), epoch: activityEpoch, bearer: session.token)
+            // Session setup can suspend while Private ends cards and changes
+            // the epoch. Snapshot the entire request after the last setup wait.
+            let request = registration(for: fingerprint, viaPushRelay: viaPushRelay, credential: credential)
+            let answer = try await session.client.registerAPNs(
+                request.body, singleActivity: request.single, epoch: request.epoch, bearer: session.token
+            )
             unreached.remove(computer.fingerprint)
             delivery[computer.fingerprint] = switch answer.delivery {
             case .pushRelay: .pushRelay
@@ -320,5 +293,44 @@ final class ActivityTokens {
             lastError = failure
             return failure
         }
+    }
+
+    /// All fields on one registration describe the same main-actor instant.
+    private func registration(
+        for fingerprint: Fingerprint, viaPushRelay: Bool, credential: PushRelayCredential?
+    ) -> (body: API.APNsRegistration, single: Bool, epoch: UUID?) {
+        let recipient = { (token: String?, kind: PushRelayKind) -> API.PushRecipient? in
+            // Without the push relay nothing reaches a token, so none goes out.
+            guard let token, viaPushRelay else { return nil }
+            guard let credential, let handle = self.pushRelay.handle(for: token, kind: kind, credential: credential) else {
+                return nil
+            }
+            return .pushRelayHandle(handle, environment: credential.environment)
+        }
+        let activities = running.values
+            .filter { $0.attributes.fingerprint == fingerprint }
+            .compactMap { running in
+                recipient(running.token, .activity).map { API.APNsRegistration.Activity(pane: running.attributes.pane, token: $0) }
+            }
+        let alert = recipient(alert, .alert)
+        // Each computer seals to its own notify key. Without one, alerts
+        // would arrive sealed to nobody: send neither, and the computer
+        // sends this phone nothing through APNs. Through the push relay,
+        // Live Activity content is sealed to it too.
+        let needsKey = alert != nil || viaPushRelay
+        let notifyKey = needsKey ? try? NotifyKey.loadOrCreate(for: fingerprint).registered : nil
+        let generic = LiveActivityStyleSetting.current.asksGeneric
+        // With the push relay off, the computer drops every handle it holds,
+        // so it stops pushing even if revoking them at the push relay failed.
+        let registration = viaPushRelay
+            ? API.APNsRegistration(
+                pushToStart: recipient(pushToStart, .pushToStart),
+                activities: activities,
+                alert: notifyKey == nil ? nil : alert,
+                notifyKey: notifyKey,
+                genericActivities: generic
+            )
+            : .pushRelayOff(genericActivities: generic)
+        return (registration, ActivityGrouping.single(for: fingerprint), activityEpoch)
     }
 }

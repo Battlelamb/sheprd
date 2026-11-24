@@ -1,5 +1,7 @@
 -- The status bar: the connection, then the machine's load and quick commands.
 
+local gauge = use "sheprd-gauge"
+
 local function run(command: string)
 	return { command = command }
 end
@@ -109,59 +111,81 @@ end
 -- The selected host's load as Sheprd's own bar draws it
 -- (`app.sheprd_load`, src/system_load/hosted.rs): CPU as a sparkline of its
 -- recent samples, memory as a meter, each with its share, in their
--- severity's colors; the graphs only while the bar is detailed.
+-- severity's colors; the graphs only while the bar is detailed. The GPU,
+-- when shown, follows as its own pair: busy share and video memory.
 local function load_item(load: any)
 	if load.unavailable then
 		return ui.text { load.unavailable, style = { color = load.label_color } }
 	end
-	local function label(text: string)
-		return ui.text { text, style = { color = load.label_color } }
-	end
-	local function share(value: number, color: string)
-		return ui.text { `{math.floor(value + 0.5)}%`, style = { color = color } }
-	end
-	local cpu: any = { class = "sheprd-load-cpu", align = "center", shrink = false, style = { gap = 5 }, label(load.cpu_label) }
-	if load.history then
-		local bars: any = { class = "sheprd-sparkline", align = "end", height = 11, shrink = false, style = { gap = 1 } }
-		for _, bar in load.history do
-			table.insert(bars, if bar
-				then ui.row { width = 2, height = math.max(11 * bar.value, 1), shrink = false, style = { background = bar.color, radius = 0.5 } }
-				else ui.row { width = 2, height = 1, shrink = false, style = { background = load.track } })
-		end
-		table.insert(cpu, ui.row(bars))
-	end
-	if load.cpu then
-		table.insert(cpu, share(load.cpu, load.cpu_color))
-	end
-	local row: any = { class = "sheprd-load", align = "center", shrink = false, style = { gap = 10 }, ui.row(cpu) }
-	if load.memory then
-		local memory: any = { class = "sheprd-load-memory", align = "center", shrink = false, style = { gap = 5 }, label(load.memory_label) }
-		if load.meter then
-			table.insert(memory, ui.row {
-				width = 32,
-				height = 5,
-				shrink = false,
-				style = { background = load.track, radius = 3 },
-				ui.row { width = 32 * load.meter.used, height = 5, style = { background = load.meter.color, radius = 3 } },
+	local row: any = { class = "sheprd-load", align = "center", shrink = false, style = { gap = 10 } }
+	if load.cpu_label then
+		table.insert(row, gauge {
+			class = "sheprd-load-cpu",
+			name = load.cpu_label,
+			value = load.cpu,
+			color = load.cpu_color,
+			label_color = load.label_color,
+			history = load.history,
+			track = load.track,
+		})
+		if load.memory then
+			table.insert(row, gauge {
+				class = "sheprd-load-memory",
+				name = load.memory_label,
+				value = load.memory,
+				color = load.memory_color,
+				label_color = load.label_color,
+				meter = load.meter,
+				track = load.track,
 			})
 		end
-		table.insert(memory, share(load.memory, load.memory_color))
-		table.insert(row, ui.row(memory))
+	end
+	local gpu = load.gpu
+	if gpu then
+		if gpu.busy then
+			table.insert(row, gauge {
+				class = "sheprd-load-gpu",
+				name = gpu.busy_label,
+				value = gpu.busy,
+				color = gpu.busy_color,
+				label_color = gpu.label_color,
+				history = gpu.history,
+				track = gpu.track,
+			})
+		end
+		if gpu.memory then
+			table.insert(row, gauge {
+				class = "sheprd-load-vram",
+				name = gpu.memory_label,
+				value = gpu.memory,
+				color = gpu.memory_color,
+				label_color = gpu.label_color,
+				meter = gpu.meter,
+				track = gpu.track,
+			})
+		end
 	end
 	return ui.row(row)
 end
 
-local function item(icon: string, text: string, color: string, msg: any, to: string?)
+local function item(icon: string, text: string, color: string, msg: any, to: string?, shown: string?)
+	-- `[status_bar]` hides a button, or draws its icon alone, named by its
+	-- tooltip, as Sheprd's own bar does.
+	if shown == "hidden" then
+		return false
+	end
+	local icon_only = shown == "icon"
 	return ui.row {
 		class = "status-item",
 		align = "center",
 		shrink = false,
 		msg = msg,
 		to = to,
+		tooltip = if icon_only then text else nil,
 		style = { gap = 5 },
 		-- As Sheprd's own bar: text at the UI size, icons a size up.
 		ui.icon { name = icon, size = "large", style = { color = color } },
-		ui.text { text, style = { color = color } },
+		if icon_only then false else ui.text { text, style = { color = color } },
 	}
 end
 
@@ -186,6 +210,7 @@ return mod {
 			end
 		end
 		local theme = app.sheprd_theme or {}
+		local buttons = sheprd.status_bar or {}
 		return ui.row {
 			class = "sheprd-status",
 			grow = true,
@@ -196,8 +221,8 @@ return mod {
 			if sheprd.usage then usage(sheprd.usage, theme) else false,
 			ui.spacer(),
 			if app.sheprd_load then load_item(app.sheprd_load) else false,
-			item("palette", "Theme", theme.subtext, run "themes", "provider:sheprd"),
-			item("command", "Commands", theme.subtext, run "command_palette", "provider:sheprd"),
+			item("palette", "Theme", theme.subtext, run "themes", "provider:sheprd", buttons.theme),
+			item("command", "Commands", theme.subtext, run "command_palette", "provider:sheprd", buttons.commands),
 		}
 	end,
 }

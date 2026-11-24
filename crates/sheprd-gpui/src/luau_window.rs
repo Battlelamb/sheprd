@@ -1,6 +1,6 @@
 //! All of Sheprd in a window Moonframe lays out from `moonframe/app/main.luau`:
-//! the `moonframe` feature, on by default. A build with it opens this window
-//! on a plain launch unless the user chose the classic one; see [`wanted`].
+//! release builds include the `moonframe` feature. A plain launch opens this
+//! window when the user opts in. See [`wanted`].
 //! Release builds run the layout compiled into the binary; `moonframe-studio`
 //! reads it from this checkout instead, so saving a file reloads it.
 
@@ -297,9 +297,13 @@ pub(crate) fn wanted(args: &[std::ffi::OsString], chosen: impl FnOnce() -> bool)
 /// is read as the first frame's settings are, writing nothing; a file that
 /// does not parse leaves the default, and the app reports it.
 pub(crate) fn chosen() -> bool {
+    // Development, benchmarks and recordings can select it for a single launch.
+    if std::env::var_os("SHEPRD_MOONFRAME").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        return true;
+    }
     // A launch from Finder or a desktop launcher may lack the login shell's
     // `XDG_CONFIG_HOME`; without adopting it first, this would read another
-    // folder's settings and miss `moonframe_window = false`. Both startups
+    // folder's settings and miss the user's window preference. Both startups
     // adopt it again, which then finds it already set.
     crate::login_env::adopt_config_home();
     let kept = crate::config::Config::load_startup().map_or_else(

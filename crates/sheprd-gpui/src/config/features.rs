@@ -86,9 +86,7 @@ features! {
     #[cfg(feature = "mcp")]
     mcp: Mcp = false, "features-mcp",
         "features-mcp-description";
-    // Off on Windows until Moonframe finds its folders there without `HOME`;
-    // see `luau_window::NAME`.
-    moonframe_window: MoonframeWindow = cfg!(not(windows)), "features-moonframe-window",
+    moonframe_window: MoonframeWindow = false, "features-moonframe-window",
         "features-moonframe-window-description";
     qa_menu: QaMenu = false, "features-qa-menu",
         "features-qa-menu-description";

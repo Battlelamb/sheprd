@@ -873,9 +873,9 @@ size = 12
 # acp_chats = true
 #
 # Open Sheprd in the window Moonframe lays out in Luau, in beta; false opens the
-# classic window. Read when Sheprd starts. Off by default on Windows. On macOS,
+# classic window (the default). Read when Sheprd starts. On macOS,
 # holding Option as Sheprd starts opens the other window once.
-# moonframe_window = true
+# moonframe_window = false
 #
 # Open a space's menu when the pointer rests on its sidebar row, without a
 # right click. Moving the pointer anywhere but into that menu closes it again.

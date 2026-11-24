@@ -1,26 +1,20 @@
 # Sheprd on Moonframe
 
-Sheprd opens in a window [Moonframe](https://moonframe.dev) lays out: the
-`moonframe` feature of `sheprd-gpui`, on by default, so releases ship it. A
-plain launch opens this window; `sheprd` commands and `--socket` or `--session`
-launches stay the app's own, as without the feature. Releases ship it as a
-beta that is on by default: anyone can go back to the classic window as below.
-CI builds and tests it with every leg and loads its Luau with `--check`, both
-the copy compiled in and the sources.
+Sheprd opens the classic window by default on every platform. Releases include
+the [Moonframe](https://moonframe.dev) beta. To try it, turn on **Settings >
+General > Moonframe window (beta)** and restart Sheprd, or set
+`moonframe_window = true` under `[features]` in your configuration.
 
-## The classic window
+## Choosing a window
 
-Turn off **Settings > General > Moonframe window (beta)**
-(`moonframe_window = false` under `[features]`) and Sheprd opens its classic window from the next launch.
-`sheprd --classic` opens the classic window once, whatever the setting says.
-On macOS, hold ⌥ Option as Sheprd starts (from Finder, the Dock, `open`, or
-`just run`) to open the other window from the one the setting keeps, without
-changing it: the classic window while the setting is on, Moonframe's while it
-is off.
-The setting is off by default on Windows: Moonframe finds its folders through
-`HOME` and the XDG variables, which Windows does not set for the apps it
-starts, so it would remember no window placement and write its files to a new
-temporary folder at each launch.
+A plain launch follows your setting. For a single launch, use
+`SHEPRD_MOONFRAME=1 sheprd` for Moonframe or `sheprd --classic` for the classic
+window. On macOS, holding ⌥ Option during a normal launch opens the other
+window once. Commands and launches with `--socket` or `--session` keep their
+usual behavior.
+
+On Windows, Moonframe needs `HOME` or the XDG variables to persist its files
+and window placement across launches.
 
 The two windows keep their state apart. The classic window's settings, log,
 and saved tabs stay under `herdr` as before; Moonframe keeps its own under
@@ -186,7 +180,7 @@ runs several times slower. GPUI times every frame in either window, so the same
 line reads both:
 
 ```sh
-ZED_MEASUREMENTS=1 RUST_LOG=moonframe::perf=debug target/release/sheprd
+SHEPRD_MOONFRAME=1 ZED_MEASUREMENTS=1 RUST_LOG=moonframe::perf=debug target/release/sheprd
 ZED_MEASUREMENTS=1 target/release/sheprd --classic
 ```
 

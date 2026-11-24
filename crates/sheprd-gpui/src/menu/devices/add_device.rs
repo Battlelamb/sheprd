@@ -435,7 +435,10 @@ impl SheprdWindow {
             form.fields[1].read(cx).text(),
             form.fields[2].read(cx).text(),
         )
-        .map(|request| request.with_host_keys(form.host_keys));
+        .map(|mut request| {
+            request.tmux = self.config.terminal_backend == crate::config::TerminalBackend::Tmux;
+            request.with_host_keys(form.host_keys)
+        });
         let request = match request.and_then(|request| {
             self.ensure_new_device(&request)?;
             Ok(request)

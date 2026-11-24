@@ -1,20 +1,56 @@
 # Session model
 
 Sheprd supports backends that disagree about what a session is. Herdr 1 owns
-workspaces, tabs, panes, and agents. herdr-core owns terminals only. The goal
+workspaces, tabs, panes, and agents. herdr-core and the tmux adapter each own terminals. The goal
 is one model the app reads whichever backend runs, so a feature stops depending
 on Herdr 1's snapshot and a new backend costs an adapter rather than a rewrite.
 
+## tmux
+
+Sheprd keeps one session per terminal on the host's `tmux -L sheprd` server.
+The stored address consists of the workspace host and a `tmux-<UUID>` terminal ID.
+Tabs, splits and mirrors reuse the app's saved pane tree. Each attaching view
+owns a control client and a local emulator. Detaching drops the client, while
+closing a driving pane ends its session. Tmux reports the live working directory
+and pane process ID. A Sheprd chat publishes its status, title and endpoint
+through the session environment, including while its view is detached. The
+tmux server owns the programs and their scrollback. Stopping that server or
+rebooting the host ends those sessions.
+
+The desktop's terminal worker depends on `Backend` and `Terminal`.
+`WatchBackend` adds an ordered event stream for herdr-core. The tmux desktop
+inventory uses polling. The tmux adapter takes a scoped `CommandHost` for remote
+execution, so SSH, WSL and cloud authentication stay in `sheprd-remote`. Phone control and shared workspace documents, Teleport
+and daemon-launched automations still have their own Herdr-specific callers.
+The existing `sheprd-t3` client owns the T3 conversation integration. A T3
+thread keeps its server and thread identity regardless of the terminal backend.
+Further T3 work belongs at the conversation layer, where transcripts, sending a
+turn and approvals can be implemented against the T3 server. The existing
+[T3 integration plan](t3-plan.md) describes what the client already supports.
+
+### Remaining work for Herdr-free feature parity
+
+| Feature | Current dependency | Interface needed |
+| --- | --- | --- |
+| Phone and web terminal control | `sheprd-remote-control/src/hub/core` attaches to a core and reads its shared spaces document | Use the terminal traits for the screen, driving lease, input and scrollback. Give shared layout storage its own revisioned read/write interface. |
+| Teleport | `sheprd-remote/src/teleport` prepares and resumes terminals on the destination core | Select the destination backend and track a verified source, destination and transfer receipt before closing a source pane. |
+| Fan-out and orchestrator | `sheprd-remote/src/work/owned_agent` checks core ownership labels and the live foreground process before messaging or ending an agent | Provide an owned-agent interface with atomic labelled spawn, process identity checks, readiness and recovery. |
+| Scheduled automations | `sheprd-automate/src/drive.rs` selects Herdr or herdr-core independently of the desktop preference | Extend the automation drive with the same owned-agent operations and persist the selected backend in each run. |
+| Converting an existing CLI agent into a chat | `sheprd-core-client/src/convert.rs` verifies the current process and its recorded conversation | Supply tmux process-bound session evidence before interrupting an agent or sending its resume command. |
+| Agent notes and remote browser requests | The desktop delivers notes and acknowledges remote requests through herdr-core | Route replies through the owning backend and verify that the same agent still owns the receiving pane. |
+| Recovery after a server restart | A saved tmux address can reattach for the lifetime of its server | Persist a resumable chat identity independently of a running terminal and reopen it explicitly after a host restart. |
+| Personal tmux servers | The desktop lists Sheprd's dedicated server | Moonmux demonstrates read-only discovery on other sockets. External pane identities need the host, server lifetime and pane ID, and explicit ownership before a destructive operation. |
+
 ## Where it stands
 
-| Layer | Herdr 1 | herdr-core |
-| --- | --- | --- |
-| Terminals (`sheprd-backend`) | Not implemented; `sheprd-client` talks to the daemon | `CoreBackend` |
-| Tab and pane layout | The daemon's snapshot | `sheprd_session::panes`, saved with the tab |
-| Workspaces | The daemon's snapshot | Kept by the app beside its tabs (`browser-tabs.json`'s `workspaces`, read by `SavedTabs::workspaces`), under the scope of the host whose core runs them (this computer, or a saved SSH, cloud, or WSL host), listed after Herdr 1's; with no Herdr 1 installed, the first is `core_terminals::WORKSPACE`. A terminal started outside the app for a workspace, as by a phone, carries `sheprd_session::WORKSPACE_LABEL` and gets a tab there (`core_terminals::adopt`) |
-| Agents | The daemon's snapshot | `TerminalInfo::agent`, per terminal; which agent by `sheprd_core_client::agent_kind` |
-| Commands | 43 `sheprd_client::Method` variants | Handled per feature in `core_terminals` |
-| `Session` | `session_model::of_snapshot`, cached per snapshot in `LiveState::session` | `Session::core`, rebuilt on the window tick from the app's tabs and the core's terminals |
+| Layer | Herdr 1 | herdr-core | tmux |
+| --- | --- | --- | --- |
+| Terminals (`sheprd-backend`) | Not implemented; `sheprd-client` talks to the daemon | `CoreBackend` | `sheprd_tmux::Tmux` implements the same lifecycle and attached-view traits as `CoreBackend` |
+| Tab and pane layout | The daemon's snapshot | `sheprd_session::panes`, saved with the tab | The same saved pane tree, scoped to the desktop |
+| Workspaces | The daemon's snapshot | Kept by the app beside its tabs (`browser-tabs.json`'s `workspaces`, read by `SavedTabs::workspaces`), under the scope of the host whose core runs them (this computer, or a saved SSH, cloud, or WSL host), listed after Herdr 1's; with no Herdr 1 installed, the first is `core_terminals::WORKSPACE`. A terminal started outside the app for a workspace, as by a phone, carries `sheprd_session::WORKSPACE_LABEL` and gets a tab there (`core_terminals::adopt`) | Kept by the desktop, including a local Home workspace when Herdr is absent |
+| Agents | The daemon's snapshot | `TerminalInfo::agent`, per terminal; which agent by `sheprd_core_client::agent_kind` | Sheprd chats publish agent status, title and endpoint in their tmux session. Other programs expose their foreground command |
+| Commands | 43 `sheprd_client::Method` variants | Handled per feature in `core_terminals` | The terminal worker handles input, history and resizing. The adapter handles listing, spawning and closing |
+| `Session` | `session_model::of_snapshot`, cached per snapshot in `LiveState::session` | `Session::core`, rebuilt on the window tick from the app's tabs and the core's terminals | The app builds the same kept-workspace session from saved tabs and its tmux inventory |
 
 `sheprd-session` holds what is already shared: the pane tree, the reader of the
 app's saved tabs, which the remote control daemon used to parse as untyped JSON,

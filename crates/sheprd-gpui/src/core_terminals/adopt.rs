@@ -65,14 +65,14 @@ impl SheprdWindow {
         let retired = sheprd_core_client::chat_recovery::mapping(
             self.core_terminals
                 .infos
-                .all()
+                .core_terminals()
                 .map(|info| (info.id.as_str(), &info.labels)),
         );
         let local = self.core_host().map(|index| scope(&self.endpoints[index]));
         let wanted: Vec<_> = self
             .core_terminals
             .infos
-            .all()
+            .core_terminals()
             .filter(|info| {
                 !held.contains(&info.id)
                     && !self.core_terminals.adopted.contains(&info.id)

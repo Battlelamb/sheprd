@@ -29,12 +29,7 @@ Cursor, and Codex can use it too, through [`sheprd mcp`](docs/cli.md#mcp), once
 turned on in Settings. The iPhone and iPad app is in a
 [TestFlight beta](https://sheprd.org/testflight/).
 
-Sheprd supports both an existing [Herdr](https://herdr.dev/) daemon and
-[herdr-core terminals](crates/sheprd-gpui/README.md#herdr-2-terminals). Releases
-bundle a pinned herdr-core, so a separate Herdr 1 installation is optional.
-Herdr 1 supplies terminal cells; herdr-core supplies raw output that
-`sheprd-terminal` emulates for the native view. The daemons own terminal
-processes, so closing Sheprd leaves sessions running.
+Choose **Herdr 1**, **Herdr 2** (herdr-core), or, with the optional `tmux` Cargo feature, **tmux** under **Settings → Tabs → Terminal backend**. With tmux installed, the desktop can run persistent local terminals without either Herdr daemon. Each pane keeps its original backend across app restarts. Releases bundle herdr-core. See the [terminal guide](website/docs/terminals.md) for setup and feature coverage.
 
 > **Unaffiliated project.** Not affiliated with, endorsed by, or supported by
 > Herdr or [herdr.dev](https://herdr.dev/).

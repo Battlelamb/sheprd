@@ -124,10 +124,13 @@ pub enum HostProbe {
     /// No compatible Herdr 1, but herdr-core (Herdr 2) is installed, which
     /// is a whole setup of its own: the host's terminals run in its core.
     Core,
+    /// The selected tmux backend is installed.
+    Tmux,
 }
 
 /// Every candidate reports its client and server status, one block each, so
 /// the choice between them stays with the same rules the bridge applies.
+#[cfg(test)]
 fn probe_command(session: &str) -> String {
     format!("/bin/sh -c {}", quote(&probe_script(session)))
 }
@@ -154,6 +157,21 @@ printf '%s\n' '{PROBE_DONE}'"#,
     )
 }
 
+/// Prefer an installed tmux when the user selected it for new terminals.
+pub(crate) fn selected_probe_script(session: &str, tmux: bool) -> String {
+    let herdr = probe_script(session);
+    if !tmux {
+        return herdr;
+    }
+    format!(
+        r#"if PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin" command -v tmux >/dev/null 2>&1; then
+    printf '%s\n' 'sheprd-probe:tmux' '{PROBE_DONE}'
+    exit 0
+fi
+{herdr}"#
+    )
+}
+
 /// `None` when the script never finished, so partial output is not mistaken
 /// for a host without Herdr.
 pub(crate) fn classify_probe(output: &[u8]) -> Option<HostProbe> {
@@ -168,13 +186,16 @@ fn classify_probe_with(
     // Each block holds one candidate's client status, then its server status.
     let mut blocks: Vec<Vec<serde_json::Value>> = Vec::new();
     let mut core = false;
+    let mut tmux = false;
     for line in lines(output) {
         if line == PROBE_DONE.as_bytes() {
             let Some(statuses) = blocks
                 .iter()
                 .find(|statuses| statuses.iter().any(|s| compatible(s).is_some()))
             else {
-                return Some(if core {
+                return Some(if tmux {
+                    HostProbe::Tmux
+                } else if core {
                     HostProbe::Core
                 } else if blocks.is_empty() {
                     HostProbe::Missing
@@ -191,7 +212,9 @@ fn classify_probe_with(
                 HostProbe::Stopped
             });
         }
-        if line == PROBE_CORE.as_bytes() {
+        if line == b"sheprd-probe:tmux" {
+            tmux = true;
+        } else if line == PROBE_CORE.as_bytes() {
             core = true;
         } else if line == PROBE_CANDIDATE.as_bytes() {
             blocks.push(Vec::new());
@@ -219,9 +242,19 @@ pub fn probe_host(target: &str, session: &str) -> Result<HostProbe> {
 /// [`probe_host`] checking host keys as `keys` says, for a host whose choice
 /// is not saved yet.
 pub fn probe_host_with(target: &str, session: &str, keys: HostKeys) -> Result<HostProbe> {
+    probe_terminals(target, session, keys, false)
+}
+
+pub fn probe_terminals(
+    target: &str,
+    session: &str,
+    keys: HostKeys,
+    tmux: bool,
+) -> Result<HostProbe> {
     validate_target(target)?;
     session_socket(Path::new(""), session)?;
-    let mut command = command_with(target, &probe_command(session), keys);
+    let script = selected_probe_script(session, tmux);
+    let mut command = command_with(target, &format!("/bin/sh -c {}", quote(&script)), keys);
     // Stderr is read only to classify an `ssh` failure; its text is dropped.
     command.stderr(Stdio::piped());
     tracing::info!(category = "probe", "probing host");

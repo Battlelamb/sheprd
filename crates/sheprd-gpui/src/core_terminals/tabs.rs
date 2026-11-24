@@ -5,7 +5,6 @@
 use super::{
     CoreTerminalView, Host, Start, TabPanes,
     panes::{Axis, Panes},
-    worker,
 };
 use crate::{
     SheprdWindow,
@@ -14,7 +13,7 @@ use crate::{
     window::Flash,
 };
 use gpui::{prelude::*, *};
-use sheprd_backend::{Backend as _, Role, Size, TerminalId};
+use sheprd_backend::{Role, Size, TerminalId};
 
 /// The size a terminal starts at, before its pane is laid out.
 const FIRST_SIZE: (u16, u16) = (80, 24);
@@ -172,16 +171,21 @@ impl SheprdWindow {
         for (tab, terminal, role, host) in missing {
             // Restored tabs join a running core; only a command starts one
             // here, while another host's bridge starts its own.
-            let Some(backend) = self.core_terminals.backend_of(&host).cloned() else {
+            let Some(backend) =
+                self.core_terminals
+                    .owner(&host, &terminal, self.config.herdr_2_scrollback)
+            else {
                 if let Some(hub) = self.core_hub(&host) {
-                    hub.connect(Start::Join);
+                    if !terminal.is_tmux() {
+                        hub.connect(Start::Join);
+                    }
                 }
                 continue;
             };
             let Ok(size) = Size::new(FIRST_SIZE.0, FIRST_SIZE.1) else {
                 continue;
             };
-            let link = match worker::spawn(backend.clone(), terminal.clone(), size, role) {
+            let link = match backend.link(terminal.clone(), size, role) {
                 Ok(link) => link,
                 Err(error) => {
                     tracing::warn!(%error, "Could not start a herdr-core terminal worker");
@@ -219,13 +223,22 @@ impl SheprdWindow {
             .iter()
             .map(|((tab, _), view)| (Some(*tab), view.clone()))
             .chain(fallback)
-            .filter(|(_, view)| view.read(cx).is_stale())
+            .filter(|(_, view)| view.read(cx).ready_to_relink())
             .collect();
         for (tab, view) in stale {
             let host = tab.map_or(Host::Local, |tab| self.core_terminals.host_of(tab));
-            let Some(backend) = self.core_terminals.backend_of(&host).cloned() else {
+            let terminal = view.read(cx).terminal().clone();
+            if terminal.is_tmux() && self.core_terminals.reported(&host, &terminal).is_none() {
+                continue;
+            }
+            let Some(backend) =
+                self.core_terminals
+                    .owner(&host, &terminal, self.config.herdr_2_scrollback)
+            else {
                 if let Some(hub) = self.core_hub(&host) {
-                    hub.connect(Start::Join);
+                    if !terminal.is_tmux() {
+                        hub.connect(Start::Join);
+                    }
                 }
                 continue;
             };
@@ -237,7 +250,6 @@ impl SheprdWindow {
             } else {
                 Role::Active
             };
-            let terminal = view.read(cx).terminal().clone();
             let size = view
                 .read(cx)
                 .size()
@@ -245,7 +257,7 @@ impl SheprdWindow {
             let Some(size) = size else {
                 continue;
             };
-            match worker::spawn(backend.clone(), terminal, size, role) {
+            match backend.link(terminal, size, role) {
                 Ok(link) => view.update(cx, |view, cx| view.relink(link, cx)),
                 Err(error) => {
                     tracing::warn!(%error, "Could not start a herdr-core terminal worker")
@@ -329,7 +341,16 @@ impl SheprdWindow {
             }
         }
         for (tab, terminal) in ended {
-            self.remove_core_pane(tab, &terminal, window, cx);
+            if self.remove_core_pane(tab, &terminal, window, cx)
+                && terminal.is_tmux()
+                && self
+                    .core_terminals
+                    .tabs
+                    .get(&tab)
+                    .is_some_and(|shown| !shown.observe)
+            {
+                self.end_core_terminal(&self.core_terminals.host_of(tab), terminal);
+            }
         }
         let titles: Vec<(TabId, String)> = self
             .core_terminals
@@ -461,9 +482,15 @@ impl SheprdWindow {
     /// Ends a terminal of `host`'s core on a worker thread, so herdr-core's
     /// answer is never awaited on the UI thread.
     pub(super) fn end_core_terminal(&self, host: &Host, terminal: TerminalId) {
+        if !crate::config::TerminalBackend::owner(&terminal).available() {
+            return;
+        }
         let unended = std::sync::Arc::clone(&self.core_terminals.unended);
         // Not connected: it ends once its core answers again.
-        let Some(backend) = self.core_terminals.backend_of(host).cloned() else {
+        let Some(backend) =
+            self.core_terminals
+                .owner(host, &terminal, self.config.herdr_2_scrollback)
+        else {
             if let Ok(mut unended) = unended.lock() {
                 unended.push((host.clone(), terminal));
             }
@@ -479,8 +506,14 @@ impl SheprdWindow {
                 tracing::warn!(%error, %terminal, "Could not end a herdr-core terminal");
                 // The core's refusal, as for a terminal already gone, is
                 // its answer; anything else did not reach it.
-                if !matches!(error, sheprd_core_client::Error::Refused { .. })
-                    && let Ok(mut unended) = unended.lock()
+                #[cfg(feature = "tmux")]
+                if matches!(error, super::Error::Tmux(_)) {
+                    return;
+                }
+                if !matches!(
+                    error,
+                    super::Error::Core(sheprd_core_client::Error::Refused { .. })
+                ) && let Ok(mut unended) = unended.lock()
                 {
                     unended.push((host, terminal));
                 }
@@ -505,10 +538,15 @@ impl SheprdWindow {
         // load, keeps its kills for a window that can.
         let mut unreached = Vec::new();
         for (host, terminal) in unended {
-            if self.core_terminals.backend_of(&host).is_none()
+            if self
+                .core_terminals
+                .owner(&host, &terminal, self.config.herdr_2_scrollback)
+                .is_none()
                 && let Some(hub) = self.core_hub(&host)
             {
-                hub.connect(Start::Join);
+                if !terminal.is_tmux() {
+                    hub.connect(Start::Join);
+                }
             }
             // Ends it now, or puts it back to wait for the core.
             if self.core_terminals.hub_of(&host).is_some() {
@@ -534,10 +572,19 @@ impl SheprdWindow {
         // so its terminals are left to it.
         let mut waiting = Vec::new();
         for (host, terminal) in Store::update(cx, Store::take_ending) {
-            if self.core_terminals.backend_of(&host).is_some() {
+            if !crate::config::TerminalBackend::owner(&terminal).available() {
+                continue;
+            }
+            if self
+                .core_terminals
+                .owner(&host, &terminal, self.config.herdr_2_scrollback)
+                .is_some()
+            {
                 self.end_core_terminal(&host, terminal);
             } else if let Some(hub) = self.core_hub(&host) {
-                hub.connect(Start::Join);
+                if !terminal.is_tmux() {
+                    hub.connect(Start::Join);
+                }
                 waiting.push((host, terminal));
             }
         }

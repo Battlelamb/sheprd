@@ -289,6 +289,8 @@ impl SheprdWindow {
                 None if terminals.retry.iter().any(|(waiting, _)| waiting == group) => {}
                 None => {
                     let mut connection = ConnectionBridge::new(target.clone());
+                    connection.start_local_herdr =
+                        self.config.terminal_backend != crate::config::TerminalBackend::Tmux;
                     connection.reconnect(self.options, false, true);
                     terminals.parked.push(Parked {
                         group: *group,

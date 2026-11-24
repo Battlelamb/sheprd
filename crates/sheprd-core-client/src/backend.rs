@@ -10,8 +10,7 @@ use crate::{
     wire::{Foreground, Run, Status, StatusState, Terminal, TerminalState},
 };
 use sheprd_backend::{
-    AgentStatus, Change, Exit, Generation, Process, Role, RunState, Size, Spawn, TerminalId,
-    TerminalInfo,
+    AgentStatus, Change, Exit, Process, Role, RunState, Size, Spawn, TerminalId, TerminalInfo,
 };
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 
@@ -51,13 +50,8 @@ impl CoreBackend {
 }
 
 impl sheprd_backend::Backend for CoreBackend {
-    type Changes = CoreChanges;
     type Error = Error;
     type Terminal = CoreTerminal;
-
-    fn generation(&self) -> Generation {
-        Generation::Herdr2
-    }
 
     fn terminals(&self) -> Result<Vec<TerminalInfo>> {
         let listed = self.core.list(false)?.terminals;
@@ -69,24 +63,6 @@ impl sheprd_backend::Backend for CoreBackend {
             recovery.poll(&self.core);
         }
         listed.iter().map(info).collect()
-    }
-
-    fn watch(&self) -> Result<(Vec<TerminalInfo>, CoreChanges)> {
-        let subscription = self.core.subscribe()?;
-        let records: BTreeMap<String, Terminal> = subscription
-            .terminals
-            .iter()
-            .map(|terminal| (terminal.address.clone(), terminal.clone()))
-            .collect();
-        let snapshot = records.values().map(info).collect::<Result<_>>()?;
-        let changes = CoreChanges {
-            core: Arc::clone(&self.core),
-            records,
-            recovery: Arc::clone(&self.recovery),
-            seq: subscription.seq,
-            subscription,
-        };
-        Ok((snapshot, changes))
     }
 
     fn attach(&self, id: &TerminalId, size: Size, role: Role) -> Result<CoreTerminal> {
@@ -127,6 +103,28 @@ impl sheprd_backend::Backend for CoreBackend {
             Some(terminal) => crate::chat_recovery::close_terminal(&self.core, &terminal),
             None => self.core.kill(id.as_str()).map(drop),
         }
+    }
+}
+
+impl sheprd_backend::WatchBackend for CoreBackend {
+    type Changes = CoreChanges;
+
+    fn watch(&self) -> Result<(Vec<TerminalInfo>, CoreChanges)> {
+        let subscription = self.core.subscribe()?;
+        let records: BTreeMap<String, Terminal> = subscription
+            .terminals
+            .iter()
+            .map(|terminal| (terminal.address.clone(), terminal.clone()))
+            .collect();
+        let snapshot = records.values().map(info).collect::<Result<_>>()?;
+        let changes = CoreChanges {
+            core: Arc::clone(&self.core),
+            records,
+            recovery: Arc::clone(&self.recovery),
+            seq: subscription.seq,
+            subscription,
+        };
+        Ok((snapshot, changes))
     }
 }
 

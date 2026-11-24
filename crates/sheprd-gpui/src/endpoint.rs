@@ -585,6 +585,8 @@ impl SheprdWindow {
         #[cfg(feature = "container")]
         crate::container::lifecycle::resume(&self.endpoints[index].connection.target);
         self.endpoints[index].attempts = 0;
+        self.endpoints[index].connection.start_local_herdr =
+            self.config.terminal_backend != crate::config::TerminalBackend::Tmux;
         self.endpoints[index].connect(self.options, index == 0);
         self.reset_selected(cx);
     }

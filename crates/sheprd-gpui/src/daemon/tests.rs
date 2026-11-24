@@ -146,7 +146,7 @@ fn explicit_and_remote_targets_never_start_local_daemon() {
             session: "default".into(),
         },
     ] {
-        let _ = connect(&target, &AtomicBool::new(false), || {
+        let _ = connect(&target, &AtomicBool::new(false), true, || {
             panic!("attach-only targets must not launch a local daemon")
         });
     }

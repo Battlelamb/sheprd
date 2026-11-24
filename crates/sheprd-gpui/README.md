@@ -1927,6 +1927,8 @@ show ahead/behind counts against the configured upstream, without fetching.
 The last known folder is saved, so closing the last terminal or restarting
 the app preserves it and the automatic name.
 
+With the opt-in `tmux` Cargo feature, the same tabs can hold tmux terminals. Select **tmux** under **Settings → Tabs → Terminal backend**, or open one directly with `sheprd run new_tmux_terminal`. The desktop restores the owning backend from the saved terminal ID. See [Choosing a terminal backend](../../website/docs/terminals.md#choosing-a-terminal-backend).
+
 Herdr 2 (herdr-core) runs terminals that stay alive like Herdr's, but streams
 their raw output, so Sheprd emulates each one itself and draws it with the
 same painter as a Herdr pane. That lets a tab split into native panes. Herdr 1
@@ -1934,8 +1936,8 @@ and Herdr 2 run side by side: Herdr 2 tabs open in the same workspaces as
 Herdr 1 tabs, and nothing moves from one to the other.
 
 - **Opening one:** **New Herdr 2 Terminal** in the command palette, or
-  `sheprd run new_core_terminal`. With `herdr_2_terminals = true`
-  (**Settings > Tabs > New terminals use Herdr 2**), every new tab is one,
+  `sheprd run new_core_terminal`. With `terminal_backend = "herdr-core"`
+  (**Settings > Tabs > Terminal backend**), every new tab is one,
   on this computer and on an SSH, WSL, or cloud host, in that host's own
   herdr-core and folders. A host found to have no herdr-core keeps its new tabs
   in its Herdr; **Install Herdr 2** in the host's menu adds it.

@@ -355,6 +355,9 @@ pub(crate) fn run_owned(
             agent.display.clone(),
             endpoint.map(|id| id.to_string()),
         )?),
+        #[cfg(feature = "tmux")]
+        None => Reporter::on_tmux(agent.display.clone(), endpoint.map(|id| id.to_string()))?,
+        #[cfg(not(feature = "tmux"))]
         None => None,
     };
     let report = reporter.as_ref().map(Reporter::handle);

@@ -154,11 +154,12 @@ impl SheprdWindow {
         } else {
             &endpoint.live
         };
-        !self.core_terminals.lacks_core(&host)
-            && (self.config.herdr_2_terminals
-                || live.herdr_1_unavailable()
-                || (self.endpoint_snapshot(index).is_none()
-                    && self.core_terminals.is_connected(&host)))
+        self.config.terminal_backend == crate::config::TerminalBackend::Tmux
+            || !self.core_terminals.lacks_core(&host)
+                && (self.config.herdr_2_terminals
+                    || live.herdr_1_unavailable()
+                    || (self.endpoint_snapshot(index).is_none()
+                        && self.core_terminals.is_connected(&host)))
     }
 
     /// The repositories open in the workspaces the app keeps on endpoint

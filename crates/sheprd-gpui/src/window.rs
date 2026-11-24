@@ -19,6 +19,7 @@ mod construct;
 mod copy_mode;
 mod device_themes;
 mod double_shift;
+mod edge_light;
 pub(crate) mod file_drop;
 mod file_links;
 pub(crate) use file_links::FileLink;

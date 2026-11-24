@@ -294,25 +294,70 @@ fn marker_consumes_banners_not_protocol_bytes() {
     assert!(await_ready(&mut stream, &AtomicBool::new(true), Instant::now()).is_err());
 }
 #[test]
-fn child_guard_reaps_on_drop() {
-    // A child that would run for a minute, from programs every machine has.
+fn child_guard_kills_and_reaps_on_drop() {
+    // A child that runs far longer than the test waits, from programs every
+    // machine has, so only a kill ends it in time.
     #[cfg(unix)]
-    let child = Command::new("sleep").arg("60").spawn().unwrap();
+    let child = Command::new("sleep").arg("600").spawn().unwrap();
     #[cfg(windows)]
     let child = Command::new("ping")
-        .args(["-n", "60", "127.0.0.1"])
+        .args(["-n", "600", "127.0.0.1"])
         .stdout(Stdio::null())
         .spawn()
         .unwrap();
-    let started = Instant::now();
-    drop(ChildGuard(child));
-    // The guard waits for the child, so a drop that returns this soon killed
-    // it and reaped it.
-    assert!(
-        started.elapsed() < Duration::from_secs(30),
-        "{:?}",
-        started.elapsed()
-    );
+    let id = child.id();
+    // Dropped on a thread, so a guard that waits without killing fails here
+    // instead of holding the test for ten minutes.
+    let (dropped, done) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        drop(ChildGuard(child));
+        let _ = dropped.send(());
+    });
+    if done.recv_timeout(Duration::from_secs(20)).is_err() {
+        end_process(id);
+        panic!("the guard waited for process {id} without killing it");
+    }
+    // On Unix a zombie still exists, so this also fails if the guard kills
+    // without waiting. Windows keeps no zombie.
+    assert!(!process_exists(id), "process {id} outlived its guard");
+}
+
+/// Whether a process with this ID still exists. `kill -0` also finds a
+/// zombie, a child killed but never waited for.
+#[cfg(unix)]
+fn process_exists(id: u32) -> bool {
+    Command::new("kill")
+        .args(["-0", &id.to_string()])
+        .stderr(Stdio::null())
+        .status()
+        .unwrap()
+        .success()
+}
+
+#[cfg(unix)]
+fn end_process(id: u32) {
+    let _ = Command::new("kill").args(["-9", &id.to_string()]).status();
+}
+
+/// Whether a process with this ID still exists. `tasklist` prints a CSV row
+/// per match, its ID quoted in the second column, and a localized notice
+/// otherwise, so the row is looked for rather than the notice.
+#[cfg(windows)]
+fn process_exists(id: u32) -> bool {
+    let output = Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {id}"), "/FO", "CSV", "/NH"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8_lossy(&output.stdout).contains(&format!(",\"{id}\","))
+}
+
+#[cfg(windows)]
+fn end_process(id: u32) {
+    let _ = Command::new("taskkill")
+        .args(["/F", "/PID", &id.to_string()])
+        .stdout(Stdio::null())
+        .status();
 }
 #[test]
 fn discovery_checks_binary_capabilities_before_starting_bridge() {

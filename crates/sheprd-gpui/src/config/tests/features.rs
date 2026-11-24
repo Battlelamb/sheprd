@@ -48,5 +48,6 @@ fn the_moonframe_window_requires_opt_in() -> anyhow::Result<()> {
     assert!(!Config::parse("[features]")?.features.moonframe_window);
     let config = Config::parse("[features]\nmoonframe_window = true")?;
     assert!(config.features.moonframe_window);
+    assert!(!config.features.moonframe_tools);
     Ok(())
 }

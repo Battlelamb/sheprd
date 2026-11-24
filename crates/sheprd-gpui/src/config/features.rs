@@ -86,6 +86,8 @@ features! {
     #[cfg(feature = "mcp")]
     mcp: Mcp = false, "features-mcp",
         "features-mcp-description";
+    moonframe_tools: MoonframeTools = false, "features-moonframe-tools",
+        "features-moonframe-tools-description";
     moonframe_window: MoonframeWindow = false, "features-moonframe-window",
         "features-moonframe-window-description";
     qa_menu: QaMenu = false, "features-qa-menu",

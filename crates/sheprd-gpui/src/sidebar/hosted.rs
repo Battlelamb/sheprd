@@ -87,6 +87,7 @@ pub struct Stamp {
     metrics: SidebarMetrics,
     /// Whether Back and Forward fit the left column's header.
     navigation: bool,
+    moonframe_tools: bool,
     panel: ActivityPanel,
     section: bool,
     sidebar_visible: bool,
@@ -116,6 +117,7 @@ impl PartialEq for Stamp {
             && self.devices == other.devices
             && self.merged == other.merged
             && self.metrics == other.metrics
+            && self.moonframe_tools == other.moonframe_tools
             && self.navigation == other.navigation
             && self.panel == other.panel
             && self.section == other.section
@@ -291,8 +293,9 @@ impl SheprdWindow {
             devices: self.hosted_devices_stamp(),
             merged: self.merged_worktrees().len(),
             panel: self.activity_panel(),
-            section: self.activity_section().is_some(),
+            section: self.activity_section().is_some() || self.mod_app().is_some(),
             metrics: self.hosted_metrics(),
+            moonframe_tools: self.config.features.moonframe_tools,
             navigation: self.navigation_fits_sidebar(self.viewport_width),
             sidebar_visible: self.sidebar_visible,
             snapshot: self.live.snapshot.clone(),
@@ -405,10 +408,11 @@ impl SheprdWindow {
                 "merged": self.merged_worktrees().len(),
                 "layout": layout_state(self.config.layout.mode.name(), &self.hosted_metrics()),
                 "connected": self.live.status.is_connected(),
+                "moonframe_tools": self.config.features.moonframe_tools,
                 "details_visible": self.details_visible,
                 "panel": panel_id(self.activity_panel()),
                 "panels": panels,
-                "section": self.activity_section().is_some(),
+                "section": self.activity_section().is_some() || self.mod_app().is_some(),
                 "navigation_in_header": self.navigation_fits_sidebar(self.viewport_width),
                 "sidebar_visible": self.sidebar_visible,
                 // The classic status bar's message, absent when it shows none.

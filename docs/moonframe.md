@@ -30,8 +30,11 @@ file and talk to the same daemon.
 | Default (`just run`, releases) | Compiled in, written to `~/.cache/sheprd/app/<hash>` to run | Your copies in `~/.config/sheprd` |
 | `moonframe-studio` (`just run-moonframe`) | Read from `crates/sheprd-gpui/moonframe/app`, reloaded on save | The checkout's files |
 
-Every build has Moonframe's developer tools: Developer Mode, Inspect Element,
-and the sparkles agent.
+Both windows show the same stock controls. **Settings > General > Moonframe tools**
+adds the layout editor button, worktree details toggle, and chat turn timeline
+to the Moonframe window. You can also set `moonframe_tools = true` under
+`[features]`. The Developer menu and Inspect Element are available in Moonframe
+with either setting.
 
 `just run-moonframe` uses your settings and daemon, so quit Sheprd first.
 
@@ -41,28 +44,31 @@ The window layout is defined in `crates/sheprd-gpui/moonframe/app`:
 | --- | --- |
 | `main.luau` | The layout: where each part goes, the rule between New and Menu and the agents, that shares the left pane's height between them (kept across launches; a double click shares it evenly again), and the device picker under them |
 | `mods/header/main.luau` | Hosts the draggable classic header (`region = "header"`), with Back and Forward while they fit the column |
-| `mods/activity/main.luau` | The activity bar, in Sheprd's own icons, with the sparkles above Settings |
-| `mods/worktrees/main.luau` | The left pane's head and worktree rows, linked worktrees under their checkout, drawn in the sidebar layout Sheprd's config names (`layout = "orca"`, `compact`, `minimal`, ...), and the classic sidebar title and toggle (`region = "sidebar_title"`) in its head, or over the rail of numbered tiles while the sidebar is folded. Dragging the column's edge out of the rail opens the sidebar too |
-| `mods/actions/main.luau` | New and Menu under the worktrees: a new worktree, and the command palette |
-| `mods/agents/main.luau` | The agents under the worktrees, in Sheprd's sort and the same layout |
+| `mods/activity/main.luau` | Hosts the shared activity bar, including mod apps, counts, keyboard stops and Settings. Moonframe tools adds the editor above Settings |
+| `mods/worktrees/main.luau` | Places the shared `sidebar_title` and `worktrees` regions, including the search field, tags, pinned hosts, context menus, and row reordering |
+| `mods/actions/main.luau` | Hosts the classic New and Menu controls and their click handlers |
+| `mods/agents/main.luau` | Hosts the shared agents list, including favorites, sort, groups and the empty state |
 | `mods/devices/main.luau` | The device picker at the left pane's foot, and the sheet it opens: the agents' activity, every device and the unfolded one's sessions, and Add Device |
-| `mods/details/main.luau` | The right pane; the toggle at the end of the title bar opens it |
-| `mods/turns/main.luau` | A chat's turns in its left gutter, as Moonframe's revision timeline draws its chat rail: a tight stack of ticks in the gutter's middle, one per prompt, the prompt and the start of its reply on the card under the pointer, the turn being read marked, and a click back to a prompt. The shell floats it where Sheprd laid the gutter out |
+| `mods/details/main.luau` | The optional worktree details pane, opened from the title bar with Moonframe tools enabled |
+| `mods/turns/main.luau` | The optional chat turn timeline in the left gutter, with Moonframe tools enabled: a tight stack of ticks in the gutter's middle, one per prompt, the prompt and the start of its reply on the card under the pointer, the turn being read marked, and a click back to a prompt. The shell floats it where Sheprd laid the gutter out |
+| `mods/build/main.luau` | Hosts the shared worktree build strip with its branch and pull request link |
 | `mods/status/main.luau` | Hosts the classic status bar with `region = "status"`, including the version and update button, configured controls, and mod items |
-| `components/sheprd-*.luau` | What the worktrees and agents share: a row highlighted as the layout marks the selected one, the status dot, and the section names |
+| `components/sheprd-*.luau` | Reusable Luau rows, status dots and section headings for custom mods |
 | `style.luau` | The hover looks, for every mod |
 
-The terminals, tabs, and pages stay one Rust view, placed with
-`ui.view { name = "sheprd", id = "main", props = { region = "main" } }`.
-The device picker at the left pane's foot is the `devices` mod, shown as
-`[sidebar] device_footer` says; Sheprd keeps what it is doing and the dialogs
-it opens (Add Device, a session's editor). Sheprd's own picker is still a
-region, `region = "devices"`, for a layout that would rather place it.
-The title bar's end is Sheprd's own (`region = "titlebar"`): the checkout's changes and
-branch, the account, and the details toggle. The shell lays it over the end of
-the tab strip, which leaves it that room, at the width Sheprd reports
-(`titlebar` among the sizes); each group's tabs, split and ⋯ stay with its
-terminals. The terminals keep the keyboard: they take it when the window opens
+The stock shell places the terminals, tabs and pages with `region = "body"`.
+When activity pages or the tab position require a standalone title bar, it
+places `full_header` across both columns. With tabs in the title bar, the
+`titlebar` region fills the room at the end of the tab strip. Existing layouts
+using `region = "main"` keep their built-in standalone header.
+
+Folded rails, the Devices layout, nested agents, sidebar mods and the hidden
+device-footer layout use the whole `sidebar` region, including its own
+controls and resize edges. The `devices` region uses the same picker as
+Classic. Custom Luau pickers can still open their own sheet using
+`device_picker` and the existing provider actions. Copied mods can continue drawing their own rows from the published workspace and agent data.
+
+The terminals keep the keyboard: they take it when the window opens
 or comes back to the front, and after a click anywhere in the layout, so only
 a field (the search, a note) holds it instead.
 
@@ -76,8 +82,7 @@ hides loaded pages, even when WebKit text and page captures look correct.
 
 In `just run-moonframe`, saving a file reloads the window. To keep a change of
 your own in any build, copy the file to the same path under `~/.config/sheprd`
-and edit the copy; deleting it brings the original back. The sparkles in the
-activity bar, above Settings, open a window where you ask an agent to make a change, and it asks before each edit:
+and edit the copy; deleting it brings the original back. With Moonframe tools enabled, the sparkles above Settings open a window where you ask an agent to make a change, and it asks before each edit:
 in a release it writes those copies, in `just run-moonframe` the checkout's
 files. View > Inspect Element (⌥⌘I, or ⇧⌘X
 to go straight to picking) shows what built any part, and its file and line.
@@ -94,6 +99,7 @@ shows in the log when one appears: `unknown key` names it.
 | `devices` | Each device the sidebar lists, in its order: `id`, `label`, `selected`, `connected`, `enabled`, `removing`, `collapsed`, `wash` (host tint as #rrggbbaa), `opacity` (row opacity for group-dim), `load` (`cpu`, `memory`), `search` (every workspace, folded or not, with `label`, `branch` and `note`, for the sidebar's search), and `workspaces`, its visible rows (fields as below, plus `endpoint`, `group`, `fold_glyph` and `collapsed` on a checkout that folds its worktrees, `note`, `muted`, `teleported`) |
 | `multi` | Whether several devices are listed, so each shows a header |
 | `device_picker` | The device picker: `footer` (`label`, `initials` beside the activity bar, `hosts`, `connected`, `adding`, `settings` (its tooltip, without the bar), `aria`, `shown`, `width`), `online` and `wash` (the connected dot's and the current line's colors), `open`, and while open `sheet`: `activity` (`heading`, `overview`, `working`, `blocked`, `bars` of `working` and `blocked`, or `false` before a step was seen, and their `peak`), `heading`, `hint`, `selected` (the line the keys are on), `lines` (each `kind`: `all`, `device`, `session`, `add`, `note` or `error`; the lines the keys reach have `ordinal`, `key`, `label`, `detail`, `checked`, `enabled`, and `online`, a device its session `chip` (`word`, `session`, `open`, `hint`), a session `delete` (whether it can be deleted now); a note or error its `text`), and `adding` (cloud machines still being added) |
+| `moonframe_tools` | Whether the stock layout shows the editor, worktree details control and chat turn timeline |
 | `build` | The worktree a build came from: `worktree`, `branch`, `pr` |
 | `chat_turns` | The turns of the chat on screen (Herdr's focused pane when several are), or `null` while none shows, its gutter (the room its reading column, `[chat] max_width`, leaves on the left) is under 120 pixels, or it has fewer than two prompts: `pane`; `left`, `top`, `width`, `height`, where the ticks go in the `main` region's coordinates: the gutter's width, and a stack only as tall as the ticks need at `spacing` points apart, in the gutter's middle (the whole gutter once they fill it), since the timeline spreads its ticks over the height it gets; `entries`, each prompt's `id` (its entry), `label` and the start of its reply as `summary`, once there is one; and `selected`, the turn being read |
 | `workspaces` | The selected device's, folded or not, in the sidebar's order: `id`, `number`, `label`, `branch`, `repo`, `repo_key`, `repo_tile` (initials and colors when repository icons are enabled), `linked`, `child` (shown under its checkout), `focused`, `agent_status`, `ahead`, `behind`, `added`, `removed`, `dirty`, `pr`, `pr_color` (the number's color for its state) |
@@ -117,8 +123,7 @@ runs only the views that read them:
 
 Moonframe's own widgets follow Sheprd's theme and UI font without reading these.
 `font = "mono"` is Sheprd's sidebar font, though only its family: set
-`size = theme.sidebar_size` beside it for the sidebar's size, as the
-worktrees and agents do.
+`size = theme.sidebar_size` beside it for the sidebar's size when drawing custom rows.
 
 ## Menus
 
@@ -170,10 +175,7 @@ window's root view.
 The window reopens where it was and as large, as Moonframe keeps it
 (`window = { remember = false }` in `app/main.luau` turns that off).
 
-Still missing: New Window opens a window of Sheprd's own rather than another
-Luau one, until Moonframe can open a second main window. The sidebar has no
-device tag sections, no Devices layout or agents nested under their
-workspaces, and no menu that opens as the pointer rests on a row.
+New Window opens a Classic window. Moonframe currently hosts one main window.
 
 ## Measuring
 

@@ -22,6 +22,7 @@ use {
     },
 };
 
+mod native_region;
 mod theme;
 
 /// Moonframe's name for the app, which names its folders: `~/.config/sheprd`
@@ -427,7 +428,13 @@ impl SheprdRegion {
         let name = init.props().get("region").and_then(Data::as_str);
         let region = match name {
             Some("activity") => Some(Region::ActivityBar),
+            Some("activity_editor") => Some(Region::ActivityBarWithEditor),
+            Some("worktrees") => Some(Region::Worktrees),
+            Some("agents") => Some(Region::Agents),
+            Some("sidebar_actions") => Some(Region::SidebarActions),
+            Some("build") => Some(Region::Build),
             Some("devices") => Some(Region::Devices),
+            Some("full_header") => Some(Region::FullHeader),
             Some("header") => Some(Region::Header),
             Some("sidebar") => Some(Region::Sidebar),
             Some("sidebar_title") => Some(Region::SidebarTitle),
@@ -437,7 +444,7 @@ impl SheprdRegion {
         };
         let view = match region {
             Some(region) => host.region(region, cx),
-            None => host.main(),
+            None => host.layout_main(name == Some("body"), cx),
         };
         #[cfg(feature = "integration-test")]
         if region.is_none() {
@@ -451,10 +458,14 @@ impl SheprdRegion {
                 if last.replace(sizes) != Some(sizes) {
                     messenger.send(Data::map([
                         ("activity_bar", f64::from(sizes.activity_bar).into()),
+                        ("build", f64::from(sizes.build).into()),
                         ("devices", f64::from(sizes.devices).into()),
+                        ("full_header", sizes.full_header.into()),
                         ("header", f64::from(sizes.header).into()),
                         ("height", f64::from(sizes.height).into()),
                         ("left", f64::from(sizes.left).into()),
+                        ("sidebar_region", sizes.sidebar_region.into()),
+                        ("zen", sizes.zen.into()),
                         ("sidebar_title", f64::from(sizes.sidebar_title).into()),
                         ("status_bar", f64::from(sizes.status_bar).into()),
                         ("titlebar", f64::from(sizes.titlebar).into()),
@@ -645,11 +656,14 @@ impl Render for SheprdRegion {
             )
         });
         // `Terminal` keeps Moonframe's Escape off: it belongs to the terminal.
-        div()
-            .key_context(TERMINAL_CONTEXT)
-            .size_full()
-            .child(self.view.clone())
-            .children(overlay)
+        native_region::NativeRegion(
+            div()
+                .key_context(TERMINAL_CONTEXT)
+                .size_full()
+                .child(self.view.clone())
+                .children(overlay)
+                .into_any_element(),
+        )
     }
 }
 

@@ -233,6 +233,7 @@ impl SheprdWindow {
             gui_config_diagnostic,
             held_keys: Default::default(),
             hosted: false,
+            hosted_full_header: None,
             hover: None,
             hover_menu: None,
             hovered_terminal_link: false,

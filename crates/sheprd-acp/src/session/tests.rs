@@ -27,6 +27,7 @@ mod media;
 mod opencode;
 mod origin;
 mod permissions;
+mod picks;
 mod prompt_titles;
 mod pull_requests;
 mod questions;

@@ -16,11 +16,11 @@
 # none. Uninstalled names are ignored, and at most 8 are accepted per section.
 # With none installed and [terminal] fallback unset, a pane showing an icon
 # brings up a dismissible card naming a Nerd Font to install.
-# [sidebar], [tabs], and [ui] then fall back to the platform's Chinese,
-# Japanese, and Korean faces (PingFang and Hiragino on macOS, Microsoft YaHei
-# and Yu Gothic on Windows, Noto Sans CJK on Linux), the one matching the
-# first CJK language in `language` or the system's languages first, so Han
-# characters take that region's shapes. [terminal] keeps the icons alone.
+# [sidebar], [tabs], and [ui] prefer dedicated Symbols Nerd Fonts, then the
+# platform's Chinese, Japanese, and Korean faces, then other Nerd Fonts.
+# The first CJK language in `language` or the system's languages takes
+# priority among CJK faces, so Han characters use that region's shapes.
+# [terminal] keeps only the automatic Nerd Font cascade.
 # Saved changes to the local file reload automatically in every GUI window.
 
 # Built-ins: Default, Nord, Dracula, Catppuccin Mocha, Catppuccin Latte, plus
@@ -841,6 +841,16 @@ size = 12
 # [undo_close_tab]
 # enabled = false
 # seconds = 10
+
+# Virtual Macs shared with your other computers.
+# macOS runs two at once per Mac; when they are busy, `sheprd machine
+# --host HOST` borrows one from another Mac this window reaches.
+# [machine]
+# Let your other computers borrow this Mac's virtual Macs. A Mac that keeps
+# Tart VMs, or runs other programs' VMs, never lends.
+# lend = true
+# Hosts, by ID or label, to borrow from without asking each time.
+# borrow_from = []
 
 # Zen mode (View > Toggle Zen Mode, or `toggle_zen_mode`) hides the
 # header, sidebar, tab strips, status bar, and notices, and every group but

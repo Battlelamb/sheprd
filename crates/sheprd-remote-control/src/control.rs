@@ -18,8 +18,10 @@ pub mod fleet;
 pub mod github;
 pub mod host_relay;
 pub mod hosts;
+pub mod labels;
 pub mod layout;
 pub mod pairing_link;
+pub mod phone;
 pub mod pull_requests;
 pub mod push;
 pub mod read;
@@ -242,6 +244,11 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         offer: Option<tags::ComputerTags>,
     },
+    Labels {
+        target: labels::Target,
+        worktree: bool,
+        edit: labels::Edit,
+    },
     /// This computer's favorite agents: stars or unstars one pane, if
     /// `change` says so, and answers with the favorites that stand
     /// (`favorites`).
@@ -338,6 +345,10 @@ pub enum Request {
     /// answers what came of each, within [`ASK_WAIT`]. An older daemon
     /// closes without answering.
     TestPush,
+    /// Agents driving a paired phone's app (`phone`): the phones that let
+    /// them, or a drive, answered once the phone says what it did or
+    /// [`ASK_WAIT`] passes. An older daemon closes without answering.
+    Phone(phone::Ask),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -387,6 +398,9 @@ pub enum Response {
     Enrolled(hosts::Enrolled),
     Fleet(Box<fleet::sync::Answer>),
     Tags(tags::ComputerTags),
+    Labels {
+        tags: Vec<String>,
+    },
     Favorites(favorites::Favorites),
     Read(read::Unread),
     Shortcuts(shortcuts::TextShortcuts),
@@ -415,6 +429,7 @@ pub enum Response {
     },
     PushStatus(push::PushStatus),
     TestPushed(push::TestPushes),
+    Phone(phone::Answer),
 }
 
 /// The daemon's answer to a nearby phone's first step, the same JSON over
@@ -595,6 +610,11 @@ pub enum PairingState {
     /// No phone has claimed the token yet.
     Waiting {
         expires_in_ms: u64,
+        /// The code a nearby phone or computer agreed on over Bluetooth and
+        /// shows already, before it claims: the dialog shows it too, so
+        /// both screens show it at once. The claim brings it again.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        nearby_code: Option<String>,
     },
     /// A phone claimed it: the dialog shows its name and the matching code
     /// and asks the user.

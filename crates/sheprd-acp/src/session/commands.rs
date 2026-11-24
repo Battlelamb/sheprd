@@ -6,8 +6,8 @@ use sheprd_chat_protocol::{
     Origin, PermissionId, Queued, Rejection, Status, Turn,
 };
 
-use super::{ConnId, Pending, Session, Update};
 use crate::project::STOP_METHOD;
+use crate::session::{ConnId, Pending, Session, Update};
 
 /// Prompts waiting behind a turn, and their text in bytes: the queue is
 /// copied into every change and snapshot, so it stays well inside a frame.
@@ -155,7 +155,7 @@ impl<R: FnMut(Update)> Session<R> {
             self.turn = Some(self.next_request);
             self.emit(Change::Turn {
                 turn: Some(Turn {
-                    started_ms: super::now_ms(),
+                    started_ms: crate::session::now_ms(),
                 }),
             });
             self.status(Status::Working);
@@ -174,7 +174,7 @@ impl<R: FnMut(Update)> Session<R> {
             return;
         }
         let next = queued.remove(0);
-        let origin = self.queued_origins.get(&next.id).copied();
+        let origin = self.queued_origins.get(&next.id).cloned();
         self.queue_changed(queued);
         self.send_prompt(&next.text, &next.attachments, origin);
     }

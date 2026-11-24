@@ -20,12 +20,14 @@ mod links;
 mod local_ports;
 mod machine;
 mod machine_agent;
+mod machine_remote;
 #[cfg(feature = "mcp")]
 mod mcp;
 mod memory;
 mod menu_bar;
 mod mods;
 mod open_command;
+mod phone;
 mod pr_create;
 mod pr_merge;
 mod px0;
@@ -38,6 +40,25 @@ mod ui_panel;
 mod ui_traces;
 mod usage_pick;
 mod worktrees;
+
+#[test]
+fn labels_reach_control_with_the_requested_scope() {
+    use sheprd_remote_control::control::labels::{Command, Edit, Target};
+    let parsed =
+        LaunchOptions::parse(["labels", "add", "Release", "--workspace", "w1", "--json"]).unwrap();
+    let LaunchMode::Control(invocation) = parsed.mode else {
+        panic!("expected control")
+    };
+    assert!(invocation.json);
+    assert_eq!(
+        invocation.command,
+        control::ControlCommand::Labels(Command {
+            target: Some(Target::Workspace("w1".into())),
+            worktree: true,
+            edit: Edit::Add("Release".into()),
+        })
+    );
+}
 
 #[test]
 fn build_info_is_an_informational_mode() {
@@ -77,7 +98,7 @@ fn browser_commands_never_start_the_gui() {
         browser(BrowserCommand::Open {
             target: "localhost:3000".into(),
             workspace: None,
-            focus: true,
+            focus: false,
             placement: None,
         })
     );
@@ -86,7 +107,7 @@ fn browser_commands_never_start_the_gui() {
         browser(BrowserCommand::Open {
             target: "demo.html".into(),
             workspace: None,
-            focus: true,
+            focus: false,
             placement: Some(control::Placement::Beside),
         })
     );
@@ -95,7 +116,7 @@ fn browser_commands_never_start_the_gui() {
         browser(BrowserCommand::Open {
             target: "demo.html".into(),
             workspace: None,
-            focus: true,
+            focus: false,
             placement: Some(control::Placement::Tab),
         })
     );

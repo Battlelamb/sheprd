@@ -9,6 +9,9 @@ impl Localize for Error {
             #[cfg(target_os = "macos")]
             Self::Agent(error) => error.localize(),
             Self::Busy(name) => fl!("error-machine-busy", name = name.as_str()),
+            Self::Capacity { in_use, limit } => {
+                fl!("error-machine-capacity", in_use = *in_use, limit = *limit)
+            }
             Self::Cpus { min, max } => fl!("error-machine-cpus", min = *min, max = *max),
             Self::Delete { path, source } => fl!(
                 "error-machine-delete",
@@ -28,6 +31,14 @@ impl Localize for Error {
             Self::InvalidDisplay => fl!("error-machine-invalid-display"),
             Self::InvalidName => fl!("error-machine-invalid-name"),
             Self::Memory { min, max } => fl!("error-machine-memory", min = *min, max = *max),
+            Self::NameMismatch {
+                requested,
+                installed,
+            } => fl!(
+                "error-machine-name-mismatch",
+                requested = requested.as_str(),
+                installed = installed.as_str()
+            ),
             Self::NoStateDir => fl!("error-machine-no-state-dir"),
             Self::NotInstalled(path) => fl!(
                 "error-machine-not-installed",
@@ -38,6 +49,7 @@ impl Localize for Error {
                 path = path.display().to_string(),
                 error = source.to_string()
             ),
+            Self::Remote(error) => error.localize(),
             Self::Suspended(name) => fl!("error-machine-suspended", name = name.as_str()),
             Self::Unsupported => fl!("error-machine-unsupported"),
             Self::Write { path, source } => fl!(
@@ -114,6 +126,55 @@ impl Localize for crate::machine::install::Error {
             ),
             Error::NotSupported => fl!("error-machine-install-not-supported"),
             Error::Status(status) => fl!("error-machine-install-status", status = *status),
+        }
+    }
+}
+
+impl Localize for crate::machine::remote::Error {
+    fn localize(&self) -> String {
+        use crate::machine::remote::Error;
+        match self {
+            Error::Answer { host, source } => fl!(
+                "error-machine-remote-answer",
+                host = host.as_str(),
+                error = source.to_string()
+            ),
+            Error::Base64(source) => {
+                fl!("error-machine-remote-base64", error = source.to_string())
+            }
+            Error::Decode(source) => {
+                fl!("error-machine-remote-decode", error = source.to_string())
+            }
+            Error::Encode(source) => {
+                fl!("error-machine-remote-encode", error = source.to_string())
+            }
+            Error::Missing(host) => fl!("error-machine-remote-missing", host = host.as_str()),
+            Error::NotPng => fl!("error-machine-remote-not-png"),
+            Error::NotRunning(host) => {
+                fl!("error-machine-remote-not-running", host = host.as_str())
+            }
+            Error::Refused { host, message } => fl!(
+                "error-machine-remote-refused",
+                host = host.as_str(),
+                message = message.as_str()
+            ),
+            Error::Request { host, source } => fl!(
+                "error-machine-remote-request",
+                host = host.as_str(),
+                error = source.to_string()
+            ),
+            Error::Run { host, source } => fl!(
+                "error-machine-remote-run",
+                host = host.as_str(),
+                error = source.to_string()
+            ),
+            Error::TooLarge(host) => fl!("error-machine-remote-too-large", host = host.as_str()),
+            Error::TooOld(host) => fl!("error-machine-remote-too-old", host = host.as_str()),
+            Error::Write { path, source } => fl!(
+                "error-machine-write",
+                path = path.display().to_string(),
+                error = source.to_string()
+            ),
         }
     }
 }

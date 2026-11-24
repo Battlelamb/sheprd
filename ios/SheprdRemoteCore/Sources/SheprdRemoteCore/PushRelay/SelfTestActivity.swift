@@ -25,17 +25,44 @@ public enum SelfTestActivity {
         )
     }
 
-    /// What the activity says when it starts at `now`.
+    /// What the activity says when it starts at `now`: as a computer's
+    /// turn would, with each style's fields, so the test shows the chosen
+    /// style whole.
     public static func started(at now: Date) -> ChatActivityState {
-        ChatActivityState(phase: .working, step: "Started through the push relay", startedAt: now, working: 1)
+        ChatActivityState(
+            phase: .working,
+            step: "sheprd-push-relay push --live-activity",
+            startedAt: now,
+            planDone: 1,
+            planTotal: 3,
+            working: 1,
+            previous: ["sheprd-push-relay attest"],
+            activity: "Started through the push relay",
+            icon: .web,
+            previousActivities: ["Let this phone in"],
+            steps: 2
+        )
+    }
+
+    /// The step the test moves to halfway, so updates show too.
+    public static func progressed(from start: ChatActivityState) -> ChatActivityState {
+        var state = start
+        state.step = "widget open --sealed"
+        state.activity = "Drawing this activity"
+        state.icon = .build
+        state.previous = ["sheprd-push-relay attest", "sheprd-push-relay push --live-activity"]
+        state.previousActivities = ["Let this phone in", "Started through the push relay"]
+        state.planDone = 2
+        state.steps = 3
+        return state
     }
 
     /// What it says when the test ends it.
     public static func finished(from start: ChatActivityState) -> ChatActivityState {
-        var state = start
+        var state = progressed(from: start)
         state.phase = .finished
-        state.step = "Live Activities work on this phone."
         state.summary = "Live Activities work on this phone."
+        state.planDone = 3
         state.working = 0
         return state
     }

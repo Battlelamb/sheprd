@@ -72,11 +72,32 @@ local function under(gap: number, child: any)
 	return ui.row { gap = "none", ui.row { width = DOT + gap, shrink = false }, child }
 end
 
-local function agent_row(agent: any, layout: any, theme: any)
+local function agent_row(agent: any, layout: any, theme: any, host: any)
 	local gap = layout.gap or 6
-	local single = layout.name == "orca" or layout.name == "minimal"
+	local orca = layout.name == "orca"
+	local single = orca or layout.name == "minimal"
 	local first
-	if single then
+	if orca then
+		local where = {}
+		if host and host.id ~= "local" then table.insert(where, host.label) end
+		if agent.workspace_label then table.insert(where, agent.workspace_label) end
+		if agent.tab then table.insert(where, agent.tab) end
+		local color = if agent.focused then theme.foreground else theme.subtext
+		first = ui.row {
+			grow = true,
+			align = "center",
+			style = { gap = 6 },
+			ui.icon { logo(agent.kind), size = "normal", style = { color = color } },
+			ui.row { grow = true, ui.text { agent.name or "agent", class = "agent-name", truncate = true, style = { color = color } } },
+			if agent.pane_name then ui.text { agent.pane_name, truncate = true, style = { color = theme.muted } } else false,
+			if #where > 0 then ui.row {
+				grow = true,
+				justify = "end",
+				ui.text { table.concat(where, " · "), class = "agent-workspace", truncate = true, style = { color = theme.muted } },
+			} else false,
+			if agent.state then ui.text { agent.state, truncate = true, style = { color = (theme.status or {})[agent.status] } } else false,
+		}
+	elseif single then
 		-- The agent's name keeps its room; the workspace gives way first.
 		first = ui.row {
 			grow = true,
@@ -89,8 +110,10 @@ local function agent_row(agent: any, layout: any, theme: any)
 	end
 	return row {
 		class = "agent-row",
-		selected = agent.focused,
-		layout = layout,
+		selected = agent.focused and (not host or host.selected),
+		host = host,
+		card = orca,
+		layout = if orca then { radius = 4, row_padding = 3, padding = 6 } else layout,
 		theme = theme,
 		msg = { focus_pane = agent.pane, endpoint = agent.endpoint },
 		-- Sheprd's own menu for the agent's pane, at the pointer.
@@ -99,7 +122,8 @@ local function agent_row(agent: any, layout: any, theme: any)
 		tooltip = agent.title,
 		ui.row {
 			align = "center",
-			style = { gap = gap },
+			height = if orca then layout.line or 16 else nil,
+			style = { gap = if orca then 6 else gap },
 			status_dot { status = agent.status, theme = theme, height = DOT },
 			first,
 			-- A draft typed in the agent's chat and not sent, kept across
@@ -137,15 +161,20 @@ return mod {
 	view = function(_, app)
 		local sheprd = app.sheprd or { workspaces = {}, agents = {} }
 		local theme = app.sheprd_theme or {}
-		local layout = sheprd.layout or {}
+		local layout = table.clone(sheprd.layout or {})
+		layout.line = sheprd.sidebar_line_height
 		-- A page in the sidebar's place, the sidebar collapsed to tiles, or
 		-- agents hidden in Sheprd's settings.
 		if sheprd.section or sheprd.sidebar_visible == false or sheprd.agents_list == false then
 			return ui.column { height = 0 }
 		end
+		local hosts = {}
+		for _, device in sheprd.devices or {} do
+			hosts[device.id] = device
+		end
 		local rows = {}
 		for _, agent in sheprd.agents do
-			table.insert(rows, agent_row(agent, layout, theme))
+			table.insert(rows, agent_row(agent, layout, theme, hosts[agent.endpoint]))
 		end
 		-- It fills the pane the shell gives it, whose top edge resizes it.
 		return ui.column {

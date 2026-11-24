@@ -215,6 +215,9 @@ fn layout_state(name: &str, metrics: &SidebarMetrics) -> Value {
     json!({
         "child_details": metrics.child_details,
         "child_indent": metrics.child_indent,
+        "card_indent": metrics.card_indent,
+        "header_padding": metrics.header_padding,
+        "footer_padding": metrics.footer_padding,
         "gap": metrics.gap,
         "name": name,
         // How far rows step in under a device's header, as several devices
@@ -386,6 +389,10 @@ impl SheprdWindow {
             },
             main: json!({
                 "agents": self.hosted_agents(),
+                "sidebar_title_height": self.activity_title_height(),
+                "sidebar_line_height": super::line_height(&self.config.sidebar),
+                "primary_label": crate::i18n::fl!("sidebar-primary").to_string(),
+                "hosts_folded": self.hosts_folded(cx),
                 // Whether the sidebar lists agents in a list of their own,
                 // as the window's own sidebar does.
                 "agents_list": self.hosted_agents_list(),

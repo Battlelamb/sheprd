@@ -11,10 +11,9 @@ end
 local AGENTS_LEAST = 60
 local WORKTREES_LEAST = 120
 
--- The height the left column's lists share: the window's, less the row over
--- them and the device picker under them.
+-- Share the space between the title and footer, excluding the divider.
 local function lists_height(state: any): number
-	return math.max(state.height - state.header - state.devices, 0)
+	return math.max(state.height - state.header - state.sidebar_title - state.devices - 6, 0)
 end
 
 -- The agents section's height: as dragged, else half the lists' room as
@@ -65,6 +64,7 @@ return mod {
 			header = 34,
 			height = 780,
 			left = 300,
+			sidebar_title = 32,
 			status_bar = 24,
 			titlebar = 0,
 		}
@@ -79,6 +79,7 @@ return mod {
 			state.header = msg.header
 			state.height = msg.height or state.height
 			state.left = msg.left
+			state.sidebar_title = msg.sidebar_title or 0
 			state.status_bar = msg.status_bar
 			state.titlebar = msg.titlebar or 0
 		elseif type(msg) == "table" and msg.sidebar_width then
@@ -126,7 +127,8 @@ return mod {
 				grow = true,
 				gap = "none",
 				if state.left > 0 then ui.column {
-					width = state.left,
+					-- The one-pixel resize edge completes the column width.
+					width = state.left - 1,
 					shrink = false,
 					gap = "none",
 					ui.row { height = state.header, shrink = false, gap = "none", style = { background = theme.sidebar }, ui.column { grow = true, gap = "none", ui.mount "header" } },
@@ -145,34 +147,31 @@ return mod {
 							gap = "none",
 							style = { background = theme.sidebar },
 							ui.column { grow = true, gap = "none", ui.mount "worktrees" },
-							-- Under a rule, new and menu, then the agents. The rule is the edge
-							-- that shares the height between the worktrees and the agents, as
-							-- Sheprd's does.
-							if lists then ui.column {
+							if lists then ui.mount "actions" else false,
+							if lists and sheprd.agents_list ~= false then ui.column {
 								class = "sheprd-lower",
 								shrink = false,
 								gap = "none",
-								ui.row { class = "sheprd-rule", height = 1, shrink = false, style = { background = theme.active } },
-								ui.mount "actions",
-								if sheprd.agents_list ~= false then ui.column {
-									class = "sheprd-agents-pane",
-									height = agents_height(state),
-									shrink = false,
-									gap = "none",
-									ui.mount "agents",
-								} else false,
-								if sheprd.agents_list ~= false then ui.row {
+								ui.row {
 									class = "sheprd-agents-edge",
-									float = { top = -3, left = 0, right = 0 },
-									height = 7,
+									height = 6,
+									shrink = false,
 									align = "center",
 									justify = "center",
+									style = { border = "top", border_color = theme.active },
 									cursor = "row-resize",
 									tooltip = "Drag to resize, double-click to reset",
 									pointer = { agents_edge = true },
 									hover = true,
 									handle(state.agents_edge, "x"),
-								} else false,
+								},
+								ui.column {
+									class = "sheprd-agents-pane",
+									height = agents_height(state),
+									shrink = false,
+									gap = "none",
+									ui.mount "agents",
+								},
 							} else false,
 							if lists and state.devices > 0
 								then ui.row { height = state.devices, shrink = false, gap = "none", ui.mount "devices" }

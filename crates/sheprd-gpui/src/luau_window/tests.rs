@@ -175,4 +175,5 @@ mod devices;
 mod drafted_agents;
 mod keys;
 mod pages;
+mod stock_chrome;
 mod turns;

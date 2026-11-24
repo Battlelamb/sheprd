@@ -7,7 +7,6 @@
 -- other, and the lines under it start at the name. Inspect reaches each
 -- label, branch and pull request. The agents under them are their own mod
 -- (`mods/agents`); the highlight is `sheprd-row`'s.
-local icon_button = use "icon-button"
 local row = use "sheprd-row"
 local status_dot = use "sheprd-status-dot"
 local subhead = use "sheprd-subhead"
@@ -18,30 +17,35 @@ local DOT = 8
 -- The theme color a status shows in, as `sheprd-status-dot` colors it.
 local TONES = { working = "warning", blocked = "danger", done = "success" }
 
--- Which design draws the rows. Devices lists agents by machine, which this
--- pane does not yet, so it draws Herdr's rows.
--- A tool at the end of a head (fold, search, the sidebar toggle): a small button, as
--- `icon_button`'s, with its icon a step larger, as large as Sheprd's own
--- sidebar draws them, where a small button's icon would be smaller.
+-- A tool at the end of the spaces heading.
 local function head_tool(props: any)
 	return ui.row {
 		gap = "none",
 		ui.row {
 			class = "icon-button sheprd-head-tool",
-			width = 26,
-			height = 26,
+			width = props.size or 26,
+			height = props.size or 26,
 			align = "center",
 			justify = "center",
 			tooltip = props.tooltip,
 			msg = props.msg,
 			to = props.to,
-			ui.icon { name = props.icon, size = "large" },
+			ui.icon { name = props.icon, size = if props.size then "small" else "large" },
 		},
 	}
 end
 
--- Folds the sidebar to its rail, or opens it again from there.
-local TOGGLE = { icon = "panel-left", tooltip = "Toggle the sidebar", msg = { command = "toggle_sidebar" }, to = LINK }
+-- The same localized heading, toggle glyph and click target in the list and rail.
+local function panel_title(sheprd: any)
+	local height = sheprd.sidebar_title_height or 0
+	if height == 0 then return false end
+	return ui.row {
+		class = "sheprd-head",
+		height = height,
+		shrink = false,
+		ui.view { name = "sheprd", id = "sidebar_title", props = { region = "sidebar_title" } },
+	}
+end
 
 local function design(layout: any): string
 	local name = layout.name
@@ -140,7 +144,7 @@ local function fold(workspace: any, theme: any)
 		msg = { toggle_repository = workspace.group, endpoint = workspace.endpoint },
 		to = LINK,
 		tooltip = if workspace.collapsed then "Show its worktrees" else "Hide its worktrees",
-		ui.icon { if workspace.collapsed then "chevron-right" else "chevron-down", size = "small", style = { color = theme.muted } },
+		ui.text { workspace.fold_glyph or (if workspace.collapsed then "▸" else "▾"), style = { color = theme.muted } },
 	}
 end
 
@@ -164,6 +168,11 @@ end
 -- the pull request's added and removed lines under them when `counts` shows
 -- them.
 local function badges(workspace: any, counts: boolean, theme: any)
+	local commits = drift(workspace, theme)
+	local has_counts = counts and (workspace.added or workspace.removed)
+	if not (workspace.muted or workspace.teleported or workspace.dirty or commits or workspace.pr or workspace.group or has_counts) then
+		return false
+	end
 	local dirty = theme.dirty or theme.warning
 	return ui.column {
 		class = "worktree-badges",
@@ -186,11 +195,11 @@ local function badges(workspace: any, counts: boolean, theme: any)
 					ui.icon { "pencil", size = "small", style = { color = theme.dirty_ink or dirty } },
 				}
 				else false,
-			drift(workspace, theme),
+			commits,
 			if workspace.pr then ui.text { workspace.pr, class = "worktree-pr", style = { color = workspace.pr_color or theme.muted } } else false,
 			fold(workspace, theme),
 		},
-		if counts and (workspace.added or workspace.removed)
+		if has_counts
 			then ui.row {
 				class = "worktree-counts",
 				gap = "none",
@@ -253,6 +262,7 @@ local function classic_row(workspace: any, last: boolean, layout: any, theme: an
 	return row {
 		class = if child then "worktree-row worktree-child" else "worktree-row",
 		selected = workspace.focused,
+		host = layout.host,
 		layout = layout,
 		theme = theme,
 		-- With guides, the indent is the guide's, inside the row.
@@ -300,6 +310,7 @@ local function superset_row(workspace: any, layout: any, theme: any)
 	return row {
 		class = "worktree-row",
 		selected = workspace.focused,
+		host = layout.host,
 		stripe = true,
 		layout = { padding = layout.padding, row_padding = 5 },
 		theme = theme,
@@ -335,24 +346,39 @@ local function without_pr(workspace: any)
 	return copy
 end
 
--- Orca's cards: a status column beside the name, and a quieter meta line
--- with the branch and the pull request.
-local function orca_row(workspace: any, layout: any, theme: any)
-	local meta = {}
-	if branch(workspace) then
-		table.insert(meta, workspace.branch)
+-- Orca keeps the repository tile next to the branch or, on a one-line
+-- card, next to the name. The letters and colors come from Classic's tile.
+local function repo_tile(tile: any, line: number)
+	if not tile then
+		return false
 	end
-	if workspace.pr then
-		table.insert(meta, workspace.pr)
-	end
-	return row {
+	return ui.row {
+		class = "repository-chip",
+		width = line * 1.4,
+		height = line,
+		shrink = false,
+		align = "center",
+		justify = "center",
+		style = { background = tile.background, radius = line / 4 },
+		ui.text { tile.letters, size = "small", style = { color = tile.foreground } },
+	}
+end
+
+local function orca_row(workspace: any, last: boolean, layout: any, theme: any)
+	local line = layout.line or 16
+	local indent = if workspace.child then layout.card_indent or 12 else 0
+	local host_label = if layout.nest > 0 and layout.host.id ~= "local" then layout.host.label else nil
+	local detail = branch(workspace)
+	local meta = detail or host_label or workspace.pr or workspace.dirty or workspace.teleported
+	local padding = if meta then 5 else 7
+	local card = row {
 		class = "worktree-row worktree-card",
 		selected = workspace.focused,
+		host = layout.host,
 		card = true,
-		layout = { padding = 8, row_padding = 5, spacing = 4 },
+		layout = { padding = 6, row_padding = padding, radius = 8 },
 		theme = theme,
-		indent = if workspace.child then 12 else 0,
-		nest = layout.nest,
+		indent = indent + layout.nest,
 		msg = { sheprd = focus(workspace) },
 		context = { sheprd = menu(workspace) },
 		carry = carry(workspace),
@@ -360,18 +386,40 @@ local function orca_row(workspace: any, layout: any, theme: any)
 		drop = drop_at(workspace),
 		ui.row {
 			align = "center",
+			height = line,
 			style = { gap = 6 },
 			ui.row { width = 12, shrink = false, justify = "center", status_dot { status = workspace.agent_status, theme = theme, height = DOT } },
 			label(workspace, theme),
+			if not meta then repo_tile(workspace.repo_tile, line) else false,
+			if workspace.group and layout.primary_label and theme.foreground then ui.row {
+				class = "worktree-primary",
+				shrink = false,
+				style = { padding = { x = 5 }, radius = 4, border = "all", border_color = `{theme.foreground}33`, background = `{theme.foreground}0f` },
+				ui.text { layout.primary_label, size = "small", style = { color = theme.subtext } },
+			} else false,
 			badges(without_pr(workspace), false, theme),
 		},
-		if #meta > 0
-			then ui.row {
-				gap = "none",
-				ui.row { width = 18, shrink = false },
-				ui.text { table.concat(meta, " · "), class = "worktree-meta", truncate = true, size = "small", style = { color = theme.muted } },
-			}
-			else false,
+		if meta then ui.row {
+			height = line,
+			align = "center",
+			style = { margin = { top = 4, left = 18 }, gap = 6 },
+			repo_tile(workspace.repo_tile, line),
+			if host_label then ui.text { host_label, size = "small", truncate = true, style = { background = theme.active } } else false,
+			ui.row { grow = true, if detail then ui.text { detail, truncate = true, size = "small", style = { color = theme.muted } } else false },
+			if workspace.pr then ui.text { workspace.pr, size = "small", style = { color = workspace.pr_color } } else false,
+		} else false,
+	}
+	if indent <= 0 or not layout.tree_lines then
+		return card
+	end
+	local x = 4 + layout.nest + 1 + 6 + 2
+	local elbow = 1 + padding + line / 2
+	return ui.column {
+		gap = "none",
+		shrink = false,
+		card,
+		ui.row { float = if last then { top = 0, left = x } else { top = 0, bottom = 0, left = x }, width = 1, height = if last then elbow else nil, style = { background = theme.muted } },
+		ui.row { float = { top = elbow, left = x }, width = indent, height = 1, style = { background = theme.muted } },
 	}
 end
 
@@ -380,6 +428,7 @@ local function minimal_row(workspace: any, layout: any, theme: any)
 	return row {
 		class = "worktree-row",
 		selected = workspace.focused,
+		host = layout.host,
 		layout = layout,
 		theme = theme,
 		indent = if workspace.child then layout.child_indent else 0,
@@ -417,7 +466,7 @@ local function workspace_row(workspace: any, last: boolean, layout: any, theme: 
 	if kind == "superset" then
 		return with_note(superset_row(workspace, layout, theme), workspace, theme)
 	elseif kind == "orca" then
-		return with_note(orca_row(workspace, layout, theme), workspace, theme)
+		return with_note(orca_row(workspace, last, layout, theme), workspace, theme)
 	elseif kind == "minimal" then
 		return with_note(minimal_row(workspace, layout, theme), workspace, theme)
 	end
@@ -453,57 +502,44 @@ end
 -- click opens its menu.
 local function device_header(device: any, layout: any, theme: any)
 	local load = device.load
-	return ui.row {
+	return row {
 		class = "sheprd-device",
 		selected = device.selected,
-		align = "center",
-		shrink = false,
+		layout = layout,
+		theme = theme,
+		host = device,
 		msg = { select_device = device.id },
 		context = { menu = "device", endpoint = device.id },
 		to = LINK,
-		style = {
-			gap = 6,
-			padding = { x = (layout.padding or 8) + (layout.inset or 0), y = 3 },
-			background = if device.selected then theme.active else nil,
-			opacity = if device.enabled == false then 0.6 else nil,
-		},
 		ui.row {
-			class = "sheprd-device-fold",
-			shrink = false,
-			msg = { toggle_device = device.id },
-			to = LINK,
-			tooltip = if device.collapsed then "Show its workspaces" else "Hide its workspaces",
-			ui.icon { if device.collapsed then "chevron-right" else "chevron-down", size = "small", style = { color = theme.muted } },
-		},
-		ui.icon { if device.id == "local" then "laptop" else "server", size = "small", style = { color = theme.subtext } },
-		ui.row { grow = true, ui.text { device.label, class = "sheprd-device-label", truncate = true, weight = "bold", style = { color = theme.foreground } } },
-		if load and load.cpu
-			then ui.text { `{math.floor(load.cpu + 0.5)}%`, class = "sheprd-device-cpu", tooltip = "CPU", style = { color = theme.muted } }
-			else false,
-		if load and load.memory
-			then ui.text { `{math.floor(load.memory + 0.5)}%`, class = "sheprd-device-memory", tooltip = "Memory", style = { color = theme.muted } }
-			else false,
-		ui.row {
-			class = "sheprd-device-status",
-			width = 7,
-			height = 7,
-			shrink = false,
-			tooltip = if device.connected then "Connected" else "Not connected",
-			style = { radius = 4, background = if device.connected then theme.success else theme.muted },
+			align = "center",
+			style = { gap = 6, opacity = if device.enabled == false then 0.6 else nil },
+			ui.row {
+				class = "sheprd-device-fold",
+				shrink = false,
+				msg = { toggle_device = device.id },
+				to = LINK,
+				tooltip = if device.collapsed then "Show its workspaces" else "Hide its workspaces",
+				ui.icon { if device.collapsed then "chevron-right" else "chevron-down", size = "small", style = { color = theme.muted } },
+			},
+			ui.icon { if device.id == "local" then "laptop" else "server", size = "small", style = { color = theme.subtext } },
+			ui.row { grow = true, ui.text { device.label, class = "sheprd-device-label", truncate = true, weight = "bold", style = { color = theme.foreground } } },
+			if load and load.cpu
+				then ui.text { `{math.floor(load.cpu + 0.5)}%`, class = "sheprd-device-cpu", tooltip = "CPU", style = { color = theme.muted } }
+				else false,
+			if load and load.memory
+				then ui.text { `{math.floor(load.memory + 0.5)}%`, class = "sheprd-device-memory", tooltip = "Memory", style = { color = theme.muted } }
+				else false,
+			ui.row {
+				class = "sheprd-device-status",
+				width = 7,
+				height = 7,
+				shrink = false,
+				tooltip = if device.connected then "Connected" else "Not connected",
+				style = { radius = 4, background = if device.connected then theme.success else theme.muted },
+			},
 		},
 	}
-end
-
--- Whether any repository on any device has its worktrees folded away.
-local function any_folded(devices: any): boolean
-	for _, device in devices do
-		for _, workspace in device.workspaces or {} do
-			if workspace.collapsed then
-				return true
-			end
-		end
-	end
-	return false
 end
 
 -- Search, as Sheprd's sidebar searches: a case-insensitive substring of
@@ -654,7 +690,8 @@ return mod {
 		local sheprd = app.sheprd or { workspaces = {}, devices = {} }
 		local devices = sheprd.devices or {}
 		local theme = app.sheprd_theme or {}
-		local layout = sheprd.layout or {}
+		local layout = table.clone(sheprd.layout or {})
+		layout.line = sheprd.sidebar_line_height
 		-- Only the selected device's rows move, while it is connected, as in
 		-- Sheprd's own sidebar.
 		drag.device = nil
@@ -680,7 +717,7 @@ return mod {
 				gap = "none",
 				style = { background = theme.sidebar },
 				-- The toggle that opens the sidebar again, where its head has it.
-				ui.row { class = "sheprd-head", align = "center", justify = "center", height = 32, shrink = false, head_tool(TOGGLE) },
+				panel_title(sheprd),
 				ui.column {
 					grow = true,
 					scroll = true,
@@ -701,8 +738,10 @@ return mod {
 			-- Sheprd's sidebar shows them, its rows stepped in by the
 			-- layout's `nest`; one device's rows stand alone.
 			local nested = table.clone(layout)
+			nested.primary_label = sheprd.primary_label
 			nested.nest = if sheprd.multi then layout.nest or 0 else 0
 			for _, device in devices do
+				nested.host = device
 				if sheprd.multi then
 					table.insert(rows, device_header(device, layout, theme))
 				end
@@ -713,7 +752,7 @@ return mod {
 				end
 			end
 		end
-		local folded = any_folded(devices)
+		local folded = sheprd.hosts_folded
 		local head = if state.searching
 			then ui.row {
 				class = "sheprd-search",
@@ -730,7 +769,7 @@ return mod {
 					submit = "search_open",
 					keys = { escape = "search_close", up = "search_previous", down = "search_next" },
 				},
-				icon_button { icon = "circle-x", size = "small", tooltip = "Close the search", msg = "search_close" },
+				head_tool { icon = "circle-x", size = 16, tooltip = "Close the search", msg = "search_close" },
 			}
 			else subhead {
 				text = "spaces",
@@ -739,12 +778,13 @@ return mod {
 				side = ui.row {
 					align = "center",
 					style = { gap = 2 },
-					head_tool {
+					if folded ~= nil then head_tool {
+						size = 16,
 						icon = if folded then "chevrons-up-down" else "list-tree",
-						tooltip = if folded then "Expand every group" else "Collapse every group",
-						msg = { fold_all = not folded },
+						tooltip = if folded then "Expand all hosts" else "Collapse all hosts",
+						msg = { command = "toggle_all_hosts" },
 						to = LINK,
-					},
+					} else false,
 					if (sheprd.merged or 0) > 0
 						then head_tool {
 							icon = "sparkles",
@@ -753,7 +793,7 @@ return mod {
 							to = LINK,
 						}
 						else false,
-					head_tool { icon = "search", tooltip = "Search devices, worktrees, branches and notes", msg = "search" },
+					head_tool { size = 16, icon = "search", tooltip = "Search devices, worktrees, branches and notes", msg = "search" },
 				},
 			}
 		return ui.column {
@@ -763,16 +803,7 @@ return mod {
 			-- Sheprd's sidebar font (src/luau_window/theme.rs) at the size
 			-- step nearest its own (`sidebar_size`, src/sidebar/hosted.rs).
 			style = { background = theme.sidebar, font = "mono", size = theme.sidebar_size },
-			ui.row {
-				class = "sheprd-head",
-				align = "center",
-				height = 32,
-				shrink = false,
-				style = { padding = { left = 12, right = 8 } },
-				ui.text { "WORKSPACES", class = "sheprd-title", weight = "bold", size = "small", style = { color = theme.subtext } },
-				ui.spacer(),
-				head_tool(TOGGLE),
-			},
+			panel_title(sheprd),
 			head,
 			ui.column {
 				grow = true,
@@ -782,7 +813,7 @@ return mod {
 				gap = "none",
 				ui.column { shrink = false, gap = "none", table.unpack(rows) },
 			},
-			-- New and menu are the `actions` mod's, under the rule below.
+			-- New and menu are the `actions` mod's, at the foot of this list.
 		}
 	end,
 }

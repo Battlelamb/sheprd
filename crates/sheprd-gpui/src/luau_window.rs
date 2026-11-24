@@ -430,6 +430,7 @@ impl SheprdRegion {
             Some("devices") => Some(Region::Devices),
             Some("header") => Some(Region::Header),
             Some("sidebar") => Some(Region::Sidebar),
+            Some("sidebar_title") => Some(Region::SidebarTitle),
             Some("status") => Some(Region::StatusBar),
             Some("titlebar") => Some(Region::TitleBar),
             _ => None,
@@ -454,6 +455,7 @@ impl SheprdRegion {
                         ("header", f64::from(sizes.header).into()),
                         ("height", f64::from(sizes.height).into()),
                         ("left", f64::from(sizes.left).into()),
+                        ("sidebar_title", f64::from(sizes.sidebar_title).into()),
                         ("status_bar", f64::from(sizes.status_bar).into()),
                         ("titlebar", f64::from(sizes.titlebar).into()),
                     ]));

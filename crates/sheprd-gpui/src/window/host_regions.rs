@@ -23,6 +23,8 @@ pub enum Region {
     /// no clicks of its own.
     Overlay,
     Sidebar,
+    /// The workspaces heading and sidebar toggle over the list or rail.
+    SidebarTitle,
     StatusBar,
     /// What ends the title bar: the checkout's changes and branch, the
     /// account, and the details toggle. The tab strips leave its room free.
@@ -40,6 +42,7 @@ pub struct Sizes {
     pub height: f32,
     /// The column holding the activity bar and sidebar.
     pub left: f32,
+    pub sidebar_title: f32,
     pub status_bar: f32,
     /// The title bar's end, as last drawn.
     pub titlebar: f32,
@@ -62,6 +65,7 @@ impl SheprdWindow {
             header: crate::titlebar::HEIGHT,
             height: f32::from(window.viewport_size().height),
             left: self.sidebar_column_width(width).unwrap_or(0.),
+            sidebar_title: self.activity_title_height(),
             status_bar: if self.status_bar_visible {
                 self.status_bar_height()
             } else {
@@ -111,6 +115,10 @@ impl SheprdWindow {
                 root.into_any_element()
             }
             Region::Sidebar => self.render_sidebar_region(window, cx),
+            Region::SidebarTitle if self.activity_bar_leads() => self
+                .region_root()
+                .child(self.panel_title(ActivityPanel::Workspaces, cx))
+                .into_any_element(),
             Region::StatusBar if self.status_bar_visible => self
                 .region_root()
                 .child(self.render_status_bar(cx))

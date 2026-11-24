@@ -1,5 +1,5 @@
 -- Under the worktrees: a new worktree, and the command palette. The shell
--- draws the rule over it, the edge the agents below it are resized by, as
+-- draws the rule below it, the edge the agents below it are resized by, as
 -- in Sheprd's own sidebar.
 local LINK = "provider:sheprd"
 
@@ -34,7 +34,7 @@ return mod {
 				background = theme.sidebar,
 				font = "mono",
 				size = theme.sidebar_size,
-				padding = { x = (layout.padding or 8) + (layout.inset or 0), y = 4 },
+				padding = { x = (layout.padding or 8) + (layout.inset or 0), y = layout.footer_padding or 4 },
 			},
 			link("new", "new_workspace", theme),
 			ui.spacer(),

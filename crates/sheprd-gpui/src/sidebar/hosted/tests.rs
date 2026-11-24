@@ -8,6 +8,7 @@ mod focus;
 mod icons;
 mod nest;
 mod sidebar_size;
+mod status_buttons;
 mod unread;
 
 #[gpui::test]

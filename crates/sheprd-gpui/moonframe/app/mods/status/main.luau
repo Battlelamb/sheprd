@@ -185,17 +185,24 @@ local function load_item(load: any)
 	return ui.row(row)
 end
 
-local function item(icon: string, text: string, color: string, msg: any, to: string?)
+local function item(icon: string, text: string, color: string, msg: any, to: string?, shown: string?)
+	-- `[status_bar]` hides a button, or draws its icon alone, named by its
+	-- tooltip, as Sheprd's own bar does.
+	if shown == "hidden" then
+		return false
+	end
+	local icon_only = shown == "icon"
 	return ui.row {
 		class = "status-item",
 		align = "center",
 		shrink = false,
 		msg = msg,
 		to = to,
+		tooltip = if icon_only then text else nil,
 		style = { gap = 5 },
 		-- As Sheprd's own bar: text at the UI size, icons a size up.
 		ui.icon { name = icon, size = "large", style = { color = color } },
-		ui.text { text, style = { color = color } },
+		if icon_only then false else ui.text { text, style = { color = color } },
 	}
 end
 
@@ -220,6 +227,7 @@ return mod {
 			end
 		end
 		local theme = app.sheprd_theme or {}
+		local buttons = sheprd.status_bar or {}
 		return ui.row {
 			class = "sheprd-status",
 			grow = true,
@@ -230,8 +238,8 @@ return mod {
 			if sheprd.usage then usage(sheprd.usage, theme) else false,
 			ui.spacer(),
 			if app.sheprd_load then load_item(app.sheprd_load) else false,
-			item("palette", "Theme", theme.subtext, run "themes", "provider:sheprd"),
-			item("command", "Commands", theme.subtext, run "command_palette", "provider:sheprd"),
+			item("palette", "Theme", theme.subtext, run "themes", "provider:sheprd", buttons.theme),
+			item("command", "Commands", theme.subtext, run "command_palette", "provider:sheprd", buttons.commands),
 		}
 	end,
 }

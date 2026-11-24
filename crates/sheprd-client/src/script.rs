@@ -162,6 +162,10 @@ mod late_input_tests;
 #[path = "script_tests/ssh_output.rs"]
 mod ssh_output_tests;
 
+#[cfg(all(test, windows))]
+#[path = "script_tests/overlapped_handles.rs"]
+mod overlapped_handles_tests;
+
 /// Streams a script child's pipes under the output and idle bounds. On Unix
 /// the child leads its own process group, so stopping it reaches its
 /// descendants too. On Windows the child is `wsl.exe` or `ssh`, and killing it

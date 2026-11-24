@@ -193,7 +193,10 @@ bundle profile="release" features="":
     esac
     app=target/{{profile}}/Sheprd.app
     cargo build --locked $flags --target-dir target -p sheprd-gpui --features "{{features}}" -p sheprd-acp
-    cargo build --locked $flags --target-dir target -p sheprd-automate -p sheprd-remote-control
+    features="{{features}}"
+    remote_features=""
+    if [[ ",${features// /,}," == *,tmux,* ]]; then remote_features=tmux; fi
+    cargo build --locked $flags --target-dir target -p sheprd-automate -p sheprd-remote-control --features "$remote_features"
     mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
     # Replace the executables rather than rewrite them in place: macOS keeps
     # a signed file's old signature with its inode, so reading the rewritten

@@ -11,15 +11,22 @@ pub enum TerminalBackend {
 }
 
 impl TerminalBackend {
-    pub(crate) fn available(self) -> bool {
-        self != Self::Tmux || cfg!(feature = "tmux")
+    pub fn available(self, tmux: bool) -> bool {
+        self != Self::Tmux || tmux
     }
 
-    pub(crate) fn owner(id: &sheprd_backend::TerminalId) -> Self {
+    /// An unavailable backend falls back to the pre-selector preference.
+    pub fn selected(choice: Option<Self>, legacy_core: bool, tmux: bool) -> Self {
+        choice
+            .filter(|backend| backend.available(tmux))
+            .unwrap_or(if legacy_core { Self::Core } else { Self::Herdr })
+    }
+
+    pub fn owner(id: &crate::TerminalId) -> Self {
         if id.is_tmux() { Self::Tmux } else { Self::Core }
     }
 
-    pub(crate) fn name(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
             Self::Herdr => "herdr",
             Self::Core => "herdr-core",

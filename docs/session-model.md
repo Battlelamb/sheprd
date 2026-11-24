@@ -18,14 +18,14 @@ tmux server owns the programs and their scrollback. Stopping that server or
 rebooting the host ends those processes. When an owning view reopens after a new
 host boot, the adapter recreates its managed shell or ACP chat with the same
 pane ID. The ACP helper records the endpoint, built-in agent, session ID and
-provider history directories on the machine that runs the chat. It requires
+provider history directories and workspace labels on the machine that runs the chat. A tmux-enabled remote service also reopens recorded chats on startup after a host reboot, even with the desktop closed. It requires
 the provider to load that exact session. Shell screen contents and arbitrary
 programs have no comparable continuation protocol.
 
 The desktop's terminal worker depends on `Backend` and `Terminal`.
 `WatchBackend` adds an ordered event stream for herdr-core. The tmux desktop
 inventory uses polling. The tmux adapter takes a scoped `CommandHost` for remote
-execution, so SSH, WSL and cloud authentication stay in `sheprd-remote`. Phone control and shared workspace documents, Teleport
+execution, so SSH, WSL and cloud authentication stay in `sheprd-remote`. Paired phone and web clients can open, continue and start managed tmux chats through a tmux-enabled remote service. Raw terminal control and shared workspace documents, Teleport
 and daemon-launched automations still have their own Herdr-specific callers.
 The existing `sheprd-t3` client owns the T3 conversation integration. A T3
 thread keeps its server and thread identity regardless of the terminal backend.

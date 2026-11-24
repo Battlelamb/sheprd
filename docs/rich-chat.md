@@ -234,7 +234,7 @@ restarts the chat helper under the original terminal ID and endpoint. The
 helper asks the provider to load the exact recorded conversation. Native
 Codex and Claude read history from their session logs. ACP adapters can replay
 history through `session/load`. A provider that cannot load the saved session
-reports the failure. Closing a chat clears its continuation record.
+reports the failure. Closing a chat clears its continuation record. If the tmux-enabled remote service starts before the desktop, it resumes the recorded chats so paired clients can reconnect. Other shells wait for an owning desktop view.
 
 For managed chats, Sheprd also keeps a private conversation checkpoint in
 `conversations` beside the restore directory. When a provider successfully

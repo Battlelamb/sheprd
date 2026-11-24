@@ -110,7 +110,11 @@ impl Hub {
 /// `answering` nor installed here, or the user chose Herdr 2 for new
 /// terminals. Blocking: it reads settings and the login shell's PATH.
 fn core_program(answering: bool) -> Option<PathBuf> {
-    let chosen = settings_path().is_some_and(|path| herdr_2_chosen(&path));
+    let selected = settings_path().map(|path| chosen(&path));
+    if selected == Some(sheprd_backend::TerminalBackend::Tmux) {
+        return None;
+    }
+    let chosen = selected == Some(sheprd_backend::TerminalBackend::Core);
     if answering && !chosen {
         return None;
     }
@@ -122,28 +126,35 @@ fn core_program(answering: bool) -> Option<PathBuf> {
 }
 
 /// Sheprd's settings on this computer.
-fn settings_path() -> Option<PathBuf> {
+pub(super) fn settings_path() -> Option<PathBuf> {
     let root = sheprd_client::local_path::config_root().ok()?;
     Some(root.join("herdr/config-gpui.toml"))
 }
 
 /// Whether the settings at `path` say new terminals use Herdr 2: the
 /// user's overrides first, then the file itself, off when neither says.
-pub(super) fn herdr_2_chosen(path: &std::path::Path) -> bool {
-    let read = |path: &std::path::Path| -> Option<bool> {
-        let text = sheprd_client::settings_files::read(path).ok()??;
-        text.parse::<toml::Table>()
-            .ok()?
-            .get(HERDR_2_TERMINALS)?
-            .as_bool()
+pub(super) fn chosen(path: &std::path::Path) -> sheprd_backend::TerminalBackend {
+    use sheprd_backend::TerminalBackend;
+    fn read(path: &std::path::Path) -> Option<toml::Table> {
+        sheprd_client::settings_files::read(path)
+            .ok()??
+            .parse()
+            .ok()
+    }
+    let overrides = read(&sheprd_client::settings_files::overrides_path(path));
+    let settings = read(path);
+    let value = |key| {
+        overrides
+            .as_ref()
+            .and_then(|table| table.get(key))
+            .or_else(|| settings.as_ref().and_then(|table| table.get(key)))
     };
-    read(&sheprd_client::settings_files::overrides_path(path))
-        .or_else(|| read(path))
-        .unwrap_or(false)
+    let backend = value("terminal_backend").and_then(|value| value.clone().try_into().ok());
+    let legacy = value("herdr_2_terminals")
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(false);
+    TerminalBackend::selected(backend, legacy, cfg!(feature = "tmux"))
 }
-
-/// The setting "New terminals use Herdr 2".
-const HERDR_2_TERMINALS: &str = "herdr_2_terminals";
 
 /// `program` where the daemon looks, else on the login shell's `login`
 /// PATH: a service's own PATH can leave out a directory the user's shell

@@ -72,7 +72,7 @@ impl SheprdWindow {
         let wanted: Vec<_> = self
             .core_terminals
             .infos
-            .core_terminals()
+            .all()
             .filter(|info| {
                 !held.contains(&info.id)
                     && !self.core_terminals.adopted.contains(&info.id)
@@ -80,7 +80,7 @@ impl SheprdWindow {
                     // A tab of the core's shared document holds it, whoever
                     // put it there, and it shows here once that tab is read;
                     // until the document is read, any tab may.
-                    && !super::spaces::Shared::may_hold(cx, &Host::Local, &info.id)
+                    && (info.id.is_tmux() || !super::spaces::Shared::may_hold(cx, &Host::Local, &info.id))
             })
             .filter_map(|info| {
                 // A phone's new workspace: kept in its folder, once a tab
@@ -134,7 +134,9 @@ impl SheprdWindow {
             if self.core_terminals.adopted.len() >= MAX_ADOPTED {
                 self.core_terminals.adopted.clear();
             }
-            self.release_labels(&scope, terminal.clone());
+            if !terminal.is_tmux() {
+                self.release_labels(&scope, terminal.clone());
+            }
             self.core_terminals.adopted.insert(terminal);
         }
         if opened {

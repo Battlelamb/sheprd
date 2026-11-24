@@ -47,6 +47,9 @@ fn saved_tmux_panes_keep_their_owner_in_both_builds() -> anyhow::Result<()> {
     let id = sheprd_backend::TerminalId::new("tmux-01234567-89ab-cdef-0123-456789abcdef")?;
     let owner = TerminalBackend::owner(&id);
     assert_eq!(owner, TerminalBackend::Tmux);
-    assert_eq!(owner.available(), cfg!(feature = "tmux"));
+    assert_eq!(
+        owner.available(cfg!(feature = "tmux")),
+        cfg!(feature = "tmux")
+    );
     Ok(())
 }

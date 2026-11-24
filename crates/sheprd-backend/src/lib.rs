@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 
+mod choice;
 mod error;
 mod history;
 mod terminal;
@@ -10,6 +11,7 @@ mod tests;
 
 use std::time::Duration;
 
+pub use choice::TerminalBackend;
 pub use error::{Error, Result};
 pub use history::{
     CopyMotion, History, HistoryAnswer, MAX_SEARCH_MATCHES, MAX_SEARCH_QUERY_BYTES, Matches,

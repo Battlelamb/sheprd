@@ -28,6 +28,19 @@ fn only_a_loaded_session_gets_its_saved_conversation_and_never_double_replays_it
     h.respond(turn, json!({"stopReason":"end_turn"}));
     drop(h);
 
+    // A later build must still open the original v1 checkpoint, whose
+    // provider, cwd and session identity appeared only in its filename.
+    let path = std::fs::read_dir(dir.path())
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let mut original: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    original.as_object_mut().unwrap().remove("identity");
+    std::fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
+
     for replay in [false, true] {
         let mut h = started(dir.path(), true);
         assert!(h.transcript().entries.is_empty());

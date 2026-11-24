@@ -23,7 +23,8 @@ const INTERVAL: Duration = Duration::from_secs(2);
 #[derive(Deserialize, Serialize)]
 struct Saved {
     version: u8,
-    identity: String,
+    #[serde(default)]
+    identity: Option<String>,
     entries: Vec<Entry>,
     pull_requests: Vec<PullRequest>,
     truncated: bool,
@@ -41,8 +42,10 @@ impl Saved {
             return None;
         }
         let saved: Self = serde_json::from_slice(&bytes).ok()?;
+        let name = path.file_name()?.to_str()?;
+        // Early v1 checkpoints stored the identity only in their filename.
         (saved.version == 1
-            && path.file_name()?.to_str()? == saved.identity
+            && saved.identity.as_deref().is_none_or(|id| id == name)
             && super::keep_from(&saved.entries) == 0
             && saved.pull_requests.len() <= sheprd_chat_protocol::MAX_PULL_REQUESTS)
             .then_some(saved)
@@ -128,7 +131,7 @@ impl Checkpoint {
         let divider = transcript.session.as_ref().and_then(|s| s.continued);
         let saved = Saved {
             version: 1,
-            identity: identity.to_owned(),
+            identity: Some(identity.to_owned()),
             entries: transcript
                 .entries
                 .iter()

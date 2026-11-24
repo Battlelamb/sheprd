@@ -479,7 +479,7 @@ impl SheprdWindow {
     /// Ends a terminal of `host`'s core on a worker thread, so herdr-core's
     /// answer is never awaited on the UI thread.
     pub(super) fn end_core_terminal(&self, host: &Host, terminal: TerminalId) {
-        if !crate::config::TerminalBackend::owner(&terminal).available() {
+        if !crate::config::TerminalBackend::owner(&terminal).available(cfg!(feature = "tmux")) {
             return;
         }
         let unended = std::sync::Arc::clone(&self.core_terminals.unended);
@@ -568,7 +568,7 @@ impl SheprdWindow {
         // so its terminals are left to it.
         let mut waiting = Vec::new();
         for (host, terminal) in Store::update(cx, Store::take_ending) {
-            if !crate::config::TerminalBackend::owner(&terminal).available() {
+            if !crate::config::TerminalBackend::owner(&terminal).available(cfg!(feature = "tmux")) {
                 continue;
             }
             if self

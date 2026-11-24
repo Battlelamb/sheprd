@@ -16,6 +16,7 @@ serde_json.workspace           = true
 sheprd-backend.workspace       = true
 sheprd-chat-protocol.workspace = true
 sheprd-client.workspace        = true
+sheprd-session.workspace       = true
 sheprd-terminal.workspace      = true
 thiserror.workspace            = true
 uuid.workspace                 = true

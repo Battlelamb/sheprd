@@ -2,11 +2,12 @@
 //! provider session may be resumed. A provider may keep its history outside
 //! the default location, so its session directory overrides travel with it.
 use super::{Error, Result, Tmux};
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use sheprd_backend::{Spawn, TerminalId, TerminalInfo};
 use sheprd_chat_protocol::{Agent, ENDPOINT_ENV, EndpointId, TOKEN};
 use sheprd_client::shell_quote;
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 const SCRIPT: &str = include_str!("recovery.sh");
 
@@ -16,6 +17,8 @@ struct Saved {
     cwd: Option<PathBuf>,
     name: Option<String>,
     chat: Option<ChatRecovery>,
+    #[serde(default)]
+    labels: BTreeMap<String, String>,
 }
 
 /// Continuation information supplied by the running ACP host at session/open.
@@ -28,7 +31,7 @@ pub struct ChatRecovery {
     pub session: String,
     pub helper: PathBuf,
     #[serde(default)]
-    pub directories: std::collections::BTreeMap<String, String>,
+    pub directories: BTreeMap<String, String>,
 }
 
 impl Saved {
@@ -44,6 +47,7 @@ impl Saved {
         let mut spawn = Spawn {
             cwd: self.cwd,
             name: self.name,
+            labels: placement(self.labels),
             ..Default::default()
         };
         if let Some(chat) = self.chat {
@@ -91,6 +95,21 @@ impl Saved {
     }
 }
 
+/// Keep only tab placement. A restored process must establish its own agent
+/// status, endpoint and ownership of any automated work.
+fn placement(mut labels: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    use sheprd_session::{
+        NEW_WORKSPACE_LABEL, NEW_WORKSPACE_TITLE_LABEL, SESSION_LABEL, WORKSPACE_LABEL,
+    };
+    labels.retain(|key, _| {
+        matches!(
+            key.as_str(),
+            NEW_WORKSPACE_LABEL | NEW_WORKSPACE_TITLE_LABEL | SESSION_LABEL | WORKSPACE_LABEL
+        )
+    });
+    labels
+}
+
 fn script(action: &str, id: &TerminalId, json: &str) -> Result<String> {
     Tmux::target(id)?;
     Ok(format!(
@@ -119,16 +138,23 @@ impl Tmux {
             cwd: spawn.cwd.clone(),
             name: spawn.name.clone(),
             chat: None,
+            labels: placement(spawn.labels.clone()),
         };
         Ok(format!("{}\n", script("shell", id, &saved.json()?)?))
     }
 
     /// Called only by the chat that has opened the provider session.
     pub fn keep_chat(&self, id: &TerminalId, cwd: PathBuf, chat: ChatRecovery) -> Result<()> {
+        let (name, labels) = std::env::var("SHEPRD_TMUX_METADATA")
+            .ok()
+            .and_then(|text| super::URL_SAFE_NO_PAD.decode(text).ok())
+            .and_then(|bytes| serde_json::from_slice::<super::Metadata>(&bytes).ok())
+            .unwrap_or_default();
         let saved = Saved {
             id: id.to_string(),
             cwd: Some(cwd),
-            name: None,
+            name,
+            labels: placement(labels),
             chat: Some(chat),
         };
         let json = saved.json()?;
@@ -145,6 +171,16 @@ impl Tmux {
     }
 
     pub(super) fn recover(&self, id: &TerminalId) -> Result<Option<TerminalInfo>> {
+        self.recover_saved(id, false)
+    }
+
+    /// The remote service can resume an explicitly recorded chat after a
+    /// host reboot even if the desktop stays closed. Shells require a view.
+    pub fn recover_chat(&self, id: &TerminalId) -> Result<Option<TerminalInfo>> {
+        self.recover_saved(id, true)
+    }
+
+    fn recover_saved(&self, id: &TerminalId, chat_only: bool) -> Result<Option<TerminalInfo>> {
         let bytes = self.recovery_command("read", id, "")?;
         if bytes.is_empty() {
             return Ok(None);
@@ -153,6 +189,9 @@ impl Tmux {
             .map_err(|_| Error::Invalid)?
             .trim_end();
         let saved: Saved = serde_json::from_str(json).map_err(|_| Error::Invalid)?;
+        if chat_only && saved.chat.is_none() {
+            return Ok(None);
+        }
         // new-session serializes competing openers. Recheck after it owns the
         // name so a close between the first read and spawn also wins.
         let guard = format!("{} || exit 1\n", script("claim", id, json)?);
@@ -211,6 +250,11 @@ mod tests {
             id: id.to_string(),
             cwd: Some("/work".into()),
             name: None,
+            labels: [
+                (sheprd_session::WORKSPACE_LABEL.into(), "desk".into()),
+                ("stale-owner".into(), "old".into()),
+            ]
+            .into(),
             chat: Some(ChatRecovery {
                 agent: Agent::Codex,
                 adapter: true,
@@ -241,6 +285,8 @@ mod tests {
                 .contains(&("CODEX_HOME".into(), "/data/codex".into()))
         );
         assert_eq!(spawn.labels[TOKEN], endpoint.as_str());
+        assert_eq!(spawn.labels[sheprd_session::WORKSPACE_LABEL], "desk");
+        assert!(!spawn.labels.contains_key("stale-owner"));
         assert!(saved().spawn(&Tmux::named_id("other").unwrap()).is_err());
         let mut bad = saved();
         bad.chat.as_mut().unwrap().session = "--new".into();

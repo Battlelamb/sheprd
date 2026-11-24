@@ -10,7 +10,7 @@ Sheprd keeps terminals in workspaces. Each pane can run on Herdr or tmux, locall
 
 ## Choosing a terminal backend
 
-Herdr 1 and Herdr 2 are included by default. To add tmux to the desktop and its chat helper, build both with `cargo build --locked -p sheprd-gpui -p sheprd-acp --features tmux`. On macOS, `just bundle release tmux` builds the app bundle. A build without the feature preserves saved tmux pane addresses for the next tmux-enabled build. Its new terminals follow the existing Herdr preference.
+Herdr 1 and Herdr 2 are included by default. To add tmux to the desktop, chat helper and remote service, build with `cargo build --locked -p sheprd-gpui -p sheprd-acp -p sheprd-remote-control --features tmux`. On macOS, `just bundle release tmux` builds the app bundle. A build without the feature preserves saved tmux pane addresses for the next tmux-enabled build. Its new terminals follow the existing Herdr preference.
 
 Open **Settings → Tabs → Terminal backend** to select **Herdr 1**, **Herdr 2**, or **tmux** for new terminals. Each saved pane reattaches to the backend that created it. Splitting a pane uses its backend too. Closing the desktop leaves the terminal processes running.
 

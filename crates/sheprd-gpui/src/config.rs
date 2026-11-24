@@ -109,6 +109,7 @@ pub use padding::Padding;
 pub(crate) use padding::{Axis, MAX_PADDING, Side, Sides};
 pub use remote::RemoteConfig;
 use serde::Deserialize;
+pub use sheprd_backend::TerminalBackend;
 pub use sheprd_orchestrator::azure::Config as AzureDevOpsConfig;
 pub use sheprd_orchestrator::gitlab::Config as GitLabConfig;
 pub use sheprd_remote::config::AzureConfig;
@@ -152,8 +153,6 @@ use std::{
 };
 pub use tab_labels::TabLabels;
 pub use tab_layout::TabLayoutMode;
-mod terminal_backend;
-pub use terminal_backend::TerminalBackend;
 pub use theme::Theme;
 pub(crate) use theme::ThemeName;
 pub(crate) use theme::mix;
@@ -959,16 +958,11 @@ impl Config {
         config.open_files_in = settings.open_files_in;
         config.editor_command = settings.editor_command;
         config.keep_selection_after_copy = settings.keep_selection_after_copy.unwrap_or(true);
-        config.terminal_backend = settings
-            .terminal_backend
-            .filter(|backend| backend.available())
-            .unwrap_or_else(|| {
-                if settings.herdr_2_terminals.unwrap_or(false) {
-                    TerminalBackend::Core
-                } else {
-                    TerminalBackend::Herdr
-                }
-            });
+        config.terminal_backend = TerminalBackend::selected(
+            settings.terminal_backend,
+            settings.herdr_2_terminals.unwrap_or(false),
+            cfg!(feature = "tmux"),
+        );
         config.herdr_2_terminals = config.terminal_backend == TerminalBackend::Core;
         config.herdr_2_scrollback = herdr_2::scrollback(settings.herdr_2_scrollback);
         for (name, font, settings) in [

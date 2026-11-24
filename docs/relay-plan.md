@@ -113,6 +113,10 @@ Statuses: `0` ok, `1` offline, `2` busy, `3` timeout, `4` limited,
 
 #### WebSocket fallback and HTTP
 
+When a relay bans the caller’s network address, its HTTP 403 carries
+`Sheprd-Relay-Banned: 1` and `Cache-Control: no-store`. Clients use this
+response on `/v1/info` to identify a ban before opening a connection.
+
 | Route | What it does |
 | --- | --- |
 | `GET /v1/listen` | A computer's control socket. The relay sends `{"t":"challenge","nonce","version":1}`; the computer answers `{"key","signature","token"?}` over `"sheprd-relay/listen/v1\0" ‖ name ‖ 0x00 ‖ nonce`, where the name is the relay's host and path prefix as its endpoint gives them (`Endpoint::proof_name`, `relay.example.org/sheprd`). Binding the name stops one relay passing another's challenge through, prefixes included. The relay answers `{"t":"ready","route"}`. The computer sends `{"t":"dial_keys","keys"}` and `{"t":"pairing_key","key","seconds"}`, each answered `{"t":"status","status"}`, and hears `{"t":"incoming","session","key"}` for each dial. A newer listener with the same key replaces the older one, which is closed with 4409. |
@@ -244,9 +248,7 @@ limit both ways for an hour sends 14 GiB a side and is never slowed.
   a clean day after the last one starts over.
 - A banned address is refused before any new work: before the QUIC
   handshake (even before a retry), before every new stream, and before
-  every HTTP route but `/healthz`. Its HTTP 403 carries
-  `Sheprd-Relay-Banned: 1` and `Cache-Control: no-store`, so clients can
-  identify a ban on their own address, including before a new connection.
+  every HTTP route but `/healthz`.
 - A ban that any probe, forged proof, malformed message, or overrun budget
   led to also ends the address's open sessions (QUIC code 8, WebSocket
   4429), its QUIC connections, and its listeners. A ban earned by hitting

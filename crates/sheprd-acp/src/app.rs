@@ -447,8 +447,8 @@ pub(crate) fn run_owned(
                     }
                 }
             });
-            if keep_history && let Some(dir) = sheprd_chat_protocol::endpoint_dir() {
-                session.keep_history(dir.join("conversations"));
+            if keep_history && let Some(dir) = sheprd_chat_protocol::restore::restore_dir() {
+                session.keep_history(dir.with_file_name("conversations"));
             }
             if let Some(dir) = crate::briefs::dir() {
                 session.keep_briefs(dir);

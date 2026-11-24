@@ -91,6 +91,7 @@ impl Infos {
     }
 
     /// How many lists have been read; none means nothing is known yet.
+    #[cfg(any(target_os = "macos", windows, test))]
     pub(super) fn lists(&self) -> u64 {
         self.lists
     }

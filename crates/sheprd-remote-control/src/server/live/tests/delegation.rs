@@ -235,3 +235,24 @@ fn a_cancelled_or_unattached_launch_releases_the_parent() {
         assert!(matches!(group.update().event, Event::End { .. }));
     }
 }
+
+#[test]
+fn cancellation_before_the_notifier_reads_the_launch_counts_one_failed_worker() {
+    let owner = Delegation {
+        endpoint: EndpointId::random(),
+        started_ms: 10,
+    };
+    let child = EndpointId::random();
+    let parent = live(Event::End { dismissal_s: 99 });
+    let mut group = Group::new(owner.clone(), &parent.pane, parent.state.clone());
+    let launches = Launches::default();
+    launches.report(owner.clone(), child.clone(), Some("Parser".into()), 11);
+    launches.report(owner, child, None, 12);
+    assert!(launches.deliver(&mut group, 13));
+    assert!(!launches.deliver(&mut group, 14));
+    let final_state = group.parent(parent);
+    assert!(matches!(final_state.event, Event::End { .. }));
+    let agents = final_state.state.detail.agents.unwrap();
+    assert_eq!((agents.done, agents.total), (1, 1));
+    assert_eq!(agents.latest.as_deref(), Some("Failed · Parser"));
+}

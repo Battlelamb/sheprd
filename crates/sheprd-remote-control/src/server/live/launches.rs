@@ -18,6 +18,7 @@ pub(crate) struct Launches(Mutex<HashMap<EndpointId, Launch>>);
 struct Launch {
     owner: Delegation,
     label: Option<String>,
+    cancelled: bool,
     until_ms: u64,
 }
 
@@ -31,12 +32,18 @@ impl Launches {
     ) {
         let mut waiting = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         waiting.retain(|_, launch| launch.until_ms > now);
-        if waiting.len() < MAX_WAITING || waiting.contains_key(&child) {
+        let cancelled = label.is_none();
+        if let Some(launch) = waiting.get_mut(&child) {
+            // A tab can fail before the notifier consumes its announcement.
+            // Keep the original name and deliver both transitions together.
+            launch.cancelled |= cancelled;
+        } else if waiting.len() < MAX_WAITING {
             waiting.insert(
                 child,
                 Launch {
                     owner,
                     label: label.map(|s| excerpt(&s)),
+                    cancelled,
                     until_ms: now.saturating_add(STARTUP_MS),
                 },
             );
@@ -55,7 +62,12 @@ impl Launches {
                 if !group.owns(&launch.owner) {
                     return true;
                 }
-                changed |= group.launch(child, launch.label.as_deref(), launch.until_ms);
+                if let Some(label) = &launch.label {
+                    changed |= group.launch(child, Some(label), launch.until_ms);
+                }
+                if launch.cancelled {
+                    changed |= group.launch(child, None, launch.until_ms);
+                }
                 false
             });
         changed

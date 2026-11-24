@@ -1,13 +1,15 @@
 //! The Tailscale banner a run has to notice. A host in check mode holds the
 //! connection and `ssh` never prompts, so a run that does not read stderr can
 //! only report its timeout; these tests pin that the refusal comes from the
-//! banner, at once, and carries the address a surface can offer.
+//! banner, at once, with the whole address a surface can offer — including when
+//! the banner arrives in pieces, after a host has been verbose.
 
 use super::*;
 
 /// `sh` printing Tailscale's banner to stderr and then holding the connection,
 /// as a host in check mode does. Nothing here lets go of it on its own, so a
 /// run that waited would report the timeout instead.
+#[cfg(unix)]
 fn host_waiting_for_a_check() -> Command {
     let mut command = Command::new("sh");
     command
@@ -42,6 +44,64 @@ fn a_banner_is_reported_at_once_instead_of_timing_out() {
         crate::Error::Ssh(Error::Refused(SshFailure::Tailscale(check))) => {
             assert_eq!(check.url(), Some("https://login.tailscale.com/a/abc123"));
         }
+        other => panic!("expected the Tailscale check, got {other:?}"),
+    }
+}
+
+/// The marker and the address reach the pipe as separate reads. Reporting the
+/// first one would hand the window a check with nothing to open, so the run
+/// waits for the address.
+#[cfg(unix)]
+#[test]
+fn an_address_written_after_the_marker_is_waited_for() {
+    let mut command = Command::new("sh");
+    command
+        .arg("-c")
+        .arg(
+            r#"printf '%s\n' \
+'Tailscale SSH requires an additional check to connect to alice@node1:' >&2
+sleep 0.3
+printf '%s\n' '    To authenticate, visit: https://login.tailscale.com/a/abc123' >&2
+while :; do sleep 1; done"#,
+        )
+        .stderr(Stdio::piped());
+    match run_reading_banner(&mut command, Duration::from_secs(20), || false) {
+        Err(crate::Error::Ssh(Error::Refused(SshFailure::Tailscale(check)))) => assert_eq!(
+            check.url(),
+            Some("https://login.tailscale.com/a/abc123"),
+            "the whole address, not the marker alone"
+        ),
+        other => panic!("expected the Tailscale check, got {other:?}"),
+    }
+}
+
+/// A host that chatters past the retained tail and only then asks for a check.
+/// The tail stops growing at its bound, so the scan has to notice output by
+/// more than its length, or the banner is missed and the run reports a timeout.
+#[cfg(unix)]
+#[test]
+fn a_banner_after_a_full_tail_is_still_found() {
+    let mut command = Command::new("sh");
+    command
+        .arg("-c")
+        .arg(
+            r#"i=0
+while [ "$i" -lt 120 ]; do
+    printf 'noise noise noise noise noise noise noise noise noise noise\n' >&2
+    i=$((i + 1))
+done
+printf '%s\n' \
+'Tailscale SSH requires an additional check to connect to alice@node1:' \
+'    To authenticate, visit: https://login.tailscale.com/a/abc123' >&2
+while :; do sleep 1; done"#,
+        )
+        .stderr(Stdio::piped());
+    match run_reading_banner(&mut command, PROBE_TIMEOUT, || false) {
+        Err(crate::Error::Ssh(Error::Refused(SshFailure::Tailscale(check)))) => assert_eq!(
+            check.url(),
+            Some("https://login.tailscale.com/a/abc123"),
+            "the banner is read even though the tail had stopped growing"
+        ),
         other => panic!("expected the Tailscale check, got {other:?}"),
     }
 }

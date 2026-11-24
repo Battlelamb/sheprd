@@ -16,12 +16,16 @@ pub(super) struct PendingCheck(Option<TailscaleCheck>);
 
 impl PendingCheck {
     /// Remember what the last attempt said, in its failure or in the sentence
-    /// it left. An attempt that names no check leaves what is remembered alone:
-    /// a retry empties the live error while the check is still pending.
+    /// it left. An attempt that has said nothing yet leaves what is remembered
+    /// alone — a retry empties the live error while the check is still pending —
+    /// but an attempt that answers with anything else ends the check: the window
+    /// must show what the host says now, not an address that no longer applies.
     pub(super) fn observe(&mut self, live: &LiveState, outage: Option<&str>) {
         let sentence = live.error.as_deref().or(outage);
         if let Some(found) = tailscale::check(live.ssh_failure.as_ref(), sentence) {
             self.0 = Some(found);
+        } else if live.ssh_failure.is_some() || live.error.is_some() {
+            self.0 = None;
         }
     }
 

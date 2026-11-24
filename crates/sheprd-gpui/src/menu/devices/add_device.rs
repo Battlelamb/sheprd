@@ -49,12 +49,14 @@ pub(in crate::menu) struct Setup {
     /// anything else drops it.
     pub(super) highlight: Option<(String, Vec<String>)>,
     /// Why the last check or save failed. Each source of Add Device keeps
-    /// its own, so a job finishing while another source shows stays here.
-    pub(super) error: Option<String>,
+    /// its own, so a job finishing while another source shows stays here. Read
+    /// through [`Self::error`] and written through [`Self::fail`], so it never
+    /// drifts from `ssh_failure`.
+    error: Option<String>,
     /// The SSH failure behind `error`, when the failure was one. Written and
     /// cleared with it: a Tailscale address offered beside a message that no
     /// longer names it would be a link to a check nobody ran.
-    pub(super) ssh_failure: Option<SshFailure>,
+    ssh_failure: Option<SshFailure>,
     pub(super) suggestion_scroll: ScrollHandle,
     /// Whether the host's key is checked; see `host_key_choice`.
     pub(super) host_keys: HostKeys,
@@ -82,12 +84,57 @@ impl Drop for CancelFlag {
 }
 
 impl Setup {
+    /// The message the dialog shows, when the last check or save failed.
+    pub(super) fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
+    /// The SSH failure behind that message, when it came from one: an address
+    /// is offered beside a refusal only when the refusal carried it.
+    pub(super) fn failure(&self) -> Option<&SshFailure> {
+        self.ssh_failure.as_ref()
+    }
+
+    /// Record a message that came from no failure, dropping the failure behind
+    /// the last one: an address kept past its message would be a link to a
+    /// check nobody ran.
+    pub(super) fn fail(&mut self, error: impl Into<String>) {
+        self.record(Some(error.into()), None);
+    }
+
+    /// Record the message and the failure behind it together, which is the only
+    /// way either is written.
+    pub(super) fn record(&mut self, error: Option<String>, failure: Option<SshFailure>) {
+        self.error = error;
+        self.ssh_failure = failure;
+    }
+
     /// Forget why the last attempt failed, and with it the address it named: a
     /// Tailscale check belongs to the attempt that printed it, so an address
     /// kept past its message would outlive the thing it was a link to.
-    fn clear_failure(&mut self) {
-        self.error = None;
-        self.ssh_failure = None;
+    pub(super) fn clear_failure(&mut self) {
+        self.record(None, None);
+    }
+}
+
+#[cfg(test)]
+impl Setup {
+    /// A dialog holding nothing but the step under test, for the device tests.
+    pub(super) fn fixture(step: Step, cx: &mut Context<SheprdWindow>) -> Self {
+        Self {
+            fields: std::array::from_fn(|_| cx.new(SearchInput::new)),
+            step,
+            claim: None,
+            task: None,
+            discovery: None,
+            suggested_label: None,
+            _edits: Vec::new(),
+            highlight: None,
+            suggestion_scroll: ScrollHandle::new(),
+            error: None,
+            ssh_failure: None,
+            host_keys: HostKeys::Verify,
+        }
     }
 }
 
@@ -136,8 +183,7 @@ impl SheprdWindow {
     /// for a message that does not name it.
     fn set_device_failure(&mut self, error: Option<String>, failure: Option<SshFailure>) {
         if let Some(setup) = &mut self.menu.device_setup {
-            setup.error = error;
-            setup.ssh_failure = failure;
+            setup.record(error, failure);
         }
     }
 
@@ -346,19 +392,18 @@ impl SheprdWindow {
             }
         }
         body = body.child(self.render_host_key_choice(setup, cx));
-        if let Some(error) = &setup.error {
+        if let Some(error) = setup.error() {
             // A check Tailscale refused says so in its own words, and comes with
             // the address that answers it. That check died with the connection
             // which asked for it, so nothing is held open: opening the address
             // is what lets the next check through, and the app never opens it.
-            let address =
-                crate::tailscale::pending(setup.ssh_failure.as_ref()).and_then(TailscaleCheck::url);
+            let address = crate::tailscale::pending(setup.failure()).and_then(TailscaleCheck::url);
             let shown = if address.is_some() {
                 // The dialog is already the form for this host, so the sentence
                 // does not name it again: it names what to open instead.
                 fl!("add-device-tailscale-refused")
             } else {
-                error.clone()
+                error.to_owned()
             };
             body = body.child(
                 div()
@@ -554,7 +599,7 @@ impl SheprdWindow {
         tracing::info!(category = "device_setup", "Checking device");
         form.step = Step::Checking(request.clone());
         form.claim = None;
-        form.error = None;
+        form.clear_failure();
         // Claim before probing: a second add of this host, from any window of
         // this process, is refused from here on rather than after a slow probe.
         let background = cx.background_executor().spawn(async move {

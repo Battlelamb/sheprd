@@ -42,7 +42,7 @@ fn a_refused_check_is_stored_with_its_address(cx: &mut gpui::TestAppContext) {
             // A terminal cannot finish this check, so none is offered for it.
             assert!(matches!(step(view), Step::Confirm(_, Offer::Terminal)));
             assert_eq!(
-                crate::tailscale::pending(form.ssh_failure.as_ref()).and_then(TailscaleCheck::url),
+                crate::tailscale::pending(form.failure()).and_then(TailscaleCheck::url),
                 Some(ADDRESS),
                 "the dialog must still hold the address to link to"
             );
@@ -62,9 +62,9 @@ fn another_refusal_offers_no_address(cx: &mut gpui::TestAppContext) {
             view.device_probed(refused("ssh-unreachable", SshFailure::Unreachable), cx);
 
             let form = view.menu.device_setup.as_ref().unwrap();
-            assert!(form.error.is_some(), "the refusal is still said");
-            assert_eq!(form.ssh_failure, Some(SshFailure::Unreachable));
-            assert!(crate::tailscale::pending(form.ssh_failure.as_ref()).is_none());
+            assert!(form.error().is_some(), "the refusal is still said");
+            assert_eq!(form.failure(), Some(&SshFailure::Unreachable));
+            assert!(crate::tailscale::pending(form.failure()).is_none());
         });
     });
 }
@@ -79,20 +79,13 @@ fn a_cleared_refusal_takes_its_address_with_it(cx: &mut gpui::TestAppContext) {
             let request = setup::Request::new("user@100.106.27.157", "", "").unwrap();
             open_form(view, Step::Checking(request), cx);
             view.device_probed(tailscale("tailscale-clear"), cx);
-            assert!(
-                view.menu
-                    .device_setup
-                    .as_ref()
-                    .unwrap()
-                    .ssh_failure
-                    .is_some()
-            );
+            assert!(view.menu.device_setup.as_ref().unwrap().failure().is_some());
 
             view.set_device_error(None);
             let form = view.menu.device_setup.as_ref().unwrap();
-            assert!(form.error.is_none());
+            assert!(form.error().is_none());
             assert!(
-                form.ssh_failure.is_none(),
+                form.failure().is_none(),
                 "an address outliving its message would outlive the check it answers"
             );
         });

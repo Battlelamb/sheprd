@@ -95,6 +95,21 @@ pub(crate) fn pending(stderr: &[u8]) -> Option<TailscaleCheck> {
     (url.is_some() || stderr.contains(MARKER)).then_some(TailscaleCheck { url })
 }
 
+/// The check pending in output that may still be arriving.
+///
+/// A banner is written over several reads, so a tail that is still growing can
+/// hold the marker with the address not yet written, or an address that runs to
+/// the end of what has arrived and may still be growing. Neither is reported:
+/// this waits for the whole address, and [`pending`] is what reads output that
+/// has finished.
+pub(crate) fn pending_live(stderr: &[u8]) -> Option<TailscaleCheck> {
+    let stderr = String::from_utf8_lossy(stderr);
+    let (url, ends) = address_ending(&stderr)?;
+    // An address that stops before the end of the text is followed by a
+    // boundary that actually arrived; one at the very end may still grow.
+    (ends < stderr.len()).then_some(TailscaleCheck { url: Some(url) })
+}
+
 /// The sign-in address `text` names, when it is one of Tailscale's own and
 /// ends where Sheprd can prove it ends.
 ///
@@ -111,6 +126,13 @@ pub(crate) fn pending(stderr: &[u8]) -> Option<TailscaleCheck> {
 /// An address that fails either test is dropped and the search continues, so
 /// one unreadable mention does not hide a real one after it.
 fn address(text: &str) -> Option<String> {
+    address_ending(text).map(|(url, _)| url)
+}
+
+/// [`address`], also returning the index just past the address, so a caller
+/// reading output that is still arriving can tell an address with a boundary
+/// after it from one that runs to the end of what has been read.
+fn address_ending(text: &str) -> Option<(String, usize)> {
     let mut from = 0;
     while let Some(at) = text[from..].find(ADDRESS) {
         let start = from + at;
@@ -123,7 +145,7 @@ fn address(text: &str) -> Option<String> {
         let readable = text[..start].chars().next_back().is_none_or(boundary)
             && text[ends..].chars().next().is_none_or(boundary);
         if !token.is_empty() && token.len() <= TOKEN_LIMIT && readable {
-            return Some(format!("{ADDRESS}{token}"));
+            return Some((format!("{ADDRESS}{token}"), ends));
         }
         from = after;
     }

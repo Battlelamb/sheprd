@@ -109,6 +109,33 @@ fn a_token_that_could_not_be_a_token_yields_no_link() {
 }
 
 #[test]
+fn a_banner_still_arriving_waits_for_its_whole_address() {
+    // The marker alone: the address is in a later read, so nothing is reported
+    // yet and a surface never offers a check with nothing to open.
+    assert_eq!(
+        pending_live(b"Tailscale SSH requires an additional check to connect to alice@node1:\n"),
+        None
+    );
+    // An address running to the end of what has arrived may still be growing.
+    assert_eq!(
+        pending_live(b"visit: https://login.tailscale.com/a/abc"),
+        None
+    );
+    // Once a boundary arrives, the address is whole and is reported.
+    assert_eq!(
+        pending_live(b"visit: https://login.tailscale.com/a/abc\n")
+            .and_then(|check| check.url().map(str::to_owned)),
+        Some("https://login.tailscale.com/a/abc".into())
+    );
+    // Output that has finished is read as it is, where the address may be the
+    // last thing the host managed to write.
+    assert_eq!(
+        url_of(b"visit: https://login.tailscale.com/a/abc"),
+        Some("https://login.tailscale.com/a/abc".into())
+    );
+}
+
+#[test]
 fn a_link_is_found_after_the_first_that_is_not_one() {
     // A banner that prints a rejected token first still gets the real one.
     assert_eq!(

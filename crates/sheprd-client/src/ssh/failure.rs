@@ -11,7 +11,7 @@ use sheprd_relay::ban::Ban;
 use std::{
     io::{ErrorKind, Read},
     net::{IpAddr, ToSocketAddrs},
-    process::{Child, ChildStderr},
+    process::Child,
     sync::atomic::{AtomicBool, Ordering},
     sync::mpsc,
     sync::{Arc, Mutex, PoisonError},
@@ -217,6 +217,9 @@ pub(super) struct Stderr(Arc<Mutex<Tail>>);
 #[derive(Default)]
 struct Tail {
     bytes: Vec<u8>,
+    /// Bytes read from the child, which keeps growing once `bytes` is full. A
+    /// caller watching for a banner reads this to know the output moved on.
+    read: usize,
     /// The reader reached EOF, so `bytes` is all the child wrote.
     done: bool,
 }
@@ -226,10 +229,11 @@ impl Stderr {
         read(&mut self.0.lock().unwrap_or_else(PoisonError::into_inner))
     }
 
-    /// Bytes read so far. Comparing this between looks is how a caller avoids
-    /// re-reading output that has not changed.
-    pub(super) fn len(&self) -> usize {
-        self.with(|tail| tail.bytes.len())
+    /// Bytes read so far, whether or not the retained tail is still growing.
+    /// Comparing this between looks is how a caller avoids re-reading output
+    /// that has not changed.
+    pub(super) fn total(&self) -> usize {
+        self.with(|tail| tail.read)
     }
 
     /// The tail read so far, for classification only.
@@ -252,7 +256,11 @@ impl Stderr {
 
 /// Drain the child's stderr for its whole life, so a chatty remote can never
 /// fill the pipe and stall `ssh`, publishing the bounded tail as it arrives.
-pub(super) fn drain_live(stderr: ChildStderr) -> Result<Stderr> {
+///
+/// The reader is any stream, not just a `ChildStderr`: on Windows the child's
+/// stderr is a private overlapped pipe this process made, and it arrives here
+/// as a file.
+pub(super) fn drain_live(stderr: impl Read + Send + 'static) -> Result<Stderr> {
     let shared = Stderr::default();
     let reader = shared.clone();
     thread::Builder::new()
@@ -266,6 +274,14 @@ pub(super) fn waiting(stderr: &Stderr) -> Option<TailscaleCheck> {
     check::pending(&stderr.text())
 }
 
+/// The check this output says the connection is waiting on, once the address it
+/// names has fully arrived. A banner arrives over several reads, so a tail that
+/// still has output coming can be missing its address, or hold one that runs to
+/// its end and may still grow; [`waiting`] is for output that has finished.
+pub(super) fn waiting_live(stderr: &Stderr) -> Option<TailscaleCheck> {
+    check::pending_live(&stderr.text())
+}
+
 fn pump(mut stderr: impl Read, shared: &Stderr) {
     let mut buffer = [0u8; 1024];
     loop {
@@ -276,6 +292,7 @@ fn pump(mut stderr: impl Read, shared: &Stderr) {
             Err(_) => break,
         };
         shared.with(|kept| {
+            kept.read += n;
             kept.bytes.extend_from_slice(&buffer[..n]);
             if kept.bytes.len() > STDERR_TAIL {
                 kept.bytes.drain(..kept.bytes.len() - STDERR_TAIL);

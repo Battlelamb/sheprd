@@ -3,8 +3,8 @@ use super::{
     add_device::{Offer, Setup, Step},
     setup,
 };
-use crate::{SheprdWindow, search_input::SearchInput, sidebar::layout_tests::fixture_window};
-use gpui::{AppContext, Context};
+use crate::{SheprdWindow, sidebar::layout_tests::fixture_window};
+use gpui::Context;
 use sheprd_client::HostProbe;
 
 #[cfg(feature = "cloud")]
@@ -63,20 +63,7 @@ fn only_a_present_herdr_is_saved_without_a_terminal() {
 }
 
 fn open_form(view: &mut SheprdWindow, step: Step, cx: &mut Context<SheprdWindow>) {
-    view.menu.device_setup = Some(Setup {
-        fields: std::array::from_fn(|_| cx.new(SearchInput::new)),
-        step,
-        claim: None,
-        task: None,
-        discovery: None,
-        suggested_label: None,
-        _edits: Vec::new(),
-        highlight: None,
-        suggestion_scroll: gpui::ScrollHandle::new(),
-        error: None,
-        ssh_failure: None,
-        host_keys: sheprd_client::HostKeys::Verify,
-    });
+    view.menu.device_setup = Some(Setup::fixture(step, cx));
     view.menu.page = Some(Page::AddDevice);
 }
 
@@ -172,7 +159,7 @@ fn a_host_already_saved_or_being_added_returns_to_the_form(cx: &mut gpui::TestAp
                 view.device_probed(Err(error), cx);
                 assert!(matches!(step(view), Step::Form));
                 assert_eq!(
-                    view.menu.device_setup.as_ref().unwrap().error.as_deref(),
+                    view.menu.device_setup.as_ref().unwrap().error(),
                     Some(message)
                 );
             }

@@ -77,8 +77,9 @@ pub(super) fn run(
     // Borrowed for the scan; the run hands over its tail once the child ends.
     let tail = stderr.as_ref();
     let deadline = Instant::now() + timeout;
-    // The banner is printed once and stays in the tail, so it is looked for
-    // only when the tail grows.
+    // The scan is only worth repeating when more output arrived. That is counted
+    // over the child's whole life: the retained tail stops growing once it is
+    // full, and a chatty host fills it long before it asks for a check.
     let mut scanned = 0;
     let status = loop {
         if let Some(status) = child.0.try_wait()? {
@@ -87,15 +88,21 @@ pub(super) fn run(
         if cancelled() {
             return Err(Error::Cancelled.into());
         }
-        let read = tail.map_or(0, failure::Stderr::len);
+        let read = tail.map_or(0, failure::Stderr::total);
         if read != scanned {
             scanned = read;
-            if let Some(found) = tail.and_then(failure::waiting) {
+            if let Some(found) = tail.and_then(failure::waiting_live) {
                 return Err(Error::Refused(SshFailure::Tailscale(found)).into());
             }
         }
         if Instant::now() >= deadline {
-            return Err(Error::Timeout.into());
+            // A check that went unfinished says so, with whatever address the
+            // output managed to carry: the address belongs to this connection,
+            // which the guard closes as this returns.
+            return Err(match tail.and_then(failure::waiting) {
+                Some(check) => Error::Refused(SshFailure::Tailscale(check)).into(),
+                None => Error::Timeout.into(),
+            });
         }
         std::thread::sleep(Duration::from_millis(25));
     };

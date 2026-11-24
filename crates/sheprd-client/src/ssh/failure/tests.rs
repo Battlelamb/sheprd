@@ -282,12 +282,28 @@ fn the_stderr_tail_is_readable_while_the_child_still_runs() {
     let written = b"Permission denied, please try again.\n";
     let stderr = Stderr::default();
     pump(written.as_slice(), &stderr);
-    assert_eq!(stderr.len(), written.len());
+    assert_eq!(stderr.total(), written.len());
     assert_eq!(stderr.finished(Duration::from_secs(1)), written.to_vec());
     // Nothing has been read yet, and a caller is not held by an empty pipe.
     let empty = Stderr::default();
-    assert_eq!(empty.len(), 0);
+    assert_eq!(empty.total(), 0);
     assert!(empty.finished(Duration::from_millis(10)).is_empty());
+}
+
+#[test]
+fn the_count_of_bytes_read_keeps_growing_once_the_tail_is_full() {
+    // A caller watching for a banner only rescans when this changes, and a
+    // chatty host fills the retained tail long before it asks for a check.
+    let stderr = Stderr::default();
+    pump(vec![b'x'; STDERR_TAIL * 2].as_slice(), &stderr);
+    let filled = stderr.total();
+    assert_eq!(stderr.finished(Duration::from_secs(1)).len(), STDERR_TAIL);
+    pump(b"more".as_slice(), &stderr);
+    assert_eq!(
+        stderr.total(),
+        filled + 4,
+        "bytes read grows even though the retained tail cannot"
+    );
 }
 
 #[test]

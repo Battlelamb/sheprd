@@ -645,6 +645,8 @@ impl SheprdWindow {
         endpoint.stop();
         endpoint.outage = None;
         endpoint.detached = true;
+        // Retries stop here, so no connection will ever finish this check.
+        endpoint.tailscale.clear();
         endpoint.live.status = ConnectionStatus::Detached;
         if let Ok(mut state) = endpoint.connection.inbox.lock() {
             *state = endpoint.live.clone();

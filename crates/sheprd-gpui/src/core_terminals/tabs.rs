@@ -17,24 +17,62 @@ use sheprd_backend::{Role, Size, TerminalId};
 
 /// The size a terminal starts at, before its pane is laid out.
 const FIRST_SIZE: (u16, u16) = (80, 24);
+/// How long a failed local tmux kill waits before trying again.
+#[cfg(feature = "tmux")]
+const LOCAL_TMUX_KILL_RETRY: std::time::Duration = std::time::Duration::from_secs(2);
+/// How long a failed remote tmux kill waits before trying again, so an
+/// unreachable host is not dialled on every window tick.
+#[cfg(feature = "tmux")]
+const REMOTE_TMUX_KILL_RETRY: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Kills that did not reach their core, kept for the whole app rather than
 /// one window: a pane closed while disconnected leaves its window's saved
 /// layout and the shared ending queue, so if its window closes before the
 /// core answers, only another window holding the same list can end it.
 #[derive(Clone, Default)]
-struct Unended(std::sync::Arc<std::sync::Mutex<Vec<crate::browser::Ending>>>);
+struct Unended {
+    list: std::sync::Arc<std::sync::Mutex<Vec<crate::browser::Ending>>>,
+    #[cfg(feature = "tmux")]
+    tmux_retry: std::sync::Arc<
+        std::sync::Mutex<std::collections::HashMap<crate::browser::Ending, std::time::Instant>>,
+    >,
+}
 
 impl Global for Unended {}
 
 impl super::CoreTerminals {
     /// A window's herdr-core state, sharing the app's unended kills.
     pub(crate) fn shared(cx: &mut App) -> Self {
+        let shared = cx.default_global::<Unended>().clone();
         Self {
-            unended: std::sync::Arc::clone(&cx.default_global::<Unended>().0),
+            unended: shared.list,
+            #[cfg(feature = "tmux")]
+            tmux_kill_retry: shared.tmux_retry,
             ..Self::default()
         }
     }
+}
+
+/// Whether a failed kill did not reach its backend and should be retried once
+/// the host answers again.
+pub(super) fn should_retry_kill(error: &super::Error) -> bool {
+    // The core's refusal, as for a terminal already gone, is its answer.
+    if matches!(
+        error,
+        super::Error::Core(sheprd_core_client::Error::Refused { .. })
+    ) {
+        return false;
+    }
+    // Tmux::kill already treats an absent server or session as success; only
+    // an invalid identity is permanent.
+    #[cfg(feature = "tmux")]
+    if matches!(
+        error,
+        super::Error::Tmux(sheprd_tmux::Error::Invalid | sheprd_tmux::Error::Id(_))
+    ) {
+        return false;
+    }
+    true
 }
 
 impl SheprdWindow {
@@ -483,6 +521,8 @@ impl SheprdWindow {
             return;
         }
         let unended = std::sync::Arc::clone(&self.core_terminals.unended);
+        #[cfg(feature = "tmux")]
+        let tmux_retry = std::sync::Arc::clone(&self.core_terminals.tmux_kill_retry);
         // Not connected: it ends once its core answers again.
         let Some(backend) =
             self.core_terminals
@@ -498,20 +538,34 @@ impl SheprdWindow {
             .name("herdr-core-kill".into())
             .spawn(move || {
                 let Err(error) = backend.kill(&terminal) else {
+                    #[cfg(feature = "tmux")]
+                    if let Ok(mut retry) = tmux_retry.lock() {
+                        retry.remove(&(host, terminal));
+                    }
                     return;
                 };
                 tracing::warn!(%error, %terminal, "Could not end a herdr-core terminal");
-                // The core's refusal, as for a terminal already gone, is
-                // its answer; anything else did not reach it.
-                #[cfg(feature = "tmux")]
-                if matches!(error, super::Error::Tmux(_)) {
+                if !should_retry_kill(&error) {
+                    #[cfg(feature = "tmux")]
+                    if let Ok(mut retry) = tmux_retry.lock() {
+                        retry.remove(&(host, terminal));
+                    }
                     return;
                 }
-                if !matches!(
-                    error,
-                    super::Error::Core(sheprd_core_client::Error::Refused { .. })
-                ) && let Ok(mut unended) = unended.lock()
+                #[cfg(feature = "tmux")]
+                if matches!(error, super::Error::Tmux(_))
+                    && let Ok(mut retry) = tmux_retry.lock()
                 {
+                    let delay = match host {
+                        Host::Local => LOCAL_TMUX_KILL_RETRY,
+                        Host::Remote(_) => REMOTE_TMUX_KILL_RETRY,
+                    };
+                    retry.insert(
+                        (host.clone(), terminal.clone()),
+                        std::time::Instant::now() + delay,
+                    );
+                }
+                if let Ok(mut unended) = unended.lock() {
                     unended.push((host, terminal));
                 }
             });
@@ -534,18 +588,36 @@ impl SheprdWindow {
         // A host this window cannot reach yet, as before its saved devices
         // load, keeps its kills for a window that can.
         let mut unreached = Vec::new();
+        #[cfg(feature = "tmux")]
+        let now = std::time::Instant::now();
         for (host, terminal) in unended {
+            #[cfg(feature = "tmux")]
+            if terminal.is_tmux()
+                && self
+                    .core_terminals
+                    .tmux_kill_retry
+                    .lock()
+                    .ok()
+                    .is_some_and(|retry| {
+                        retry
+                            .get(&(host.clone(), terminal.clone()))
+                            .is_some_and(|due| now < *due)
+                    })
+            {
+                unreached.push((host, terminal));
+                continue;
+            }
             if self
                 .core_terminals
                 .owner(&host, &terminal, self.config.herdr_2_scrollback)
                 .is_none()
-                && !terminal.is_tmux()
                 && let Some(hub) = self.core_hub(&host)
+                && !terminal.is_tmux()
             {
                 hub.connect(Start::Join);
             }
             // Ends it now, or puts it back to wait for the core.
-            if terminal.is_tmux() || self.core_terminals.hub_of(&host).is_some() {
+            if self.core_terminals.hub_of(&host).is_some() {
                 self.end_core_terminal(&host, terminal);
             } else {
                 unreached.push((host, terminal));

@@ -26,16 +26,17 @@ impl Drop for Client {
 }
 
 pub struct TmuxTerminal {
-    _client: Client,
+    _client: Option<Client>,
     commands: SyncSender<Command>,
     output: Receiver<Message>,
     emulator: Emulator,
     surface: Surface,
     role: Role,
     ended: bool,
+    pending_exit: Option<sheprd_backend::Exit>,
 }
 
-enum Command {
+pub(super) enum Command {
     Keys(Vec<u8>),
     Resize(Size),
 }
@@ -117,11 +118,26 @@ impl TmuxTerminal {
         // a driving view then asks for its own size.
         const DIMENSIONS: &str = "#{history_size} #{pane_height} #{pane_width} #{alternate_on} #{alternate_saved_x} #{alternate_saved_y}";
         const CURSOR: &str = "#{cursor_x} #{cursor_y} #{keypad_cursor_flag} #{bracket_paste_flag} #{mouse_standard_flag} #{mouse_button_flag} #{mouse_all_flag} #{mouse_sgr_flag} #{mouse_utf8_flag} #{cursor_flag}";
+        let sentinel = uuid::Uuid::new_v4().to_string();
+        let normal_start = if history_limit > 0 {
+            format!(" -S -{history_limit}")
+        } else {
+            String::new()
+        };
+        let history_start = history_limit.max(1);
         writeln!(
             stdin,
-            "display-message -p -t {pane} '{DIMENSIONS}' ; capture-pane -p -e -S -{} -E -1 -t {pane} ; capture-pane -a -q -p -e -t {pane} ; capture-pane -p -e -t {pane} ; display-message -p -t {pane} '{CURSOR}'",
-            history_limit.max(1)
+            "display-message -p -t {pane} '{DIMENSIONS}' ; \
+             if-shell -F -t {pane} '#{{alternate_on}}' \
+             'capture-pane -p -e -J -S -{history_start} -E -1 -t {pane} ; display-message -p {sentinel} ; \
+              capture-pane -a -q -p -e -J -t {pane} ; display-message -p {sentinel} ; \
+              capture-pane -p -e -J -t {pane} ; display-message -p {sentinel}' \
+             'capture-pane -p -e -J{normal_start} -t {pane} ; display-message -p {sentinel}' ; \
+             display-message -p -t {pane} '{CURSOR}'"
         )?;
+        // If a capture fails and aborts the command list above, this standalone
+        // sentinel still runs so the reader exits the capture block at once.
+        writeln!(stdin, "display-message -p {sentinel}")?;
         writeln!(
             stdin,
             "refresh-client -B 'sheprd-exit::#{{pane_dead}}/#{{pane_dead_status}}'"
@@ -136,6 +152,7 @@ impl TmuxTerminal {
                     BufReader::new(stdout),
                     &read_pane,
                     history_limit,
+                    &sentinel,
                     &send,
                     Some(ready),
                 ) {
@@ -147,7 +164,7 @@ impl TmuxTerminal {
         attached
             .recv_timeout(Duration::from_secs(20))
             .map_err(|_| std::io::Error::other("tmux did not acknowledge attachment"))?;
-        let (commands, queue) = mpsc::sync_channel::<Command>(64);
+        let (commands, queue) = mpsc::sync_channel::<Command>(256);
         std::thread::Builder::new()
             .name("tmux-input".into())
             .spawn(move || {
@@ -158,25 +175,88 @@ impl TmuxTerminal {
                 }
             })?;
         let mut terminal = Self {
-            _client: client,
+            _client: Some(client),
             commands,
             output,
             emulator,
             surface: Surface::default(),
             role,
             ended: false,
+            pending_exit: None,
         };
         sheprd_backend::Terminal::resize(&mut terminal, size)?;
         Ok(terminal)
     }
 
-    fn command(&self, cmd: Command) -> Result<()> {
-        self.commands
-            .try_send(cmd)
-            .map_err(|_| std::io::Error::other("tmux input queue unavailable").into())
+    #[cfg(test)]
+    pub(super) fn for_test(
+        commands: SyncSender<Command>,
+        output: Receiver<Message>,
+        size: Size,
+    ) -> Self {
+        Self {
+            _client: None,
+            commands,
+            output,
+            emulator: Emulator::new(size, 100),
+            surface: Surface::default(),
+            role: Role::Active,
+            ended: false,
+            pending_exit: None,
+        }
     }
 
-    fn keys(&self, bytes: Vec<u8>) -> Result<()> {
+    fn drain_output(&mut self, timeout: Duration) -> Result<()> {
+        if self.ended {
+            return Ok(());
+        }
+        let mut msg = self.output.recv_timeout(timeout);
+        for index in 0..128 {
+            match msg {
+                Ok(Message::Bytes(bytes)) => self.emulator.feed(&bytes),
+                Ok(Message::Resize(size)) => self.emulator.resize(size),
+                Ok(Message::Exit(exit)) => {
+                    self.pending_exit = Some(exit);
+                    self.ended = true;
+                    break;
+                }
+                Ok(Message::Failed(error)) => return Err(error),
+                Err(mpsc::RecvTimeoutError::Timeout) => break,
+                Err(mpsc::RecvTimeoutError::Disconnected) => return Err(Error::Invalid),
+            }
+            if index == 127 {
+                break;
+            }
+            msg = match self.output.try_recv() {
+                Ok(msg) => Ok(msg),
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => Err(mpsc::RecvTimeoutError::Disconnected),
+            };
+        }
+        Ok(())
+    }
+
+    fn command(&mut self, mut cmd: Command) -> Result<()> {
+        loop {
+            if self.ended {
+                return Ok(());
+            }
+            match self.commands.try_send(cmd) {
+                Ok(()) => return Ok(()),
+                Err(mpsc::TrySendError::Disconnected(_)) => {
+                    return Err(std::io::Error::other("tmux input closed").into());
+                }
+                Err(mpsc::TrySendError::Full(unsent)) => {
+                    cmd = unsent;
+                    // Drain pending output while waiting for room so tmux cannot
+                    // stall on stdout while the input thread waits on stdin.
+                    self.drain_output(Duration::from_millis(5))?;
+                }
+            }
+        }
+    }
+
+    fn keys(&mut self, bytes: Vec<u8>) -> Result<()> {
         if bytes.is_empty() {
             return Ok(());
         }
@@ -213,36 +293,9 @@ impl sheprd_backend::Terminal for TmuxTerminal {
     }
 
     fn next(&mut self, timeout: Duration) -> Result<Vec<SurfaceUpdate>> {
-        let mut exited = None;
-        if !self.ended {
-            let mut msg = self.output.recv_timeout(self.surface.timeout(timeout));
-            for index in 0..128 {
-                match msg {
-                    Ok(Message::Bytes(bytes)) => self.emulator.feed(&bytes),
-                    Ok(Message::Resize(size)) => self.emulator.resize(size),
-                    Ok(Message::Exit(exit)) => {
-                        exited = Some(exit);
-                        self.ended = true;
-                        break;
-                    }
-                    Ok(Message::Failed(error)) => return Err(error),
-                    Err(mpsc::RecvTimeoutError::Timeout) => break,
-                    Err(mpsc::RecvTimeoutError::Disconnected) => return Err(Error::Invalid),
-                }
-                if index == 127 {
-                    break;
-                }
-                msg = match self.output.try_recv() {
-                    Ok(msg) => Ok(msg),
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        Err(mpsc::RecvTimeoutError::Disconnected)
-                    }
-                };
-            }
-        }
+        self.drain_output(self.surface.timeout(timeout))?;
         let mut updates = self.surface.updates(&mut self.emulator, self.ended);
-        if let Some(exit) = exited {
+        if let Some(exit) = self.pending_exit.take() {
             updates.push(SurfaceUpdate::Ended(exit));
         }
         Ok(updates)

@@ -439,6 +439,11 @@ pub(crate) struct CoreTerminals {
     /// it was sent, put back to end once their core answers again. Every
     /// window holds the app's one list ([`tabs::Unended`]).
     unended: std::sync::Arc<std::sync::Mutex<Vec<crate::browser::Ending>>>,
+    /// When a failed tmux kill may be tried again, shared across windows so a
+    /// host that is down is not dialled on every tick.
+    #[cfg(feature = "tmux")]
+    tmux_kill_retry:
+        std::sync::Arc<std::sync::Mutex<HashMap<crate::browser::Ending, std::time::Instant>>>,
     views: HashMap<(TabId, TerminalId), Entity<CoreTerminalView>>,
     /// Terminals to start, one after another, once the hub of each one's
     /// host connects: a shell, or the program its spawn names. Several

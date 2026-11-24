@@ -31,22 +31,23 @@ fn a_saved_id_cannot_target_other_sessions() {
 #[test]
 fn capture_text_is_never_treated_as_a_notification() {
     let (tx, rx) = mpsc::sync_channel(16);
+    let sentinel = "sentinel-test-nonce";
     let stream = [
         "%begin 1 1 0",
         "%end 1 1 0",
         "%begin 1 2 1",
-        "0 2 80 0",
+        "0 3 80 0",
         "%end 1 2 1",
         "%begin 1 3 1",
-        "",
         "%end 1 3 1",
-        "%begin 1 4 1",
-        "",
-        "%end 1 4 1",
         "%begin 2 2 1",
         "%output %1 hello",
         "%end 2 2 1",
+        "%begin 9 9 1",
         "%end 2 2 1",
+        "%begin 2 3 1",
+        sentinel,
+        "%end 2 3 1",
         "%begin 3 3 1",
         "3 2 1",
         "%end 3 3 1",
@@ -56,7 +57,15 @@ fn capture_text_is_never_treated_as_a_notification() {
         "",
     ]
     .join("\n");
-    control::read(Cursor::new(stream.as_bytes()), "%1", 100, &tx, None).unwrap();
+    control::read(
+        Cursor::new(stream.as_bytes()),
+        "%1",
+        100,
+        sentinel,
+        &tx,
+        None,
+    )
+    .unwrap();
     drop(tx);
     let bytes: Vec<_> = rx
         .into_iter()
@@ -71,8 +80,142 @@ fn capture_text_is_never_treated_as_a_notification() {
         .collect();
     assert_eq!(
         bytes,
-        b"%output %1 hello\r\n%end 2 2 1\x1b[0m\x1b[3;4H\x1b[?1h\x1b\xffx"
+        b"%output %1 hello\r\n%end 2 2 1\r\n%begin 9 9 1\x1b[0m\x1b[3;4H\x1b[?1h\x1b\xffx"
     );
+}
+
+#[test]
+fn capture_error_aborts_through_the_trailing_sentinel() {
+    let (tx, _rx) = mpsc::sync_channel(16);
+    let sentinel = "sentinel-err-nonce";
+    let stream = [
+        "%begin 1 2 1",
+        "0 2 80 0",
+        "%end 1 2 1",
+        "%begin 1 3 1",
+        "%end 1 3 1",
+        "%begin 2 2 1",
+        "can't find pane: %1",
+        "%error 2 2 1",
+        "%begin 2 3 1",
+        sentinel,
+        "%end 2 3 1",
+        "",
+    ]
+    .join("\n");
+    assert!(
+        control::read(
+            Cursor::new(stream.as_bytes()),
+            "%1",
+            100,
+            sentinel,
+            &tx,
+            None,
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn joined_capture_preserves_wraps_distinct_from_newlines() {
+    use sheprd_backend::{History, HistoryAnswer};
+    let (tx, rx) = mpsc::sync_channel(16);
+    let sentinel = "sentinel-wrap-nonce";
+    // Width 10, height 4, history 1: first line wraps across history into row 0,
+    // second line wraps on visible rows 1..2, third line is a single row.
+    let stream = [
+        "%begin 1 2 1",
+        "1 4 10 0",
+        "%end 1 2 1",
+        "%begin 1 3 1",
+        "%end 1 3 1",
+        "%begin 2 2 1",
+        "1234567890abcdef",
+        "ABCDEFGHIJklmn",
+        "short",
+        "%end 2 2 1",
+        "%begin 2 3 1",
+        sentinel,
+        "%end 2 3 1",
+        "%begin 3 3 1",
+        "5 3",
+        "%end 3 3 1",
+        "%exit",
+        "",
+    ]
+    .join("\n");
+    control::read(
+        Cursor::new(stream.as_bytes()),
+        "%1",
+        100,
+        sentinel,
+        &tx,
+        None,
+    )
+    .unwrap();
+    drop(tx);
+    let mut emulator = sheprd_terminal::Emulator::new(Size::new(10, 4).unwrap(), 100);
+    for msg in rx {
+        match msg {
+            control::Message::Resize(size) => emulator.resize(size),
+            control::Message::Bytes(bytes) => emulator.feed(&bytes),
+            control::Message::Exit(_) | control::Message::Failed(_) => {}
+        }
+    }
+    let HistoryAnswer::Text(text) = emulator.history(&History::Text).unwrap() else {
+        panic!("expected text");
+    };
+    assert!(
+        text.contains("1234567890abcdef\nABCDEFGHIJklmn\nshort"),
+        "expected wrapped rows without inserted newlines: {text:?}"
+    );
+    assert_eq!(emulator.line_rows(), vec![2, 2, 1]);
+    assert_eq!(emulator.wrapped_rows(), vec![false, true, false, false]);
+}
+
+#[test]
+fn full_input_queue_waits_and_drains_output_without_disconnecting() {
+    use sheprd_backend::{ClientPaneInputEvent, History, HistoryAnswer, Terminal};
+    let (cmd_tx, cmd_rx) = mpsc::sync_channel(1);
+    let (out_tx, out_rx) = mpsc::sync_channel(1);
+    let mut terminal = TmuxTerminal::for_test(cmd_tx, out_rx, Size::new(40, 4).unwrap());
+    let reader = std::thread::spawn(move || {
+        // Send output first so the sender must drain output while waiting on
+        // the full 1-slot command channel (avoiding a stdin/stdout deadlock).
+        out_tx
+            .send(control::Message::Bytes(b"echoed".to_vec()))
+            .unwrap();
+        let mut received = Vec::new();
+        for _ in 0..8 {
+            if let terminal::Command::Keys(bytes) = cmd_rx.recv().unwrap() {
+                received.extend(bytes);
+            }
+        }
+        out_tx
+            .send(control::Message::Exit(sheprd_backend::Exit {
+                code: Some(0),
+            }))
+            .unwrap();
+        received
+    });
+    for byte in b"abcdefgh" {
+        terminal
+            .input(&ClientPaneInputEvent::TextCommit(String::from(
+                *byte as char,
+            )))
+            .unwrap();
+    }
+    assert_eq!(reader.join().unwrap(), b"abcdefgh");
+    let updates = terminal.next(Duration::from_millis(200)).unwrap();
+    assert!(
+        updates
+            .iter()
+            .any(|u| matches!(u, sheprd_backend::SurfaceUpdate::Ended(e) if e.code == Some(0)))
+    );
+    let HistoryAnswer::Text(text) = terminal.history(&History::Text).unwrap() else {
+        panic!("expected text");
+    };
+    assert!(text.contains("echoed"), "screen missing output: {text:?}");
 }
 
 #[cfg(unix)]

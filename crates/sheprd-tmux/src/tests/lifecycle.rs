@@ -122,14 +122,31 @@ done"#
     };
     let mut active = tmux.attach(&info.id, size, Role::Active).unwrap();
     wait(&mut active, "ready");
+    let long_cmd = "wrapped-".to_owned() + &"x".repeat(95) + "-end";
     active
-        .input(&ClientPaneInputEvent::TextCommit("hello\r".into()))
+        .input(&ClientPaneInputEvent::TextCommit(format!("{long_cmd}\r")))
         .unwrap();
-    wait(&mut active, "reply=hello");
+    wait(&mut active, &format!("reply={long_cmd}"));
+    // Burst more than 64 input commands in a row without disconnecting.
+    for ch in "hello".chars().chain(std::iter::repeat_n('!', 80)) {
+        active
+            .input(&ClientPaneInputEvent::TextCommit(ch.to_string()))
+            .unwrap();
+    }
+    active
+        .input(&ClientPaneInputEvent::TextCommit("\r".into()))
+        .unwrap();
+    let burst = format!("reply=hello{}", "!".repeat(80));
+    wait(&mut active, &burst);
     drop(active);
     let mut observer = tmux.attach(&info.id, size, Role::Observer).unwrap();
-    wait(&mut observer, "reply=hello");
+    wait(&mut observer, &burst);
     wait(&mut observer, "history-row-0");
+    // Reattaching must preserve soft wraps instead of inserting newlines.
+    assert!(
+        matches!(observer.history(&History::Text).unwrap(), HistoryAnswer::Text(t) if t.contains(&format!("reply={long_cmd}"))),
+        "reattached screen split a wrapped line with a newline"
+    );
     observer
         .input(&ClientPaneInputEvent::TextCommit("wrong\r".into()))
         .unwrap();
@@ -153,8 +170,12 @@ done"#
     restored
         .input(&ClientPaneInputEvent::TextCommit("leave\r".into()))
         .unwrap();
-    wait(&mut restored, "reply=hello");
+    wait(&mut restored, &burst);
     wait(&mut restored, "history-row-0");
+    assert!(
+        matches!(restored.history(&History::Text).unwrap(), HistoryAnswer::Text(t) if t.contains(&format!("reply={long_cmd}"))),
+        "leaving alternate screen split a wrapped line with a newline"
+    );
     let quick = tmux
         .spawn(&Spawn {
             argv: vec![

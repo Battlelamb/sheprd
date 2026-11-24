@@ -55,7 +55,7 @@ Everything around the terminals is Luau in `crates/sheprd-gpui/moonframe/app`:
 | `mods/details/main.luau` | The right pane; the toggle at the end of the title bar opens it |
 | `mods/turns/main.luau` | A chat's turns in its left gutter, as Moonframe's revision timeline draws its chat rail: a tight stack of ticks in the gutter's middle, one per prompt, the prompt and the start of its reply on the card under the pointer, the turn being read marked, and a click back to a prompt. The shell floats it where Sheprd laid the gutter out |
 | `mods/status/main.luau` | The status bar |
-| `components/sheprd-*.luau` | What the worktrees and agents share: a row highlighted as the layout marks the selected one, the status dot, and the section names |
+| `components/sheprd-*.luau` | What the worktrees and agents share: a row highlighted as the layout marks the selected one, the animated Orca status mark (spinner, question bubble, ringed check, quiet dot), and the section names |
 | `style.luau` | The hover looks, for every mod |
 
 The terminals, tabs, and pages stay one Rust view, placed with

@@ -283,7 +283,7 @@ final class ActivityTokens {
             let session = try await sessions.session(for: computer, fallback: relay)
             guard PushRelaySetting.isOn == viaPushRelay else { return changed }
             guard computers.contains(where: { $0.fingerprint == fingerprint }) else { return forgotten }
-            let answer = try await session.client.registerAPNs(registration, bearer: session.token)
+            let answer = try await session.client.registerAPNs(registration, singleActivity: ActivityGrouping.single(for: fingerprint), bearer: session.token)
             unreached.remove(computer.fingerprint)
             delivery[computer.fingerprint] = switch answer.delivery {
             case .pushRelay: .pushRelay

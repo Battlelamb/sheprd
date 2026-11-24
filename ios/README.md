@@ -372,6 +372,14 @@ longer have, which shows as not reported).
 
 ## Live Activity styles
 
+Under Settings > Notifications > Live Activities, each paired computer defaults
+to **One per computer**. Its overlapping chats and terminal agents share a card
+that shows progress and opens the pane it currently features. A waiting question
+takes priority. Choose **Multiple** for separate cards per independent chat or
+terminal agent. Delegated workers still contribute to their coordinator's count.
+The choice applies to new activities on this phone and syncs when an offline
+computer reconnects. Older computers continue sending individual cards.
+
 Settings > Notifications > Live Activities > Style picks how an activity
 looks on this phone (`LiveActivityStyle`, kept in the App Group so the widget
 draws with it), each previewed working, waiting, and finished:

@@ -5,6 +5,7 @@ use sheprd_chat_protocol::{PermissionKind, PermissionOption};
 fn state(phase: Phase) -> ContentState {
     ContentState {
         detail: Detail {
+            focus: None,
             agents: None,
             activity: Some("Editing secret.rs".to_owned()),
             files: Some(3),

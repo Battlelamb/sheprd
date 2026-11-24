@@ -227,6 +227,7 @@ fn state(before: &Transcript, phase: Phase, step: Step) -> ContentState {
     edited.sort_unstable();
     edited.dedup();
     let detail = Detail {
+        focus: None,
         agents: None,
         activity: step
             .described

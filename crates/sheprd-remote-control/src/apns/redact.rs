@@ -53,7 +53,13 @@ impl Live {
         state.previous.clear();
         state.summary = None;
         // Words, icon, and counts all tell what the turn does.
+        let focus = state.detail.focus.take().map(|mut focus| {
+            focus.chat_title.clear();
+            focus.workspace.clone_from(&focus.computer);
+            focus
+        });
         state.detail = Detail {
+            focus,
             agents: state.detail.agents.take(),
             ..Detail::default()
         };

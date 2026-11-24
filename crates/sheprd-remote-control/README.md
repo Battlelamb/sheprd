@@ -548,6 +548,11 @@ older daemon may answer `own_key`, which the app shows as unknown. The
 environment picks one of the two relays compiled in, `push.sheprd.org` and
 `push-sandbox.sheprd.org`; no device can name another host.
 
+A phone requests a single Live Activity for overlapping work on this host
+with `POST /api/apns?single=true`. Omitting the query selects separate
+activities. The authenticated device's registration keeps the preference.
+Older hosts ignore the query, and older phones keep receiving per-pane cards.
+
 A registration that leaves out `push_to_start` or `alert` keeps the one
 stored; an explicit `null` clears it (`apns::Update`). The app sends
 `{"push_to_start": null, "alert": null, "activities": []}` when its push

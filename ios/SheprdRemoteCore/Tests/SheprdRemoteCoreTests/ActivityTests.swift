@@ -52,6 +52,36 @@ final class ActivityTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(ChatActivityState.self, from: JSONEncoder().encode(state)), state)
     }
 
+    func testGroupingDefaultsToOneAndPersistsIndependentlyPerComputer() throws {
+        let suite = UUID().uuidString
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let first = try XCTUnwrap(Fingerprint(String(repeating: "AA", count: 32)))
+        let second = try XCTUnwrap(Fingerprint(String(repeating: "BB", count: 32)))
+        XCTAssertTrue(ActivityGrouping.single(for: first, in: defaults))
+        defaults.set(true, forKey: ActivityGrouping.key(for: first))
+        XCTAssertFalse(ActivityGrouping.single(for: first, in: try XCTUnwrap(UserDefaults(suiteName: suite))))
+        XCTAssertTrue(ActivityGrouping.single(for: second, in: defaults))
+    }
+
+    func testHostCardRoutesItsTokenAndQuestionIndependently() throws {
+        let start = try aps("start")
+        var attributes = try decode(ChatActivityFacts.self, start["attributes"])
+        var state = try decode(ChatActivityState.self, aps("update")["content-state"])
+        var focus = attributes
+        focus.pane = "second"
+        attributes.pane = "host-activity/test"
+        state.focus = focus
+        let content = try JSONDecoder().decode(ChatActivityState.self, from: JSONEncoder().encode(state))
+        let opened = try XCTUnwrap(SealedChatActivity.open(attributes: .plain(attributes), state: .plain(content), keys: [], allowsPlain: true))
+        XCTAssertEqual(opened.facts.link.pane, "second")
+        XCTAssertEqual(opened.state.permission, 7)
+        XCTAssertEqual(SealedChatActivity.facts(.plain(attributes), keys: [])?.0.pane, "host-activity/test")
+        focus.computerId = String(repeating: "BB", count: 32)
+        state.focus = focus
+        XCTAssertEqual(SealedChatActivity.Opened(facts: attributes, state: state).facts.computerId, attributes.computerId)
+    }
+
     func testQuestionUpdateDecodes() throws {
         let state = try decode(ChatActivityState.self, aps("update")["content-state"])
         XCTAssertEqual(state.phase, .question)

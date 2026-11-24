@@ -94,6 +94,9 @@ pub(crate) struct AgentProgress {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Detail {
+    /// The pane currently shown by a combined host activity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) focus: Option<Attributes>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) agents: Option<AgentProgress>,
     /// `step` in plain words, such as `Checking pull request #1548`.

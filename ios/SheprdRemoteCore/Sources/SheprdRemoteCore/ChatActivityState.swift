@@ -44,6 +44,7 @@ public struct ChatActivityState: Codable, Hashable, Sendable {
         public var label: String { "\(done) of \(total) agents done" }
     }
 
+    public var focus: ChatActivityFacts?
     public var agents: AgentProgress?
     public var phase: Phase
     public var step: String
@@ -117,11 +118,12 @@ public struct ChatActivityState: Codable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case phase, step, startedAt, question, summary, planDone, planTotal, working, waiting
         case permission, options, previous
-        case activity, icon, previousActivities, steps, files, agents
+        case activity, icon, previousActivities, steps, files, agents, focus
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        focus = try container.decodeIfPresent(ChatActivityFacts.self, forKey: .focus)
         agents = try container.decodeIfPresent(AgentProgress.self, forKey: .agents)
         phase = try container.decode(Phase.self, forKey: .phase)
         step = try container.decode(String.self, forKey: .step)
@@ -146,6 +148,7 @@ public struct ChatActivityState: Codable, Hashable, Sendable {
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(focus, forKey: .focus)
         try container.encodeIfPresent(agents, forKey: .agents)
         try container.encode(phase, forKey: .phase)
         try container.encode(step, forKey: .step)

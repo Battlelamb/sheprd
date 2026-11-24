@@ -9,6 +9,7 @@
 //! dropped, never queued.
 
 mod group;
+mod host;
 mod launches;
 pub(crate) use launches::Launches;
 
@@ -34,6 +35,7 @@ const HOLD_MS: u64 = 10 * 60 * 1000;
 pub(super) struct LiveActivities {
     pacer: Pacer,
     groups: HashMap<EndpointId, Group>,
+    cards: HashMap<DeviceId, host::Cards>,
     /// The latest update or end for an activity whose token the device has
     /// not registered yet, by device and pane. A short turn can end before
     /// the token arrives; its end must still reach the phone.
@@ -332,6 +334,27 @@ impl LiveActivities {
         for live in self.pacer.due(now_ms()) {
             self.dispatch(state, live);
         }
+        let now = now_ms();
+        let devices = registrations(state);
+        self.cards
+            .retain(|device, _| devices.iter().any(|(id, _)| id == device));
+        for (device, registration) in devices {
+            let Some(cards) = self.cards.get_mut(&device) else {
+                continue;
+            };
+            let mut updates = cards.due(now);
+            if layout.connected {
+                let present =
+                    |pane: &str| layout.chat(pane).is_some() || layout.terminal(pane).is_some();
+                cards.forget_missing(present);
+                for ended in cards.missing(present, now) {
+                    updates.extend(cards.offer(&ended, &registration, || None, now));
+                }
+            }
+            for live in updates {
+                self.deliver_to(state, &device, &registration, live, now);
+            }
+        }
         self.release(state);
     }
 
@@ -342,32 +365,53 @@ impl LiveActivities {
         live.state.working = working(state);
         let now = now_ms();
         for (device, registration) in registrations(state) {
-            let key = (device, live.pane.clone());
-            // Whatever was held is older than this, or was for the activity
-            // a start replaces.
-            self.held.remove(&key);
-            match route(&live, &registration, &state.apns) {
-                Route::Send(token) => {
-                    let shown = shown(state, live.clone(), &registration);
-                    send(
-                        state,
-                        key.0,
-                        token.clone(),
-                        notify_key(&registration),
-                        shown,
-                    );
-                }
-                Route::Hold => {
-                    self.held.insert(
-                        key,
-                        Held {
-                            live: live.clone(),
-                            since_ms: now,
-                        },
-                    );
-                }
-                Route::Skip => {}
+            if registration.activities.is_empty()
+                && !registration
+                    .push_to_start
+                    .as_ref()
+                    .is_some_and(|t| state.apns.reaches(t))
+            {
+                self.cards.remove(&device);
+                continue;
             }
+            let cards = self.cards.entry(device.clone()).or_default();
+            cards.restore(&registration, || current_panes(state, &self.groups, now));
+            if let Some(live) =
+                cards.offer(&live, &registration, || pane_facts(state, &live.pane), now)
+            {
+                self.deliver_to(state, &device, &registration, live, now);
+            }
+        }
+    }
+
+    fn deliver_to(
+        &mut self,
+        state: &Arc<State>,
+        device: &DeviceId,
+        registration: &Registration,
+        live: Live,
+        now: u64,
+    ) {
+        let key = (device.clone(), live.pane.clone());
+        self.held.remove(&key);
+        match route(&live, registration, &state.apns) {
+            Route::Send(token) => send(
+                state,
+                key.0,
+                token.clone(),
+                notify_key(registration),
+                shown(state, live, registration),
+            ),
+            Route::Hold => {
+                self.held.insert(
+                    key,
+                    Held {
+                        live,
+                        since_ms: now,
+                    },
+                );
+            }
+            Route::Skip => {}
         }
     }
 
@@ -407,6 +451,84 @@ impl LiveActivities {
             false
         });
     }
+}
+
+/// The currently running coordinators and terminal agents on a restarted host.
+fn current_panes(
+    state: &State,
+    groups: &HashMap<EndpointId, Group>,
+    now: u64,
+) -> Vec<(crate::apns::Attributes, crate::apns::ContentState)> {
+    let layout = state.hub.layout();
+    let mut active: Vec<_> = layout
+        .chats()
+        .filter_map(|chat| {
+            let content = groups
+                .get(&chat.endpoint)
+                .map(|g| g.update().state)
+                .or_else(|| {
+                    state.hub.chat(&chat.pane)?.read(|t| {
+                        if t.delegation.is_some() {
+                            return None;
+                        }
+                        group::seed(&chat.endpoint, &chat.pane, t).map(|g| g.update().state)
+                    })
+                })?;
+            Some((pane_facts(state, &chat.pane)?, content))
+        })
+        .collect();
+    let names = super::notifier::agent_names(&layout);
+    for agent in super::notifier::terminal_agents(&layout, &names) {
+        if !crate::push::is_running(agent.status) {
+            continue;
+        }
+        let moved = Moved {
+            pane: agent.chat.pane.into(),
+            from: sheprd_client::protocol::AgentStatus::Idle,
+            to: Some(agent.status),
+            started_ms: None,
+        };
+        if let Some(live) = decide_terminal(
+            &moved,
+            Some(&agent),
+            &state.computer,
+            &state.fingerprint,
+            now,
+        ) && let Event::Start { attributes, .. } = live.event
+        {
+            active.push((attributes, live.state));
+        }
+    }
+    active
+}
+
+/// Rebuild the focused pane after reconnecting to an already registered card.
+fn pane_facts(state: &State, pane: &str) -> Option<crate::apns::Attributes> {
+    use crate::push::excerpt;
+    let layout = state.hub.layout();
+    let (workspace, title, agent, terminal) = if let Some((ws, row)) = layout.chat(pane) {
+        (&ws.label, &row.title, row.agent.as_deref(), false)
+    } else {
+        let (ws, tab) = layout.terminal(pane)?;
+        (
+            &ws.label,
+            &tab.label,
+            tab.agents
+                .iter()
+                .find(|a| a.pane == pane)
+                .and_then(|a| a.name.as_deref()),
+            true,
+        )
+    };
+    Some(crate::apns::Attributes {
+        workspace: excerpt(workspace),
+        chat_title: excerpt(title),
+        agent: excerpt(agent.unwrap_or("Agent")),
+        pane: pane.to_owned(),
+        terminal,
+        computer: excerpt(&state.computer),
+        computer_id: crate::apns::computer_id(&state.fingerprint),
+    })
 }
 
 /// `live` as the device behind `registration` may see it.

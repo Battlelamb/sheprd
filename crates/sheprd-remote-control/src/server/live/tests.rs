@@ -3,6 +3,7 @@ use crate::apns::{ContentState, Phase};
 use secrecy::ExposeSecret as _;
 
 mod delegation;
+mod host_cards;
 mod relay;
 
 fn live(event: Event) -> Live {

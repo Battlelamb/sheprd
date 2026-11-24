@@ -780,14 +780,18 @@ brief as the chat's first prompt and marks it as the agent's, which clients
 show as a brief rather than the person's words, and deletes the file. A
 start that fails deletes it too.
 
-On iOS, the chat that delegates work owns one Live Activity for its turn.
+On iOS, a chat and its delegated workers share a progress count. By default
+all concurrent work on a computer shares one Live Activity. In Settings >
+Notifications > Live Activities, choose Multiple for a computer to show
+each independent chat or terminal agent on its own card.
 It counts native subagents and local chats started with a brief, including
 chats in another Herdr space and the native subagents they start. A chat
 counts as soon as its launch is registered. Its coordinator can finish
 first and the activity stays open for the workers. The count advances when a task finishes,
 fails, or stops. The latest outcome names the task when notification
 privacy permits. Give each brief a distinct task name on its first line.
-Tapping the activity opens the coordinating chat.
+Tapping the card opens the chat or terminal it shows. A pending question
+takes priority on a shared card.
 
 A brief is not yet sent to a chat on an SSH host or another machine's
 Herdr 2: the file is on this machine, so `chat new` refuses with exit 8

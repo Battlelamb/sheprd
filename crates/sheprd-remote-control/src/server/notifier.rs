@@ -190,7 +190,7 @@ fn terminal_changes(
 }
 
 /// Each terminal agent's display name, as `claude` shows as `Claude`.
-fn agent_names(layout: &Layout) -> HashMap<&str, String> {
+pub(super) fn agent_names(layout: &Layout) -> HashMap<&str, String> {
     layout
         .workspaces
         .iter()

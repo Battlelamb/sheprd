@@ -90,6 +90,8 @@ pub(crate) struct ActivityToken {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Registration {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) single_activity: bool,
     #[serde(default)]
     pub(crate) activities: Vec<ActivityToken>,
     /// How much this phone's activities may say.

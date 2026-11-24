@@ -346,6 +346,7 @@ pub(super) const CATALOG: &[Entry] = &[
     feature(Feature::AcpChats),
     #[cfg(feature = "mcp")]
     feature(Feature::Mcp),
+    feature(Feature::MoonframeTools),
     feature(Feature::MoonframeWindow),
     feature(Feature::QaMenu),
     feature(Feature::SidebarHoverMenu),

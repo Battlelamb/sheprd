@@ -73,6 +73,8 @@ pub(crate) struct MenuState {
     /// The saved distribution the removal confirmation names.
     pub(super) wsl_remove: Option<String>,
     pub(super) session_edit: Option<super::sessions::Edit>,
+    /// A Luau mod opened the picker and owns its sheet until the menu resets.
+    pub(crate) hosted_picker: bool,
     /// The device whose sessions the picker shows under it, by endpoint id so
     /// a catalog change cannot unfold another one.
     pub(crate) unfolded_device: Option<String>,
@@ -398,6 +400,7 @@ impl MenuState {
             nearby_setup: None,
             wsl_remove: None,
             session_edit: None,
+            hosted_picker: false,
             unfolded_device: None,
             unfolded_height: Default::default(),
             unfolded_rows: Default::default(),
@@ -502,6 +505,7 @@ impl MenuState {
         self.nearby_setup = None;
         self.wsl_remove = None;
         self.session_edit = None;
+        self.hosted_picker = false;
         self.unfolded_device = None;
         self.folding = None;
         self.open_checkout = None;

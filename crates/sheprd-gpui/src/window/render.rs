@@ -760,6 +760,13 @@ impl Render for SheprdWindow {
         // Zen mode keeps toasts and menus: they carry errors and what the
         // user asked for, not chrome.
         let zen = self.zen_layout();
+        let standalone_header = !merged && !zen;
+        if let Some(last) = &mut self.hosted_full_header
+            && *last != standalone_header
+        {
+            *last = standalone_header;
+            cx.notify();
+        }
         let mut root = div()
             .capture_key_down(cx.listener(Self::application_menu_shortcut))
             .capture_key_down(cx.listener(Self::chrome_focus_key))
@@ -903,9 +910,10 @@ impl Render for SheprdWindow {
             .when(crate::menus::IN_WINDOW && !zen, |root| {
                 root.child(self.render_application_bar(window, cx))
             })
-            .when(!merged && !zen, |root| {
-                root.child(self.render_titlebar(window, cx))
-            })
+            .when(
+                standalone_header && self.hosted_full_header.is_none(),
+                |root| root.child(self.render_titlebar(window, cx)),
+            )
             .when(zen, |root| {
                 root.children(crate::titlebar::zen_inset(fill.ground(), window))
             })

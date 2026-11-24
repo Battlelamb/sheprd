@@ -2,6 +2,7 @@ use super::*;
 use gpui::TestAppContext;
 
 mod connection;
+mod device_gpu;
 mod drafted;
 mod edge;
 mod focus;

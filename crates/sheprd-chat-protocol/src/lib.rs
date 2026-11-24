@@ -18,6 +18,7 @@ pub mod naming;
 mod origin;
 pub mod restore;
 mod settings;
+pub mod sharing;
 mod wire;
 
 pub use agents::{Agent, UnknownAgent};

@@ -64,6 +64,15 @@ final class ActivityTests: XCTestCase {
         XCTAssertTrue(ActivityGrouping.single(for: second, in: defaults))
     }
 
+    func testOnlySharedStartsFromBeforeAnExplicitResetAreRetired() {
+        let epoch = UUID()
+        XCTAssertFalse(ActivityGrouping.isRetiredHostCard("w1:p1", since: epoch))
+        XCTAssertFalse(ActivityGrouping.isRetiredHostCard("host-activity/old", since: nil))
+        XCTAssertTrue(ActivityGrouping.isRetiredHostCard("host-activity/old", since: epoch))
+        let new = "host-activity/" + epoch.uuidString.lowercased() + "/new"
+        XCTAssertFalse(ActivityGrouping.isRetiredHostCard(new, since: epoch))
+    }
+
     func testHostCardRoutesItsTokenAndQuestionIndependently() throws {
         let start = try aps("start")
         var attributes = try decode(ChatActivityFacts.self, start["attributes"])

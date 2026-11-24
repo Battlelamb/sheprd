@@ -560,9 +560,12 @@ final class RemoteClient: Sendable {
         )
     }
 
-    func registerAPNs(_ registration: API.APNsRegistration, singleActivity: Bool, bearer: String) async throws -> API.APNsAnswer {
+    func registerAPNs(_ registration: API.APNsRegistration, singleActivity: Bool, epoch: UUID?, bearer: String) async throws -> API.APNsAnswer {
         // Older computers ignore the query and continue accepting all the tokens.
-        try await send("POST", singleActivity ? "/api/apns?single=true" : "/api/apns", body: registration, bearer: bearer)
+        var query = singleActivity ? ["single=true"] : []
+        if let epoch { query.append("epoch=" + epoch.uuidString) }
+        let path = query.isEmpty ? "/api/apns" : "/api/apns?" + query.joined(separator: "&")
+        return try await send("POST", path, body: registration, bearer: bearer)
     }
 
     /// Asks the computer to send this phone a sealed test alert carrying `id`.

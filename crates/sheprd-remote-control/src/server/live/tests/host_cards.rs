@@ -143,3 +143,55 @@ fn restoring_a_shared_card_keeps_it_open_until_all_its_panes_finish() {
         Event::End { .. }
     ));
 }
+
+#[test]
+fn a_phone_reset_replaces_the_host_card_even_before_its_first_token_arrives() {
+    let mut cards = host::Cards::default();
+    let mut reg = Registration {
+        single_activity: true,
+        ..Default::default()
+    };
+    let mut first = start("first");
+    let original = cards.offer(&first, &reg, || None, 0).unwrap();
+    // Ordinary registration lag never creates a duplicate start.
+    assert!(cards.replace_reset(&reg, 5).is_none());
+    reg.activity_epoch = Some(uuid::Uuid::new_v4());
+    let (old, fresh) = cards.replace_reset(&reg, 6).unwrap();
+    assert_eq!(old, original.pane);
+    assert_ne!(old, fresh.pane);
+    assert!(matches!(fresh.event, Event::Start { .. }));
+    assert_eq!(fresh.state.detail.focus.unwrap().pane, "first");
+    assert!(cards.replace_reset(&reg, 7).is_none());
+    let joined = cards
+        .offer(&start("second"), &reg, || None, 20_000)
+        .unwrap();
+    assert_eq!(joined.pane, fresh.pane);
+    assert!(matches!(joined.event, Event::Update { .. }));
+    assert_eq!(joined.state.detail.agents.unwrap().total, 2);
+
+    first.event = Event::End { dismissal_s: 999 };
+    cards.offer(&first, &reg, || None, 31_000).unwrap();
+    let mut second = first;
+    second.pane = "second".into();
+    let end = cards.offer(&second, &reg, || None, 32_000).unwrap();
+    assert_eq!(end.event, Event::End { dismissal_s: 999 });
+    assert_eq!(end.state.detail.agents.unwrap().done, 2);
+}
+
+#[test]
+fn the_last_run_controls_when_the_host_card_leaves_the_lock_screen() {
+    for dismissal_s in [20, 920] {
+        let reg = Registration {
+            single_activity: true,
+            ..Default::default()
+        };
+        let mut cards = host::Cards::default();
+        let mut last = start("only");
+        cards.offer(&last, &reg, || None, 0).unwrap();
+        last.event = Event::End { dismissal_s };
+        assert_eq!(
+            cards.offer(&last, &reg, || None, 20_000).unwrap().event,
+            last.event
+        );
+    }
+}

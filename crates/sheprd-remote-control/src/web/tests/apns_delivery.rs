@@ -40,10 +40,9 @@ async fn grouping_is_registered_per_device_and_older_phones_keep_separate_cards(
     Arc::get_mut(&mut state).unwrap().apns = crate::apns::Delivery::new(true).unwrap();
     let (first, first_token) = signed_in(&state, 1);
     let (second, second_token) = signed_in(&state, 2);
-    for (token, path) in [
-        (&first_token, "/api/apns?single=true"),
-        (&second_token, "/api/apns"),
-    ] {
+    let epoch = uuid::Uuid::new_v4();
+    let reset = format!("/api/apns?single=true&epoch={epoch}");
+    for (token, path) in [(&first_token, reset.as_str()), (&second_token, "/api/apns")] {
         let req = HttpRequest::post(path)
             .header(header::AUTHORIZATION, format!("Bearer {token}"))
             .body(Body::from(
@@ -60,10 +59,12 @@ async fn grouping_is_registered_per_device_and_older_phones_keep_separate_cards(
                 .get(device)
                 .and_then(|r| r.apns.as_ref()),
         )
-        .single_activity
     };
-    assert!(mode(&first));
-    assert!(!mode(&second));
+    assert!(mode(&first).single_activity);
+    assert_eq!(mode(&first).activity_epoch, Some(epoch));
+    assert!(!mode(&second).single_activity);
+    assert_eq!(mode(&second).activity_epoch, None);
     assert_eq!(send(&state, register(&first_token)).await.0, StatusCode::OK);
-    assert!(!mode(&first));
+    assert!(!mode(&first).single_activity);
+    assert_eq!(mode(&first).activity_epoch, None);
 }

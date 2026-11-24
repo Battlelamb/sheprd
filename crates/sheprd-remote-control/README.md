@@ -551,6 +551,8 @@ environment picks one of the two relays compiled in, `push.sheprd.org` and
 A phone requests a single Live Activity for overlapping work on this host
 with `POST /api/apns?single=true`. Omitting the query selects separate
 activities. The authenticated device's registration keeps the preference.
+Entering Private ends the phone’s existing cards. Its next registrations carry
+a new `epoch` UUID so the host can restart ongoing work on a fresh card.
 Older hosts ignore the query, and older phones keep receiving per-pane cards.
 
 A registration that leaves out `push_to_start` or `alert` keeps the one

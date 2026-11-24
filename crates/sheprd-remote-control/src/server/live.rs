@@ -342,7 +342,12 @@ impl LiveActivities {
             let Some(cards) = self.cards.get_mut(&device) else {
                 continue;
             };
-            let mut updates = cards.due(now);
+            let mut updates = Vec::new();
+            if let Some((old, start)) = cards.replace_reset(&registration, now) {
+                self.held.remove(&(device.clone(), old));
+                updates.push(start);
+            }
+            updates.extend(cards.due(now));
             if layout.connected {
                 let present =
                     |pane: &str| layout.chat(pane).is_some() || layout.terminal(pane).is_some();
@@ -376,9 +381,13 @@ impl LiveActivities {
             }
             let cards = self.cards.entry(device.clone()).or_default();
             cards.restore(&registration, || current_panes(state, &self.groups, now));
-            if let Some(live) =
-                cards.offer(&live, &registration, || pane_facts(state, &live.pane), now)
-            {
+            let replacement = cards.replace_reset(&registration, now);
+            let next = cards.offer(&live, &registration, || pane_facts(state, &live.pane), now);
+            if let Some((old, start)) = replacement {
+                self.held.remove(&(device.clone(), old));
+                self.deliver_to(state, &device, &registration, start, now);
+            }
+            if let Some(live) = next {
                 self.deliver_to(state, &device, &registration, live, now);
             }
         }

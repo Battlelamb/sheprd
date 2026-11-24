@@ -9,6 +9,17 @@ use std::collections::{HashMap, HashSet};
 
 const PREFIX: &str = "host-activity/";
 
+/// The optional epoch comes from the phone and survives an offline reset.
+fn card_prefix(registration: &Registration) -> String {
+    registration
+        .activity_epoch
+        .map_or_else(|| PREFIX.to_owned(), |epoch| format!("{PREFIX}{epoch}/"))
+}
+
+fn card_key(registration: &Registration) -> String {
+    format!("{}{}", card_prefix(registration), EndpointId::random())
+}
+
 #[derive(Default)]
 pub(super) struct Cards {
     separate: HashSet<String>,
@@ -37,10 +48,11 @@ impl Cards {
         if self.saw_host {
             return;
         }
+        let prefix = card_prefix(registration);
         if let Some(token) = registration
             .activities
             .iter()
-            .find(|a| a.pane.starts_with(PREFIX))
+            .find(|a| a.pane.starts_with(&prefix))
         {
             let mut host = Host::new(token.pane.clone());
             for (facts, state) in active() {
@@ -97,12 +109,47 @@ impl Cards {
         self.saw_host = true;
         let host = self
             .host
-            .get_or_insert_with(|| Host::new(format!("{PREFIX}{}", EndpointId::random())));
-        let result = host.step(live, facts, fresh, now);
+            .get_or_insert_with(|| Host::new(card_key(registration)));
+        let result = host.step(live, facts, fresh);
         if host.running.is_empty() {
             self.host = None;
         }
         self.pacer.offer(result, now)
+    }
+
+    /// Private ends the phone's existing cards, even when work is still
+    /// running. Give its replacement a new token route and retain progress.
+    pub(super) fn replace_reset(
+        &mut self,
+        registration: &Registration,
+        now: u64,
+    ) -> Option<(String, Live)> {
+        let epoch = registration.activity_epoch?;
+        let host = self.host.as_mut()?;
+        if host.key.starts_with(&format!("{PREFIX}{epoch}/")) {
+            return None;
+        }
+        let (facts, state) = host
+            .running
+            .values()
+            .min_by_key(|(facts, state)| (state.phase != Phase::Question, &facts.pane))?
+            .clone();
+        let old = std::mem::replace(&mut host.key, card_key(registration));
+        let start = Live {
+            pane: facts.pane.clone(),
+            state,
+            event: Event::Start {
+                alert: crate::apns::Alert {
+                    title: facts.computer.clone(),
+                    body: "Open Sheprd for details".into(),
+                },
+                attributes: facts.clone(),
+            },
+        };
+        // The new card has its own ActivityKit token and pacing window.
+        self.pacer = Pacer::default();
+        let replacement = host.step(&start, facts, true);
+        self.pacer.offer(replacement, now).map(|live| (old, live))
     }
 
     pub(super) fn due(&mut self, now: u64) -> Vec<Live> {
@@ -147,7 +194,7 @@ impl Host {
         }
     }
 
-    fn step(&mut self, live: &Live, facts: Attributes, fresh: bool, now: u64) -> Live {
+    fn step(&mut self, live: &Live, facts: Attributes, fresh: bool) -> Live {
         let ended = matches!(live.event, Event::End { .. });
         let progress = live.state.detail.agents.as_ref();
         let previous = self
@@ -216,9 +263,7 @@ impl Host {
                 attributes,
             }
         } else if self.running.is_empty() {
-            Event::End {
-                dismissal_s: now / 1000,
-            }
+            live.event.clone()
         } else {
             let alert = match &live.event {
                 Event::Update { alert } => alert.clone(),

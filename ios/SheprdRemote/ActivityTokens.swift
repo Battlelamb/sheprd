@@ -55,6 +55,11 @@ final class ActivityTokens {
     /// token or the push relay setting changed still gets them.
     private(set) var unreached: Set<Fingerprint> = []
     let pushRelay = PushRelayAccess()
+    private static let epochKey = "liveActivityResetEpoch"
+    private var activityEpoch: UUID? {
+        UserDefaults.standard.string(forKey: Self.epochKey).flatMap(UUID.init(uuidString:))
+    }
+
     private let sessions: Sessions
     private var started = false
     /// Each computer's sync running or last queued; the next for that
@@ -139,7 +144,8 @@ final class ActivityTokens {
         // Sealed attributes open only with the key of the computer they
         // name; one no key opens shows the cover, and its token goes nowhere.
         guard let facts = activity.attributes.facts(keys: NotifyKey.activityKeys()) else { return }
-        if facts.namesChat, LiveActivityStyleSetting.current.asksGeneric {
+        if ActivityGrouping.isRetiredHostCard(facts.pane, since: activityEpoch)
+            || (facts.namesChat && LiveActivityStyleSetting.current.asksGeneric) {
             let id = activity.id
             Task { await Self.end(id) }
             return
@@ -191,7 +197,11 @@ final class ActivityTokens {
         if generic {
             for id in Activity<ChatActivityAttributes>.activities.map(\.id) {
                 await Self.end(id)
+                running[id] = nil
             }
+            // A missing token also occurs during a normal push-to-start.
+            // Explicitly invalidate old host cards, including on offline hosts.
+            UserDefaults.standard.set(UUID().uuidString, forKey: Self.epochKey)
         }
         await sync()
     }
@@ -283,7 +293,7 @@ final class ActivityTokens {
             let session = try await sessions.session(for: computer, fallback: relay)
             guard PushRelaySetting.isOn == viaPushRelay else { return changed }
             guard computers.contains(where: { $0.fingerprint == fingerprint }) else { return forgotten }
-            let answer = try await session.client.registerAPNs(registration, singleActivity: ActivityGrouping.single(for: fingerprint), bearer: session.token)
+            let answer = try await session.client.registerAPNs(registration, singleActivity: ActivityGrouping.single(for: fingerprint), epoch: activityEpoch, bearer: session.token)
             unreached.remove(computer.fingerprint)
             delivery[computer.fingerprint] = switch answer.delivery {
             case .pushRelay: .pushRelay

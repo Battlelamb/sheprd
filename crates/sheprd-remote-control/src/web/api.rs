@@ -507,6 +507,7 @@ pub(super) async fn start_chat(
 pub(super) struct ActivityMode {
     #[serde(default)]
     single: bool,
+    epoch: Option<uuid::Uuid>,
 }
 
 /// The iOS companion's Live Activity tokens or push relay handles: the
@@ -532,6 +533,7 @@ pub(super) async fn register_apns(
         );
         stored.apply(update);
         stored.single_activity = mode.single;
+        stored.activity_epoch = mode.epoch;
         let value = stored
             .to_stored()
             .map_err(|_| ApiError::Invalid("that registration cannot be stored"))?;

@@ -7,6 +7,7 @@ public enum AgentMark {
     /// `agent`'s logo, or `generic` for one without its own.
     public static func named(_ agent: String?) -> String {
         let name = (agent ?? "").lowercased()
+        if name.contains("antigravity") { return "agy" }
         return all.first { name.contains($0) } ?? "generic"
     }
 }

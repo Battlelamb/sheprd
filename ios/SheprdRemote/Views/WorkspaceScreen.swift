@@ -57,13 +57,12 @@ struct WorkspaceScreen: View {
     private func content(_ machine: Fleet.Machine, _ workspace: Home.Workspace) -> some View {
         let chats = model.fleet.chatItems.filter { $0.computer.device == key.device && $0.workspace.id == key.workspace }
         let terminals = model.fleet.terminalItems.filter { $0.computer.device == key.device && $0.workspace.id == key.workspace }
-        let repository = machine.home?.repositories.first { $0.workspaces.contains { $0.id == key.workspace } }
         // The chat answered last knows best what the workspace is about.
         let namer = chats.filter { $0.chat.summary?.connected == true }
             .max { ($0.lastAnswer ?? .distantPast) < ($1.lastAnswer ?? .distantPast) }
         return endingDialogs(List {
             Section {
-                Summary(workspace: workspace, place: repository?.label ?? workspace.cwd)
+                Summary(workspace: workspace)
                 NavigationLink {
                     ComputerScreen(device: key.device).makesRoomForConnectionToast()
                 } label: {
@@ -633,10 +632,9 @@ private struct EndProblem: Identifiable {
     let changes: Int
 }
 
-/// The workspace's branch, and where it is.
+/// The project, with the checkout shown beneath it.
 private struct Summary: View {
     var workspace: Home.Workspace
-    var place: String
 
     var body: some View {
         HStack(spacing: 12) {
@@ -644,9 +642,11 @@ private struct Summary: View {
                 .foregroundStyle(.tint)
                 .frame(width: 28, height: 28).background(.tint.opacity(0.15), in: .rect(cornerRadius: 28 * 0.28))
             VStack(alignment: .leading, spacing: 2) {
-                Text(workspace.branch ?? workspace.label)
-                    .font(.body.monospaced()).lineLimit(1).truncationMode(.middle)
-                Text(place).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                Text(workspace.repositoryName).font(.body).lineLimit(1)
+                if let checkout = workspace.checkoutSubtitle {
+                    Text(checkout).font(.subheadline.monospaced()).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
             }
         }
     }

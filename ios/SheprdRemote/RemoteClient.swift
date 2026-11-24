@@ -209,6 +209,12 @@ final class RemoteClient: Sendable {
         try await send("GET", "/api/v2/new", bearer: bearer)
     }
 
+    func createProject(_ project: NewProjectRequest, bearer: String) async throws -> String {
+        struct Answer: Decodable { let path: String }
+        let answer: Answer = try await send("POST", "/api/v2/projects", body: project, bearer: bearer, timeout: 260)
+        return answer.path
+    }
+
     /// Creating waits up to ten seconds for the chat's program to report in.
     func createWorkspace(_ request: NewWorkspaceRequest, bearer: String) async throws -> Created {
         try await send("POST", "/api/v2/workspaces", body: request, bearer: bearer, timeout: 30)

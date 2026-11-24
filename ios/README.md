@@ -15,6 +15,7 @@ The native app for Sheprd's remote control (`docs/ios-app-plan.md`).
   paired computer, merged into one list, with what needs you first. Agent and worktree labels appear together on each row. Agents manage them with `sheprd labels` on the host.
 - **What you can do:** answer questions in place, open a chat or a terminal,
   and send prompts.
+- **New project:** In Workspaces, open the computer’s ⋯ menu and choose **New Project**. Create an empty Git repository or clone one, select a parent folder on that computer, and open the first workspace there.
 - **Chat text:** an agent's replies are Markdown with the desktop's text sizes
   (`:big[…]` and the other steps) and message effects (`:::slam` bubbles,
   invisible ink revealed by a tap, and `::confetti` and the other screen

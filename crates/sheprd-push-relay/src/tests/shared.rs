@@ -187,3 +187,23 @@ async fn replacement_keeps_a_quiet_hosts_question_and_restored_finish_counts_onc
     assert_eq!(state["done"], 1);
     assert_eq!(state["waiting"], 1);
 }
+
+#[tokio::test]
+async fn a_second_question_from_one_host_alerts_even_if_the_resolution_was_paced() {
+    let f = fixture();
+    let host = scoped(GROUP, &"a".repeat(32), "push_to_start", 1);
+    let question = |revision, question_revision| {
+        let mut r = report(revision, false, true);
+        r["question_revision"] = json!(question_revision);
+        r
+    };
+    send(&f, &host, question(1, 101u64)).await;
+    let start = last(&f);
+    let nonce = start["attributes"]["shared"]["card"].as_str().unwrap();
+    send(&f, &scoped(GROUP, nonce, "activity", 3), json!({})).await;
+    assert!(last(&f)["alert"].is_null());
+    send(&f, &host, question(2, 102)).await;
+    assert!(last(&f)["alert"].is_object());
+    send(&f, &host, question(3, 102)).await;
+    assert!(last(&f)["alert"].is_null());
+}

@@ -241,3 +241,32 @@ fn a_restart_with_only_the_relay_recipient_can_deliver_the_first_finish() {
     assert!(matches!(report.event, Event::End { .. }));
     assert_eq!(report.state.detail.agents.unwrap().done, 1);
 }
+
+#[test]
+fn redacted_host_reports_distinguish_consecutive_questions_without_naming_them() {
+    let reg = Registration {
+        single_activity: true,
+        ..Default::default()
+    };
+    let mut cards = host::Cards::default();
+    let mut live = start("pane");
+    live.state.phase = Phase::Question;
+    live.state.permission = Some(42);
+    let mut report = |live: &Live, now| {
+        cards
+            .offer(live, &reg, || None, now)
+            .unwrap()
+            .redacted(
+                crate::push::Privacy::Generic,
+                crate::app::config::ActivityDetail::Generic,
+            )
+            .state
+    };
+    let first = report(&live, 1);
+    assert!(first.permission.is_none());
+    let revision = first.detail.question_revision.unwrap();
+    live.event = Event::Update { alert: None };
+    assert_eq!(report(&live, 2).detail.question_revision, Some(revision));
+    live.state.permission = Some(43);
+    assert_ne!(report(&live, 3).detail.question_revision.unwrap(), revision);
+}

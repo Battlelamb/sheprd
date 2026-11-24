@@ -588,7 +588,8 @@ host-card snapshots to `POST /v1/push` using that recipient for every event.
 The sealed handle extends `push_to_start` with a random 128-bit phone
 generation (`group`) and a generation-specific pairing pseudonym (`slot`).
 The report contains a random-card digest, increasing host revision, finish
-and question flags, working, waiting, done and total counts, encrypted state, and an optional
+and question flags, an opaque revision for the focused question, working,
+waiting, done and total counts, encrypted state, and an optional
 encrypted completion label. Each pairing retains its own notify key. The
 relay can correlate opted-in slots and see progress and timing. Computer
 identities, pane routes, questions, options, and labels stay inside seals.

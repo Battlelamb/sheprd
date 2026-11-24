@@ -73,6 +73,7 @@ impl Live {
                     "restored": live.pane.rsplit('/').next().is_some_and(|s| s.starts_with("restored-")),
                     "working": live.state.working, "waiting": live.state.waiting,
                     "question": live.state.phase == super::Phase::Question,
+                    "question_revision": live.state.detail.question_revision,
                     "done": agents.map_or(usize::from(end), |p| p.done),
                     "total": agents.map_or(1, |p| p.total),
                     "state": sealed_field(sealer, &live.state)?, "latest": latest

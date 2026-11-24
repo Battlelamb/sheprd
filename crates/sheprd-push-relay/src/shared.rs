@@ -57,6 +57,9 @@ struct Report {
     restored: bool,
     end: bool,
     question: bool,
+    question_revision: Option<u64>,
+    #[serde(skip)]
+    alerted: bool,
     working: u32,
     waiting: u32,
     done: u32,
@@ -77,7 +80,6 @@ pub(crate) struct Card {
     started: bool,
     token_gone: bool,
     dirty: bool,
-    alerted: Option<String>,
     timestamp: u64,
     arrival: u64,
     pub(crate) token: Option<SecretString>,
@@ -113,6 +115,13 @@ impl Card {
             self.retire();
         }
         let previous = self.reports.get(slot);
+        r.alerted = r.question
+            && previous.is_some_and(|old| {
+                old.alerted
+                    && old.run == r.run
+                    && old.question
+                    && old.question_revision == r.question_revision
+            });
         if let Some(previous) = previous.filter(|p| p.run != r.run) {
             // A restarted daemon can only reconstruct currently observable
             // panes. Credit earlier completions missing from its new snapshot.
@@ -218,7 +227,7 @@ impl Card {
                 .collect();
             aps["attributes"] = json!({"shared":{"group":marker,"card":self.nonce}});
         }
-        if start || (focus.question && self.alerted.as_ref() != Some(slot)) {
+        if start || (focus.question && !focus.alerted) {
             aps["alert"] = json!({"title":"Sheprd","body":"New activity"});
         }
         if event == "end" {
@@ -241,12 +250,14 @@ impl Card {
     }
 
     pub(crate) fn delivered(&mut self, start: bool) {
-        self.alerted = self
+        if let Some(focus) = self
             .reports
-            .iter()
-            .filter(|(_, r)| !r.end && r.question)
-            .max_by_key(|(_, r)| r.arrival)
-            .map(|(slot, _)| slot.clone());
+            .values_mut()
+            .filter(|r| !r.end && r.question)
+            .max_by_key(|r| r.arrival)
+        {
+            focus.alerted = true;
+        }
         self.dirty = false;
         self.started = true;
         if !start && self.ended() {

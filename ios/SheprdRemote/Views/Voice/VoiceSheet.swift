@@ -12,6 +12,10 @@ struct VoiceSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            if let reason = session.speechError {
+                Label("Couldn’t speak aloud. \(reason)", systemImage: "speaker.slash")
+                    .font(.callout)
+            }
             content
         }
         .padding(20)

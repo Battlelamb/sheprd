@@ -58,6 +58,7 @@ struct PairView: View {
                 }
             }
         }
+        .onDisappear { pairing.cancel() }
     }
 
     private var scan: some View {

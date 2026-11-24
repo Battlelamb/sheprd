@@ -39,13 +39,6 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate {
         Task { @MainActor in if self.ownsAudio || self.download != nil { self.stop() } }
     }
 
-    @discardableResult
-    func say(_ words: String, always: Bool = false) async -> Bool {
-        guard always || VoiceSettings.speaks else { return false }
-        do { return try await play(words, account: SpeechAccount.load()) }
-        catch { return false }
-    }
-
     func play(_ words: String, account: SpeechAccount?) async throws -> Bool {
         stop()
         let generation = self.generation
@@ -64,7 +57,11 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate {
             defer { http.invalidateAndCancel() }
             let task = Task { try await stream.play(request, session: http) }
             download = task
-            try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            do {
+                try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            } catch where self.generation != generation || task.isCancelled {
+                return false
+            }
             return self.generation == generation
         }
         try activateOutput()

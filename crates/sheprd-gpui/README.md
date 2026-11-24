@@ -1296,7 +1296,11 @@ memory** in Settings > Status bar, shows the selected host's in the status bar;
 Sidebar, shows each host's on a sidebar line under its CPU and memory (layouts
 with detail lines; compact ones add a GPU gauge after the host's name). While
 either is on, the Overview and Devices pages show GPU and VRAM too. `[status_bar]
-gpu_detail = "compact"` shows the shares without the graph and meter. NVIDIA
+gpu_detail = "compact"` shows the shares without the graph and meter. In the
+Moonframe window, the sidebar shows each host's shares beside its name (CPU, memory, GPU, video memory); top-level
+`sidebar_load = "detailed"`, or **Host load** in Settings > Sidebar, gives the
+load lines of its own under the name instead: CPU with its graph and memory with
+its meter, then the GPU with its graph and video memory. NVIDIA
 cards are read with `nvidia-smi`, AMD cards from the `amdgpu` driver's sysfs
 files, and Apple GPUs with `ioreg`, which reports no video memory because it
 is shared; Intel GPUs report no usage without root and are left out. A remote

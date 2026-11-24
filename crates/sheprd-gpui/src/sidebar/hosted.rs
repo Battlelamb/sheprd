@@ -13,7 +13,7 @@ use super::{
     agents::{listed::Listed, status_style, status_text},
     layout::{HeaderCase, Highlight},
 };
-use crate::{config::Theme, preferences::AgentSort, system_load::Sample, window::SheprdWindow};
+use crate::{config::Theme, preferences::AgentSort, window::SheprdWindow};
 use gpui::App;
 use serde_json::{Value, json};
 use sheprd_client::protocol::{AgentStatus, ClientShellSnapshot};
@@ -94,6 +94,8 @@ pub struct Stamp {
     snapshot: Option<Arc<ClientShellSnapshot>>,
     /// The status bar's connection message; see `connection_message`.
     status: Option<String>,
+    /// Which of the status bar's buttons show, and how.
+    status_bar: crate::config::status_bar::StatusBar,
     status_bar_visible: bool,
     theme: u32,
 }
@@ -123,6 +125,7 @@ impl PartialEq for Stamp {
             && self.section == other.section
             && self.sidebar_visible == other.sidebar_visible
             && self.status == other.status
+            && self.status_bar == other.status_bar
             && self.status_bar_visible == other.status_bar_visible
             && self.theme == other.theme
     }
@@ -271,13 +274,6 @@ fn build_state() -> Value {
     })
 }
 
-fn load_state(sample: Option<&Sample>) -> Value {
-    json!({
-        "cpu": sample.and_then(|sample| sample.cpu),
-        "memory": sample.and_then(|sample| sample.memory).map(|memory| memory.percent()),
-    })
-}
-
 impl SheprdWindow {
     /// Whether a host's state may have changed; see [`Stamp`].
     pub(crate) fn hosted_stamp(&self) -> Stamp {
@@ -300,6 +296,7 @@ impl SheprdWindow {
             sidebar_visible: self.sidebar_visible,
             snapshot: self.live.snapshot.clone(),
             status: self.connection_message(),
+            status_bar: self.config.status_bar,
             status_bar_visible: self.status_bar_visible,
             theme: self.theme.background,
         }
@@ -417,6 +414,12 @@ impl SheprdWindow {
                 "sidebar_visible": self.sidebar_visible,
                 // The classic status bar's message, absent when it shows none.
                 "status": self.connection_message(),
+                // The Theme and Commands buttons: `label`, `icon` or `hidden`,
+                // as `[status_bar] theme` and `shortcuts` set them.
+                "status_bar": {
+                    "commands": self.config.status_bar.shortcuts.name(),
+                    "theme": self.config.status_bar.theme.name(),
+                },
                 "status_bar_visible": self.status_bar_visible,
                 "usage": self.hosted_usage(),
             "workspaces": self.hosted_workspaces(cx),

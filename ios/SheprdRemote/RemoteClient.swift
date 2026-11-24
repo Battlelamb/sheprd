@@ -209,6 +209,12 @@ final class RemoteClient: Sendable {
         try await send("GET", "/api/v2/new", bearer: bearer)
     }
 
+    func createProject(_ project: NewProjectRequest, bearer: String) async throws -> String {
+        struct Answer: Decodable { let path: String }
+        let answer: Answer = try await send("POST", "/api/v2/projects", body: project, bearer: bearer, timeout: 260)
+        return answer.path
+    }
+
     /// Creating waits up to ten seconds for the chat's program to report in.
     func createWorkspace(_ request: NewWorkspaceRequest, bearer: String) async throws -> Created {
         try await send("POST", "/api/v2/workspaces", body: request, bearer: bearer, timeout: 30)
@@ -560,8 +566,12 @@ final class RemoteClient: Sendable {
         )
     }
 
-    func registerAPNs(_ registration: API.APNsRegistration, bearer: String) async throws -> API.APNsAnswer {
-        try await send("POST", "/api/apns", body: registration, bearer: bearer)
+    func registerAPNs(_ registration: API.APNsRegistration, singleActivity: Bool, epoch: UUID?, bearer: String) async throws -> API.APNsAnswer {
+        // Older computers ignore the query and continue accepting all the tokens.
+        var query = singleActivity ? ["single=true"] : []
+        if let epoch { query.append("epoch=" + epoch.uuidString) }
+        let path = query.isEmpty ? "/api/apns" : "/api/apns?" + query.joined(separator: "&")
+        return try await send("POST", path, body: registration, bearer: bearer)
     }
 
     /// Asks the computer to send this phone a sealed test alert carrying `id`.

@@ -203,6 +203,12 @@ pub(super) const CATALOG: &[Entry] = &[
     ),
     entry(
         Section::Sidebar,
+        "sidebar-load",
+        "settings-sidebar-load",
+        "settings-sidebar-load-description",
+    ),
+    entry(
+        Section::Sidebar,
         "sidebar-indent",
         "settings-sidebar-indent",
         "settings-sidebar-indent-description",

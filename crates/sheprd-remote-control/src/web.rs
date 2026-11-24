@@ -128,6 +128,7 @@ pub(crate) struct State {
     pub(crate) push: Option<Sender>,
     /// How the last APNs push of each kind went.
     pub(crate) pushes: crate::apns::Ledger,
+    pub(crate) launches: crate::server::live::Launches,
     /// The relays this computer listens on, when any are set.
     pub(crate) relay: Option<Arc<crate::relay::Relays>>,
     /// How often each address may write a phone's error to the log.

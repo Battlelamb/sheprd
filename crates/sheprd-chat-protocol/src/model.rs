@@ -43,6 +43,9 @@ pub struct Transcript {
     /// Prompts another agent wrote, oldest first (revision 4).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub briefs: Vec<crate::Brief>,
+    /// Parent turn for the initial agent-authored brief.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation: Option<crate::brief::DelegatedTask>,
     /// How many attached clients watch, not counting the program's own view.
     #[serde(default)]
     pub clients: u32,

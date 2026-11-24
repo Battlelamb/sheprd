@@ -315,6 +315,7 @@ struct CreatingSheet: View {
 
     var body: some View {
         switch creating {
+        case let .project(device): NewProjectSheet(device: device)
         case let .workspace(device, folder, session): NewWorkspaceSheet(device: device, folder: folder, session: session)
         case let .chat(device, workspace, label, agent): NewChatSheet(device: device, workspace: workspace, label: label, agent: agent)
         }

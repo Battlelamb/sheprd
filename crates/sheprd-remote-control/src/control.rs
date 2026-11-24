@@ -340,6 +340,13 @@ pub enum Request {
     /// went (`push`). Read-only, and it names no token, handle, or device.
     /// An older daemon closes without answering.
     PushStatus,
+    /// Reserve a delegated chat on its coordinating Live Activity before its
+    /// tab opens. An absent label withdraws a launch that failed.
+    DelegatedLaunch {
+        owner: sheprd_chat_protocol::brief::Delegation,
+        child: sheprd_chat_protocol::EndpointId,
+        label: Option<String>,
+    },
     /// Sends each phone registered for alerts one sealed test alert now,
     /// through the push relay, as the phone's own Send Test Push does, and
     /// answers what came of each, within [`ASK_WAIT`]. An older daemon

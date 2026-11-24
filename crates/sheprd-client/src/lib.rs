@@ -116,7 +116,7 @@ pub use surface_images::{
 pub use terminal_attach::TerminalAttach;
 pub use transport::Stream;
 #[cfg(windows)]
-pub use transport::pipe_available;
+pub use transport::{overlapped_output, pipe_available};
 pub use upload::{
     remove_uploaded_files, remove_uploaded_files_with, upload_files, upload_files_with,
 };

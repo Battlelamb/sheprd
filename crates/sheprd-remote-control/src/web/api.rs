@@ -501,10 +501,20 @@ pub(super) async fn start_chat(
     Ok(Json(json!({ "location": location })))
 }
 
+/// Older phones register per-pane cards. A phone that supports host cards
+/// opts in without changing the registration body accepted by older hosts.
+#[derive(Deserialize)]
+pub(super) struct ActivityMode {
+    #[serde(default)]
+    single: bool,
+    epoch: Option<uuid::Uuid>,
+}
+
 /// The iOS companion's Live Activity tokens or push relay handles: the
 /// push-to-start token when it changed, and every activity it still shows.
 /// The answer names the delivery, `push_relay`, the only one there is.
 pub(super) async fn register_apns(
+    axum::extract::Query(mode): axum::extract::Query<ActivityMode>,
     State(state): State<Shared>,
     Device(device): Device,
     body: axum::body::Bytes,
@@ -522,6 +532,8 @@ pub(super) async fn register_apns(
             devices.get(&device).and_then(|record| record.apns.as_ref()),
         );
         stored.apply(update);
+        stored.single_activity = mode.single;
+        stored.activity_epoch = mode.epoch;
         let value = stored
             .to_stored()
             .map_err(|_| ApiError::Invalid("that registration cannot be stored"))?;

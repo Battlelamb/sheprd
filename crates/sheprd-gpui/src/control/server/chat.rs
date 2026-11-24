@@ -287,6 +287,24 @@ pub(super) fn serve_parked(
         ));
         return;
     }
+    let parent = callers_pane(&caller).and_then(|key| {
+        let handle = super::window_for(&caller, cx).ok()?;
+        handle
+            .read_with(cx, |view, _| {
+                let pane = view.chats.pane(&key)?;
+                let transcript = pane.session.transcript();
+                let turn = transcript.turn?;
+                Some(transcript.delegated_brief().map_or_else(
+                    || sheprd_chat_protocol::brief::Delegation {
+                        endpoint: pane.target.endpoint.clone(),
+                        started_ms: turn.started_ms,
+                    },
+                    |(root, _)| root.clone(),
+                ))
+            })
+            .ok()
+            .flatten()
+    });
     let written = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot = written.clone();
     let task = cx.background_executor().spawn(async move {
@@ -296,7 +314,13 @@ pub(super) fn serve_parked(
         {
             return Err(crate::chat::brief::Error::Unsupported);
         }
-        Brief::write(&prompt, None)
+        let mut brief = Brief::write(&prompt, None)?;
+        brief.parent = parent;
+        if let Some(owner) = &brief.parent {
+            let task = sheprd_chat_protocol::brief::DelegatedTask::new(owner.clone(), &prompt);
+            brief.report_launch(Some(task.label));
+        }
+        Ok(brief)
     });
     cx.spawn(async move |cx| {
         let result = task.await;

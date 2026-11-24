@@ -9,6 +9,7 @@ struct NotificationSettingsView: View {
     @Environment(AppModel.self) private var model
     @AppStorage(LiveActivityStyleSetting.key, store: LiveActivityStyleSetting.store)
     private var style = LiveActivityStyle.standardChoice.rawValue
+    @AppStorage(ActivityGrouping.defaultKey) private var defaultMultiple = false
     @State private var showingStyle = false
 
     var body: some View {
@@ -28,6 +29,16 @@ struct NotificationSettingsView: View {
                 if !ActivityAuthorizationInfo().areActivitiesEnabled {
                     Label("Live Activities are off for Sheprd. Turn them on in Settings.", systemImage: "exclamationmark.triangle")
                 }
+                Picker("Default grouping", selection: $defaultMultiple) {
+                    Text("One per host").tag(false)
+                    Text("One per agent").tag(true)
+                }
+                .onChange(of: defaultMultiple) {
+                    Task { await model.tokens.sync() }
+                }
+                ForEach(model.shownComputers) { computer in
+                    ActivityGroupingPicker(computer: computer, label: model.displayName(computer))
+                }
                 NavigationLink {
                     LiveActivityStyleView().makesRoomForConnectionToast()
                 } label: {
@@ -44,7 +55,7 @@ struct NotificationSettingsView: View {
             } header: {
                 Text("Live Activities")
             } footer: {
-                Text("Style picks how much an activity shows, from Private, which keeps the chat's name and steps off this phone, to Geek. A computer can also keep its activities generic in Sheprd's Remote control settings. Start Test Activity has this phone start one on itself through the push relay, as a computer does, in the chosen style.")
+                Text("One per host combines work across all worktrees on that computer. One per agent gives each independent chat or terminal agent its own activity. Delegated workers count toward their coordinator’s progress. Changes apply to new activities. The Private style hides chat names and steps. A computer can also limit detail in its Remote control settings.")
             }
             Section {
                 TestPushRow().agentHighlight(.testPush)
@@ -58,6 +69,31 @@ struct NotificationSettingsView: View {
         .navigationDestination(isPresented: $showingStyle) { LiveActivityStyleView().makesRoomForConnectionToast() }
         // The simulator loop's `-openLiveActivityStyle YES`.
         .task { if UserDefaults.standard.bool(forKey: "openLiveActivityStyle") { showingStyle = true } }
+    }
+}
+
+/// Both settings pages edit the same preference for this computer's identity.
+struct ActivityGroupingPicker: View {
+    @Environment(AppModel.self) private var model
+    @AppStorage private var multiple: Bool?
+    let computer: Computer
+    let label: String
+
+    init(computer: Computer, label: String) {
+        self.computer = computer
+        self.label = label
+        _multiple = AppStorage(ActivityGrouping.key(for: computer.fingerprint))
+    }
+
+    var body: some View {
+        Picker(label, selection: $multiple) {
+            Text("Use default").tag(nil as Bool?)
+            Text("One per host").tag(false as Bool?)
+            Text("One per agent").tag(true as Bool?)
+        }
+        .onChange(of: multiple) {
+            Task { await model.tokens.sync(only: computer.fingerprint) }
+        }
     }
 }
 

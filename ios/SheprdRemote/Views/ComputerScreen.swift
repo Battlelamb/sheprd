@@ -94,6 +94,7 @@ struct ComputerScreen: View {
                     get: { computer.presence },
                     set: { model.setPresence($0, for: computer) }
                 ))
+                ActivityGroupingPicker(computer: computer, label: "Live Activities")
                 LabeledContent("Push", value: PushRelaySection.label(
                     model.tokens.delivery[computer.fingerprint],
                     reached: !model.tokens.unreached.contains(computer.fingerprint),

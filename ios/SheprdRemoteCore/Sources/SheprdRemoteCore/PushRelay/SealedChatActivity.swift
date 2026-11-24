@@ -68,6 +68,17 @@ public enum SealedChatActivity {
     public struct Opened: Equatable, Sendable {
         public let facts: ChatActivityFacts
         public let state: ChatActivityState
+
+        // Only the computer authenticated by the fixed attributes can supply
+        // a new pane for its host card. Token registration always uses facts().
+        init(facts: ChatActivityFacts, state: ChatActivityState) {
+            if let focus = state.focus, focus.computerId == facts.computerId {
+                self.facts = focus
+            } else {
+                self.facts = facts
+            }
+            self.state = state
+        }
     }
 
     /// The attributes alone, for routing an activity's token: sealed ones

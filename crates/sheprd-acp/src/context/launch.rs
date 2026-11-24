@@ -59,6 +59,9 @@ pub(super) fn guide(sheprd: &Path, agent: &str, running: &Running) -> String {
          with the id of a pane in it. With no agent named, that starts {agent} with this \
          chat's model, thinking, and permission mode. Name another agent \
          (`{sheprd} chat new codex --pane PANE`) only when asked to, and do not run an \
-         agent's terminal command there instead.\n"
+         agent's terminal command there instead. For delegated work, pass --prompt or \
+         --prompt-file with a short, distinct task name on the first line. This groups those \
+         agents on your turn's iOS Live Activity. Give native sub-agents distinct task names \
+         too, so the person can tell which one finished.\n"
     )
 }

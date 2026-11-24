@@ -13,6 +13,10 @@ use tokio::io::join;
 /// How long reaching one relay and dialing through it may take before the
 /// next is tried.
 const ATTEMPT: Duration = Duration::from_secs(10);
+/// A relay can briefly have no room for another session while an earlier SSH
+/// channel is closing. Retrying the dial on the same connection avoids turning
+/// that transient relay response into an SSH failure.
+const DIAL_RETRY: Duration = Duration::from_millis(100);
 
 /// How long the machine's last bytes may take once `ssh` closed its side.
 /// `ssh` closes it only as it exits, and the machine may never close its
@@ -112,7 +116,7 @@ pub(crate) async fn open_record(
         };
         let attempt = async {
             let connection = client::reach(&endpoint).await?;
-            let halves = client::dial(&connection, route, &keys.dial).await?;
+            let halves = dial(&connection, route, &keys.dial).await?;
             Ok::<_, client::Error>((connection, halves))
         };
         let (connection, (send, recv)) = match tokio::time::timeout(ATTEMPT, attempt).await {
@@ -136,10 +140,40 @@ pub(crate) async fn open_record(
     Err(failure)
 }
 
+/// Dial until the relay accepts the session or the caller's attempt deadline
+/// expires. `Busy` and `Timeout` mean the route was found but could not accept
+/// this particular stream yet; all other responses are durable failures and
+/// should move on to the next relay immediately.
+async fn dial(
+    connection: &quinn::Connection,
+    route: RouteId,
+    key: &p256::ecdsa::SigningKey,
+) -> Result<(quinn::SendStream, quinn::RecvStream), client::Error> {
+    loop {
+        match client::dial(connection, route, key).await {
+            Ok(halves) => return Ok(halves),
+            Err(error) if retryable(&error) => {
+                tokio::time::sleep(DIAL_RETRY).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+fn retryable(error: &client::Error) -> bool {
+    matches!(
+        error,
+        client::Error::Refused(
+            sheprd_relay::wire::Status::Busy | sheprd_relay::wire::Status::Timeout
+        )
+    )
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::splice;
+    use super::{retryable, splice};
+    use sheprd_relay::client;
     use std::time::Duration;
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
@@ -172,5 +206,18 @@ mod tests {
         let mut seen = Vec::new();
         read.read_to_end(&mut seen).await.unwrap();
         assert_eq!(seen, b"last");
+    }
+
+    #[test]
+    fn only_transient_relay_refusals_are_retried() {
+        for status in [
+            sheprd_relay::wire::Status::Busy,
+            sheprd_relay::wire::Status::Timeout,
+        ] {
+            assert!(retryable(&client::Error::Refused(status)));
+        }
+        assert!(!retryable(&client::Error::Refused(
+            sheprd_relay::wire::Status::Offline
+        )));
     }
 }

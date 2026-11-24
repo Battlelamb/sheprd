@@ -783,7 +783,8 @@ start that fails deletes it too.
 On iOS, a chat and its delegated workers share a progress count. By default
 all concurrent work on a computer shares one Live Activity. In Settings >
 Notifications > Live Activities, choose **One per host** to combine work
-across that host’s worktrees, or **One per agent** to show each independent
+across that host’s worktrees, **One for all hosts** to combine work across
+paired computers through the push relay, or **One per agent** to show each independent
 chat or terminal agent on its own card. You can set a phone-wide default
 and override it for individual hosts.
 It counts native subagents and local chats started with a brief, including

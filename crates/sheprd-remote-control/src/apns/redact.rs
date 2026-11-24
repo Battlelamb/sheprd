@@ -59,6 +59,7 @@ impl Live {
             focus
         });
         state.detail = Detail {
+            question_revision: state.detail.question_revision,
             focus,
             agents: state.detail.agents.take(),
             ..Detail::default()

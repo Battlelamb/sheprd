@@ -30,8 +30,12 @@ final class ActivityGroupingTests: XCTestCase {
         XCTAssertTrue(grouping.label.hasSuffix("One per agent"))
         XCTAssertTrue(studio.label.hasSuffix("One per host"))
         XCTAssertTrue(laptop.label.hasSuffix("Use default"))
+        choose("One for all hosts", on: grouping)
+        XCTAssertTrue(grouping.label.hasSuffix("One for all hosts"))
+        XCTAssertTrue(studio.label.hasSuffix("One per host"))
+        XCTAssertTrue(laptop.label.hasSuffix("Use default"))
         let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "Per-agent default with a per-host override"
+        shot.name = "One activity for all hosts with a per-host override"
         shot.lifetime = .keepAlways
         add(shot)
         choose("Use default", on: studio)

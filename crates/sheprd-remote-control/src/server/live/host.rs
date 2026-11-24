@@ -8,6 +8,7 @@ use sheprd_chat_protocol::EndpointId;
 use std::collections::{HashMap, HashSet};
 
 const PREFIX: &str = "host-activity/";
+pub(super) const SHARED_RECIPIENT: &str = "relay/all-hosts";
 
 /// The optional epoch comes from the phone and survives an offline reset.
 fn card_prefix(registration: &Registration) -> String {
@@ -49,15 +50,22 @@ impl Cards {
             return;
         }
         let prefix = card_prefix(registration);
-        if let Some(token) = registration
+        let existing = registration
             .activities
             .iter()
-            .find(|a| a.pane.starts_with(&prefix))
-        {
-            let mut host = Host::new(token.pane.clone());
+            .find(|a| a.pane.starts_with(&prefix));
+        let restored = existing.map(|a| a.pane.clone()).or_else(|| {
+            // The phone binds a fleet card's token directly to the relay.
+            // Its reserved recipient is enough to reconstruct this host.
+            registration
+                .activity(SHARED_RECIPIENT)
+                .map(|_| format!("{prefix}restored-{}", EndpointId::random()))
+        });
+        if let Some(key) = restored {
+            let mut host = Host::new(key);
             for (facts, state) in active() {
                 if registration.activity(&facts.pane).is_none() {
-                    host.running.insert(facts.pane.clone(), (facts, state));
+                    host.remember(facts, state, false);
                 }
             }
             self.host = Some(host);
@@ -93,7 +101,7 @@ impl Cards {
             }
             return Some(live.clone());
         }
-        if !start && !tracked && self.host.is_none() {
+        if !start && !tracked && (end || self.host.is_none()) {
             return None;
         }
         let facts = match &live.event {
@@ -194,6 +202,28 @@ impl Host {
         }
     }
 
+    fn remember(&mut self, facts: Attributes, mut state: ContentState, asked: bool) {
+        if state.phase == Phase::Question {
+            let prior = self
+                .running
+                .get(&facts.pane)
+                .map(|(_, state)| state)
+                .filter(|old| {
+                    old.phase == Phase::Question
+                        && (state.permission.is_none() || old.started_at == state.started_at)
+                        && old.permission == state.permission
+                        && old.question == state.question
+                        && (state.permission.is_some() || !asked)
+                })
+                .and_then(|old| old.detail.question_revision);
+            // Generate an opaque revision before redaction. It reveals neither
+            // the permission id nor the text, including in the Private style.
+            state.detail.question_revision =
+                Some(prior.unwrap_or_else(crate::apns::relayed::revision));
+        }
+        self.running.insert(facts.pane.clone(), (facts, state));
+    }
+
     fn step(&mut self, live: &Live, facts: Attributes, fresh: bool) -> Live {
         let ended = matches!(live.event, Event::End { .. });
         let progress = live.state.detail.agents.as_ref();
@@ -223,8 +253,11 @@ impl Host {
                 self.latest = Some(crate::push::excerpt(&format!("{outcome} · {name}")));
             }
         } else {
-            self.running
-                .insert(live.pane.clone(), (facts.clone(), live.state.clone()));
+            let asked = matches!(
+                live.event,
+                Event::Start { .. } | Event::Update { alert: Some(_) }
+            );
+            self.remember(facts.clone(), live.state.clone(), asked);
         }
         // Keep a pending question actionable when a different pane reports
         // ordinary work, and switch away from finished panes when possible.

@@ -10,7 +10,10 @@ struct NotificationSettingsView: View {
     @AppStorage(LiveActivityStyleSetting.key, store: LiveActivityStyleSetting.store)
     private var style = LiveActivityStyle.standardChoice.rawValue
     @AppStorage(ActivityGrouping.defaultKey) private var defaultMultiple = false
+    @AppStorage(ActivityGrouping.allHostsKey) private var allHosts = false
     @State private var showingStyle = false
+
+    private enum Grouping { case host, agent, shared }
 
     var body: some View {
         List {
@@ -29,12 +32,18 @@ struct NotificationSettingsView: View {
                 if !ActivityAuthorizationInfo().areActivitiesEnabled {
                     Label("Live Activities are off for Sheprd. Turn them on in Settings.", systemImage: "exclamationmark.triangle")
                 }
-                Picker("Default grouping", selection: $defaultMultiple) {
-                    Text("One per host").tag(false)
-                    Text("One per agent").tag(true)
-                }
-                .onChange(of: defaultMultiple) {
-                    Task { await model.tokens.sync() }
+                Picker("Default grouping", selection: Binding(
+                    get: { allHosts ? Grouping.shared : (defaultMultiple ? .agent : .host) },
+                    set: { choice in
+                        let changed = allHosts != (choice == .shared)
+                        allHosts = choice == .shared
+                        defaultMultiple = choice == .agent
+                        Task { await model.tokens.groupingChanged(sharedChanged: changed) }
+                    }
+                )) {
+                    Text("One per host").tag(Grouping.host)
+                    Text("One per agent").tag(Grouping.agent)
+                    Text("One for all hosts").tag(Grouping.shared)
                 }
                 ForEach(model.shownComputers) { computer in
                     ActivityGroupingPicker(computer: computer, label: model.displayName(computer))
@@ -55,7 +64,7 @@ struct NotificationSettingsView: View {
             } header: {
                 Text("Live Activities")
             } footer: {
-                Text("One per host combines work across all worktrees on that computer. One per agent gives each independent chat or terminal agent its own activity. Delegated workers count toward their coordinator’s progress. Changes apply to new activities. The Private style hides chat names and steps. A computer can also limit detail in its Remote control settings.")
+                Text("One for all hosts shares a card across computers using the default. One per host combines work across all worktrees on that computer. One per agent gives each independent chat or terminal agent its own activity. Delegated workers count toward their coordinator’s progress. Changes apply to new activities. The Private style hides chat names and steps. A computer can also limit detail in its Remote control settings.")
             }
             Section {
                 TestPushRow().agentHighlight(.testPush)
@@ -91,8 +100,9 @@ struct ActivityGroupingPicker: View {
             Text("One per host").tag(false as Bool?)
             Text("One per agent").tag(true as Bool?)
         }
-        .onChange(of: multiple) {
-            Task { await model.tokens.sync(only: computer.fingerprint) }
+        .onChange(of: multiple) { old, new in
+            let sharedChanged = (old == nil || new == nil) && UserDefaults.standard.bool(forKey: ActivityGrouping.allHostsKey)
+            Task { await model.tokens.groupingChanged(sharedChanged: sharedChanged, affected: computer.fingerprint) }
         }
     }
 }

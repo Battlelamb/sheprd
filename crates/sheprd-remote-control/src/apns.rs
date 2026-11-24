@@ -43,7 +43,7 @@ mod payload;
 pub(crate) mod push_relay_revoke;
 mod recipient;
 mod redact;
-mod relayed;
+pub(crate) mod relayed;
 mod terminal;
 mod tokens;
 

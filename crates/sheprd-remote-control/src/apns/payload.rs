@@ -94,6 +94,9 @@ pub(crate) struct AgentProgress {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Detail {
+    /// Internal host-card metadata, outside the sealed content on shared reports.
+    #[serde(skip)]
+    pub(crate) question_revision: Option<u64>,
     /// The pane currently shown by a combined host activity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) focus: Option<Attributes>,

@@ -6,6 +6,7 @@ fn state(phase: Phase) -> ContentState {
     ContentState {
         detail: Detail {
             focus: None,
+            question_revision: None,
             agents: None,
             activity: Some("Editing secret.rs".to_owned()),
             files: Some(3),

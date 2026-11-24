@@ -228,6 +228,7 @@ fn state(before: &Transcript, phase: Phase, step: Step) -> ContentState {
     edited.dedup();
     let detail = Detail {
         focus: None,
+        question_revision: None,
         agents: None,
         activity: step
             .described

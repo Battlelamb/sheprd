@@ -1080,14 +1080,20 @@ through. B's daemon admits that tunnel key, sees that the device has an
 SSH key, splices the session to its SSH server instead of serving the
 API, and marks the device seen.
 
-**Joining the fleet in the same step** (built). Pairing leaves both
-computers in one fleet, whichever of them was in it (Fleet, Joining):
+**Joining the fleet in the same step** (the protocol is built; Sheprd's
+page no longer uses it). Add Device > Nearby Sheprd only pairs: it claims
+as soon as both screens show the code, with no fleet, so the other
+computer shows Allow at once. Pairing is pairing; joining a fleet is
+Settings > Fleet's, later (Invite on a machine this computer reaches).
+The daemons still carry and check a claim's fleet, as below, for peers
+that send one:
 
 - B names its fleet in the sealed offer while it is a live computer
   member (`fleet::bluetooth::hint`: the id, and its computer and host
   counts for the words, never trusted).
-- Once both screens show the code, A's page knows both fleets and the
-  child waits for its choice (`PairInput::Claim`) before it claims:
+- Once both screens show the code, the child waits for the page's claim
+  (`PairInput::Claim`). Sheprd's page sends it at once with no fleet; a
+  claim with one carries:
 
   | A | B | A's page offers | The claim carries |
   | --- | --- | --- | --- |
@@ -1681,6 +1687,7 @@ that member.
 | --- | --- | --- |
 | A computer, over Bluetooth (#1389, both directions) | On the member, and on the joining computer, because joining makes it a host for everyone | The 6-digit code both screens show |
 | A computer, over SSH, when the member already reaches it | On the member. The SSH session already proves the person controls that account. The joining computer's app then shows "Joined studio's fleet" with Leave. | The strictly checked SSH host key |
+| A computer in no fleet, over SSH, when it reaches a member | On the joining computer: Settings > Fleet shows "studio already has a fleet" with Join. Reaching the member's account over SSH proves the person controls it, as above. The joiner signs its bundle, the member's `fleet admit` admits it (computers only; a phone joins by pairing), and the joiner carries the member's log back with `fleet apply` | The strictly checked SSH host key |
 | A computer, from a phone | On the phone, after Nearby pairing between the phone and the computer: "Add studio to your fleet?", with Face ID | The Bluetooth code |
 | A phone, by QR or Nearby pairing | The pairing dialog's Allow on the computer gains a line, ticked by default: "Also add to your fleet (3 computers, 9 hosts)". The phone shows the same line before it claims. | The QR, or the Bluetooth code |
 
@@ -1696,6 +1703,12 @@ What happens:
 4. Sync spreads `Admit`. Hosts add the joiner's grants, every member
    lists the joiner as a host, and the joiner lists every host. Both
    directions work after one round.
+
+**Many computers at once.** A member's Settings > Fleet counts the
+computers it reaches over SSH that are in no fleet, and Invite all
+invites each in turn, as Invite does one. A computer in no fleet answers
+`fleet apply` with an empty fleet rather than failing, so it is told from
+a machine without Sheprd, and one in another fleet is left out.
 
 **A device in another fleet.** A device belongs to one fleet. When the
 joiner already has one, the dialog names both. Joining means leaving the
@@ -2403,8 +2416,8 @@ manual multi-machine and phone steps left unticked in its QA list.
      through the fleet, its pairing is superseded; a removed member's
      pairings go with it (phase 2).
    - **Bringing existing machines in:** saved devices, cloud machines,
-     and computers paired over Bluetooth show under Machines this Sheprd
-     reaches, to Share or Invite; paired phones join from the phone
+     and computers paired over Bluetooth show under Connected machines,
+     by the name Devices gives them, to Share or Invite; paired phones join from the phone
      (phase 5). Nothing is spread without that step.
 7. **Bluetooth on Linux and Windows:** scanning in `crates/sheprd-nearby`,
    then the transport measurement and its verdict here.

@@ -70,6 +70,18 @@ impl Group {
 }
 
 impl Section {
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Self::Fleet => "fleet",
+            Self::Tabs => "tabs",
+            Self::TextShortcuts => "text-shortcuts",
+            _ => self
+                .message()
+                .strip_prefix("settings-section-")
+                .unwrap_or(self.message()),
+        }
+    }
+
     /// The section list's order: General first, outside every group, as the
     /// catch-all people look in when they do not know where a setting lives;
     /// then each group's pages together, groups in [`Group::ALL`] order. Users

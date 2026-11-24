@@ -19,6 +19,7 @@ mod github;
 mod hosts;
 mod indicators;
 mod kept;
+pub(crate) mod labels;
 mod log;
 mod nearby;
 mod origins;
@@ -93,8 +94,11 @@ pub(crate) struct State {
     pub(crate) computer: String,
     /// Streams open per device.
     pub(crate) connected: Mutex<HashMap<DeviceId, usize>>,
+    /// Phones agents may drive, and drives waiting for them.
+    pub(crate) drivers: crate::native::drive::Drivers,
     /// This computer's favorite agents, which its phones and desktops share.
     pub(crate) favorites: Favorites,
+    pub(crate) labels: labels::Labels,
     pub(crate) fingerprint: String,
     /// The fleet, when its key could be read or made.
     pub(crate) fleet: Option<Arc<crate::fleet::Fleet>>,
@@ -292,6 +296,7 @@ pub(crate) fn router(state: Shared) -> Router {
         .route("/api/v2/read", post(read::post))
         .route("/api/v2/live", get(crate::native::live))
         .route("/api/v2/new", get(crate::native::new_options))
+        .route("/api/v2/projects", post(crate::native::create_project))
         .route("/api/v2/search", get(crate::native::search))
         .route(
             "/api/v2/shortcuts",
@@ -532,6 +537,8 @@ pub(crate) enum ApiError {
     #[error("not found")]
     NotFound,
     #[error(transparent)]
+    Project(#[from] crate::native::project::Error),
+    #[error(transparent)]
     Push(#[from] crate::push::Error),
     #[error("too many connections from this device")]
     TooManyStreams,
@@ -551,6 +558,7 @@ impl IntoResponse for ApiError {
             Self::Agent(error) => error.status(),
             Self::Changes(error) => error.status(),
             Self::GitHub(error) => error.status(),
+            Self::Project(error) => error.status(),
             Self::TooManyStreams => StatusCode::TOO_MANY_REQUESTS,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Auth(auth::Error::RateLimited | auth::Error::NearbyBusy) => {

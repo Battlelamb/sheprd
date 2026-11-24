@@ -12,7 +12,7 @@ The bundle-ID changes below are for an independently signed fork only.
 
 The native app for Sheprd's remote control (`docs/ios-app-plan.md`).
 - **What it shows:** the chats and terminal tabs running in Sheprd on every
-  paired computer, merged into one list, with what needs you first.
+  paired computer, merged into one list, with what needs you first. Agent and worktree labels appear together on each row. Agents manage them with `sheprd labels` on the host.
 - **What you can do:** answer questions in place, open a chat or a terminal,
   and send prompts.
 - **Chat text:** an agent's replies are Markdown with the desktop's text sizes
@@ -58,6 +58,8 @@ just ios-test      # Swift package tests on the Mac, no simulator
 just ios-build     # unsigned simulator build of the app and its extensions
 just ios-generate  # then open ios/SheprdRemote.xcodeproj
 python3 ios/tools/test_branding.py  # generated names and stable deployed identities
+python3 ios/tools/test_privacy.py   # every bundle's privacy manifest
+python3 ios/tools/test_app_store.py # the App Store listing's limits
 ```
 
 - **Fixtures:** the package tests decode the JSON fixtures that the
@@ -242,10 +244,35 @@ app, once the repository's `testflight` environment holds these secrets:
   before it; with none to go on, the notes list the latest 20 commits. The
   upload fails if the notes cannot be set within 30 minutes, though the
   build stays uploaded; the next build's notes then cover both.
+- **External groups:** after App Store Connect finishes processing a build,
+  the upload automatically adds it to every existing external beta group for
+  the app. Internal-only groups are left alone; create groups and invite
+  testers in App Store Connect as usual. Apple may still require Beta App
+  Review before external testers can install a build; this workflow does not
+  submit the build for review.
 - **Running it locally:** `just ios-testflight` does the same with the same
   variables. Any it does not find set come from `pass`: the issuer ID from
   `apple/app-store-connect-issuer-id` and the key from
   `herdr-gpui/apple-api-key-KEYID`.
+
+## App Store
+
+`AppStore/` holds what App Store Connect asks for, entered there by hand:
+the listing (`metadata.toml`, checked by `tools/test_app_store.py`), the notes
+for App Review, the App Privacy answers, and the export compliance inventory.
+The privacy policy and support pages are `website/site/privacy/` and
+`website/site/support/`. `tools/store_screenshots.sh` takes the screenshots
+from the demo.
+
+### The demo
+
+With no computer paired, Home offers Explore the Demo (`SheprdRemote/Demo/`):
+two made-up computers from `DemoData` in the package, with chats, a waiting
+question, and a terminal. `Fleet` starts no link for them and refuses every
+call with `FleetError.demo`, so nothing is sent; widgets, the badge, and
+Spotlight ignore them, and pairing a computer ends it. App Review uses it, as
+the app shows nothing without a computer. In the simulator, `-demo YES`
+starts it and `-demoChat PANE` opens one of its chats.
 
 ## Pair
 
@@ -343,12 +370,34 @@ longer have, which shows as not reported).
   builds. The simulator has no App Attest, so the push relay cannot be used
   there.
 
+## Live Activity styles
+
+Settings > Notifications > Live Activities > Style picks how an activity
+looks on this phone (`LiveActivityStyle`, kept in the App Group so the widget
+draws with it), each previewed working, waiting, and finished:
+
+- **Private**: the agent and working, waiting, or done. Computers send it
+  generic, as below.
+- **Minimal**: the chat, its computer, and its status.
+- **Standard**, the default: the step in words (`activity`, with an `icon`
+  kind) and the answer buttons.
+- **Complete**: Standard with the steps before it in words, the plan, and the
+  turn's counts (`steps`, `files`).
+- **Geek**: the commands themselves, without their shell wrapper.
+
+The daemon says each step in words from the tool call's kind and, for a
+command, its first words (`apns/activity.rs`), and sends it beside the step,
+so every style is drawn from the same push; an older computer sends only the
+step, which the words fall back to. Changing the style redraws the activities
+showing. Start Test Activity, on the same page, plays a test in the chosen
+style.
+
 ## Live Activity detail
 
 Detailed, the default, shows the chat and its current step. Generic shows the
 agent and what it is doing in general. A computer chooses in Sheprd's Settings >
-Remote control (`live_activities` in `[remote]`), and a phone chooses with Keep
-Generic in its Settings. The stricter choice wins. Turning on Keep Generic ends
+Remote control (`live_activities` in `[remote]`), and a phone chooses with the
+Private style. The stricter choice wins. Turning on Private ends
 the activities showing, since a title set when one starts cannot change, and the
 app ends any naming a chat that a computer starts before it hears. A computer that is away
 hears at the next sync, and while the app is closed such an activity can show
@@ -436,6 +485,31 @@ the phone: Apple sees only "Sheprd", "New activity", and ciphertext.
    - A phone that never paired was never asked to show alerts, so it has
      no alert token: the test asks then, as pairing does, and waits up to
      10 seconds for iOS to hand the token over.
+7. **Test Live Activity.** With the push relay on, Settings >
+   Notifications > Live Activities > Start Test Activity starts a Live
+   Activity on this phone the way a computer does, with no computer
+   online. The phone makes a push relay handle for its push-to-start
+   token (kind `push_to_start`) and posts a `liveactivity` start
+   (`SelfTestActivity`) shaped like the daemon's relayed start: the cover
+   alert ActivityKit requires, and `attributes` and `content-state` each
+   one `sealed` field under `SealedChatActivity.info`.
+   - Both are sealed to the phone's own key and name `this-phone` as the
+     computer, with pane `test-ID`. The widget tries the computers' keys
+     first; only content none of them opens is tried with the own key,
+     and it shows only as a test (`SelfTestActivity.open`): no question or
+     answer buttons. Its token goes to no computer and its link opens no
+     chat. While the push relay is on, the own key is also kept in its own
+     App Group file (`notify-own-key`), as the widget cannot read the
+     keychain on a device.
+   - Settings waits up to 30 seconds for ActivityKit to start an activity
+     with that pane, then says "Started in N s". It runs for 20 seconds,
+     so it can be seen on the Lock Screen and in the Dynamic Island, and
+     ends showing that it worked. A test left running, such as when iOS
+     gave the app no background time, ends when the next test starts.
+   - It says where it stopped otherwise: Live Activities off for Sheprd,
+     no push-to-start token from iOS yet, a push relay answer other than
+     `delivered`, or no activity within 30 seconds, which is also what
+     iOS's limit on push-started activities looks like.
 
 A Live Activity in the question phase also offers up to three answers
 (never the "always" ones) as buttons that answer from the lock screen.

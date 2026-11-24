@@ -10,6 +10,7 @@ mod carry;
 mod commands;
 mod harness;
 mod known;
+mod picks;
 mod pictures;
 mod pull_requests;
 mod thread;
@@ -216,6 +217,7 @@ pub(crate) struct Session<R: FnMut(Update)> {
     next_request: i64,
     outbox: rpc::Outbox,
     pending: HashMap<i64, Pending>,
+    picks: picks::Picks,
     pictures: pictures::Pictures,
     projector: Projector,
     /// Where each queued prompt was typed, by its command; the transcript's
@@ -302,6 +304,7 @@ impl<R: FnMut(Update)> Session<R> {
             next_request: 0,
             outbox,
             pending: HashMap::new(),
+            picks: picks::Picks::default(),
             pictures: pictures::Pictures::default(),
             projector,
             queued_origins: HashMap::new(),

@@ -2,7 +2,7 @@
 //! chats, and push subscriptions. Auth calls that write to disk run on the
 //! blocking pool.
 
-use super::{
+use crate::web::{
     ApiError, Device, Peer, Shared, TypedFrom,
     fragments::folders,
     render::{now_ms, urlencode},
@@ -229,7 +229,10 @@ pub(super) async fn claim_status(
         // the approval, with what came of it.
         let pairing = match pairing {
             PairingState::Approved { device } if auth.pairings().fleet_settling(&device) => {
-                PairingState::Waiting { expires_in_ms: 0 }
+                PairingState::Waiting {
+                    expires_in_ms: 0,
+                    nearby_code: None,
+                }
             }
             pairing => pairing,
         };
@@ -364,7 +367,7 @@ pub(super) async fn origins(State(state): State<Shared>, _device: Device) -> Jso
 
 pub(super) async fn command(
     State(state): State<Shared>,
-    _device: Device,
+    device: Device,
     TypedFrom(origin): TypedFrom,
     Path(pane): Path<String>,
     Json(command): Json<Command>,
@@ -377,7 +380,7 @@ pub(super) async fn command(
         } => Command::Prompt {
             text,
             attachments: state.uploads.resolve(&attachments, now_ms())?,
-            origin: Some(origin),
+            origin: Some(TypedFrom::authenticated(origin, &device.0)),
         },
         command => command,
     };
@@ -446,10 +449,12 @@ pub(crate) async fn check_new_workspace(
 ) -> Result<(Agent, Option<String>), ApiError> {
     let agent = parse_agent(agent)?;
     let layout = state.hub.layout();
-    let offered = tokio::task::spawn_blocking(move || folders(&layout))
+    let wanted = cwd.to_owned();
+    // `offers` may look at the disk too.
+    let offered = tokio::task::spawn_blocking(move || folders(&layout).offers(&wanted))
         .await
         .map_err(|_| ApiError::Folder)?;
-    if !offered.offers(cwd) {
+    if !offered {
         return Err(ApiError::Folder);
     }
     let branch = branch.trim();

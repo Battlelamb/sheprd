@@ -24,10 +24,10 @@ struct ConnectionToast: View {
 
     var body: some View {
         let machines = model.fleet.machines
-        let connecting = machines.filter { $0.status == .connecting }.map(\.id)
+        let connecting = machines.filter { $0.presentedStatus == .connecting }.map(\.id)
         let online = Set(machines.filter { if case .online = $0.status { true } else { false } }.map(\.id))
         let notice = keyboard || (window?.typing ?? 0) > 0 ? nil : LinkNotice.worst(
-            machines.map { ($0.id, $0.status) },
+            machines.map { ($0.id, $0.presentedStatus) },
             patient: patient,
             dismissed: model.dismissedNotices,
             // Home's cards ask about unpaired computers instead.
@@ -67,7 +67,7 @@ struct ConnectionToast: View {
         case .offline:
             // The oldest view still shown is the one worth dating.
             let since = named.compactMap(\.updated).min()
-            let reason = named.lazy.compactMap { if case let .offline(reason) = $0.status { reason } else { nil } }.first ?? ""
+            let reason = named.lazy.compactMap { if case let .offline(reason) = $0.presentedStatus { reason } else { nil } }.first ?? ""
             capsule(close: close) {
                 Image(systemName: "wifi.slash").foregroundStyle(.orange)
                 VStack(alignment: .leading, spacing: 0) {

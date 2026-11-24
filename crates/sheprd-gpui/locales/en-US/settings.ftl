@@ -276,8 +276,8 @@ settings-remote-notifications = Notification text
 settings-remote-notifications-description = Whether phone notifications include a short excerpt of the message.
 settings-remote-idle = Forget idle devices after
 settings-remote-idle-description = A day, a week, a month, or never: how long a paired device may stay away.
-settings-remote-pair-card = Pair a phone
-settings-remote-pair-card-description = Show a QR code to scan with a phone, then approve it.
+settings-remote-pair-card = Pair device
+settings-remote-pair-card-description = Show a QR code to scan with a phone, or for a computer nearby to find, then approve it.
 settings-remote-devices = Paired devices
 settings-remote-devices-description = Devices that can control your chats, with when each was last seen. Revoke one here.
 settings-config-local = Sheprd settings
@@ -286,3 +286,5 @@ settings-config-shared = Herdr configuration
 settings-config-shared-description = Herdr's configuration file, which its terminal client reads too.
 settings-config-reload = Reload configuration
 settings-config-reload-description = Re-reads both files. Does not restart the daemon.
+
+settings-agent-guide-dismiss = Dismiss agent guidance

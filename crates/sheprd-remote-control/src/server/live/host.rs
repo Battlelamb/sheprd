@@ -93,7 +93,7 @@ impl Cards {
             }
             return Some(live.clone());
         }
-        if !start && !tracked && self.host.is_none() {
+        if !start && !tracked && (end || self.host.is_none()) {
             return None;
         }
         let facts = match &live.event {

@@ -403,6 +403,27 @@ impl LiveActivities {
     ) {
         let key = (device.clone(), live.pane.clone());
         self.held.remove(&key);
+        // Older hosts ignore this reserved activity recipient and use their
+        // ordinary push-to-start handle. No shared update token leaves iOS.
+        if live.pane.starts_with("host-activity/")
+            && let Some(token) = registration.activity("relay/all-hosts")
+        {
+            let live = shown(state, live, registration);
+            let token = token.clone();
+            let key = notify_key(registration);
+            let state = state.clone();
+            let revision = crate::apns::relayed::revision();
+            tokio::spawn(async move {
+                let sent = state
+                    .apns
+                    .shared(&token, key.as_ref(), &live, revision, now)
+                    .await;
+                state
+                    .pushes
+                    .record(crate::apns::Kind::LiveActivity, &sent, now_ms());
+            });
+            return;
+        }
         match route(&live, registration, &state.apns) {
             Route::Send(token) => send(
                 state,

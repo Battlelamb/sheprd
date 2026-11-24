@@ -3,6 +3,12 @@ import Foundation
 /// The phone defaults to grouping by host. An explicit choice for a
 /// particular host takes precedence over the phone-wide default.
 public enum ActivityGrouping {
+    public static let allHostsKey = "liveActivityAllHosts"
+
+    public static func shared(for computer: Fingerprint, in defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: allHostsKey) && defaults.object(forKey: key(for: computer)) == nil
+    }
+
     public static let defaultKey = "multipleLiveActivities.default"
 
     public static func key(for computer: Fingerprint) -> String {
@@ -18,6 +24,6 @@ public enum ActivityGrouping {
 
     public static func single(for computer: Fingerprint, in defaults: UserDefaults = .standard) -> Bool {
         let override = defaults.object(forKey: key(for: computer)) as? Bool
-        return !(override ?? defaults.bool(forKey: defaultKey))
+        return !(override ?? (!defaults.bool(forKey: allHostsKey) && defaults.bool(forKey: defaultKey)))
     }
 }

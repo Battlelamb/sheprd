@@ -79,7 +79,10 @@ final class ActivityTokens {
         } catch {
             lastError = "Live Activity keys: \(error.localizedDescription)"
         }
-        if !on { await pushRelay.turnedOff() }
+        if !on {
+            await resetSharedGroup()
+            await pushRelay.turnedOff()
+        }
         await sync()
     }
 
@@ -140,11 +143,15 @@ final class ActivityTokens {
     }
 
     private func watch(_ activity: Activity<ChatActivityAttributes>) {
+        if case let .sharedCard(card) = activity.attributes.content {
+            watchShared(activity, card: card)
+            return
+        }
         guard running[activity.id] == nil else { return }
         // Sealed attributes open only with the key of the computer they
         // name; one no key opens shows the cover, and its token goes nowhere.
         guard let facts = activity.attributes.facts(keys: NotifyKey.activityKeys()) else { return }
-        if ActivityGrouping.isRetiredHostCard(facts.pane, since: activityEpoch)
+        if ActivityGrouping.isRetiredHostCard(facts.pane, since: epoch(for: facts.fingerprint))
             || (facts.namesChat && LiveActivityStyleSetting.current.asksGeneric) {
             let id = activity.id
             Task { await Self.end(id) }
@@ -168,6 +175,83 @@ final class ActivityTokens {
                 return
             }
         }
+    }
+
+    private var sharedWatches: [String: String] = [:]
+
+    private func watchShared(_ activity: Activity<ChatActivityAttributes>, card: SharedActivityCard) {
+        guard PushRelaySetting.isOn, card.belongs(to: ChatActivityAttributes.sharedGroup) else {
+            let id = activity.id
+            Task { await Self.end(id) }
+            return
+        }
+        if let watched = sharedWatches[card.card] {
+            if watched != activity.id {
+                let duplicate = activity.id
+                Task { await Self.end(duplicate) }
+            }
+            return
+        }
+        sharedWatches[card.card] = activity.id
+        let task = Task {
+            if let token = activity.pushToken { await bindShared(token.hexString, card: card) }
+            for await token in activity.pushTokenUpdates {
+                await bindShared(token.hexString, card: card)
+            }
+        }
+        Task {
+            for await state in activity.activityStateUpdates where state == .ended || state == .dismissed {
+                task.cancel()
+                sharedWatches[card.card] = nil
+                return
+            }
+        }
+    }
+
+    private func bindShared(_ token: String, card: SharedActivityCard) async {
+        for delay in [1, 3, 10, 30, 60] {
+            guard !Task.isCancelled, let group = ChatActivityAttributes.sharedGroup, card.belongs(to: group), PushRelaySetting.isOn else { return }
+            if let credential = await pushRelay.usableCredential(),
+               let handle = pushRelay.handle(for: token, kind: .activity, credential: credential, group: group, slot: card.card) {
+                let result = try? await pushRelay.push(.bindSharedActivity(handle))
+                if result == .delivered || result == .gone { return }
+            }
+            try? await Task.sleep(for: .seconds(delay))
+        }
+    }
+
+    private func resetSharedGroup() async {
+        let retired = ChatActivityAttributes.sharedGroup
+        LiveActivityStyleSetting.store?.removeObject(forKey: ChatActivityAttributes.sharedGroupKey)
+        for activity in Activity<ChatActivityAttributes>.activities {
+            if case .sharedCard = activity.attributes.content { await Self.end(activity.id) }
+        }
+        if let retired { Task { await pushRelay.retire(group: retired) } }
+    }
+
+    func groupingChanged(sharedChanged: Bool, affected: Fingerprint? = nil) async {
+        if sharedChanged {
+            await resetSharedGroup()
+            // Only participating computers need replacement host snapshots.
+            let epoch = UUID().uuidString
+            for computer in computers {
+                let fingerprint = computer.fingerprint
+                let key = "sharedActivityEpoch." + fingerprint.hex
+                if affected == fingerprint || UserDefaults.standard.object(forKey: ActivityGrouping.key(for: fingerprint)) == nil {
+                    UserDefaults.standard.set(epoch, forKey: key)
+                    for item in running.values where item.attributes.fingerprint == fingerprint && item.attributes.pane.hasPrefix("host-activity/") {
+                        await Self.end(item.id)
+                    }
+                }
+            }
+        }
+        await sync()
+    }
+
+    private func epoch(for owner: Fingerprint?) -> UUID? {
+        guard let owner else { return activityEpoch }
+        return UserDefaults.standard.string(forKey: "sharedActivityEpoch." + owner.hex)
+            .flatMap(UUID.init(uuidString:)) ?? activityEpoch
     }
 
     /// The Live Activity style changed from `old`: running activities are
@@ -195,6 +279,10 @@ final class ActivityTokens {
     /// starts before it hears.
     private func genericChanged(to generic: Bool) async {
         if generic {
+            await resetSharedGroup()
+            for computer in computers {
+                UserDefaults.standard.removeObject(forKey: "sharedActivityEpoch." + computer.fingerprint.hex)
+            }
             for id in Activity<ChatActivityAttributes>.activities.map(\.id) {
                 await Self.end(id)
                 running[id] = nil
@@ -307,11 +395,20 @@ final class ActivityTokens {
             }
             return .pushRelayHandle(handle, environment: credential.environment)
         }
-        let activities = running.values
+        var activities = running.values
             .filter { $0.attributes.fingerprint == fingerprint }
             .compactMap { running in
                 recipient(running.token, .activity).map { API.APNsRegistration.Activity(pane: running.attributes.pane, token: $0) }
             }
+        if viaPushRelay, ActivityGrouping.shared(for: fingerprint), let pushToStart, let credential,
+           let store = LiveActivityStyleSetting.store {
+            let group = ChatActivityAttributes.sharedGroup ?? PushRelayCredential.newHandleId()
+            store.set(group, forKey: ChatActivityAttributes.sharedGroupKey)
+            let slot = SharedActivityCard.slot(group: group, computer: fingerprint)
+            if let handle = pushRelay.handle(for: pushToStart, kind: .pushToStart, credential: credential, group: group, slot: slot) {
+                activities.append(.init(pane: "relay/all-hosts", token: .pushRelayHandle(handle, environment: credential.environment)))
+            }
+        }
         let alert = recipient(alert, .alert)
         // Each computer seals to its own notify key. Without one, alerts
         // would arrive sealed to nobody: send neither, and the computer
@@ -331,6 +428,6 @@ final class ActivityTokens {
                 genericActivities: generic
             )
             : .pushRelayOff(genericActivities: generic)
-        return (registration, ActivityGrouping.single(for: fingerprint), activityEpoch)
+        return (registration, ActivityGrouping.single(for: fingerprint), epoch(for: fingerprint))
     }
 }

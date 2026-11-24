@@ -106,13 +106,17 @@ struct UnreadMenu: View {
             }
             .disabled(unread.isEmpty)
         } label: {
-            HStack(spacing: 3) {
-                Image(systemName: only ? "envelope.fill" : "envelope")
+            HStack(spacing: 5) {
+                UnreadDot(unread: !unread.isEmpty)
+                    .tint(Color.accentColor)
                 Text(unread.count, format: .number)
                     .font(.footnote.weight(.semibold))
                     .monospacedDigit()
+                    .foregroundStyle(.primary)
             }
-            .foregroundStyle(only ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(Color.accentColor.opacity(only ? 0.15 : 0), in: Capsule())
         }
         .accessibilityLabel("Unread \(unread.count)")
         .accessibilityValue(only ? Text("Unread Only") : Text("All Agents"))

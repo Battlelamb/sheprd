@@ -221,7 +221,7 @@ ban it:
 
 | Offense | Points |
 | --- | --- |
-| Hitting a rate limit or the per-address connection cap | 1 |
+| Hitting a rate limit or the per-address connection cap | 0; excess work is refused |
 | Probing: a route or session id that does not parse, a stream held open with no request | 2 |
 | A forged proof or wrong listen token; malformed messages or frames | 3 |
 | Sending more than four times `max-transfer-per-hour` (20 GiB) in an hour | 10, a ban at once |
@@ -229,7 +229,12 @@ ban it:
 A refused dial costs nothing, whether no one listens or the key is not
 named: the two must cost the same, so a ban never reveals an occupied
 route, and a phone retrying while its computer is off must never get its
-household banned. The dial rate limit holds a flood of either back. Wrong
+household banned. The dial rate limit holds a flood of either back. Capacity
+and rate refusals never accumulate ban points: a desktop reconnecting its
+terminals, chats, and background commands, or several users sharing one public
+address, can legitimately reach those limits. The limits continue to refuse
+excess work; releasing capacity or replenishing the rate bucket permits retries
+without waiting for an IP ban to expire. Wrong
 dashboard tokens block that address from the dashboard for 15 minutes,
 never from the relay, so one person's typos cannot cost everyone behind a
 shared address their computers.
@@ -245,12 +250,10 @@ limit both ways for an hour sends 14 GiB a side and is never slowed.
 - A banned address is refused before any new work: before the QUIC
   handshake (even before a retry), before every new stream, and before
   every HTTP route but `/healthz`.
-- A ban that any probe, forged proof, malformed message, or overrun budget
-  led to also ends the address's open sessions (QUIC code 8, WebSocket
-  4429), its QUIC connections, and its listeners. A ban earned by hitting
-  limits alone leaves them open, and its listeners keep taking dials
-  (WebSocket accepts included): a household or a carrier's NAT can hit
-  limits together without anyone misbehaving.
+- A ban for probes, forged proofs, malformed messages, or an overrun budget
+  also ends the address's open sessions (QUIC code 8, WebSocket 4429), its
+  QUIC connections, and its listeners. Hitting capacity or rate limits alone
+  never bans an address or ends its existing sessions and listeners.
 - Bans are checked under the same lock that opens sessions and registers
   listeners, so a ban cannot slip between a dial and its session. A ban
   closes the address's QUIC connections, and every new stream checks.

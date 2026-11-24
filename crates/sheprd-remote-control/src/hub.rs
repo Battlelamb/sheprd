@@ -169,7 +169,14 @@ impl Hub {
             primary_socket.as_deref().and_then(sessions::session_name),
         )?;
         let (core_sender, core_layout) = watch::channel(Arc::new(Layout::default()));
-        let core = core::Source::start(core_sender, &target, core_endpoint, state_dir)?;
+        let sessions = sessions::Sessions::start(primary_socket, wsl_catalog);
+        let core = core::Source::start(
+            core_sender,
+            &target,
+            core_endpoint,
+            state_dir,
+            sessions.clone(),
+        )?;
         let (base_sender, base_layout) = watch::channel(Arc::new(Layout::default()));
         tokio::spawn(core::merge_sources(
             base_sender,
@@ -178,7 +185,6 @@ impl Hub {
         ));
         #[cfg(feature = "tmux")]
         let base_layout = tmux::with_chats(base_layout, &target, state_dir);
-        let sessions = sessions::Sessions::start(primary_socket, wsl_catalog);
         tokio::spawn(sessions::merge_sources(
             sender,
             base_layout,

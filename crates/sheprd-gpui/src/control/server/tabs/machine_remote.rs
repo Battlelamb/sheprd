@@ -109,7 +109,16 @@ pub(super) fn serve(
         }
         .wait_seconds(),
     );
+    let workspace = if matches!(request, TabOp::Machine { .. }) {
+        match super::arrive::workspace(&caller, cx) {
+            Ok(key) => Some(key),
+            Err(response) => return incoming.respond(response),
+        }
+    } else {
+        None
+    };
     let mut job = Job {
+        workspace,
         stage: Stage::Ready,
         request,
         owner: owner(&caller),
@@ -189,6 +198,7 @@ enum Stage {
 /// A request in flight. Dropping it, as an answered or abandoned request
 /// does, stops the run if it still goes on.
 struct Job {
+    workspace: Option<(crate::browser::Scope, String)>,
     stage: Stage,
     request: TabOp,
     owner: String,
@@ -254,10 +264,24 @@ impl Job {
             .unwrap_or_else(PoisonError::into_inner)
             .take()?;
         if let (Response::Done { .. }, Some((endpoint, name))) = (&response, &running.open) {
-            let (endpoint, name) = (endpoint.clone(), name.clone());
-            let _ = self.handle.update(cx, |view, window, cx| {
-                view.open_remote_machine(endpoint, name, window, cx);
-            });
+            let location = crate::browser::Location::RemoteMachine {
+                endpoint: endpoint.clone(),
+                name: match crate::machine::Name::try_from(name.clone()) {
+                    Ok(name) => name,
+                    Err(error) => {
+                        return Some(Response::error(
+                            ErrorCode::InvalidRequest,
+                            error.to_string(),
+                        ));
+                    }
+                },
+            };
+            if let Some(key) = self.workspace.take() {
+                let opened = super::arrive::background_tab(key, location, cx);
+                if matches!(opened, Response::Error { .. }) {
+                    return Some(opened);
+                }
+            }
         }
         Some(response)
     }

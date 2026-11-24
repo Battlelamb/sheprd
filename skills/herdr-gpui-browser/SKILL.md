@@ -28,6 +28,11 @@ This skill keeps its installed identifier across the rename. The `herdr-ui`
 fence, `HerdrKit`, `herdr.send`, and `/.herdr/` URLs are stable compatibility
 APIs; use them as shown below.
 
+Keep the user's current tab, workspace, window, and keyboard focus while you
+work. Use focus commands, visible splits, and commands that open panels or
+dialogs only when the user asks to see or interact with them. When creating a
+Herdr workspace, worktree, or terminal tab, pass `--no-focus`.
+
 ## Working inside a virtual Mac
 
 For work inside a Sheprd VM, use the guest control channel through
@@ -40,8 +45,8 @@ requires a separate explicit request from the user.
 
 1. Run `sheprd machine list` and select the VM the user named, or an existing
    suitable VM. Check it with `sheprd machine agent NAME`. Use
-   `sheprd machine open NAME` only if it needs starting or resuming, or the
-   user wants to see it; guest commands do not need its tab focused.
+   `sheprd machine start NAME` to start or resume it without a tab.
+   `sheprd machine open NAME` adds a background tab when a display is wanted.
 2. Run installs, builds, tests, and diagnostics with
    `sheprd machine exec NAME -- COMMAND...`. Paths in that command belong
    to the guest. Quote shell arguments that must reach it without host
@@ -124,15 +129,9 @@ sheprd browser open ./mockup/index.html
 sheprd browser open http://localhost:3000
 ```
 
-- A local file opens in a split next to your terminal: the user sees both,
-  and the keyboard stays with your pane, so they can keep talking to you
-  while the page updates. Later files you open join the same split. If your
-  terminal is not on screen, Sheprd opens a tab instead and reports that fallback.
-- A web address opens as a tab in your own workspace (`HERDR_WORKSPACE_ID`,
-  which Herdr sets in every pane, or the workspace of your Herdr 2 tab). It
-  stays in the background until the user selects it.
-- Add `--tab` to open a file as a tab instead, or `--beside` to put a web
-  address in the split.
+- Files and web addresses open in a background tab of your workspace.
+- Use `--beside` when the user asks for a split, or `--focus` when they
+  ask you to switch to the page.
 - Relative paths (`./mockup/index.html`) and absolute paths
   (`/tmp/mockup/index.html`) are supported by the local CLI. The address bar
   shows the canonical file path, even though the page loads through Sheprd's
@@ -282,9 +281,9 @@ The commands exit with:
 | 7 | Sheprd did not answer in time | Try again once |
 | 8 | Not available on this platform or this version | Print the URL or path for the user instead |
 
-A successful open means the tab was accepted, not that the page has finished
-loading. Before capturing a new page, focus its tab and wait for its expected
-content. `--no-focus` followed immediately by a capture can return a blank page.
+Use `browser text` or `browser screenshot` to inspect a page in the background.
+If the page has never loaded and its Mac window is inactive, the command
+reports busy. Leave focus with the user.
 If the user sees blank content but `browser text` and `browser screenshot`
 return the expected page, do not rewrite a valid local path or claim the page
 is visible: those commands inspect WebKit, not the composited desktop window.
@@ -340,8 +339,9 @@ automatically, and an already launched trusted script cannot be undone by
 cancelling its reply. Checkpoint reads/diffs and `scripts list` need the full
 CLI installed on the host.
 
-On Linux the app has no embedded browser yet: web pages open in the system
-browser, and local files and annotations are not available.
+On Linux, background web tabs offer a button to open the system browser.
+An explicit `--focus` opens the web address there immediately. Local files
+and annotations require an embedded browser.
 
 Run `sheprd browser --help` for the full usage.
 
@@ -418,7 +418,7 @@ screencast or a sequence of screenshot/click commands:
    both VMs, and retry while needed. Give a chat progress update at least once
    a minute; do not leave the user guessing whether the agent stopped.
 5. Once reserved, tell the user which VM you acquired and what you are testing,
-   then `sheprd machine open NAME` and use its guest commands normally.
+   then `sheprd machine start NAME` and use its guest commands normally.
 6. Always `sheprd machine release NAME` when finished, including after a failed
    test. Stop any background guest jobs you started before releasing.
 
@@ -449,6 +449,10 @@ unless they ask for another:
 - **You hand it a task**: write the task to a file and start the chat with
   it, `sheprd chat new [AGENT] --pane ID --prompt-file PATH` (or
   `--prompt TEXT`, or `--prompt-file -` for standard input; at most 96 KB).
+  Use a short, distinct task name on the first line. Launch all the chats
+  for one batch from the coordinating turn. Its iOS Live Activity shows
+  how many agents have ended and the latest task to finish. Native subagents
+  also report into that activity.
   Sheprd sends it as the new chat's first prompt and shows it as your
   brief, not the user's words. Do not paste a task into a chat with
   `herdr agent prompt` or `herdr pane send-text`. A brief works only for

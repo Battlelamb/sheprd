@@ -195,6 +195,32 @@ async fn a_paired_phone_reaches_the_api_through_a_relay_end_to_end() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn desktop_status_names_an_address_ban_from_the_relay() {
+    let (http, _, _) = relay_with(RelayOptions {
+        bans: sheprd_relay::guard::parse_list("127.0.0.1").0,
+        ..RelayOptions::default()
+    })
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let endpoint = Endpoint::parse(&format!("http://{http}")).unwrap();
+    let address = endpoint.to_string();
+    let relays = Arc::new(Relays::load(dir.path(), vec![endpoint.into()]).unwrap());
+    let (_stop, stopped) = watch::channel(false);
+    relays.start(served(dir.path(), &state(dir.path())).0, stopped);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Status::Failed { error } = &relays.status()[&address].state {
+                assert!(error.contains("banned your network address"), "{error}");
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_dial_key_no_device_sent_is_refused_at_the_relay() {
     let (http, quic, pin) = relay().await;
     let dir = tempfile::tempdir().unwrap();

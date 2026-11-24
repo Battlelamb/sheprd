@@ -100,6 +100,7 @@ fn the_tab_carries_the_program_in_its_environment() {
         Agent::Codex,
         Some(Path::new("/opt/herdr-acp")),
         &none,
+        true,
     );
     assert_eq!(
         params,
@@ -112,11 +113,12 @@ fn the_tab_carries_the_program_in_its_environment() {
         Agent::Codex,
         Some(Path::new("/opt/herdr-acp")),
         &none,
+        true,
     );
     assert!(params.get("cwd").is_none());
     // A remote chat's tab carries no local path.
     assert!(
-        tab_params("w1", None, Agent::Codex, None, &none)
+        tab_params("w1", None, Agent::Codex, None, &none, true)
             .get("env")
             .is_none()
     );
@@ -137,6 +139,7 @@ fn the_chat_environment_goes_with_every_chat_tab() {
         Agent::Claude,
         Some(Path::new("/opt/herdr-acp")),
         &extra,
+        true,
     );
     assert_eq!(
         local["env"],
@@ -144,7 +147,7 @@ fn the_chat_environment_goes_with_every_chat_tab() {
             "HERDR_ACP": "/opt/herdr-acp"})
     );
     // On an SSH host too, without the local program.
-    let remote = tab_params("w1", None, Agent::Copilot, None, &extra);
+    let remote = tab_params("w1", None, Agent::Copilot, None, &extra, true);
     assert_eq!(remote["env"]["GH_HOST"], "mycompany.ghe.com");
     assert!(remote["env"].get("HERDR_ACP").is_none());
 }

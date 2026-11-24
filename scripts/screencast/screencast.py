@@ -61,8 +61,8 @@ APP = "~/Apps/Sheprd.app"  # where the machine keeps the build being recorded
 # rest is desktop). A video is recorded once per window asked for, so people
 # can pick the one they use. Rune is to come.
 WINDOWS = {
-    "classic": (["--classic"], 1.0),
-    "moonframe": ([], 1.0),
+    "classic": (["--args", "--classic"], 1.0),
+    "moonframe": (["--env", "SHEPRD_MOONFRAME=1"], 1.0),
 }
 
 
@@ -146,7 +146,7 @@ def launch(name, window, work):
         sys.exit("Sheprd did not quit in the machine")
     args = " ".join(WINDOWS[window][0])
     machine(name, "exec", "--", "sh", "-c",
-            f"open {APP}" + (f" --args {args}" if args else ""))
+            f"open {APP} {args}")
     for _ in range(40):
         time.sleep(0.5)
         if machine(name, "exec", "--", "sh", "-c", "pgrep -x sheprd || true").strip():

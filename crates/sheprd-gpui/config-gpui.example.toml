@@ -116,6 +116,12 @@ show_system_load = true
 # GPU tool runs on any host.
 show_gpu_load = false
 show_sidebar_gpu_load = false
+# How the Moonframe window's sidebar shows each host's load: "compact" puts
+# the shares beside its name (CPU, memory, then GPU and video memory when
+# show_sidebar_gpu_load is on); "detailed" adds lines under it, CPU with its
+# graph and memory with its meter, then the GPU and video memory when
+# show_sidebar_gpu_load is on. Also under Settings > Sidebar.
+sidebar_load = "compact"
 # Checkpoint a worktree each time one of its agents starts or finishes a turn,
 # locally or over SSH, so its files can be rolled back from the workspace
 # menu's Checkpoints. Snapshots include untracked (not ignored) files, live in
@@ -872,9 +878,9 @@ size = 12
 # acp_chats = true
 #
 # Open Sheprd in the window Moonframe lays out in Luau, in beta; false opens the
-# classic window. Read when Sheprd starts. Off by default on Windows. On macOS,
+# classic window (the default). Read when Sheprd starts. On macOS,
 # holding Option as Sheprd starts opens the other window once.
-# moonframe_window = true
+# moonframe_window = false
 #
 # Open a space's menu when the pointer rests on its sidebar row, without a
 # right click. Moving the pointer anywhere but into that menu closes it again.

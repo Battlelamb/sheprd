@@ -157,10 +157,9 @@ mcp = ["dep:sheprd-mcp"]
 # permission. GitHub's test support seeds pull requests the rich-chat fixture
 # shows.
 mockup = ["gpui_platform/test-support", "sheprd-github/test-support"]
-# A plain launch opens Sheprd in a window Moonframe lays out from the Luau in
-# `moonframe/app`, compiled into the binary; `sheprd` commands, `--classic`,
-# `--socket` and `--session` launches, and `moonframe_window = false` under
-# `[features]` open the classic window. Release builds ship it, with
+# With `moonframe_window = true` under `[features]`, a plain launch opens
+# the window Moonframe lays out from the Luau in `moonframe/app`.
+# Release builds include the compiled layout, with
 # Moonframe's Developer Mode (Inspect Element, the Developer tools) and the
 # sparkles agent (`acp`), which edits the user's copy of the layout.
 moonframe = ["dep:async-channel", "dep:futures-lite", "dep:moonframe", "moonframe/acp", "moonframe/studio"]

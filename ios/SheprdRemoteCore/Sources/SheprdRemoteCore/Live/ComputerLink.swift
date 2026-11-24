@@ -7,6 +7,7 @@ public enum LinkStatus: Codable, Hashable, Sendable {
     /// Nothing answered, or the connection dropped; it retries by itself
     /// and stays offline until a retry gets through.
     case offline(reason: String)
+    case relayBanned(RelayEndpoint)
     /// The computer no longer knows this phone: unpaired or revoked there.
     case revoked
     /// The computer's Sheprd has no live API for this app: update Sheprd
@@ -65,6 +66,8 @@ public struct LinkIO: Sendable {
     /// A bearer token from `origin`, signed with the device key.
     public var session: @Sendable (_ origin: String) async throws -> String
     public var connect: @Sendable (_ origin: String, _ token: String) async throws -> LiveConnection
+    /// Checks the relays for an explicit address ban after all paths failed.
+    public var bannedRelay: @Sendable () async -> RelayEndpoint? = { nil }
     public var sleep: @Sendable (Duration) async throws -> Void
 
     public init(
@@ -105,6 +108,9 @@ public actor ComputerLink {
     private var connected: String?
     private var connectedAt: ContinuousClock.Instant?
     private var runner: Task<Void, Never>?
+    private var banCheck: Task<Void, Never>?
+    private var banCheckID = 0
+    private var confirmedBan: RelayEndpoint?
     private var wake: CheckedContinuation<Void, Never>?
     private var attempt = 0
     private var pauseID = 0
@@ -129,6 +135,8 @@ public actor ComputerLink {
     }
 
     public func stop() {
+        cancelBanCheck()
+        confirmedBan = nil
         runner?.cancel()
         runner = nil
         connection?.close()
@@ -180,6 +188,7 @@ public actor ComputerLink {
     /// The network changed: stop waiting and try every address again.
     public func networkChanged() {
         attempt = 0
+        cancelBanCheck()
         if wake == nil { retryNow = true }
         wakeUp()
     }
@@ -215,8 +224,20 @@ public actor ComputerLink {
                 guard let origin = race.found else {
                     if !reported { continuation.yield(.unreachable(race.failures)) }
                     reported = true
-                    throw Offline(reason: "No address answered (\(origins.count) tried)")
+                    guard !Task.isCancelled else { return }
+                    let reason = "No address answered (\(origins.count) tried)"
+                    startBanCheck(offlineReason: reason)
+                    if let relay = confirmedBan {
+                        continuation.yield(.status(.relayBanned(relay)))
+                    } else {
+                        continuation.yield(.status(.offline(reason: reason)))
+                    }
+                    offline = true
+                    await pause()
+                    continue
                 }
+                cancelBanCheck()
+                confirmedBan = nil
                 let token = try await io.session(origin)
                 let opened = try await io.connect(origin, token)
                 connection = opened
@@ -372,6 +393,38 @@ public actor ComputerLink {
         if let id, id != pauseID { return }
         wake?.resume()
         wake = nil
+    }
+
+    /// Checks relays for an explicit address ban without holding up retries.
+    private func startBanCheck(offlineReason: String) {
+        guard banCheck == nil else { return }
+        banCheckID += 1
+        let id = banCheckID
+        let check = io.bannedRelay
+        banCheck = Task {
+            let relay = await check()
+            self.finishBanCheck(id: id, relay: relay, offlineReason: offlineReason)
+        }
+    }
+
+    private func finishBanCheck(id: Int, relay: RelayEndpoint?, offlineReason: String) {
+        guard id == banCheckID, !Task.isCancelled, runner != nil, connection == nil else { return }
+        banCheck = nil
+        if let relay {
+            if confirmedBan != relay {
+                confirmedBan = relay
+                continuation.yield(.status(.relayBanned(relay)))
+            }
+        } else if confirmedBan != nil {
+            confirmedBan = nil
+            continuation.yield(.status(.offline(reason: offlineReason)))
+        }
+    }
+
+    private func cancelBanCheck() {
+        banCheck?.cancel()
+        banCheck = nil
+        banCheckID += 1
     }
 
     /// A fingerprint as hex digits alone: `/api/ping` writes it with colons.

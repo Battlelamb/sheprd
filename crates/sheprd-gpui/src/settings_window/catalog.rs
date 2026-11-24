@@ -203,6 +203,12 @@ pub(super) const CATALOG: &[Entry] = &[
     ),
     entry(
         Section::Sidebar,
+        "sidebar-load",
+        "settings-sidebar-load",
+        "settings-sidebar-load-description",
+    ),
+    entry(
+        Section::Sidebar,
         "sidebar-indent",
         "settings-sidebar-indent",
         "settings-sidebar-indent-description",
@@ -340,6 +346,7 @@ pub(super) const CATALOG: &[Entry] = &[
     feature(Feature::AcpChats),
     #[cfg(feature = "mcp")]
     feature(Feature::Mcp),
+    feature(Feature::MoonframeTools),
     feature(Feature::MoonframeWindow),
     feature(Feature::QaMenu),
     feature(Feature::SidebarHoverMenu),

@@ -13,7 +13,7 @@ pub enum BrowserCommand {
         workspace: Option<String>,
         focus: bool,
         /// `--beside` or `--tab`; otherwise chosen by what the page is.
-        placement: Option<Placement>,
+        placement: Placement,
     },
     Reload,
     /// Waits up to `wait` seconds for notes; zero only checks.
@@ -160,14 +160,16 @@ pub(super) fn parse(args: &mut Args) -> Result<BrowserCommand, CliError> {
         _ => return Err(CliError::UnknownBrowserCommand(command)),
     }
     let (mut target, mut workspace) = (None, None);
-    let mut placement = None;
+    let mut placement = Placement::Tab;
+    let mut focus = false;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--help" | "-h") => return Ok(BrowserCommand::Help),
             // Kept for callers written before background opening was the default.
-            Some("--no-focus") => {}
-            Some("--beside") => placement = Some(Placement::Beside),
-            Some("--tab") => placement = Some(Placement::Tab),
+            Some("--no-focus") => focus = false,
+            Some("--focus") => focus = true,
+            Some("--beside") => placement = Placement::Beside,
+            Some("--tab") => placement = Placement::Tab,
             Some("--workspace") => {
                 let value = args
                     .next()
@@ -186,7 +188,7 @@ pub(super) fn parse(args: &mut Args) -> Result<BrowserCommand, CliError> {
     Ok(BrowserCommand::Open {
         target: target.ok_or(CliError::MissingUrl)?,
         workspace,
-        focus: false,
+        focus,
         placement,
     })
 }

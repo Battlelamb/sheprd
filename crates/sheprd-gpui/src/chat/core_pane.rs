@@ -200,8 +200,7 @@ impl SheprdWindow {
         key_on(&self.core_terminals.host_of(tab), terminal)
     }
 
-    /// Splits `tab`'s pane in use with a chat running `agent`, beside it in
-    /// its folder.
+    /// Starts a background chat tab in the current pane's workspace and folder.
     pub(crate) fn start_core_chat(
         &mut self,
         agent: Agent,
@@ -238,6 +237,7 @@ impl SheprdWindow {
         self.start_core_chat_tab(
             agent,
             Purpose::Tab {
+                focus: true,
                 scope,
                 workspace,
                 group,
@@ -265,6 +265,7 @@ impl SheprdWindow {
         {
             let scope = crate::browser::scope(&self.endpoints[self.selected_endpoint]);
             let purpose = Purpose::Tab {
+                focus: false,
                 scope,
                 workspace: crate::core_terminals::WORKSPACE.to_owned(),
                 group: None,
@@ -308,18 +309,27 @@ impl SheprdWindow {
         if at.as_str().contains('/') {
             return Err(super::StartError::NotLocal);
         }
-        let spawn = self.prepare_core_chat(agent, &self.core_terminals.host_of(tab), carry)?;
-        self.chats.last_started = Some(agent);
-        self.start_core_program(
-            Purpose::Split {
-                tab,
-                at,
-                axis: crate::core_terminals::panes::Axis::Row,
+        let (scope, workspace) = self
+            .core_terminals
+            .tab_workspace(tab)
+            .cloned()
+            .ok_or(super::StartError::NoWorkspace)?;
+        let cwd = self
+            .core_terminals
+            .info(tab, &at)
+            .and_then(|info| info.cwd.clone());
+        self.start_core_chat_tab(
+            agent,
+            Purpose::Tab {
+                scope,
+                workspace,
+                group: None,
+                focus: false,
             },
-            spawn,
+            cwd,
+            carry,
             cx,
-        );
-        Ok(())
+        )
     }
 
     /// A kept workspace with no driven tab still starts its chat on its own
@@ -329,6 +339,7 @@ impl SheprdWindow {
         agent: Agent,
         carry: Option<&Settings>,
         group: Option<crate::browser::GroupId>,
+        focus: bool,
         cx: &gpui::App,
     ) -> Result<(), super::StartError> {
         self.kept_in_front().ok_or(super::StartError::NoWorkspace)?;
@@ -337,6 +348,7 @@ impl SheprdWindow {
         self.start_core_chat_tab(
             agent,
             Purpose::Tab {
+                focus,
                 scope,
                 workspace,
                 group,
@@ -394,7 +406,11 @@ impl SheprdWindow {
         } else {
             None
         };
-        let endpoint = EndpointId::random();
+        let endpoint = self
+            .chats
+            .brief
+            .as_ref()
+            .map_or_else(EndpointId::random, |brief| brief.endpoint.clone());
         let env = self.chat_env(carry);
         let mut spawn = match program.as_deref() {
             Some(program) => spawn((agent, self.chats.program_choice), program, &endpoint, &env),

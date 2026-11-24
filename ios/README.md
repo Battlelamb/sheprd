@@ -373,6 +373,18 @@ longer have, which shows as not reported).
 
 ## Live Activity styles
 
+In Settings > Notifications > Live Activities, **Default grouping** applies to
+current and future hosts. **One per host** is the default and combines all
+worktrees on each computer. **One for all hosts** lets the push relay keep one
+card for overlapping work on computers using **Use default**, even while the
+phone is locked. A waiting question takes focus. Tap to open its pane or use
+the available answer buttons. **One per agent** gives each independent chat or
+terminal agent its own activity. Delegated workers contribute to their
+coordinator’s progress. To override the default for a host, select its name
+and choose a grouping. Choose **Use default** to make it follow the default
+again. Choices apply to new activities and sync when an offline host reconnects.
+Older computers continue using the grouping they support.
+
 Settings > Notifications > Live Activities > Style picks how an activity
 looks on this phone (`LiveActivityStyle`, kept in the App Group so the widget
 draws with it), each previewed working, waiting, and finished:

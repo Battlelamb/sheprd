@@ -302,6 +302,10 @@ pub struct Config {
     pub sidebar: FontConfig,
     /// Daemon sidebar rows, falling back to defaults when invalid.
     pub sidebar_layout: SidebarLayout,
+    /// How the Moonframe sidebar shows each host's load: shares beside its
+    /// name, or lines under it with the sparklines and meters. Compact by
+    /// default.
+    pub sidebar_load: status_bar::Detail,
     /// Spacing overrides, host colours, and selection marking for the sidebar.
     pub sidebar_style: SidebarStyle,
     /// Wheel scrollback draws panes between rows, following the OS deltas.
@@ -492,6 +496,7 @@ impl Default for Config {
             show_window_controls: cfg!(target_os = "linux"),
             sidebar: font(monospace, 12.0),
             sidebar_layout: SidebarLayout::default(),
+            sidebar_load: status_bar::Detail::Compact,
             sidebar_style: SidebarStyle::default(),
             smooth_scroll: true,
             sound: SoundConfig::default(),
@@ -586,6 +591,7 @@ struct Settings {
     show_system_load: Option<bool>,
     show_window_controls: Option<bool>,
     sidebar: sidebar_style::SidebarSettings,
+    sidebar_load: Option<status_bar::Detail>,
     smooth_scroll: Option<bool>,
     sound: SoundConfig,
     sprites: SpritesConfig,
@@ -922,6 +928,7 @@ impl Config {
         config.show_window_controls = settings
             .show_window_controls
             .unwrap_or(cfg!(target_os = "linux"));
+        config.sidebar_load = settings.sidebar_load.unwrap_or(status_bar::Detail::Compact);
         config.smooth_scroll = settings.smooth_scroll.unwrap_or(true);
         // keep-sorted end
         settings.mods.validate()?;

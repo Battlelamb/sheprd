@@ -99,16 +99,30 @@ fn browser_commands_never_start_the_gui() {
             target: "localhost:3000".into(),
             workspace: None,
             focus: false,
-            placement: None,
+            placement: control::Placement::Tab,
         })
     );
+    for (args, focus) in [
+        (vec!["browser", "open", "demo.html"], false),
+        (vec!["browser", "open", "--focus", "demo.html"], true),
+    ] {
+        assert_eq!(
+            mode(&args).unwrap(),
+            browser(BrowserCommand::Open {
+                target: "demo.html".into(),
+                workspace: None,
+                placement: control::Placement::Tab,
+                focus,
+            })
+        );
+    }
     assert_eq!(
         mode(&["browser", "open", "--beside", "demo.html"]).unwrap(),
         browser(BrowserCommand::Open {
             target: "demo.html".into(),
             workspace: None,
             focus: false,
-            placement: Some(control::Placement::Beside),
+            placement: control::Placement::Beside,
         })
     );
     assert_eq!(
@@ -117,7 +131,7 @@ fn browser_commands_never_start_the_gui() {
             target: "demo.html".into(),
             workspace: None,
             focus: false,
-            placement: Some(control::Placement::Tab),
+            placement: control::Placement::Tab,
         })
     );
     assert_eq!(
@@ -134,7 +148,7 @@ fn browser_commands_never_start_the_gui() {
             target: "https://a.test".into(),
             workspace: Some("w_2".into()),
             focus: false,
-            placement: None,
+            placement: control::Placement::Tab,
         })
     );
     assert_eq!(

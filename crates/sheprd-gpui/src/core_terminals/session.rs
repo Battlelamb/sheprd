@@ -92,6 +92,7 @@ impl SheprdWindow {
                             .is_some_and(super::Hub::cooling));
             if self.keep_default_workspace(missing, &scope, cx) {
                 let purpose = super::Purpose::Tab {
+                    focus: true,
                     group: None,
                     scope,
                     workspace: super::WORKSPACE.to_owned(),
@@ -171,7 +172,7 @@ impl SheprdWindow {
             .collect()
     }
 
-    pub(super) fn live_at(&self, index: usize) -> &crate::state::LiveState {
+    pub(crate) fn live_at(&self, index: usize) -> &crate::state::LiveState {
         if index == self.selected_endpoint {
             &self.live
         } else {

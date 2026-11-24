@@ -105,7 +105,7 @@ pub(crate) async fn open_record(
 ) -> Result<(quinn::Connection, sheprd_tunnel::stream::Tunnel)> {
     let identity = record.tunnel_identity()?;
     let route = RouteId::parse(&record.route).ok_or(Error::RelayInfo)?;
-    let mut last = None;
+    let mut failure = Error::NoRelays;
     for relay in &record.relays {
         let Ok(endpoint) = Endpoint::parse(relay) else {
             continue;
@@ -118,7 +118,7 @@ pub(crate) async fn open_record(
         let (connection, (send, recv)) = match tokio::time::timeout(ATTEMPT, attempt).await {
             Ok(Ok(dialed)) => dialed,
             Ok(Err(error)) => {
-                last = Some(error);
+                failure.record_relay(&endpoint, error);
                 continue;
             }
             Err(_) => continue,
@@ -133,7 +133,7 @@ pub(crate) async fn open_record(
         .map_err(|_| Error::Tunnel(sheprd_tunnel::Error::Closed))??;
         return Ok((connection, tunnel));
     }
-    Err(last.map_or(Error::NoRelays, Error::Relay))
+    Err(failure)
 }
 
 #[cfg(test)]

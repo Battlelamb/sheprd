@@ -106,8 +106,8 @@ In a Herdr 2 (herdr-core) tab, starting a chat from the tab strip's launcher
 or the group menu opens a new chat tab in that group, using the terminal's
 current folder. The requested group stays with the start while the agent
 launches, even if you switch to the editor meanwhile. This leaves room for an editor in another group without
-adding a terminal beside the chat. `sheprd chat new --pane` can still split
-a core pane explicitly; a tab can hold several chats and plain terminals. The window picks the chat's endpoint before `sheprd-acp` starts:
+adding a terminal beside the chat. `sheprd chat new --pane` starts a background tab in that
+pane's workspace and folder; a tab can hold several chats and plain terminals. The window picks the chat's endpoint before `sheprd-acp` starts:
 it passes the id in `HERDR_ACP_ENDPOINT` and labels the terminal `acp=<id>`
 in herdr-core. Because herdr-core keeps the label, the chat view comes back
 after a restart and appears in every window that shows the pane.
@@ -798,6 +798,22 @@ a Herdr 2 terminal gets the options in its argv. `sheprd-acp` sends the
 brief as the chat's first prompt and marks it as the agent's, which clients
 show as a brief rather than the person's words, and deletes the file. A
 start that fails deletes it too.
+
+On iOS, a chat and its delegated workers share a progress count. By default
+all concurrent work on a computer shares one Live Activity. In Settings >
+Notifications > Live Activities, choose **One per host** to combine work
+across that host’s worktrees, **One for all hosts** to combine work across
+paired computers through the push relay, or **One per agent** to show each independent
+chat or terminal agent on its own card. You can set a phone-wide default
+and override it for individual hosts.
+It counts native subagents and local chats started with a brief, including
+chats in another Herdr space and the native subagents they start. A chat
+counts as soon as its launch is registered. Its coordinator can finish
+first and the activity stays open for the workers. The count advances when a task finishes,
+fails, or stops. The latest outcome names the task when notification
+privacy permits. Give each brief a distinct task name on its first line.
+Tapping the card opens the chat or terminal it shows. A pending question
+takes priority on a shared card.
 
 A brief is not yet sent to a chat on an SSH host or another machine's
 Herdr 2: the file is on this machine, so `chat new` refuses with exit 8

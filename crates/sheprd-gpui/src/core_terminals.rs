@@ -103,6 +103,7 @@ type Started = std::sync::mpsc::Receiver<start::Outcome>;
 pub(crate) enum Purpose {
     /// A new tab in a workspace.
     Tab {
+        focus: bool,
         scope: Scope,
         workspace: String,
         group: Option<crate::browser::GroupId>,
@@ -676,6 +677,7 @@ impl SheprdWindow {
         };
         self.start_on_provider(
             Purpose::Tab {
+                focus: true,
                 group: None,
                 scope,
                 workspace,
@@ -721,6 +723,7 @@ impl SheprdWindow {
             return false;
         }
         if let Purpose::Tab {
+            focus: true,
             scope,
             workspace,
             group,

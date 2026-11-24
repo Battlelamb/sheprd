@@ -4,13 +4,14 @@
 use super::*;
 #[cfg(target_os = "macos")]
 use crate::{
-    SheprdWindow,
     control::{
         protocol::tabs::{MachineImageInfo, MachineInfo, MachineState},
         server::window_for,
     },
     i18n::Localize as _,
+    machine::settings_request::Request,
     machine::{self, Limits, Listing, Name, Settings, Status, image},
+    window::main_window::MainWindow,
 };
 
 #[cfg(target_os = "macos")]
@@ -265,23 +266,26 @@ pub(super) fn delete(caller: &Caller, name: String, incoming: socket::Incoming, 
                 format!("No virtual Mac is called {name}"), // i18n: data
             ));
         }
-        let message = format!("Asked in Settings to delete {name}"); // i18n: data
-        cx.update(|cx| {
-            let source = handle
-                .entity(cx)
-                .map(|view: gpui::Entity<SheprdWindow>| view.downgrade());
-            if let Ok(source) = source {
-                crate::settings_window::open_machines(source, Some(Asked::Machine(name)), cx);
-            }
-        });
-        incoming.respond(Response::done(message));
+        incoming.respond(
+            cx.update(|cx| offer_settings(handle, Request::Delete(Asked::Machine(name)), cx)),
+        );
     })
     .detach();
 }
 
-/// Opens Settings > Virtual Macs on the caller's window, where the user
-/// confirms downloading Apple's macOS onto a new machine: it takes tens of
-/// gigabytes, so the command only asks.
+#[cfg(target_os = "macos")]
+fn offer_settings(handle: MainWindow, request: Request, cx: &mut App) -> Response {
+    match handle.update(cx, |view, _, cx| view.offer_machine_request(request, cx)) {
+        Ok(true) => Response::done("Added a notice to review the request in Virtual Macs settings"),
+        Ok(false) => Response::error(
+            ErrorCode::WindowBusy,
+            "Another virtual Mac settings request is waiting",
+        ),
+        Err(_) => closed(),
+    }
+}
+
+/// Offers to download macOS and create a machine once the user reviews it.
 #[cfg(target_os = "macos")]
 fn offer(caller: &Caller, name: Option<String>, incoming: socket::Incoming, cx: &mut App) {
     let (name, incoming) = match name {
@@ -306,17 +310,7 @@ fn offer(caller: &Caller, name: Option<String>, incoming: socket::Incoming, cx: 
         if let Some(name) = name.as_ref().filter(|_| taken) {
             return incoming.respond(refused(&machine::Error::Exists(name.clone())));
         }
-        cx.update(|cx| {
-            let source = handle
-                .entity(cx)
-                .map(|view: gpui::Entity<SheprdWindow>| view.downgrade());
-            if let Ok(source) = source {
-                crate::settings_window::offer_new_machine(source, name, cx);
-            }
-        });
-        incoming.respond(Response::done(
-            "Opened Settings > Virtual Macs: press Download and install there to make it", // i18n: data
-        ));
+        incoming.respond(cx.update(|cx| offer_settings(handle, Request::Create(name), cx)));
     })
     .detach();
 }
@@ -430,16 +424,9 @@ pub(super) fn image_delete(
         if !found {
             return incoming.respond(refused(&machine::Error::ImageNotFound(name)));
         }
-        let message = format!("Asked in Settings to delete {name}"); // i18n: data
-        cx.update(|cx| {
-            let source = handle
-                .entity(cx)
-                .map(|view: gpui::Entity<SheprdWindow>| view.downgrade());
-            if let Ok(source) = source {
-                crate::settings_window::open_machines(source, Some(Asked::Image(name)), cx);
-            }
-        });
-        incoming.respond(Response::done(message));
+        incoming.respond(
+            cx.update(|cx| offer_settings(handle, Request::Delete(Asked::Image(name)), cx)),
+        );
     })
     .detach();
 }

@@ -449,6 +449,10 @@ unless they ask for another:
 - **You hand it a task**: write the task to a file and start the chat with
   it, `sheprd chat new [AGENT] --pane ID --prompt-file PATH` (or
   `--prompt TEXT`, or `--prompt-file -` for standard input; at most 96 KB).
+  Use a short, distinct task name on the first line. Launch all the chats
+  for one batch from the coordinating turn. Its iOS Live Activity shows
+  how many agents have ended and the latest task to finish. Native subagents
+  also report into that activity.
   Sheprd sends it as the new chat's first prompt and shows it as your
   brief, not the user's words. Do not paste a task into a chat with
   `herdr agent prompt` or `herdr pane send-text`. A brief works only for

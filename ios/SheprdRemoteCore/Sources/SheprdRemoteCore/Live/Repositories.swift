@@ -81,6 +81,12 @@ extension Home {
 }
 
 extension Home.Workspace {
+    /// The branch or workspace label shown below the project when it adds detail.
+    public var checkoutSubtitle: String? {
+        let checkout = branch ?? label
+        return checkout == repositoryName ? nil : checkout
+    }
+
     /// The most pressing status among its chats and the agents in its
     /// terminal tabs, or nil when it runs none.
     public var status: Home.AgentStatus? {

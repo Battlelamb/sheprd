@@ -2,12 +2,15 @@ use super::*;
 use gpui::TestAppContext;
 
 mod connection;
+mod device_gpu;
+mod device_load;
 mod drafted;
 mod edge;
 mod focus;
 mod icons;
 mod nest;
 mod sidebar_size;
+mod status_buttons;
 mod unread;
 
 #[gpui::test]

@@ -116,6 +116,12 @@ show_system_load = true
 # GPU tool runs on any host.
 show_gpu_load = false
 show_sidebar_gpu_load = false
+# How the Moonframe window's sidebar shows each host's load: "compact" puts
+# the shares beside its name (CPU, memory, then GPU and video memory when
+# show_sidebar_gpu_load is on); "detailed" adds lines under it, CPU with its
+# graph and memory with its meter, then the GPU and video memory when
+# show_sidebar_gpu_load is on. Also under Settings > Sidebar.
+sidebar_load = "compact"
 # Checkpoint a worktree each time one of its agents starts or finishes a turn,
 # locally or over SSH, so its files can be rolled back from the workspace
 # menu's Checkpoints. Snapshots include untracked (not ignored) files, live in

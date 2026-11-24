@@ -495,6 +495,9 @@ final class AppModel {
         computers.removeAll { $0.device == computer.device }
         save()
         try? NotifyKey.forget(computer.fingerprint)
+        if ActivityGrouping.shared(for: computer.fingerprint) {
+            Task { await tokens.groupingChanged(sharedChanged: true) }
+        }
         hostLinks.forget(computer)
         collapsed.computers.forget(computer.device)
         shortcuts.offline(computer.device)

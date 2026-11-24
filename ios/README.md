@@ -15,6 +15,7 @@ The native app for Sheprd's remote control (`docs/ios-app-plan.md`).
   paired computer, merged into one list, with what needs you first. Agent and worktree labels appear together on each row. Agents manage them with `sheprd labels` on the host.
 - **What you can do:** answer questions in place, open a chat or a terminal,
   and send prompts.
+- **New project:** In Workspaces, open the computer’s ⋯ menu and choose **New Project**. Create an empty Git repository or clone one, select a parent folder on that computer, and open the first workspace there.
 - **Chat text:** an agent's replies are Markdown with the desktop's text sizes
   (`:big[…]` and the other steps) and message effects (`:::slam` bubbles,
   invisible ink revealed by a tap, and `::confetti` and the other screen
@@ -371,6 +372,18 @@ longer have, which shows as not reported).
   there.
 
 ## Live Activity styles
+
+In Settings > Notifications > Live Activities, **Default grouping** applies to
+current and future hosts. **One per host** is the default and combines all
+worktrees on each computer. **One for all hosts** lets the push relay keep one
+card for overlapping work on computers using **Use default**, even while the
+phone is locked. A waiting question takes focus. Tap to open its pane or use
+the available answer buttons. **One per agent** gives each independent chat or
+terminal agent its own activity. Delegated workers contribute to their
+coordinator’s progress. To override the default for a host, select its name
+and choose a grouping. Choose **Use default** to make it follow the default
+again. Choices apply to new activities and sync when an offline host reconnects.
+Older computers continue using the grouping they support.
 
 Settings > Notifications > Live Activities > Style picks how an activity
 looks on this phone (`LiveActivityStyle`, kept in the App Group so the widget

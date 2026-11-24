@@ -21,6 +21,10 @@ return mod {
 			class = "sheprd-header",
 			grow = true,
 			justify = "center",
+			-- A title bar, as the classic sidebar's top and the tab strip
+			-- beside it are: dragging it moves the window, a double click
+			-- zooms it; Back and Forward stay buttons.
+			drag = true,
 			style = { background = theme.sidebar },
 			ui.row {
 				align = "center",

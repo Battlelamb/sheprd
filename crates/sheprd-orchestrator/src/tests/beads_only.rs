@@ -8,6 +8,7 @@ fn a_beads_folder_outside_git_is_a_project() {
     let dir = tempfile::tempdir().unwrap();
     let checkout = dir.path().join("notes");
     std::fs::create_dir_all(checkout.join(".beads")).unwrap();
+    std::fs::write(checkout.join(".beads/metadata.json"), "{}").unwrap();
     let host = sheprd_remote::teleport::Host::new(&ConnectTarget::Local).unwrap();
     let info = repo::detect(
         &ConnectTarget::Local,
@@ -65,4 +66,81 @@ fn a_file_named_beads_does_not_make_a_project() {
         ),
         Err(Error::NotARepository)
     ));
+}
+
+/// Whether `checkout` is a project, read on this machine and by the SSH
+/// script under a local shell, which must agree.
+fn found(checkout: &std::path::Path) -> (bool, bool) {
+    let host = sheprd_remote::teleport::Host::new(&ConnectTarget::Local).unwrap();
+    let local = repo::detect(
+        &ConnectTarget::Local,
+        &host,
+        &checkout.to_string_lossy(),
+        &AtomicBool::new(false),
+    );
+    let mut command = std::process::Command::new("/bin/sh");
+    command
+        .args(["-c", &repo::detection_script(&checkout.to_string_lossy())])
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", checkout)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", checkout.join("gitconfig"));
+    let output = sheprd_remote::teleport::Host::capture_command(
+        command,
+        std::time::Duration::from_secs(5),
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    let ssh = repo::parse(
+        &ConnectTarget::Ssh {
+            target: "fixture".into(),
+            session: "default".into(),
+        },
+        &String::from_utf8(output).unwrap(),
+    );
+    let beads = |info: Result<repo::RepoInfo>| match info {
+        Ok(info) => info.beads,
+        Err(Error::NotARepository) => false,
+        Err(error) => panic!("{error:?}"),
+    };
+    (beads(local), beads(ssh))
+}
+
+#[test]
+fn bds_own_state_beside_a_home_folder_is_not_a_project() {
+    for git in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        if git {
+            gix::init(dir.path()).unwrap();
+        }
+        let state = dir.path().join(".beads");
+        std::fs::create_dir_all(state.join("eventsData")).unwrap();
+        std::fs::write(state.join("machine-id"), "0123").unwrap();
+        std::fs::write(state.join("vc.db"), "").unwrap();
+        std::fs::write(state.join("issues.db.backup"), "").unwrap();
+        assert_eq!(found(dir.path()), (false, false), "git: {git}");
+    }
+}
+
+#[test]
+fn what_bd_reads_as_a_project_makes_one() {
+    for (name, folder) in [
+        ("redirect", false),
+        ("metadata.json", false),
+        ("config.yaml", false),
+        ("beads.db", false),
+        ("dolt", true),
+        ("embeddeddolt", true),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join(".beads");
+        std::fs::create_dir(&state).unwrap();
+        if folder {
+            std::fs::create_dir(state.join(name)).unwrap();
+        } else {
+            std::fs::write(state.join(name), "").unwrap();
+        }
+        assert_eq!(found(dir.path()), (true, true), "{name}");
+    }
 }

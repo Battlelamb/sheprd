@@ -15,6 +15,8 @@ mod error;
 mod hold;
 mod job;
 mod kept;
+#[cfg(feature = "tmux")]
+pub(super) use kept::tmux_placements;
 mod lines;
 mod new_workspace;
 mod own;

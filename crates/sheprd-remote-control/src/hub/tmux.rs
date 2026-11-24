@@ -57,6 +57,7 @@ pub(super) fn with_chats(
     base: watch::Receiver<Arc<Layout>>,
     target: &ConnectTarget,
     state_dir: &Path,
+    sessions: Arc<sessions::Sessions>,
 ) -> watch::Receiver<Arc<Layout>> {
     let scope = target
         .socket_path()
@@ -74,6 +75,7 @@ pub(super) fn with_chats(
         let backend = sheprd_tmux::Tmux::new(0);
         loop {
             let backend = backend.clone();
+            let named = sessions.local_scopes();
             let tabs = tabs.clone();
             let scope = scope.clone();
             let Ok(next) = tokio::task::spawn_blocking(move || {
@@ -86,7 +88,7 @@ pub(super) fn with_chats(
                 }
                 let saved = tabs.as_deref().and_then(core::read_tabs);
                 let saved = saved.as_ref().zip(scope.as_deref());
-                let mut layout = project(records, saved);
+                let mut layout = project(records, saved, &named);
                 if selected && let Some(home) = sheprd_client::local_path::home_dir() {
                     list_home(&mut layout, saved, &home);
                 }
@@ -168,7 +170,13 @@ fn list_home(layout: &mut Layout, saved: Option<(&SavedTabs, &str)>, home: &Path
     layout.boot = "tmux".into();
 }
 
-fn project(records: Vec<TerminalInfo>, saved: Option<(&SavedTabs, &str)>) -> Layout {
+fn project(
+    records: Vec<TerminalInfo>,
+    saved: Option<(&SavedTabs, &str)>,
+    named: &std::collections::BTreeMap<String, String>,
+) -> Layout {
+    let (tabs, scope) = saved.unzip();
+    let mut placements = core::tmux_placements(tabs, scope, named);
     let mut layout = Layout::default();
     let mut endpoints = HashSet::new();
     for info in records {
@@ -181,13 +189,8 @@ fn project(records: Vec<TerminalInfo>, saved: Option<(&SavedTabs, &str)>) -> Lay
         if !endpoints.insert(endpoint.clone()) {
             continue;
         }
-        let tab = saved.and_then(|(tabs, scope)| {
-            tabs.core_tabs(scope)
-                .find(|tab| tab.panes.contains(&info.id))
-        });
-        let workspace = tab
-            .as_ref()
-            .map(|t| t.workspace_id.to_owned())
+        let (workspace, name) = placements.remove(&info.id).unzip();
+        let workspace = workspace
             .or_else(|| {
                 sheprd_session::labelled_workspace(&info.labels)
                     .map(|w| sessions::join_id(w.session, w.id))
@@ -219,12 +222,11 @@ fn project(records: Vec<TerminalInfo>, saved: Option<(&SavedTabs, &str)>) -> Lay
             }
         };
         let pane = crate::control::favorites::tmux_pane(info.id.as_str());
-        let name = saved.zip(tab.as_ref()).and_then(|((tabs, scope), tab)| {
-            tabs.pane_names(scope, tab.id)?
-                .get(info.id.as_str())
-                .cloned()
-        });
-        let title = name.or(info.title).or(info.name).unwrap_or_default();
+        let title = name
+            .flatten()
+            .or(info.title)
+            .or(info.name)
+            .unwrap_or_default();
         row.chats.push(ChatRow {
             tab: pane.clone(),
             pane,

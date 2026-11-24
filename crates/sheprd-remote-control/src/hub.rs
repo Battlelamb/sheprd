@@ -184,7 +184,7 @@ impl Hub {
             core_layout,
         ));
         #[cfg(feature = "tmux")]
-        let base_layout = tmux::with_chats(base_layout, &target, state_dir);
+        let base_layout = tmux::with_chats(base_layout, &target, state_dir, sessions.clone());
         tokio::spawn(sessions::merge_sources(
             sender,
             base_layout,

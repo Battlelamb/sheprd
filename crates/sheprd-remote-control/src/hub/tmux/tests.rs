@@ -37,6 +37,7 @@ fn discovers_each_live_helper_once_and_uses_its_saved_workspace_and_pane_name() 
     let layout = project(
         vec![shell, dead, info.clone(), info.clone()],
         Some((&saved, "s")),
+        &Default::default(),
     );
     assert!(layout.connected);
     assert_eq!(layout.working, 1);
@@ -51,15 +52,31 @@ fn discovers_each_live_helper_once_and_uses_its_saved_workspace_and_pane_name() 
 
 #[test]
 fn a_missing_or_unrelated_scope_never_claims_a_chat_and_the_inventory_is_bounded() {
-    let layout = project((0..100).map(chat).collect(), None);
+    let layout = project((0..100).map(chat).collect(), None, &Default::default());
     assert_eq!(layout.workspaces[0].id, "tmux:chats");
     assert_eq!(layout.chats().count(), MAX_CHATS);
-    assert!(!project(vec![], None).connected);
+    assert!(!project(vec![], None, &Default::default()).connected);
+}
+
+#[test]
+fn a_named_sessions_tab_joins_its_own_workspace() {
+    let info = chat(42);
+    let saved = SavedTabs::parse(
+        &serde_json::to_vec(&json!({
+            "tabs":[{"id":1,"scope":"side-socket","workspace_id":"w1","title":"Chat",
+                "location":{"kind":"core_terminal","panes":info.id.as_str()}}]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let scopes = [("side".into(), "side-socket".into())].into();
+    let layout = project(vec![info], Some((&saved, "primary")), &scopes);
+    assert_eq!(layout.workspaces[0].id, "herdr:side:w1");
 }
 
 #[test]
 fn a_host_using_tmux_offers_a_home_to_start_its_first_chat() {
-    let mut layout = project(vec![], None);
+    let mut layout = project(vec![], None, &Default::default());
     list_home(&mut layout, None, Path::new("/home/guest"));
     list_home(&mut layout, None, Path::new("/home/guest"));
     assert!(layout.connected);
@@ -77,7 +94,7 @@ async fn remote_client_subscribes_and_sends_a_command_without_either_herdr() {
     };
     use sheprd_client::private_endpoint::Listener;
     let dir = tempfile::tempdir().unwrap();
-    let layout = project(vec![chat(1)], None);
+    let layout = project(vec![chat(1)], None, &Default::default());
     let row = layout.chats().next().unwrap();
     let pane = row.pane.clone();
     let path = sheprd_chat_protocol::endpoint_path(dir.path(), &row.endpoint);

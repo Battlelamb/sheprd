@@ -34,3 +34,40 @@ fn edge_light_controls_save_hex_auto_width_and_trail(cx: &mut TestAppContext) {
         ]
     );
 }
+
+#[gpui::test]
+fn typed_hex_stays_open_until_a_busy_save_finishes(cx: &mut TestAppContext) {
+    let (view, cx, edits) = indicators_page(cx);
+    let bounds = cx.debug_bounds("edge-light-hex").unwrap();
+    cx.simulate_click(bounds.center(), Default::default());
+    cx.run_until_parked();
+    cx.simulate_input("#29bAc3");
+    view.update(cx, |view, cx| {
+        view.saving = true;
+        cx.notify();
+    });
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| {
+        assert!(
+            view.hex_edit.is_some(),
+            "busy save must preserve the hex draft"
+        );
+    });
+    assert!(
+        edits.lock().unwrap().is_empty(),
+        "busy save must not drop a write"
+    );
+
+    view.update(cx, |view, cx| {
+        view.saving = false;
+        cx.notify();
+    });
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    assert!(view.read_with(cx, |view, _| view.hex_edit.is_none()));
+    assert_eq!(
+        *edits.lock().unwrap(),
+        [Preference::EdgeLightColor(Some(0x29bac3))]
+    );
+}

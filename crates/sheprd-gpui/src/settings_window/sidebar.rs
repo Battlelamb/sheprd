@@ -468,7 +468,7 @@ impl SettingsWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.quitting || self.closing.is_some() {
+        if self.quitting || self.closing.is_some() || self.busy() {
             return;
         }
         if !self.finish_hex_edit(true, cx) {
@@ -517,6 +517,11 @@ impl SettingsWindow {
         } else {
             None
         };
+        // A save/reload owns persistence while busy. Keep the valid draft open
+        // rather than closing it before save_preference can reject the write.
+        if save && self.busy() {
+            return false;
+        }
         if let Some(edit) = self.hex_edit.take()
             && let Some(color) = color
         {

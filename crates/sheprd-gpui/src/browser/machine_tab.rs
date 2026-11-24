@@ -1,10 +1,12 @@
 //! Opening and drawing a machine's tab, and the status bar item that says a
 //! machine is running whether or not a tab shows it.
 
+use super::Tab;
 #[cfg(target_os = "macos")]
-use super::TabId;
-use super::{Location, Store, Tab};
-use crate::{SheprdWindow, i18n::fl, machine::Name, window::Flash};
+use super::{Location, Store, TabId};
+#[cfg(target_os = "macos")]
+use crate::machine::Name;
+use crate::{SheprdWindow, i18n::fl, window::Flash};
 use gpui::{AnyElement, Context, Div, IntoElement, ParentElement, Styled, Window, div, rgb};
 #[cfg(target_os = "macos")]
 use gpui::{
@@ -15,6 +17,7 @@ use gpui::{
 impl SheprdWindow {
     /// Shows machine `name` in a tab of the focused workspace, or brings back
     /// the one already showing it there, and starts it if it is stopped.
+    #[cfg(target_os = "macos")]
     pub(crate) fn open_machine(&mut self, name: Name, window: &mut Window, cx: &mut Context<Self>) {
         let Some((scope, workspace)) = self.browser_key() else {
             self.show_flash(Flash::warning(fl!("machine-no-workspace")), cx);
@@ -29,7 +32,6 @@ impl SheprdWindow {
         };
         self.dismiss_menu(window, cx);
         self.show_browser_tab(id, window, cx);
-        #[cfg(target_os = "macos")]
         crate::machine::start(&name, cx);
         cx.notify();
     }

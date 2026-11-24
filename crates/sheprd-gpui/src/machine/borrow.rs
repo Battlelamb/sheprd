@@ -90,8 +90,7 @@ impl Drop for Ask {
 
 impl SheprdWindow {
     /// Asks whether to borrow `machine` on host `host`, kept as `key`
-    /// when the user always borrows from it. `None` when another dialog
-    /// holds the window, which the caller reports as busy.
+    /// when the user always borrows from it. Only one borrow request can wait at a time.
     pub(crate) fn ask_to_borrow(
         &mut self,
         host: String,
@@ -100,7 +99,7 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Answered> {
-        if self.menu.page.is_some() || self.menu.machine_borrow.is_some() {
+        if self.menu.machine_borrow.is_some() {
             return None;
         }
         let answered = Answered::default();
@@ -132,11 +131,13 @@ impl SheprdWindow {
         )))
         .on_click(cx.listener(|this, _, window, cx| {
             cx.stop_propagation();
-            if let Some(ask) = this.menu.machine_borrow.take()
-                && !ask.answered.cancelled()
+            if this
+                .menu
+                .machine_borrow
+                .as_ref()
+                .is_some_and(|ask| !ask.answered.cancelled())
                 && this.open_menu(window, cx)
             {
-                this.menu.machine_borrow = Some(ask);
                 this.menu.page = Some(Page::BorrowMachine);
                 cx.notify();
             }

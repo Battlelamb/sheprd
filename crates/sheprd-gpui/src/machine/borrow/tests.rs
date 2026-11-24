@@ -40,7 +40,17 @@ fn a_borrow_request_waits_for_a_click_without_taking_focus(cx: &mut gpui::TestAp
             assert!(original.is_focused(window));
             assert!(view.menu.page.is_none());
             assert!(view.notice_shown(crate::window::NoticeCard::BorrowMachine));
-            assert!(ask.is_some_and(|ask| ask.take().is_none()));
+            let Some(ask) = ask else {
+                panic!("expected a borrow request")
+            };
+            assert!(view.open_menu(window, cx));
+            view.dismiss_menu(window, cx);
+            assert!(ask.take().is_none());
+            assert!(view.notice_shown(crate::window::NoticeCard::BorrowMachine));
+            assert!(view.open_menu(window, cx));
+            view.menu.page = Some(crate::menu::Page::BorrowMachine);
+            view.dismiss_menu(window, cx);
+            assert_eq!(ask.take(), Some(Answer::Dismissed));
         })
     });
 }

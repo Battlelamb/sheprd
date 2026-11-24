@@ -269,7 +269,13 @@ impl SheprdWindow {
     ) -> Option<std::cell::Ref<'_, crate::pull_request::PullRequest>> {
         // The Git probe only tracks this machine's checkouts, read with its
         // main account.
-        let input = self.git.tracked()?;
+        self.checkout_pull_request(self.git.tracked()?)
+    }
+
+    pub(crate) fn checkout_pull_request(
+        &self,
+        input: &crate::pull_request::Input,
+    ) -> Option<std::cell::Ref<'_, crate::pull_request::PullRequest>> {
         let view = crate::pull_request::View {
             origin: crate::pull_request::Origin::Local,
             login: self.main_tokens()?.key(),

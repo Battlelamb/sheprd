@@ -523,7 +523,10 @@ impl MenuState {
         self.remote_pairing = None;
         self.remote_revoke = None;
         self.remote_host_ask = None;
-        self.machine_borrow = None;
+        // Closing the borrow dialog declines it. Other menus leave the pending notice alone.
+        if self.page == Some(Page::BorrowMachine) {
+            self.machine_borrow = None;
+        }
         self.devices_scroll.set_offset(Point::default());
         self.devices_reveal.set(None);
         self.usage_scroll.set_offset(Point::default());

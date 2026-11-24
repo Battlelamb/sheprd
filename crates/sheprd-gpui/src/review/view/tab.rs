@@ -51,11 +51,17 @@ impl SheprdWindow {
             self.show_flash(Flash::warning(fl!("review-no-workspace")), cx);
             return;
         };
-        let scope = crate::browser::scope(&self.endpoints[self.selected_endpoint]);
         // Read before the review replaces the pane in the active group.
         let core = self.shown_core_pane(cx);
         let agent = review_recipient(self.live.snapshot.as_deref(), core.is_some());
-        let Some(id) = self.load_review_tab(scope, &workspace, checkout, agent, core, cx) else {
+        let Some(id) = self.load_review_tab(
+            self.selected_endpoint,
+            &workspace,
+            checkout,
+            agent,
+            core,
+            cx,
+        ) else {
             return;
         };
         self.dismiss_menu(window, cx);
@@ -123,18 +129,19 @@ impl SheprdWindow {
                 pane.or(snapshot.focused_pane_id.as_deref()),
             )
         });
-        self.load_review_tab(scope, workspace, checkout, agent, core, cx)
+        self.load_review_tab(index, workspace, checkout, agent, core, cx)
     }
 
     fn load_review_tab(
         &mut self,
-        scope: crate::browser::Scope,
+        endpoint: usize,
         workspace: &str,
         checkout: ReviewCheckout,
         agent: Option<Agent>,
         core: Option<(TabId, sheprd_backend::TerminalId)>,
         cx: &mut Context<Self>,
     ) -> Option<TabId> {
+        let scope = crate::browser::scope(self.endpoints.get(endpoint)?);
         let existing = cx.try_global::<Store>().and_then(|store| {
             store
                 .in_workspace(&scope, workspace)
@@ -158,7 +165,7 @@ impl SheprdWindow {
             self.show_flash(Flash::warning(fl!("review-too-many-tabs")), cx);
             return None;
         };
-        self.ensure_review(id, agent, cx);
+        self.ensure_review(id, endpoint, agent, cx);
         self.aim_review(id, core);
         self.load_review(id, cx);
         Some(id)
@@ -183,7 +190,13 @@ impl SheprdWindow {
 
     /// Makes `id`'s review from its tab, if the window has none yet; a newly
     /// named `agent` replaces the one the review sends to. Whether it was made.
-    fn ensure_review(&mut self, id: TabId, agent: Option<Agent>, cx: &mut Context<Self>) -> bool {
+    fn ensure_review(
+        &mut self,
+        id: TabId,
+        endpoint: usize,
+        agent: Option<Agent>,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if let Some(review) = self.reviews.get_mut(&id) {
             if agent.is_some() {
                 review.agent = agent;
@@ -197,7 +210,7 @@ impl SheprdWindow {
         else {
             return false;
         };
-        let review = self.new_review(id, Input::from(&checkout), agent, cx);
+        let review = self.new_review(id, Input::from(&checkout), agent, endpoint, cx);
         self.reviews.insert(id, review);
         true
     }
@@ -245,7 +258,7 @@ impl SheprdWindow {
             })
             .collect();
         for (id, agent) in missing {
-            if self.ensure_review(id, agent, cx) {
+            if self.ensure_review(id, self.selected_endpoint, agent, cx) {
                 self.load_review(id, cx);
             }
         }
@@ -326,6 +339,7 @@ impl SheprdWindow {
         id: TabId,
         checkout: Input,
         agent: Option<Agent>,
+        endpoint: usize,
         cx: &mut Context<Self>,
     ) -> Review {
         let (ui, theme) = (self.config.ui.clone(), self.theme.clone());
@@ -362,7 +376,7 @@ impl SheprdWindow {
             split_ratio: rows::EVEN_SPLIT,
             agent,
             core: None,
-            origin: crate::agent_notes::Origin::of(self),
+            origin: crate::agent_notes::Origin::at(self, endpoint),
             state: State::Loading,
             starts: vec![0],
             reading: HashSet::new(),

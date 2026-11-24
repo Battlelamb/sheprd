@@ -14,10 +14,13 @@ fn the_section_list_leads_from_the_right_and_resizes_by_its_left_edge(cx: &mut T
         window.focus(&view.focus, cx);
         view
     });
-    cx.simulate_resize(size(px(1200.), px(800.)));
+    // Short enough that the section list overflows on every platform, and drawn
+    // twice because the thumb reads the layout from the frame before it.
+    cx.simulate_resize(size(px(1200.), px(420.)));
     let draw = |cx: &mut VisualTestContext| {
         cx.update(|window, cx| crate::sidebar::layout_tests::full_draw(window, cx).clear(cx));
     };
+    draw(cx);
     draw(cx);
     let search = cx.debug_bounds("settings-nav-search").unwrap();
     let body = cx.debug_bounds("settings-body").unwrap();

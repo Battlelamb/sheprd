@@ -263,9 +263,10 @@ impl SheprdWindow {
                     let current = this.file_transfer_current(transfer);
                     let cancelled = transfer.cancelled.load(Ordering::Acquire) || !current;
                     let error = match &result {
-                        Ok(paths)
-                            if !cancelled && this.menu.page.is_none() && this.input_ready() =>
-                        {
+                        // The paths go to the captured pane by its ID, so a
+                        // tab switch still waiting for its frame, which leaves
+                        // the shown tab unready for input, does not refuse them.
+                        Ok(paths) if !cancelled && this.menu.page.is_none() => {
                             let text = super::file_drop::quote_paths(
                                 &paths.iter().map(PathBuf::from).collect::<Vec<_>>(),
                             );

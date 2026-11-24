@@ -40,7 +40,6 @@ struct Reader {
     grant: GrantId,
     projection: Projection,
     share: ShareId,
-    source_seq: u64,
 }
 
 /// Owned by one serial host worker. Disk operations are blocking. Opening the
@@ -198,7 +197,6 @@ impl Store {
                 grant,
                 projection: Projection::new(),
                 share,
-                source_seq: source.cursor.seq,
             },
         );
         Ok(Guest(id))
@@ -229,7 +227,6 @@ impl Store {
             reader
                 .projection
                 .read(source.transcript, boundary, content, request.cursor)?;
-        reader.source_seq = source.cursor.seq;
         Ok(update)
     }
 
@@ -240,10 +237,6 @@ impl Store {
         let reader = self.readers.get(&guest.0).ok_or(Error::Denied)?;
         let share = reader.share;
         let grant = reader.grant;
-        if source.cursor.seq < reader.source_seq {
-            self.stop(share, now)?;
-            return Err(Error::Source);
-        }
         self.source(share, source, now)?;
         let record = self.active(share, now)?;
         if !record
@@ -339,12 +332,16 @@ impl Store {
     }
 
     fn source(&mut self, id: ShareId, source: Source<'_>, now: Clock) -> Result<()> {
+        let index = self.index(id)?;
         let record = self.active(id, now)?;
         if !record.binding.matches(source) || source.cursor.seq < record.source_seq {
             self.stop(id, now)?;
             return Err(Error::Source);
         }
-        projection::validate(source.transcript)
+        projection::validate(source.transcript)?;
+        let share = &mut self.state.shares[index];
+        share.source_seq = share.source_seq.max(source.cursor.seq);
+        Ok(())
     }
 
     fn prune(&mut self, now: Clock) {

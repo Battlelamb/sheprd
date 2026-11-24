@@ -99,6 +99,74 @@ fn regressed_source_sequence_closes_access() {
 }
 
 #[test]
+fn reconnect_and_other_readers_cannot_accept_regressed_source_sequence() {
+    let mut f = Fixture::new();
+    f.cursor.seq = 10;
+    let (invite, guest) = f.share(History::All, Content::default());
+    f.cursor.seq = 100;
+    assert!(f.read(&guest, None, 1).is_ok());
+    f.store.disconnect(guest);
+
+    f.cursor.seq = 50;
+    let regressed = Source {
+        endpoint: &f.endpoint,
+        cursor: f.cursor,
+        transcript: &f.transcript,
+    };
+    assert!(matches!(
+        f.store.admit(
+            invite.share,
+            invite.grant,
+            &invite.capability,
+            regressed,
+            clock(2)
+        ),
+        Err(Error::Source)
+    ));
+    f.cursor.seq = 100;
+    let current = Source {
+        endpoint: &f.endpoint,
+        cursor: f.cursor,
+        transcript: &f.transcript,
+    };
+    assert!(matches!(
+        f.store.admit(
+            invite.share,
+            invite.grant,
+            &invite.capability,
+            current,
+            clock(3)
+        ),
+        Err(Error::Denied)
+    ));
+
+    let mut f = Fixture::new();
+    f.cursor.seq = 10;
+    let (invite, first) = f.share(History::All, Content::default());
+    let initial = Source {
+        endpoint: &f.endpoint,
+        cursor: f.cursor,
+        transcript: &f.transcript,
+    };
+    let second = f
+        .store
+        .admit(
+            invite.share,
+            invite.grant,
+            &invite.capability,
+            initial,
+            clock(0),
+        )
+        .unwrap();
+    f.cursor.seq = 100;
+    assert!(f.read(&first, None, 1).is_ok());
+    f.cursor.seq = 50;
+    assert!(matches!(f.read(&second, None, 2), Err(Error::Source)));
+    f.cursor.seq = 100;
+    assert!(matches!(f.read(&first, None, 3), Err(Error::Denied)));
+}
+
+#[test]
 fn expiry_checks_wall_and_monotonic_clocks_at_the_boundary() {
     for elapsed_only in [false, true] {
         let mut f = Fixture::new();

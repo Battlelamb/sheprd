@@ -53,12 +53,17 @@ impl<R: FnMut(Update)> Session<R> {
         self.accepts = crate::files::Accepts::default();
         self.acp_session = None;
         self.asked.clear();
+        self.auth_attempted = false;
+        self.auth_methods.clear();
+        self.can_load_session = false;
+        self.legacy_model_option = false;
         self.pending.clear();
         self.pictures = super::pictures::Pictures::default();
         self.ready = false;
         self.turn = None;
         self.config.agent = agent.display_name().to_owned();
         self.context.switched(&self.config.agent);
+        self.context.set_direct(agent == Agent::Antigravity);
         self.config.harness = Some(agent);
         self.config.login_hint = Some(agent.login_hint().to_owned());
 

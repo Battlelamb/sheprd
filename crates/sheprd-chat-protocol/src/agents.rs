@@ -46,6 +46,7 @@ macro_rules! agents {
 
 agents! {
     // keep-sorted start
+    Antigravity => "antigravity", "Antigravity", "run `agy acp --login` to sign in with Google", [("agy", "acp")];
     Claude => "claude", "Claude", "run `claude` and use /login", [("claude-agent-acp"), ("npx", "-y", "@agentclientprotocol/claude-agent-acp")];
     Codex => "codex", "Codex", "run `codex login`", [("codex-acp"), ("npx", "-y", "@agentclientprotocol/codex-acp")];
     Copilot => "copilot", "Copilot", "run `copilot` and use /login, or for GitHub Enterprise `copilot login --host HOST` with GH_HOST set", [("copilot", "--acp")];

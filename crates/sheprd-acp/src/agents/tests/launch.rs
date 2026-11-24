@@ -59,6 +59,34 @@ fn other_agents_keep_their_acp_command() {
 }
 
 #[test]
+fn antigravity_runs_its_official_acp_command() {
+    let dir = tempfile::tempdir().unwrap();
+    install(dir.path(), "agy");
+    let path = dir.path().as_os_str();
+    assert_eq!(
+        launch(Agent::Antigravity, Some(path), false),
+        Launch::Acp(dir.path().join("agy").into_os_string(), vec!["acp".into()])
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn the_standalone_antigravity_cli_beats_an_ide_launcher_on_path() {
+    let ide = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    install(ide.path(), "agy");
+    let local_bin = home.path().join(".local/bin");
+    std::fs::create_dir_all(&local_bin).unwrap();
+    install(&local_bin, "agy");
+    let path = std::env::join_paths([ide.path(), local_bin.as_path()]).unwrap();
+
+    assert_eq!(
+        antigravity_program(Some(path.as_os_str()), Some(home.path())),
+        Some(local_bin.join("agy"))
+    );
+}
+
+#[test]
 fn claude_alone_counts_as_installed() {
     let dir = tempfile::tempdir().unwrap();
     install(dir.path(), "claude");

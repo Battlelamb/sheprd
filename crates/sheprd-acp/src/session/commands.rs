@@ -281,6 +281,23 @@ impl<R: FnMut(Update)> Session<R> {
         if !known {
             return Err(Rejection::UnknownSetting);
         }
+        if self.legacy_model_option && id == crate::project::models::OPTION_ID {
+            let OptionValue::Choice { id: model_id } = value else {
+                return Err(Rejection::UnknownSetting);
+            };
+            let request = serde_json::json!({
+                "sessionId": session,
+                "modelId": model_id,
+            });
+            if !self.request(
+                "session/set_model",
+                &request,
+                Pending::SetModel(model_id.clone()),
+            ) {
+                return Err(Rejection::AgentUnavailable);
+            }
+            return Ok(());
+        }
         let request = wire::SetSessionConfigOptionRequest::new(
             session,
             id,

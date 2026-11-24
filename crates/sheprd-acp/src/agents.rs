@@ -79,7 +79,7 @@ fn native(agent: Agent) -> Option<&'static str> {
         Agent::Claude => Some(crate::claude::PROGRAM),
         Agent::Codex => Some(crate::codex::PROGRAM),
         Agent::Pi => Some(crate::pi::PROGRAM),
-        Agent::Copilot | Agent::Gemini | Agent::Kimi | Agent::Opencode => None,
+        Agent::Antigravity | Agent::Copilot | Agent::Gemini | Agent::Kimi | Agent::Opencode => None,
     }
 }
 
@@ -87,10 +87,14 @@ fn native(agent: Agent) -> Option<&'static str> {
 /// order. One only `npx` could start does not count: it would be
 /// downloaded, not run.
 pub(crate) fn installed(path: Option<&OsStr>) -> Vec<Agent> {
+    let home = std::env::home_dir();
     Agent::ALL
         .iter()
         .copied()
         .filter(|agent| {
+            if *agent == Agent::Antigravity {
+                return antigravity_program(path, home.as_deref()).is_some();
+            }
             native(*agent).is_some_and(|program| find_program(program, path).is_some())
                 || agent
                     .candidates()
@@ -105,9 +109,14 @@ pub(crate) fn installed(path: Option<&OsStr>) -> Vec<Agent> {
 /// so that starting it fails with a message naming what to install.
 pub(crate) fn command(agent: Agent, path: Option<&OsStr>) -> (OsString, Vec<OsString>) {
     let candidates = agent.candidates();
-    let found = candidates
-        .iter()
-        .find_map(|(program, args)| find_program(program, path).map(|found| (found, *args)));
+    let found = if agent == Agent::Antigravity {
+        antigravity_program(path, std::env::home_dir().as_deref())
+            .map(|found| (found, candidates[0].1))
+    } else {
+        candidates
+            .iter()
+            .find_map(|(program, args)| find_program(program, path).map(|found| (found, *args)))
+    };
     let (program, args) = match found {
         Some((found, args)) => (found.into_os_string(), args),
         None => {
@@ -122,6 +131,38 @@ pub(crate) fn command(agent: Agent, path: Option<&OsStr>) -> (OsString, Vec<OsSt
 pub(crate) fn find_program(program: &str, path: Option<&OsStr>) -> Option<PathBuf> {
     let path = path?;
     std::env::split_paths(path).find_map(|dir| executable(&dir, program))
+}
+
+/// Prefer the standalone Antigravity CLI's documented install locations over
+/// an IDE launcher with the same `agy` name on the shell's `PATH`.
+fn antigravity_program(path: Option<&OsStr>, home: Option<&Path>) -> Option<PathBuf> {
+    let directories: Vec<PathBuf> = std::env::split_paths(path?).collect();
+    let mut preferred = Vec::new();
+    #[cfg(windows)]
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        preferred.push(PathBuf::from(local).join("agy/bin"));
+    }
+    #[cfg(not(windows))]
+    preferred.extend(home.into_iter().map(|home| home.join(".local/bin")));
+    #[cfg(target_os = "macos")]
+    preferred.extend([
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/usr/local/bin"),
+    ]);
+    let ordered: Vec<PathBuf> = preferred
+        .iter()
+        .filter(|directory| directories.contains(directory))
+        .cloned()
+        .chain(
+            directories
+                .iter()
+                .filter(|directory| !preferred.contains(directory))
+                .cloned(),
+        )
+        .collect();
+    ordered
+        .iter()
+        .find_map(|directory| executable(directory, "agy"))
 }
 
 #[cfg(unix)]

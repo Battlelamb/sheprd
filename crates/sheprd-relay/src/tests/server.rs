@@ -13,6 +13,7 @@ mod handshake;
 mod history;
 mod identity;
 mod keys;
+mod legitimate_load;
 mod lockout;
 mod metrics;
 mod options;

@@ -483,6 +483,9 @@ local function device_header(device: any, layout: any, theme: any)
 		if load and load.memory
 			then ui.text { `{math.floor(load.memory + 0.5)}%`, class = "sheprd-device-memory", tooltip = "Memory", style = { color = theme.muted } }
 			else false,
+		if load and load.gpu
+			then ui.text { `{math.floor(load.gpu + 0.5)}%`, class = "sheprd-device-gpu", tooltip = "GPU", style = { color = theme.muted } }
+			else false,
 		ui.row {
 			class = "sheprd-device-status",
 			width = 7,

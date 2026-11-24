@@ -266,10 +266,13 @@ fn build_state() -> Value {
     })
 }
 
-fn load_state(sample: Option<&Sample>) -> Value {
+/// A host row's load: `cpu` and `memory` when `load`, and the GPU's busy
+/// share as `gpu` when `gpu`, as the classic row's gauges show them.
+fn load_state(sample: &Sample, load: bool, gpu: bool) -> Value {
     json!({
-        "cpu": sample.and_then(|sample| sample.cpu),
-        "memory": sample.and_then(|sample| sample.memory).map(|memory| memory.percent()),
+        "cpu": sample.cpu.filter(|_| load),
+        "gpu": sample.gpu.and_then(|card| card.busy).filter(|_| gpu),
+        "memory": sample.memory.map(|memory| memory.percent()).filter(|_| load),
     })
 }
 

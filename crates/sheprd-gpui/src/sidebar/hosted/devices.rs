@@ -98,9 +98,13 @@ impl SheprdWindow {
                 let selected = index == self.selected_endpoint;
                 let live = if selected { &self.live } else { &endpoint.live };
                 let host = crate::usage::Host::load_of(&endpoint.connection.target);
+                let (load, gpu) = (
+                    self.config.show_system_load,
+                    self.config.show_sidebar_gpu_load,
+                );
                 let reading = host
                     .as_ref()
-                    .filter(|_| self.config.show_system_load)
+                    .filter(|_| load || gpu)
                     .and_then(|host| self.system_load.get(host))
                     .and_then(|load| load.latest().copied());
                 let folded = multi && endpoint.collapsed;
@@ -116,7 +120,7 @@ impl SheprdWindow {
                     "enabled": endpoint.enabled,
                     "id": endpoint.id,
                     "label": endpoint.label,
-                    "load": reading.as_ref().map(|reading| load_state(Some(reading))),
+                    "load": reading.as_ref().map(|reading| load_state(reading, load, gpu)),
                     "removing": self.device_removing(endpoint),
                     "search": search_rows(endpoint, &sessions, cx),
                     "selected": selected,

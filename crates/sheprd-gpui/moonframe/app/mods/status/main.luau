@@ -106,47 +106,81 @@ local function usage(state: any, theme: any)
 	return ui.row(row)
 end
 
+-- One gauge of a load line: its label, then while the bar is detailed a
+-- sparkline of recent samples (`history`) or a meter (`meter`), then its
+-- share in its severity's color.
+local function gauge(class: string, name: string, value: number?, color: string?, part: any)
+	local column: any = {
+		class = class,
+		align = "center",
+		shrink = false,
+		style = { gap = 5 },
+		ui.text { name, style = { color = part.label_color } },
+	}
+	if part.history then
+		local bars: any = { class = "sheprd-sparkline", align = "end", height = 11, shrink = false, style = { gap = 1 } }
+		for _, bar in part.history do
+			table.insert(bars, if bar
+				then ui.row { width = 2, height = math.max(11 * bar.value, 1), shrink = false, style = { background = bar.color, radius = 0.5 } }
+				else ui.row { width = 2, height = 1, shrink = false, style = { background = part.track } })
+		end
+		table.insert(column, ui.row(bars))
+	end
+	if part.meter then
+		table.insert(column, ui.row {
+			width = 32,
+			height = 5,
+			shrink = false,
+			style = { background = part.track, radius = 3 },
+			ui.row { width = 32 * part.meter.used, height = 5, style = { background = part.meter.color, radius = 3 } },
+		})
+	end
+	if value then
+		table.insert(column, ui.text { `{math.floor(value + 0.5)}%`, style = { color = color } })
+	end
+	return ui.row(column)
+end
+
 -- The selected host's load as Sheprd's own bar draws it
 -- (`app.sheprd_load`, src/system_load/hosted.rs): CPU as a sparkline of its
 -- recent samples, memory as a meter, each with its share, in their
--- severity's colors; the graphs only while the bar is detailed.
+-- severity's colors; the graphs only while the bar is detailed. The GPU,
+-- when shown, follows as its own pair: busy share and video memory.
 local function load_item(load: any)
 	if load.unavailable then
 		return ui.text { load.unavailable, style = { color = load.label_color } }
 	end
-	local function label(text: string)
-		return ui.text { text, style = { color = load.label_color } }
-	end
-	local function share(value: number, color: string)
-		return ui.text { `{math.floor(value + 0.5)}%`, style = { color = color } }
-	end
-	local cpu: any = { class = "sheprd-load-cpu", align = "center", shrink = false, style = { gap = 5 }, label(load.cpu_label) }
-	if load.history then
-		local bars: any = { class = "sheprd-sparkline", align = "end", height = 11, shrink = false, style = { gap = 1 } }
-		for _, bar in load.history do
-			table.insert(bars, if bar
-				then ui.row { width = 2, height = math.max(11 * bar.value, 1), shrink = false, style = { background = bar.color, radius = 0.5 } }
-				else ui.row { width = 2, height = 1, shrink = false, style = { background = load.track } })
+	local row: any = { class = "sheprd-load", align = "center", shrink = false, style = { gap = 10 } }
+	if load.cpu_label then
+		table.insert(row, gauge("sheprd-load-cpu", load.cpu_label, load.cpu, load.cpu_color, {
+			label_color = load.label_color,
+			history = load.history,
+			track = load.track,
+		}))
+		if load.memory then
+			table.insert(row, gauge("sheprd-load-memory", load.memory_label, load.memory, load.memory_color, {
+				label_color = load.label_color,
+				meter = load.meter,
+				track = load.track,
+			}))
 		end
-		table.insert(cpu, ui.row(bars))
 	end
-	if load.cpu then
-		table.insert(cpu, share(load.cpu, load.cpu_color))
-	end
-	local row: any = { class = "sheprd-load", align = "center", shrink = false, style = { gap = 10 }, ui.row(cpu) }
-	if load.memory then
-		local memory: any = { class = "sheprd-load-memory", align = "center", shrink = false, style = { gap = 5 }, label(load.memory_label) }
-		if load.meter then
-			table.insert(memory, ui.row {
-				width = 32,
-				height = 5,
-				shrink = false,
-				style = { background = load.track, radius = 3 },
-				ui.row { width = 32 * load.meter.used, height = 5, style = { background = load.meter.color, radius = 3 } },
-			})
+	local gpu = load.gpu
+	if gpu then
+		if gpu.busy then
+			table.insert(row, gauge("sheprd-load-gpu", gpu.busy_label, gpu.busy, gpu.busy_color, {
+				label_color = gpu.label_color,
+				history = gpu.history,
+				track = gpu.track,
+			}))
 		end
-		table.insert(memory, share(load.memory, load.memory_color))
-		table.insert(row, ui.row(memory))
+		if gpu.memory then
+			table.insert(row, gauge("sheprd-load-vram", gpu.memory_label, gpu.memory, gpu.memory_color, {
+				label_color = gpu.label_color,
+				meter = gpu.meter,
+				track = gpu.track,
+			}))
+		end
 	end
 	return ui.row(row)
 end

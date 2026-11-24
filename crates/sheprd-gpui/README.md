@@ -95,7 +95,7 @@ device picker. Startup, disconnection, and operation errors remain in the status
 
 ## Speaking voices
 
-Settings > Voice shows the active provider. Click Change to choose ElevenLabs, OpenAI, Deepgram or OpenRouter in the provider sheet and connect your account. Choose a voice, preview it and select Use This Voice. Read aloud beside a chat reply sends its text to the selected provider. Click again to stop. Wispr Flow on Mac or Windows dictates into the focused composer using its configured shortcut.
+Settings > Voice shows the active provider. Click Change to choose ElevenLabs, OpenAI, Deepgram or OpenRouter in the provider sheet and connect your account. Choose a voice, preview it and select Use This Voice. Read aloud beside a chat reply sends its text to the selected provider. Playback starts as MP3 packets arrive. Stop reading cancels both playback and the download. Selecting a different reply switches to that reply. Wispr Flow on Mac or Windows dictates into the focused composer using its configured shortcut.
 
 OpenRouter supports browser sign-in with PKCE. The other speech APIs use a personal API key. New direct iOS pairings copy the active voice and credential if the other side has none. Disconnect removes the local copy. Revoke the key at the provider to invalidate all copies.
 

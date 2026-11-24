@@ -13,6 +13,7 @@ struct SpeakingVoiceSettings: View {
     @State private var voice = ""
     @State private var choices: [SpeechAccount.Choice] = []
     @State private var message = ""
+    @State private var previewing = false
     @State private var busy = false
     @State private var speaker = VoiceSpeaker()
     @State private var verifier: String?
@@ -158,7 +159,9 @@ struct SpeakingVoiceSettings: View {
                 }
                 Button("Preview") {
                     let selected = account
+                    previewing = true
                     run {
+                        defer { previewing = false }
                         guard try await speaker.play("Two chats need you. Would you like to open the first?", account: selected)
                         else { throw SpeechFailure.playback }
                     }
@@ -194,6 +197,13 @@ struct SpeakingVoiceSettings: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(busy)
         .disabled(busy)
+        .safeAreaInset(edge: .bottom) {
+            if previewing {
+                Button("Stop preview", systemImage: "stop.fill") { speaker.stop() }
+                    .buttonStyle(.borderedProminent)
+                    .padding(.bottom, 8)
+            }
+        }
     }
 
     private func reset() {

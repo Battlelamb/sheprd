@@ -21,3 +21,5 @@ settings-voice-close = Close
 settings-voice-providers = Choose a provider
 settings-voice-in-use = In use
 settings-voice-sign-in-or-key = Sign-in or API key
+settings-voice-stop = Stop preview
+settings-voice-stop-reading = Stop reading

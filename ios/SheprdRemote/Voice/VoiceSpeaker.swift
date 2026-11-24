@@ -1,4 +1,5 @@
 import AVFoundation
+import SheprdVoice
 
 /// The choices in Settings > Voice.
 enum VoiceSettings {
@@ -17,11 +18,11 @@ enum VoiceSettings {
 
 
 @MainActor
-final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
+final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate {
     private let synth = AVSpeechSynthesizer()
     private var utterance: AVSpeechUtterance?
-    private var player: AVAudioPlayer?
-    private var download: Task<Data, Error>?
+    private var player: StreamingSpeech?
+    private var download: Task<Void, Error>?
     private var completion: CheckedContinuation<Bool, Never>?
     private var generation = UUID()
     private var ownsAudio = false
@@ -35,7 +36,7 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
 
     @objc private nonisolated func interrupted(_ note: Notification) {
         guard note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt == AVAudioSession.InterruptionType.began.rawValue else { return }
-        Task { @MainActor in if self.ownsAudio { self.stop() } }
+        Task { @MainActor in if self.ownsAudio || self.download != nil { self.stop() } }
     }
 
     @discardableResult
@@ -50,28 +51,37 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
         let generation = self.generation
         defer { if self.generation == generation { stop() } }
         if let account {
-            let task = Task { try await account.audio(words) }
+            let request = try account.speechRequest(words)
+            let stream = StreamingSpeech { [weak self] in
+                guard let self, self.generation == generation else { throw CancellationError() }
+                try self.activateOutput()
+            }
+            player = stream
+            let config = URLSessionConfiguration.ephemeral
+            config.timeoutIntervalForRequest = 30
+            config.timeoutIntervalForResource = 300
+            let http = URLSession(configuration: config, delegate: SpeechHTTP(), delegateQueue: nil)
+            defer { http.invalidateAndCancel() }
+            let task = Task { try await stream.play(request, session: http) }
             download = task
-            let data = try await task.value
-            guard self.generation == generation else { return false }
-            player = try AVAudioPlayer(data: data)
-            player?.delegate = self
+            try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            return self.generation == generation
         }
+        try activateOutput()
+        return await withCheckedContinuation { continuation in
+            completion = continuation
+            let utterance = AVSpeechUtterance(string: words)
+            self.utterance = utterance
+            synth.speak(utterance)
+        }
+    }
+
+    private func activateOutput() throws {
         let session = AVAudioSession.sharedInstance()
         Feedback.shared.holdAudio(self)
         ownsAudio = true
         try session.setCategory(.playback, options: .duckOthers)
         try session.setActive(true)
-        return await withCheckedContinuation { continuation in
-            completion = continuation
-            if let player {
-                if !player.play() { finish(false) }
-            } else {
-                let utterance = AVSpeechUtterance(string: words)
-                self.utterance = utterance
-                synth.speak(utterance)
-            }
-        }
     }
 
     func stop() {
@@ -105,12 +115,4 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
         Task { @MainActor in if self.utterance.map(ObjectIdentifier.init) == id { self.finish(false) } }
     }
 
-    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        let id = ObjectIdentifier(player)
-        Task { @MainActor in if self.player.map(ObjectIdentifier.init) == id { self.finish(flag) } }
-    }
-
-    nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
-        audioPlayerDidFinishPlaying(player, successfully: false)
-    }
 }

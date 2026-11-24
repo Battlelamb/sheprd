@@ -1,26 +1,29 @@
 //! Blocking speech requests and audio playback, run by a background worker.
+mod stream;
+pub(crate) use stream::{Kind, Session};
+
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 pub(crate) use sheprd_remote_control::control::voice::{Account, Provider};
-use std::{
-    io::Cursor,
-    sync::atomic::{AtomicU64, Ordering},
-    time::{Duration, Instant},
-};
+use std::time::Duration;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
     #[error("Set up a speaking voice in Settings → Voice.")]
     Disconnected,
+    #[error("Playback stopped.")]
+    Stopped,
     #[error("Check the API key and voice ID. Speech requests support up to 8,000 UTF-8 bytes.")]
     Invalid,
     #[error("Could not complete the voice request: {0}")]
     Http(#[from] ureq::Error),
     #[error("The provider returned an invalid response.")]
     Json(#[from] serde_json::Error),
+    #[error("Speech download interrupted.")]
+    Stream(#[source] std::io::Error),
     #[error("Could not decode the speech audio.")]
     Audio(#[from] rodio::decoder::DecoderError),
     #[error("Could not open the audio output.")]
@@ -34,9 +37,14 @@ pub(crate) enum Error {
 }
 
 fn agent() -> ureq::Agent {
+    http_agent(30)
+}
+
+fn http_agent(seconds: u64) -> ureq::Agent {
     ureq::Agent::config_builder()
         .max_redirects(0)
-        .timeout_global(Some(Duration::from_secs(30)))
+        .timeout_recv_response(Some(Duration::from_secs(30)))
+        .timeout_global(Some(Duration::from_secs(seconds)))
         .build()
         .into()
 }
@@ -56,31 +64,23 @@ pub(crate) fn save(account: Option<&Account>) -> Result<(), Error> {
 }
 
 pub(crate) const SAMPLE: &str = "Two chats need you. Would you like to open the first?";
-static GENERATION: AtomicU64 = AtomicU64::new(0);
 
-pub(crate) fn next() -> u64 {
-    GENERATION.fetch_add(1, Ordering::Relaxed) + 1
-}
-
-pub(crate) fn read_message(words: &str, generation: u64) -> Result<(), Error> {
-    // Clicking again also stops the current message. Only one request and
-    // decoder can be running, including while waiting for the provider.
-    static READING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let Ok(_reading) = READING.try_lock() else {
-        return Ok(());
-    };
+pub(crate) fn read_message(words: &str, session: &Session) -> Result<(), Error> {
     let account = load()?.ok_or(Error::Disconnected)?;
-    speak(&account, words, generation)
+    speak(&account, words, session)
 }
 
-pub(crate) fn speak(account: &Account, words: &str, generation: u64) -> Result<(), Error> {
+pub(crate) fn speak(account: &Account, words: &str, session: &Session) -> Result<(), Error> {
+    if session.cancelled() {
+        return Ok(());
+    }
     if !account.valid() || words.is_empty() || words.len() > 8000 {
         return Err(Error::Invalid);
     }
     let voice = &account.voice;
     let (url, body) = match account.provider {
         Provider::ElevenLabs => (
-            format!("https://api.elevenlabs.io/v1/text-to-speech/{voice}"),
+            format!("https://api.elevenlabs.io/v1/text-to-speech/{voice}/stream"),
             json!({"text":words,"model_id":"eleven_multilingual_v2"}),
         ),
         Provider::OpenAI => (
@@ -96,7 +96,8 @@ pub(crate) fn speak(account: &Account, words: &str, generation: u64) -> Result<(
             json!({"text":words}),
         ),
     };
-    let request = agent()
+    let request = session
+        .agent()
         .post(&url)
         .header("Content-Type", "application/json");
     let key = account.key.expose();
@@ -105,27 +106,8 @@ pub(crate) fn speak(account: &Account, words: &str, generation: u64) -> Result<(
         Provider::Deepgram => request.header("Authorization", format!("Token {key}")),
         _ => request.header("Authorization", format!("Bearer {key}")),
     };
-    let audio = request
-        .send(serde_json::to_vec(&body)?.as_slice())?
-        .body_mut()
-        .with_config()
-        .limit(8 * 1024 * 1024)
-        .read_to_vec()?;
-    if GENERATION.load(Ordering::Relaxed) != generation {
-        return Ok(());
-    }
-    let source = rodio::Decoder::try_from(Cursor::new(audio))?;
-    let output = rodio::DeviceSinkBuilder::open_default_sink()?;
-    let player = rodio::Player::connect_new(output.mixer());
-    player.append(source);
-    let started = Instant::now();
-    while !player.empty()
-        && GENERATION.load(Ordering::Relaxed) == generation
-        && started.elapsed() < Duration::from_secs(300)
-    {
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    Ok(())
+    let response = request.send(serde_json::to_vec(&body)?.as_slice())?;
+    stream::play(response.into_body(), session)
 }
 
 #[derive(Deserialize)]

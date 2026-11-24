@@ -20,6 +20,7 @@ pub(in crate::settings_window) struct VoicePage {
     choices: Vec<voice::Choice>,
     notice: String,
     busy: bool,
+    previewing: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -47,6 +48,7 @@ impl VoicePage {
             choices: voice::choices(Provider::OpenAI),
             notice: String::new(),
             busy: false,
+            previewing: false,
         }
     }
 }
@@ -125,7 +127,12 @@ impl SettingsWindow {
         self.voice.busy = true;
         self.voice.notice.clear();
         cx.notify();
-        let generation = voice::next();
+        self.voice.previewing = action == ActionKind::Preview;
+        let session = if self.voice.previewing {
+            voice::Session::begin(voice::Kind::Preview)
+        } else {
+            None
+        };
         let job = cx.background_executor().spawn(async move {
             if action == ActionKind::Disconnect {
                 voice::save(None)?;
@@ -142,7 +149,14 @@ impl SettingsWindow {
                 }
             }
             match action {
-                ActionKind::Preview => voice::speak(&account, voice::SAMPLE, generation)?,
+                ActionKind::Preview => {
+                    let session = session.as_ref().ok_or(voice::Error::Invalid)?;
+                    let result = voice::speak(&account, voice::SAMPLE, session);
+                    if session.cancelled() {
+                        return Err(voice::Error::Stopped);
+                    }
+                    result?;
+                }
                 ActionKind::Save => voice::save(Some(&account))?,
                 ActionKind::Authorize | ActionKind::Disconnect => {}
             }
@@ -152,6 +166,7 @@ impl SettingsWindow {
             let result = job.await;
             let _ = this.update(cx, |this, cx| {
                 this.voice.busy = false;
+                this.voice.previewing = false;
                 match result {
                     Ok(Some(account)) => {
                         this.voice.verifier = None;
@@ -257,6 +272,10 @@ impl SettingsWindow {
         let theme = &self.theme;
         let idle = !self.voice.busy;
         let action = |id: &'static str, label: String, kind, cx: &mut Context<Self>| {
+            if kind == ActionKind::Preview && self.voice.previewing {
+                return ui::button(theme, id, fl!("settings-voice-stop"), true)
+                    .on_click(|_, _, _| voice::Session::stop_preview());
+            }
             let enabled = idle
                 && (kind != ActionKind::Disconnect
                     || self

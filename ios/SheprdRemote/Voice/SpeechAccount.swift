@@ -47,13 +47,13 @@ struct SpeechAccount: Codable, Equatable {
         try Keychain.write(JSONEncoder().encode(account), account: "speaking-voice", group: nil)
     }
 
-    func audio(_ words: String) async throws -> Data {
+    func speechRequest(_ words: String) throws -> URLRequest {
         guard valid, words.utf8.count <= 8000 else { throw SpeechFailure.invalid }
         let endpoint: String
         let body: [String: String]
         switch provider {
         case .elevenlabs:
-            endpoint = "https://api.elevenlabs.io/v1/text-to-speech/\(voice)"
+            endpoint = "https://api.elevenlabs.io/v1/text-to-speech/\(voice)/stream"
             body = ["text": words, "model_id": "eleven_multilingual_v2"]
         case .openai, .openrouter:
             endpoint = provider == .openai ? "https://api.openai.com/v1/audio/speech" : "https://openrouter.ai/api/v1/audio/speech"
@@ -66,7 +66,7 @@ struct SpeechAccount: Codable, Equatable {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(body)
-        return try await SpeechHTTP.fetch(request, limit: 8 * 1024 * 1024)
+        return request
     }
 
     struct Choice: Decodable, Identifiable {

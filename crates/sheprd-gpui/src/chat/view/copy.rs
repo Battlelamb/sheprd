@@ -56,6 +56,7 @@ impl SheprdWindow {
     /// A copy button by a message, positioned by the selected layout.
     pub(super) fn render_chat_copy(
         &self,
+        pane: &str,
         id: u64,
         text: &str,
         placement: CopyPlacement,
@@ -84,29 +85,46 @@ impl SheprdWindow {
                     .text_color(rgb(theme.muted)),
             )
             .child(fl!("chat-copy"));
+        let target = crate::voice::Kind::Message {
+            window: cx.entity_id(),
+            pane: pane.to_owned().into(),
+            entry: id,
+        };
+        let playing = crate::voice::Session::playing(&target);
+        let label = if playing {
+            fl!("settings-voice-stop-reading")
+        } else {
+            fl!("settings-voice-read")
+        };
         let read = div()
             .id(("chat-read-aloud", id))
             .role(Role::Button)
-            .aria_label(fl!("settings-voice-read"))
+            .aria_label(label.clone())
             .cursor_pointer()
             .text_color(rgb(theme.muted))
             .text_size(px((self.chat_text_size() - 2.).max(10.)))
             .px(px(4.))
-            .child(fl!("settings-voice-read"))
+            .child(label)
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |_, _, _, cx| {
                 cx.stop_propagation();
                 let words = words.clone();
-                let generation = crate::voice::next();
-                let job = cx
-                    .background_executor()
-                    .spawn(async move { crate::voice::read_message(&words, generation) });
+                cx.notify();
+                let Some(session) = crate::voice::Session::begin(target.clone()) else {
+                    return;
+                };
+                let job = cx.background_executor().spawn(async move {
+                    let result = crate::voice::read_message(&words, &session);
+                    if session.cancelled() { Ok(()) } else { result }
+                });
                 cx.spawn(async move |this, cx| {
-                    if let Err(error) = job.await {
-                        let _ = this.update(cx, |this, cx| {
-                            this.show_flash(Flash::warning(error.to_string()), cx)
-                        });
-                    }
+                    let result = job.await;
+                    let _ = this.update(cx, |this, cx| {
+                        if let Err(error) = result {
+                            this.show_flash(Flash::warning(error.to_string()), cx);
+                        }
+                        cx.notify();
+                    });
                 })
                 .detach();
             }));
@@ -114,8 +132,8 @@ impl SheprdWindow {
             .id(("chat-message-actions", id))
             .flex()
             .items_center()
-            .invisible()
-            .group_hover("chat-agent-message", |row| row.visible())
+            .when(!playing, |row| row.opacity(0.))
+            .group_hover("chat-agent-message", |row| row.opacity(1.))
             .child(button)
             .child(read);
         layout_for(self.config.chat.layout)

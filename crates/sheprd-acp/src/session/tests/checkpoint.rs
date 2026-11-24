@@ -36,8 +36,7 @@ fn only_a_loaded_session_gets_its_saved_conversation_and_never_double_replays_it
         .unwrap()
         .unwrap()
         .path();
-    let mut original: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let mut original: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     original.as_object_mut().unwrap().remove("identity");
     std::fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
 

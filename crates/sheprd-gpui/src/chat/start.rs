@@ -322,6 +322,18 @@ impl SheprdWindow {
         }
         let mut env = self.config.chat.env.clone();
         if let Some(brief) = brief {
+            if let Some(parent) = &brief.parent
+                && let Ok(value) = serde_json::to_string(parent)
+            {
+                env.insert(
+                    sheprd_chat_protocol::ENDPOINT_ENV.to_owned(),
+                    brief.endpoint.to_string(),
+                );
+                env.insert(
+                    sheprd_chat_protocol::brief::Delegation::ENV.to_owned(),
+                    value,
+                );
+            }
             env.insert(
                 super::brief::FILE_ENV.to_owned(),
                 brief.file.to_string_lossy().into_owned(),

@@ -117,6 +117,7 @@ pub(crate) fn state_lending(
         privacy: Privacy::Generic,
         pull_requests,
         push: None,
+        launches: Default::default(),
         pushes: Default::default(),
         relay: None,
         reports: Mutex::new(report_limit()),

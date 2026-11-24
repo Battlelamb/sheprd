@@ -24,12 +24,14 @@ final class HomeUnreadTests: XCTestCase {
             app.buttons["Unread Only"].tap()
         }
         XCTAssertTrue(readAgent.waitForExistence(timeout: 5))
+        XCTAssertEqual(unread.value as? String, "All Agents")
         XCTAssertFalse(app.buttons["Mark All Read"].exists)
 
         unread.tap()
         XCTAssertTrue(app.buttons["Mark All Read"].exists)
         app.buttons["Unread Only"].tap()
         XCTAssertTrue(readAgent.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(unread.value as? String, "Unread Only")
         let lastUnread = app.staticTexts["Weather widget"]
         XCTAssertTrue(lastUnread.exists)
 

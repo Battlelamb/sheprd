@@ -378,7 +378,11 @@ impl SheprdWindow {
         } else {
             None
         };
-        let endpoint = EndpointId::random();
+        let endpoint = self
+            .chats
+            .brief
+            .as_ref()
+            .map_or_else(EndpointId::random, |brief| brief.endpoint.clone());
         let env = self.chat_env(carry);
         let mut spawn = match program.as_deref() {
             Some(program) => spawn((agent, self.chats.program_choice), program, &endpoint, &env),

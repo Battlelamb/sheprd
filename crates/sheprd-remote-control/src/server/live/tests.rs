@@ -78,7 +78,10 @@ fn five_workers_share_the_parent_activity_through_its_last_completion() {
         Member::Chat(EndpointId::random()),
         Member::Chat(EndpointId::random()),
     ];
-    workers.extend(["parser", "ios", "review"].map(|name| Member::Call(name.into())));
+    workers.extend(
+        ["parser", "ios", "review"]
+            .map(|name| Member::Call(group.owner.endpoint.clone(), name.into())),
+    );
     for member in &workers {
         assert!(group.record(member.clone(), ActivityState::Running, "Task"));
     }
@@ -144,7 +147,8 @@ fn only_subagents_from_the_delegating_turn_count() {
     use sheprd_chat_protocol::{Activity, ActivityKind, Turn};
     let mut transcript = Transcript::new("Codex");
     transcript.turn = Some(Turn { started_ms: 100 });
-    let mut group = group::seed(&EndpointId::random(), "root", &transcript).unwrap();
+    let source = EndpointId::random();
+    let mut group = group::seed(&source, "root", &transcript).unwrap();
     let mut activity = Activity {
         call_id: "tool-1".into(),
         detail: None,
@@ -155,16 +159,16 @@ fn only_subagents_from_the_delegating_turn_count() {
         state: ActivityState::Running,
         stoppable: true,
     };
-    assert!(!group.activity(&activity));
+    assert!(!group.activity(&source, &activity));
     activity.started_ms = 110;
     activity.kind = ActivityKind::Shell;
-    assert!(!group.activity(&activity));
+    assert!(!group.activity(&source, &activity));
     activity.kind = ActivityKind::Subagent;
-    assert!(group.activity(&activity));
+    assert!(group.activity(&source, &activity));
     activity.detail = Some("Checking parser.rs".into());
-    assert!(!group.activity(&activity));
+    assert!(!group.activity(&source, &activity));
     activity.state = ActivityState::Failed;
-    assert!(group.activity(&activity));
+    assert!(group.activity(&source, &activity));
     let agents = group.update().state.detail.agents.unwrap();
     assert_eq!((agents.done, agents.total), (1, 1));
     assert_eq!(agents.latest.as_deref(), Some("Failed · Parser"));

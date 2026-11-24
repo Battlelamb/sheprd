@@ -9,6 +9,8 @@
 //! dropped, never queued.
 
 mod group;
+mod launches;
+pub(crate) use launches::Launches;
 
 use super::notifier::waiting;
 use crate::{
@@ -60,8 +62,29 @@ impl LiveActivities {
         let Some((workspace, row)) = layout.chat(pane) else {
             return;
         };
-        if let Some((owner, label)) = before.delegated_brief()
-            && let Some(group) = self.find_parent(state, owner, &row.endpoint)
+        if let Change::Activity { activity } = change {
+            if activity.kind != sheprd_chat_protocol::ActivityKind::Subagent {
+                return;
+            }
+            let known = self.call_owner(&row.endpoint, activity);
+            let group = if let Some(owner) = known {
+                self.groups.get_mut(&owner)
+            } else if let Some((owner, _)) = before.delegated_brief() {
+                self.find_parent(state, owner, &row.endpoint)
+            } else {
+                self.groups.get_mut(&row.endpoint)
+            };
+            if let Some(group) = group
+                && group.activity(&row.endpoint, activity)
+            {
+                state.launches.deliver(group, now_ms());
+                let live = group.update();
+                self.offer(state, live);
+            }
+            return;
+        }
+        if let Some(task) = &before.delegation
+            && let Some(group) = self.find_parent(state, &task.parent, &row.endpoint)
         {
             let status = match change {
                 Change::Turn { turn: Some(_) } => ActivityState::Running,
@@ -82,16 +105,8 @@ impl LiveActivities {
                 }
                 _ => return,
             };
-            if group.record(Member::Chat(row.endpoint.clone()), status, label) {
-                let live = group.update();
-                self.offer(state, live);
-            }
-            return;
-        }
-        if let Change::Activity { activity } = change {
-            if let Some(group) = self.groups.get_mut(&row.endpoint)
-                && group.activity(activity)
-            {
+            let launched = state.launches.deliver(group, now_ms());
+            if group.record(Member::Chat(row.endpoint.clone()), status, &task.label) || launched {
                 let live = group.update();
                 self.offer(state, live);
             }
@@ -141,8 +156,16 @@ impl LiveActivities {
                 );
             }
         }
+        if !self.groups.contains_key(&row.endpoint)
+            && let Some(group) = group::seed(&row.endpoint, pane, before)
+        {
+            self.groups.insert(row.endpoint.clone(), group);
+        }
         let live = match self.groups.get_mut(&row.endpoint) {
-            Some(group) => group.parent(live),
+            Some(group) => {
+                state.launches.deliver(group, now);
+                group.parent(live)
+            }
             None => live,
         };
         self.offer(state, live);
@@ -155,6 +178,17 @@ impl LiveActivities {
         if let Some(live) = self.pacer.offer(live, now_ms()) {
             self.dispatch(state, live);
         }
+    }
+
+    fn call_owner(
+        &self,
+        source: &EndpointId,
+        activity: &sheprd_chat_protocol::Activity,
+    ) -> Option<EndpointId> {
+        self.groups
+            .iter()
+            .find(|(_, group)| group.tracks_call(source, activity))
+            .map(|(owner, _)| owner.clone())
     }
 
     fn find_parent(
@@ -185,8 +219,43 @@ impl LiveActivities {
         let Some((_, row)) = layout.chat(pane) else {
             return;
         };
-        if let Some((owner, label)) = transcript.delegated_brief()
-            && let Some(group) = self.find_parent(state, owner, &row.endpoint)
+        let source = &row.endpoint;
+        let delegated = transcript.delegation.as_ref().and_then(|task| {
+            self.find_parent(state, &task.parent, source)
+                .map(|_| (&task.parent.endpoint, task.label.as_str()))
+        });
+        if delegated.is_none()
+            && let Some(turn) = transcript.turn
+        {
+            // A snapshot can be our first observation of this turn.
+            let resume = self.groups.get_mut(source).is_some_and(|group| {
+                group.owner.started_ms == turn.started_ms || group.resume(turn.started_ms)
+            });
+            if !resume {
+                let owner = Delegation {
+                    endpoint: source.clone(),
+                    started_ms: turn.started_ms,
+                };
+                self.groups.insert(
+                    source.clone(),
+                    Group::new(owner, pane, crate::apns::current(transcript)),
+                );
+            }
+        }
+        let mut changed = std::collections::HashSet::new();
+        for activity in &transcript.activities {
+            let owner = self
+                .call_owner(source, activity)
+                .or_else(|| delegated.map(|(owner, _)| owner.clone()))
+                .unwrap_or_else(|| source.clone());
+            if let Some(group) = self.groups.get_mut(&owner)
+                && group.activity(source, activity)
+            {
+                changed.insert(owner);
+            }
+        }
+        if let Some((owner, label)) = delegated
+            && let Some(group) = self.groups.get_mut(owner)
         {
             let status = transcript
                 .entries
@@ -197,27 +266,22 @@ impl LiveActivities {
                     EntryKind::Turn(t) => Some(group::outcome(t.end)),
                     _ => None,
                 })
+                .or_else(|| {
+                    matches!(transcript.status, Status::Failed { .. })
+                        .then_some(ActivityState::Failed)
+                })
                 .or_else(|| transcript.turn.map(|_| ActivityState::Running));
             if let Some(status) = status
-                && group.record(Member::Chat(row.endpoint.clone()), status, label)
+                && group.record(Member::Chat(source.clone()), status, label)
             {
+                changed.insert(owner.clone());
+            }
+        }
+        for owner in changed {
+            if let Some(group) = self.groups.get_mut(&owner) {
+                state.launches.deliver(group, now_ms());
                 let live = group.update();
                 self.offer(state, live);
-            }
-        } else if let Some(turn) = transcript.turn {
-            if let Some(group) = self.groups.get_mut(&row.endpoint)
-                && group.owner.started_ms == turn.started_ms
-            {
-                let mut changed = false;
-                for activity in &transcript.activities {
-                    changed |= group.activity(activity);
-                }
-                if changed {
-                    let live = group.update();
-                    self.offer(state, live);
-                }
-            } else if let Some(group) = group::seed(&row.endpoint, pane, transcript) {
-                self.groups.insert(row.endpoint.clone(), group);
             }
         }
     }
@@ -254,8 +318,11 @@ impl LiveActivities {
             let present = layout
                 .chat(group.pane())
                 .is_some_and(|(_, row)| &row.endpoint == endpoint);
-            if present && group.close_missing(&layout) {
-                updates.push(group.update());
+            if present {
+                let launched = state.launches.deliver(group, now_ms());
+                if group.close_missing(&layout, now_ms()) || launched {
+                    updates.push(group.update());
+                }
             }
             present
         });

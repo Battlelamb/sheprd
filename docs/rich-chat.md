@@ -782,7 +782,9 @@ start that fails deletes it too.
 
 On iOS, the chat that delegates work owns one Live Activity for its turn.
 It counts native subagents and local chats started with a brief, including
-chats in another Herdr space. The count advances when a task finishes,
+chats in another Herdr space and the native subagents they start. A chat
+counts as soon as its launch is registered. Its coordinator can finish
+first and the activity stays open for the workers. The count advances when a task finishes,
 fails, or stops. The latest outcome names the task when notification
 privacy permits. Give each brief a distinct task name on its first line.
 Tapping the activity opens the coordinating chat.

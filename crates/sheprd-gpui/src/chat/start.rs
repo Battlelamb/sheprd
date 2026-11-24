@@ -324,6 +324,10 @@ impl SheprdWindow {
                 && let Ok(value) = serde_json::to_string(parent)
             {
                 env.insert(
+                    sheprd_chat_protocol::ENDPOINT_ENV.to_owned(),
+                    brief.endpoint.to_string(),
+                );
+                env.insert(
                     sheprd_chat_protocol::brief::Delegation::ENV.to_owned(),
                     value,
                 );

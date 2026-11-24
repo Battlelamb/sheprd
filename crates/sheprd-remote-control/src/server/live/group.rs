@@ -16,11 +16,13 @@ const MAX_MEMBERS: usize = 256;
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub(super) enum Member {
     Chat(EndpointId),
-    Call(String),
+    Call(EndpointId, String),
 }
 
 pub(super) struct Group {
     pub(super) owner: Delegation,
+    first_started_ms: u64,
+    pending: HashMap<EndpointId, u64>,
     pane: String,
     state: ContentState,
     end: Option<Event>,
@@ -31,6 +33,8 @@ pub(super) struct Group {
 impl Group {
     pub(super) fn new(owner: Delegation, pane: &str, state: ContentState) -> Self {
         Self {
+            first_started_ms: owner.started_ms,
+            pending: HashMap::new(),
             owner,
             pane: pane.to_owned(),
             state,
@@ -45,6 +49,9 @@ impl Group {
     }
 
     pub(super) fn record(&mut self, key: Member, status: ActivityState, name: &str) -> bool {
+        if let Member::Chat(child) = &key {
+            self.pending.remove(child);
+        }
         if self
             .members
             .get(&key)
@@ -64,8 +71,37 @@ impl Group {
         true
     }
 
+    pub(super) fn owns(&self, owner: &Delegation) -> bool {
+        self.owner.endpoint == owner.endpoint
+            && (self.first_started_ms..=self.owner.started_ms).contains(&owner.started_ms)
+    }
+
+    pub(super) fn launch(
+        &mut self,
+        child: &EndpointId,
+        label: Option<&str>,
+        deadline: u64,
+    ) -> bool {
+        let key = Member::Chat(child.clone());
+        match label {
+            Some(label) if !self.members.contains_key(&key) => {
+                if self.record(key, ActivityState::Running, label) {
+                    self.pending.insert(child.clone(), deadline);
+                    return true;
+                }
+            }
+            None if self.pending.contains_key(child) => {
+                if let Some((_, name)) = self.members.get(&key).cloned() {
+                    return self.record(key, ActivityState::Failed, &name);
+                }
+            }
+            _ => {}
+        }
+        false
+    }
+
     pub(super) fn includes(&self, owner: &Delegation, child: &EndpointId) -> bool {
-        &self.owner == owner || self.members.contains_key(&Member::Chat(child.clone()))
+        self.owns(owner) || self.members.contains_key(&Member::Chat(child.clone()))
     }
 
     /// A follow-up on the coordinator reuses its still-open activity while
@@ -78,14 +114,16 @@ impl Group {
         true
     }
 
-    pub(super) fn activity(&mut self, activity: &Activity) -> bool {
+    pub(super) fn tracks_call(&self, source: &EndpointId, activity: &Activity) -> bool {
+        self.members
+            .contains_key(&Member::Call(source.clone(), activity.call_id.clone()))
+    }
+
+    pub(super) fn activity(&mut self, source: &EndpointId, activity: &Activity) -> bool {
         activity.kind == ActivityKind::Subagent
-            && (activity.started_ms >= self.owner.started_ms
-                || self
-                    .members
-                    .contains_key(&Member::Call(activity.call_id.clone())))
+            && (activity.started_ms >= self.first_started_ms || self.tracks_call(source, activity))
             && self.record(
-                Member::Call(activity.call_id.clone()),
+                Member::Call(source.clone(), activity.call_id.clone()),
                 activity.state,
                 &activity.label,
             )
@@ -143,13 +181,21 @@ impl Group {
     }
 
     /// A closed delegated chat may disappear before its final turn event.
-    pub(super) fn close_missing(&mut self, layout: &Layout) -> bool {
+    pub(super) fn close_missing(&mut self, layout: &Layout, now: u64) -> bool {
         let mut changed = false;
         for (member, (status, name)) in &mut self.members {
-            if let Member::Chat(endpoint) = member
-                && *status == ActivityState::Running
-                && !layout.chats().any(|row| &row.endpoint == endpoint)
-            {
+            let missing = match member {
+                Member::Chat(child) if self.pending.contains_key(child) => {
+                    self.pending[child] <= now
+                }
+                Member::Chat(source) | Member::Call(source, _) => {
+                    !layout.chats().any(|row| &row.endpoint == source)
+                }
+            };
+            if *status == ActivityState::Running && missing {
+                if let Member::Chat(child) = member {
+                    self.pending.remove(child);
+                }
                 *status = ActivityState::Killed;
                 self.latest = Some(excerpt(&format!("Stopped · {name}")));
                 changed = true;
@@ -175,7 +221,7 @@ pub(super) fn seed(endpoint: &EndpointId, pane: &str, transcript: &Transcript) -
     };
     let mut group = Group::new(owner, pane, apns::current(transcript));
     for activity in &transcript.activities {
-        group.activity(activity);
+        group.activity(endpoint, activity);
     }
     Some(group)
 }

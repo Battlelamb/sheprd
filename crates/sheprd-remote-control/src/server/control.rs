@@ -98,6 +98,16 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
             state.changes.seen();
             return Response::Status(status(state));
         }
+        Request::DelegatedLaunch {
+            owner,
+            child,
+            label,
+        } => {
+            if !state.apns.is_off() {
+                state.launches.report(owner, child, label, now);
+            }
+            return Response::Done;
+        }
         Request::PushStatus => return Response::PushStatus(state.pushes.status(&state.apns)),
         // `serve` answers it on the daemon's runtime; here there is none.
         Request::TestPush => {

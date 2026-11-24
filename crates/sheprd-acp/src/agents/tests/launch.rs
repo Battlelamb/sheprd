@@ -78,7 +78,7 @@ fn the_standalone_antigravity_cli_beats_an_ide_launcher_on_path() {
     let local_bin = home.path().join(".local/bin");
     std::fs::create_dir_all(&local_bin).unwrap();
     install(&local_bin, "agy");
-    let path = std::env::join_paths([ide.path(), local_bin.as_path()]).unwrap();
+    let path = search_path(Some(ide.path().as_os_str()), Some(home.path()));
 
     assert_eq!(
         antigravity_program(Some(path.as_os_str()), Some(home.path())),

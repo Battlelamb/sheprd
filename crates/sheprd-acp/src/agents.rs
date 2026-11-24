@@ -35,6 +35,14 @@ const FETCHER: &str = "npx";
 
 /// `path`'s folders, then the user and system folders agents install to.
 pub(crate) fn search_path(path: Option<&OsStr>, home: Option<&Path>) -> OsString {
+    search_path_with(path, home, local_app_data().as_deref())
+}
+
+fn search_path_with(
+    path: Option<&OsStr>,
+    home: Option<&Path>,
+    #[cfg_attr(not(windows), allow(unused_variables))] local_app_data: Option<&Path>,
+) -> OsString {
     let mut dirs: Vec<PathBuf> = path
         .map(std::env::split_paths)
         .into_iter()
@@ -44,6 +52,8 @@ pub(crate) fn search_path(path: Option<&OsStr>, home: Option<&Path>) -> OsString
         home.into_iter()
             .flat_map(|home| USER_DIRS.iter().map(|dir| home.join(dir))),
     );
+    #[cfg(windows)]
+    dirs.extend(antigravity_preferred_dirs(home, local_app_data));
     dirs.extend(SYSTEM_DIRS.iter().map(PathBuf::from));
     std::env::join_paths(dirs).unwrap_or_default()
 }
@@ -133,14 +143,18 @@ pub(crate) fn find_program(program: &str, path: Option<&OsStr>) -> Option<PathBu
     std::env::split_paths(path).find_map(|dir| executable(&dir, program))
 }
 
-/// Prefer the standalone Antigravity CLI's documented install locations over
-/// an IDE launcher with the same `agy` name on the shell's `PATH`.
-fn antigravity_program(path: Option<&OsStr>, home: Option<&Path>) -> Option<PathBuf> {
-    let directories: Vec<PathBuf> = std::env::split_paths(path?).collect();
+/// Standalone Antigravity CLI install locations, preferred over an IDE
+/// launcher with the same `agy` name on `PATH`.
+fn antigravity_preferred_dirs(
+    home: Option<&Path>,
+    #[cfg_attr(not(windows), allow(unused_variables))] local_app_data: Option<&Path>,
+) -> Vec<PathBuf> {
     let mut preferred = Vec::new();
     #[cfg(windows)]
-    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-        preferred.push(PathBuf::from(local).join("agy/bin"));
+    if let Some(local) = local_app_data {
+        preferred.push(local.join("agy").join("bin"));
+    } else if let Some(home) = home {
+        preferred.push(home.join("AppData").join("Local").join("agy").join("bin"));
     }
     #[cfg(not(windows))]
     preferred.extend(home.into_iter().map(|home| home.join(".local/bin")));
@@ -149,6 +163,38 @@ fn antigravity_program(path: Option<&OsStr>, home: Option<&Path>) -> Option<Path
         PathBuf::from("/opt/homebrew/bin"),
         PathBuf::from("/usr/local/bin"),
     ]);
+    preferred
+}
+
+#[cfg(windows)]
+fn local_app_data() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+#[cfg(not(windows))]
+fn local_app_data() -> Option<PathBuf> {
+    None
+}
+
+/// Prefer the standalone Antigravity CLI's documented install locations over
+/// an IDE launcher with the same `agy` name on the shell's `PATH`.
+///
+/// Only reorders directories already present in `path`: [`search_path`] adds
+/// every platform's standalone install directory for production lookups, while
+/// callers that pass an explicit isolated `path` stay scoped to it.
+fn antigravity_program(path: Option<&OsStr>, home: Option<&Path>) -> Option<PathBuf> {
+    antigravity_program_with(path, home, local_app_data().as_deref())
+}
+
+fn antigravity_program_with(
+    path: Option<&OsStr>,
+    home: Option<&Path>,
+    local_app_data: Option<&Path>,
+) -> Option<PathBuf> {
+    let directories: Vec<PathBuf> = std::env::split_paths(path?).collect();
+    let preferred = antigravity_preferred_dirs(home, local_app_data);
     let ordered: Vec<PathBuf> = preferred
         .iter()
         .filter(|directory| directories.contains(directory))

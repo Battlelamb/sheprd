@@ -380,7 +380,28 @@ impl LiveActivities {
                 continue;
             }
             let cards = self.cards.entry(device.clone()).or_default();
-            cards.restore(&registration, || current_panes(state, &self.groups, now));
+            cards.restore(&registration, || {
+                let mut active = current_panes(state, &self.groups, now);
+                // The first event after restart may already have removed the
+                // finished turn from its transcript (or its terminal from layout).
+                if registration.activity(host::SHARED_RECIPIENT).is_some()
+                    && !matches!(live.event, Event::Start { .. })
+                    && !active.iter().any(|(facts, _)| facts.pane == live.pane)
+                {
+                    let facts =
+                        pane_facts(state, &live.pane).unwrap_or_else(|| crate::apns::Attributes {
+                            agent: "Agent".into(),
+                            chat_title: String::new(),
+                            computer: state.computer.clone(),
+                            computer_id: crate::apns::computer_id(&state.fingerprint),
+                            workspace: state.computer.clone(),
+                            pane: live.pane.clone(),
+                            terminal: true,
+                        });
+                    active.push((facts, live.state.clone()));
+                }
+                active
+            });
             let replacement = cards.replace_reset(&registration, now);
             let next = cards.offer(&live, &registration, || pane_facts(state, &live.pane), now);
             if let Some((old, start)) = replacement {
@@ -406,7 +427,7 @@ impl LiveActivities {
         // Older hosts ignore this reserved activity recipient and use their
         // ordinary push-to-start handle. No shared update token leaves iOS.
         if live.pane.starts_with("host-activity/")
-            && let Some(token) = registration.activity("relay/all-hosts")
+            && let Some(token) = registration.activity(host::SHARED_RECIPIENT)
         {
             let live = shown(state, live, registration);
             let token = token.clone();

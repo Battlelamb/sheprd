@@ -70,6 +70,8 @@ impl Live {
                     .transpose()?;
                 let body = serde_json::to_vec(&json!({
                     "revision": revision, "run": run, "end": end,
+                    "restored": live.pane.rsplit('/').next().is_some_and(|s| s.starts_with("restored-")),
+                    "working": live.state.working, "waiting": live.state.waiting,
                     "question": live.state.phase == super::Phase::Question,
                     "done": agents.map_or(usize::from(end), |p| p.done),
                     "total": agents.map_or(1, |p| p.total),

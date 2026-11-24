@@ -224,3 +224,20 @@ fn the_last_run_controls_when_the_host_card_leaves_the_lock_screen() {
         );
     }
 }
+
+#[test]
+fn a_restart_with_only_the_relay_recipient_can_deliver_the_first_finish() {
+    let reg = registration(&serde_json::json!({"single_activity":true,"activities":[{"pane":"relay/all-hosts","token":"ab".repeat(32)}]}).to_string());
+    let mut cards = host::Cards::default();
+    let mut done = start("pane");
+    let Event::Start { attributes, .. } = &done.event else {
+        unreachable!()
+    };
+    cards.restore(&reg, || vec![(attributes.clone(), done.state.clone())]);
+    done.event = Event::End { dismissal_s: 20 };
+    done.state.phase = Phase::Finished;
+    let report = cards.offer(&done, &reg, || None, 10).unwrap();
+    assert!(report.pane.starts_with("host-activity/restored-"));
+    assert!(matches!(report.event, Event::End { .. }));
+    assert_eq!(report.state.detail.agents.unwrap().done, 1);
+}

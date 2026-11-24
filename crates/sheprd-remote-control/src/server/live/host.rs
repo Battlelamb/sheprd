@@ -8,6 +8,7 @@ use sheprd_chat_protocol::EndpointId;
 use std::collections::{HashMap, HashSet};
 
 const PREFIX: &str = "host-activity/";
+pub(super) const SHARED_RECIPIENT: &str = "relay/all-hosts";
 
 /// The optional epoch comes from the phone and survives an offline reset.
 fn card_prefix(registration: &Registration) -> String {
@@ -49,12 +50,19 @@ impl Cards {
             return;
         }
         let prefix = card_prefix(registration);
-        if let Some(token) = registration
+        let existing = registration
             .activities
             .iter()
-            .find(|a| a.pane.starts_with(&prefix))
-        {
-            let mut host = Host::new(token.pane.clone());
+            .find(|a| a.pane.starts_with(&prefix));
+        let restored = existing.map(|a| a.pane.clone()).or_else(|| {
+            // The phone binds a fleet card's token directly to the relay.
+            // Its reserved recipient is enough to reconstruct this host.
+            registration
+                .activity(SHARED_RECIPIENT)
+                .map(|_| format!("{prefix}restored-{}", EndpointId::random()))
+        });
+        if let Some(key) = restored {
+            let mut host = Host::new(key);
             for (facts, state) in active() {
                 if registration.activity(&facts.pane).is_none() {
                     host.running.insert(facts.pane.clone(), (facts, state));

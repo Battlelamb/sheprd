@@ -4,6 +4,23 @@ import Testing
 @testable import SheprdRemoteCore
 
 @Suite struct SharedActivityTests {
+    @Test func onlyHostsFollowingTheSharedDefaultParticipate() throws {
+        let suite = UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let owner = SealedChatActivityTests.owner
+        #expect(!ActivityGrouping.shared(for: owner, in: defaults))
+        defaults.set(true, forKey: ActivityGrouping.defaultKey)
+        defaults.set(true, forKey: ActivityGrouping.allHostsKey)
+        #expect(ActivityGrouping.shared(for: owner, in: defaults))
+        #expect(ActivityGrouping.single(for: owner, in: defaults))
+        for multiple in [false, true] {
+            defaults.set(multiple, forKey: ActivityGrouping.key(for: owner))
+            #expect(!ActivityGrouping.shared(for: owner, in: defaults))
+            #expect(ActivityGrouping.single(for: owner, in: defaults) != multiple)
+        }
+    }
+
     @Test func eachFocusAndFinishedLabelUsesItsOwnPairing() throws {
         let group = "local-generation"
         let a = SealedChatActivityTests.owner
@@ -22,7 +39,7 @@ import Testing
         state.focus = facts
         func snapshot(_ owner: Fingerprint) throws -> SharedActivitySnapshot {
             try .init(slot: SharedActivityCard.slot(group: group, computer: owner), sealed: seal(state, bKey),
-                      done: 1, total: 2, latest: .init(slot: SharedActivityCard.slot(group: group, computer: a), sealed: seal("Finished · Build", aKey)))
+                      working: 2, waiting: 1, done: 1, total: 2, latest: .init(slot: SharedActivityCard.slot(group: group, computer: a), sealed: seal("Finished · Build", aKey)))
         }
         let good = try snapshot(b)
         let opened = try #require(good.opened(group: group, keys: keys, generic: false))

@@ -53,8 +53,12 @@ impl Cipher {
 struct Report {
     revision: u64,
     run: u64,
+    #[serde(default)]
+    restored: bool,
     end: bool,
     question: bool,
+    working: u32,
+    waiting: u32,
     done: u32,
     total: u32,
     state: Cipher,
@@ -71,7 +75,9 @@ pub(crate) struct Card {
     latest: Option<(String, Cipher)>,
     nonce: String,
     started: bool,
+    token_gone: bool,
     dirty: bool,
+    alerted: Option<String>,
     timestamp: u64,
     arrival: u64,
     pub(crate) token: Option<SecretString>,
@@ -93,23 +99,32 @@ impl Card {
             .get(slot)
             .is_some_and(|rev| *rev >= r.revision)
         {
-            return Ok(self.action());
+            return self.action();
         }
         if self.revisions.len() >= 32 && !self.revisions.contains_key(slot) {
             return Err(Reply::Limited);
         }
-        if self.nonce.is_empty() {
-            if r.end {
-                self.revisions.insert(slot.into(), r.revision);
-                return Ok(None);
-            }
-            let mut bytes = [0u8; 16];
-            getrandom::fill(&mut bytes).map_err(|_| Reply::Unavailable)?;
-            self.nonce = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        // A finish can trail its card into an unrelated host's next session.
+        if r.end && !self.reports.contains_key(slot) {
+            self.revisions.insert(slot.into(), r.revision);
+            return Ok(None);
+        }
+        if self.token_gone && self.ended() && !r.end {
+            self.retire();
         }
         let previous = self.reports.get(slot);
         if let Some(previous) = previous.filter(|p| p.run != r.run) {
-            self.carried += u64::from(previous.total);
+            // A restarted daemon can only reconstruct currently observable
+            // panes. Credit earlier completions missing from its new snapshot.
+            let completed = if r.restored && !previous.end {
+                previous
+                    .total
+                    .saturating_sub(r.total)
+                    .max(previous.done.saturating_sub(r.done))
+            } else {
+                previous.total
+            };
+            self.carried += u64::from(completed);
         }
         let redacted =
             r.latest.is_none() && self.latest.as_ref().is_some_and(|(owner, _)| owner == slot);
@@ -121,17 +136,31 @@ impl Card {
         r.arrival = self.arrival;
         self.reports.insert(slot.into(), r);
         self.dirty = true;
-        Ok(self.action())
+        self.action()
     }
 
-    fn action(&self) -> Option<bool> {
-        (self.dirty && (!self.started || self.token.is_some())).then_some(!self.started)
+    fn action(&mut self) -> Result<Option<bool>, Reply> {
+        if !self.dirty {
+            return Ok(None);
+        }
+        if self.nonce.is_empty() || (self.token_gone && !self.ended()) {
+            let mut bytes = [0u8; 16];
+            getrandom::fill(&mut bytes).map_err(|_| Reply::Unavailable)?;
+            self.nonce = bytes.iter().map(|b| format!("{b:02x}")).collect();
+            self.started = false;
+            self.token_gone = false;
+        }
+        Ok((!self.started || self.token.is_some()).then_some(!self.started))
     }
 
     pub(crate) fn bind(&mut self, nonce: &str, token: SecretString) -> Result<Option<bool>, Reply> {
-        if !self.started || self.nonce != nonce {
+        if self.nonce != nonce {
             return Err(Reply::Gone);
         }
+        // Receiving the nonce from the phone proves APNs started the card,
+        // including when the gateway lost the acknowledgement.
+        self.started = true;
+        self.token_gone = false;
         if self
             .token
             .as_ref()
@@ -140,7 +169,7 @@ impl Card {
             self.token = Some(token);
             self.dirty = true;
         }
-        Ok(self.action())
+        self.action()
     }
 
     fn ended(&self) -> bool {
@@ -159,6 +188,13 @@ impl Card {
             .fold((self.carried, self.carried), |(d, t), r| {
                 (d + u64::from(r.done), t + u64::from(r.total))
             });
+        let (working, waiting) = self
+            .reports
+            .values()
+            .filter(|r| !r.end)
+            .fold((0u64, 0u64), |(w, q), r| {
+                (w + u64::from(r.working), q + u64::from(r.waiting))
+            });
         let event = if start {
             "start"
         } else if self.ended() {
@@ -168,10 +204,11 @@ impl Card {
         };
         self.timestamp = now.max(self.timestamp + 1);
         let mut aps = json!({"event":event,"timestamp":self.timestamp,"content-state":{"shared":{
-            "slot":slot, "sealed":focus.state.sealed, "done":done, "total":total,
+            "slot":slot, "sealed":focus.state.sealed, "done":done, "total":total,"working":working,"waiting":waiting,
             "latest":self.latest.as_ref().map(|(slot,label)| json!({"slot":slot,"sealed":label.sealed}))
         }}});
         if start {
+            aps["input-push-token"] = json!(1);
             aps["attributes-type"] = json!("ChatActivityAttributes");
             // Only the phone and sealed capabilities know the group secret.
             // The APNs-visible marker cannot authorize another attested phone.
@@ -181,7 +218,7 @@ impl Card {
                 .collect();
             aps["attributes"] = json!({"shared":{"group":marker,"card":self.nonce}});
         }
-        if start || focus.question {
+        if start || (focus.question && self.alerted.as_ref() != Some(slot)) {
             aps["alert"] = json!({"title":"Sheprd","body":"New activity"});
         }
         if event == "end" {
@@ -204,14 +241,27 @@ impl Card {
     }
 
     pub(crate) fn delivered(&mut self, start: bool) {
+        self.alerted = self
+            .reports
+            .iter()
+            .filter(|(_, r)| !r.end && r.question)
+            .max_by_key(|(_, r)| r.arrival)
+            .map(|(slot, _)| slot.clone());
         self.dirty = false;
         self.started = true;
         if !start && self.ended() {
-            self.lost_token();
+            self.retire();
         }
     }
 
     pub(crate) fn lost_token(&mut self) {
+        // APNs may have rotated the token before the phone binds its replacement.
+        self.token = None;
+        self.token_gone = true;
+        self.dirty = true;
+    }
+
+    fn retire(&mut self) {
         let revisions = std::mem::take(&mut self.revisions);
         *self = Self {
             revisions,

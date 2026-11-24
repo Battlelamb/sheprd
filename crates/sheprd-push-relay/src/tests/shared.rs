@@ -18,6 +18,7 @@ fn scoped(group: &str, slot: &str, kind: &str, byte: u8) -> String {
 
 fn report(revision: u64, end: bool, question: bool) -> Value {
     json!({"revision": revision, "run": 1, "end": end, "question": question,
+        "working": u32::from(!end && !question), "waiting": u32::from(question),
         "done": u32::from(end), "total": 1, "state": {"sealed":"opaque"},
         "latest": end.then(|| json!({"sealed":"finished"}))})
 }
@@ -115,4 +116,74 @@ async fn retries_reuse_the_start_nonce_and_a_finish_waits_for_the_right_generati
     );
     assert_ne!(first["attributes"], last(&f)["attributes"]);
     assert_eq!(send(&f, &right, json!({})).await, Reply::Gone);
+}
+
+#[tokio::test]
+async fn the_phone_can_acknowledge_a_start_after_the_gateway_times_out() {
+    let f = fixture();
+    let host = scoped(GROUP, &"a".repeat(32), "push_to_start", 1);
+    f.apple.answer(Err(sheprd_apns::Error::Timeout));
+    assert_eq!(
+        send(&f, &host, report(1, false, false)).await,
+        Reply::Unavailable
+    );
+    let start = last(&f);
+    let nonce = start["attributes"]["shared"]["card"].as_str().unwrap();
+    let bound = scoped(GROUP, nonce, "activity", 3);
+    assert_eq!(send(&f, &bound, json!({})).await, Reply::Delivered);
+    assert_eq!(last(&f)["event"], "update");
+    assert_eq!(
+        send(&f, &host, report(1, false, false)).await,
+        Reply::Delivered
+    );
+    assert_eq!(f.apple.sent().len(), 2);
+}
+
+#[tokio::test]
+async fn a_rotated_activity_token_can_deliver_a_held_end() {
+    let f = fixture();
+    let host = scoped(GROUP, &"a".repeat(32), "push_to_start", 1);
+    assert_eq!(
+        send(&f, &host, report(1, false, false)).await,
+        Reply::Delivered
+    );
+    let start = last(&f);
+    let nonce = start["attributes"]["shared"]["card"].as_str().unwrap();
+    let first = scoped(GROUP, nonce, "activity", 2);
+    assert_eq!(send(&f, &first, json!({})).await, Reply::Delivered);
+    f.apple.answer(Ok(Outcome::Gone));
+    assert_eq!(
+        send(&f, &host, report(2, true, false)).await,
+        Reply::Delivered
+    );
+    let replacement = scoped(GROUP, nonce, "activity", 3);
+    assert_eq!(send(&f, &replacement, json!({})).await, Reply::Delivered);
+    assert_eq!(last(&f)["event"], "end");
+    assert_eq!(f.apple.sent().last().unwrap().0, token(3));
+}
+
+#[tokio::test]
+async fn replacement_keeps_a_quiet_hosts_question_and_restored_finish_counts_once() {
+    let f = fixture();
+    let a = "a".repeat(32);
+    let asking = scoped(GROUP, &a, "push_to_start", 1);
+    let working = scoped(GROUP, &"b".repeat(32), "push_to_start", 2);
+    send(&f, &asking, report(1, false, true)).await;
+    let original = last(&f);
+    let nonce = original["attributes"]["shared"]["card"].as_str().unwrap();
+    send(&f, &scoped(GROUP, nonce, "activity", 3), json!({})).await;
+    f.apple.answer(Ok(Outcome::Gone));
+    send(&f, &working, report(1, false, false)).await;
+    let mut finish = report(2, true, false);
+    finish["restored"] = json!(true);
+    finish["run"] = json!(2);
+    send(&f, &working, finish).await;
+    let replacement = last(&f);
+    assert_eq!(replacement["event"], "start");
+    assert_ne!(replacement["attributes"], original["attributes"]);
+    let state = &replacement["content-state"]["shared"];
+    assert_eq!(state["slot"], a);
+    assert_eq!(state["total"], 2);
+    assert_eq!(state["done"], 1);
+    assert_eq!(state["waiting"], 1);
 }

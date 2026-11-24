@@ -178,6 +178,7 @@ final class ActivityTokens {
     }
 
     private var sharedWatches: [String: String] = [:]
+    private var bindings: [String: (token: String, task: Task<Void, Never>)] = [:]
 
     private func watchShared(_ activity: Activity<ChatActivityAttributes>, card: SharedActivityCard) {
         guard PushRelaySetting.isOn, card.belongs(to: ChatActivityAttributes.sharedGroup) else {
@@ -193,30 +194,65 @@ final class ActivityTokens {
             return
         }
         sharedWatches[card.card] = activity.id
-        let task = Task {
-            if let token = activity.pushToken { await bindShared(token.hexString, card: card) }
+        refreshSharedTokens()
+        let tokens = Task {
             for await token in activity.pushTokenUpdates {
-                await bindShared(token.hexString, card: card)
+                queueBinding(token.hexString, activity: activity.id, card: card)
             }
         }
         Task {
             for await state in activity.activityStateUpdates where state == .ended || state == .dismissed {
-                task.cancel()
+                tokens.cancel()
+                bindings.removeValue(forKey: activity.id)?.task.cancel()
                 sharedWatches[card.card] = nil
                 return
             }
         }
     }
 
-    private func bindShared(_ token: String, card: SharedActivityCard) async {
-        for delay in [1, 3, 10, 30, 60] {
-            guard !Task.isCancelled, let group = ChatActivityAttributes.sharedGroup, card.belongs(to: group), PushRelaySetting.isOn else { return }
-            if let credential = await pushRelay.usableCredential(),
-               let handle = pushRelay.handle(for: token, kind: .activity, credential: credential, group: group, slot: card.card) {
-                let result = try? await pushRelay.push(.bindSharedActivity(handle))
-                if result == .delivered || result == .gone { return }
+    /// Reconcile existing tokens on foreground and after a new card arrives.
+    /// This also retires an orphan when a relay restart lost its coordinator.
+    func refreshSharedTokens() {
+        for activity in Activity<ChatActivityAttributes>.activities {
+            guard case let .sharedCard(card) = activity.attributes.content,
+                  sharedWatches[card.card] == activity.id, let token = activity.pushToken,
+                  activity.activityState == .active || activity.activityState == .stale else { continue }
+            queueBinding(token.hexString, activity: activity.id, card: card)
+        }
+    }
+
+    private func queueBinding(_ token: String, activity id: String, card: SharedActivityCard) {
+        let previous = bindings[id]
+        guard previous?.token != token else { return }
+        previous?.task.cancel()
+        let task = Task {
+            // A token can rotate while the previous POST is in flight. Keep
+            // the posts ordered and let a rotation interrupt a retry delay.
+            await previous?.task.value
+            guard !Task.isCancelled else { return }
+            await bindShared(token, activity: id, card: card)
+            if !Task.isCancelled { bindings[id] = nil }
+        }
+        bindings[id] = (token, task)
+    }
+
+    private func bindShared(_ token: String, activity id: String, card: SharedActivityCard) async {
+        var delay = 0
+        while !Task.isCancelled {
+            if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
+            delay = min(60, max(1, delay * 2))
+            guard !Task.isCancelled, PushRelaySetting.isOn,
+                  let group = ChatActivityAttributes.sharedGroup, card.belongs(to: group) else { return }
+            guard let credential = await pushRelay.usableCredential() else { continue }
+            guard !Task.isCancelled, group == ChatActivityAttributes.sharedGroup,
+                  let handle = pushRelay.handle(for: token, kind: .activity, credential: credential, group: group, slot: card.card)
+            else { return }
+            let result = try? await pushRelay.push(.bindSharedActivity(handle))
+            if result == .delivered { return }
+            if result == .gone, !Task.isCancelled {
+                await Self.end(id)
+                return
             }
-            try? await Task.sleep(for: .seconds(delay))
         }
     }
 

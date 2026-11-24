@@ -24,6 +24,8 @@ public struct SharedActivitySnapshot: Codable, Hashable, Sendable {
 
     let slot: String
     let sealed: String
+    let working: Int
+    let waiting: Int
     let done: Int
     let total: Int
     let latest: Label?
@@ -42,6 +44,8 @@ public struct SharedActivitySnapshot: Codable, Hashable, Sendable {
         if !generic, let latest, let source = owner(latest.slot) {
             label = SealedChatActivity.open(latest.sealed, with: source)
         }
+        state.working = working
+        state.waiting = waiting
         state.agents = .init(done: done, total: total, latest: label)
         return .init(facts: facts, state: state)
     }

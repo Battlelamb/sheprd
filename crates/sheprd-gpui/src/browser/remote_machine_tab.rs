@@ -5,12 +5,8 @@ use super::{Location, Store, Tab, TabId};
 use crate::{
     SheprdWindow,
     i18n::fl,
-    machine::{
-        Name,
-        remote::watch::{self, Watch},
-    },
+    machine::remote::watch::{self, Watch},
     teleport::Host,
-    window::Flash,
 };
 use gpui::{prelude::*, *};
 use sheprd_control_protocol::protocol::tabs::{MachineButton, MachineModifier, TabOp};
@@ -42,44 +38,6 @@ enum Step {
 }
 
 impl SheprdWindow {
-    /// Shows machine `name` of the host `endpoint` in a tab of the focused
-    /// workspace, or brings back the one already showing it there. The
-    /// machine was started there; this only watches it.
-    pub(crate) fn open_remote_machine(
-        &mut self,
-        endpoint: String,
-        name: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Ok(name) = Name::try_from(name) else {
-            return;
-        };
-        let Some((scope, workspace)) = self.browser_key() else {
-            self.show_flash(Flash::warning(fl!("machine-no-workspace")), cx);
-            return;
-        };
-        let location = Location::RemoteMachine { endpoint, name };
-        let existing = cx.try_global::<Store>().and_then(|store| {
-            store
-                .in_workspace(&scope, &workspace)
-                .find(|tab| tab.location.as_ref() == Some(&location))
-                .map(|tab| tab.id)
-        });
-        let opened = existing.or_else(|| {
-            Store::update(cx, |store| {
-                store.open(scope, &workspace, Some(location), None)
-            })
-        });
-        let Some(id) = opened else {
-            self.show_flash(Flash::warning(fl!("machine-too-many-tabs")), cx);
-            return;
-        };
-        self.dismiss_menu(window, cx);
-        self.show_browser_tab(id, window, cx);
-        cx.notify();
-    }
-
     /// The host `endpoint`'s connection and label, while the window has it.
     fn remote_machine_host(&self, endpoint: &str) -> Option<(Host, String)> {
         let endpoint = self.endpoints.iter().find(|known| known.id == endpoint)?;

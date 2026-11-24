@@ -189,7 +189,7 @@ fn start_new(
         }
     };
     let own = callers_pane(caller);
-    let beside = pane.or_else(|| caller.pane_id.clone());
+    let beside = pane.or_else(|| own.clone());
     let kept = brief.clone();
     let response = in_window(caller, cx, move |view, _, cx| {
         // A chat's agent asking for another chat gets one like its
@@ -213,8 +213,7 @@ fn start_new(
             .as_ref()
             .filter(|(own, _)| *own == agent)
             .map(|(_, settings)| settings);
-        // With no Herdr pane named, as from an agent in a herdr-core
-        // pane, a herdr-core tab in the active group splits instead.
+        // A command outside a pane may use the core tab in the active group.
         let core = beside
             .is_none()
             .then(|| view.core_chat_group_tab(None, cx))
@@ -229,9 +228,9 @@ fn start_new(
             match core {
                 Some(tab) => view.start_core_chat(agent, tab, carry, cx),
                 None if beside.is_none() && view.kept_in_front().is_some() => {
-                    view.start_kept_core_chat(agent, carry, None, cx)
+                    view.start_kept_core_chat(agent, carry, None, false, cx)
                 }
-                None => view.start_chat(agent, beside.as_deref(), carry),
+                None => view.start_chat_with_focus(agent, beside.as_deref(), carry, false),
             }
         };
         view.chats.brief = None;

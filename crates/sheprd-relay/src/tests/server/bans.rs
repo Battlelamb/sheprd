@@ -48,6 +48,14 @@ async fn a_manually_banned_address_is_refused_everywhere_but_healthz() {
             "{path}: {response}"
         );
     }
+    #[cfg(feature = "client")]
+    {
+        let endpoint = format!("http://{}", relay.http).parse().unwrap();
+        assert!(matches!(
+            crate::client::reach(&endpoint).await,
+            Err(crate::client::Error::Banned)
+        ));
+    }
     // QUIC refuses it before the handshake.
     assert!(
         tokio::time::timeout(
@@ -177,6 +185,11 @@ async fn a_ban_closes_open_quic_connections() {
     let closed = tokio::time::timeout(Duration::from_secs(5), connection.closed())
         .await
         .expect("the connection stayed open");
+    #[cfg(feature = "client")]
+    assert!(matches!(
+        crate::client::Error::from(closed.clone()),
+        crate::client::Error::Banned
+    ));
     assert!(
         matches!(&closed, quinn::ConnectionError::ApplicationClosed(close) if close.error_code.into_inner() == u64::from(crate::wire::code::BANNED)),
         "{closed:?}"

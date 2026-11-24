@@ -176,7 +176,14 @@ pub async fn refuse_banned(State(shared): State<Shared>, request: Request, next:
 
 fn refused(reason: Refused) -> Response {
     match reason {
-        Refused::Banned => StatusCode::FORBIDDEN.into_response(),
+        Refused::Banned => (
+            StatusCode::FORBIDDEN,
+            [
+                (crate::endpoint::BAN_HEADER, "1"),
+                ("cache-control", "no-store"),
+            ],
+        )
+            .into_response(),
         Refused::PerAddress => StatusCode::TOO_MANY_REQUESTS.into_response(),
         Refused::Total => StatusCode::SERVICE_UNAVAILABLE.into_response(),
     }

@@ -244,7 +244,9 @@ limit both ways for an hour sends 14 GiB a side and is never slowed.
   a clean day after the last one starts over.
 - A banned address is refused before any new work: before the QUIC
   handshake (even before a retry), before every new stream, and before
-  every HTTP route but `/healthz`.
+  every HTTP route but `/healthz`. Its HTTP 403 carries
+  `Sheprd-Relay-Banned: 1` and `Cache-Control: no-store`, so clients can
+  identify a ban on their own address, including before a new connection.
 - A ban that any probe, forged proof, malformed message, or overrun budget
   led to also ends the address's open sessions (QUIC code 8, WebSocket
   4429), its QUIC connections, and its listeners. A ban earned by hitting

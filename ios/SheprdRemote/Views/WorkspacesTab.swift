@@ -248,6 +248,8 @@ struct MachineStatus: View {
             }
         case .connecting:
             ProgressView().controlSize(.small)
+        case .relayBanned:
+            Label("Relay ban", systemImage: "nosign").font(.caption).foregroundStyle(.red)
         case .offline:
             Image(systemName: "wifi.slash").foregroundStyle(.secondary).accessibilityLabel("Offline")
         case .revoked:

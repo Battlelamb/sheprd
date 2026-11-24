@@ -7,6 +7,7 @@ public enum LinkStatus: Codable, Hashable, Sendable {
     /// Nothing answered, or the connection dropped; it retries by itself
     /// and stays offline until a retry gets through.
     case offline(reason: String)
+    case relayBanned(RelayEndpoint)
     /// The computer no longer knows this phone: unpaired or revoked there.
     case revoked
     /// The computer's Sheprd has no live API for this app: update Sheprd
@@ -65,6 +66,8 @@ public struct LinkIO: Sendable {
     /// A bearer token from `origin`, signed with the device key.
     public var session: @Sendable (_ origin: String) async throws -> String
     public var connect: @Sendable (_ origin: String, _ token: String) async throws -> LiveConnection
+    /// Checks the relays for an explicit address ban after all paths failed.
+    public var bannedRelay: @Sendable () async -> RelayEndpoint? = { nil }
     public var sleep: @Sendable (Duration) async throws -> Void
 
     public init(
@@ -215,6 +218,13 @@ public actor ComputerLink {
                 guard let origin = race.found else {
                     if !reported { continuation.yield(.unreachable(race.failures)) }
                     reported = true
+                    if let relay = await io.bannedRelay() {
+                        guard !Task.isCancelled else { return }
+                        continuation.yield(.status(.relayBanned(relay)))
+                        offline = true
+                        await pause()
+                        continue
+                    }
                     throw Offline(reason: "No address answered (\(origins.count) tried)")
                 }
                 let token = try await io.session(origin)

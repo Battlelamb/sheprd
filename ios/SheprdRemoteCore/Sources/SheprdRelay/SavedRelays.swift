@@ -156,6 +156,7 @@ public enum RelayReach: Equatable, Sendable {
     /// Something answers there that is not a relay this app speaks to.
     case notARelay
     case unreachable
+    case banned
 
     struct Info: Decodable {
         let `protocol`: Int

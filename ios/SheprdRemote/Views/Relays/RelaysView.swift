@@ -152,7 +152,7 @@ private struct RelayRow: View {
     private var color: Color {
         switch reach {
         case .reachable: .green
-        case .noWebSocket, .notARelay, .unreachable: .red
+        case .noWebSocket, .notARelay, .unreachable, .banned: .red
         case nil: Color(.tertiaryLabel)
         }
     }
@@ -162,7 +162,7 @@ private struct RelayRow: View {
         case .reachable: "Reachable"
         case .noWebSocket: "No WebSocket, which this \(UIDevice.current.model) needs"
         case .notARelay: diagnostic?.detail ?? "Invalid relay response"
-        case .unreachable: diagnostic?.detail ?? "Check failed"
+        case .banned, .unreachable: diagnostic?.detail ?? "Check failed"
         case nil: "Checking…"
         }
     }

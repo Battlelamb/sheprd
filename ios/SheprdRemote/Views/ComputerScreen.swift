@@ -166,6 +166,7 @@ struct ComputerStatusLine: View {
         switch status {
         case .online: Label("Connected", systemImage: "circle.fill").foregroundStyle(.green)
         case .connecting: Label("Connecting…", systemImage: "circle.dotted").foregroundStyle(.secondary)
+        case let .relayBanned(relay): Label("\(relay.host) banned your network address", systemImage: "nosign").foregroundStyle(.red)
         case .offline: Label("Offline", systemImage: "wifi.slash").foregroundStyle(.secondary)
         case .revoked: Label("Unpaired this \(UIDevice.current.model)", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
         case .outdated: Label("Needs a newer Sheprd", systemImage: "arrow.up.circle").foregroundStyle(.orange)

@@ -20,12 +20,14 @@ pub use reach::{first_reachable, reach};
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     // keep-sorted start
+    #[error("This relay has banned your network address")]
+    Banned,
     #[error("could not open a UDP socket for QUIC")]
     Bind(#[source] std::io::Error),
     #[error("could not start a QUIC connection")]
     Connect(#[from] quinn::ConnectError),
     #[error("the QUIC connection failed or closed")]
-    Connection(#[from] quinn::ConnectionError),
+    Connection(#[source] quinn::ConnectionError),
     #[error("the connection offers no TLS exporter to prove a key over")]
     Exporter,
     #[error("the relay's /v1/info could not be read")]
@@ -51,6 +53,18 @@ pub enum Error {
     #[error("could not write to the relay")]
     Write(#[from] quinn::WriteError),
     // keep-sorted end
+}
+
+impl From<quinn::ConnectionError> for Error {
+    fn from(error: quinn::ConnectionError) -> Self {
+        if matches!(&error, quinn::ConnectionError::ApplicationClosed(close)
+            if close.error_code == quinn::VarInt::from_u32(wire::code::BANNED))
+        {
+            Self::Banned
+        } else {
+            Self::Connection(error)
+        }
+    }
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -232,12 +246,12 @@ impl Listener {
     pub async fn closed(&self) -> Error {
         let mut recv = self.recv.lock().await;
         tokio::select! {
-            error = self.connection.closed() => Error::Connection(error),
+            error = self.connection.closed() => error.into(),
             reset = recv.received_reset() => match reset {
                 Ok(Some(code)) if code == quinn::VarInt::from_u32(wire::code::REPLACED) => {
                     Error::Replaced
                 }
-                Err(quinn::ResetError::ConnectionLost(error)) => Error::Connection(error),
+                Err(quinn::ResetError::ConnectionLost(error)) => error.into(),
                 Ok(_) | Err(_) => Error::ListenEnded,
             },
         }

@@ -51,7 +51,7 @@ fn live_folder_drives_metadata_empty_groups_and_chat_tabs(cx: &mut TestAppContex
             assert!(matches!(view.group_shown(view.active_group().unwrap(), cx), crate::browser::Shown::Empty),
                 "an empty Herdr 2 group must not expose Herdr 1's reconnect screen");
             let mut spawn = Spawn::default();
-            view.give_core_context(&Purpose::Tab { group: None, scope: scope.clone(), workspace: workspace.clone() }, &crate::core_terminals::Host::Local, &mut spawn, cx);
+            view.give_core_context(&Purpose::Tab { focus: true, group: None, scope: scope.clone(), workspace: workspace.clone() }, &crate::core_terminals::Host::Local, &mut spawn, cx);
             assert_eq!(spawn.cwd.as_deref(), Some(Path::new("/work/repo/src/nested")));
 
             view.config.features.acp_chats = true;
@@ -71,7 +71,7 @@ fn live_folder_drives_metadata_empty_groups_and_chat_tabs(cx: &mut TestAppContex
             let saved = cx.global::<Store>().kept_workspace(&scope, &workspace).unwrap();
             assert_eq!(saved.cwd, "/work/repo/src/nested");
             assert_eq!(saved.label, "Chosen name");
-            view.start_kept_core_chat(Agent::Codex, None, None, cx).unwrap();
+            view.start_kept_core_chat(Agent::Codex, None, None, true, cx).unwrap();
             assert_eq!(view.core_terminals.wanted.back().unwrap().2.cwd.as_deref(), Some(Path::new("/work/repo/src/nested")));
         })
     });
@@ -113,6 +113,29 @@ fn a_chat_keeps_its_requested_group_while_the_editor_gets_focus(cx: &mut TestApp
         let crate::browser::Shown::Page(chat) = view.group_shown(chat_group, cx) else { panic!("chat tab missing"); };
         assert_ne!(chat, editor);
         assert!(matches!(&cx.global::<Store>().get(chat).unwrap().location, Some(crate::browser::Location::CoreTerminal { panes, .. }) if panes.first().as_str() == "t-chat"));
+    }));
+}
+
+#[gpui::test]
+fn a_background_chat_finishing_keeps_the_selected_tab(cx: &mut TestAppContext) {
+    let (view, cx) = window(cx, false);
+    cx.update(|window, cx| view.update(cx, |view, cx| {
+        let workspace = view.open_kept_workspace(None, Path::new("/repo"), core_tab("t1"), window, cx).unwrap();
+        let group = view.active_group().unwrap();
+        let shown = view.group_shown(group, cx);
+        view.config.features.acp_chats = true;
+        view.chats.program = crate::chat::Program::Found("/opt/sheprd-acp".into());
+        view.start_kept_core_chat(Agent::Codex, None, None, false, cx).unwrap();
+        let (purpose, host, _, _) = view.core_terminals.wanted.pop_back().unwrap();
+        view.core_terminals.start_for_test(purpose, host, Ok(TerminalInfo {
+            agent: AgentStatus::Unknown, cwd: None, foreground: None,
+            id: TerminalId::new("t-background").unwrap(), labels: Default::default(),
+            name: None, reporter: None, state: RunState::Running, title: None,
+        }));
+        view.place_started_core_terminal(window, cx);
+        assert_eq!(view.group_shown(group, cx), shown);
+        assert!(cx.global::<Store>().tabs().any(|tab| tab.workspace_id == workspace &&
+            matches!(&tab.location, Some(crate::browser::Location::CoreTerminal { panes, .. }) if panes.first().as_str() == "t-background")));
     }));
 }
 

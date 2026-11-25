@@ -2,7 +2,7 @@
 
 use crate::push::TurnPull;
 use sheprd_chat_protocol::{
-    Change, Entry, EntryId, EntryKind, PullRequest, PullRequestAction, Transcript, TurnEnd,
+    Change, Entry, EntryId, EntryKind, PullRequest, PullRequestAction, Transcript, Turn, TurnEnd,
     TurnSummary,
 };
 
@@ -89,23 +89,32 @@ fn a_fresh_copy_keeps_it_only_within_the_same_turn() {
         turn.step(&pull(7, &[PullRequestAction::Pushed]));
         turn
     };
-    let before = transcript(vec![user_kind()]);
-    // The same turn still runs.
-    let same = transcript(vec![
-        user_kind(),
-        EntryKind::Agent {
-            text: "pushed".to_owned(),
-        },
-    ]);
-    let mut kept = touched().carried(&before, &same);
-    assert_eq!(
-        kept.step(&ended()).as_deref(),
-        Some("https://github.com/o/r/pull/7")
-    );
+    let running = |started_ms, kinds| Transcript {
+        turn: Some(Turn { started_ms }),
+        ..transcript(kinds)
+    };
+    let before = running(100, vec![user_kind()]);
+    // The same turn still runs, even once a long transcript dropped the
+    // entry that began it.
+    for after in [
+        running(100, vec![user_kind()]),
+        running(
+            100,
+            vec![EntryKind::Agent {
+                text: "pushed".to_owned(),
+            }],
+        ),
+    ] {
+        let mut kept = touched().carried(&before, &after);
+        assert_eq!(
+            kept.step(&ended()).as_deref(),
+            Some("https://github.com/o/r/pull/7")
+        );
+    }
     // It ended, or another began, while the copy was away.
     for after in [
         transcript(vec![user_kind(), ended_kind()]),
-        transcript(vec![user_kind(), ended_kind(), user_kind()]),
+        running(200, vec![user_kind(), ended_kind(), user_kind()]),
     ] {
         let mut dropped = touched().carried(&before, &after);
         assert_eq!(dropped.step(&ended()), None);

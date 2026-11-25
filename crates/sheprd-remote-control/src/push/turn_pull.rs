@@ -3,9 +3,7 @@
 //! pull request once in every turn that touches it
 //! (`Change::PullRequest`), even when the transcript knows it already.
 
-use sheprd_chat_protocol::{
-    Change, EntryId, EntryKind, PullRequest, PullRequestAction, Transcript,
-};
+use sheprd_chat_protocol::{Change, EntryKind, PullRequest, PullRequestAction, Transcript};
 
 /// The last pull request the running turn created or pushed to.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -33,28 +31,16 @@ impl TurnPull {
     }
 
     /// What is kept when the chat's copy `before` is replaced by a fresh
-    /// snapshot `after`: the pull request only while `after` is still the
-    /// turn `before` was in, as a snapshot taken after that turn ended or
-    /// another began skipped both edges.
+    /// snapshot `after`: the pull request only while `after` runs the turn
+    /// `before` ran, by the turn's start (`Transcript::turn`), which outlives
+    /// the entries a long transcript drops. A snapshot taken after that turn
+    /// ended or another began skipped both edges.
     pub(crate) fn carried(self, before: &Transcript, after: &Transcript) -> Self {
-        match (running(before), running(after)) {
+        match (before.turn, after.turn) {
             (Some(was), Some(is)) if was == is => self,
             _ => Self::default(),
         }
     }
-}
-
-/// The user entry that began the turn still running in `transcript`: its
-/// last, with no turn summary after it.
-fn running(transcript: &Transcript) -> Option<EntryId> {
-    for entry in transcript.entries.iter().rev() {
-        match entry.kind {
-            EntryKind::Turn(_) => return None,
-            EntryKind::User { .. } => return Some(entry.id),
-            _ => {}
-        }
-    }
-    None
 }
 
 /// Whether the agent created or pushed to `pull`, a well-formed GitHub pull

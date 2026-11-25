@@ -18,6 +18,22 @@ use std::sync::Arc;
 use std::time::Duration;
 
 impl SheprdWindow {
+    /// Runs [`Self::tick`] about once per frame, for as long as the window lives.
+    pub(super) fn tick_every_frame(window: &mut Window, cx: &mut Context<Self>) -> Task<()> {
+        let timer = cx.background_executor().clone();
+        cx.spawn_in(window, async move |this, cx| {
+            loop {
+                timer.timer(Duration::from_millis(16)).await;
+                if this
+                    .update_in(cx, |this, window, cx| this.tick(window, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+    }
+
     pub(crate) fn new(
         target: ConnectTarget,
         window: &mut Window,
@@ -60,18 +76,7 @@ impl SheprdWindow {
         let sidebar_view = cx.new(|_| sidebar::SidebarView::new(weak, indicators));
         let hosts = vec![cx.entity_id(), sidebar_view.entity_id()];
         let mark_layer = cx.new(|cx| crate::mark_layer::MarkLayer::new(window, hosts, cx));
-        let timer = cx.background_executor().clone();
-        let poll = cx.spawn_in(window, async move |this, cx| {
-            loop {
-                timer.timer(Duration::from_millis(16)).await;
-                if this
-                    .update_in(cx, |this, window, cx| this.tick(window, cx))
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
+        let poll = Self::tick_every_frame(window, cx);
         let appearance = cx
             .try_global::<crate::app::InitialAppearance>()
             .cloned()

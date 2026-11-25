@@ -53,8 +53,8 @@ pub(crate) fn endpoint(tokens: &[(String, String)]) -> Option<EndpointId> {
 }
 
 /// The chat panes of a reachable daemon's snapshot, in its order, one per
-/// pane and at most [`MAX_CHATS`], each reached by `route`. A daemon with
-/// no route has none.
+/// pane, each reached by `route`. A daemon with no route has none. The
+/// window bounds them with every other source in [`bounded`].
 pub(crate) fn targets(snapshot: &ClientShellSnapshot, route: Option<&Route>) -> Vec<Target> {
     let Some(route) = route else {
         return Vec::new();
@@ -73,8 +73,25 @@ pub(crate) fn targets(snapshot: &ClientShellSnapshot, route: Option<&Route>) -> 
             })
         })
         .filter(|target| seen.insert(target.pane_id.clone()))
-        .take(MAX_CHATS)
         .collect()
+}
+
+/// At most [`MAX_CHATS`] of `targets`, in their order: every pane in
+/// `on_screen` first, then the others as room allows. A chat the user is
+/// looking at attaches however many chats run in other workspaces.
+pub(crate) fn bounded(mut targets: Vec<Target>, on_screen: &[String]) -> Vec<Target> {
+    let shown = |target: &Target| on_screen.contains(&target.pane_id);
+    let mut room = MAX_CHATS.saturating_sub(targets.iter().filter(|t| shown(t)).count());
+    targets.retain(|target| {
+        if shown(target) {
+            return true;
+        }
+        let keep = room > 0;
+        room = room.saturating_sub(1);
+        keep
+    });
+    targets.truncate(MAX_CHATS);
+    targets
 }
 
 /// Verified CLI bindings add rich views to existing terminals. Real ACP
@@ -143,18 +160,14 @@ pub(crate) fn with_mirrors(
     targets
 }
 
-/// Adds the target `target` makes of each of the first [`MAX_CHATS`]
-/// candidates, until there are [`MAX_CHATS`] targets. A pane keeps the
+/// Adds the target `target` makes of each candidate. A pane keeps the
 /// target it already has, so earlier sources win.
 fn extend<T>(
     targets: &mut Vec<Target>,
     candidates: &[T],
     mut target: impl FnMut(&T) -> Option<Target>,
 ) {
-    for candidate in candidates.iter().take(MAX_CHATS) {
-        if targets.len() >= MAX_CHATS {
-            break;
-        }
+    for candidate in candidates {
         if let Some(target) = target(candidate)
             && !targets.iter().any(|known| known.pane_id == target.pane_id)
         {

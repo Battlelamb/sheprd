@@ -159,10 +159,36 @@ fn a_local_daemon_lists_each_chat_pane_once() {
 fn chat_panes_are_bounded() {
     let panes: Vec<String> = (0..MAX_CHATS + 4).map(|n| format!("p{n}")).collect();
     let agents: Vec<_> = panes.iter().map(|pane| (pane.as_str(), ID)).collect();
+    let targets = discovery::targets(&snapshot(&agents), Some(&Route::Local));
+    assert_eq!(targets.len(), MAX_CHATS + 4);
+    let bounded = discovery::bounded(targets, &[]);
+    let kept: Vec<_> = bounded.iter().map(|t| t.pane_id.as_str()).collect();
+    assert_eq!(kept, panes[..MAX_CHATS]);
+}
+
+#[test]
+fn a_chat_on_screen_attaches_past_the_bound() {
+    let panes: Vec<String> = (0..MAX_CHATS + 4).map(|n| format!("p{n}")).collect();
+    let agents: Vec<_> = panes.iter().map(|pane| (pane.as_str(), ID)).collect();
+    let targets = discovery::targets(&snapshot(&agents), Some(&Route::Local));
+    let last = panes[MAX_CHATS + 3].clone();
+    let bounded = discovery::bounded(targets, std::slice::from_ref(&last));
+    let kept: Vec<_> = bounded.iter().map(|t| t.pane_id.as_str()).collect();
+    assert_eq!(kept.len(), MAX_CHATS);
+    assert_eq!(kept[..MAX_CHATS - 1], panes[..MAX_CHATS - 1]);
     assert_eq!(
-        discovery::targets(&snapshot(&agents), Some(&Route::Local)).len(),
-        MAX_CHATS
+        kept[MAX_CHATS - 1],
+        last,
+        "order is kept, the shown chat last"
     );
+}
+
+#[test]
+fn chats_on_screen_alone_still_respect_the_bound() {
+    let panes: Vec<String> = (0..MAX_CHATS + 4).map(|n| format!("p{n}")).collect();
+    let agents: Vec<_> = panes.iter().map(|pane| (pane.as_str(), ID)).collect();
+    let targets = discovery::targets(&snapshot(&agents), Some(&Route::Local));
+    assert_eq!(discovery::bounded(targets, &panes).len(), MAX_CHATS);
 }
 
 #[test]

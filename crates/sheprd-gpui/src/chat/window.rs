@@ -102,7 +102,10 @@ impl SheprdWindow {
             })
             .unwrap_or_default();
         let core = enabled.then(|| self.core_chat_targets());
-        let targets = super::core_pane::with_core(targets, core.unwrap_or_default());
+        let targets = discovery::bounded(
+            super::core_pane::with_core(targets, core.unwrap_or_default()),
+            &self.on_screen_chat_panes(cx),
+        );
         if enabled {
             self.locate_chat_program(cx);
             self.probe_chat_agents(cx);

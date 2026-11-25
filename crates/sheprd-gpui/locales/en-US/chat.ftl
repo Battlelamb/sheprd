@@ -270,3 +270,6 @@ chat-form-busy = Finish your current message before sending this form
 
 chat-file-open = Open
 chat-file-on-host = File on the agent’s computer
+
+chat-viewer-previous = Previous
+chat-viewer-next = Next

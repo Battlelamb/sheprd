@@ -3,12 +3,14 @@
 use std::{ffi::OsString, path::PathBuf};
 
 pub const HELP: &str = "\
-sheprd-t3: read T3 Code threads as Sheprd chats
+sheprd-t3: read and steer T3 Code threads as Sheprd chats
 
 Usage:
   sheprd-t3 pair --token-file FILE [--server URL]
   sheprd-t3 threads --token-file FILE [--server URL] [--json]
   sheprd-t3 show --token-file FILE [--server URL] [--json] THREAD
+  sheprd-t3 send --token-file FILE [--server URL] [--json] THREAD [--] TEXT
+  sheprd-t3 stop --token-file FILE [--server URL] [--json] THREAD
 
 Commands:
   pair      Sign in with a one-time code from `t3 auth pairing create` on
@@ -16,6 +18,9 @@ Commands:
             FILE (mode 0600), usable only with that server
   threads   List the server's threads
   show      Print one thread as a chat transcript
+  send      Send TEXT to the thread's agent: now, or after the turn under
+            way when one runs
+  stop      Stop the thread's turn under way
 
 Options:
   --server URL       The server's address; by default the T3 Code server
@@ -31,6 +36,8 @@ pub enum Command {
     Pair,
     Threads,
     Show { thread: String },
+    Send { text: String, thread: String },
+    Stop { thread: String },
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -53,6 +60,8 @@ pub enum Error {
     NoCommand,
     #[error("{0} takes one argument")]
     Arguments(&'static str),
+    #[error("send takes a thread and the text to send")]
+    SendArguments,
     #[error("--token-file is required")]
     TokenFile,
 }
@@ -75,6 +84,12 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Options, Error>
     let mut token_file = None;
     while let Some(arg) = args.next() {
         match arg.to_str() {
+            // What follows is text, such as a prompt starting with `-`.
+            Some("--") => {
+                for rest in args.by_ref() {
+                    positional.push(rest.into_string().map_err(|_| Error::Utf8)?);
+                }
+            }
             Some("-h" | "--help") => {
                 return Ok(Options {
                     command: Command::Help,
@@ -115,6 +130,13 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Options, Error>
         Some("threads") => return Err(Error::Arguments("threads")),
         Some("show") => Command::Show {
             thread: one("show", positional)?,
+        },
+        Some("send") => match <[String; 2]>::try_from(positional) {
+            Ok([thread, text]) => Command::Send { text, thread },
+            Err(_) => return Err(Error::SendArguments),
+        },
+        Some("stop") => Command::Stop {
+            thread: one("stop", positional)?,
         },
         Some(other) => return Err(Error::Unknown(other.to_owned())),
     };

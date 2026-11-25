@@ -13,7 +13,7 @@ use anyhow::{Context as _, bail};
 use secrecy::SecretString;
 use serde_json::json;
 use sheprd_t3::{
-    connection::Connection, discover, frame::ServerFrame, http::Server, shell::Shell,
+    connection::Connection, discover, frame::ServerFrame, http::Server, shell::Shell, steer,
     thread::Thread, token,
 };
 use url::Url;
@@ -129,7 +129,65 @@ fn run(options: Options) -> anyhow::Result<()> {
             }
             Ok(())
         }
+        Command::Send { text, thread } => {
+            let prompt = sheprd_chat_protocol::Command::Prompt {
+                text,
+                attachments: Vec::new(),
+                origin: None,
+            };
+            let mut connection = connect(&server, &descriptor.environment_id, &token_file)?;
+            let sequence = steer(&mut connection, &thread, &prompt)?;
+            report(options.json, sequence, "Sent.")
+        }
+        Command::Stop { thread } => {
+            let mut connection = connect(&server, &descriptor.environment_id, &token_file)?;
+            let sequence = steer(
+                &mut connection,
+                &thread,
+                &sheprd_chat_protocol::Command::Cancel,
+            )?;
+            report(options.json, sequence, "Stopped.")
+        }
     }
+}
+
+/// Sends `command` to `thread` as a chat would, from the thread as it is
+/// now; returns the sequence T3 answered with.
+fn steer(
+    connection: &mut Connection<std::net::TcpStream>,
+    thread: &str,
+    command: &sheprd_chat_protocol::Command,
+) -> anyhow::Result<u64> {
+    let id = connection.request(
+        "orchestration.subscribeThread",
+        json!({ "threadId": thread }),
+    )?;
+    let mut state = Thread::default();
+    first_chunk(connection, &id, |value| {
+        state.apply(value);
+        Ok(())
+    })?;
+    connection.interrupt(&id)?;
+    let dispatch = steer::dispatch(
+        &state,
+        &[],
+        sheprd_chat_protocol::CommandId::random(),
+        command,
+    )?;
+    let answer = connection.call(steer::DISPATCH, serde_json::to_value(&dispatch)?)?;
+    Ok(answer
+        .get("sequence")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or_default())
+}
+
+fn report(json: bool, sequence: u64, done: &str) -> anyhow::Result<()> {
+    if json {
+        println!("{}", json!({ "sequence": sequence }));
+    } else {
+        println!("{done}");
+    }
+    Ok(())
 }
 
 /// `--server`, or the server running on this computer.

@@ -58,7 +58,7 @@ pub(crate) enum Parsed {
     Mirror(MirrorOptions),
     /// Project one verified running CLI process over standard streams.
     Observe(ObserveOptions),
-    /// Follow a T3 Code thread, read-only, without starting any agent.
+    /// Follow and steer a T3 Code thread, without starting any agent.
     T3(T3Options),
     /// List the agents installed here, one name per line.
     Agents,
@@ -184,9 +184,10 @@ Usage:
                         its endpoint ID once ready. Stop with Ctrl+C.
   sheprd-acp t3 THREAD --token-file FILE [--server URL] [--pane ID]
                 [--endpoint ID]
-                        Follow a T3 Code thread live, read-only, with the token
-                        `sheprd-t3 pair` kept in FILE; starts no agent. Prints
-                        its endpoint ID once ready. Stop with Ctrl+C.
+                        Follow a T3 Code thread live and pass on its chat's
+                        prompts, answers, stops, and model changes, with the
+                        token `sheprd-t3 pair` kept in FILE; starts no agent.
+                        Prints its endpoint ID once ready. Stop with Ctrl+C.
 
 Agents:
   antigravity agy acp

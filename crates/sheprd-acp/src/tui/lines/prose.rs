@@ -1,5 +1,6 @@
 //! One line of agent prose as styled spans. Markdown's inline marks
-//! (`code`, **strong**, [links](url)) are drawn rather than shown, and a
+//! (`code`, **strong**, [links](url)) and Sheprd's sizes (`:big[text]`)
+//! are drawn rather than shown, and a
 //! line's block mark (heading, bullet, number, quote) becomes its lead. A
 //! mark left unclosed stays as written, so plain text is never eaten.
 
@@ -132,6 +133,13 @@ fn inline(text: &str, base: Style, out: &mut Vec<(char, Style)>) {
             rest = &inner[end + 2..];
             continue;
         }
+        if ch == ':'
+            && let Some((style, inner, tail)) = sized(&rest[1..], base)
+        {
+            inline(inner, style, out);
+            rest = tail;
+            continue;
+        }
         if ch == '['
             && let Some((label, target, tail)) = link(rest)
         {
@@ -147,6 +155,22 @@ fn inline(text: &str, base: Style, out: &mut Vec<(char, Style)>) {
         out.push((ch, base));
         rest = &rest[ch.len_utf8()..];
     }
+}
+
+/// A `big[text]` after a `:`, as Sheprd's chat sets text larger or
+/// smaller: the style a terminal gives that size over `base`, the text, and
+/// what follows. A name that is not a size stays text.
+fn sized(text: &str, base: Style) -> Option<(Style, &str, &str)> {
+    let (style, rest) = [
+        ("small", base.fg(Color::DarkGray)),
+        ("big", base.add_modifier(Modifier::BOLD)),
+        ("huge", base.fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        ("giant", base.fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+    ]
+    .into_iter()
+    .find_map(|(name, style)| Some((style, text.strip_prefix(name)?.strip_prefix('[')?)))?;
+    let end = rest.find(']').filter(|end| *end > 0)?;
+    Some((style, &rest[..end], &rest[end + 1..]))
 }
 
 /// A `[label](target)` at the start of `text`: its label, its target, and

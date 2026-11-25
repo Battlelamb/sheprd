@@ -122,3 +122,18 @@ fn a_link_keeps_its_address_readable() {
         Some(Color::DarkGray)
     );
 }
+
+#[test]
+fn chat_sizes_are_drawn_and_unknown_names_stay_text() {
+    let lines = render("PR :big[#1641] is :huge[open], :small[quietly]", 80);
+    assert_eq!(text(&lines[0]), "  PR #1641 is open, quietly");
+    assert!(
+        style_of(&lines[0], "#1641")
+            .add_modifier
+            .contains(Modifier::BOLD)
+    );
+    assert_eq!(style_of(&lines[0], "quietly").fg, Some(Color::DarkGray));
+    for raw in [":tiny[x] stays", ":big[] stays", ":big[open stays"] {
+        assert_eq!(text(&render(raw, 80)[0]), format!("  {raw}"));
+    }
+}

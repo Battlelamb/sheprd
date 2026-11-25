@@ -787,6 +787,7 @@ impl Chats {
 
     /// Attaches to `targets` and detaches from every other pane, then
     /// starts the connections that are due.
+    #[cfg(test)]
     pub(crate) fn reconcile(
         &mut self,
         targets: Vec<Target>,

@@ -75,9 +75,7 @@ fn no_chat_row_while_chats_are_off(cx: &mut gpui::TestAppContext) {
 }
 
 #[gpui::test]
-fn probed_chat_agents_including_antigravity_and_gemini_show_in_chat_row(
-    cx: &mut gpui::TestAppContext,
-) {
+fn probed_chat_agents_show_in_chat_row(cx: &mut gpui::TestAppContext) {
     let (view, cx) = cx.add_window_view(sidebar::layout_tests::fixture_window);
     cx.simulate_resize(gpui::size(gpui::px(900.), gpui::px(700.)));
     cx.update(|window, cx| {
@@ -94,7 +92,12 @@ fn probed_chat_agents_including_antigravity_and_gemini_show_in_chat_row(
             let endpoint = view.endpoints[0].id.clone();
             view.chats.agents.record(
                 &endpoint,
-                vec![Agent::Antigravity, Agent::Claude, Agent::Gemini],
+                vec![
+                    Agent::Antigravity,
+                    Agent::Claude,
+                    Agent::Gemini,
+                    Agent::Muse,
+                ],
             );
             view.open_workspace_menu("w3", Default::default(), window, cx);
             view.open_workspace_dialog(WorkspaceAction::NewWorktree, window, cx);
@@ -109,4 +112,5 @@ fn probed_chat_agents_including_antigravity_and_gemini_show_in_chat_row(
     );
     assert!(cx.debug_bounds("worktree-landing-chat-claude").is_some());
     assert!(cx.debug_bounds("worktree-landing-chat-gemini").is_some());
+    assert!(cx.debug_bounds("worktree-landing-chat-muse").is_some());
 }

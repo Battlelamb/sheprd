@@ -26,6 +26,7 @@ mod history;
 mod known;
 mod linked_pictures;
 mod media;
+mod muse;
 mod opencode;
 mod origin;
 mod permissions;

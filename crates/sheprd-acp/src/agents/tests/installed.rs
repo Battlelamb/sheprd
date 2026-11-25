@@ -7,12 +7,18 @@ fn only_agents_with_their_own_command_are_installed() {
     // npx alone would only download Claude's and Codex's adapters.
     install(dir.path(), "npx");
     install(dir.path(), "agy");
+    install(dir.path(), "muse");
     install(dir.path(), "opencode");
     install(dir.path(), "codex-acp");
     let path = dir.path().as_os_str();
     assert_eq!(
         installed(Some(path)),
-        [Agent::Antigravity, Agent::Codex, Agent::Opencode]
+        [
+            Agent::Antigravity,
+            Agent::Codex,
+            Agent::Muse,
+            Agent::Opencode
+        ]
     );
     assert!(installed(None).is_empty());
 }
@@ -58,4 +64,19 @@ fn windows_search_path_adds_and_prefers_standalone_antigravity_dir() {
     let path = search_path_with(None, Some(home.path()), None);
     let dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
     assert!(dirs.contains(&fallback));
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_finds_the_muse_installer_shim_outside_path() {
+    let local = tempfile::tempdir().unwrap();
+    let bin = local.path().join("Programs").join("muse");
+    std::fs::create_dir_all(&bin).unwrap();
+    let shim = bin.join("muse.cmd");
+    std::fs::write(&shim, "@echo off\r\n").unwrap();
+    let path = search_path_with(None, None, Some(local.path()));
+    assert_eq!(
+        launch(Agent::Muse, Some(&path), false),
+        Launch::Acp(shim.into_os_string(), vec!["acp".into()])
+    );
 }

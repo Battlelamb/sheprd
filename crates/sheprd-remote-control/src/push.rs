@@ -12,6 +12,7 @@
 mod directives;
 mod encrypt;
 mod event;
+mod finish;
 mod plain;
 mod presence;
 mod send;
@@ -26,6 +27,7 @@ use std::{io, path::PathBuf};
 
 pub(crate) use encrypt::{MAX_PAYLOAD, encrypt};
 pub(crate) use event::EventId;
+pub(crate) use finish::recapped;
 pub(crate) use presence::{Hold, Near};
 #[cfg(test)]
 pub(crate) use presence::{MAX_HELD, NEAR_TTL_MS};
@@ -34,8 +36,7 @@ pub(crate) use send::{Delivery, Outcome, Sender, Urgency};
 pub(crate) use send::{Topic, outcome};
 pub(crate) use subscription::Subscription;
 pub(crate) use terminals::{
-    Agents as TerminalAgents, MAX_COUNT as MAX_OUTCOME_COUNT, Moved, RunOutcome, Seen as SeenAgent,
-    decide as decide_terminal, is_running,
+    Agents as TerminalAgents, Moved, Seen as SeenAgent, decide as decide_terminal, is_running,
 };
 pub(crate) use throttle::Throttle;
 pub use triggers::Privacy;

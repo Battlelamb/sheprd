@@ -9,8 +9,8 @@
 //! the blocking pool. A push service that says a token, handle, or subscription
 //! is gone drops it from the device. While Sheprd marks a device near
 //! (presence), its alerts are held and go out when the owner leaves. A
-//! terminal agent's finish says what the run left in its checkout, read
-//! with Git off this loop ([`outcome`]).
+//! terminal agent's finish says what the agent did, read off its screen
+//! away from this loop ([`recap`]).
 
 use crate::{
     apns::{self, Recipient, Registration, Sent, alert::Sealed},
@@ -18,8 +18,8 @@ use crate::{
     hub::Event,
     hub::Layout,
     push::{
-        Chat, Delivery, Hold, Kind, Notification, Outcome, SeenAgent, Subscription, TerminalAgents,
-        Throttle, decide, decide_terminal,
+        Chat, Delivery, Hold, Kind, Notification, Outcome, Privacy, SeenAgent, Subscription,
+        TerminalAgents, Throttle, decide, decide_terminal,
     },
     web::{State, now_ms},
 };
@@ -100,9 +100,9 @@ pub(super) async fn run(state: Arc<State>) {
             _ = ticker.tick() => {
                 live.tick(&state);
                 let now = now_ms();
-                for (notification, run) in terminal_changes(&state, &mut terminals, &mut live, now) {
-                    match run {
-                        Some((cwd, since)) => outcome::tell(notification, cwd, since, told.clone()),
+                for (notification, task) in terminal_changes(&state, &mut terminals, &mut live, now) {
+                    match task {
+                        Some(task) => recap::tell(&state, notification, task, told.clone()),
                         None => offer(&state, &mut throttles, &mut holds, &mut outbox, notification),
                     }
                 }
@@ -171,13 +171,14 @@ fn notification(
 
 /// Steps every terminal agent's status, starting, updating, or ending its
 /// Live Activity, and returns the alerts the settled changes call for,
-/// each finish with the folder and start of the run it ended.
+/// with the task of each finish whose screen may say what the agent did
+/// (`Some(None)` for one without a task).
 fn terminal_changes(
     state: &Arc<State>,
     agents: &mut TerminalAgents,
     live: &mut super::live::LiveActivities,
     now: u64,
-) -> Vec<(Notification, Option<(String, u64)>)> {
+) -> Vec<(Notification, Option<Option<String>>)> {
     let layout = state.hub.layout();
     let names = agent_names(&layout);
     let seen = terminal_agents(&layout, &names);
@@ -196,29 +197,12 @@ fn terminal_changes(
             continue;
         }
         if let Some(alert) = agent.and_then(|agent| decide_terminal(agent, &moved, state.privacy)) {
-            let run = (alert.kind == Kind::TerminalDone)
-                .then(|| Some((pane_cwd(&layout, &moved.pane)?, moved.started_ms?)))
-                .flatten();
-            alerts.push((alert, run));
+            let recap = alert.kind == Kind::TerminalDone && state.privacy == Privacy::Excerpt;
+            let task = recap.then(|| agent.and_then(|agent| agent.task).map(str::to_owned));
+            alerts.push((alert, task));
         }
     }
     alerts
-}
-
-/// The folder `pane`'s shell is in, else its tab's.
-fn pane_cwd(layout: &Layout, pane: &str) -> Option<String> {
-    let terminal = layout
-        .workspaces
-        .iter()
-        .flat_map(|workspace| &workspace.terminals)
-        .find(|terminal| terminal.agents.iter().any(|agent| agent.pane == pane))?;
-    terminal
-        .panes
-        .iter()
-        .find(|shown| shown.pane == pane)
-        .and_then(|shown| shown.cwd.clone())
-        .or_else(|| terminal.cwd.clone())
-        .filter(|cwd| !cwd.is_empty())
 }
 
 /// Each terminal agent's display name, as `claude` shows as `Claude`.
@@ -509,7 +493,7 @@ fn send(state: &State, device: &DeviceId, notification: &Notification) {
     }
 }
 
-mod outcome;
+mod recap;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]

@@ -83,14 +83,3 @@ fn an_unnamed_agent_is_the_agent() {
     let names = agent_names(&layout);
     assert_eq!(terminal_agents(&layout, &names)[0].chat.agent, "The agent");
 }
-
-#[test]
-fn a_finish_reads_git_where_its_pane_is_else_its_tab() {
-    let mut layout = layout(Some("claude"));
-    let terminal = &mut layout.workspaces[0].terminals[0];
-    terminal.cwd = Some("/code/tab".to_owned());
-    assert_eq!(pane_cwd(&layout, "t1-p1").as_deref(), Some("/code/tab"));
-    layout.workspaces[0].terminals[0].panes[0].cwd = Some("/code/pane".to_owned());
-    assert_eq!(pane_cwd(&layout, "t1-p1").as_deref(), Some("/code/pane"));
-    assert_eq!(pane_cwd(&layout, "t2-p1"), None, "no agent there");
-}

@@ -5,6 +5,7 @@ use base64::Engine as _;
 
 mod directives;
 mod encrypt;
+mod finish;
 mod notices;
 mod per_host;
 mod plain;

@@ -155,67 +155,10 @@ pub(crate) fn decide(agent: &Seen<'_>, moved: &Moved, privacy: Privacy) -> Optio
             format!("{} needs an answer", agent.chat.agent),
         ),
         AgentStatus::Done if is_running(moved.from) => {
-            (Kind::TerminalDone, format!("{} finished", agent.chat.agent))
+            return Some(super::finish::finished(agent, privacy));
         }
         _ => return None,
     };
     let body = triggers::body(excerpt, None);
     Some(Notification::new(&agent.chat, kind, title, body))
-}
-
-/// What a finished run left in its checkout, read from Git when it
-/// settled: counts only, never names, so any [`Privacy`] may show it.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) struct RunOutcome {
-    /// Commits on `HEAD` made since the run began.
-    pub commits: usize,
-    /// Whether the branch's upstream has `HEAD`.
-    pub pushed: bool,
-    /// Files `git status` lists as changed or new.
-    pub uncommitted: usize,
-}
-
-/// The most of either count the line spells out; more reads `99+`.
-pub(crate) const MAX_COUNT: usize = 99;
-
-impl RunOutcome {
-    /// `1 commit, pushed · 3 files uncommitted`, or `None` when the run
-    /// left nothing to tell.
-    pub(crate) fn line(&self) -> Option<String> {
-        let count = |n: usize, one: &str, many: &str| {
-            let word = if n == 1 { one } else { many };
-            if n > MAX_COUNT {
-                format!("{MAX_COUNT}+ {word}")
-            } else {
-                format!("{n} {word}")
-            }
-        };
-        let mut parts = Vec::new();
-        if self.commits > 0 {
-            let commits = count(self.commits, "commit", "commits");
-            parts.push(if self.pushed {
-                format!("{commits}, pushed")
-            } else {
-                commits
-            });
-        }
-        if self.uncommitted > 0 {
-            parts.push(format!(
-                "{} uncommitted",
-                count(self.uncommitted, "file", "files")
-            ));
-        }
-        (!parts.is_empty()).then(|| parts.join(" \u{b7} "))
-    }
-
-    /// `finished` saying what the run did instead of what it was asked,
-    /// when there is something to say; unchanged otherwise.
-    pub(crate) fn told(&self, mut finished: Notification) -> Notification {
-        if let Some(line) = self.line()
-            && finished.kind == Kind::TerminalDone
-        {
-            finished.body = line;
-        }
-        finished
-    }
 }

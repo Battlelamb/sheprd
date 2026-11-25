@@ -270,4 +270,7 @@ chat-form-not-ready = The agent is not ready to receive this form
 chat-form-busy = Finish your current message before sending this form
 
 chat-file-open = Open
+# Selects the attachment in Finder (macOS) or its folder elsewhere.
+chat-file-reveal = Show in Finder
+chat-file-reveal-folder = Show in Folder
 chat-file-on-host = File on the agent’s computer

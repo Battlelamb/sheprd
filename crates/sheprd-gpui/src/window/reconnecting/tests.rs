@@ -1,17 +1,17 @@
-//! Which surface carries a Tailscale check: the prompt in the overlay layer is
-//! the one that shows whether or not a terminal exists, so the card over the
-//! terminal stands down while a check is pending. The check also reaches the
-//! window as a sentence rather than as a typed failure — the transport reports
-//! `PermissionDenied` — and a surface reading only the failure would offer
-//! nothing for it, which is what these tests pin.
+//! Which surface carries a Tailscale check: the prompt over the box the tabs
+//! fill is the one that shows whether or not a terminal exists, so the card
+//! over the terminal stands down while a check is pending. The check also
+//! reaches the window as a sentence rather than as a typed failure — the
+//! transport reports `PermissionDenied` — and a surface reading only the
+//! failure would offer nothing for it, which is what these tests pin.
 
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 // Named imports, not `super::*`: the parent pulls `gpui` in with a glob, and a
 // glob-imported macro of the same name would take a plain `#[test]` over.
 use super::SheprdWindow;
 use crate::{LiveState, sidebar::layout_tests, state::ConnectionStatus};
-use gpui::TestAppContext;
+use gpui::{TestAppContext, VisualTestContext, px, size};
 use sheprd_client::{
     SshFailure, TailscaleCheck,
     protocol::{FrameData, PaneSurfaceFrame},
@@ -19,6 +19,13 @@ use sheprd_client::{
 use std::sync::Arc;
 
 const URL: &str = "https://login.tailscale.com/a/o84652-335960037";
+
+/// GPUI double-buffers debug bounds; draw both buffers before asking.
+fn draw(cx: &mut VisualTestContext) {
+    for _ in 0..2 {
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+}
 
 /// The sentence a `PermissionDenied` refusal leaves, in the shape the client
 /// writes it: the address sits mid-line, with advice after it.
@@ -112,4 +119,55 @@ fn without_a_check_the_card_speaks_for_itself(cx: &mut TestAppContext) {
         assert!(view.render_reconnecting(cx).is_some());
         assert!(view.render_tailscale_prompt().is_none());
     });
+}
+
+/// The prompt dims the box the tabs fill and centres in it, not the window:
+/// the status bar's own item for the same check stays outside the dimming, and
+/// the terminal under the prompt stays inside it.
+#[gpui::test]
+fn the_prompt_dims_the_tabs_box_and_not_the_window(cx: &mut TestAppContext) {
+    let (view, cx) = cx.add_window_view(layout_tests::fixture_window);
+    view.update(cx, |view, _| {
+        pending(
+            view,
+            Some(SshFailure::Tailscale(
+                TailscaleCheck::from_address(URL).unwrap(),
+            )),
+            None,
+        );
+    });
+    cx.run_until_parked();
+    cx.simulate_resize(size(px(900.), px(700.)));
+    draw(cx);
+    let dim = cx.debug_bounds("tailscale-dim").expect("the dim draws");
+    let terminal = cx.debug_bounds("terminal").expect("a terminal to dim");
+    let item = cx
+        .debug_bounds("status-tailscale")
+        .expect("the bar's own item for the same check");
+    let card = cx
+        .debug_bounds("tailscale-prompt")
+        .expect("the prompt draws");
+    assert!(
+        dim.contains(&terminal.center()),
+        "the dim must cover the terminal it replaces: {terminal:?} is not in {dim:?}"
+    );
+    assert!(
+        !dim.contains(&item.center()),
+        "the status bar's item for the same check stays legible: {item:?} is in {dim:?}"
+    );
+    assert!(
+        !dim.intersects(&item),
+        "no part of the status bar falls under the dimming: {item:?} meets {dim:?}"
+    );
+    assert!(
+        dim.contains(&card.center()),
+        "the prompt sits in the dimmed box: {card:?} is not in {dim:?}"
+    );
+    // Centred on the box, not on the window: a card the whole window centres
+    // would still land inside this dim, so the centre itself is what is read.
+    let off = card.center() - dim.center();
+    assert!(
+        off.x.abs() <= px(1.) && off.y.abs() <= px(1.),
+        "the prompt is centred on the tabs box: {card:?} is {off:?} off the centre of {dim:?}"
+    );
 }

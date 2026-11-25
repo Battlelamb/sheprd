@@ -5,7 +5,8 @@
 //!
 //! A Tailscale check is not drawn here: a refusal during the handshake leaves
 //! no outage to hang a card on, and the check needs the same prompt whether or
-//! not a terminal exists, so the window's overlay layer carries it.
+//! not a terminal exists, so the prompt dims the box the tabs fill and centres
+//! in it, rather than the window around it.
 // i18n: migrated
 use super::SheprdWindow;
 use crate::{i18n::fl, notifications::safe_text};
@@ -33,8 +34,8 @@ impl SheprdWindow {
     }
 
     pub(super) fn render_reconnecting(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        // A pending check has its own prompt, which shows in the overlay layer
-        // and does not depend on there being a terminal to dim: drawing the
+        // A pending check has its own prompt, which dims the tabs box and
+        // does not depend on there being a terminal to cover: drawing the
         // card as well would put two answers to one question on screen.
         if self.awaiting_tailscale() || !self.reconnecting() {
             return None;
@@ -118,9 +119,10 @@ impl SheprdWindow {
         )
     }
 
-    /// The address a pending check printed, over the whole window. A refusal
-    /// during the handshake leaves no terminal to hang a card on, so this is
-    /// drawn from the overlay layer, which runs whatever the body holds.
+    /// The address a pending check printed, over the box the tabs fill. A
+    /// refusal during the handshake leaves no terminal to hang a card on, so
+    /// this dims that whole box, whatever the body holds, and centres the
+    /// prompt in it: the sidebar, tab strip, and status bar stay as they are.
     ///
     /// The sentence comes from the locale files whole and stays whole: the
     /// address has a line of its own below it, and a surface that cut it out of
@@ -134,9 +136,10 @@ impl SheprdWindow {
             div()
                 .absolute()
                 .inset_0()
+                .debug_selector(|| "tailscale-dim".into())
                 // The failure text left un-dimmed under the prompt reads as a
-                // second, half-hidden message. The backdrop only dims: occluding
-                // it here would also swallow clicks meant for the status bar.
+                // second, half-hidden message. It only dims, as a dialog's
+                // backdrop does: what lies under it keeps its clicks.
                 .bg(rgba((theme.background << 8) | DIM_ALPHA))
                 .flex()
                 .items_center()

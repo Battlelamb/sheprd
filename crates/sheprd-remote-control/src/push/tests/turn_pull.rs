@@ -2,7 +2,8 @@
 
 use crate::push::TurnPull;
 use sheprd_chat_protocol::{
-    Change, Entry, EntryId, EntryKind, PullRequest, PullRequestAction, TurnEnd, TurnSummary,
+    Change, Entry, EntryId, EntryKind, PullRequest, PullRequestAction, Transcript, TurnEnd,
+    TurnSummary,
 };
 
 fn pull(number: u64, actions: &[PullRequestAction]) -> Change {
@@ -20,21 +21,41 @@ fn push(kind: EntryKind) -> Change {
     }
 }
 
-fn user() -> Change {
-    push(EntryKind::User {
+fn user_kind() -> EntryKind {
+    EntryKind::User {
         text: "go".to_owned(),
         files: 0,
         note: None,
-    })
+    }
 }
 
-fn ended() -> Change {
-    push(EntryKind::Turn(TurnSummary {
+fn ended_kind() -> EntryKind {
+    EntryKind::Turn(TurnSummary {
         ended_ms: None,
         duration_ms: 1_000,
         end: TurnEnd::Done,
         tokens: None,
-    }))
+    })
+}
+
+fn user() -> Change {
+    push(user_kind())
+}
+
+fn ended() -> Change {
+    push(ended_kind())
+}
+
+/// A transcript of `kinds`, numbered from 1.
+fn transcript(kinds: Vec<EntryKind>) -> Transcript {
+    let mut transcript = Transcript::new("Claude");
+    for (index, kind) in kinds.into_iter().enumerate() {
+        transcript.entries.push(Entry {
+            id: EntryId(index as u64 + 1),
+            kind,
+        });
+    }
+    transcript
 }
 
 #[test]
@@ -59,4 +80,34 @@ fn the_person_speaking_starts_a_turn_without_one() {
     turn.step(&pull(7, &[PullRequestAction::Pushed]));
     turn.step(&user());
     assert_eq!(turn.step(&ended()), None);
+}
+
+#[test]
+fn a_fresh_copy_keeps_it_only_within_the_same_turn() {
+    let touched = || {
+        let mut turn = TurnPull::default();
+        turn.step(&pull(7, &[PullRequestAction::Pushed]));
+        turn
+    };
+    let before = transcript(vec![user_kind()]);
+    // The same turn still runs.
+    let same = transcript(vec![
+        user_kind(),
+        EntryKind::Agent {
+            text: "pushed".to_owned(),
+        },
+    ]);
+    let mut kept = touched().carried(&before, &same);
+    assert_eq!(
+        kept.step(&ended()).as_deref(),
+        Some("https://github.com/o/r/pull/7")
+    );
+    // It ended, or another began, while the copy was away.
+    for after in [
+        transcript(vec![user_kind(), ended_kind()]),
+        transcript(vec![user_kind(), ended_kind(), user_kind()]),
+    ] {
+        let mut dropped = touched().carried(&before, &after);
+        assert_eq!(dropped.step(&ended()), None);
+    }
 }

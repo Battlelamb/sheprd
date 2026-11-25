@@ -50,8 +50,11 @@ pub(super) async fn run(state: Arc<State>) {
             event = events.recv() => match event {
                 Ok((pane, Event::Reset { transcript, cursor })) => {
                     live.snapshot(&state, &pane, &transcript);
-                    // A fresh copy of the same chat: its turn goes on.
-                    let pull = transcripts.remove(&pane).map(|base| base.pull).unwrap_or_default();
+                    // A fresh copy of the same chat: its turn may go on.
+                    let pull = transcripts
+                        .remove(&pane)
+                        .map(|base| base.pull.carried(&base.transcript, &transcript))
+                        .unwrap_or_default();
                     transcripts.insert(pane, Base {
                         transcript: Transcript::clone(&transcript),
                         cursor: Some(cursor),

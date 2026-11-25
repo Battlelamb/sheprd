@@ -11,6 +11,7 @@
 //! Nothing here holds a key or decides anything: the child and the other
 //! computer's daemon do.
 
+mod fleet;
 pub(super) mod link;
 mod render;
 
@@ -303,10 +304,16 @@ impl SheprdWindow {
                     cx,
                 );
             }
-            // Pairing is pairing: the claim goes at once, so the other
-            // computer shows Allow while this one shows the code. Joining
-            // a fleet is Settings > Fleet's, later.
-            PairOutput::Code { code, computer, .. } => {
+            // The claim goes at once, so the other computer shows Allow
+            // while this one shows the code, and brings the two into one
+            // fleet when one of them is in one: that computer's Allow
+            // says so.
+            PairOutput::Code {
+                code,
+                computer,
+                fleet,
+                pairing,
+            } => {
                 let Some(found) = setup.step.computer().cloned() else {
                     return;
                 };
@@ -318,9 +325,7 @@ impl SheprdWindow {
                     code,
                     claimed: false,
                 };
-                if let Some(pairing) = &setup.pairing {
-                    pairing.claim(None);
-                }
+                self.nearby_claim(fleet.as_ref(), pairing, cx);
             }
             PairOutput::Claimed { code: claimed_code } => {
                 if let Step::Code { claimed, code, .. } = &mut setup.step {

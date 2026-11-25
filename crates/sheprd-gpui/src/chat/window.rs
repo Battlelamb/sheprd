@@ -612,8 +612,8 @@ impl SheprdWindow {
     }
 
     /// Pastes the clipboard's text into the composer when it holds several
-    /// lines, which the field takes as several lines. Whether it took
-    /// the paste.
+    /// lines, which the field takes as several lines, or attaches it as a
+    /// `.txt` file when it is long. Whether it took the paste.
     pub(super) fn chat_paste(
         &mut self,
         pane_id: &str,
@@ -672,6 +672,12 @@ impl SheprdWindow {
             self.attach_chat_image(pane_id, image, window, cx);
             return true;
         };
+        // Long text, such as a log, attaches as a file rather than flood the
+        // composer.
+        if super::pasted::is_long_text(&text) {
+            self.attach_chat_text(pane_id, text, window, cx);
+            return true;
+        }
         if !text.contains(['\n', '\r']) {
             return false;
         }

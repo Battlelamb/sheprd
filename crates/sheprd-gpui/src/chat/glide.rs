@@ -38,6 +38,11 @@ const MIN_STEP: f32 = 0.5;
 /// More than this many viewports behind is closed at once, down to it, so
 /// a long burst of output does not take seconds to scroll past.
 const MAX_BEHIND: f32 = 0.5;
+/// More rows than this arriving between two frames, as when the window
+/// comes back from the background, are jumped past rather than glided
+/// through: rows not laid out yet count no height, so the glide would find
+/// them a screen at a time and scroll through every one.
+const BURST_ROWS: usize = 8;
 
 /// Whether the list's top moved to another row, or to or from a row's start.
 fn crossed(before: ListOffset, after: ListOffset) -> bool {
@@ -56,6 +61,8 @@ pub(crate) struct Glide {
     last_step: Option<Instant>,
     /// The spring's speed, in pixels a second.
     speed: f32,
+    /// How many rows the list had at the last frame's step.
+    rows: usize,
     /// The button back to the end, open while the list stays behind it.
     /// Shared with [`Self::watch`], which alone knows the list's real end.
     away: Rc<Cell<motion::Toggle>>,
@@ -80,6 +87,7 @@ impl Glide {
             scrolled,
             last_step: None,
             speed: 0.,
+            rows: list.item_count(),
             away: Rc::default(),
             waiting: Rc::default(),
             top: Rc::default(),
@@ -93,6 +101,7 @@ impl Glide {
         self.scrolled.set(false);
         self.last_step = None;
         self.speed = 0.;
+        self.rows = list.item_count();
         list.scroll_to(ListOffset {
             item_ix: list.item_count(),
             offset_in_item: px(0.),
@@ -180,8 +189,13 @@ impl Glide {
     }
 
     /// Scrolls `list` one frame's step toward its end, or with `smooth`
-    /// off all the way there, and says whether to draw another frame.
+    /// off or many rows new since the last frame all the way there, and
+    /// says whether to draw another frame.
     pub(crate) fn tick(&mut self, list: &ListState, now: Instant, smooth: bool) -> bool {
+        let rows = list.item_count();
+        let burst = rows > self.rows.saturating_add(BURST_ROWS);
+        self.rows = rows;
+        let smooth = smooth && !burst;
         // The user's scroll stands until this frame's layout judges it.
         if self.scrolled.get() {
             self.last_step = None;

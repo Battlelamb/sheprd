@@ -247,3 +247,41 @@ fn a_sent_prompt_shows_whole_with_its_delivered_note(cx: &mut TestAppContext) {
         "{delivered:?} above {typing:?}"
     );
 }
+
+#[gpui::test]
+fn many_entries_landing_at_once_are_jumped_past_not_glided_through(cx: &mut TestAppContext) {
+    let (view, _peer, cx) = gliding(cx);
+    let program = Program::new();
+    let entries = (1..=40)
+        .map(|id| agent(id, "A line of an earlier reply."))
+        .collect();
+    let mut stream = attach_with(&view, &program, snapshot(cursor(1, 0), entries), cx);
+    redraw(&view, cx);
+    assert!(behind(&view, cx) <= 1., "opens at its end");
+
+    // What streamed while the window was in the background lands at once.
+    let reply = "A paragraph that arrived while the window was away.\n\n".repeat(4);
+    for (seq, id) in (41..=80).enumerate() {
+        let entry = agent(id, &reply);
+        send(
+            &mut stream,
+            &change(Change::Push { entry }, cursor(1, seq as u64 + 1)),
+        );
+    }
+    wait_until(|| {
+        poll(&view, &program, cx);
+        view.read_with(cx, |view, _| {
+            view.chats
+                .pane("w1:p1")
+                .unwrap()
+                .session
+                .transcript()
+                .entries
+                .len()
+                == 80
+        })
+    });
+    redraw(&view, cx);
+    let left = behind(&view, cx);
+    assert!(left <= 1., "at the new end in one frame: {left}");
+}

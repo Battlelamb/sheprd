@@ -293,6 +293,7 @@ fn session() -> Vector {
                     path: "/tmp/shot.png".into(),
                 }],
                 id: sheprd_chat_protocol::CommandId(uuid::Uuid::from_u128(7)),
+                steered: false,
                 text: "and the docs".into(),
             }],
         },

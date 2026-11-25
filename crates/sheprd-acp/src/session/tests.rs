@@ -38,6 +38,7 @@ mod questions;
 mod resume;
 mod sent_notes;
 mod settings;
+mod steering;
 mod streaming;
 mod threads;
 

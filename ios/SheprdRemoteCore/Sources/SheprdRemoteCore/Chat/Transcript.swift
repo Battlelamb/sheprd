@@ -209,14 +209,18 @@ public struct SlashCommand: Codable, Hashable, Sendable {
 public struct Queued: Codable, Hashable, Sendable {
     public var attachments: [Attachment]
     public var id: UUID
+    /// Already sent into the running turn, waiting for the agent's next
+    /// step; it can no longer be withdrawn.
+    public var steered: Bool
     public var text: String
 
-    enum CodingKeys: String, CodingKey { case attachments, id, text }
+    enum CodingKeys: String, CodingKey { case attachments, id, steered, text }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         attachments = try c.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
         id = try c.decode(UUID.self, forKey: .id)
+        steered = try c.decodeIfPresent(Bool.self, forKey: .steered) ?? false
         text = try c.decode(String.self, forKey: .text)
     }
 }

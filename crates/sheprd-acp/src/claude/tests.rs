@@ -26,6 +26,7 @@ fn claude_runs_in_its_streaming_mode_for_one_session() {
         "-p",
         "--verbose",
         "--include-partial-messages",
+        "--replay-user-messages",
         "--allow-dangerously-skip-permissions",
     ] {
         assert!(new.iter().any(|arg| arg == flag), "{flag}");

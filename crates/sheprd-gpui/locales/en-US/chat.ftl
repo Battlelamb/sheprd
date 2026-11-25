@@ -83,6 +83,7 @@ chat-you = You
 chat-delivered = Delivered
 chat-typing = typing…
 chat-queued = Queued
+chat-steering = Steering
 chat-working = Working
 chat-working-writing = Writing
 chat-working-thinking = Thinking

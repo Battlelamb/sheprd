@@ -60,6 +60,7 @@ chat-you = 你
 chat-delivered = 已送达
 chat-typing = 正在输入…
 chat-queued = 已排队
+chat-steering = 引导中
 chat-working = 工作中
 chat-working-writing = 正在撰写
 chat-working-thinking = 正在思考

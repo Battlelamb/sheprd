@@ -63,8 +63,9 @@ pub(crate) fn draw(frame: &mut Frame<'_>, view: &mut View, tick: usize) {
         .take(3)
         .map(|queued| {
             let first = queued.text.lines().next().unwrap_or_default();
+            let state = if queued.steered { "steering" } else { "queued" };
             Line::styled(
-                format!("↳ queued: {first}"),
+                format!("↳ {state}: {first}"),
                 Style::default().fg(Color::DarkGray),
             )
         })

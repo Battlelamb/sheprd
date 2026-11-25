@@ -284,15 +284,19 @@ private struct ChatDocument: View {
                         Text("Queued").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
                         ForEach(transcript.queued, id: \.id) { queued in
                             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Image(systemName: "clock").foregroundStyle(.secondary)
+                                Image(systemName: queued.steered ? "arrow.turn.down.right" : "clock").foregroundStyle(.secondary)
+                                    .accessibilityLabel(queued.steered ? "Steering" : "Queued")
                                 Text(queued.text).font(.subheadline).lineLimit(3)
                                 if !queued.attachments.isEmpty {
                                     Label("\(queued.attachments.count)", systemImage: "photo").font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                Button { unqueue(queued) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel("Remove from the queue")
+                                // A steered prompt is already with the agent.
+                                if !queued.steered {
+                                    Button { unqueue(queued) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("Remove from the queue")
+                                }
                             }
                             .padding(10)
                             .background(.fill.quinary, in: .rect(cornerRadius: 12))

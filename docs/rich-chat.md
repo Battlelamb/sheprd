@@ -585,6 +585,15 @@ computer's and every connected SSH host's that has the program, keeps the
 latest edit, and offers it to the others, so an edit made anywhere reaches all
 of them. A host without the program is skipped.
 
+A prompt sent while Claude Code, Codex or pi works goes into the running turn
+rather than waiting for it to end: the agent reads it at its next step, such
+as after the tool call running now, and the conversation shows it there. Until
+then it waits above the composer marked **Steering**, and cannot be withdrawn,
+as the agent already has it. One the agent did not take before its turn ended
+goes as the next prompt. Other agents, and a prompt sent behind one still
+waiting to be sent, keep the queue: it waits marked **Queued** until the turn
+ends, and its × withdraws it. **Stop** drops both.
+
 ACP chats retain their native composer, permissions, tools, plans, context
 information and file attachments. Tool and thinking cards start collapsed and
 expand to show retained text and diffs.

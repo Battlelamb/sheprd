@@ -510,15 +510,19 @@ impl SheprdWindow {
     ) -> Option<Div> {
         let open = chat.steps.is_open();
         let needs_input = self.chat_needs_input(chat);
-        let working = working::Working::of(chat.session.transcript(), super::now_ms())
-            .map(|working| working::Working { open, ..working })
-            .map(|working| {
-                if needs_input {
-                    working.waiting(chat.input())
-                } else {
-                    working
-                }
-            });
+        let working = working::Working::of_at(
+            chat.session.transcript(),
+            super::now_ms(),
+            chat.session.last_activity_ms(),
+        )
+        .map(|working| working::Working { open, ..working })
+        .map(|working| {
+            if needs_input {
+                working.waiting(chat.input())
+            } else {
+                working
+            }
+        });
         let row = layout::layout_for(self.config.chat.layout)
             .working(working.as_ref(), &self.chat_look())
             .map(|row| {

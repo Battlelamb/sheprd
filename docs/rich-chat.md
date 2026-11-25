@@ -657,6 +657,10 @@ hides until hovered. The agent learns the syntax from the note Sheprd sends
 with the first prompt on a desktop (`desktop.md` and `remote.md` in
 `crates/sheprd-acp/prompts`) and in the iPhone and iPad app (`phone-app.md`).
 
+On desktop, turn off **Settings > Chat > Message effects** to stop bubble and
+screen effects, including wizz. Invisible ink becomes readable and replay links
+disappear, including in existing messages.
+
 The iPhone and iPad app draws the same sizes and effects
 (`ios/SheprdRemoteCore/Sources/SheprdRemoteCore/Chat/TextSize.swift` and
 `Chat/Effects`, ported from the desktop's with the same tests), with these

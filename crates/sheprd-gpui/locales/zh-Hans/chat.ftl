@@ -187,3 +187,6 @@ chat-form-read-only = 只读聊天记录
 chat-form-range = { $min } 至 { $max }
 chat-form-not-ready = 智能体尚无法接收此表单
 chat-form-busy = 请先完成当前消息，再发送此表单
+
+chat-open-message-text = 将完整消息作为文本文件打开
+chat-message-file-error = 无法将消息保存为文本文件：{ $error }

@@ -270,3 +270,6 @@ chat-form-busy = Finish your current message before sending this form
 
 chat-file-open = Open
 chat-file-on-host = File on the agent’s computer
+
+chat-open-message-text = Open full message as a text file
+chat-message-file-error = Could not save the message as a text file: { $error }

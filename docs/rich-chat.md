@@ -506,6 +506,12 @@ this, and how, is in the [`sheprd-acp` README](../crates/sheprd-acp/README.md#be
 
 ## Messages and controls
 
+In the desktop conversation, a user message with at least 12 lines or 2,048
+characters shows a first-line preview and a **Message.txt** button. Click the
+button to open the full text in your default text editor. This applies to
+existing conversations too. You can still edit a paste in the composer before
+sending it, and the agent receives the full prompt.
+
 Write normal Markdown and TeX in user and agent messages. Rich chat supports
 headings, lists, links, aligned tables with horizontal scrolling, Mermaid,
 attached images, and explicitly loaded remote pictures. Conversation prose uses

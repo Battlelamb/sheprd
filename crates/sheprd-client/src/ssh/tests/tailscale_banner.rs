@@ -9,7 +9,6 @@ use super::*;
 /// `sh` printing Tailscale's banner to stderr and then holding the connection,
 /// as a host in check mode does. Nothing here lets go of it on its own, so a
 /// run that waited would report the timeout instead.
-#[cfg(unix)]
 fn host_waiting_for_a_check() -> Command {
     let mut command = Command::new("sh");
     command
@@ -27,7 +26,6 @@ while :; do sleep 1; done"#,
 /// The banner ends the run with the check it named, well before the budget the
 /// caller gave: the address belongs to this connection, so holding it open for
 /// a check nobody may answer is time the window spends showing nothing.
-#[cfg(unix)]
 #[test]
 fn a_banner_is_reported_at_once_instead_of_timing_out() {
     let started = Instant::now();
@@ -51,7 +49,6 @@ fn a_banner_is_reported_at_once_instead_of_timing_out() {
 /// The marker and the address reach the pipe as separate reads. Reporting the
 /// first one would hand the window a check with nothing to open, so the run
 /// waits for the address.
-#[cfg(unix)]
 #[test]
 fn an_address_written_after_the_marker_is_waited_for() {
     let mut command = Command::new("sh");
@@ -78,7 +75,6 @@ while :; do sleep 1; done"#,
 /// A host that chatters past the retained tail and only then asks for a check.
 /// The tail stops growing at its bound, so the scan has to notice output by
 /// more than its length, or the banner is missed and the run reports a timeout.
-#[cfg(unix)]
 #[test]
 fn a_banner_after_a_full_tail_is_still_found() {
     let mut command = Command::new("sh");
@@ -108,7 +104,6 @@ while :; do sleep 1; done"#,
 
 /// A banner whose address Sheprd cannot read still says why the host stopped,
 /// so the run reports the check rather than a bare timeout.
-#[cfg(unix)]
 #[test]
 fn a_banner_without_a_readable_address_is_still_a_check() {
     let mut command = Command::new("sh");

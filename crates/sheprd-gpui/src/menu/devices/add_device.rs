@@ -95,15 +95,10 @@ impl Setup {
         self.ssh_failure.as_ref()
     }
 
-    /// Record a message that came from no failure, dropping the failure behind
-    /// the last one: an address kept past its message would be a link to a
-    /// check nobody ran.
-    pub(super) fn fail(&mut self, error: impl Into<String>) {
-        self.record(Some(error.into()), None);
-    }
-
     /// Record the message and the failure behind it together, which is the only
-    /// way either is written.
+    /// way either is written. A message that came from no failure passes `None`,
+    /// which drops the failure behind the last one: an address kept past its
+    /// message would be a link to a check nobody ran.
     pub(super) fn record(&mut self, error: Option<String>, failure: Option<SshFailure>) {
         self.error = error;
         self.ssh_failure = failure;

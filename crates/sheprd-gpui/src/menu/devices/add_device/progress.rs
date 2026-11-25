@@ -139,7 +139,7 @@ impl SheprdWindow {
                     if let Some(form) = &mut self.menu.device_setup {
                         form.step = Step::Confirm(request, offer);
                         form.claim = claim;
-                        form.fail(error.localize());
+                        form.record(Some(error.localize()), None);
                     }
                     cx.notify();
                 }
@@ -167,7 +167,7 @@ impl SheprdWindow {
                 if !self.refuse_duplicate(&error, cx) {
                     if let Some(form) = &mut self.menu.device_setup {
                         form.step = Step::Confirm(request, offer);
-                        form.fail(error.to_string());
+                        form.record(Some(error.to_string()), None);
                     }
                     cx.notify();
                 }
@@ -245,7 +245,7 @@ impl SheprdWindow {
             };
             form.step = Step::Form;
             form.claim = None;
-            form.fail(error.to_string());
+            form.record(Some(error.to_string()), None);
         }
         cx.notify();
     }

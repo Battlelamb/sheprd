@@ -12,7 +12,7 @@ public struct RelayDiagnostic: Codable, Equatable, Sendable {
 
     public enum Outcome: Codable, Equatable, Sendable {
         case reachable, noWebSocket, invalidAddress, nonHTTP, oversized, invalidJSON
-        case httpError
+        case banned, httpError
         case protocolVersion(Int)
         case network(Int)
         case transportFailure
@@ -28,6 +28,7 @@ public struct RelayDiagnostic: Codable, Equatable, Sendable {
         case .nonHTTP: "Non-HTTP response"
         case .oversized: "Response exceeds 16 KiB"
         case .invalidJSON: "Response is not valid relay info JSON"
+        case .banned: "This relay has banned your network address"
         case .httpError: "HTTP \(status ?? 0) from relay or proxy"
         case .protocolVersion(let version): "Unsupported relay protocol \(version)"
         case .network(let code): "\(URLError.Code(rawValue: code).diagnosticName) (URL error \(code))"
@@ -44,6 +45,7 @@ extension RelayDiagnostic.Outcome {
     var reach: RelayReach {
         switch self {
         case .reachable: .reachable
+        case .banned: .banned
         case .noWebSocket: .noWebSocket
         case .network, .transportFailure, .httpError, .nonHTTP: .unreachable
         default: .notARelay
@@ -93,6 +95,9 @@ extension RelayReach {
             defer { bytes.task.cancel() }
             guard let http = response as? HTTPURLResponse else { return result(.nonHTTP) }
             status = http.statusCode
+            if http.statusCode == 403, http.value(forHTTPHeaderField: "sheprd-relay-banned") == "1" {
+                return result(.banned)
+            }
             guard http.statusCode == 200 else { return result(.httpError) }
             guard http.expectedContentLength <= Int64(maxInfo),
                   let body = try await bounded(bytes, limit: maxInfo) else { return result(.oversized) }

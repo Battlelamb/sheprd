@@ -151,8 +151,10 @@ impl<R: FnMut(Update)> Session<R> {
             // Only a prompt the agent received names the chat and starts
             // the conversation a later agent is handed.
             self.thread.prompted(&shown, handoff);
+            self.keep_started(&shown);
             (self.report)(Update::Prompt(shown));
             self.turn = Some(self.next_request);
+            self.watchdog.start(std::time::Instant::now());
             self.emit(Change::Turn {
                 turn: Some(Turn {
                     started_ms: crate::session::now_ms(),
@@ -185,6 +187,7 @@ impl<R: FnMut(Update)> Session<R> {
         }
         self.clear_queue();
         self.resolve_all();
+        self.watchdog.clear();
         if self.turn.is_some()
             && let Some(session) = self.acp_session.clone()
             && let Err(error) = self
@@ -280,6 +283,23 @@ impl<R: FnMut(Update)> Session<R> {
             .any(|option| option.id == id && option.accepts(value));
         if !known {
             return Err(Rejection::UnknownSetting);
+        }
+        if self.legacy_model_option && id == crate::project::models::OPTION_ID {
+            let OptionValue::Choice { id: model_id } = value else {
+                return Err(Rejection::UnknownSetting);
+            };
+            let request = serde_json::json!({
+                "sessionId": session,
+                "modelId": model_id,
+            });
+            if !self.request(
+                "session/set_model",
+                &request,
+                Pending::SetModel(model_id.clone()),
+            ) {
+                return Err(Rejection::AgentUnavailable);
+            }
+            return Ok(());
         }
         let request = wire::SetSessionConfigOptionRequest::new(
             session,

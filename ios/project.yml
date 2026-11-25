@@ -229,6 +229,16 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: so.pen.herdr.remote.notifications
         SHEPRD_FILTERS_REPEATS: "NO"
 
+  SheprdRemoteTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [SheprdRemoteTests]
+    dependencies:
+      - target: SheprdRemote
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+
   SheprdRemoteUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -278,7 +288,7 @@ schemes:
       targets:
         SheprdRemote: all
     test:
-      targets: [SheprdRemoteUITests]
+      targets: [SheprdRemoteTests, SheprdRemoteUITests]
     run:
       config: Debug
     archive:

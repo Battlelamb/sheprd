@@ -10,6 +10,7 @@ use super::*;
 use crate::rpc::{Inbound, Outbox};
 
 mod activities;
+mod antigravity;
 mod attach;
 mod attachments;
 mod auto_accept;
@@ -19,11 +20,14 @@ mod carry;
 mod commands;
 mod continued;
 mod flow;
+mod gemini;
 mod harnesses;
 mod history;
+mod kept;
 mod known;
 mod linked_pictures;
 mod media;
+mod muse;
 mod opencode;
 mod origin;
 mod permissions;
@@ -36,6 +40,7 @@ mod sent_notes;
 mod settings;
 mod streaming;
 mod threads;
+mod watchdog;
 
 type Reports = Rc<RefCell<Vec<Activity>>>;
 type Prompts = Rc<RefCell<Vec<String>>>;
@@ -59,10 +64,12 @@ struct Harness {
 
 fn config() -> Config {
     Config {
+        antigravity_auth_method: None,
         agent: "Claude".to_owned(),
         choices: None,
         cwd: PathBuf::from("/work"),
         exit_with_agent: false,
+        gemini_auth_method: None,
         harness: Some(Agent::Claude),
         history: None,
         known: Default::default(),
@@ -74,6 +81,7 @@ fn config() -> Config {
         require_load: false,
         settings: None,
         sheprd: None,
+        thread: None,
     }
 }
 
@@ -200,6 +208,17 @@ impl Harness {
 
     fn transcript(&self) -> &Transcript {
         self.session.transcript()
+    }
+
+    fn handoffs(&self) -> Vec<sheprd_chat_protocol::HandedOver> {
+        self.transcript()
+            .entries
+            .iter()
+            .filter_map(|entry| match &entry.kind {
+                EntryKind::Handoff(handoff) => Some(handoff.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     fn notices(&self) -> Vec<(NoticeLevel, String)> {

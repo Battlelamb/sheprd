@@ -252,4 +252,5 @@ mod gpu;
 #[cfg(unix)]
 mod gpu_tool;
 mod hosted;
+mod hosted_gpu;
 mod windows;

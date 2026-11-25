@@ -90,8 +90,7 @@ impl Drop for Ask {
 
 impl SheprdWindow {
     /// Asks whether to borrow `machine` on host `host`, kept as `key`
-    /// when the user always borrows from it. `None` when another dialog
-    /// holds the window, which the caller reports as busy.
+    /// when the user always borrows from it. Only one borrow request can wait at a time.
     pub(crate) fn ask_to_borrow(
         &mut self,
         host: String,
@@ -100,7 +99,7 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Answered> {
-        if self.menu.page.is_some() || !self.open_menu(window, cx) {
+        if self.menu.machine_borrow.is_some() {
             return None;
         }
         let answered = Answered::default();
@@ -110,11 +109,43 @@ impl SheprdWindow {
             machine,
             answered: answered.clone(),
         });
-        self.menu.page = Some(Page::BorrowMachine);
-        window.activate_window();
         cx.notify();
         self.close_borrow_when_cancelled(answered.clone(), window, cx);
         Some(answered)
+    }
+
+    /// Invite the user to review a pending request without interrupting input.
+    pub(crate) fn borrow_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let ask = self.menu.machine_borrow.as_ref()?;
+        let label = fl!("machine-borrow-title", host = safe_text(&ask.host, 64));
+        let control = button(
+            &self.theme,
+            "review-machine-borrow",
+            label,
+            Tone::Primary,
+            true,
+        )
+        .occlude()
+        .children(self.overlay_probe(crate::browser::Overlay::Notice(
+            crate::window::NoticeCard::BorrowMachine,
+        )))
+        .on_click(cx.listener(|this, _, window, cx| {
+            cx.stop_propagation();
+            if this
+                .menu
+                .machine_borrow
+                .as_ref()
+                .is_some_and(|ask| !ask.answered.cancelled())
+                && this.open_menu(window, cx)
+            {
+                this.menu.page = Some(Page::BorrowMachine);
+                cx.notify();
+            }
+        }));
+        Some(
+            self.chrome_stop(crate::window::chrome_focus::Region::Notices, control)
+                .into_any_element(),
+        )
     }
 
     /// Closes the question once its request ends unanswered, so a stale
@@ -136,7 +167,11 @@ impl SheprdWindow {
                         .is_some_and(|ask| ask.answered.same(&answered));
                     if ours && answered.cancelled() {
                         view.menu.machine_borrow = None;
-                        view.dismiss_menu(window, cx);
+                        if view.menu.page == Some(Page::BorrowMachine) {
+                            view.dismiss_menu(window, cx);
+                        } else {
+                            cx.notify();
+                        }
                         return false;
                     }
                     ours

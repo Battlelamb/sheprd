@@ -49,15 +49,12 @@ class PrivacyManifestTests(unittest.TestCase):
                 self.assertEqual(reasons(target, "NSPrivacyAccessedAPICategoryFileTimestamp"),
                                  {"C617.1"}, target)
 
-    def test_only_the_app_collects_and_only_the_push_token(self):
-        # The push relay, which the publisher runs, opens the sealed handle and
-        # so reads the device's push token; nothing else leaves for a server
-        # that is not the user's own computer.
+    def test_app_discloses_push_and_opt_in_voice_content(self):
         collected = manifest("SheprdRemote")["NSPrivacyCollectedDataTypes"]
-        self.assertEqual([c["NSPrivacyCollectedDataType"] for c in collected],
-                         ["NSPrivacyCollectedDataTypeDeviceID"])
-        self.assertFalse(collected[0]["NSPrivacyCollectedDataTypeLinked"])
-        self.assertFalse(collected[0]["NSPrivacyCollectedDataTypeTracking"])
+        linked = {c["NSPrivacyCollectedDataType"]: c["NSPrivacyCollectedDataTypeLinked"] for c in collected}
+        self.assertEqual(linked, {"NSPrivacyCollectedDataTypeDeviceID": False,
+                                  "NSPrivacyCollectedDataTypeOtherUserContent": True})
+        self.assertTrue(all(not c["NSPrivacyCollectedDataTypeTracking"] for c in collected))
         for target in TARGETS[1:]:
             self.assertEqual(manifest(target)["NSPrivacyCollectedDataTypes"], [], target)
 

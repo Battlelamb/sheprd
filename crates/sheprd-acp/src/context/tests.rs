@@ -16,6 +16,13 @@ const PHONE: Origin = Origin::new(Device::PhoneApp, Via::Relay);
 const DESKTOP: Origin = Origin::new(Device::Desktop, Via::Local);
 
 #[test]
+fn direct_context_never_adds_sheprd_text_to_a_persons_prompt() {
+    let mut context = Context::direct();
+    assert_eq!(context.before(Some(PHONE)), None);
+    assert_eq!(context.before(Some(DESKTOP)), None);
+}
+
+#[test]
 fn the_system_prompt_goes_once_with_the_first_prompt() {
     let mut context = Context::new(
         Prompts::with_instructions("Answer in French."),

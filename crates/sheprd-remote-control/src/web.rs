@@ -128,6 +128,7 @@ pub(crate) struct State {
     pub(crate) push: Option<Sender>,
     /// How the last APNs push of each kind went.
     pub(crate) pushes: crate::apns::Ledger,
+    pub(crate) launches: crate::server::live::Launches,
     /// The relays this computer listens on, when any are set.
     pub(crate) relay: Option<Arc<crate::relay::Relays>>,
     /// How often each address may write a phone's error to the log.
@@ -284,6 +285,7 @@ pub(crate) fn router(state: Shared) -> Router {
             "/api/v2/fleet/sync",
             post(fleet::sync).layer(DefaultBodyLimit::max(fleet::MAX_SYNC_BODY)),
         )
+        .route("/api/v2/pair/voice", post(api::pair_voice))
         .route("/api/v2/github/token", get(crate::native::github::token))
         .route("/api/v2/home", get(crate::native::get_home))
         .route("/api/v2/hosts", get(hosts::list))

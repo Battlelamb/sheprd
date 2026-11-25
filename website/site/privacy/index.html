@@ -38,8 +38,8 @@
   <section class="tf-hero" aria-labelledby="pp-h">
     <p class="kicker">Sheprd for iPhone, iPad, and Apple Watch</p>
     <h1 id="pp-h">Privacy</h1>
-    <p class="dek">The app shows what Sheprd runs on your own computers. Your prompts, chats, code, and terminals go between your phone and those computers, and nowhere else. We run no accounts, analytics, ads, or tracking.</p>
-    <p class="note">Last updated 22 November 2026.</p>
+    <p class="dek">The app shows what Sheprd runs on your own computers. Your phone connects directly to those computers. Optional cloud voices send the text spoken aloud to the provider you select. We run no accounts, analytics, ads, or tracking.</p>
+    <p class="note">Last updated 23 November 2026.</p>
   </section>
 
   <h2>What stays on your phone</h2>
@@ -51,6 +51,10 @@
 
   <h2>What goes to your computers</h2>
   <p>The app talks directly to Sheprd on the computers you paired, over your network, Tailscale, or a Sheprd relay. Prompts you send, answers to agents' questions, photos and files you attach, terminal input, and diagnostics you choose to send all go to that computer. When a relay carries the connection, it is end-to-end encrypted: the relay passes encrypted bytes and sees only the IP addresses, timing, and size of the traffic, and keeps no logs of them.</p>
+
+  <h2>Optional voice services</h2>
+  <p>Apple speech runs on your device. When you choose a cloud voice or preview one, the app sends the text to ElevenLabs, OpenAI, Deepgram or OpenRouter using your own account. Spoken text can include chat titles, workspace names and task descriptions. OpenRouter routes synthesis to its model provider. The provider’s billing and data retention policies apply.</p>
+  <p>Your phone saves the active voice key in its device-only Keychain. When you approve pairing, the devices copy the active account across the authenticated connection if only one has a voice account. Disconnect removes the local copy. To invalidate all copies, revoke the key with the provider. If you choose Wispr Flow for dictation, its keyboard handles your audio under your Wispr settings.</p>
 
   <h2>Notifications and the push relay</h2>
   <p>Apple delivers notifications for this app only when they come from Sheprd, so they go through a small server we run, the push relay at push.sheprd.org. It is on by default, and you can turn it off in Settings &gt; Notifications &gt; Push Relay.</p>
@@ -65,7 +69,7 @@
   <h2>Permissions</h2>
   <ul>
     <li><strong>Camera:</strong> to scan a computer's pairing code, and to take photos you send to a chat.</li>
-    <li><strong>Microphone and speech recognition:</strong> for dictated prompts and spoken commands, transcribed on your phone. The audio does not leave it.</li>
+    <li><strong>Microphone and speech recognition:</strong> for dictated prompts and spoken commands, transcribed on your phone by the built-in recognizer.</li>
     <li><strong>Bluetooth and local network:</strong> to find and pair your computers nearby, and, if you turn on presence, to tell them you are at the desk.</li>
     <li><strong>Face ID:</strong> before a chat may run every tool without asking.</li>
     <li><strong>Notifications:</strong> for questions, finished turns, and errors from your agents.</li>

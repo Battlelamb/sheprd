@@ -749,10 +749,12 @@ final class Fleet {
 
     private func startLink(_ computer: Computer) {
         guard links[computer.device] == nil, !DemoFleet.owns(computer.device) else { return }
+        var io = LiveSocket.io(for: computer, sessions: sessions)
+        io.bannedRelay = { [weak self] in await self?.bannedRelay(for: computer.device) }
         let link = ComputerLink(
             fingerprint: computer.fingerprint.hex,
             origins: origins(computer),
-            io: LiveSocket.io(for: computer, sessions: sessions)
+            io: io
         )
         links[computer.device] = link
         startRelay(computer)

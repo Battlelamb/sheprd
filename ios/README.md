@@ -15,6 +15,7 @@ The native app for Sheprd's remote control (`docs/ios-app-plan.md`).
   paired computer, merged into one list, with what needs you first. Agent and worktree labels appear together on each row. Agents manage them with `sheprd labels` on the host.
 - **What you can do:** answer questions in place, open a chat or a terminal,
   and send prompts.
+- **New project:** In Workspaces, open the computer’s ⋯ menu and choose **New Project**. Create an empty Git repository or clone one, select a parent folder on that computer, and open the first workspace there.
 - **Chat text:** an agent's replies are Markdown with the desktop's text sizes
   (`:big[…]` and the other steps) and message effects (`:::slam` bubbles,
   invisible ink revealed by a tap, and `::confetti` and the other screen
@@ -165,6 +166,14 @@ and nothing goes through your phone.
    - Avoid `simctl openurl`: its confirmation alert needs a tap, and it
      keeps the app inactive until the simulator restarts.
 
+## Speaking voices and dictation
+
+In Settings > Voice, tap Change to open the provider sheet. The active provider is marked In use. Choose Apple on-device speech or connect a personal ElevenLabs, OpenAI, Deepgram or OpenRouter account. Preview uses a sample sentence and the provider bills your account. Cloud voices play as MP3 packets arrive. Stop preview cancels the download and clears queued audio. OpenRouter sign-in opens the browser, then asks for the authorization code using PKCE. ElevenLabs can load the first 100 account voices, or accept a voice ID. Use This Voice saves the active account.
+
+Direct pairing exchanges accounts over pinned TLS after approval and proof of the device key. If one side has a cloud voice, the other imports it. Two configured devices keep their own accounts. Disconnect forgets the key on that device. Revoke it at the provider to invalidate paired copies.
+
+For Wispr Flow, select Use Keyboard for Voice Commands, switch to the installed Flow keyboard, dictate, and tap Review Command. The ordinary chat composer accepts keyboard dictation too.
+
 ## Voice commands
 
 The waveform button on Home, the Talk to Sheprd Control (for the Action
@@ -186,6 +195,8 @@ Voice reads the plan aloud and takes a plain yes, for a new worktree only.
 | Check | `VoiceDraft.adopting` | A name counts only if it was heard, and a task only if the words are the speaker's own. The model cannot stop a chat or answer a question |
 | Plan | `VoicePlan.swift` | Fills in what was not said and labels it. Something named that does not exist becomes a question, never a substitute |
 | Confirm | `SheprdRemote/Views/Voice/VoiceSheet.swift` | The card is the request. Starting an agent, sending, stopping, and answering take a tap on Start |
+
+`SHEPRD_AUDIO_TEST=1 swift test --filter StreamingSpeechTests` exercises progressive playback and cancellation using a held response and muted audio output on macOS. The same test runs on the iOS simulator.
 
 `VOICE_EVAL=1 swift test --filter VoiceEvalTests` scores every sentence in
 `Fixtures/voice` against the real model, which needs Apple Intelligence on the
@@ -371,6 +382,18 @@ longer have, which shows as not reported).
   there.
 
 ## Live Activity styles
+
+In Settings > Notifications > Live Activities, **Default grouping** applies to
+current and future hosts. **One per host** is the default and combines all
+worktrees on each computer. **One for all hosts** lets the push relay keep one
+card for overlapping work on computers using **Use default**, even while the
+phone is locked. A waiting question takes focus. Tap to open its pane or use
+the available answer buttons. **One per agent** gives each independent chat or
+terminal agent its own activity. Delegated workers contribute to their
+coordinator’s progress. To override the default for a host, select its name
+and choose a grouping. Choose **Use default** to make it follow the default
+again. Choices apply to new activities and sync when an offline host reconnects.
+Older computers continue using the grouping they support.
 
 Settings > Notifications > Live Activities > Style picks how an activity
 looks on this phone (`LiveActivityStyle`, kept in the App Group so the widget

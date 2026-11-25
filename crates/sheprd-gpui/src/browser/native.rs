@@ -207,7 +207,10 @@ fn new_window(
     outbox: &Outbox,
 ) -> wry::NewWindowResponse {
     #[cfg(target_os = "macos")]
-    if let (Some(mtm), Ok(address)) = (objc2::MainThreadMarker::new(), WebUrl::try_from(&*url)) {
+    if let (Some(mtm), Ok(address)) = (objc2::MainThreadMarker::new(), WebUrl::try_from(&*url))
+        && !features.opener.webview.isHiddenOrHasHiddenAncestor()
+        && objc2_app_kit::NSApplication::sharedApplication(mtm).isActive()
+    {
         let key = NEXT_POPUP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let source = Source::Popup(key);
         let builder = with_handlers(wry::WebViewBuilder::new(), source, outbox);
@@ -278,12 +281,6 @@ impl Pages {
     /// Where each page drew in the frame being drawn, filled as they lay out.
     pub(crate) fn drawn(&self) -> Drawn {
         self.drawn.clone()
-    }
-
-    /// Where tab `id`'s page drew last, if it is laid out.
-    #[cfg(target_os = "macos")]
-    pub(crate) fn drawn_at(&self, id: TabId) -> Option<gpui::Bounds<gpui::Pixels>> {
-        self.drawn.borrow().get(&id).copied()
     }
 
     /// Starts the next frame's record of where pages draw. The window calls
@@ -366,6 +363,8 @@ impl Pages {
             ""
         };
         let builder = with_handlers(wry::WebViewBuilder::new(), Source::Tab(id), &self.outbox)
+            .with_focused(false)
+            .with_visible(false)
             .with_initialization_script(bridge)
             .with_url(location.page_url())
             .with_asynchronous_custom_protocol(
@@ -614,7 +613,7 @@ impl Pages {
             let Some(view) = page.web() else {
                 return false;
             };
-            super::snapshot::capture(view, rect, move |tiff| {
+            super::snapshot::capture(view, rect, true, move |tiff| {
                 report(&sender, Event::Captured(Source::Tab(id), capture, tiff));
             });
             return true;

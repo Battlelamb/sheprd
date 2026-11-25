@@ -101,6 +101,8 @@ fn quoted(path: &Path) -> String {
 /// What the agent has been told in this conversation.
 #[derive(Debug, Default)]
 pub(crate) struct Context {
+    /// Antigravity receives each prompt directly, without Sheprd annotations.
+    direct: bool,
     facts: Facts,
     /// The `sheprd` command the agent starts a chat like this one with;
     /// `None` leaves what it runs as out of the note.
@@ -125,9 +127,25 @@ pub(crate) struct Context {
 }
 
 impl Context {
+    /// A chat that passes each prompt through without annotation.
+    #[cfg(test)]
+    pub(crate) fn direct() -> Self {
+        Self {
+            direct: true,
+            ..Self::default()
+        }
+    }
+
+    /// Toggles pass-through mode when switching to or from an agent (such as
+    /// Antigravity) that receives each prompt directly without Sheprd notes.
+    pub(crate) fn set_direct(&mut self, direct: bool) {
+        self.direct = direct;
+    }
+
     /// A conversation in which earlier notes told the agent `told`.
     pub(crate) fn new(prompts: Prompts, facts: Facts, told: Told) -> Self {
         Self {
+            direct: false,
             facts,
             launch: None,
             last: None,
@@ -191,6 +209,9 @@ impl Context {
     /// `prompt` and were not offered yet, and the current device on every
     /// identified prompt. Only the new turn changes; cached history stays put.
     pub(crate) fn before_prompt(&mut self, origin: Option<Origin>, prompt: &str) -> Option<String> {
+        if self.direct {
+            return None;
+        }
         // An older client cannot identify a phone. Clear a previous target
         // rather than letting its next message inherit another device's id.
         let origin = origin.or_else(|| {

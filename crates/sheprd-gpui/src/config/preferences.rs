@@ -13,6 +13,8 @@ pub(crate) enum Preference {
     ChatCodeStripes(bool),
     /// `[chat] glide`: whether chats scroll smoothly to new output.
     ChatGlide(bool),
+    /// Whether desktop chats show message effects.
+    ChatMessageEffects(bool),
     /// `[chat] launcher`: where tab strips offer one-click chats.
     ChatLauncher(ChatLauncher),
     /// `[chat] layout`: how chat views draw.
@@ -33,6 +35,8 @@ pub(crate) enum Preference {
     ShowNetworkQuality(bool),
     ShowGpuLoad(bool),
     ShowSidebarGpuLoad(bool),
+    /// `sidebar_load`: each host's load in the Moonframe sidebar, compact or detailed.
+    SidebarLoad(status_bar::Detail),
     AgentCheckpoints(bool),
     ShowListeningPorts(bool),
     ShowAgentsHeader(bool),
@@ -151,6 +155,9 @@ impl Config {
                 Preference::ChatCodeStripes(value) => {
                     (Some("chat"), "code_stripes", Some(value.into()))
                 }
+                Preference::ChatMessageEffects(value) => {
+                    (Some("chat"), "message_effects", Some(value.into()))
+                }
                 Preference::ChatGlide(value) => (Some("chat"), "glide", Some(value.into())),
                 Preference::ChatLauncher(launcher) => {
                     (Some("chat"), "launcher", Some(launcher.name().into()))
@@ -186,6 +193,9 @@ impl Config {
                 Preference::ShowGpuLoad(value) => (None, "show_gpu_load", Some(value.into())),
                 Preference::ShowSidebarGpuLoad(value) => {
                     (None, "show_sidebar_gpu_load", Some(value.into()))
+                }
+                Preference::SidebarLoad(detail) => {
+                    (None, "sidebar_load", Some(detail.name().into()))
                 }
                 Preference::AgentCheckpoints(value) => {
                     (None, "agent_checkpoints", Some(value.into()))

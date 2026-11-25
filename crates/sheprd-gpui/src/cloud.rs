@@ -7,14 +7,78 @@ pub(crate) mod batch;
 pub(crate) mod image;
 mod jobs;
 pub(crate) mod status;
+#[cfg(test)]
+mod tests;
 pub(crate) mod worker;
 
 pub(crate) use jobs::Jobs;
 pub(crate) use sheprd_remote::cloud::*;
 
+use crate::config::{Feature, Features};
+
+/// The providers this launch offers: those built in whose `[features]`
+/// switch is on, while `cloud_providers` is. Read once from the startup
+/// config, so a change takes effect when Sheprd next starts. Tests see every
+/// provider built in, whatever the config on the machine running them says.
+pub(crate) fn enabled() -> &'static [CloudProvider] {
+    static ENABLED: std::sync::OnceLock<Vec<CloudProvider>> = std::sync::OnceLock::new();
+    ENABLED.get_or_init(|| {
+        if cfg!(test) {
+            return CloudProvider::ALL.to_vec();
+        }
+        let features = crate::config::Config::load_startup()
+            .map(|config| config.features)
+            .unwrap_or_default();
+        enabled_in(&features)
+    })
+}
+
+/// Whether this launch offers `provider`; see [`enabled`].
+pub(crate) fn is_enabled(provider: CloudProvider) -> bool {
+    enabled().contains(&provider)
+}
+
+/// The providers `features` turns on, in display order.
+fn enabled_in(features: &Features) -> Vec<CloudProvider> {
+    if !features.cloud_providers {
+        return Vec::new();
+    }
+    CloudProvider::ALL
+        .iter()
+        .copied()
+        .filter(|&provider| features.enabled(switch(provider)))
+        .collect()
+}
+
+/// The `[features]` flag that turns `provider` on or off.
+fn switch(provider: CloudProvider) -> Feature {
+    match provider {
+        #[cfg(feature = "azure")]
+        CloudProvider::Azure => Feature::CloudAzure,
+        #[cfg(feature = "boat")]
+        CloudProvider::Boat => Feature::CloudBoat,
+        #[cfg(feature = "boxd")]
+        CloudProvider::Boxd => Feature::CloudBoxd,
+        #[cfg(feature = "coder")]
+        CloudProvider::Coder => Feature::CloudCoder,
+        #[cfg(feature = "container")]
+        CloudProvider::Container => Feature::CloudContainer,
+        #[cfg(feature = "daytona")]
+        CloudProvider::Daytona => Feature::CloudDaytona,
+        #[cfg(feature = "opensandbox")]
+        CloudProvider::OpenSandbox => Feature::CloudOpenSandbox,
+        #[cfg(feature = "railway")]
+        CloudProvider::Railway => Feature::CloudRailway,
+        #[cfg(feature = "sprites")]
+        CloudProvider::Sprites => Feature::CloudSprites,
+    }
+}
+
 /// Every minute, stop machines left idle: Azure VMs past `auto_stop`, and
 /// idle containers. Each reads its table as the first frame does, with no
-/// maintenance, and only when one of its devices is saved.
+/// maintenance, and only when one of its devices is saved. These run even
+/// while the provider is turned off in `[features]`, so a hidden machine left
+/// running still stops instead of costing money.
 pub(crate) fn install_idle_checks(cx: &mut gpui::App) {
     #[cfg(feature = "azure")]
     every(cx, std::time::Duration::from_secs(60), || {

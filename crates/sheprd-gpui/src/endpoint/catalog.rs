@@ -61,11 +61,17 @@ fn cloud_devices() -> Option<Vec<crate::cloud::SavedDevice>> {
     if crate::cloud::unavailable().is_some() {
         return Some(Vec::new());
     }
+    // Devices of a provider turned off in `[features]` stay in the file too,
+    // offered again once it is back on.
     crate::cloud::load()
         .inspect_err(|error| {
             tracing::warn!(category = "cloud_catalog", %error, "Cannot read saved cloud devices");
         })
         .ok()
+        .map(|mut devices| {
+            devices.retain(|device| crate::cloud::is_enabled(device.provider));
+            devices
+        })
 }
 
 fn load(development: bool, startup: bool) -> Result<CatalogUpdate> {

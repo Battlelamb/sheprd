@@ -151,6 +151,7 @@ impl<R: FnMut(Update)> Session<R> {
             // Only a prompt the agent received names the chat and starts
             // the conversation a later agent is handed.
             self.thread.prompted(&shown, handoff);
+            self.keep_started(&shown);
             (self.report)(Update::Prompt(shown));
             self.turn = Some(self.next_request);
             self.emit(Change::Turn {

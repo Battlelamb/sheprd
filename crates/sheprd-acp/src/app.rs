@@ -397,7 +397,7 @@ pub(crate) fn run_owned(
     };
     let listens = endpoint.is_some();
     let target = Target::from_env();
-    let mut keeper = if target.is_none() && std::env::var_os("HC_TERMINAL_ID").is_some() {
+    let keeper = if target.is_none() && std::env::var_os("HC_TERMINAL_ID").is_some() {
         crate::restore::Keeper::core(
             sheprd_chat_protocol::restore::restore_dir(),
             endpoint.as_ref(),
@@ -416,6 +416,31 @@ pub(crate) fn run_owned(
             &cwd,
         )
     };
+    // A built-in agent's chat is a thread, `--thread`'s or a new one,
+    // which a restore continues.
+    let thread_id = match &options.agent {
+        AgentChoice::Builtin { .. } => Some(
+            options
+                .thread
+                .unwrap_or_else(sheprd_chat_protocol::thread::ThreadId::random),
+        ),
+        AgentChoice::Command { .. } => None,
+    };
+    let thread = thread_id
+        .zip(sheprd_chat_protocol::thread::threads_dir())
+        .and_then(
+            |(id, dir)| match crate::session::ThreadStart::read(dir, id) {
+                Ok(start) => Some(start),
+                Err(error) => {
+                    notices.push((
+                        NoticeLevel::Warning,
+                        format!("This conversation cannot be kept as a thread: {error}"),
+                    ));
+                    None
+                }
+            },
+        );
+    let mut keeper = keeper.map(|keeper| keeper.with_thread(thread_id));
     if let Some(keeper) = &mut keeper {
         keeper.child = Some(agent_process.id());
     }
@@ -502,6 +527,7 @@ pub(crate) fn run_owned(
         require_load: options.require_load,
         settings,
         sheprd: crate::context::sheprd_executable(),
+        thread,
     };
     let launcher = inputs.clone();
     let session_thread = thread::Builder::new()

@@ -121,6 +121,7 @@ fn a_whole_turn_reaches_the_transcript_through_the_bridge() {
         require_load: false,
         settings: None,
         sheprd: None,
+        thread: None,
     };
     let mut session = Session::new(config, outbox, |_| {});
     session.start();

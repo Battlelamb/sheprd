@@ -40,6 +40,7 @@ mod en_xa;
 mod feature;
 mod file_links;
 mod glide;
+mod handoffs;
 mod ia;
 mod imessage;
 mod jump;

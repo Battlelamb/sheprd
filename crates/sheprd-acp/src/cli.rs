@@ -37,6 +37,10 @@ pub enum Error {
     ChooseCommand,
     #[error("`--choose` starts a new conversation and cannot continue one")]
     ChooseLoad,
+    #[error("`{0}` is not a thread id")]
+    InvalidThread(String),
+    #[error("`--thread` continues a built-in agent's session named by `--load` or `--resume`")]
+    ThreadWithoutLoad,
     #[error("terminal must be a nonempty local identifier without routing or whitespace")]
     InvalidTerminal,
     #[error("unknown session agent `{0}`")]
@@ -91,6 +95,9 @@ pub(crate) struct Options {
     /// Stop rather than start a new session when the agent cannot continue
     /// `load`, as `--resume` asks.
     pub require_load: bool,
+    /// The thread the continued session belongs to, kept on as that thread
+    /// rather than a new one.
+    pub thread: Option<sheprd_chat_protocol::thread::ThreadId>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -204,6 +211,8 @@ Options:
   --load ID      Continue the agent's session ID instead of starting a new one
   --resume ID    Continue session ID, and stop rather than start a new one
                  when the agent cannot (Sheprd restores chats with it)
+  --thread ID    Keep the continued session in thread ID, its transcript
+                 and agents, rather than a new thread
   --name NAME    The name to show for a custom command
   --brief-file FILE
                  Send FILE's text as the first prompt, marked as another
@@ -292,6 +301,7 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Parsed, 
         load: None,
         name: None,
         require_load: false,
+        thread: None,
     };
     let mut agent = None;
     while let Some(arg) = args.next() {
@@ -311,6 +321,10 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Parsed, 
                 options.require_load = true;
             }
             Some("--name") => options.name = Some(utf8(args.next(), "--name")?),
+            Some("--thread") => {
+                let id = utf8(args.next(), "--thread")?;
+                options.thread = Some(id.parse().map_err(|_| Error::InvalidThread(id))?);
+            }
             Some("--brief-file") => {
                 options.brief_file = Some(
                     args.next()
@@ -358,6 +372,11 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Parsed, 
 /// from a command or extra arguments only one agent takes, or away from a
 /// conversation the agent already holds.
 fn choosable(options: Options) -> Result<Parsed, Error> {
+    if options.thread.is_some()
+        && (options.load.is_none() || matches!(options.agent, AgentChoice::Command { .. }))
+    {
+        return Err(Error::ThreadWithoutLoad);
+    }
     if options.choose {
         let AgentChoice::Builtin { args, .. } = &options.agent else {
             return Err(Error::ChooseCommand);

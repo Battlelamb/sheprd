@@ -9,6 +9,7 @@ mod briefs;
 mod carry;
 mod commands;
 mod harness;
+mod keep;
 mod known;
 mod picks;
 mod pictures;
@@ -29,6 +30,8 @@ use sheprd_chat_protocol::{
 use uuid::Uuid;
 
 use crate::{context::Context, project::Projector, rpc};
+
+pub(crate) use keep::Start as ThreadStart;
 
 /// Changes kept for clients that reconnect with a cursor.
 const LOG: usize = 8192;
@@ -166,6 +169,9 @@ pub(crate) struct Config {
     /// The `sheprd` command the first note tells the agent to keep the
     /// repository's memory with; `None` leaves memory out of it.
     pub sheprd: Option<PathBuf>,
+    /// The thread the chat keeps; `None` keeps none, as for a custom
+    /// command, which no segment can name.
+    pub thread: Option<keep::Start>,
 }
 
 #[derive(Debug)]
@@ -219,6 +225,10 @@ pub(crate) struct Session<R: FnMut(Update)> {
     handled: VecDeque<(CommandId, Option<Rejection>)>,
     /// The agent process heard now.
     harness: HarnessId,
+    /// The thread kept on disk, while it can be.
+    keep: Option<keep::Keep>,
+    /// Why the thread stopped being kept, until the chat says so.
+    keep_failure: Option<String>,
     /// An agent to start once the input that chose it is handled.
     launch: Option<Agent>,
     /// Whether the `model` config option came from legacy `models` and uses
@@ -274,10 +284,28 @@ impl<R: FnMut(Update)> Session<R> {
         });
         known::seed(&config.known, config.harness, &mut transcript);
         let thread = thread::Thread::new(config.harness, &transcript.entries);
-        let projector = transcript
-            .entries
-            .last()
-            .map_or_else(Projector::default, |entry| Projector::after(entry.id));
+        let opened = config
+            .thread
+            .take()
+            .zip(config.harness)
+            .map(|(start, agent)| {
+                keep::Keep::open(
+                    start,
+                    agent,
+                    config.load.as_deref(),
+                    &mut transcript.entries,
+                    config.cwd.clone(),
+                )
+            });
+        let mut last = transcript.last_entry_id();
+        let keep = opened.map(|opened| {
+            transcript.thread = Some(opened.thread);
+            // The thread's file goes on from its newest entry, so ids never
+            // repeat in it.
+            last = last.max(opened.last);
+            opened.keep
+        });
+        let projector = last.map_or_else(Projector::default, Projector::after);
         let facts = crate::context::Facts {
             agent: config.agent.clone(),
             cwd: config.cwd.display().to_string(),
@@ -324,6 +352,8 @@ impl<R: FnMut(Update)> Session<R> {
             epoch: Uuid::new_v4(),
             handled: VecDeque::new(),
             harness: HarnessId::default(),
+            keep,
+            keep_failure: None,
             launch: None,
             legacy_model_option: false,
             log: VecDeque::new(),
@@ -381,6 +411,7 @@ impl<R: FnMut(Update)> Session<R> {
             } if harness == self.harness => {
                 self.exited(code, &stderr);
                 if self.config.exit_with_agent {
+                    self.keep_entries();
                     self.bye(ByeReason::Exiting);
                     return Flow::Exit;
                 }
@@ -394,6 +425,7 @@ impl<R: FnMut(Update)> Session<R> {
                 self.ack(conn, id, Some(Rejection::Unsupported));
             }
             Input::Shutdown => {
+                self.keep_entries();
                 self.bye(ByeReason::Exiting);
                 return Flow::Exit;
             }
@@ -418,6 +450,9 @@ impl<R: FnMut(Update)> Session<R> {
     /// Applies a change and sends it to every client.
     fn emit(&mut self, change: Change) {
         let change = self.pictures_before(change);
+        if let Change::Truncate { before } = &change {
+            self.keep_before_truncate(*before);
+        }
         if self.transcript.apply(&change).is_err() {
             // The session only emits changes made from its own transcript, so
             // one that does not fit is a bug; dropping it keeps every client
@@ -427,6 +462,7 @@ impl<R: FnMut(Update)> Session<R> {
         if let Change::Truncate { before } = &change {
             self.projector.forget_before(*before);
         }
+        self.keep_mark(&change);
         self.seq += 1;
         let size = change_size(&change);
         while self.log.len() == LOG || (self.log_bytes + size > LOG_BYTES && !self.log.is_empty()) {
@@ -463,6 +499,7 @@ impl<R: FnMut(Update)> Session<R> {
         self.report_activity();
         self.pictures_after(&change);
         self.find_pull_requests(&change);
+        self.keep_after(&change);
         self.find_brief(&change);
     }
 

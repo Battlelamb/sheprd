@@ -89,8 +89,11 @@ fn a_clients_commands_reach_t3_and_its_answers_come_back_as_acks() {
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
     let url = url::Url::parse(&format!("ws://127.0.0.1:{port}/ws")).unwrap();
-    let connection = Connection::handshake(&url, stream.try_clone().unwrap()).unwrap();
-    stream
+    // One socket handle, as the program uses: a `try_clone` duplicate on
+    // Windows does not reliably see the short timeout set on the original.
+    let connection = Connection::handshake(&url, stream).unwrap();
+    connection
+        .stream()
         .set_read_timeout(Some(Duration::from_millis(20)))
         .unwrap();
     let (updates, changes) = bounded(1);
@@ -168,9 +171,8 @@ fn a_clients_commands_reach_t3_and_its_answers_come_back_as_acks() {
         }
     );
     assert!(matches!(next(), Step::Ended(_)));
+    // The worker's end dropped the socket, which the server reads until.
     worker.join().unwrap();
-    // The server reads until the socket closes.
-    drop(stream);
     server.join().unwrap();
 }
 

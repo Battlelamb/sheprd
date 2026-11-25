@@ -2,6 +2,7 @@
 //!
 //! Each machine or image folder may hold `guest.json`. Folders created before
 //! this file existed lack it and continue to mean an Apple macOS ARM64 guest.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
 use super::{Error, Result};
 use serde::{Deserialize, Serialize};

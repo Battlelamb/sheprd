@@ -69,7 +69,7 @@ short: when its plan has hit a limit, is 80% used, or is half used and on
 pace to run out before it resets, the button starts the installed agent with
 the most room instead, and its tooltip says why. Usage comes from the status
 bar's last reading of the selected host, matched by name (Claude, Codex,
-Copilot, Gemini, Kimi Code, OpenCode, Pi); every window counts, so a weekly limit
+Copilot, Gemini, Kimi Code, Muse Code, OpenCode, Pi); every window counts, so a weekly limit
 running out matters even when a session window is fuller. An agent without
 a reading, or whose limits have reset since, counts as having room, and one
 tight plan never replaces another. With usage turned off
@@ -320,7 +320,7 @@ Limitations:
   folder could be handed the old chat.
 - A chat whose shell folder differs from the chat's own (started with
   `--cwd`) is not continued.
-- Only the built-in agents (`antigravity`, `claude`, `codex`, `copilot`, `gemini`, `kimi`,
+- Only the built-in agents (`antigravity`, `claude`, `codex`, `copilot`, `gemini`, `kimi`, `muse`,
   `opencode`, `pi`) started without extra agent arguments. Custom commands
   are not continued.
 - `[chat.env]` variables are not set again: typing their values into a shell

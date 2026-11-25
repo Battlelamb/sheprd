@@ -190,6 +190,7 @@ Agents:
   copilot    copilot --acp
   gemini     gemini --acp
   kimi       kimi acp
+  muse       muse acp
   opencode   opencode acp
   pi         pi --mode rpc, or with --acp pi-acp (or npx pi-acp)
 

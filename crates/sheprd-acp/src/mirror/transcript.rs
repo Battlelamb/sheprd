@@ -70,6 +70,7 @@ impl TryFrom<Agent> for TranscriptAgent {
             | Agent::Copilot
             | Agent::Gemini
             | Agent::Kimi
+            | Agent::Muse
             | Agent::Opencode
             | Agent::Pi => Err(agent),
         }

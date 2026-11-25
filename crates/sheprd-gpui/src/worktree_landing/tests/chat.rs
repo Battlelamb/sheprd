@@ -117,13 +117,19 @@ fn antigravity_and_probed_chat_agents_including_gemini_are_offered() {
     // A `herdr-acp agents` probe offers every available chat agent, including
     // Gemini (which has no terminal AgentKind) and Antigravity.
     picker.allow_chats(true);
-    picker.offer_chats(vec![Agent::Gemini, Agent::Antigravity, Agent::Claude]);
+    picker.offer_chats(vec![
+        Agent::Gemini,
+        Agent::Antigravity,
+        Agent::Claude,
+        Agent::Muse,
+    ]);
     assert_eq!(
         picker.offered_chats(),
         [
             Landing::Chat(Agent::Antigravity),
             Landing::Chat(Agent::Claude),
             Landing::Chat(Agent::Gemini),
+            Landing::Chat(Agent::Muse),
         ]
     );
     assert!(picker.choose(Landing::Chat(Agent::Gemini)));

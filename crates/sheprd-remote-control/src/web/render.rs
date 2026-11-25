@@ -90,6 +90,7 @@ pub(crate) fn agent_icon(agent: Option<&str>, size: &str) -> Markup {
         n if n.contains("gemini") => (icons::Agent::Gemini, "bg-gemini text-white"),
         n if n.contains("copilot") => (icons::Agent::Copilot, "bg-copilot text-white"),
         n if n.contains("opencode") => (icons::Agent::OpenCode, "bg-raised text-text"),
+        n if n.contains("muse") => (icons::Agent::Muse, "bg-raised text-text"),
         n if n.contains("grok") => (icons::Agent::Grok, "bg-raised text-text"),
         n if n.contains("cursor") => (icons::Agent::Cursor, "bg-raised text-text"),
         n if n.contains("antigravity") || n.contains("agy") => {

@@ -673,6 +673,9 @@ impl<R: FnMut(Update)> Session<R> {
 
     pub(super) fn exited(&mut self, code: Option<i32>, stderr: &[String]) {
         let summary = match code {
+            Some(5) if self.config.harness == Some(Agent::Muse) && self.acp_session.is_none() => {
+                "Muse Code could not start ACP. Check `muse acp --help` on this host and verify ACP is enabled for your build.".to_owned()
+            }
             Some(0) => format!("{} exited.", self.config.agent),
             Some(code) => format!("{} exited with status {code}.", self.config.agent),
             None => format!("{} was stopped.", self.config.agent),

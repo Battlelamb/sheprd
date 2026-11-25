@@ -47,7 +47,7 @@ fn agents_show_their_logos_not_symbols() {
     );
     // Herdr names these; each has its own logo, not the generic one.
     let generic = agent_icon(None, "").into_string();
-    for agent in ["grok", "cursor", "agy", "antigravity"] {
+    for agent in ["grok", "cursor", "agy", "antigravity", "Muse Code"] {
         assert_ne!(
             agent_icon(Some(agent), "").into_string(),
             generic,

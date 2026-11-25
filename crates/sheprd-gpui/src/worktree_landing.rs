@@ -60,7 +60,7 @@ fn terminal_agent(agent: Agent) -> Option<AgentKind> {
         Agent::Claude => Some(AgentKind::Claude),
         Agent::Codex => Some(AgentKind::Codex),
         Agent::Copilot => Some(AgentKind::Copilot),
-        Agent::Gemini => None,
+        Agent::Gemini | Agent::Muse => None,
         Agent::Kimi => Some(AgentKind::Kimi),
         Agent::Opencode => Some(AgentKind::Opencode),
         Agent::Pi => Some(AgentKind::Pi),

@@ -232,6 +232,13 @@ impl OrchestratorView {
                 .iter()
                 .any(|repo| repo.key == *key && repo.outside_git())
         });
+        // A checkout picked before its worker found its repository may now
+        // stand behind another checkout of it (`project_of`).
+        let picks = std::mem::take(&mut self.projects);
+        self.projects = picks
+            .into_iter()
+            .map(|key| self.pick_of(&key).unwrap_or(key))
+            .collect();
         let open = self.detail.as_ref().map(|detail| &detail.key);
         if self.revealed.as_ref() != open || self.tab != Tab::PullRequests {
             self.revealed = None;

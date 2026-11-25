@@ -18,15 +18,19 @@ use std::sync::Arc;
 use std::time::Duration;
 
 impl SheprdWindow {
-    /// Runs [`Self::tick`] about once per frame, for as long as the window lives.
+    /// Runs [`Self::tick`] about once per frame, for as long as the view lives.
     pub(super) fn tick_every_frame(window: &mut Window, cx: &mut Context<Self>) -> Task<()> {
         let timer = cx.background_executor().clone();
         cx.spawn_in(window, async move |this, cx| {
             loop {
                 timer.timer(Duration::from_millis(16)).await;
+                // An update also fails while the window or app is busy, as in
+                // a nested run loop: skip that tick, and stop only once the
+                // view is gone.
                 if this
                     .update_in(cx, |this, window, cx| this.tick(window, cx))
                     .is_err()
+                    && this.upgrade().is_none()
                 {
                     break;
                 }

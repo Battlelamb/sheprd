@@ -15,6 +15,7 @@ mod error;
 mod fixtures;
 pub mod frame;
 pub mod http;
+pub mod launch;
 pub mod shell;
 pub mod steer;
 pub mod thread;

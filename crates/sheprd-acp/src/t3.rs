@@ -31,7 +31,7 @@ use sheprd_t3::{
 };
 
 use crate::{
-    cli::T3Options,
+    cli::{T3Options, T3Thread},
     mirror::Mirror,
     session::{ConnId, Input},
 };
@@ -260,9 +260,15 @@ pub(crate) fn run(options: T3Options) -> anyhow::Result<()> {
             Vec::new()
         }
     };
+    let thread = match options.thread {
+        T3Thread::Existing(thread) => thread,
+        T3Thread::New(request) => {
+            sheprd_t3::launch::start(&mut connection, &request, uuid::Uuid::new_v4())?
+        }
+    };
     let request = connection.request(
         "orchestration.subscribeThread",
-        json!({ "threadId": options.thread }),
+        json!({ "threadId": thread }),
     )?;
     let mut follower = Follower::new(request, providers);
     while !follower.ready() {

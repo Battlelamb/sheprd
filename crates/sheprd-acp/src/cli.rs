@@ -45,6 +45,10 @@ pub enum Error {
     InvalidTerminal,
     #[error("unknown session agent `{0}`")]
     SessionAgent(String),
+    #[error(transparent)]
+    T3Mode(#[from] sheprd_t3::launch::UnknownMode),
+    #[error("`--branch` needs `--base`")]
+    BranchWithoutBase,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -126,9 +130,18 @@ pub(crate) struct T3Options {
     pub pane: Option<String>,
     /// The server's address; by default the one running on this computer.
     pub server: Option<String>,
-    pub thread: String,
+    pub thread: T3Thread,
     /// The access token `sheprd-t3 pair` kept.
     pub token_file: PathBuf,
+}
+
+/// The thread `sheprd-acp t3` follows.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum T3Thread {
+    /// One that exists, by id.
+    Existing(String),
+    /// One it starts first.
+    New(sheprd_t3::launch::Request),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -182,12 +195,16 @@ Usage:
                         Watch an existing JSONL transcript, read-only; starts
                         no agent and changes no Herdr pane metadata. Prints
                         its endpoint ID once ready. Stop with Ctrl+C.
-  sheprd-acp t3 THREAD --token-file FILE [--server URL] [--pane ID]
+  sheprd-acp t3 THREAD|--new --token-file FILE [--server URL] [--pane ID]
                 [--endpoint ID]
                         Follow a T3 Code thread live and pass on its chat's
                         prompts, answers, stops, and model changes, with the
                         token `sheprd-t3 pair` kept in FILE; starts no agent.
                         Prints its endpoint ID once ready. Stop with Ctrl+C.
+                        With --new, first start a thread in a checkout, as
+                        `sheprd-t3 new` does: [--cwd PATH] [--prompt TEXT]
+                        [--title TEXT] [--provider ID] [--model SLUG]
+                        [--mode MODE] [--plan] [--base REF [--branch NAME]].
 
 Agents:
   antigravity agy acp
@@ -438,12 +455,59 @@ fn t3(args: impl Iterator<Item = OsString>) -> Result<Parsed, Error> {
     let Some(mut args) = unless_help(args) else {
         return Ok(Parsed::Help);
     };
-    let thread = utf8(args.next(), "t3 THREAD")?;
+    let first = utf8(args.next(), "t3 THREAD")?;
+    let mut new = (first == "--new").then(|| sheprd_t3::launch::Request {
+        cwd: PathBuf::from("."),
+        ..sheprd_t3::launch::Request::default()
+    });
+    let mut base = None;
+    let mut branch = None;
     let mut endpoint = None;
     let mut pane = None;
     let mut server = None;
     let mut token_file = None;
     while let Some(arg) = args.next() {
+        if let Some(new) = &mut new {
+            match arg.to_str() {
+                Some("--cwd") => {
+                    new.cwd = PathBuf::from(args.next().ok_or(Error::MissingValue("--cwd"))?);
+                    continue;
+                }
+                Some("--prompt") => {
+                    new.prompt = Some(utf8(args.next(), "--prompt")?);
+                    continue;
+                }
+                Some("--provider") => {
+                    new.provider = Some(utf8(args.next(), "--provider")?);
+                    continue;
+                }
+                Some("--model") => {
+                    new.model = Some(utf8(args.next(), "--model")?);
+                    continue;
+                }
+                Some("--title") => {
+                    new.title = Some(utf8(args.next(), "--title")?);
+                    continue;
+                }
+                Some("--mode") => {
+                    new.runtime_mode = utf8(args.next(), "--mode")?.parse()?;
+                    continue;
+                }
+                Some("--plan") => {
+                    new.interaction_mode = sheprd_t3::launch::InteractionMode::Plan;
+                    continue;
+                }
+                Some("--base") => {
+                    base = Some(utf8(args.next(), "--base")?);
+                    continue;
+                }
+                Some("--branch") => {
+                    branch = Some(utf8(args.next(), "--branch")?);
+                    continue;
+                }
+                _ => {}
+            }
+        }
         match arg.to_str() {
             Some("--pane") => pane = Some(utf8(args.next(), "--pane")?),
             Some("--server") => server = Some(utf8(args.next(), "--server")?),
@@ -459,6 +523,17 @@ fn t3(args: impl Iterator<Item = OsString>) -> Result<Parsed, Error> {
             _ => return Err(Error::UnknownOption(arg)),
         }
     }
+    let thread = match new {
+        Some(mut new) => {
+            new.worktree = match (base, branch) {
+                (Some(base), branch) => Some(sheprd_t3::launch::NewWorktree { base, branch }),
+                (None, Some(_)) => return Err(Error::BranchWithoutBase),
+                (None, None) => None,
+            };
+            T3Thread::New(new)
+        }
+        None => T3Thread::Existing(first),
+    };
     Ok(Parsed::T3(T3Options {
         endpoint,
         pane,

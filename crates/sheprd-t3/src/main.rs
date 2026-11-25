@@ -148,6 +148,17 @@ fn run(options: Options) -> anyhow::Result<()> {
             )?;
             report(options.json, sequence, "Stopped.")
         }
+        Command::New(request) => {
+            let mut connection = connect(&server, &descriptor.environment_id, &token_file)?;
+            let thread = sheprd_t3::launch::start(&mut connection, &request, uuid::Uuid::new_v4())?;
+            connection.close();
+            if options.json {
+                println!("{}", json!({ "thread": thread }));
+            } else {
+                println!("{}", cli::plain(&thread));
+            }
+            Ok(())
+        }
     }
 }
 

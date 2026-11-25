@@ -397,8 +397,12 @@ impl SheprdWindow {
         }
         // Dropping the child closes its input, which cancels. A save under
         // way still finishes, as the other computer already allowed it, but
-        // its answer no longer moves this page.
+        // its answer no longer moves this page. A claim cancelled before its
+        // Allow leaves the fleet free again.
         setup.pairing = None;
+        if matches!(setup.step, Step::Code { .. } | Step::Exchanging(_)) {
+            crate::fleet::Fleet::release_pairing(cx, setup.attempt);
+        }
         setup.attempt = next_attempt();
         setup.step = Step::Looking;
         cx.notify();
@@ -429,8 +433,9 @@ impl SheprdWindow {
                 // whatever this page does next. The other computer already
                 // acted on its Allow, so a Herdr check or a device save that
                 // failed here never drops it; `paired` retries its own SSH.
-                if let Some(fleet) = fleet {
-                    crate::fleet::bluetooth::paired(cx, target, fleet);
+                match fleet {
+                    Some(fleet) => crate::fleet::bluetooth::paired(cx, target, fleet, attempt),
+                    None => crate::fleet::Fleet::release_pairing(cx, attempt),
                 }
                 let Some(setup) = &mut this.menu.nearby_setup else {
                     return;

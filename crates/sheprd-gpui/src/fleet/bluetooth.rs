@@ -91,10 +91,12 @@ pub(crate) fn found(cx: &mut App, done: impl FnOnce(Result<Hint, Error>, &mut Ap
 /// Finishes what the pairing left for the fleet, over the SSH it opened to
 /// `target`: admits the other computer's bundle and hands it the log, or
 /// takes the log from the other computer that admitted this one. A
-/// failure shows in Settings > Fleet; the two stay paired either way.
-pub(crate) fn paired(cx: &mut App, target: String, fleet: ApprovedFleet) {
+/// failure shows in Settings > Fleet; the two stay paired either way. Ends
+/// the fleet hold of the pairing `attempt` when done.
+pub(crate) fn paired(cx: &mut App, target: String, fleet: ApprovedFleet, attempt: u64) {
     let Some(client) = Supervisor::client(cx) else {
         Fleet::pairing_done(cx, Some(Error::NoDaemon.to_string()));
+        Fleet::release_pairing(cx, attempt);
         return;
     };
     let ours = Fleet::member_of(cx);
@@ -118,6 +120,7 @@ pub(crate) fn paired(cx: &mut App, target: String, fleet: ApprovedFleet) {
         }
         cx.update(|cx| {
             Fleet::pairing_done(cx, outcome.err().map(|error| error.to_string()));
+            Fleet::release_pairing(cx, attempt);
             Fleet::refresh(cx);
         });
     })

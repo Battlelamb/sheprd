@@ -69,7 +69,17 @@ impl SheprdWindow {
         pairing: String,
         cx: &mut Context<Self>,
     ) {
-        let asked = ask(cx, theirs);
+        let mut asked = ask(cx, theirs);
+        let Some(attempt) = self.menu.nearby_setup.as_ref().map(|setup| setup.attempt) else {
+            return;
+        };
+        // One fleet change at a time: a join or invitation from Settings,
+        // or another window's pairing, could otherwise leave a fleet
+        // listing this computer while it joins another.
+        if asked != Ask::Nothing && !Fleet::hold_for_pairing(cx, attempt) {
+            Fleet::pairing_done(cx, Some(Error::Busy.to_string()));
+            asked = Ask::Nothing;
+        }
         let Some(setup) = &self.menu.nearby_setup else {
             return;
         };
@@ -77,7 +87,6 @@ impl SheprdWindow {
             Ask::Nothing => claim(setup, None),
             Ask::Invite(ours) => claim(setup, Some(ClaimFleet::Invite(ours))),
             Ask::Join(fleet) => {
-                let attempt = setup.attempt;
                 let this = cx.entity().downgrade();
                 bluetooth::joining(cx, fleet, pairing, move |joining, cx| {
                     let _ = this.update(cx, |view, cx| {
@@ -86,7 +95,6 @@ impl SheprdWindow {
                 });
             }
             Ask::Found => {
-                let attempt = setup.attempt;
                 let this = cx.entity().downgrade();
                 bluetooth::found(cx, move |founded, cx| {
                     let _ = this.update(cx, |view, cx| {
@@ -107,21 +115,26 @@ impl SheprdWindow {
         fleet: Result<ClaimFleet, Error>,
         cx: &mut Context<Self>,
     ) {
-        let Some(setup) = &self.menu.nearby_setup else {
-            return;
-        };
         // Cancelled, failed, or another computer picked meanwhile: the
-        // child that waited for this is gone.
-        if setup.attempt != attempt || !matches!(setup.step, Step::Code { .. }) {
+        // child that waited for this is gone, and so is its hold.
+        let current = self.menu.nearby_setup.as_ref().is_some_and(|setup| {
+            setup.attempt == attempt && matches!(setup.step, Step::Code { .. })
+        });
+        if !current {
+            Fleet::release_pairing(cx, attempt);
             return;
         }
-        match fleet {
-            Ok(fleet) => claim(setup, Some(fleet)),
+        let fleet = match fleet {
+            Ok(fleet) => Some(fleet),
             Err(error) => {
                 tracing::debug!(%error, "Pairing without bringing the fleet along");
                 Fleet::pairing_done(cx, Some(error.to_string()));
-                claim(setup, None);
+                Fleet::release_pairing(cx, attempt);
+                None
             }
+        };
+        if let Some(setup) = &self.menu.nearby_setup {
+            claim(setup, fleet);
         }
         cx.notify();
     }

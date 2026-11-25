@@ -153,4 +153,63 @@ mod page {
             assert_eq!(Fleet::error(cx), None);
         });
     }
+
+    #[gpui::test]
+    fn a_claim_that_carries_the_fleet_holds_it_until_it_ends(cx: &mut TestAppContext) {
+        let (window, cx) = cx.add_window_view(fixture_window);
+        window.update_in(cx, |view, window, cx| {
+            Fleet::install(cx);
+            Fleet::set_view(cx, None);
+            exchanging(view, cx);
+            view.nearby_output(code(Some(hint(THEIRS))), window, cx);
+            // A join from Settings, or another pairing, waits for it.
+            assert!(Fleet::busy(cx));
+            let attempt = view.menu.nearby_setup.as_ref().unwrap().attempt;
+            assert!(!Fleet::hold_for_pairing(cx, attempt + 1));
+            // Cancelled before the other computer allowed it: free again.
+            view.stop_nearby_pairing(cx);
+            assert!(!Fleet::busy(cx));
+        });
+    }
+
+    #[gpui::test]
+    fn a_pairing_while_another_fleet_change_runs_pairs_only(cx: &mut TestAppContext) {
+        let (window, cx) = cx.add_window_view(fixture_window);
+        window.update_in(cx, |view, window, cx| {
+            Fleet::install(cx);
+            Fleet::set_view(cx, None);
+            crate::fleet::join::set_acting(cx, "studio", true);
+            exchanging(view, cx);
+            view.nearby_output(code(Some(hint(THEIRS))), window, cx);
+            let setup = view.menu.nearby_setup.as_ref().unwrap();
+            assert!(matches!(setup.step, Step::Code { .. }));
+            assert_eq!(
+                Fleet::error(cx),
+                Some(crate::fleet::Error::Busy.to_string())
+            );
+            // The running change still holds the fleet, not this pairing.
+            crate::fleet::join::set_acting(cx, "studio", false);
+            assert!(!Fleet::busy(cx));
+        });
+    }
+
+    #[gpui::test]
+    fn a_failed_or_late_answer_frees_the_fleet(cx: &mut TestAppContext) {
+        let (window, cx) = cx.add_window_view(fixture_window);
+        window.update_in(cx, |view, window, cx| {
+            Fleet::install(cx);
+            Fleet::set_view(cx, None);
+            exchanging(view, cx);
+            view.nearby_output(code(None), window, cx);
+            let attempt = view.menu.nearby_setup.as_ref().unwrap().attempt;
+            view.nearby_claim_with(attempt, Err(crate::fleet::Error::NoRelays), cx);
+            assert!(!Fleet::busy(cx));
+            exchanging(view, cx);
+            view.nearby_output(code(None), window, cx);
+            let attempt = view.menu.nearby_setup.as_ref().unwrap().attempt;
+            exchanging(view, cx);
+            view.nearby_claim_with(attempt, Err(crate::fleet::Error::NoDaemon), cx);
+            assert!(!Fleet::busy(cx));
+        });
+    }
 }

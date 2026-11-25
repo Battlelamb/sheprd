@@ -53,7 +53,12 @@ fn search_path_with(
             .flat_map(|home| USER_DIRS.iter().map(|dir| home.join(dir))),
     );
     #[cfg(windows)]
-    dirs.extend(antigravity_preferred_dirs(home, local_app_data));
+    {
+        dirs.extend(antigravity_preferred_dirs(home, local_app_data));
+        if let Some(local) = local_app_data {
+            dirs.push(local.join("Programs").join("muse"));
+        }
+    }
     dirs.extend(SYSTEM_DIRS.iter().map(PathBuf::from));
     std::env::join_paths(dirs).unwrap_or_default()
 }
@@ -89,7 +94,12 @@ fn native(agent: Agent) -> Option<&'static str> {
         Agent::Claude => Some(crate::claude::PROGRAM),
         Agent::Codex => Some(crate::codex::PROGRAM),
         Agent::Pi => Some(crate::pi::PROGRAM),
-        Agent::Antigravity | Agent::Copilot | Agent::Gemini | Agent::Kimi | Agent::Opencode => None,
+        Agent::Antigravity
+        | Agent::Copilot
+        | Agent::Gemini
+        | Agent::Kimi
+        | Agent::Muse
+        | Agent::Opencode => None,
     }
 }
 

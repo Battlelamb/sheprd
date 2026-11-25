@@ -119,8 +119,14 @@ fn switching_to_antigravity_mid_session_hands_it_the_conversation_without_sheprd
     assert_eq!(rejection(&drain(&client), id), None);
 
     let agy = open_antigravity(&mut harness, 1, "agy-1", false);
-    assert!(harness.notices().iter().any(|(_, text)| text
-        == "Antigravity continues this conversation and gets the conversation so far with your next prompt."));
+    assert!(
+        harness
+            .handoffs()
+            .iter()
+            .any(|handoff| handoff.from == Some(Agent::Claude)
+                && handoff.to == Agent::Antigravity
+                && !handoff.resumed)
+    );
 
     // Next prompt carries the conversation handoff, without Sheprd's context note.
     harness.command(

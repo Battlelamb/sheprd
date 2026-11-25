@@ -876,7 +876,8 @@ is off, chat panes show their terminal and `chat new` exits 8.
 Set the reading width with `sheprd config set chat.max_width 1200`, or use
 `0` for the full available width. Bounded widths range from 320 to 4000 logical
 pixels; the default is 800. Settings > Chat offers the same width slider and
-**Full-width chat** switch.
+**Full-width chat** switch. Turn off desktop message effects with
+`sheprd config set chat.message_effects false` or **Settings > Chat > Message effects**.
 
 A chat on an SSH host shows in the native chat view like a local one. Sheprd
 runs `sheprd-acp connect ID` on the host over the same SSH connection it uses

@@ -89,10 +89,8 @@ fn a_clients_commands_reach_t3_and_its_answers_come_back_as_acks() {
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
     let url = url::Url::parse(&format!("ws://127.0.0.1:{port}/ws")).unwrap();
-    let connection = Connection::handshake(&url, stream.try_clone().unwrap()).unwrap();
-    stream
-        .set_read_timeout(Some(Duration::from_millis(20)))
-        .unwrap();
+    let connection = Connection::handshake(&url, stream).unwrap();
+    connection.stream().set_read_timeout(Some(POLL)).unwrap();
     let (updates, changes) = bounded(1);
     let (orders, queue) = bounded(4);
     let worker = thread::spawn(move || {
@@ -169,8 +167,6 @@ fn a_clients_commands_reach_t3_and_its_answers_come_back_as_acks() {
     );
     assert!(matches!(next(), Step::Ended(_)));
     worker.join().unwrap();
-    // The server reads until the socket closes.
-    drop(stream);
     server.join().unwrap();
 }
 

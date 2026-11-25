@@ -207,8 +207,8 @@ impl SheprdWindow {
         }
         let look = self.core_look();
         for (tab, terminal, role, host) in missing {
-            // Restored tabs join a running core; only a command starts one
-            // here, while another host's bridge starts its own.
+            // A restored tab starts this computer's core when none runs, as
+            // after a reboot, while another host's bridge starts its own.
             let Some(backend) =
                 self.core_terminals
                     .owner(&host, &terminal, self.config.herdr_2_scrollback)
@@ -216,7 +216,7 @@ impl SheprdWindow {
                 if !terminal.is_tmux()
                     && let Some(hub) = self.core_hub(&host)
                 {
-                    hub.connect(Start::Join);
+                    hub.connect_restored();
                 }
                 continue;
             };

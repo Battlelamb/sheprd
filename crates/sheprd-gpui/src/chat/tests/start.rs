@@ -83,10 +83,18 @@ fn the_typed_line_names_only_the_agent() {
             command_line(Agent::Claude, AgentChoice::Open, None),
             r#" sh -c 'exec "$HERDR_ACP" --choose claude'"#
         );
+        assert_eq!(
+            command_line(Agent::Antigravity, AgentChoice::Open, None),
+            r#" sh -c 'exec "$HERDR_ACP" --choose antigravity'"#
+        );
     } else {
         assert_eq!(
             command_line(Agent::Claude, AgentChoice::Open, None),
             "& $env:HERDR_ACP --choose claude"
+        );
+        assert_eq!(
+            command_line(Agent::Antigravity, AgentChoice::Open, None),
+            "& $env:HERDR_ACP --choose antigravity"
         );
     }
 }

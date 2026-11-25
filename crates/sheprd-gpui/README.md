@@ -92,6 +92,15 @@ The status dot pulses amber during local daemon startup and is red when disconne
 Healthy connections leave the status bar quiet; connection indicators live in the
 device picker. Startup, disconnection, and operation errors remain in the status bar.
 
+
+## Speaking voices
+
+Settings > Voice shows the active provider. Click Change to choose ElevenLabs, OpenAI, Deepgram or OpenRouter in the provider sheet and connect your account. Choose a voice, preview it and select Use This Voice. Read aloud beside a chat reply sends its text to the selected provider. Playback starts as MP3 packets arrive. Stop reading cancels both playback and the download. Selecting a different reply switches to that reply. Wispr Flow on Mac or Windows dictates into the focused composer using its configured shortcut.
+
+OpenRouter supports browser sign-in with PKCE. The other speech APIs use a personal API key. New direct iOS pairings copy the active voice and credential if the other side has none. Disconnect removes the local copy. Revoke the key at the provider to invalidate all copies.
+
+Both clients currently use `gpt-4o-mini-tts` for direct OpenAI speech. OpenAI schedules this endpoint's models for retirement on January 6, 2027. [OpenAI deprecation schedule](https://developers.openai.com/api/docs/deprecations)
+
 ## macOS Git permission troubleshooting
 
 If Git in a local Sheprd terminal reports `Operation not permitted`, even
@@ -3764,7 +3773,7 @@ conversation natively over that pane. The program is the agent's only client,
 so the Herdr TUI, a plain terminal, and every app window see one conversation.
 
 **Starting one.** A group's **…** menu lists **New Chat** with one row per
-agent `sheprd-acp` knows (Claude, Codex, Copilot, Gemini, Kimi Code, OpenCode, Pi). A row
+agent `sheprd-acp` knows (Antigravity, Claude, Codex, Copilot, Gemini, Kimi Code, Muse Code, OpenCode, Pi). A row
 opens a tab named after the agent in the focused workspace, in the focused
 pane's folder, and runs the program there; `sheprd chat new AGENT` does
 the same from a pane, and from a chat, `sheprd chat new` starts that chat's
@@ -3776,8 +3785,8 @@ directory, or where `just install` puts both) and then on the login shell's
 saved SSH, cloud, and WSL hosts; an empty app-kept workspace starts a new
 Herdr 2 chat tab. Remote launches find the remote host's own program rather
 than using the desktop executable's path. Each agent has to be
-installed: `claude`, `codex` and `pi` (which `sheprd-acp` drives without an
-ACP adapter), `copilot --acp`, `gemini --acp`, `kimi acp`, or `opencode acp`. The program can
+installed: `agy acp`, `claude`, `codex` and `pi` (which `sheprd-acp` drives without an
+ACP adapter), `copilot --acp`, `gemini --acp`, `kimi acp`, `muse acp`, or `opencode acp`. The program can
 also be started by hand in any pane: `sheprd-acp claude`.
 
 **One click.** Each tab strip also offers an **Agent** button right after

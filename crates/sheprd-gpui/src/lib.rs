@@ -180,6 +180,7 @@ mod truncate;
 mod update_panel;
 mod upload_chips;
 mod usage;
+mod voice;
 mod window;
 mod window_state;
 mod words;

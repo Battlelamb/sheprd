@@ -41,7 +41,8 @@ pub(crate) enum Start {
     /// Only join a core that already runs.
     Join,
     /// Start the user's `herdr-core`, else the bundled one. The window asks
-    /// for this only when no Herdr 1 is installed, or the user did.
+    /// for this when no Herdr 1 is installed, when the user did, or for a
+    /// tab saved with herdr-core panes, whose core a reboot stopped.
     IfMissing,
 }
 
@@ -165,6 +166,15 @@ impl Hub {
             Ok(_) => State::Connecting(receive),
             Err(error) => State::Unavailable(Arc::new(Error::Worker(error))),
         };
+    }
+
+    /// Connects for a tab saved with this core's panes: starts the core when
+    /// none runs, as after a reboot, but after a failure waits the retry
+    /// interval as a join does, since restored tabs ask on every tick.
+    pub(crate) fn connect_restored(&mut self) {
+        if !self.cooling() {
+            self.connect(Start::IfMissing);
+        }
     }
 
     /// Whether the last attempt failed within the retry interval, so asking

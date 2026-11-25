@@ -88,9 +88,18 @@ impl Sizing {
 
     /// Scrolls the view `lines`, up toward its history when positive.
     /// False when nothing can take the scroll: a Herdr 1 terminal scrolls
-    /// only through an attach holding it.
-    pub(super) fn scroll(&mut self, pane: &str, lines: i32) -> bool {
+    /// only through an attach holding it. A Herdr 2 program that reads the
+    /// wheel, as a full-screen agent does, scrolls itself instead.
+    pub(super) async fn scroll(&mut self, state: &Shared, pane: &str, lines: i32) -> bool {
         if Hub::is_core_pane(pane) {
+            match state.hub.wheel(pane, lines).await {
+                Ok(true) => {
+                    self.up = 0;
+                    return true;
+                }
+                Ok(false) => {}
+                Err(error) => tracing::debug!(%error, "terminal wheel not sent"),
+            }
             let by = usize::try_from(lines.unsigned_abs()).unwrap_or(usize::MAX);
             self.up = if lines > 0 {
                 self.up.saturating_add(by).min(self.history)

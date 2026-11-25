@@ -526,6 +526,7 @@ mod saved_beside_spaces;
 mod screen_history;
 mod shared_poller;
 mod unlisted_name;
+mod wheel;
 mod workspace_changes;
 
 #[test]

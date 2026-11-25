@@ -288,6 +288,7 @@ settings-config-reload = Reload configuration
 settings-config-reload-description = Re-reads both files. Does not restart the daemon.
 
 settings-agent-guide-dismiss = Dismiss agent guidance
+
 settings-tabs-terminal-backend = Terminal backend
 settings-tabs-backend-herdr = Herdr 1
 settings-tabs-backend-core = Herdr 2

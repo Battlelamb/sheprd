@@ -177,7 +177,7 @@ write_files:
 runcmd:
   - [chown, -R, 'sheprd:sheprd', /home/sheprd]
   - [systemctl, daemon-reload]
-  - [systemctl, enable, --now, sheprd-provision.service]
+  - [systemctl, enable, --now, --no-block, sheprd-provision.service]
 "#
     )
 }

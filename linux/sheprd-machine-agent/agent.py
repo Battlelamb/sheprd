@@ -281,9 +281,10 @@ class AgentServer:
                 reply = refusal.reply()
             except Exception as exc:  # pragma: no cover - defensive catch-all
                 reply = Refusal("failed", str(exc)).reply()
+            try:
+                send_frame(conn, reply)
             finally:
                 self._end()
-            send_frame(conn, reply)
         finally:
             try:
                 conn.close()

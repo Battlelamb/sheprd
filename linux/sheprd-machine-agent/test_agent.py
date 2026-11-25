@@ -256,40 +256,91 @@ class AgentProtocolTests(unittest.TestCase):
             self.assertEqual(os.path.realpath(ok["stdout"].strip()), os.path.realpath(tmp))
             self.assertFalse(ok["timed_out"])
 
-            # Timeout kills entire process group cleanly.
+            # Timeout kills entire process group cleanly, including a child
+            # that ignores SIGTERM and redirects output after the leader exits.
+            pid_file = os.path.join(tmp, "child.pid")
+            script = (
+                "import os, signal, subprocess, sys, time; "
+                "child = subprocess.Popen([sys.executable, '-c', "
+                "'import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)'], "
+                "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+                f"open({pid_file!r}, 'w').write(str(child.pid)); "
+                "time.sleep(30)"
+            )
             slow = exchange(
                 server,
                 {
                     "op": "exec",
-                    "argv": [sys.executable, "-c", "import time; time.sleep(30)"],
-                    "timeout_ms": 150,
+                    "argv": [sys.executable, "-c", script],
+                    "timeout_ms": 300,
                 },
             )
             self.assertTrue(slow["ok"])
             self.assertTrue(slow["timed_out"])
+            child_pid = int(open(pid_file).read().strip())
+            # Wait briefly for kernel process reaping after SIGKILL.
+            for _ in range(20):
+                try:
+                    os.kill(child_pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(child_pid, 0)
+
+    def test_exec_output_drain_shares_single_deadline(self) -> None:
+        backend = StubWaylandBackend(desktop_ready=False)
+        server = agent.AgentServer(backend)
+        # Parent exits immediately while child closes stdout after 0.35s and
+        # holds stderr open for 30s; shared 500ms timeout must kill stderr
+        # promptly rather than granting a second full 500ms window.
+        script = (
+            "import subprocess, sys; "
+            "subprocess.Popen([sys.executable, '-c', "
+            "'import sys, time; time.sleep(0.35); sys.stdout.close(); time.sleep(30)'])"
+        )
+        start = time.monotonic()
+        reply = exchange(
+            server,
+            {
+                "op": "exec",
+                "argv": [sys.executable, "-c", script],
+                "timeout_ms": 500,
+            },
+        )
+        elapsed = time.monotonic() - start
+        self.assertTrue(reply["ok"])
+        self.assertLess(elapsed, 0.85)
 
     def test_session_recovery_after_compositor_restart_picks_newest_sockets(self) -> None:
         with tempfile.TemporaryDirectory() as runtime_dir:
             old_wl = os.path.join(runtime_dir, "wayland-0")
             new_wl = os.path.join(runtime_dir, "wayland-1")
+            x11_sock = os.path.join(runtime_dir, "X0")
             s1 = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             s2 = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sx = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
                 s1.bind(old_wl)
                 time.sleep(0.02)
                 s2.bind(new_wl)
+                sx.bind(x11_sock)
                 backend = wayland.WaylandBackend(
                     base_env={
                         "XDG_RUNTIME_DIR": runtime_dir,
-                        # Stale WAYLAND_DISPLAY from a dead compositor:
+                        # Stale WAYLAND_DISPLAY and DISPLAY from a dead compositor:
                         "WAYLAND_DISPLAY": "wayland-stale",
+                        "DISPLAY": ":99",
                     }
                 )
                 discovered = backend._discover_wayland_display(runtime_dir)
                 self.assertEqual(discovered, "wayland-1")
+                discovered_x11 = backend._discover_x11_display(runtime_dir)
+                self.assertEqual(discovered_x11, ":0")
             finally:
                 s1.close()
                 s2.close()
+                sx.close()
 
     def test_parse_sway_outputs_handles_focused_output_and_scale(self) -> None:
         payload = json.dumps(

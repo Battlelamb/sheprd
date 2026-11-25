@@ -89,7 +89,7 @@ fn provision_user_data_hardens_grub_and_configures_wayland_desktop() {
     assert!(user.contains("/usr/local/lib/sheprd-machine-agent/agent.py"));
     assert!(user.contains("/usr/local/lib/sheprd-machine-agent/wayland.py"));
     assert!(user.contains("sheprd-machine-agent.service"));
-    assert!(user.contains("import-environment WAYLAND_DISPLAY SWAYSOCK"));
+    assert!(user.contains("import-environment DISPLAY WAYLAND_DISPLAY SWAYSOCK"));
     // Non-blocking start prevents deadlocking cloud-final.service with After=cloud-final.service.
     assert!(user.contains("[systemctl, enable, --now, --no-block, sheprd-provision.service]"));
     // Does not pass console=hvc0 when serial console is unattached.

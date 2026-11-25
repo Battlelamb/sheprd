@@ -155,15 +155,23 @@ def run_exec(request: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
         try:
             returncode = proc.wait(timeout=EXEC_KILL_GRACE_S)
         except subprocess.TimeoutExpired:
-            _kill_group(proc.pid, signal.SIGKILL)
+            returncode = None
+        # Always SIGKILL the whole process group even if the leader exited on
+        # SIGTERM: a surviving child ignoring SIGTERM keeps the group alive.
+        _kill_group(proc.pid, signal.SIGKILL)
+        if returncode is None:
             returncode = proc.wait()
 
-    remaining = max(0.0, deadline - time.monotonic())
-    drain_wait = remaining if not timed_out and remaining > 0 else EXEC_KILL_GRACE_S
-    if not (stdout.wait(drain_wait) and stderr.wait(drain_wait)):
+    now = time.monotonic()
+    drain_deadline = now + EXEC_KILL_GRACE_S if now > deadline else deadline
+    drained = stdout.wait(drain_deadline - time.monotonic()) and stderr.wait(
+        drain_deadline - time.monotonic()
+    )
+    if not drained:
         _kill_group(proc.pid, signal.SIGKILL)
-        stdout.wait(EXEC_KILL_GRACE_S)
-        stderr.wait(EXEC_KILL_GRACE_S)
+        kill_deadline = time.monotonic() + EXEC_KILL_GRACE_S
+        stdout.wait(kill_deadline - time.monotonic())
+        stderr.wait(kill_deadline - time.monotonic())
 
     out_text, out_cut = stdout.snapshot()
     err_text, err_cut = stderr.snapshot()

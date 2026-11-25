@@ -116,7 +116,7 @@ write_files:
       default_border pixel 2
       bindsym $mod+Return exec foot
       bindsym $mod+Shift+q kill
-      exec systemctl --user import-environment WAYLAND_DISPLAY SWAYSOCK XDG_CURRENT_DESKTOP XDG_SESSION_TYPE && systemctl --user restart sheprd-machine-agent.service
+      exec systemctl --user import-environment DISPLAY WAYLAND_DISPLAY SWAYSOCK XDG_CURRENT_DESKTOP XDG_SESSION_TYPE && systemctl --user restart sheprd-machine-agent.service
       exec foot
   - path: /home/sheprd/.bash_profile
     permissions: '0644'

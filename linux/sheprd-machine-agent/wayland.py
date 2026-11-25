@@ -256,6 +256,23 @@ class WaylandBackend:
         )
         return os.path.basename(sockets[0]) if sockets else None
 
+    def _discover_x11_display(self, x11_dir: str = "/tmp/.X11-unix") -> str | None:
+        current = self._base_env.get("DISPLAY")
+        if current and current.startswith(":"):
+            num = current[1:].split(".", 1)[0]
+            if num.isdigit() and is_socket(os.path.join(x11_dir, f"X{num}")):
+                return current
+        sockets = sorted(
+            (p for p in glob.glob(os.path.join(x11_dir, "X*")) if is_socket(p)),
+            key=lambda p: os.path.getmtime(p),
+            reverse=True,
+        )
+        for path in sockets:
+            base = os.path.basename(path)
+            if base.startswith("X") and base[1:].isdigit():
+                return f":{base[1:]}"
+        return None
+
     def _discover_sway_sockets(self, runtime_dir: str) -> list[str]:
         candidates: list[str] = []
         current = self._base_env.get("SWAYSOCK")
@@ -308,6 +325,12 @@ class WaylandBackend:
             env["WAYLAND_DISPLAY"] = wayland
         else:
             env.pop("WAYLAND_DISPLAY", None)
+
+        x11_display = self._discover_x11_display()
+        if x11_display:
+            env["DISPLAY"] = x11_display
+        else:
+            env.pop("DISPLAY", None)
 
         display: DisplayInfo | None = None
         if wayland and has_swaymsg:

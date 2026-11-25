@@ -25,6 +25,9 @@ struct ChatActivityAttributes: ActivityAttributes {
 
     var content: ActivitySealable<ChatActivityFacts>
 
+    static let sharedGroupKey = "liveActivitySharedGeneration"
+    static var sharedGroup: String? { LiveActivityStyleSetting.store?.string(forKey: sharedGroupKey) }
+
     init(facts: ChatActivityFacts) {
         content = .plain(facts)
     }
@@ -46,14 +49,24 @@ struct ChatActivityAttributes: ActivityAttributes {
     /// What to draw, or `nil` for the fixed cover. While this phone uses
     /// the push relay, only sealed content shows. The keys are read only
     /// for sealed content, so plain content (the debug sample, or an older
-    /// computer's) costs no keychain read per render.
+    /// computer's) costs no keychain read per render. Sealed content no
+    /// computer's key opens may be the test this phone started on itself
+    /// (`SelfTestActivity`), which only its own key opens.
     func opened(_ state: ContentState) -> SealedChatActivity.Opened? {
+        if case let .sharedCard(card) = content {
+            guard PushRelaySetting.isOn, let group = Self.sharedGroup, card.belongs(to: group),
+                  case let .sharedState(snapshot) = state else { return nil }
+            return snapshot.opened(group: group, keys: NotifyKey.activityKeys(), generic: LiveActivityStyleSetting.current.asksGeneric)
+        }
         let sealed = content.plain == nil || state.plain == nil
-        return SealedChatActivity.open(
+        if let opened = SealedChatActivity.open(
             attributes: content,
             state: state,
             keys: sealed ? NotifyKey.activityKeys() : [],
             allowsPlain: !PushRelaySetting.isOn
-        )
+        ) {
+            return opened
+        }
+        return sealed ? NotifyKey.openSelfTest(attributes: content, state: state) : nil
     }
 }

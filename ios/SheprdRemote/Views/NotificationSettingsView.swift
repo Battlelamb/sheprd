@@ -7,16 +7,20 @@ import UIKit
 /// Activities, and one test push from a source picked in a menu.
 struct NotificationSettingsView: View {
     @Environment(AppModel.self) private var model
-    @AppStorage(ActivityTokens.genericSetting) private var genericActivities = false
+    @AppStorage(LiveActivityStyleSetting.key, store: LiveActivityStyleSetting.store)
+    private var style = LiveActivityStyle.standardChoice.rawValue
+    @AppStorage(ActivityGrouping.defaultKey) private var defaultMultiple = false
+    @AppStorage(ActivityGrouping.allHostsKey) private var allHosts = false
+    @State private var showingStyle = false
+
+    private enum Grouping { case host, agent, shared }
 
     var body: some View {
         List {
             PushRelaySection()
             if !model.computers.isEmpty {
                 Section {
-                    NavigationLink {
-                        DeskHoldView().makesRoomForConnectionToast()
-                    } label: {
+                    NavigationLink(value: AgentSettingsPage.deskHold) {
                         let held = model.computers.count(where: \.presence)
                         LabeledContent("Hold Alerts at the Desk", value: held == 0 ? "Off" : "\(held) of \(model.computers.count)")
                     }
@@ -28,10 +32,29 @@ struct NotificationSettingsView: View {
                 if !ActivityAuthorizationInfo().areActivitiesEnabled {
                     Label("Live Activities are off for Sheprd. Turn them on in Settings.", systemImage: "exclamationmark.triangle")
                 }
-                Toggle("Keep Generic", isOn: $genericActivities)
-                    .onChange(of: genericActivities) { _, generic in
-                        Task { await model.tokens.genericChanged(to: generic) }
+                Picker("Default grouping", selection: Binding(
+                    get: { allHosts ? Grouping.shared : (defaultMultiple ? .agent : .host) },
+                    set: { choice in
+                        let changed = allHosts != (choice == .shared)
+                        allHosts = choice == .shared
+                        defaultMultiple = choice == .agent
+                        Task { await model.tokens.groupingChanged(sharedChanged: changed) }
                     }
+                )) {
+                    Text("One per host").tag(Grouping.host)
+                    Text("One per agent").tag(Grouping.agent)
+                    Text("One for all hosts").tag(Grouping.shared)
+                }
+                ForEach(model.shownComputers) { computer in
+                    ActivityGroupingPicker(computer: computer, label: model.displayName(computer))
+                }
+                NavigationLink {
+                    LiveActivityStyleView().makesRoomForConnectionToast()
+                } label: {
+                    LabeledContent("Style", value: LiveActivityStyle.stored(style).title)
+                }
+                .agentHighlight(.liveActivities)
+                TestActivityRow()
                 #if DEBUG
                 Button("Start a sample activity") { model.startSample() }
                 if let status = model.sampleStatus {
@@ -41,16 +64,46 @@ struct NotificationSettingsView: View {
             } header: {
                 Text("Live Activities")
             } footer: {
-                Text("Generic shows the agent and what it is doing, without the chat's name, steps, or questions. A computer can also choose this in Sheprd's Remote control settings.")
+                Text("One for all hosts shares a card across computers using the default. One per host combines work across all worktrees on that computer. One per agent gives each independent chat or terminal agent its own activity. Delegated workers count toward their coordinator’s progress. Changes apply to new activities. The Private style hides chat names and steps. A computer can also limit detail in its Remote control settings.")
             }
             Section {
-                TestPushRow()
+                TestPushRow().agentHighlight(.testPush)
             } footer: {
                 Text("Sends this phone a sealed notification now and shows whether it arrived.")
             }
         }
+        .agentGuideScrolling()
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(isPresented: $showingStyle) { LiveActivityStyleView().makesRoomForConnectionToast() }
+        // The simulator loop's `-openLiveActivityStyle YES`.
+        .task { if UserDefaults.standard.bool(forKey: "openLiveActivityStyle") { showingStyle = true } }
+    }
+}
+
+/// Both settings pages edit the same preference for this computer's identity.
+struct ActivityGroupingPicker: View {
+    @Environment(AppModel.self) private var model
+    @AppStorage private var multiple: Bool?
+    let computer: Computer
+    let label: String
+
+    init(computer: Computer, label: String) {
+        self.computer = computer
+        self.label = label
+        _multiple = AppStorage(ActivityGrouping.key(for: computer.fingerprint))
+    }
+
+    var body: some View {
+        Picker(label, selection: $multiple) {
+            Text("Use default").tag(nil as Bool?)
+            Text("One per host").tag(false as Bool?)
+            Text("One per agent").tag(true as Bool?)
+        }
+        .onChange(of: multiple) { old, new in
+            let sharedChanged = (old == nil || new == nil) && UserDefaults.standard.bool(forKey: ActivityGrouping.allHostsKey)
+            Task { await model.tokens.groupingChanged(sharedChanged: sharedChanged, affected: computer.fingerprint) }
+        }
     }
 }
 
@@ -99,6 +152,32 @@ struct DeskHoldView: View {
         }
         .navigationTitle("Hold Alerts at the Desk")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Start Test Activity: this phone starts a Live Activity on itself through
+/// the push relay (`ActivityTest`), which needs no computer online.
+struct TestActivityRow: View {
+    @Environment(AppModel.self) private var model
+    @AppStorage(PushRelaySetting.key, store: PushRelaySetting.store) private var pushRelay = true
+
+    var body: some View {
+        let test = model.activityTest
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                Task { await test.start() }
+            } label: {
+                Label("Start Test Activity", systemImage: "platter.filled.top.iphone")
+            }
+            .buttonStyle(.borderless)
+            .disabled(!pushRelay || test.busy)
+            if let status = test.status {
+                Text(ActivityTest.text(status)).font(.footnote).foregroundStyle(.secondary)
+            } else if !pushRelay {
+                Text("Turn on Use the Push Relay to test Live Activities.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
     }
 }
 

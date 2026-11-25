@@ -87,6 +87,28 @@ impl Store {
         true
     }
 
+    /// Saves the driving terminal's last folder without replacing a user name.
+    pub(crate) fn follow_kept_folder(&mut self, scope: &Scope, id: &str, cwd: &str) -> bool {
+        if cwd.is_empty() || cwd.len() > MAX_CWD_BYTES || cwd.contains('\0') {
+            return false;
+        }
+        let Some(workspace) = self
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.scope == scope.as_str() && workspace.id == id)
+        else {
+            return false;
+        };
+        if workspace.cwd == cwd {
+            return false;
+        }
+        workspace.cwd = cwd.to_owned();
+        // Automatic labels are projected from the checkout root, not this
+        // potentially nested folder. Keep the saved name for linked worktrees.
+        self.save();
+        true
+    }
+
     /// Renames a kept workspace; whether its name changed.
     pub(crate) fn rename_kept(&mut self, scope: &Scope, id: &str, label: &str) -> bool {
         let label = clean_label(label);

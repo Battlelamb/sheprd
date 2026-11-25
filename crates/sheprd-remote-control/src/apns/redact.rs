@@ -13,7 +13,7 @@
 //! without seeing what they are answering, and the app checks an answer
 //! against the question shown (`ActivityAnswer`).
 
-use super::{Event, Live, Phase};
+use super::{Detail, Event, Live, Phase};
 use crate::{app::config::ActivityDetail, push::Privacy};
 
 /// The text of an alert that may not name the chat.
@@ -36,6 +36,9 @@ impl Live {
     /// Removes text that may quote the chat.
     fn hide_quotes(&mut self) {
         let state = &mut self.state;
+        if let Some(agents) = &mut state.detail.agents {
+            agents.latest = None;
+        }
         state.question = None;
         state.permission = None;
         state.options.clear();
@@ -49,6 +52,18 @@ impl Live {
         let state = &mut self.state;
         state.previous.clear();
         state.summary = None;
+        // Words, icon, and counts all tell what the turn does.
+        let focus = state.detail.focus.take().map(|mut focus| {
+            focus.chat_title.clear();
+            focus.workspace.clone_from(&focus.computer);
+            focus
+        });
+        state.detail = Detail {
+            question_revision: state.detail.question_revision,
+            focus,
+            agents: state.detail.agents.take(),
+            ..Detail::default()
+        };
         state.step = match state.phase {
             Phase::Working => super::decide::DEFAULT_STEP,
             Phase::Question => GENERIC_QUESTION,

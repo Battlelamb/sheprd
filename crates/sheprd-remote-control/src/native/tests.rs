@@ -14,11 +14,13 @@ mod hosts;
 mod installed_agents;
 #[cfg(unix)]
 mod installed_agents_path;
+mod labels;
 #[cfg(unix)]
 mod live_chat;
 mod messages;
 mod pane_job;
 mod pictures;
+mod project;
 mod projection;
 mod pull_request_fixture;
 mod reducer;
@@ -65,6 +67,7 @@ pub(super) fn layout(endpoint: EndpointId) -> Layout {
                 }],
                 zoomed: false,
                 agent: Some(crate::hub::TerminalAgent {
+                    boot: "b".into(),
                     name: Some("claude".into()),
                     status: AgentStatus::Done,
                     pane: "p2".into(),

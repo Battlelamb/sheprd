@@ -19,12 +19,14 @@ pub mod edited;
 mod environment;
 mod error;
 mod event;
+pub mod filesystem;
 mod forward;
 mod frame;
 mod handle;
 pub mod herdr;
 mod host_theme;
 mod limits;
+mod liveness;
 mod local_network;
 pub mod local_path;
 pub mod login_env;
@@ -83,6 +85,7 @@ pub use event::ClientEvent;
 pub use forward::{ForwardEvent, PortForward, preferred_local_port};
 pub use handle::{Client, ClientHandle};
 pub use host_theme::HostTheme;
+pub use liveness::Suspicion;
 pub use local_network::{LocalNetworkAccess, local_network_access, wait_for_local_network};
 pub use method::Method;
 pub use options::ConnectOptions;
@@ -115,7 +118,7 @@ pub use surface_images::{
 pub use terminal_attach::TerminalAttach;
 pub use transport::Stream;
 #[cfg(windows)]
-pub use transport::pipe_available;
+pub use transport::{overlapped_output, pipe_available};
 pub use upload::{
     remove_uploaded_files, remove_uploaded_files_with, upload_files, upload_files_with,
 };

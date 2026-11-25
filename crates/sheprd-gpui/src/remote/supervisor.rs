@@ -140,6 +140,7 @@ pub(crate) struct Supervisor {
     synced: Option<RemoteConfig>,
     /// Where the app's updater stands, and a phone's update running.
     updates: Updates,
+    voice_polling: bool,
     watchers: Rc<Cell<usize>>,
     // keep-sorted end
 }
@@ -178,6 +179,7 @@ impl Default for Supervisor {
             shared_panes: std::collections::BTreeSet::new(),
             synced: None,
             updates: Updates::default(),
+            voice_polling: false,
             watchers: Rc::default(),
             // keep-sorted end
         }
@@ -361,6 +363,7 @@ impl Supervisor {
         }
         Self::poll_changes(cx);
         Self::poll_github_leases(cx);
+        Self::poll_voice(cx);
         let supervisor = cx.global_mut::<Self>();
         let watched = supervisor.watchers.get() > 0;
         let interval = if watched { WATCHED } else { UNWATCHED };

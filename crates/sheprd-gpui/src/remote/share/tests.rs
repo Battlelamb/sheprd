@@ -31,6 +31,7 @@ fn fixture_status() -> Status {
         devices: 0,
         connected: 0,
         github_asks: 0,
+        voice_asks: 0,
         relays,
     }
 }

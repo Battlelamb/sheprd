@@ -71,3 +71,4 @@ menu-page-workspace = Workspace
 menu-page-trust-worktree-script = Trust worktree script
 # $provider is an AI service, such as Claude or Codex.
 menu-page-usage = { $provider } usage
+menu-page-borrow-machine = Borrow a virtual Mac

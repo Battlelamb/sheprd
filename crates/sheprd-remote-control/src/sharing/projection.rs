@@ -237,7 +237,8 @@ fn filter(kind: &EntryKind, content: Content) -> Option<EntryKind> {
         | EntryKind::Image { .. }
         | EntryKind::Tool(_)
         | EntryKind::Turn(_)
-        | EntryKind::Notice { .. } => None,
+        | EntryKind::Notice { .. }
+        | EntryKind::Handoff(_) => None,
     }
 }
 

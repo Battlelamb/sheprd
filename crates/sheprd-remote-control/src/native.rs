@@ -6,10 +6,12 @@
 pub(crate) mod changes;
 mod convert;
 mod create;
+pub(crate) mod drive;
 pub(crate) mod github;
 mod live;
 mod model;
 pub(crate) mod previews;
+pub(crate) mod project;
 mod search;
 mod summarize;
 mod title;
@@ -17,6 +19,7 @@ mod wire;
 
 pub(crate) use convert::convert;
 pub(crate) use create::{create_workspace, new_options, new_terminal, start_chat};
+pub(crate) use project::create_project;
 pub(crate) use search::search;
 pub(crate) use summarize::summarize;
 pub(crate) use title::title;
@@ -92,6 +95,7 @@ fn home(state: &Shared, device: &DeviceId) -> Home {
         computer: &state.computer,
         favorites: &favorites,
         fingerprint: &state.fingerprint,
+        labels: &state.labels.current(),
         layout: &layout,
         load: *state.load.borrow(),
         summaries,

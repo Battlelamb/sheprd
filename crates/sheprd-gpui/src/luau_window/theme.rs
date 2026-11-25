@@ -1,6 +1,5 @@
-//! Moonframe's widgets in Sheprd's colors and font. Luau's text, buttons and
-//! status bar draw from the toolkit's theme, so without this a mod's rows stay
-//! in Moonframe's own look beside Sheprd's panes.
+//! Moonframe's widgets in Sheprd's colors and font. Luau text and buttons
+//! use the toolkit theme alongside Sheprd's native views.
 
 use {
     crate::embed::Palette,
@@ -48,7 +47,15 @@ fn config(palette: &Palette) -> ThemeConfig {
     let mut colors = ThemeConfigColors::default();
     colors.accent = Some(color(active));
     colors.accent_foreground = Some(color(foreground));
-    colors.background = Some(color(background));
+    // Moonframe paints this behind its entire shell. On macOS native pages
+    // lie below GPUI, so the shell must leave their pixels untouched. The
+    // native window supplies the opaque base, and Sheprd paints its main
+    // region around pages. Panels and popovers keep their own solid colors.
+    colors.background = Some(if cfg!(target_os = "macos") {
+        "#00000000".into()
+    } else {
+        color(background)
+    });
     colors.border = Some(blend(14));
     colors.caret = Some(color(cursor));
     colors.danger = Some(color(danger));

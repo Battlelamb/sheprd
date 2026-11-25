@@ -302,7 +302,11 @@ impl SheprdWindow {
         matches!(
             self.menu.page,
             Some(
-                Page::RemoteControl | Page::RevokeDevice | Page::RemoteHostAsk | Page::ShareSession
+                Page::RemoteControl
+                    | Page::RevokeDevice
+                    | Page::RemoteHostAsk
+                    | Page::ShareSession
+                    | Page::BorrowMachine
             )
         )
     }
@@ -314,6 +318,8 @@ impl SheprdWindow {
             Some(Page::RevokeDevice) => Some(self.render_revoke(cx)),
             Some(Page::RemoteHostAsk) => Some(self.render_host_ask(cx)),
             Some(Page::ShareSession) => Some(self.render_share_session(cx)),
+            // Another computer's virtual Mac, borrowed from here.
+            Some(Page::BorrowMachine) => Some(self.render_borrow_machine(cx)),
             _ => None,
         }
     }
@@ -335,6 +341,12 @@ impl SheprdWindow {
                 cx,
             ),
             Phase::Requesting => self.pairing_offer(None, cx),
+            // A nearby phone or computer already shows the code, and
+            // claims next: show it here too, so both screens match at once.
+            Phase::Showing {
+                nearby_code: Some(code),
+                ..
+            } => self.pairing_nearby_code(code),
             Phase::Showing { .. } => self.pairing_offer(Some(&dialog.pairing), cx),
             Phase::Claimed {
                 device_name,
@@ -673,6 +685,32 @@ impl SheprdWindow {
             )
     }
 
+    /// The code a nearby phone or computer agreed on, before its claim
+    /// brings Allow.
+    fn pairing_nearby_code(&self, code: &str) -> Div {
+        let theme = &self.theme;
+        div()
+            .debug_selector(|| "remote-pair-nearby-code".into())
+            .flex()
+            .flex_col()
+            .gap(px(12.))
+            .child(fl!("remote-pair-nearby-code"))
+            .child(
+                div()
+                    .debug_selector(|| "remote-pair-code".into())
+                    .text_font(&self.config.terminal)
+                    .text_size(px(28.))
+                    .line_height(px(36.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(spaced(code)),
+            )
+            .child(
+                div()
+                    .text_color(rgb(theme.subtext()))
+                    .child(fl!("remote-pair-nearby-next")),
+            )
+    }
+
     fn pairing_message(
         &self,
         title: &str,
@@ -728,14 +766,14 @@ enum Action {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Tone {
+pub(crate) enum Tone {
     Plain,
     Primary,
     Danger,
 }
 
 /// A dialog button; the caller adds `.on_click` when it is enabled.
-pub(super) fn button(
+pub(crate) fn button(
     theme: &Theme,
     id: &'static str,
     label: impl Into<SharedString>,

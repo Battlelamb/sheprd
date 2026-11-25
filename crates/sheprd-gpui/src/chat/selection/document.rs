@@ -330,6 +330,11 @@ fn project(
                 Cell::default(),
                 crate::chat::text::turn(turn),
             ),
+            EntryKind::Handoff(handoff) => builder.plain(
+                Region::Body(0),
+                Cell::default(),
+                crate::chat::text::handoff(handoff),
+            ),
             EntryKind::Tool(_) | EntryKind::Image { .. } => {}
         },
     }
@@ -410,7 +415,9 @@ impl Builder {
             let region = Region::Body(index);
             let first = self.segments.len();
             match content {
-                Part::Rich(blocks) | Part::Bubble(_, blocks) => self.blocks(region, blocks),
+                Part::Rich(blocks) | Part::Bubble(_, blocks) | Part::File { blocks, .. } => {
+                    self.blocks(region, blocks)
+                }
                 Part::Text(lines) => self.lines(region, lines),
                 // Source owned by a preview/card is not visible transcript
                 // text. A range across it must never reveal the hidden payload.

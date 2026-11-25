@@ -19,6 +19,7 @@ mod subscription;
 mod terminals;
 mod throttle;
 mod triggers;
+mod turn_pull;
 mod vapid;
 
 use serde::{Deserialize, Serialize};
@@ -39,6 +40,7 @@ pub(crate) use terminals::{
 pub(crate) use throttle::Throttle;
 pub use triggers::Privacy;
 pub(crate) use triggers::{Chat, Kind, Notification, decide, excerpt};
+pub(crate) use turn_pull::TurnPull;
 pub(crate) use vapid::Vapid;
 
 #[derive(Debug, thiserror::Error)]

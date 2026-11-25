@@ -6,7 +6,9 @@ use std::collections::VecDeque;
 
 use acp::v1 as wire;
 use serde_json::Value;
-use sheprd_chat_protocol::{Change, EntryKind, MAX_PULL_REQUESTS, PullRequest, Rejection};
+use sheprd_chat_protocol::{
+    Change, EntryKind, MAX_PULL_REQUESTS, PullRequest, PullRequestAction, Rejection,
+};
 
 use super::{Session, Update};
 
@@ -49,6 +51,27 @@ impl Commands {
     }
 }
 
+/// The pull requests the running turn created or pushed to, each listed
+/// once more in the turn even when the transcript knows that already, so
+/// whoever watches the stream (the phone's "finished" push) learns which
+/// ones the turn touched. Emptied when the person speaks.
+#[derive(Debug, Default)]
+pub(super) struct TurnPulls(Vec<PullRequest>);
+
+impl TurnPulls {
+    /// Whether `pull` is one the turn created or pushed to and has not
+    /// listed yet.
+    fn wants(&self, pull: &PullRequest) -> bool {
+        pull.actions.iter().any(|action| {
+            matches!(
+                action,
+                PullRequestAction::Created | PullRequestAction::Pushed
+            )
+        }) && !self.0.iter().any(|known| known.is(pull))
+            && self.0.len() < MAX_PULL_REQUESTS
+    }
+}
+
 /// The command an input names: a string, or the words of an argument list
 /// such as Codex's `["bash", "-lc", "…"]`, bounded.
 fn command_of(input: &Value) -> Option<String> {
@@ -86,12 +109,16 @@ impl<R: FnMut(Update)> Session<R> {
     }
 
     /// Records the pull requests a tool call `change` finished worked on,
-    /// unless the transcript already has each with all it did. A full list
-    /// takes no more.
+    /// unless the transcript already has each with all it did and this
+    /// turn already listed it ([`TurnPulls`]). A full list takes no more.
     pub(super) fn find_pull_requests(&mut self, change: &Change) {
         let (Change::Push { entry } | Change::Replace { entry }) = change else {
             return;
         };
+        if matches!(entry.kind, EntryKind::User { .. }) {
+            self.turn_pulls.0.clear();
+            return;
+        }
         let EntryKind::Tool(tool) = &entry.kind else {
             return;
         };
@@ -106,7 +133,11 @@ impl<R: FnMut(Update)> Session<R> {
                     .any(|action| !known.actions.contains(action))
             });
             let room = known.is_some() || self.transcript.pull_requests.len() < MAX_PULL_REQUESTS;
-            if new && room {
+            let turn = self.turn_pulls.wants(&pull);
+            if turn && room {
+                self.turn_pulls.0.push(pull.clone());
+            }
+            if (new || turn) && room {
                 self.emit(Change::PullRequest { pull_request: pull });
             }
         }

@@ -234,6 +234,9 @@ private struct ChatDocument: View {
     /// offset: the screen shows nothing until a drag.
     @State private var overshot = false
     @State private var scrolling = false
+    /// Resting on the latest message, not merely near it as `away` allows:
+    /// only then does the chat follow it back there.
+    @State private var atLatest = true
     @Environment(\.scenePhase) private var scenePhase
 
     /// Lines stay this wide at most on an iPad or an unfolded iPhone, so
@@ -329,13 +332,21 @@ private struct ChatDocument: View {
             scrolling = phase != .idle
             if !scrolling, overshot { position.scrollTo(edge: .bottom) }
         }
+        // Only a reader's own scroll moves them off the latest; content
+        // shrinking under them while idle is repaired above instead.
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            let end = geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height
+            return geometry.contentOffset.y >= end - 8
+        } action: { _, now in
+            if scrolling || now { atLatest = now }
+        }
         // Back in the app, or a fresh snapshot replacing the cached one: a
         // reader at the latest stays there.
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active, !away { position.scrollTo(edge: .bottom) }
+            if phase == .active, atLatest { position.scrollTo(edge: .bottom) }
         }
         .onChange(of: store.stale) { _, stale in
-            if !stale, !away { position.scrollTo(edge: .bottom) }
+            if !stale, atLatest { position.scrollTo(edge: .bottom) }
         }
         // Dragging the conversation puts the keyboard away, as Messages does.
         .scrollDismissesKeyboard(.interactively)

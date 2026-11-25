@@ -34,7 +34,8 @@ pub(crate) use send::{Delivery, Outcome, Sender, Urgency};
 pub(crate) use send::{Topic, outcome};
 pub(crate) use subscription::Subscription;
 pub(crate) use terminals::{
-    Agents as TerminalAgents, Moved, Seen as SeenAgent, decide as decide_terminal, is_running,
+    Agents as TerminalAgents, MAX_COUNT as MAX_OUTCOME_COUNT, Moved, RunOutcome, Seen as SeenAgent,
+    decide as decide_terminal, is_running,
 };
 pub(crate) use throttle::Throttle;
 pub use triggers::Privacy;

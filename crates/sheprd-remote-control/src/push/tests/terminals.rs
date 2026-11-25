@@ -233,3 +233,62 @@ fn a_new_task_on_the_way_to_another_status_rides_with_it() {
     assert_eq!(moved.len(), 1);
     assert_eq!((moved[0].from, moved[0].to), (Working, Some(Blocked)));
 }
+
+#[test]
+fn a_finish_says_what_the_run_left_instead_of_the_task() {
+    let finish = |privacy| {
+        decide_terminal(
+            &seen(AgentStatus::Done),
+            &moved(AgentStatus::Working, Some(AgentStatus::Done)),
+            privacy,
+        )
+        .unwrap()
+    };
+    let outcome = RunOutcome {
+        commits: 1,
+        pushed: true,
+        uncommitted: 3,
+    };
+    for privacy in [Privacy::Excerpt, Privacy::Generic] {
+        let told = outcome.told(finish(privacy));
+        assert_eq!(told.body, "1 commit, pushed \u{b7} 3 files uncommitted");
+        assert_eq!(told.title, "Claude finished");
+    }
+    let nothing = RunOutcome::default().told(finish(Privacy::Excerpt));
+    assert_eq!(nothing.body, "Fix the flaky test", "falls back to the task");
+}
+
+#[test]
+fn an_outcome_counts_in_words() {
+    let line = |commits, pushed, uncommitted| {
+        RunOutcome {
+            commits,
+            pushed,
+            uncommitted,
+        }
+        .line()
+    };
+    assert_eq!(line(0, false, 0), None);
+    assert_eq!(line(0, true, 0), None, "pushed alone tells nothing new");
+    assert_eq!(line(2, false, 0).as_deref(), Some("2 commits"));
+    assert_eq!(line(0, false, 1).as_deref(), Some("1 file uncommitted"));
+    assert_eq!(
+        line(250, true, 1000).as_deref(),
+        Some("99+ commits, pushed \u{b7} 99+ files uncommitted")
+    );
+}
+
+#[test]
+fn an_outcome_never_rewrites_a_question() {
+    let asking = decide_terminal(
+        &seen(AgentStatus::Blocked),
+        &moved(AgentStatus::Working, Some(AgentStatus::Blocked)),
+        Privacy::Excerpt,
+    )
+    .unwrap();
+    let outcome = RunOutcome {
+        commits: 1,
+        ..RunOutcome::default()
+    };
+    assert_eq!(outcome.told(asking).body, "Fix the flaky test");
+}

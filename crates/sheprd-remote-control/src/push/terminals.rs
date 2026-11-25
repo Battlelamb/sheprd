@@ -155,7 +155,7 @@ pub(crate) fn decide(agent: &Seen<'_>, moved: &Moved, privacy: Privacy) -> Optio
             format!("{} needs an answer", agent.chat.agent),
         ),
         AgentStatus::Done if is_running(moved.from) => {
-            (Kind::TerminalDone, format!("{} finished", agent.chat.agent))
+            return Some(super::finish::finished(agent, privacy));
         }
         _ => return None,
     };

@@ -290,3 +290,5 @@ settings-config-reload = Reload configuration
 settings-config-reload-description = Re-reads both files. Does not restart the daemon.
 
 settings-agent-guide-dismiss = Dismiss agent guidance
+
+settings-section-voice = Voice

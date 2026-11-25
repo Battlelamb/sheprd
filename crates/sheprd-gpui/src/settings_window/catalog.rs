@@ -578,6 +578,12 @@ pub(super) const CATALOG: &[Entry] = &[
         "settings-notif-volume-description",
     ),
     entry(
+        Section::Voice,
+        "voice-provider",
+        "settings-voice-provider",
+        "settings-voice-lead",
+    ),
+    entry(
         Section::TextShortcuts,
         "text-shortcuts-add",
         "settings-text-shortcuts-add",

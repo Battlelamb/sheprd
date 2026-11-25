@@ -117,6 +117,15 @@ pub(crate) fn answer(state: &State, stop: &watch::Sender<bool>, request: Request
             };
         }
         Request::Phone(ask) => return Response::Phone(crate::native::drive::answer(state, ask)),
+        Request::VoiceAsks => {
+            return Response::VoiceAsks {
+                asks: state.changes.take_voice(),
+            };
+        }
+        Request::VoiceAnswer { id, answer } => {
+            state.changes.answer_voice(id, answer);
+            return Response::Done;
+        }
         Request::ChangeAsks => {
             let (asks, layout) = state.changes.take(control::ASK_WAIT);
             return Response::ChangeAsks { asks, layout };
@@ -608,6 +617,7 @@ fn status(state: &State) -> Status {
         devices: state.auth().devices().len(),
         connected: state.connected().len(),
         github_asks: state.lending.asks.queued(),
+        voice_asks: state.changes.voice_count(),
         relays: state
             .relay
             .as_ref()

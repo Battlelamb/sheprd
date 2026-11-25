@@ -31,7 +31,7 @@ pub(crate) struct Pending {
     pub(crate) opened: HashSet<String>,
     /// What changed here of each tab the document holds.
     pub(crate) tabs: HashMap<String, TabFields>,
-    /// Workspaces kept or renamed here.
+    /// Workspaces kept, renamed, or followed to a folder here.
     pub(crate) workspaces: HashSet<String>,
 }
 
@@ -152,6 +152,9 @@ impl Pending {
                 }
                 Edit::ForgetWorkspace { id } => {
                     pending.forgotten.insert(id.clone());
+                }
+                Edit::FollowWorkspace { id, .. } => {
+                    pending.workspaces.insert(id.clone());
                 }
                 Edit::KeepWorkspace(workspace) => {
                     pending.workspaces.insert(workspace.id.clone());

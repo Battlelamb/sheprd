@@ -237,3 +237,32 @@ impl SheprdWindow {
         self.core_terminals.shown.is_some()
     }
 }
+
+/// Saves the name each workspace the user has not named shows in `sessions`,
+/// which its folder gives it, so the shared document carries it to other
+/// clients. The store changes only when a name did.
+pub(super) fn keep_core_workspace_names(
+    sessions: &[(Scope, std::sync::Arc<sheprd_session::Session>)],
+    cx: &mut App,
+) {
+    let changes: Vec<(&Scope, &str, &str)> = cx
+        .try_global::<crate::browser::Store>()
+        .into_iter()
+        .flat_map(|store| {
+            sessions.iter().flat_map(move |(scope, session)| {
+                session.workspaces.iter().filter_map(move |workspace| {
+                    let kept = store.kept_workspace(scope, &workspace.id)?;
+                    (!workspace.custom_label && !kept.custom && kept.label != workspace.label)
+                        .then_some((scope, workspace.id.as_str(), workspace.label.as_str()))
+                })
+            })
+        })
+        .collect();
+    if !changes.is_empty() {
+        crate::browser::Store::update(cx, |store| {
+            for (scope, id, label) in changes {
+                store.follow_kept_label(scope, id, label);
+            }
+        });
+    }
+}

@@ -53,6 +53,8 @@ fn new_and_gone_records_are_kept_put_closed_and_forgotten() {
     );
 }
 
+/// Without a folder, an automatic name is not written: it follows the
+/// folder ([`a_folder_followed_here_reaches_the_document`]).
 #[test]
 fn only_a_name_the_user_gave_is_written() {
     let base = view(&["a"], Vec::new());

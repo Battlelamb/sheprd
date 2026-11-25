@@ -211,14 +211,8 @@ fn nested_checkout_names_and_live_folders_survive_last_close(cx: &mut TestAppCon
                 assert_eq!(restored.worktree, current.worktree);
                 let saved = cx.global::<Store>().kept_workspace(&scope, &id).unwrap();
                 assert_eq!(saved.cwd, current.cwd);
-                assert_eq!(
-                    saved.label,
-                    if custom {
-                        "My project"
-                    } else {
-                        "original-worktree"
-                    }
-                );
+                // The name shown is saved, so other clients show it too.
+                assert_eq!(saved.label, expected);
             })
         });
     }

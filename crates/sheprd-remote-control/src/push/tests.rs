@@ -7,6 +7,7 @@ mod directives;
 mod encrypt;
 mod notices;
 mod per_host;
+mod plain;
 mod presence;
 mod send;
 mod subscription;

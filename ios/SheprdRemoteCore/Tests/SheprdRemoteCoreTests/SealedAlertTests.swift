@@ -84,6 +84,8 @@ import Testing
         let plaintext = try #require(raw["plaintext"] as? [String: Any])
         #expect(alert.pane == plaintext["pane"] as? String)
         #expect(alert.title == plaintext["title"] as? String)
+        #expect(alert.subtitle == plaintext["subtitle"] as? String ?? "")
+        #expect(alert.body == plaintext["body"] as? String)
         #expect(alert.computer == plaintext["computer"] as? String)
         if let permission = plaintext["permission"] as? [String: Any] {
             #expect(alert.permission?.id.value == (permission["id"] as? NSNumber)?.uint64Value)

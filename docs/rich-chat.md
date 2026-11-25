@@ -640,7 +640,8 @@ All 214 tests pass.
   did: the chat shakes for a second and, on a phone, buzzes. A turn whose
   last reply holds it sends a time-sensitive push that plays the same buzz,
   whatever the push privacy, so a locked phone buzzes too. The excerpt a
-  push shows leaves every directive line out.
+  push shows leaves every directive line out and reads as plain text,
+  without size marks or Markdown.
 
 Only an agent's replies play effects; a user's message shows its effect
 directives as text, though its size spans still apply. Each effect plays once,

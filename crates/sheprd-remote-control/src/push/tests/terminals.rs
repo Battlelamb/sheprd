@@ -138,7 +138,8 @@ fn waiting_for_the_user_asks_and_opens_the_terminal() {
     .unwrap();
     assert_eq!(alert.kind, Kind::TerminalAsking);
     assert_eq!(alert.title, "Claude needs an answer");
-    assert_eq!(alert.body, "Fix the flaky test\nherdr-gpui \u{b7} server");
+    assert_eq!(alert.body, "Fix the flaky test");
+    assert_eq!(alert.subtitle, "herdr-gpui \u{b7} server");
     assert_eq!(alert.urgency, Urgency::High);
     let message = alert.message(1);
     assert_eq!(message.url, "/term/w1-p3");
@@ -156,7 +157,8 @@ fn finishing_a_run_tells_and_privacy_hides_the_task() {
     .unwrap();
     assert_eq!(alert.kind, Kind::TerminalDone);
     assert_eq!(alert.title, "Claude finished");
-    assert_eq!(alert.body, "herdr-gpui \u{b7} server");
+    assert_eq!(alert.body, "");
+    assert_eq!(alert.subtitle, "herdr-gpui \u{b7} server");
     assert_eq!(alert.urgency, Urgency::Normal);
 }
 

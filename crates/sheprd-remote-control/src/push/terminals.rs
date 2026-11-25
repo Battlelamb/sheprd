@@ -159,6 +159,6 @@ pub(crate) fn decide(agent: &Seen<'_>, moved: &Moved, privacy: Privacy) -> Optio
         }
         _ => return None,
     };
-    let body = triggers::body(&agent.chat, excerpt, None);
+    let body = triggers::body(excerpt, None);
     Some(Notification::new(&agent.chat, kind, title, body))
 }

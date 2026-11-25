@@ -12,6 +12,7 @@
 mod directives;
 mod encrypt;
 mod event;
+mod plain;
 mod presence;
 mod send;
 mod subscription;

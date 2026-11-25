@@ -13,6 +13,12 @@ use tokio::io::join;
 /// How long reaching one relay and dialing through it may take before the
 /// next is tried.
 const ATTEMPT: Duration = Duration::from_secs(10);
+/// Initial wait before retrying a transient relay refusal (`Busy` or
+/// `Timeout`). Doubles up to [`DIAL_RETRY_MAX`] so a busy relay never spends
+/// the relay's per-address dial allowance (default 120/min, burst 30) within
+/// [`ATTEMPT`]: at most 8 dials over 10 seconds.
+const DIAL_RETRY_INITIAL: Duration = Duration::from_millis(250);
+const DIAL_RETRY_MAX: Duration = Duration::from_secs(2);
 
 /// How long the machine's last bytes may take once `ssh` closed its side.
 /// `ssh` closes it only as it exits, and the machine may never close its
@@ -112,7 +118,7 @@ pub(crate) async fn open_record(
         };
         let attempt = async {
             let connection = client::reach(&endpoint).await?;
-            let halves = client::dial(&connection, route, &keys.dial).await?;
+            let halves = dial(&connection, route, &keys.dial).await?;
             Ok::<_, client::Error>((connection, halves))
         };
         let (connection, (send, recv)) = match tokio::time::timeout(ATTEMPT, attempt).await {
@@ -136,10 +142,51 @@ pub(crate) async fn open_record(
     Err(failure)
 }
 
+/// Dial until the relay accepts the session or the caller's attempt deadline
+/// expires. `Busy` and `Timeout` mean the route was found but could not accept
+/// this particular stream yet; all other responses are durable failures and
+/// should move on to the next relay immediately.
+async fn dial(
+    connection: &quinn::Connection,
+    route: RouteId,
+    key: &p256::ecdsa::SigningKey,
+) -> Result<(quinn::SendStream, quinn::RecvStream), client::Error> {
+    dial_with(|| client::dial(connection, route, key)).await
+}
+
+async fn dial_with<F, Fut, T>(mut attempt: F) -> Result<T, client::Error>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, client::Error>>,
+{
+    let mut delay = DIAL_RETRY_INITIAL;
+    loop {
+        match attempt().await {
+            Ok(value) => return Ok(value),
+            Err(error) if retryable(&error) => {
+                tokio::time::sleep(delay).await;
+                delay = (delay * 2).min(DIAL_RETRY_MAX);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+fn retryable(error: &client::Error) -> bool {
+    matches!(
+        error,
+        client::Error::Refused(
+            sheprd_relay::wire::Status::Busy | sheprd_relay::wire::Status::Timeout
+        )
+    )
+}
+
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use super::splice;
+    use super::{ATTEMPT, dial, dial_with, retryable, splice};
+    use p256::ecdsa::SigningKey;
+    use sheprd_relay::{Limits, Options as RelayOptions, RouteId, client, wire::Status};
     use std::time::Duration;
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
@@ -172,5 +219,163 @@ mod tests {
         let mut seen = Vec::new();
         read.read_to_end(&mut seen).await.unwrap();
         assert_eq!(seen, b"last");
+    }
+
+    #[test]
+    fn only_transient_relay_refusals_are_retried() {
+        for status in [Status::Busy, Status::Timeout] {
+            assert!(retryable(&client::Error::Refused(status)));
+        }
+        for status in [Status::Offline, Status::Limited, Status::TooMany] {
+            assert!(!retryable(&client::Error::Refused(status)));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn dial_backs_off_within_the_relay_allowance_and_stops_at_the_deadline() {
+        let start = tokio::time::Instant::now();
+        let mut attempts = Vec::new();
+        let result = tokio::time::timeout(
+            ATTEMPT,
+            dial_with(|| {
+                attempts.push(start.elapsed());
+                std::future::ready(Err::<(), _>(client::Error::Refused(Status::Busy)))
+            }),
+        )
+        .await;
+        assert!(result.is_err(), "persistent Busy must stop at ATTEMPT");
+        assert_eq!(
+            attempts,
+            [
+                Duration::from_millis(0),
+                Duration::from_millis(250),
+                Duration::from_millis(750),
+                Duration::from_millis(1_750),
+                Duration::from_millis(3_750),
+                Duration::from_millis(5_750),
+                Duration::from_millis(7_750),
+                Duration::from_millis(9_750),
+            ],
+            "backoff must stay well below the relay's 30-dial burst / 120/min allowance",
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn dial_retries_transient_refusals_until_success() {
+        let start = tokio::time::Instant::now();
+        let mut attempts = 0usize;
+        let result = dial_with(|| {
+            attempts += 1;
+            let outcome = match attempts {
+                1 => Err(client::Error::Refused(Status::Busy)),
+                2 => Err(client::Error::Refused(Status::Timeout)),
+                _ => Ok("spliced"),
+            };
+            std::future::ready(outcome)
+        })
+        .await;
+        assert_eq!(result.unwrap(), "spliced");
+        assert_eq!(attempts, 3);
+        assert_eq!(start.elapsed(), Duration::from_millis(750));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn dial_returns_durable_refusals_without_retrying() {
+        let start = tokio::time::Instant::now();
+        let mut attempts = 0usize;
+        let result = dial_with(|| {
+            attempts += 1;
+            std::future::ready(Err::<(), _>(client::Error::Refused(Status::Offline)))
+        })
+        .await;
+        assert!(matches!(
+            result,
+            Err(client::Error::Refused(Status::Offline))
+        ));
+        assert_eq!(attempts, 1);
+        assert_eq!(start.elapsed(), Duration::ZERO);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dial_retries_busy_on_the_same_connection_until_a_slot_opens() {
+        let (_, quic, pin) = crate::relay::tests::relay_with(RelayOptions {
+            limits: Limits {
+                max_sessions_per_key: 1,
+                ..Limits::default()
+            },
+            metrics: None,
+            ..RelayOptions::default()
+        })
+        .await;
+        let host_key = SigningKey::from_slice(&[0x41; 32]).unwrap();
+        let dial_key = SigningKey::from_slice(&[0x42; 32]).unwrap();
+        let listener_conn = client::connect(quic, pin).await.unwrap();
+        let mut listener = client::Listener::listen(listener_conn, &host_key, &[])
+            .await
+            .unwrap();
+        listener
+            .set_dial_keys(vec![client::public(&dial_key)])
+            .await
+            .unwrap();
+        let route = listener.route();
+
+        // One shared QUIC connection for the dialer across all attempts.
+        let connection = client::connect(quic, pin).await.unwrap();
+
+        // A durable refusal on an unknown route returns promptly without retrying.
+        let unknown = RouteId::of(SigningKey::from_slice(&[0x43; 32]).unwrap().verifying_key());
+        let offline = tokio::time::timeout(
+            Duration::from_secs(2),
+            dial(&connection, unknown, &dial_key),
+        )
+        .await
+        .expect("durable refusal should return promptly");
+        assert!(matches!(
+            offline,
+            Err(client::Error::Refused(Status::Offline))
+        ));
+
+        // Fill the single session slot so the relay answers Busy.
+        let (first_dial, first_accept) = tokio::join!(
+            client::dial(&connection, route, &dial_key),
+            listener.accept()
+        );
+        let (mut first_send, mut first_recv) = first_dial.unwrap();
+        let mut first_incoming = first_accept.unwrap();
+        assert!(matches!(
+            client::dial(&connection, route, &dial_key).await,
+            Err(client::Error::Refused(Status::Busy))
+        ));
+
+        // While the slot remains occupied, persistent Busy stops at the deadline
+        // rather than exhausting the dial rate limit into Limited.
+        let timed_out = tokio::time::timeout(
+            Duration::from_millis(600),
+            dial(&connection, route, &dial_key),
+        )
+        .await;
+        assert!(timed_out.is_err(), "persistent Busy must stop at deadline");
+
+        // Free the occupied slot while `dial` is retrying on the same connection.
+        let release = async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let _ = first_send.finish();
+            let _ = first_recv.stop(0u32.into());
+            let _ = first_incoming.send.finish();
+            let _ = first_incoming.recv.stop(0u32.into());
+            drop((first_send, first_recv, first_incoming));
+            listener.accept().await.unwrap()
+        };
+        let (retried, mut second_incoming) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(dial(&connection, route, &dial_key), release)
+        })
+        .await
+        .expect("retried dial should succeed once the first session closes");
+        let (mut second_send, _second_recv) = retried.unwrap();
+        second_send.write_all(b"ok").await.unwrap();
+        let _ = second_send.finish();
+        let mut seen = [0_u8; 2];
+        second_incoming.recv.read_exact(&mut seen).await.unwrap();
+        assert_eq!(&seen, b"ok");
     }
 }

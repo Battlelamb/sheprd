@@ -41,7 +41,9 @@ pub(crate) async fn relay() -> (SocketAddr, SocketAddr, sheprd_relay::pin::Pin) 
 }
 
 /// [`relay`], started with `options`.
-async fn relay_with(options: RelayOptions) -> (SocketAddr, SocketAddr, sheprd_relay::pin::Pin) {
+pub(crate) async fn relay_with(
+    options: RelayOptions,
+) -> (SocketAddr, SocketAddr, sheprd_relay::pin::Pin) {
     let (endpoint, info) =
         sheprd_relay::bind_quic("127.0.0.1:0".parse().unwrap(), None, None).unwrap();
     let quic = endpoint.local_addr().unwrap();

@@ -61,18 +61,25 @@ pub fn connect(
             pin_config_home(&mut command, sheprd_client::local_var("XDG_CONFIG_HOME"));
             command
         },
-        start_local
-            && matches!(
-                target,
-                ConnectTarget::Local
-                    | ConnectTarget::Session {
-                        development: false,
-                        ..
-                    }
-            ),
+        start_local && may_start(target),
     )?;
     let local = local_peer(&stream, target, &socket);
     Ok((stream, local))
+}
+
+/// Whether connecting to `target` may start its daemon when none answers.
+/// The App Store build never does: a daemon it started would inherit its
+/// sandbox, and with it every shell and agent in its terminals.
+fn may_start(target: &ConnectTarget) -> bool {
+    !cfg!(feature = "mas")
+        && matches!(
+            target,
+            ConnectTarget::Local
+                | ConnectTarget::Session {
+                    development: false,
+                    ..
+                }
+        )
 }
 
 /// Start the daemon under the configuration root `socket` was resolved

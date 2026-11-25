@@ -10,6 +10,10 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthChar;
 
+/// Marks open inside one another before deeper ones stay text, as in
+/// Sheprd's chat, so an agent's nesting cannot run the stack out.
+const MAX_NESTING: usize = 8;
+
 /// Columns every prose line is indented by, under the entry's lead column.
 const INDENT: &str = "  ";
 
@@ -20,7 +24,7 @@ pub(super) fn prose(lines: &mut Vec<Line<'static>>, raw: &str, width: usize) {
     let lead_width = text_width(&block.lead);
     let room = width.saturating_sub(INDENT.len() + lead_width).max(1);
     let mut styled = Vec::new();
-    inline(block.body, block.style, &mut styled);
+    inline(block.body, block.style, 0, &mut styled);
     for (index, row) in wrap(&styled, room).into_iter().enumerate() {
         let mut spans = vec![Span::raw(INDENT)];
         if index == 0 {
@@ -115,7 +119,7 @@ fn numbered(line: &str) -> Option<(&str, &str)> {
 
 /// Appends `text`'s characters to `out`, each with the style its inline
 /// marks give it over `base`.
-fn inline(text: &str, base: Style, out: &mut Vec<(char, Style)>) {
+fn inline(text: &str, base: Style, depth: usize, out: &mut Vec<(char, Style)>) {
     let code = base.fg(Color::Cyan);
     let mut rest = text;
     while let Some(ch) = rest.chars().next() {
@@ -129,22 +133,33 @@ fn inline(text: &str, base: Style, out: &mut Vec<(char, Style)>) {
         if let Some(inner) = rest.strip_prefix("**")
             && let Some(end) = inner.find("**").filter(|end| *end > 0)
         {
-            inline(&inner[..end], base.add_modifier(Modifier::BOLD), out);
+            inline(
+                &inner[..end],
+                base.add_modifier(Modifier::BOLD),
+                depth + 1,
+                out,
+            );
             rest = &inner[end + 2..];
             continue;
         }
         if ch == ':'
+            && depth < MAX_NESTING
             && starts_directive(out.last().map(|(ch, _)| *ch))
             && let Some((style, inner, tail)) = sized(&rest[1..], base)
         {
-            inline(inner, style, out);
+            inline(inner, style, depth + 1, out);
             rest = tail;
             continue;
         }
         if ch == '['
             && let Some((label, target, tail)) = link(rest)
         {
-            inline(label, base.add_modifier(Modifier::UNDERLINED), out);
+            inline(
+                label,
+                base.add_modifier(Modifier::UNDERLINED),
+                depth + 1,
+                out,
+            );
             // The terminal cannot open it, so the address stays readable.
             if !target.is_empty() && target != label {
                 let quiet = base.fg(Color::DarkGray);

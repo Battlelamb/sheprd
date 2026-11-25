@@ -152,3 +152,12 @@ fn a_size_holds_a_link_and_needs_a_word_break_before_it() {
     }
     assert_eq!(text(&render("(:big[x])", 80)[0]), "  (x)");
 }
+
+#[test]
+fn deeply_nested_sizes_stay_text_past_the_limit() {
+    let deep = format!("{}x{}", ":big[".repeat(10_000), "]".repeat(10_000));
+    let lines = render(&deep, 80);
+    assert!(text(&lines[0]).contains(":big["));
+    let shallow = render(":big[:big[x]]", 80);
+    assert_eq!(text(&shallow[0]), "  x");
+}

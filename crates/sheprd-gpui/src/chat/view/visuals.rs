@@ -61,7 +61,7 @@ impl SheprdWindow {
                     target.set(bounds.into_iter().reduce(|all, part| all.union(&part)));
                 })
             })
-            .children(parts.iter().enumerate().map(|(index, part)| {
+            .children(parts.iter().enumerate().filter_map(|(index, part)| {
                 // Each part scopes its own links' element ids.
                 let part = match part {
                     Part::Text(lines) => self
@@ -72,6 +72,7 @@ impl SheprdWindow {
                             cx,
                         )
                         .into_any_element(),
+                    Part::Screen(_) if !self.config.chat.message_effects => return None,
                     Part::Rich(blocks) => {
                         match self.chat_text_scope(pane_id, entry, Region::Body(index)) {
                             Some(scope) => self
@@ -144,7 +145,7 @@ impl SheprdWindow {
                         pane_id, entry, index, *id, url, alt, visuals, cx,
                     ),
                 };
-                div().id(("chat-part", index)).min_w_0().child(part)
+                Some(div().id(("chat-part", index)).min_w_0().child(part))
             }))
     }
 

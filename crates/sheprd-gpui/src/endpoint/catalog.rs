@@ -168,6 +168,12 @@ impl Catalog {
         failure
     }
 
+    /// Reads the saved devices again on the next poll rather than in two
+    /// seconds, after this window changed them.
+    pub(crate) fn refresh(&mut self) {
+        self.next_poll = Instant::now();
+    }
+
     /// Whether the saved devices have been read once, so a device missing
     /// from the window is really not saved rather than not loaded yet.
     pub(crate) fn loaded(&self) -> bool {

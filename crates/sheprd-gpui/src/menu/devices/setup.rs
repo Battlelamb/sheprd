@@ -167,6 +167,31 @@ fn rename_with(executable: &std::ffi::OsStr, id: &str, label: &str) -> Result<()
     .into())
 }
 
+/// Pause a saved device (`enabled` false) with `herdr machine disable`, or
+/// resume it with `enable`. The CLI only edits the local catalog: the host's
+/// own Herdr and its terminals keep running, and the catalog watcher drops or
+/// restores the connection. Blocks on a process: call it from the background
+/// executor.
+pub(crate) fn set_enabled(id: &str, enabled: bool) -> Result<()> {
+    set_enabled_with(crate::daemon::executable().as_os_str(), id, enabled)
+}
+
+fn set_enabled_with(executable: &std::ffi::OsStr, id: &str, enabled: bool) -> Result<()> {
+    if !sheprd_client::valid_profile_id(id) {
+        return Err(Error::NoProfile.into());
+    }
+    let verb = if enabled { "enable" } else { "disable" };
+    let (status, _, stderr) = run_cli(executable, &["machine", verb, id], REMOVE_TIMEOUT)?;
+    if status.success() {
+        return Ok(());
+    }
+    Err(Error::Pause {
+        status,
+        detail: last_line(&stderr),
+    }
+    .into())
+}
+
 /// Check the catalog on disk again, right before a step that saves.
 pub(super) fn verify_unsaved(request: &Request, claim: &Claim) -> Result<()> {
     ensure_unsaved(request, claim, &load_catalog()?, resolve)

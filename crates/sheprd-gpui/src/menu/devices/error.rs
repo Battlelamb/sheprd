@@ -28,6 +28,11 @@ pub enum Error {
         status: std::process::ExitStatus,
         detail: String,
     },
+    #[error("Pausing or resuming the device failed ({status}){}", if detail.is_empty() { String::new() } else { format!(": {detail}") })]
+    Pause {
+        status: std::process::ExitStatus,
+        detail: String,
+    },
     #[error("Renaming the device failed ({status}){}", if detail.is_empty() { String::new() } else { format!(": {detail}") })]
     Rename {
         status: std::process::ExitStatus,

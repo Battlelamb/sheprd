@@ -16,6 +16,7 @@ mod host_key_choice;
 mod host_menu;
 mod local_network;
 mod nearby;
+mod pause;
 pub(super) mod picker;
 pub(super) mod rail;
 mod saved_warning;

@@ -385,6 +385,14 @@ edits only the local catalog: the host's own Herdr keeps running. When the
 device has its own GitHub sign-in, the confirmation also offers to delete it,
 since its account panel goes away with the device. Local's menu offers neither.
 
+**Pause device**, in the same menu of an SSH or cloud device, keeps the device
+listed but stops connecting to it: its header turns grey and says *paused*,
+its workspaces leave the sidebar, and nothing on it notifies. Choosing it
+again resumes the connection. It is the catalog's `enabled` flag, so an SSH
+device's pause is `herdr machine disable` (resume, `enable`); the host's own
+Herdr and its terminals keep running either way. `sheprd host pause|resume
+HOST` does the same from a pane.
+
 A cloud device's header (Azure, Boat, boxd, Coder, Container, Daytona,
 OpenSandbox, Railway, or Sprites) has a menu too: **Rename…** changes the name the sidebar
 shows, falling back to the machine's name when left empty; **Cloud device

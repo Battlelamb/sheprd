@@ -88,6 +88,20 @@ fn a_branch_its_upstream_has_is_pushed() {
 }
 
 #[test]
+fn each_new_file_in_a_new_folder_counts() {
+    let parent = tempfile::tempdir().unwrap();
+    let repository = parent.path().join("project");
+    std::fs::create_dir_all(repository.join("new/deeper")).unwrap();
+    run(&repository, &["init", "--quiet"]);
+    commit(&repository, "before.txt", "@1767225000 +0000");
+    for file in ["new/a.txt", "new/b.txt", "new/deeper/c.txt"] {
+        std::fs::write(repository.join(file), file).unwrap();
+    }
+    let outcome = read(&repository, START_S * 1000).unwrap();
+    assert_eq!(outcome.uncommitted, 3, "not the one folder");
+}
+
+#[test]
 fn outside_a_checkout_there_is_none() {
     let folder = tempfile::tempdir().unwrap();
     assert_eq!(read(folder.path(), START_S * 1000), None);

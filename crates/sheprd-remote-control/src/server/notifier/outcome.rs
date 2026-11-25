@@ -42,11 +42,7 @@ pub(super) fn read(cwd: &Path, since_ms: u64) -> Option<RunOutcome> {
             .ok()
             .and_then(|ahead| count(&ahead))
             == Some(0);
-    let status = git(
-        cwd,
-        &["status", "--porcelain=v1", "--untracked-files=normal"],
-    )
-    .ok()?;
+    let status = git(cwd, &["status", "--porcelain=v1", "--untracked-files=all"]).ok()?;
     Some(RunOutcome {
         commits,
         pushed,

@@ -173,3 +173,80 @@ fn watchdog_skips_non_antigravity_running_tools_and_pending_permissions() {
     let _perm = ask_permission(&mut agy, 99);
     assert_eq!(agy.session.next_tick(), None);
 }
+
+#[test]
+fn background_command_turn_warns_cancels_and_runs_queued_prompt() {
+    // Matches `agy acp`'s real ACP update sequence for a backgrounded
+    // `run_command`: the tool call starts in_progress, completes once the
+    // command moves to the background, the assistant replies, and `agy acp`
+    // holds `session/prompt` open while waiting for the background task.
+    let mut harness = ready_antigravity();
+    let turn = prompt(&mut harness, 1, "start the background job");
+
+    harness.update(json!({
+        "sessionUpdate": "tool_call",
+        "toolCallId": "cmd-bg-1",
+        "title": "Run background build",
+        "kind": "execute",
+        "status": "in_progress"
+    }));
+    assert_eq!(harness.session.next_tick(), None);
+
+    harness.update(json!({
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "cmd-bg-1",
+        "status": "completed",
+        "content": [{
+            "type": "content",
+            "content": {
+                "type": "text",
+                "text": "Tool is running as a background task with task id: conv/task-1"
+            }
+        }]
+    }));
+    // Tool finished backgrounding, but the model has not replied yet.
+    assert_eq!(harness.session.next_tick(), None);
+
+    harness.agent_says("Started the background build.");
+    let warn_at = harness.session.next_tick().expect("warn deadline");
+
+    // Queue a follow-up prompt while `session/prompt` remains held open.
+    harness.command(
+        1,
+        Command::Prompt {
+            origin: None,
+            text: "check build status".to_owned(),
+            attachments: Vec::new(),
+        },
+    );
+    assert_eq!(harness.transcript().queued.len(), 1);
+
+    harness.session.tick(warn_at);
+    let notices = harness.notices();
+    assert_eq!(notices.len(), 1);
+    assert_eq!(notices[0].0, NoticeLevel::Info);
+    assert!(notices[0].1.contains("10 minutes"), "{}", notices[0].1);
+    assert!(harness.sent().is_empty());
+
+    let cancel_at = harness.session.next_tick().expect("cancel deadline");
+    harness.session.tick(cancel_at);
+    let notices = harness.notices();
+    assert_eq!(notices.len(), 2);
+    assert_eq!(notices[1].0, NoticeLevel::Warning);
+    assert!(notices[1].1.contains("1 hour"), "{}", notices[1].1);
+
+    let sent = harness.sent();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["method"], "session/cancel");
+    assert_eq!(sent[0]["params"]["sessionId"], "s1");
+    assert_eq!(harness.transcript().queued.len(), 1);
+    assert_eq!(harness.session.next_tick(), None);
+
+    harness.respond(turn, json!({"stopReason": "cancelled"}));
+    assert!(harness.transcript().queued.is_empty());
+    let next = harness.last_request("session/prompt");
+    assert_eq!(
+        next["params"]["prompt"],
+        json!([{"type": "text", "text": "check build status"}])
+    );
+}

@@ -342,13 +342,24 @@ fn place(chat: &Chat<'_>) -> String {
 }
 
 /// `text` on one line, at most [`EXCERPT_CHARS`] characters, ending in `…`
-/// when cut, at a word's end where one is near.
+/// when cut. The phone cuts a Live Activity's question the same way
+/// (`ActivityAnswer.excerpt`) to match an answer to it, so the two must not
+/// drift apart.
 pub(crate) fn excerpt(text: &str) -> String {
     let words: Vec<&str> = text.split_whitespace().collect();
     let line = words.join(" ");
     if line.chars().count() <= EXCERPT_CHARS {
         return line;
     }
+    let mut cut: String = line.chars().take(EXCERPT_CHARS - 1).collect();
+    cut.truncate(cut.trim_end().len());
+    cut.push('\u{2026}');
+    cut
+}
+
+/// `line`, longer than [`EXCERPT_CHARS`], cut to fit at a word's end where
+/// one is near, ending in `…`.
+fn word_cut(line: &str) -> String {
     let cut: String = line.chars().take(EXCERPT_CHARS - 1).collect();
     // The cut lands inside a word unless a space follows it.
     let whole = line[cut.len()..].starts_with(' ');
@@ -361,10 +372,10 @@ pub(crate) fn excerpt(text: &str) -> String {
     cut
 }
 
-/// What an agent wrote, as [`excerpt`] shows it, but ending with a whole
-/// sentence when the sentences that fit fill at least half the space: a
-/// lock screen then reads complete thoughts. Ends in `…` only when cut
-/// within a sentence.
+/// What an agent wrote on one line, at most [`EXCERPT_CHARS`] characters,
+/// ending with a whole sentence when the sentences that fit fill at least
+/// half the space: a lock screen then reads complete thoughts. Otherwise
+/// cut at a word's end, with `…`.
 pub(crate) fn sentences(text: &str) -> String {
     let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if line.chars().count() <= EXCERPT_CHARS {
@@ -380,6 +391,6 @@ pub(crate) fn sentences(text: &str) -> String {
         .next_back();
     match end {
         Some(end) if room[..end].chars().count() >= EXCERPT_CHARS / 2 => room[..end].to_owned(),
-        _ => excerpt(&line),
+        _ => word_cut(&line),
     }
 }

@@ -228,6 +228,18 @@ fn excerpts_are_one_short_line() {
     assert_eq!(excerpt(&exact), exact);
 }
 
+/// The phone matches a Live Activity's answer to the question by this cut
+/// (`ActivityAnswer.excerpt`), which `SealedAlertTests.swift` pins to the
+/// same literal.
+#[test]
+fn a_question_is_cut_where_the_phone_cuts_it() {
+    let long = ["Run cargo test --workspace"; 10].join(" ");
+    assert_eq!(
+        excerpt(&long),
+        "Run cargo test --workspace Run cargo test --workspace Run cargo test --workspace Run cargo test --workspace Run cargo t\u{2026}"
+    );
+}
+
 #[test]
 fn messages_link_to_the_chat() {
     let before = Transcript::new("Claude");

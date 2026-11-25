@@ -147,7 +147,7 @@ fn waiting_for_the_user_asks_and_opens_the_terminal() {
 }
 
 #[test]
-fn finishing_a_run_tells_and_privacy_hides_the_task() {
+fn finishing_a_run_says_where_and_privacy_hides_the_task() {
     let agent = seen(AgentStatus::Done);
     let alert = decide_terminal(
         &agent,
@@ -156,9 +156,9 @@ fn finishing_a_run_tells_and_privacy_hides_the_task() {
     )
     .unwrap();
     assert_eq!(alert.kind, Kind::TerminalDone);
-    assert_eq!(alert.title, "Claude finished");
-    assert_eq!(alert.body, "");
-    assert_eq!(alert.subtitle, "herdr-gpui \u{b7} server");
+    assert_eq!(alert.title, "herdr-gpui");
+    assert_eq!(alert.body, "Done");
+    assert_eq!(alert.subtitle, "");
     assert_eq!(alert.urgency, Urgency::Normal);
 }
 

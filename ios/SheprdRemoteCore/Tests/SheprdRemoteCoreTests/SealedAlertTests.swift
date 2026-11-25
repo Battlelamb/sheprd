@@ -128,6 +128,10 @@ import Testing
         #expect(ActivityAnswer.excerpt("  a\n\nb\tc  ") == "a b c")
         let exact = String(repeating: "x", count: ActivityAnswer.excerptLength)
         #expect(ActivityAnswer.excerpt(exact) == exact)
+        // Cut mid-word, never at a word's end: the same literal as Rust's
+        // `a_question_is_cut_where_the_phone_cuts_it`.
+        let long = Array(repeating: "Run cargo test --workspace", count: 10).joined(separator: " ")
+        #expect(ActivityAnswer.excerpt(long) == "Run cargo test --workspace Run cargo test --workspace Run cargo test --workspace Run cargo test --workspace Run cargo t\u{2026}")
     }
 
     @Test func anotherQuestionIdOrAnswerDoesNot() throws {

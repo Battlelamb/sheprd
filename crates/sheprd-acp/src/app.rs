@@ -582,7 +582,21 @@ pub(crate) fn run_owned(
             }
             let mut current = Some(first.process);
             let mut stopping = Vec::new();
-            for input in receiver {
+            loop {
+                let timer = match session.next_tick() {
+                    Some(deadline) => crossbeam_channel::at(deadline),
+                    None => crossbeam_channel::never(),
+                };
+                let input = crossbeam_channel::select! {
+                    recv(receiver) -> input => match input {
+                        Ok(input) => input,
+                        Err(_) => break,
+                    },
+                    recv(timer) -> _ => {
+                        session.tick(std::time::Instant::now());
+                        continue;
+                    }
+                };
                 let expected = crate::restore::expected_end(&input);
                 match session.handle(input) {
                     Flow::Continue => {}

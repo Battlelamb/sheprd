@@ -16,6 +16,7 @@ mod pictures;
 mod pull_requests;
 mod steer;
 mod thread;
+mod watchdog;
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -267,6 +268,7 @@ pub(crate) struct Session<R: FnMut(Update)> {
     thread: thread::Thread,
     transcript: Transcript,
     turn: Option<i64>,
+    watchdog: watchdog::Watchdog,
 }
 
 impl<R: FnMut(Update)> Session<R> {
@@ -386,6 +388,7 @@ impl<R: FnMut(Update)> Session<R> {
             thread,
             transcript,
             turn: None,
+            watchdog: watchdog::Watchdog::default(),
         }
     }
 
@@ -450,6 +453,92 @@ impl<R: FnMut(Update)> Session<R> {
             },
             None => Flow::Continue,
         }
+    }
+
+    /// The next time the session thread should call [`Self::tick`], if any.
+    pub(crate) fn next_tick(&self) -> Option<std::time::Instant> {
+        self.watchdog
+            .next_deadline(self.antigravity_quiet_after_reply())
+    }
+
+    /// Runs periodic session checks (such as the Antigravity silent-turn
+    /// watchdog) as of `now`.
+    pub(crate) fn tick(&mut self, now: std::time::Instant) {
+        let eligible = self.antigravity_quiet_after_reply();
+        match self.watchdog.poll(now, eligible) {
+            Some(watchdog::Action::Warn(after)) => {
+                let after = watchdog::describe_duration(after);
+                let notice = self.projector.notice(
+                    sheprd_chat_protocol::NoticeLevel::Info,
+                    format!(
+                        "{} has been quiet for {after} since its last reply; a background task \
+                         may be holding this turn open. Press Esc or Stop to cancel it, or wait \
+                         for it to finish.",
+                        self.config.agent
+                    ),
+                );
+                self.emit(notice);
+            }
+            Some(watchdog::Action::Cancel(after)) => {
+                let after = watchdog::describe_duration(after);
+                let notice = self.projector.notice(
+                    sheprd_chat_protocol::NoticeLevel::Warning,
+                    format!(
+                        "{} sent no updates for {after} after its last reply; cancelling the turn \
+                         to release any lingering background task.",
+                        self.config.agent
+                    ),
+                );
+                self.emit(notice);
+                // Cancel the stuck turn without dropping any follow-up prompts
+                // the person queued behind it.
+                if let Some(session) = self.acp_session.clone()
+                    && let Err(error) = self
+                        .outbox
+                        .notify("session/cancel", &wire::CancelNotification::new(session))
+                {
+                    self.fail(&error.to_string());
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// Whether an Antigravity turn has already streamed a reply and has no
+    /// pending permission or in-progress foreground tool call.
+    fn antigravity_quiet_after_reply(&self) -> bool {
+        if self.config.harness != Some(Agent::Antigravity)
+            || self.turn.is_none()
+            || !self.asked.is_empty()
+        {
+            return false;
+        }
+        let mut last_reply = false;
+        for entry in self.transcript.entries.iter().rev() {
+            match &entry.kind {
+                sheprd_chat_protocol::EntryKind::User { .. }
+                | sheprd_chat_protocol::EntryKind::Turn(_) => break,
+                sheprd_chat_protocol::EntryKind::Notice { .. } => continue,
+                sheprd_chat_protocol::EntryKind::Tool(tool)
+                    if matches!(
+                        tool.status,
+                        sheprd_chat_protocol::ToolStatus::Pending
+                            | sheprd_chat_protocol::ToolStatus::InProgress
+                    ) =>
+                {
+                    return false;
+                }
+                sheprd_chat_protocol::EntryKind::Agent { .. } if !last_reply => {
+                    last_reply = true;
+                }
+                _ => {
+                    if !last_reply {
+                        return false;
+                    }
+                }
+            }
+        }
+        last_reply
     }
 
     pub(crate) fn cursor(&self) -> Cursor {

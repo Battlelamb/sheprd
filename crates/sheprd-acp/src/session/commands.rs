@@ -203,6 +203,7 @@ impl<R: FnMut(Update)> Session<R> {
             self.keep_started(&shown);
             (self.report)(Update::Prompt(shown));
             self.turn = Some(self.next_request);
+            self.watchdog.start(std::time::Instant::now());
             self.emit(Change::Turn {
                 turn: Some(Turn {
                     started_ms: crate::session::now_ms(),
@@ -257,6 +258,7 @@ impl<R: FnMut(Update)> Session<R> {
         }
         self.clear_queue();
         self.resolve_all();
+        self.watchdog.clear();
         if self.turn.is_some()
             && let Some(session) = self.acp_session.clone()
             && let Err(error) = self

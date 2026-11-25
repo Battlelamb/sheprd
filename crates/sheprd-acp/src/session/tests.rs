@@ -41,6 +41,7 @@ mod settings;
 mod steering;
 mod streaming;
 mod threads;
+mod watchdog;
 
 type Reports = Rc<RefCell<Vec<Activity>>>;
 type Prompts = Rc<RefCell<Vec<String>>>;

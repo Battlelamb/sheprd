@@ -25,6 +25,10 @@ pub(super) enum Availability {
     FollowingSystemTheme,
     /// Only on Windows, which has the only platform code for it.
     Windows,
+    /// Only while a cloud provider is turned on; Settings > Cloud devices
+    /// shows nothing else otherwise.
+    #[cfg(feature = "cloud")]
+    CloudProviders,
 }
 
 impl Entry {
@@ -634,7 +638,8 @@ pub(super) const CATALOG: &[Entry] = &[
         "cloud-setup",
         "settings-cloud-setup",
         "settings-cloud-setup-description",
-    ),
+    )
+    .only(Availability::CloudProviders),
     entry(
         Section::RemoteControl,
         "remote-enabled",

@@ -188,9 +188,10 @@ fn cloud_devices(window: &crate::SheprdWindow) -> u64 {
 }
 
 impl SettingsWindow {
-    /// Build each provider's card on first view, then refresh what it reads.
+    /// Build each turned-on provider's card on first view, then refresh what it
+    /// reads. A provider turned off gets no card, so nothing of it runs here.
     pub(super) fn open_cloud_devices(&mut self, cx: &mut Context<Self>) {
-        for &provider in CloudProvider::ALL {
+        for &provider in crate::cloud::enabled() {
             match provider {
                 #[cfg(feature = "azure")]
                 CloudProvider::Azure => self.open_azure_card(cx),
@@ -214,10 +215,10 @@ impl SettingsWindow {
         }
     }
 
-    /// Called after the config file reloads, so each card follows an account
-    /// that was just saved or edited by hand.
+    /// Called after the config file reloads, so each turned-on provider's card
+    /// follows an account that was just saved or edited by hand.
     pub(super) fn cloud_config_changed(&mut self, cx: &mut Context<Self>) {
-        for &provider in CloudProvider::ALL {
+        for &provider in crate::cloud::enabled() {
             match provider {
                 #[cfg(feature = "azure")]
                 CloudProvider::Azure => self.azure_config_changed(cx),

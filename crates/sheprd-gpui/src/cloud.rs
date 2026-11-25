@@ -19,18 +19,48 @@ use crate::config::{Feature, Features};
 /// The providers this launch offers: those built in whose `[features]`
 /// switch is on, while `cloud_providers` is. Read once from the startup
 /// config, so a change takes effect when Sheprd next starts. Tests see every
-/// provider built in, whatever the config on the machine running them says.
+/// provider built in, whatever the config on the machine running them says,
+/// unless they choose others with [`enable_for_test`].
 pub(crate) fn enabled() -> &'static [CloudProvider] {
-    static ENABLED: std::sync::OnceLock<Vec<CloudProvider>> = std::sync::OnceLock::new();
-    ENABLED.get_or_init(|| {
-        if cfg!(test) {
-            return CloudProvider::ALL.to_vec();
-        }
-        let features = crate::config::Config::load_startup()
-            .map(|config| config.features)
-            .unwrap_or_default();
-        enabled_in(&features)
-    })
+    #[cfg(test)]
+    return TEST_ENABLED
+        .with(|enabled| enabled.get())
+        .unwrap_or(CloudProvider::ALL);
+    #[cfg(not(test))]
+    {
+        static ENABLED: std::sync::OnceLock<Vec<CloudProvider>> = std::sync::OnceLock::new();
+        ENABLED.get_or_init(|| {
+            let features = crate::config::Config::load_startup()
+                .map(|config| config.features)
+                .unwrap_or_default();
+            enabled_in(&features)
+        })
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_ENABLED: std::cell::Cell<Option<&'static [CloudProvider]>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Turns on only `providers` for this test thread, which GPUI tests and their
+/// executors share, until the guard drops.
+#[cfg(test)]
+pub(crate) fn enable_for_test(providers: &[CloudProvider]) -> EnabledForTest {
+    let providers: &'static [CloudProvider] = Box::leak(providers.to_vec().into_boxed_slice());
+    EnabledForTest(TEST_ENABLED.with(|enabled| enabled.replace(Some(providers))))
+}
+
+/// Restores the providers tests see; see [`enable_for_test`].
+#[cfg(test)]
+pub(crate) struct EnabledForTest(Option<&'static [CloudProvider]>);
+
+#[cfg(test)]
+impl Drop for EnabledForTest {
+    fn drop(&mut self) {
+        TEST_ENABLED.with(|enabled| enabled.set(self.0));
+    }
 }
 
 /// Whether this launch offers `provider`; see [`enabled`].

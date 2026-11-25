@@ -77,6 +77,40 @@ fn a_prompt_without_an_origin_sends_only_its_words() {
 }
 
 #[test]
+fn antigravity_gets_the_persons_prompt_without_sheprd_annotations() {
+    let mut harness = harness_with(Config {
+        antigravity_auth_method: Some("oauth-personal".to_owned()),
+        agent: "Antigravity".to_owned(),
+        harness: Some(Agent::Antigravity),
+        listens: true,
+        prompts: Prompts::with_instructions("Do not inject this into Antigravity."),
+        sheprd: Some(PathBuf::from("/bin/sheprd")),
+        ..config()
+    });
+    harness.session.start();
+    let initialize = harness.last_request("initialize");
+    assert_eq!(initialize["params"]["clientInfo"]["name"], "sheprd");
+    let id = initialize["id"].as_i64().unwrap();
+    harness.respond(
+        id,
+        json!({"protocolVersion": 1, "agentCapabilities": {}, "authMethods": [
+            {"id": "oauth-personal", "name": "Log in with Google"}
+        ]}),
+    );
+    let authenticate = harness.last_request("authenticate");
+    assert_eq!(authenticate["params"]["methodId"], "oauth-personal");
+    harness.respond(authenticate["id"].as_i64().unwrap(), json!({}));
+    let id = harness.last_request("session/new")["id"].as_i64().unwrap();
+    harness.respond(id, json!({"sessionId": "antigravity-1"}));
+
+    harness.command(0, from(Some(PHONE), "make the change"));
+    let (id, sent) = sent_prompt(&harness);
+    assert_eq!(sent, ["make the change"]);
+    assert!(!sent.iter().any(|text| text.contains("Do not inject")));
+    finish(&mut harness, id);
+}
+
+#[test]
 fn a_queued_prompt_keeps_where_it_was_typed() {
     let mut harness = ready();
     harness.command(0, from(Some(DESKTOP), "one"));

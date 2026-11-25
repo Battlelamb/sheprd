@@ -30,6 +30,7 @@ const MAX_SKIPPED: usize = 1024;
 
 pub(crate) mod activity;
 mod claude_code;
+pub(crate) mod models;
 pub(crate) mod opencode;
 mod subagents;
 pub(crate) mod todos;

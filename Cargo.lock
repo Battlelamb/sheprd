@@ -12056,6 +12056,7 @@ dependencies = [
  "sheprd-chat-protocol",
  "sheprd-client",
  "sheprd-core-client",
+ "sheprd-credentials",
  "sheprd-github",
  "sheprd-relay",
  "sheprd-relay-agent",

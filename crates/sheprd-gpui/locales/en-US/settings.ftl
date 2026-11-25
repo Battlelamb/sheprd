@@ -293,3 +293,5 @@ settings-tabs-terminal-backend = Terminal backend
 settings-tabs-backend-herdr = Herdr 1
 settings-tabs-backend-core = Herdr 2
 settings-tabs-backend-tmux = tmux
+
+settings-section-voice = Voice

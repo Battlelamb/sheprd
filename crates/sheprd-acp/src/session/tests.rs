@@ -10,6 +10,7 @@ use super::*;
 use crate::rpc::{Inbound, Outbox};
 
 mod activities;
+mod antigravity;
 mod attach;
 mod attachments;
 mod auto_accept;
@@ -20,6 +21,7 @@ mod checkpoint;
 mod commands;
 mod continued;
 mod flow;
+mod gemini;
 mod harnesses;
 mod history;
 mod known;
@@ -60,10 +62,12 @@ struct Harness {
 
 fn config() -> Config {
     Config {
+        antigravity_auth_method: None,
         agent: "Claude".to_owned(),
         choices: None,
         cwd: PathBuf::from("/work"),
         exit_with_agent: false,
+        gemini_auth_method: None,
         harness: Some(Agent::Claude),
         history: None,
         known: Default::default(),

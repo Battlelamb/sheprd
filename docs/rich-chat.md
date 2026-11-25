@@ -320,7 +320,7 @@ Limitations:
   folder could be handed the old chat.
 - A chat whose shell folder differs from the chat's own (started with
   `--cwd`) is not continued.
-- Only the built-in agents (`claude`, `codex`, `copilot`, `gemini`, `kimi`,
+- Only the built-in agents (`antigravity`, `claude`, `codex`, `copilot`, `gemini`, `kimi`,
   `opencode`, `pi`) started without extra agent arguments. Custom commands
   are not continued.
 - `[chat.env]` variables are not set again: typing their values into a shell
@@ -732,6 +732,8 @@ GitHub CLI's credentials rather than SSH, and stops rather than turning
 off signing when a commit needs a key (`phone.md` and `remote.md`; the
 iPhone and iPad app's `phone-app.md` follows `phone.md`, so says it once
 through it). An older program ignores the origin field, and an older client sends none.
+Antigravity receives direct prompts without these annotations or Sheprd's
+prompt templates and memory notes.
 The transcript shows only the person's words, and keeps what went ahead of
 them in the user entry's optional `note`: the note and, on a live prompt, a
 handed-over conversation; on a replay or a restored log, the note alone. The

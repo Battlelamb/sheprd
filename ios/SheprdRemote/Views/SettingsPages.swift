@@ -105,6 +105,7 @@ struct VoiceSettingsView: View {
 
     var body: some View {
         List {
+            SpeakingVoiceSettings()
             Section {
                 Toggle("Speak Results", isOn: $voiceSpeaks).agentHighlight(.speakResults)
             }

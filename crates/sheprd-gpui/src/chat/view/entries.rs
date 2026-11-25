@@ -167,6 +167,7 @@ impl SheprdWindow {
                                 cx,
                             ))
                             .child(self.render_chat_copy(
+                                pane_id,
                                 entry.id.0,
                                 text,
                                 CopyPlacement::Footer,
@@ -187,6 +188,7 @@ impl SheprdWindow {
                     .group("chat-agent-message")
                     .child(message)
                     .child(self.render_chat_copy(
+                        pane_id,
                         entry.id.0,
                         text,
                         copy_placement(body.as_deref()),
@@ -695,7 +697,13 @@ impl SheprdWindow {
                                     cx,
                                 )),
                         )
-                        .child(self.render_chat_copy(id.0, details, CopyPlacement::Footer, cx)),
+                        .child(self.render_chat_copy(
+                            pane_id,
+                            id.0,
+                            details,
+                            CopyPlacement::Footer,
+                            cx,
+                        )),
                 )
             })
     }

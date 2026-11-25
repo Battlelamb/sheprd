@@ -20,14 +20,20 @@ beads_root() {
 
 # Whether $1/.beads is a Beads project rather than bd's own state, such as the
 # ~/.beads it keeps beside a home folder: a redirect, or what bd's
-# hasBeadsProjectFiles looks for. repo.rs's holds_beads reads the same.
+# hasBeadsProjectFiles looks for. repo.rs's holds_beads reads the same. A .beads
+# folder whose contents cannot be read is a discovery failure, never skipped.
 holds_beads() {
+    [ -d "$1/.beads" ] || return 1
     for name in redirect metadata.json config.yaml; do
         [ ! -e "$1/.beads/$name" ] || return 0
     done
     for name in dolt embeddeddolt; do
         [ ! -d "$1/.beads/$name" ] || return 0
     done
+    if [ ! -r "$1/.beads" ] || [ ! -x "$1/.beads" ]; then
+        printf 'Reading the Beads folder %s/.beads failed: permission denied\n' "$1" >&2
+        exit 1
+    fi
     for database in "$1"/.beads/*.db; do
         case ${database##*/} in
         *.backup* | vc.db) ;;

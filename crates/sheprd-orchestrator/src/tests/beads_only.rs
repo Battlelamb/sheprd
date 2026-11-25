@@ -68,16 +68,28 @@ fn a_file_named_beads_does_not_make_a_project() {
     ));
 }
 
-/// Whether `checkout` is a project, read on this machine and by the SSH
-/// script under a local shell, which must agree.
-fn found(checkout: &std::path::Path) -> (bool, bool) {
+/// Whether `checkout` is a project, read on this machine and, where a shell
+/// runs it, by the SSH script, which must agree.
+fn found(checkout: &std::path::Path) -> bool {
+    let local = beads(detect_local(checkout));
+    #[cfg(unix)]
+    assert_eq!(beads(script(checkout)), local, "SSH script disagrees");
+    local
+}
+
+fn detect_local(checkout: &std::path::Path) -> Result<repo::RepoInfo> {
     let host = sheprd_remote::teleport::Host::new(&ConnectTarget::Local).unwrap();
-    let local = repo::detect(
+    repo::detect(
         &ConnectTarget::Local,
         &host,
         &checkout.to_string_lossy(),
         &AtomicBool::new(false),
-    );
+    )
+}
+
+/// What the SSH discovery script reads of `checkout` under a local shell.
+#[cfg(unix)]
+fn script(checkout: &std::path::Path) -> Result<repo::RepoInfo> {
     let mut command = std::process::Command::new("/bin/sh");
     command
         .args(["-c", &repo::detection_script(&checkout.to_string_lossy())])
@@ -91,20 +103,24 @@ fn found(checkout: &std::path::Path) -> (bool, bool) {
         std::time::Duration::from_secs(5),
         &AtomicBool::new(false),
     )
-    .unwrap();
-    let ssh = repo::parse(
+    .map_err(|_| Error::Output {
+        operation: "Running the discovery script",
+    })?;
+    repo::parse(
         &ConnectTarget::Ssh {
             target: "fixture".into(),
             session: "default".into(),
         },
         &String::from_utf8(output).unwrap(),
-    );
-    let beads = |info: Result<repo::RepoInfo>| match info {
+    )
+}
+
+fn beads(info: Result<repo::RepoInfo>) -> bool {
+    match info {
         Ok(info) => info.beads,
         Err(Error::NotARepository) => false,
         Err(error) => panic!("{error:?}"),
-    };
-    (beads(local), beads(ssh))
+    }
 }
 
 #[test]
@@ -119,7 +135,7 @@ fn bds_own_state_beside_a_home_folder_is_not_a_project() {
         std::fs::write(state.join("machine-id"), "0123").unwrap();
         std::fs::write(state.join("vc.db"), "").unwrap();
         std::fs::write(state.join("issues.db.backup"), "").unwrap();
-        assert_eq!(found(dir.path()), (false, false), "git: {git}");
+        assert!(!found(dir.path()), "git: {git}");
     }
 }
 
@@ -141,6 +157,29 @@ fn what_bd_reads_as_a_project_makes_one() {
         } else {
             std::fs::write(state.join(name), "").unwrap();
         }
-        assert_eq!(found(dir.path()), (true, true), "{name}");
+        assert!(found(dir.path()), "{name}");
     }
+}
+
+/// A `.beads` folder that cannot be listed fails discovery, on this machine
+/// and over SSH, rather than dropping the project as if it held none.
+#[cfg(unix)]
+#[test]
+fn an_unreadable_beads_folder_is_a_discovery_failure() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join(".beads");
+    std::fs::create_dir(&state).unwrap();
+    std::fs::write(state.join("beads.db"), "").unwrap();
+    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o100)).unwrap();
+    // Root reads any folder, so there is nothing to refuse.
+    let readable = std::fs::read_dir(&state).is_ok();
+    let local = detect_local(dir.path());
+    let ssh = script(dir.path());
+    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+    if readable {
+        return;
+    }
+    assert!(matches!(local, Err(Error::Git { .. })), "{local:?}");
+    assert!(matches!(ssh, Err(Error::Output { .. })), "{ssh:?}");
 }

@@ -262,3 +262,16 @@ fn a_command_sent_while_away_goes_out_on_reconnect() {
         }
     );
 }
+
+#[test]
+fn a_pane_with_files_for_an_unsent_prompt_holds_them() {
+    let mut harness = Harness::new();
+    harness.reconcile(vec![target("p1", A)]);
+    let pane = harness.chats.pane_mut("p1").unwrap();
+    assert!(!pane.holds_unsent_files());
+    pane.attachments.push("/tmp/notes.md".into());
+    assert!(pane.holds_unsent_files());
+    pane.attachments.clear();
+    pane.uploading = 1;
+    assert!(pane.holds_unsent_files());
+}

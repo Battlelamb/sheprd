@@ -77,21 +77,28 @@ pub(crate) fn targets(snapshot: &ClientShellSnapshot, route: Option<&Route>) -> 
 }
 
 /// At most [`MAX_CHATS`] of `targets`, in their order: every pane in
-/// `on_screen` first, then the others as room allows. A chat the user is
-/// looking at attaches however many chats run in other workspaces.
-pub(crate) fn bounded(mut targets: Vec<Target>, on_screen: &[String]) -> Vec<Target> {
-    let shown = |target: &Target| on_screen.contains(&target.pane_id);
-    let mut room = MAX_CHATS.saturating_sub(targets.iter().filter(|t| shown(t)).count());
-    targets.retain(|target| {
-        if shown(target) {
+/// `first` before the others, as room allows. The window puts the panes on
+/// screen there, so a chat the user is looking at attaches however many
+/// chats run elsewhere, and the panes holding files for an unsent prompt,
+/// which letting go would lose.
+pub(crate) fn bounded(targets: Vec<Target>, first: &[String]) -> Vec<Target> {
+    bound_by(targets, |target| first.contains(&target.pane_id))
+}
+
+/// At most [`MAX_CHATS`] of `items`, in their order, those `first` picks
+/// before the others.
+pub(crate) fn bound_by<T>(mut items: Vec<T>, first: impl Fn(&T) -> bool) -> Vec<T> {
+    let mut room = MAX_CHATS.saturating_sub(items.iter().filter(|item| first(item)).count());
+    items.retain(|item| {
+        if first(item) {
             return true;
         }
         let keep = room > 0;
         room = room.saturating_sub(1);
         keep
     });
-    targets.truncate(MAX_CHATS);
-    targets
+    items.truncate(MAX_CHATS);
+    items
 }
 
 /// Verified CLI bindings add rich views to existing terminals. Real ACP

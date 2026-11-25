@@ -431,14 +431,14 @@ fi
 "#;
 
 /// The agents in `snapshot` that discovery may observe: Codex and Claude
-/// running in their own CLIs, not through a chat program already.
+/// running in their own CLIs, not through a chat program already. The
+/// window bounds them, those on screen first, before [`Existing::poll`].
 pub(crate) fn candidates(snapshot: &ClientShellSnapshot) -> Vec<&ClientShellAgent> {
     snapshot
         .agents
         .iter()
         .filter(|agent| agent.agent.as_deref().and_then(observable).is_some())
         .filter(|agent| super::discovery::endpoint(&agent.tokens).is_none())
-        .take(super::MAX_CHATS)
         .collect()
 }
 

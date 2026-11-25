@@ -311,3 +311,27 @@ fn the_remote_script_finds_an_older_macs_program() {
     let old = script.find("/Applications/Herdr.app/Contents/MacOS/herdr-acp");
     assert!(new < old);
 }
+
+#[test]
+fn an_existing_agent_on_screen_is_probed_past_the_bound() {
+    let panes: Vec<String> = (0..=MAX_CHATS).map(|n| format!("p{n}")).collect();
+    let mut snapshot = snapshot(
+        &panes
+            .iter()
+            .map(|p| (p.as_str(), "none"))
+            .collect::<Vec<_>>(),
+    );
+    for agent in &mut snapshot.agents {
+        agent.agent = Some("claude".into());
+        agent.tokens.clear();
+    }
+    let candidates = existing::candidates(&snapshot);
+    assert_eq!(candidates.len(), MAX_CHATS + 1);
+    let last = &panes[MAX_CHATS];
+    let probed = discovery::bound_by(candidates, |agent| agent.pane_id == *last);
+    assert_eq!(probed.len(), MAX_CHATS);
+    assert_eq!(
+        probed.last().map(|agent| agent.pane_id.as_str()),
+        Some(last.as_str())
+    );
+}

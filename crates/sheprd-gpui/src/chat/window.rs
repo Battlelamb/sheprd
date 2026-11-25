@@ -61,11 +61,21 @@ impl SheprdWindow {
                         connection: endpoint.generation,
                     })
             });
+        // The panes on screen and those holding unsent files come first
+        // wherever a bound applies.
+        let mut first = self.on_screen_chat_panes(cx);
+        first.extend(
+            self.chats
+                .panes()
+                .filter(|pane| pane.holds_unsent_files())
+                .map(|pane| pane.target.pane_id.clone()),
+        );
         let agents = self
             .live
             .snapshot
             .as_deref()
             .map(super::existing::candidates)
+            .map(|agents| discovery::bound_by(agents, |agent| first.contains(&agent.pane_id)))
             .unwrap_or_default();
         let candidates: Vec<_> = agents.iter().map(|agent| agent.pane_id.clone()).collect();
         // A new conversation usually moves its pane's reported state, so the
@@ -104,7 +114,7 @@ impl SheprdWindow {
         let core = enabled.then(|| self.core_chat_targets());
         let targets = discovery::bounded(
             super::core_pane::with_core(targets, core.unwrap_or_default()),
-            &self.on_screen_chat_panes(cx),
+            &first,
         );
         if enabled {
             self.locate_chat_program(cx);

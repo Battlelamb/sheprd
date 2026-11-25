@@ -218,6 +218,12 @@ pub(crate) struct ChatPane {
 }
 
 impl ChatPane {
+    /// Whether files wait here for an unsent prompt, attached or still
+    /// being copied: letting the pane go would lose them.
+    pub(crate) fn holds_unsent_files(&self) -> bool {
+        !self.attachments.is_empty() || self.uploading > 0 || !self.uploads.is_empty()
+    }
+
     /// What the composer's round button does with `text` in the field: as in
     /// the phone app, it stops a running turn while nothing is written or
     /// attached, and sends only once something is.

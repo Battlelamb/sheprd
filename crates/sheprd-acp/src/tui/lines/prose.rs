@@ -134,6 +134,7 @@ fn inline(text: &str, base: Style, out: &mut Vec<(char, Style)>) {
             continue;
         }
         if ch == ':'
+            && starts_directive(out.last().map(|(ch, _)| *ch))
             && let Some((style, inner, tail)) = sized(&rest[1..], base)
         {
             inline(inner, style, out);
@@ -169,8 +170,34 @@ fn sized(text: &str, base: Style) -> Option<(Style, &str, &str)> {
     ]
     .into_iter()
     .find_map(|(name, style)| Some((style, text.strip_prefix(name)?.strip_prefix('[')?)))?;
-    let end = rest.find(']').filter(|end| *end > 0)?;
+    let end = closing(rest).filter(|end| *end > 0)?;
     Some((style, &rest[..end], &rest[end + 1..]))
+}
+
+/// Whether a size may begin after `before`, as in Sheprd's chat: at the
+/// start, or after a character that is not part of a word, so a colon in
+/// `word:big[x]` or `http://x:big[` stays text.
+fn starts_directive(before: Option<char>) -> bool {
+    before.is_none_or(|ch| !ch.is_alphanumeric() && ch != '/')
+}
+
+/// Where the `]` that closes a span opened just before `text` is, counting
+/// the brackets inside it, such as a link's, in pairs.
+fn closing(text: &str) -> Option<usize> {
+    let mut depth = 1usize;
+    for (at, ch) in text.char_indices() {
+        match ch {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(at);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// A `[label](target)` at the start of `text`: its label, its target, and

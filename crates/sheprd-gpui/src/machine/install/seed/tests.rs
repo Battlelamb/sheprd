@@ -85,6 +85,11 @@ fn provision_user_data_hardens_grub_and_configures_wayland_desktop() {
     assert!(user.contains("sway xwayland grim wtype foot epiphany-browser"));
     assert!(user.contains("fonts-noto-cjk fonts-noto-color-emoji"));
     assert!(user.contains("org.gnome.Epiphany ask-for-default false"));
+    // Embeds Linux guest agent and runs it in the graphical systemd user session.
+    assert!(user.contains("/usr/local/lib/sheprd-machine-agent/agent.py"));
+    assert!(user.contains("/usr/local/lib/sheprd-machine-agent/wayland.py"));
+    assert!(user.contains("sheprd-machine-agent.service"));
+    assert!(user.contains("import-environment WAYLAND_DISPLAY SWAYSOCK"));
     // Does not pass console=hvc0 when serial console is unattached.
     assert!(!user.contains("console=hvc0"));
 }

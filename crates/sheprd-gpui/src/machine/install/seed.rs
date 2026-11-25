@@ -6,8 +6,13 @@
 //! image is cloned — without requiring macOS to mount or mutate ext4 disks.
 
 use crate::machine::Name;
+use base64::Engine as _;
 use sha2::{Digest as _, Sha256};
 use std::{fs, io, path::Path};
+
+const LINUX_AGENT_PY: &[u8] = include_bytes!("../../../../../linux/sheprd-machine-agent/agent.py");
+const LINUX_WAYLAND_PY: &[u8] =
+    include_bytes!("../../../../../linux/sheprd-machine-agent/wayland.py");
 
 const SECTOR_SIZE: usize = 2048;
 /// System area (sectors 0..16), PVD (16), Joliet SVD (17), Terminator (18),
@@ -43,6 +48,8 @@ pub(crate) fn meta_data(name: &Name, identity: &[u8]) -> String {
 /// `apt-get` installation runs on a clean post-resize boot after cloud-init's
 /// first-boot online `growpart`/`resize2fs` and GRUB hardening.
 pub(crate) fn provision_user_data(name: &Name) -> String {
+    let agent_b64 = base64::engine::general_purpose::STANDARD.encode(LINUX_AGENT_PY);
+    let wayland_b64 = base64::engine::general_purpose::STANDARD.encode(LINUX_WAYLAND_PY);
     format!(
         r#"#cloud-config
 hostname: {name}
@@ -72,6 +79,34 @@ write_files:
     content: |
       ssh_deletekeys: true
       preserve_hostname: false
+  - path: /usr/local/lib/sheprd-machine-agent/agent.py
+    permissions: '0755'
+    encoding: b64
+    content: {agent_b64}
+  - path: /usr/local/lib/sheprd-machine-agent/wayland.py
+    permissions: '0644'
+    encoding: b64
+    content: {wayland_b64}
+  - path: /usr/local/bin/sheprd-machine-agent
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      exec /usr/bin/python3 /usr/local/lib/sheprd-machine-agent/agent.py "$@"
+  - path: /home/sheprd/.config/systemd/user/sheprd-machine-agent.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Sheprd Linux Wayland guest agent
+      After=default.target
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/local/bin/sheprd-machine-agent
+      Restart=always
+      RestartSec=1
+
+      [Install]
+      WantedBy=default.target
   - path: /home/sheprd/.config/sway/config
     permissions: '0644'
     content: |
@@ -81,6 +116,7 @@ write_files:
       default_border pixel 2
       bindsym $mod+Return exec foot
       bindsym $mod+Shift+q kill
+      exec systemctl --user import-environment WAYLAND_DISPLAY SWAYSOCK XDG_CURRENT_DESKTOP XDG_SESSION_TYPE && systemctl --user restart sheprd-machine-agent.service
       exec foot
   - path: /home/sheprd/.bash_profile
     permissions: '0644'
@@ -114,7 +150,11 @@ write_files:
         sway xwayland grim wtype foot epiphany-browser \
         fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji \
         dbus-user-session seatd libglib2.0-bin
+      mkdir -p /home/sheprd/.config/systemd/user/default.target.wants
+      ln -sf /home/sheprd/.config/systemd/user/sheprd-machine-agent.service \
+        /home/sheprd/.config/systemd/user/default.target.wants/sheprd-machine-agent.service
       chown -R sheprd:sheprd /home/sheprd
+      loginctl enable-linger sheprd || true
       su - sheprd -c 'dbus-run-session -- gsettings set org.gnome.Epiphany ask-for-default false' || true
       touch /var/lib/sheprd/provisioned
       systemctl disable sheprd-provision.service || true

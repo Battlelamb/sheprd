@@ -220,7 +220,15 @@ fn scale(scale: f64) -> u8 {
 #[cfg(target_os = "macos")]
 fn refused(error: &agent::Error) -> Response {
     let code = match error {
-        agent::Error::NotRunning(_) => ErrorCode::Busy,
+        agent::Error::NotRunning(_)
+        | agent::Error::Refused {
+            refusal: agent::Refusal::NotReady,
+            ..
+        } => ErrorCode::Busy,
+        agent::Error::Refused {
+            refusal: agent::Refusal::Unsupported,
+            ..
+        } => ErrorCode::Unsupported,
         agent::Error::Refused {
             refusal: agent::Refusal::Invalid,
             ..

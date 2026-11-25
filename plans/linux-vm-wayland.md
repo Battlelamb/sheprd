@@ -401,7 +401,16 @@ agent speaking the existing 4-byte length-prefixed JSON wire protocol.
   regeneration (`/etc/machine-id`, SSH host keys, hostname), EFI variable store
   creation and read-only `seed.iso` attachment, atomic `.install-*` staging and
   publication, and Linux desktop readiness tracking (`machine/readiness.rs`).
-- **Next:** Phase 4 (Linux guest agent and desktop interaction).
+- **Phase 4 (Linux guest agent and desktop interaction):** Complete. Implemented
+  the Linux Wayland guest agent (`linux/sheprd-machine-agent/{agent.py,wayland.py}`)
+  speaking the framed bounded vsock protocol on port 7470 with `VMADDR_CID_HOST`
+  peer enforcement, dynamic Wayland/Sway session recovery, capability
+  negotiation, `grim` PNG capture with header/dimension validation, Sway IPC
+  pointer clicks with scale conversion and bounds checks, `wtype` Unicode text
+  and portable key/modifier release, process-group `exec` with timeout/tail
+  truncation, systemd user session embedding in `seed.rs`, and host-side
+  `Refusal::{NotReady, Unsupported}` + PNG dimension bounds handling.
+- **Next:** Phase 5 (Product and remote integration).
 
 ## Open questions remaining
 

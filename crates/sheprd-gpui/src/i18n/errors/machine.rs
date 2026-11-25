@@ -84,6 +84,13 @@ impl Localize for crate::machine::agent::Error {
             Error::Refused { refusal, message } => match refusal {
                 Refusal::Accessibility => fl!("error-machine-agent-accessibility"),
                 Refusal::ScreenRecording => fl!("error-machine-agent-screen-recording"),
+                Refusal::NotReady => {
+                    fl!("error-machine-agent-not-ready", message = message.as_str())
+                }
+                Refusal::Unsupported => fl!(
+                    "error-machine-agent-unsupported",
+                    message = message.as_str()
+                ),
                 Refusal::Invalid | Refusal::Failed => {
                     fl!("error-machine-agent-refused", message = message.as_str())
                 }

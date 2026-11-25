@@ -64,6 +64,14 @@ struct ConnectionToast: View {
                 ProgressView().controlSize(.small)
                 Text("Connecting to \(Self.list(names))").font(.subheadline.weight(.medium)).lineLimit(1)
             }
+        case .relayBanned:
+            capsule(close: close) {
+                Image(systemName: "nosign").foregroundStyle(.red)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Relay banned your network address").font(.subheadline.weight(.medium))
+                    Text(Self.list(names)).font(.caption).foregroundStyle(.secondary)
+                }
+            }
         case .offline:
             // The oldest view still shown is the one worth dating.
             let since = named.compactMap(\.updated).min()

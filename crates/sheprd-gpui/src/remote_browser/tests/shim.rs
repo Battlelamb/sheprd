@@ -107,6 +107,17 @@ fn an_open_reaches_the_window_as_typed() {
 }
 
 #[test]
+fn an_explicit_focus_request_reaches_the_window() {
+    let host = Host::new();
+    let output = host.run(&["browser", "open", "--focus", "localhost:3000"], &[]);
+    assert!(output.status.success(), "{output:?}");
+    assert!(matches!(
+        request(&host).action,
+        Action::Open { focus: true, .. }
+    ));
+}
+
+#[test]
 fn a_long_address_travels_in_parts_and_options_are_kept() {
     let host = Host::new();
     let long = format!("https://example.com/{}?q=\"a\\b\"", "x".repeat(700));

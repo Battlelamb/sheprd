@@ -35,6 +35,8 @@ pub(crate) mod remote;
 #[cfg(target_os = "macos")]
 mod settings;
 #[cfg(target_os = "macos")]
+pub(crate) mod settings_request;
+#[cfg(target_os = "macos")]
 mod store;
 #[cfg(target_os = "macos")]
 mod vm;

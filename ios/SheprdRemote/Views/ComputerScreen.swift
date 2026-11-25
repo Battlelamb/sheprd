@@ -94,6 +94,7 @@ struct ComputerScreen: View {
                     get: { computer.presence },
                     set: { model.setPresence($0, for: computer) }
                 ))
+                ActivityGroupingPicker(computer: computer, label: "Live Activities")
                 LabeledContent("Push", value: PushRelaySection.label(
                     model.tokens.delivery[computer.fingerprint],
                     reached: !model.tokens.unreached.contains(computer.fingerprint),
@@ -166,6 +167,7 @@ struct ComputerStatusLine: View {
         switch status {
         case .online: Label("Connected", systemImage: "circle.fill").foregroundStyle(.green)
         case .connecting: Label("Connecting…", systemImage: "circle.dotted").foregroundStyle(.secondary)
+        case let .relayBanned(relay): Label("\(relay.host) banned your network address", systemImage: "nosign").foregroundStyle(.red)
         case .offline: Label("Offline", systemImage: "wifi.slash").foregroundStyle(.secondary)
         case .revoked: Label("Unpaired this \(UIDevice.current.model)", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
         case .outdated: Label("Needs a newer Sheprd", systemImage: "arrow.up.circle").foregroundStyle(.orange)

@@ -143,6 +143,8 @@ settings-sidebar-device-icons = Show device icons
 settings-sidebar-device-icons-description = A mark before each device's name: this machine, a cloud provider or SSH.
 settings-sidebar-gpu-load = Show GPU and video memory
 settings-sidebar-gpu-load-description = Each host's GPU busy share and VRAM on a line under its CPU and memory, or a GPU gauge after its name in compact layouts. Off by default.
+settings-sidebar-load = Host load
+settings-sidebar-load-description = Each host's CPU, memory and GPU in the Moonframe window's sidebar: Compact shows the shares beside its name (CPU, memory, GPU, video memory), Detailed adds lines under it with their graphs and video memory.
 settings-sidebar-indent = Indent
 settings-sidebar-indent-description = Pixels each nesting level steps in.
 settings-sidebar-row-padding = Row padding
@@ -226,6 +228,8 @@ settings-chat-launcher = Chat launcher
 settings-chat-launcher-description = Where tab strips offer a one-click chat with each installed agent. "+" keeps opening a terminal tab in every placement.
 settings-chat-auto-convert = Open new agents as chats
 settings-chat-auto-convert-description = Move each Claude, Codex, Copilot, or OpenCode agent started in a terminal, by you or another tool, into a chat once it has been idle for a few seconds. Agents already running, those you type into, and chats moved back stay in their terminals.
+settings-chat-message-effects = Message effects
+settings-chat-message-effects-description = Play bubble and screen effects in agent replies. Turn off to show invisible ink as ordinary text and hide replay links.
 settings-chat-glide = Smooth chat scrolling
 settings-chat-glide-description = Scroll smoothly to a reply's new text as it streams in. Off, the chat jumps to it as each chunk lands.
 settings-chat-wrap-code = Wrap code
@@ -288,3 +292,5 @@ settings-config-reload = Reload configuration
 settings-config-reload-description = Re-reads both files. Does not restart the daemon.
 
 settings-agent-guide-dismiss = Dismiss agent guidance
+
+settings-section-voice = Voice

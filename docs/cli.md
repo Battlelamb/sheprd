@@ -106,7 +106,7 @@ Every command accepts:
 | `window fullscreen [on\|off\|toggle]` | |
 | `window size [WIDTHxHEIGHT]` | Print or set the window's size; windows cannot be moved |
 | `window detach\|reconnect` | Detach from, or reconnect to, the selected host |
-| `ui settings [PAGE]` | Open a Settings page; without PAGE, open Settings and list available pages and row IDs |
+| `ui settings [PAGE]` | Open a Settings page, such as `ui settings voice` for speech accounts. Omit PAGE to list pages and row IDs |
 | `ui highlight ROW_ID` | Open Settings at that row, scroll it into view, and highlight it |
 | `ui guide TEXT [--highlight ROW_ID]` | Update one persistent top banner (three lines maximum), optionally opening and highlighting a Settings row |
 | `ui guide --clear` | Dismiss the banner and highlight; the person can also dismiss it |
@@ -141,30 +141,30 @@ Sheprd** entry, which both Windows installers add, runs this command through
 | --- | --- |
 | `tab [list]` | Pages, code, reviews, and Devices tabs with IDs |
 | `tab focus\|close ID` | |
-| `browser open\|reload\|feedback` | Opens preserve the current tab and keyboard focus. See [browser tabs](../crates/sheprd-gpui/README.md#browser-tabs) |
+| `browser open\|reload\|feedback` | Files and web addresses open in a background tab. Use `--focus` to select it or `--beside` for a visible split. See [browser tabs](../crates/sheprd-gpui/README.md#browser-tabs) |
 | `browser list` | Page tabs only |
 | `browser navigate ID URL` | Load another address in a page tab |
 | `browser back\|forward ID` | |
 | `browser zoom ID +\|-\|reset\|PERCENT` | Zoom a page tab a step, back to 100%, or to 50-300%; the tab keeps it |
-| `browser text ID` | The page's visible text |
-| `browser screenshot ID PATH` | A PNG of the visible page, at most 2000 px a side (macOS) |
+| `browser text ID` | Read the page’s text in the background |
+| `browser screenshot ID PATH` | Capture the page without selecting the tab, at most 2000 px a side (macOS). Both screenshot and text report busy if an inactive Mac window would need to create the page |
 | `code open FILE[:LINE]` | A read-only code tab at a line |
 | `code edit FILE[:LINE]` | Your terminal editor, in a new pane beside yours |
 | `devices` | The Devices overview |
-| `machine [open [NAME]]` | The virtual Mac called NAME (default `default`) in a tab, started or resumed if it is not running. Closing the tab leaves it running; quitting Sheprd saves it (Apple silicon Macs) |
+| `machine [open [NAME]]` | The virtual Mac called NAME (default `default`) in a background tab, started or resumed if it is not running. Closing the tab leaves it running; quitting Sheprd saves it (Apple silicon Macs) |
 | `machine start NAME` | Start it without a tab, resuming it if it was saved; `machine agent` tells when it is ready |
 | `machine claim NAME [--wait S]` | Atomically reserve for the calling pane/terminal for 15 idle minutes; repeat to renew. Busy exits 6. `--wait` (1–600 seconds) retries with progress on stderr every five seconds, preserving JSON stdout |
 | `machine release NAME` | Release your own reservation when finished; another owner gets exit 6 |
 | `machine list` | Sheprd VM slots in use, total limit, and slots available, followed by each machine's reservation owner and idle seconds remaining (or unreserved), state, CPUs, memory, display, and disk use, which counts blocks shared with its image. Exits 4 when there are none |
 | `machine set NAME [--cpus N] [--memory GB] [--display fit\|WxH]` | What it boots with next, after it next shuts down |
 | `machine suspend NAME` | Save it and stop it; it resumes where it was when next shown |
-| `machine delete NAME` | Ask in Settings to delete it and free its disk; the user confirms there |
+| `machine delete NAME` | Add a notice to review deletion in Settings and free its disk; the user confirms there |
 | `machine new NAME --from IMAGE` | Make a machine from an image: an APFS clone that takes no real space until it changes, with its own identity, so several can run at once (macOS allows 2) |
-| `machine new [NAME]` | Open Settings > Virtual Macs, where the user confirms downloading Apple's newest macOS for this Mac (over 20 GB) and installing it on a new machine, `NAME` or `default`; it then opens with its setup guide. Exits 2 when `NAME` exists |
+| `machine new [NAME]` | Add a notice that the user can click to open Virtual Macs settings and confirm downloading Apple's newest macOS for this Mac (over 20 GB) and installing it on a new machine, `NAME` or `default`; it then opens with its setup guide. Exits 2 when `NAME` exists |
 | `machine image [list]` | The images machines can start from. Exits 4 when there are none |
 | `machine image save MACHINE IMAGE` | Keep a shut down machine as an image. Exits 6 while it runs or is suspended |
-| `machine image delete IMAGE` | Ask in Settings to delete it; the user confirms there. Machines made from it stay |
-| `machine setup [NAME]` | Shows the machine with its setup guide docked beside it: sign in, install Sheprd Agent, allow its two permissions, and save an image, each checked by Sheprd before the next. A machine made from an image opens with it already |
+| `machine image delete IMAGE` | Add a notice to review deletion in Settings; the user confirms there. Machines made from it stay |
+| `machine setup [NAME]` | Opens a background machine tab with its setup guide docked beside it: sign in, install Sheprd Agent, allow its two permissions, and save an image, each checked by Sheprd before the next. A machine made from an image opens with it already |
 | `machine agent NAME` | Whether Sheprd Agent answers inside the running machine: its screen size in pixels and whether macOS lets it post input and take screenshots (see [Working inside a virtual Mac](#working-inside-a-virtual-mac)). Exits 1 when it does not answer |
 | `machine exec NAME [--timeout S] [--cwd DIR] -- COMMAND...` | Run a command as the machine's logged-in user and print its output, as `cloud exec` does |
 | `machine screenshot NAME PATH` | Write a PNG of the machine's screen to PATH |
@@ -177,7 +177,7 @@ Sheprd** entry, which both Windows installers add, runs this command through
 | `orchestrator adopt RUN [--repo PATH]` | Read the current process of a loaded legacy run and prepare the user's adoption confirmation; grants no authority until confirmed and revalidated |
 | `orchestrator items\|issues\|prs\|tasks` | What it last synced, from its local database (no app needed); `tasks` is the repository's Beads tasks, with each one's assignee, priority, and blockers in `--json` |
 | `review` | The review of your workspace's uncommitted changes |
-| `px0 [open]` | Open or focus px0 on your local workspace's checkout (macOS and Windows) |
+| `px0 [open]` | Open a background px0 tab on your local workspace's checkout (macOS and Windows) |
 
 `px0 open` reuses one editor tab per workspace. It discovers a local px0
 workbench or starts an installed px0; `config set px0.url http://127.0.0.1:7777/`
@@ -228,7 +228,7 @@ share at least two of its keywords and were not shown yet in that chat.
 | `chat pr [list]` | Run as the agent of a `sheprd-acp` chat: the pull requests that chat's side rail lists, oldest first, each with its repository, address, and what was done to it (`created`, `pushed`, `edited`, `commented`, `reviewed`, `ready`, `merged`, `closed`, `reopened`). Reaches the chat named by `SHEPRD_CHAT_ENDPOINT`, which the chat sets on its agent, over the chat's own socket; Sheprd need not run. Exits 4 when there are none, 2 outside a chat, and 3 when the chat cannot be reached (see [Pull requests in a chat's rail](#pull-requests-in-a-chats-rail)) |
 | `chat pr add URL` | List a pull request (`https://github.com/OWNER/REPO/pull/N`) in your chat's rail, for one you changed without `gh`. Exits 2 for an address that is not a GitHub pull request |
 | `chat show\|hide\|toggle [--pane ID]` | Show the native chat view over your pane (or ID, else the focused one), or its terminal |
-| `chat new [AGENT] [--pane ID] [--prompt TEXT \| --prompt-file PATH]` | Open a tab running a `sheprd-acp` chat with a built-in agent (`claude`, `codex`, `copilot`, `gemini`, `kimi`, `opencode`, `pi`) in the workspace and folder of your pane (or ID). `--prompt` or `--prompt-file` (`-` reads standard input) starts it with a brief, at most 96 KB, sent as its first prompt and shown as the calling agent's rather than the person's (see [Starting a chat with a brief](rich-chat.md#starting-a-chat-with-a-brief)); exits 2 for an empty, binary, or longer brief, and 8 for a chat on an SSH host or another machine's Herdr 2, which cannot take one yet. Run by a chat's agent, it starts a chat like that one: AGENT left out is the chat's own agent, and the chat's own agent, named or not, starts with the chat's model, thinking level, permission mode, and auto-accepting (see [Starting a chat like this one](rich-chat.md#starting-a-chat-like-this-one)); AGENT may be left out only there. While its agent is idle, a chat on this machine can switch to another installed agent from its composer, which hands the new agent the conversation. On an SSH host the tab runs that host's `sheprd-acp` (see [Chats on SSH hosts](#chats-on-ssh-hosts)). With no Herdr pane to go by, as when called from a Herdr 2 pane, a Herdr 2 tab in the active group splits its pane in use with the chat instead (see [Chats in Herdr 2 panes](rich-chat.md#chats-in-herdr-2-panes)); its pane id in `chat` is `core:` and the terminal's. Exits 8 when `sheprd-acp` is missing here, the host cannot be reached, or the agent is not installed on it (`sheprd-acp agents` lists those that are) |
+| `chat new [AGENT] [--pane ID] [--prompt TEXT \| --prompt-file PATH]` | Open a background tab running a `sheprd-acp` chat with a built-in agent (`antigravity`, `claude`, `codex`, `copilot`, `gemini`, `kimi`, `muse`, `opencode`, `pi`) in the workspace and folder of your pane (or ID). `--prompt` or `--prompt-file` (`-` reads standard input) groups the delegated task on the calling turn’s iOS Live Activity and starts it with a brief, at most 96 KB, sent as its first prompt and shown as the calling agent's rather than the person's (see [Starting a chat with a brief](rich-chat.md#starting-a-chat-with-a-brief)); exits 2 for an empty, binary, or longer brief, and 8 for a chat on an SSH host or another machine's Herdr 2, which cannot take one yet. Run by a chat's agent, it starts a chat like that one: AGENT left out is the chat's own agent, and the chat's own agent, named or not, starts with the chat's model, thinking level, permission mode, and auto-accepting (see [Starting a chat like this one](rich-chat.md#starting-a-chat-like-this-one)); AGENT may be left out only there. While its agent is idle, a chat on this machine can switch to another installed agent from its composer, which hands the new agent the conversation. On an SSH host the tab runs that host's `sheprd-acp` (see [Chats on SSH hosts](#chats-on-ssh-hosts)). A Herdr 2 caller gets a background tab in its workspace and folder (see [Chats in Herdr 2 panes](rich-chat.md#chats-in-herdr-2-panes)). Exits 8 when `sheprd-acp` is missing here, the host cannot be reached, or the agent is not installed on it (`sheprd-acp agents` lists those that are) |
 
 ### Hosts
 
@@ -434,10 +434,10 @@ host, so that Mac's own Sheprd runs the machine and keeps its claims, which
 name this computer and the pane that asked. Nothing is copied: the other
 Mac makes machines from its own images.
 
-Opening, starting, or claiming a machine there first asks the user in this
-window: **Use once**, **Always use HOST** (kept in `[machine] borrow_from`),
+Opening, starting, or claiming a machine there adds a notice in this window.
+Click it to review the request and choose **Use once**, **Always use HOST** (kept in `[machine] borrow_from`),
 or **Wait for a slot here**. Waiting or closing the dialog exits 6. `open`
-starts the machine there and shows it here in a tab drawn from its frames,
+starts the machine there and adds a background tab here drawn from its frames,
 which come a few times a second and shrink on a slow link; clicks and keys
 in that tab reach the machine unless an agent holds it. A screenshot's
 `PATH` is on this computer.
@@ -875,7 +875,8 @@ is off, chat panes show their terminal and `chat new` exits 8.
 Set the reading width with `sheprd config set chat.max_width 1200`, or use
 `0` for the full available width. Bounded widths range from 320 to 4000 logical
 pixels; the default is 800. Settings > Chat offers the same width slider and
-**Full-width chat** switch.
+**Full-width chat** switch. Turn off desktop message effects with
+`sheprd config set chat.message_effects false` or **Settings > Chat > Message effects**.
 
 A chat on an SSH host shows in the native chat view like a local one. Sheprd
 runs `sheprd-acp connect ID` on the host over the same SSH connection it uses

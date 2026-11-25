@@ -90,6 +90,7 @@ impl SheprdWindow {
                     .is_some_and(super::Hub::cooling);
             if self.keep_default_workspace(missing, &scope, cx) {
                 let purpose = super::Purpose::Tab {
+                    focus: true,
                     group: None,
                     scope,
                     workspace: super::WORKSPACE.to_owned(),
@@ -135,6 +136,7 @@ impl SheprdWindow {
                 built.push((scope, Arc::new(session)));
             }
         }
+        self.keep_core_workspace_names(&built, cx);
         let unchanged = self.core_terminals.sessions == built;
         if !unchanged {
             let recency = &mut self.core_terminals.recency;
@@ -169,7 +171,7 @@ impl SheprdWindow {
             .collect()
     }
 
-    pub(super) fn live_at(&self, index: usize) -> &crate::state::LiveState {
+    pub(crate) fn live_at(&self, index: usize) -> &crate::state::LiveState {
         if index == self.selected_endpoint {
             &self.live
         } else {

@@ -248,6 +248,8 @@ struct MachineStatus: View {
             }
         case .connecting:
             ProgressView().controlSize(.small)
+        case .relayBanned:
+            Label("Relay ban", systemImage: "nosign").font(.caption).foregroundStyle(.red)
         case .offline:
             Image(systemName: "wifi.slash").foregroundStyle(.secondary).accessibilityLabel("Offline")
         case .revoked:
@@ -510,6 +512,11 @@ private struct MachineActions: View {
 
     var body: some View {
         let computer = machine.computer
+        if case .online = machine.status {
+            Button("New Project…", systemImage: "folder.badge.plus") {
+                model.creating = .project(device: machine.id)
+            }
+        }
         Toggle("Hold Alerts at the Desk", systemImage: "bell.badge", isOn: Binding(
             get: { computer.presence },
             set: { model.setPresence($0, for: computer) }

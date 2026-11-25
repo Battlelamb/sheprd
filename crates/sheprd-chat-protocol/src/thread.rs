@@ -271,6 +271,30 @@ impl Record {
     }
 }
 
+/// Exclusive ownership of a thread's record and transcript. The separate
+/// lock file is never renamed or removed, so atomic rewrites cannot release
+/// ownership or let another process lock a different inode.
+#[derive(Debug)]
+pub struct Lock {
+    _file: std::fs::File,
+}
+
+impl Lock {
+    pub fn acquire(dir: &Path, id: &ThreadId) -> Result<Self, Error> {
+        crate::private::create_dir(dir)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let file = options.open(dir.join(format!("{id}.lock")))?;
+        file.try_lock().map_err(|error| match error {
+            std::fs::TryLockError::WouldBlock => Error::Locked,
+            std::fs::TryLockError::Error(error) => Error::Io(error),
+        })?;
+        Ok(Self { _file: file })
+    }
+}
+
 /// A thread's title from its first prompt: the first line with text, cut
 /// to [`MAX_TITLE`] bytes on a character boundary.
 pub fn title(prompt: &str) -> String {

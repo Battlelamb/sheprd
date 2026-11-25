@@ -28,9 +28,9 @@ use std::{
 use tokio::sync::{broadcast, oneshot};
 
 /// The attach revision the daemon reads. Phones decode entries strictly,
-/// so the threads revision (4: handoff entries) waits until they draw them;
+/// so the threads revision (5: handoff entries) waits until they draw them;
 /// until then the chat program sends its handoffs as notices.
-const PHONE_REVISION: u32 = 3;
+const PHONE_REVISION: u32 = 4;
 
 /// How long connecting waits for a free pipe instance on Windows.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);

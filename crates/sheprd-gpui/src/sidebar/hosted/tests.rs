@@ -1,6 +1,19 @@
 use super::*;
 use gpui::TestAppContext;
 
+mod connection;
+mod device_gpu;
+mod device_load;
+mod drafted;
+mod edge;
+mod focus;
+mod host_colors;
+mod icons;
+mod nest;
+mod sidebar_size;
+mod status_buttons;
+mod unread;
+
 #[gpui::test]
 fn the_state_lists_each_workspace_with_what_its_row_shows(cx: &mut TestAppContext) {
     let (view, cx) = cx.add_window_view(crate::sidebar::layout_tests::fixture_window);
@@ -162,6 +175,7 @@ fn folding_every_group_hides_its_worktrees_under_their_checkout(cx: &mut TestApp
         assert_eq!(open.len(), 3);
         assert_eq!(open[0]["group"], "repo");
         assert_eq!(open[0]["collapsed"], false);
+        assert_eq!(open[0]["fold_glyph"], "▾");
         assert_eq!(open[1]["child"], true);
 
         let before = view.hosted_stamp();
@@ -170,6 +184,7 @@ fn folding_every_group_hides_its_worktrees_under_their_checkout(cx: &mut TestApp
         let folded = rows(view, cx);
         assert_eq!(folded.len(), 2);
         assert_eq!(folded[0]["collapsed"], true);
+        assert_eq!(folded[0]["fold_glyph"], crate::direction::glyph("▸"));
 
         view.hosted_action(
             Action::ToggleRepository {

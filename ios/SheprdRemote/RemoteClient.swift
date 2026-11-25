@@ -118,6 +118,11 @@ final class RemoteClient: Sendable {
     let fingerprint: Fingerprint
     let session: URLSession
 
+    /// The tags of the `Fleet.call` this request belongs to: each request
+    /// gets the next, sent as `PathFailure.tagHeader` so the computer's
+    /// log names it too.
+    @TaskLocal static var callTags: CallTags?
+
     init(origin: String, fingerprint: Fingerprint) {
         self.origin = origin
         self.fingerprint = fingerprint
@@ -148,6 +153,10 @@ final class RemoteClient: Sendable {
     func claimStatus(_ claim: String) async throws -> API.ClaimStatus {
         let escaped = claim.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? claim
         return try await send("GET", "/api/pair/claim/\(escaped)")
+    }
+
+    func pairVoice<Body: Encodable, Answer: Decodable>(_ body: Body, bearer: String) async throws -> Answer {
+        try await send("POST", "/api/v2/pair/voice", body: body, bearer: bearer, timeout: 18)
     }
 
     /// Whether this address answers at all, within three seconds.
@@ -194,7 +203,7 @@ final class RemoteClient: Sendable {
         request.timeoutInterval = 60
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await session.upload(for: request, from: image, delegate: UploadWatcher(report: progress))
+        let (data, response) = try await session.upload(for: Self.tagged(request), from: image, delegate: UploadWatcher(report: progress))
         let answer: Answer = try decode(data, response)
         return answer.id
     }
@@ -202,6 +211,12 @@ final class RemoteClient: Sendable {
     /// The agents and folders a new workspace or chat may use.
     func newOptions(bearer: String) async throws -> NewOptions {
         try await send("GET", "/api/v2/new", bearer: bearer)
+    }
+
+    func createProject(_ project: NewProjectRequest, bearer: String) async throws -> String {
+        struct Answer: Decodable { let path: String }
+        let answer: Answer = try await send("POST", "/api/v2/projects", body: project, bearer: bearer, timeout: 260)
+        return answer.path
     }
 
     /// Creating waits up to ten seconds for the chat's program to report in.
@@ -258,7 +273,7 @@ final class RemoteClient: Sendable {
         request.httpBody = body
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: Self.tagged(request))
         guard let http = response as? HTTPURLResponse else { throw RemoteError.notHTTP }
         guard (200..<300).contains(http.statusCode) else {
             throw RemoteError.status(http.statusCode, Refusal.text(status: http.statusCode, body: data))
@@ -285,6 +300,20 @@ final class RemoteClient: Sendable {
         }
         let _: EmptyAnswer = try await send(
             "POST", "/api/v2/favorites", body: Change(pane: pane, favorite: favorite), bearer: bearer
+        )
+    }
+
+    // MARK: Read marks
+
+    /// Marks the agents in `panes` read or unread on every device; the
+    /// computer's homes say so. An older computer answers 404.
+    func setRead(_ read: Bool, panes: [String], bearer: String) async throws {
+        struct Change: Encodable {
+            let panes: [String]
+            let read: Bool
+        }
+        let _: EmptyAnswer = try await send(
+            "POST", "/api/v2/read", body: Change(panes: panes, read: read), bearer: bearer
         )
     }
 
@@ -541,8 +570,12 @@ final class RemoteClient: Sendable {
         )
     }
 
-    func registerAPNs(_ registration: API.APNsRegistration, bearer: String) async throws -> API.APNsAnswer {
-        try await send("POST", "/api/apns", body: registration, bearer: bearer)
+    func registerAPNs(_ registration: API.APNsRegistration, singleActivity: Bool, epoch: UUID?, bearer: String) async throws -> API.APNsAnswer {
+        // Older computers ignore the query and continue accepting all the tokens.
+        var query = singleActivity ? ["single=true"] : []
+        if let epoch { query.append("epoch=" + epoch.uuidString) }
+        let path = query.isEmpty ? "/api/apns" : "/api/apns?" + query.joined(separator: "&")
+        return try await send("POST", path, body: registration, bearer: bearer)
     }
 
     /// Asks the computer to send this phone a sealed test alert carrying `id`.
@@ -604,8 +637,15 @@ final class RemoteClient: Sendable {
     }
 
     private func perform<Answer: Decodable>(_ request: URLRequest) async throws -> Answer {
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: Self.tagged(request))
         return try decode(data, response)
+    }
+
+    private static func tagged(_ request: URLRequest) -> URLRequest {
+        guard let tags = callTags else { return request }
+        var request = request
+        request.setValue(tags.next(), forHTTPHeaderField: PathFailure.tagHeader)
+        return request
     }
 
     private func decode<Answer: Decodable>(_ data: Data, _ response: URLResponse) throws -> Answer {

@@ -102,6 +102,10 @@ impl SheprdWindow {
         let browser_tabs = cx.observe_global::<crate::browser::Store>(|_, cx| cx.notify());
         let agent_favorites = crate::agent_favorites::AgentFavorites::current(cx);
         let agent_favorites_changed = Self::observe_agent_favorites(cx);
+        let agent_read = crate::agent_read::AgentRead::current(cx);
+        let agent_read_changed = Self::observe_agent_read(cx);
+        let chat_drafts = crate::chat::drafts::Drafts::current(cx);
+        let chat_drafts_changed = Self::observe_chat_drafts(cx);
         let device_tags = crate::device_tags::DeviceTags::current(cx);
         let device_tags_changed = Self::observe_device_tags(cx);
         let worktree_notes = Self::observe_worktree_notes(window, cx);
@@ -133,12 +137,17 @@ impl SheprdWindow {
         });
         let window_closed = Self::give_back_torn_tabs(cx);
         let terminal_focus = Self::leave_region_with_terminal(&focus, window, cx);
+        let agent_guidance = cx.new(|_| crate::agent_guidance::State::default());
+        let agent_guidance_changed = cx.observe(&agent_guidance, |_, _, cx| cx.notify());
         let mut this = Self {
             // keep-sorted start
             _activation: activation,
             _agent_favorites: agent_favorites_changed,
+            _agent_guidance: agent_guidance_changed,
+            _agent_read: agent_read_changed,
             _appearance: appearance_change,
             _browser_tabs: browser_tabs,
+            _chat_drafts: chat_drafts_changed,
             _device_tags: device_tags_changed,
             _host_theme: host_theme,
             _notification_mutes: notification_mutes,
@@ -153,6 +162,8 @@ impl SheprdWindow {
             activity: Default::default(),
             agent_favorites,
             agent_group: None,
+            agent_guidance,
+            agent_read,
             agent_sort: preferences::AgentSort::default(),
             agent_sort_modified: false,
             app_update_notes: Default::default(),
@@ -166,7 +177,9 @@ impl SheprdWindow {
             browser,
             catalog,
             cell_width: 9.,
+            chat_drafts,
             chat_rail_width: crate::panel_resize::CHAT_RAIL,
+            chat_turns: Default::default(),
             chats: Default::default(),
             checkpoints: Default::default(),
             chrome_region: None,
@@ -186,6 +199,7 @@ impl SheprdWindow {
             core_terminals,
             daemon_text: Default::default(),
             deliveries: Default::default(),
+            details_visible: false,
             device_drag: None,
             device_filter: Default::default(),
             device_order: Vec::new(),
@@ -219,6 +233,7 @@ impl SheprdWindow {
             gui_config_diagnostic,
             held_keys: Default::default(),
             hosted: false,
+            hosted_full_header: None,
             hover: None,
             hover_menu: None,
             hovered_terminal_link: false,
@@ -332,6 +347,7 @@ impl SheprdWindow {
             theme,
             theme_light: crate::app::light_appearance(cx),
             title: WINDOW_TITLE.to_owned(),
+            titlebar_width: 0.,
             toast_motion: Default::default(),
             toasts_hidden: false,
             traces: Default::default(),

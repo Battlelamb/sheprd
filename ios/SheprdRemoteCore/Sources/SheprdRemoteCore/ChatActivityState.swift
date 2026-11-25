@@ -17,6 +17,10 @@ import Foundation
 /// | `permission` | int? | the waiting permission's id, in the question phase |
 /// | `options` | `[{id, name, kind}]`, default empty | its first three options, for answer buttons |
 /// | `previous` | `[string]`, default empty | the two steps before `step`, oldest first |
+/// | `activity` | string? | `step` in plain words, for the Standard and Complete styles |
+/// | `icon` | string? | the kind of step (`test`, `git`, `edit`, …), for its symbol |
+/// | `previousActivities` | `[string]`, default empty | `previous` in plain words |
+/// | `steps`, `files` | int? | the turn's tool calls and edited files so far |
 ///
 /// Older daemons also sent `cost`, which is ignored: the price of a turn
 /// is not worth the room on a phone.
@@ -31,6 +35,17 @@ public struct ChatActivityState: Codable, Hashable, Sendable {
         case failed
     }
 
+    public struct AgentProgress: Codable, Hashable, Sendable {
+        public var done: Int
+        public var total: Int
+        public var latest: String?
+
+        public var fraction: Double { total > 0 ? min(1, max(0, Double(done) / Double(total))) : 0 }
+        public var label: String { "\(done) of \(total) agents done" }
+    }
+
+    public var focus: ChatActivityFacts?
+    public var agents: AgentProgress?
     public var phase: Phase
     public var step: String
     public var startedAt: Date
@@ -43,6 +58,11 @@ public struct ChatActivityState: Codable, Hashable, Sendable {
     public var permission: PermissionId?
     public var options: [Option]
     public var previous: [String]
+    public var activity: String?
+    public var icon: ActivityIcon?
+    public var previousActivities: [String]
+    public var steps: Int?
+    public var files: Int?
 
     /// An answer the lock screen offers as a button.
     public struct Option: Codable, Hashable, Sendable {
@@ -69,7 +89,12 @@ public struct ChatActivityState: Codable, Hashable, Sendable {
         waiting: Int = 0,
         permission: PermissionId? = nil,
         options: [Option] = [],
-        previous: [String] = []
+        previous: [String] = [],
+        activity: String? = nil,
+        icon: ActivityIcon? = nil,
+        previousActivities: [String] = [],
+        steps: Int? = nil,
+        files: Int? = nil
     ) {
         self.phase = phase
         self.step = step
@@ -83,15 +108,23 @@ public struct ChatActivityState: Codable, Hashable, Sendable {
         self.permission = permission
         self.options = options
         self.previous = previous
+        self.activity = activity
+        self.icon = icon
+        self.previousActivities = previousActivities
+        self.steps = steps
+        self.files = files
     }
 
     enum CodingKeys: String, CodingKey {
         case phase, step, startedAt, question, summary, planDone, planTotal, working, waiting
         case permission, options, previous
+        case activity, icon, previousActivities, steps, files, agents, focus
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        focus = try container.decodeIfPresent(ChatActivityFacts.self, forKey: .focus)
+        agents = try container.decodeIfPresent(AgentProgress.self, forKey: .agents)
         phase = try container.decode(Phase.self, forKey: .phase)
         step = try container.decode(String.self, forKey: .step)
         let seconds = try container.decode(Double.self, forKey: .startedAt)
@@ -105,10 +138,18 @@ public struct ChatActivityState: Codable, Hashable, Sendable {
         permission = try container.decodeIfPresent(PermissionId.self, forKey: .permission)
         options = try container.decodeIfPresent([Option].self, forKey: .options) ?? []
         previous = try container.decodeIfPresent([String].self, forKey: .previous) ?? []
+        activity = try container.decodeIfPresent(String.self, forKey: .activity)
+        // A kind this app does not know draws no symbol rather than failing.
+        icon = (try? container.decodeIfPresent(String.self, forKey: .icon)).flatMap(ActivityIcon.init(rawValue:))
+        previousActivities = try container.decodeIfPresent([String].self, forKey: .previousActivities) ?? []
+        steps = try container.decodeIfPresent(Int.self, forKey: .steps)
+        files = try container.decodeIfPresent(Int.self, forKey: .files)
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(focus, forKey: .focus)
+        try container.encodeIfPresent(agents, forKey: .agents)
         try container.encode(phase, forKey: .phase)
         try container.encode(step, forKey: .step)
         try container.encode(startedAt.timeIntervalSince1970.rounded(.down), forKey: .startedAt)
@@ -121,6 +162,29 @@ public struct ChatActivityState: Codable, Hashable, Sendable {
         try container.encodeIfPresent(permission, forKey: .permission)
         if !options.isEmpty { try container.encode(options, forKey: .options) }
         if !previous.isEmpty { try container.encode(previous, forKey: .previous) }
+        try container.encodeIfPresent(activity, forKey: .activity)
+        try container.encodeIfPresent(icon, forKey: .icon)
+        if !previousActivities.isEmpty { try container.encode(previousActivities, forKey: .previousActivities) }
+        try container.encodeIfPresent(steps, forKey: .steps)
+        try container.encodeIfPresent(files, forKey: .files)
+    }
+
+    /// The step in plain words: `activity`, or `step` from a computer that
+    /// does not say it in words.
+    public var plainStep: String { activity ?? step }
+
+    /// The steps before it in plain words, falling back the same way.
+    public var plainPrevious: [String] {
+        previousActivities.count == previous.count ? previousActivities : previous
+    }
+
+    /// `14 steps · 3 files`, from what the computer counted.
+    public var counts: String? {
+        let parts = [
+            steps.map { $0 == 1 ? "1 step" : "\($0) steps" },
+            files.map { $0 == 1 ? "1 file" : "\($0) files" },
+        ].compactMap(\.self)
+        return parts.isEmpty ? nil : parts.joined(separator: " \u{b7} ")
     }
 
     /// Plan progress from 0 to 1, when the agent keeps a plan.

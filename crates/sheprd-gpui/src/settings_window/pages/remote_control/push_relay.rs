@@ -95,6 +95,7 @@ impl SettingsWindow {
             .child(switch)
             .children(self.push_relay_ask(cx))
             .child(self.push_delivery(cx))
+            .children(self.test_push_row(cx))
     }
 
     /// The explanation, unfolding while it asks and folding once answered.

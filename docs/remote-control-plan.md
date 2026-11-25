@@ -239,8 +239,9 @@ committed; Alpine's CSP build is vendored; everything is embedded with
 - **Home** (mockup Round 3 F, after Ghostty's mobile app): a horizontal
   strip of pending questions on top, then each computer as a section, and
   under it each workspace as an inset grouped list with ⊕ (new chat there)
-  and a collapse chevron. Rows carry the agent's icon with an unread or
-  question dot, the chat title, and `•••` while working. Terminal tabs show
+  and a collapse chevron. Rows carry the agent's icon with a question dot,
+  the chat title, and `•••` while working, and an unread agent's row a
+  leading dot (see Unread agents). Terminal tabs show
   a terminal icon and open the terminal view (see Terminal tabs). A
   floating glass toolbar holds settings, the eye, and ＋ (new workspace),
   with search apart.
@@ -435,6 +436,33 @@ phone never disturbs the desktop's layout.
     (`Request::Favorites`) and a connected machine's by running
     `sheprd-remote-control favorites [--offer]` over SSH, with a change as
     JSON on standard input.
+- **Unread agents.** Each computer's daemon keeps what was read of its
+  agents, by pane as favorites name them (`read.json`, at most 1024 panes,
+  the oldest marks dropped first), so reading a chat on any phone or Sheprd
+  clears its dot on all of them, and the agent's next reply brings it back.
+  - **The rule.** A reply is known by when its turn ended, which survives
+    the agent restarting. A pane is unread while it has a reply other than
+    the one last read, or while someone marked it unread by hand. Replies
+    from before the daemon kept marks count as read, so the first start
+    lights nothing up. A terminal agent has replied while Herdr says it is
+    done, dated when the daemon saw its status move (herdr-core reports no
+    time, so its agents are dated the same way); one found done when the
+    daemon starts has no time and is not news, and a reply already read
+    stays read. Herdr 1 restarts drop that session's panes' marks, as
+    favorites do, and only that session's earlier replies count as read.
+    Marks past 1024 drop the oldest as they are made.
+  - **What reads.** A phone reads what it shows on screen, including what
+    is replied while it does; Sheprd reads an agent focused for a second in
+    a window in front. The badge counts unread agents beside those that
+    need an answer.
+  - **Phones.** `home` marks an unread chat and a terminal's unread agent
+    with `"unread": true`, and `POST /api/v2/read` with
+    `{"panes": […], "read": …}` marks up to 1024 panes read or unread,
+    answering `{"panes": […]}`, those unread now.
+  - **Sheprd.** It reads this computer's daemon over the control socket
+    (`Request::Read`) every five seconds and a connected machine's by
+    running `sheprd-remote-control read [--offer]` over SSH every 30, a
+    change going at once. Without a daemon nothing is unread there.
 - **WSL distributions.** A distribution saved as a device on a Windows
   computer is part of that computer, not another machine: it sleeps with it,
   and a phone usually cannot reach its network. So the Windows daemon follows
@@ -580,15 +608,15 @@ push-to-start on a device with a real key, and an app icon.
 
 ## Sheprd
 
-- **Settings > Remote control**: a Pair a phone card first, then the
+- **Settings > Remote control**: a Pair device card first, then the
   toggle, port, addresses served (LAN, Tailscale when present), certificate
   (own CA or user files) with its fingerprint, notification defaults, device
   idle expiry, and paired devices with last seen and Revoke.
 - **Title bar**, before the GitHub account, while remote control runs: a
-  "Pair phone" button until a phone is paired, then a phone with the number
+  "Pair device" button until a phone is paired, then a phone with the number
   connected now (green while any is). It opens the list of phones, each with
   Disconnect (the revoke confirmation: a phone signs back in with its key,
-  so only revoking keeps it out), plus Pair a phone and Settings.
+  so only revoking keeps it out), plus Pair device and Settings.
 - **Remote control dialog**: the QR drawn as GPUI quads from a `qrcode`
   matrix, a 60-second countdown ring, the URL and CA fingerprint, then the
   approval step with the matching code. Reachable from the palette, the

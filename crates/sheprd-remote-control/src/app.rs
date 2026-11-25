@@ -10,12 +10,15 @@ mod error;
 pub mod favorites;
 pub mod firewall;
 pub mod pairing;
+pub mod presence;
 pub mod push_status;
 pub mod qr;
+pub mod read;
 pub mod relay_enroll;
 pub mod relay_tokens;
 pub mod service;
 pub mod shortcuts;
 pub mod tags;
+pub mod voice;
 
 pub use error::{Error, Result};

@@ -6,8 +6,8 @@ use sheprd_chat_protocol::{
     Origin, PermissionId, Queued, Rejection, Status, Turn,
 };
 
-use super::{ConnId, Pending, Session, Update};
 use crate::project::STOP_METHOD;
+use crate::session::{ConnId, Pending, Session, Update};
 
 /// Prompts waiting behind a turn, and their text in bytes: the queue is
 /// copied into every change and snapshot, so it stays well inside a frame.
@@ -50,7 +50,7 @@ impl<R: FnMut(Update)> Session<R> {
         self.ack(conn, id, rejected);
     }
 
-    fn prompt(
+    pub(super) fn prompt(
         &mut self,
         id: CommandId,
         text: String,
@@ -114,12 +114,11 @@ impl<R: FnMut(Update)> Session<R> {
             shown.push_str(sheprd_chat_protocol::ATTACHED);
             shown.push_str(attachment.name());
         }
-        let prompt = self.projector.prompt(&shown, attachments.len());
-        self.emit(prompt);
         let mut blocks = Vec::with_capacity(prepared.len() + 3);
         self.context
             .running(crate::context::Running::of(&self.transcript));
-        if let Some(note) = self.context.before_prompt(origin, text) {
+        let note = self.context.before_prompt(origin, text);
+        if let Some(note) = &note {
             blocks.push(wire::ContentBlock::Text(wire::TextContent::new(note)));
         }
         // The agent that took over hears the conversation next, apart from
@@ -128,6 +127,15 @@ impl<R: FnMut(Update)> Session<R> {
         if let Some(handoff) = &handoff {
             blocks.push(wire::ContentBlock::Text(wire::TextContent::new(handoff)));
         }
+        // The transcript keeps what went ahead of the person's words apart
+        // from them, for a client to show when asked.
+        let sent = [note.as_deref(), handoff.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        let sent = (!sent.is_empty()).then(|| sent.join("\n\n"));
+        let prompt = self.projector.prompt(&shown, attachments.len(), sent);
+        self.emit(prompt);
         if !text.trim().is_empty() {
             blocks.push(wire::ContentBlock::Text(wire::TextContent::new(text)));
         }
@@ -148,7 +156,7 @@ impl<R: FnMut(Update)> Session<R> {
             self.turn = Some(self.next_request);
             self.emit(Change::Turn {
                 turn: Some(Turn {
-                    started_ms: super::now_ms(),
+                    started_ms: crate::session::now_ms(),
                 }),
             });
             self.status(Status::Working);
@@ -167,7 +175,7 @@ impl<R: FnMut(Update)> Session<R> {
             return;
         }
         let next = queued.remove(0);
-        let origin = self.queued_origins.get(&next.id).copied();
+        let origin = self.queued_origins.get(&next.id).cloned();
         self.queue_changed(queued);
         self.send_prompt(&next.text, &next.attachments, origin);
     }
@@ -273,6 +281,23 @@ impl<R: FnMut(Update)> Session<R> {
             .any(|option| option.id == id && option.accepts(value));
         if !known {
             return Err(Rejection::UnknownSetting);
+        }
+        if self.legacy_model_option && id == crate::project::models::OPTION_ID {
+            let OptionValue::Choice { id: model_id } = value else {
+                return Err(Rejection::UnknownSetting);
+            };
+            let request = serde_json::json!({
+                "sessionId": session,
+                "modelId": model_id,
+            });
+            if !self.request(
+                "session/set_model",
+                &request,
+                Pending::SetModel(model_id.clone()),
+            ) {
+                return Err(Rejection::AgentUnavailable);
+            }
+            return Ok(());
         }
         let request = wire::SetSessionConfigOptionRequest::new(
             session,

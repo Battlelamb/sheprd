@@ -7,6 +7,7 @@ mod push_hosts;
 mod push_status;
 mod relay_token;
 mod relays;
+mod test_push;
 
 fn status() -> Status {
     Status {
@@ -26,6 +27,7 @@ fn status() -> Status {
         connected: 1,
         relays: Default::default(),
         github_asks: 0,
+        voice_asks: 0,
     }
 }
 

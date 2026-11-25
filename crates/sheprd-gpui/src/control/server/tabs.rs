@@ -3,6 +3,8 @@
 //! every window.
 mod arrive;
 mod machine_agent;
+mod machine_claims;
+mod machine_remote;
 mod machines;
 mod page;
 
@@ -41,24 +43,38 @@ pub(super) fn serve(
         TabOp::Text { id } => page::text(caller, id, incoming, watches, cx),
         TabOp::Screenshot { id, path } => page::screenshot(caller, id, path, incoming, watches, cx),
         TabOp::Zoom { id, change } => incoming.respond(page::zoom(&caller, id, change, cx)),
-        TabOp::Code { path, line } => arrive::code(&caller, &path, line, incoming, watches, cx),
+        TabOp::Code { path, line } => arrive::code(&caller, &path, line, incoming, cx),
         TabOp::Edit { path, line } => arrive::edit(&caller, &path, line, incoming, watches, cx),
-        TabOp::Devices => arrive::devices(&caller, incoming, watches, cx),
+        TabOp::Devices => arrive::devices(&caller, incoming, cx),
         TabOp::Machine { name } => arrive::machine(&caller, name, false, incoming, watches, cx),
         TabOp::MachineSetup { name } => arrive::machine(&caller, name, true, incoming, watches, cx),
         op @ (TabOp::MachineAgent { .. }
         | TabOp::MachineClick { .. }
         | TabOp::MachineExec { .. }
         | TabOp::MachineKey { .. }
+        | TabOp::MachinePeek { .. }
         | TabOp::MachineScreenshot { .. }
-        | TabOp::MachineType { .. }) => machine_agent::serve(op, incoming, cx),
-        TabOp::MachineDelete { name } => machines::delete(&caller, name, incoming, cx),
+        | TabOp::MachineType { .. }) => machine_agent::serve(&caller, op, incoming, cx),
+        TabOp::MachineDelete { name } => {
+            machine_claims::guarded(caller, name, incoming, cx, machines::delete)
+        }
         TabOp::MachineImageDelete { name } => {
             machines::image_delete(&caller, name, incoming, cx);
         }
         TabOp::MachineImageList => machines::image_list(incoming, cx),
         TabOp::MachineImageSave { machine, image } => {
-            machines::image_save(machine, image, incoming, cx);
+            machine_claims::guarded(
+                caller,
+                machine,
+                incoming,
+                cx,
+                move |_, name, incoming, cx| {
+                    machines::image_save(name, image, incoming, cx);
+                },
+            );
+        }
+        op @ (TabOp::MachineClaim { .. } | TabOp::MachineRelease { .. }) => {
+            machine_claims::serve(caller, op, incoming, cx);
         }
         TabOp::MachineList => machines::list(incoming, cx),
         TabOp::MachineNew { name, image } => machines::new(&caller, name, image, incoming, cx),
@@ -67,13 +83,27 @@ pub(super) fn serve(
             cpus,
             memory_gib,
             display,
-        } => machines::set(name, (cpus, memory_gib, display), incoming, cx),
-        TabOp::MachineSuspend { name } => machines::suspend(name, incoming, cx),
+        } => machine_claims::guarded(caller, name, incoming, cx, move |_, name, incoming, cx| {
+            machines::set(name, (cpus, memory_gib, display), incoming, cx);
+        }),
+        TabOp::MachineStart { name } => {
+            machine_claims::guarded(caller, name, incoming, cx, |caller, name, incoming, cx| {
+                machines::start(caller, name, incoming, cx);
+            });
+        }
+        TabOp::MachineOn { host, request } => {
+            machine_remote::serve(caller, host, *request, incoming, watches, cx);
+        }
+        TabOp::MachineSuspend { name } => {
+            machine_claims::guarded(caller, name, incoming, cx, |_, name, incoming, cx| {
+                machines::suspend(name, incoming, cx)
+            })
+        }
         TabOp::Orchestrator { repo, action } => {
             arrive::orchestrator(&caller, repo, action, incoming, watches, cx)
         }
-        TabOp::Review => arrive::review(&caller, incoming, watches, cx),
-        TabOp::Px0 => arrive::px0(&caller, incoming, watches, cx),
+        TabOp::Review => arrive::review(&caller, incoming, cx),
+        TabOp::Px0 => arrive::px0(&caller, incoming, cx),
     }
 }
 
@@ -92,7 +122,7 @@ fn kind(tab: &Tab) -> TabKind {
         Some(Location::Code { .. }) => TabKind::Code,
         Some(Location::Devices) => TabKind::Devices,
         Some(Location::CoreTerminal { .. }) => TabKind::CoreTerminal,
-        Some(Location::Machine { .. }) => TabKind::Machine,
+        Some(Location::Machine { .. } | Location::RemoteMachine { .. }) => TabKind::Machine,
     }
 }
 
@@ -119,6 +149,7 @@ fn location(tab: &Tab) -> Option<String> {
             .collect::<Vec<_>>()
             .join(","),
         Location::Machine { name } => name.to_string(),
+        Location::RemoteMachine { endpoint, name } => format!("{endpoint}:{name}"),
         Location::Devices => return None,
     })
 }

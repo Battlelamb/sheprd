@@ -27,6 +27,7 @@ use std::path::PathBuf;
 
 mod push_relay;
 mod relays;
+mod test_push;
 
 #[cfg(test)]
 pub(in crate::settings_window) use push_relay::{
@@ -35,6 +36,9 @@ pub(in crate::settings_window) use push_relay::{
 pub(in crate::settings_window) use relays::Offered;
 #[cfg(test)]
 pub(in crate::settings_window) use relays::{Standing, public_title, relay_line};
+pub(in crate::settings_window) use test_push::TestPushState;
+#[cfg(test)]
+pub(in crate::settings_window) use test_push::{answered, test_push_lines};
 
 /// The page's state while it shows.
 #[derive(Default)]
@@ -59,6 +63,8 @@ pub(in crate::settings_window) struct RemoteSettings {
     pub(in crate::settings_window) token: relays::TokenPrompt,
     /// The push relay's explanation, asked before it turns on.
     pub(in crate::settings_window) push_relay: push_relay::Ask,
+    /// The last Send Test Push.
+    pub(in crate::settings_window) test_push: TestPushState,
 }
 
 /// Opens Settings at Remote control, as the status bar's phone does.
@@ -205,6 +211,7 @@ impl SettingsWindow {
         self.remote.revoking = None;
         self.remote.relay_invalid = false;
         self.remote.push_relay = push_relay::Ask::default();
+        self.remote.test_push = TestPushState::default();
     }
 
     pub(in crate::settings_window) fn sync_remote_fields(&mut self, cx: &mut Context<Self>) {

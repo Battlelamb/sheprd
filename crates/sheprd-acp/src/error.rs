@@ -16,6 +16,8 @@ pub enum Error {
     },
     #[error("the agent stopped reading its input")]
     AgentStalled,
+    #[error(transparent)]
+    Brief(#[from] crate::briefs::Error),
     #[error("could not listen for Sheprd at {path}")]
     Bind {
         path: std::path::PathBuf,
@@ -36,8 +38,6 @@ pub enum Error {
     History(#[from] crate::history::Error),
     #[error("chat I/O failed")]
     Io(#[from] io::Error),
-    #[error("a line from the agent exceeded {limit} bytes")]
-    LineTooLong { limit: usize },
     #[error(transparent)]
     Mirror(#[from] crate::mirror::Error),
     #[error("no directory to listen in: neither XDG_STATE_HOME nor HOME is set")]

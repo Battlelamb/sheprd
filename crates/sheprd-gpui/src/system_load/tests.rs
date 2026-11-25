@@ -251,3 +251,5 @@ mod en_xa;
 mod gpu;
 #[cfg(unix)]
 mod gpu_tool;
+mod hosted;
+mod hosted_gpu;

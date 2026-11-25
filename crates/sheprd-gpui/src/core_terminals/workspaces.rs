@@ -86,6 +86,8 @@ impl SheprdWindow {
         };
         self.start_core_program(
             Purpose::Tab {
+                focus: true,
+                group: None,
                 scope: scope_of(self),
                 workspace: id,
             },
@@ -116,13 +118,26 @@ impl SheprdWindow {
         };
         self.start_core_program(
             Purpose::Tab {
+                focus: true,
+                group: None,
                 scope: scope.clone(),
                 workspace: id.clone(),
             },
             spawn,
             cx,
         );
-        self.start_core_chat_tab(agent, scope, id, Some(cwd), None, cx)
+        self.start_core_chat_tab(
+            agent,
+            Purpose::Tab {
+                focus: true,
+                scope,
+                workspace: id,
+                group: None,
+            },
+            Some(cwd),
+            None,
+            cx,
+        )
     }
 
     /// Keeps a new workspace for a checkout at `cwd` whose first tab shows

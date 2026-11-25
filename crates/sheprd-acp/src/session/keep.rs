@@ -8,14 +8,17 @@
 //! the transcript is about to drop them. A failure to write is said once in
 //! the chat, and the thread is no longer kept.
 
-use std::{collections::BTreeSet, path::PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+};
 
 use sheprd_chat_protocol::{
     Change, Entry, EntryId, EntryKind, OptionCategory, OptionKind, Transcript,
     thread::{self, Record, Thread, ThreadId, file},
 };
 
-use super::{Session, Update, now_ms};
+use crate::session::{Session, Update, now_ms};
 
 /// Entries marked before they are written without waiting for the turn.
 const MARKED: usize = 64;
@@ -28,6 +31,8 @@ pub(crate) struct Start {
     id: ThreadId,
     /// The newest entry id the thread's file knows, kept or trimmed.
     last: Option<EntryId>,
+    saved: Vec<Entry>,
+    lock: thread::Lock,
     record: Option<Record>,
     writer: file::Writer,
 }
@@ -37,17 +42,21 @@ impl Start {
     /// yet. Anything kept that cannot be read is an error, so a thread is
     /// never written over with less than it held.
     pub(crate) fn read(dir: PathBuf, id: ThreadId) -> Result<Self, thread::Error> {
+        let lock = thread::Lock::acquire(&dir, &id)?;
         let record = match Record::read(&thread::record_path(&dir, &id)) {
             Ok(record) => Some(record),
             Err(thread::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error),
         };
         let writer = file::Writer::open(&dir, &id)?;
-        let last = file::Contents::read(writer.path())?.last_id();
+        let contents = file::Contents::read(writer.path())?;
+        let last = contents.last_id();
         Ok(Self {
             dir,
             id,
             last,
+            saved: contents.entries,
+            lock,
             record,
             writer,
         })
@@ -63,9 +72,11 @@ pub(super) struct Keep {
     cwd: PathBuf,
     dir: PathBuf,
     marked: BTreeSet<EntryId>,
-    /// While a continued session replays the conversation the transcript
-    /// file already holds, its entries are not written again.
-    quiet: bool,
+    /// Saved entries still available to match during initial recovery.
+    recovery: Vec<Entry>,
+    /// Display IDs stay in replay order; writes retain the saved identity.
+    recovered: BTreeMap<EntryId, Entry>,
+    _lock: thread::Lock,
     title: String,
     /// Whether the record is on disk.
     written: bool,
@@ -85,30 +96,59 @@ impl Keep {
     /// Opens the thread of `start` for `agent`, continuing its record when
     /// there is one. `load` is the session the chat continues: a thread
     /// whose last segment is that session goes on in it; otherwise `agent`
-    /// takes over after the newest entry. A new thread keeps `entries`, the
-    /// conversation the chat opened with, and is kept at once when they
-    /// hold a prompt.
+    /// takes over after the saved entries. Recovered entries are matched
+    /// to saved content because agent logs use independent IDs. Missing
+    /// entries are kept, even when a record survived an interrupted turn.
     pub(super) fn open(
         start: Start,
         agent: sheprd_chat_protocol::Agent,
         load: Option<&str>,
-        entries: &[Entry],
+        entries: &mut [Entry],
         cwd: PathBuf,
     ) -> Opened {
         let Start {
             dir,
             id,
             last,
+            saved,
+            lock,
             record,
             writer,
         } = start;
-        let newest = entries.last().map(|entry| entry.id);
+        // Agent logs have their own IDs. Match content within this session's
+        // segment, then allocate missing history beyond every saved ID.
+        let segment = record
+            .as_ref()
+            .and_then(|record| record.thread.current())
+            .filter(|segment| {
+                load.is_some() && segment.agent == agent && segment.session.as_deref() == load
+            });
+        let mut recovery: Vec<_> = saved
+            .into_iter()
+            .filter(|entry| {
+                segment.is_some_and(|segment| segment.after.is_none_or(|after| entry.id > after))
+            })
+            .collect();
+        let mut recovered = BTreeMap::new();
+        let mut next = last.map_or(0, |id| id.0);
+        if record.is_some() {
+            for entry in entries.iter_mut() {
+                next = next.saturating_add(1);
+                entry.id = EntryId(next);
+                if let Some(at) = recovery.iter().position(|saved| same_entry(saved, entry)) {
+                    let saved = recovery.remove(at);
+                    recovered.insert(entry.id, saved);
+                }
+            }
+        }
         let mut keep = Self {
             created_ms: None,
             cwd,
             dir,
-            marked: BTreeSet::new(),
-            quiet: false,
+            marked: entries.iter().map(|entry| entry.id).collect(),
+            recovered,
+            recovery: if load.is_some() { recovery } else { Vec::new() },
+            _lock: lock,
             title: String::new(),
             written: record.is_some(),
             writer,
@@ -120,12 +160,10 @@ impl Keep {
                     current.agent == agent && load.is_some() && current.session.as_deref() == load
                 });
                 if !same {
-                    thread.switch(agent, newest.max(last));
+                    thread.switch(agent, last);
                 }
                 keep.created_ms = Some(record.created_ms);
                 keep.title = record.title;
-                // The file holds the conversation the session replays.
-                keep.quiet = load.is_some();
                 thread
             }
             None => {
@@ -179,8 +217,73 @@ impl Keep {
             .into_iter()
             .filter_map(|id| transcript.entry(id))
             .collect();
-        self.writer.append(&entries)
+        let entries: Vec<_> = entries
+            .into_iter()
+            .map(|entry| {
+                if !self.recovered.contains_key(&entry.id)
+                    && let Some(at) = self
+                        .recovery
+                        .iter()
+                        .position(|saved| same_entry(saved, entry))
+                {
+                    let saved = self.recovery.remove(at);
+                    self.recovered.insert(entry.id, saved);
+                }
+                let mut entry = entry.clone();
+                if let Some(saved) = self.recovered.get(&entry.id) {
+                    merge_recovered(saved, &mut entry);
+                }
+                entry
+            })
+            .collect();
+        self.writer.append(&entries.iter().collect::<Vec<_>>())
     }
+}
+
+/// A call's identity survives history readers omitting live timing and
+/// progress metadata. Other entries have no source identity.
+fn same_entry(saved: &Entry, recovered: &Entry) -> bool {
+    match (&saved.kind, &recovered.kind) {
+        (EntryKind::Tool(saved), EntryKind::Tool(recovered)) => saved.call_id == recovered.call_id,
+        _ => saved.kind == recovered.kind,
+    }
+}
+
+/// Native logs can reconstruct less than the live tool carried. Retain
+/// its rich previews and metadata, adding only new content and progress.
+fn merge_recovered(saved: &Entry, entry: &mut Entry) {
+    use sheprd_chat_protocol::{ToolKind, ToolStatus};
+    entry.id = saved.id;
+    let (EntryKind::Tool(saved), EntryKind::Tool(recovered)) = (&saved.kind, &mut entry.kind)
+    else {
+        return;
+    };
+    let mut merged = saved.clone();
+    for content in &recovered.content {
+        if !merged.content.contains(content) {
+            merged.content.push(content.clone());
+        }
+    }
+    for location in &recovered.locations {
+        if !merged.locations.contains(location) {
+            merged.locations.push(location.clone());
+        }
+    }
+    merged.started_ms = merged.started_ms.or(recovered.started_ms);
+    merged.parent = merged.parent.or_else(|| recovered.parent.clone());
+    if merged.kind == ToolKind::Other {
+        merged.kind = recovered.kind;
+    }
+    if merged.title.is_empty() {
+        merged.title.clone_from(&recovered.title);
+    }
+    if matches!(merged.status, ToolStatus::Pending)
+        || (merged.status == ToolStatus::InProgress
+            && matches!(recovered.status, ToolStatus::Completed | ToolStatus::Failed))
+    {
+        merged.status = recovered.status;
+    }
+    *recovered = merged;
 }
 
 /// The current value of the transcript's model setting.
@@ -195,7 +298,7 @@ impl<R: FnMut(Update)> Session<R> {
     /// Marks the entry `change` made or changed, right after it applied and
     /// before the transcript may drop it for room.
     pub(super) fn keep_mark(&mut self, change: &Change) {
-        let Some(keep) = self.keep.as_mut().filter(|keep| !keep.quiet) else {
+        let Some(keep) = self.keep.as_mut() else {
             return;
         };
         match change {
@@ -280,8 +383,9 @@ impl<R: FnMut(Update)> Session<R> {
 
     /// The session continued or opened: entries from now on are new.
     pub(super) fn keep_opened(&mut self, session: &str) {
+        self.keep_entries();
         if let Some(keep) = &mut self.keep {
-            keep.quiet = false;
+            keep.recovery.clear();
         }
         if let Some(thread) = &mut self.transcript.thread {
             thread.opened(session);
@@ -297,7 +401,7 @@ impl<R: FnMut(Update)> Session<R> {
             thread.switch(agent, last);
         }
         if let Some(keep) = &mut self.keep {
-            keep.quiet = false;
+            keep.recovery.clear();
         }
     }
 

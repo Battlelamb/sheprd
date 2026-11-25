@@ -42,14 +42,16 @@ pub(super) fn describe(chat: &ChatInfo) -> String {
 pub(super) fn chat(command: ChatCommand, context: &Context) -> crate::Result<Output> {
     let op = match command {
         ChatCommand::Status => ChatOp::Status,
-        ChatCommand::New { agent, pane } => ChatOp::New {
+        ChatCommand::New { agent, pane, brief } => ChatOp::New {
             agent: agent.map(|agent| agent.name().to_owned()),
             pane,
+            prompt: brief.map(crate::control::brief::read).transpose()?,
         },
         ChatCommand::Convert { pane } => ChatOp::Convert { pane },
         ChatCommand::View { switch, pane } => ChatOp::View { switch, pane },
         ChatCommand::Shortcuts => ChatOp::Shortcuts,
         ChatCommand::Favorite { switch, pane } => ChatOp::Favorite { switch, pane },
+        ChatCommand::Unread { switch, pane } => ChatOp::Unread { switch, pane },
         // Answered by the caller's own chat, not the app.
         ChatCommand::PullRequests(command) => return chat_pull_requests(command),
     };
@@ -83,6 +85,16 @@ pub(super) fn chat(command: ChatCommand, context: &Context) -> crate::Result<Out
                 format!("{pane_id} is not a favorite")
             },
             &serde_json::json!({ "pane_id": pane_id, "favorite": favorite }),
+        ),
+        Response::Chat {
+            reply: Reply::Unread { pane_id, unread },
+        } => Output::data(
+            if unread {
+                format!("{pane_id} is unread")
+            } else {
+                format!("{pane_id} is read")
+            },
+            &serde_json::json!({ "pane_id": pane_id, "unread": unread }),
         ),
         Response::Chat {
             reply: Reply::Started { agent },

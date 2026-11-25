@@ -9,6 +9,7 @@
 
 mod error;
 mod gpu;
+mod hosted;
 mod render;
 mod sample;
 
@@ -16,6 +17,8 @@ mod sample;
 mod tests;
 
 pub(crate) use error::Error;
+// A host's load as data, for the layouts that draw it themselves.
+pub(crate) use hosted::host_load;
 
 use crate::{
     Result,

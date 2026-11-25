@@ -4,9 +4,12 @@
 //! `$GEMINI_CLI_HOME`, else `~/.gemini`). The report's Gemini and Claude/GPT
 //! groups give a 5-hour and a weekly window each. The report sends no model
 //! prompt and prints no credentials; it runs in a fresh empty directory so no
-//! project is loaded. A signed-out `agy` opens a browser to sign in instead,
-//! so the report runs only when the config asks for Antigravity, never for a
-//! merely detected install.
+//! project is loaded, with browser launchers shadowed so a revoked sign-in
+//! cannot open a browser window.
+//!
+//! Automatic detection checks for an actual `agy` CLI sign-in rather than the
+//! Antigravity desktop folder (`~/.gemini/antigravity`) or an unauthenticated
+//! CLI directory, so a merely installed or signed-out `agy` is never run (#320).
 //!
 //! Not ported: the Antigravity app's and IDE's local language server and the
 //! `agy` HTTPS server (process and port discovery, CSRF tokens, and loopback
@@ -27,15 +30,23 @@ use crate::{
 use serde::Deserialize;
 use std::time::Duration;
 
-/// Runs `$1` in a private empty directory and removes it afterwards.
+/// Runs `$1` in a private empty directory, blocking browser launchers so a
+/// revoked or signed-out `agy` cannot open a sign-in page, and removes the
+/// temporary directory afterwards.
 const REPORT_SCRIPT: &str = r#"d=$(mktemp -d) || exit 1
-cd "$d" || exit 1
-"$1" -p /usage --output-format json --print-timeout 90s
+mkdir -p "$d/bin" "$d/work" || { rm -rf "$d" 2>/dev/null; exit 1; }
+printf '#!/bin/sh\nexit 1\n' > "$d/bin/open"
+printf '#!/bin/sh\nexit 1\n' > "$d/bin/xdg-open"
+chmod +x "$d/bin/open" "$d/bin/xdg-open"
+cd "$d/work" || { rm -rf "$d" 2>/dev/null; exit 1; }
+PATH="$d/bin:$PATH" BROWSER=false "$1" -p /usage --output-format json --print-timeout 30s
 s=$?
-cd / && rmdir "$d" 2>/dev/null
+cd / && rm -rf "$d" 2>/dev/null
 exit $s"#;
 /// Earlier builds could send `/usage` to the model as a prompt.
 const MINIMUM: (u64, u64, u64) = (1, 1, 11);
+const KEYCHAIN_SERVICE: &str = "gemini";
+const KEYCHAIN_ACCOUNT: &str = "antigravity";
 
 pub(crate) struct Antigravity;
 
@@ -58,21 +69,25 @@ impl Service for Antigravity {
         let configured = probe
             .text_setting("cli_path")
             .filter(|path| !path.is_empty());
-        if configured.is_none() && !probe.requested() {
-            return None;
-        }
         let data = |rest: &str| HostPath::env_or("GEMINI_CLI_HOME", ".gemini", rest);
-        let used = probe.exists(&data("antigravity-cli")) || probe.exists(&data("antigravity"));
-        if configured.is_none() && !used {
-            return None;
+        if configured.is_none() {
+            if probe.requested() {
+                let used =
+                    probe.exists(&data("antigravity-cli")) || probe.exists(&data("antigravity"));
+                if !used {
+                    return None;
+                }
+            } else if !signed_in(probe, data) {
+                return None;
+            }
         }
-        let program = configured.unwrap_or_else(|| "agy".into());
+        let program = configured.as_deref().unwrap_or("agy");
         let version = probe
-            .command(&program, &["--version"], Duration::from_secs(5))
+            .command(program, &["--version"], Duration::from_secs(5))
             .ok()
             .filter(|output| output.success)?;
         if parse_version(&version.stdout).is_none_or(|version| version < MINIMUM) {
-            return Some(Err(Error::Command(
+            return (configured.is_some() || probe.requested()).then_some(Err(Error::Command(
                 "agy 1.1.11 or later is needed for usage reports",
             )));
         }
@@ -80,8 +95,8 @@ impl Service for Antigravity {
             probe
                 .command(
                     "/bin/sh",
-                    &["-c", REPORT_SCRIPT, "agy-usage", program.as_str()],
-                    Duration::from_secs(100),
+                    &["-c", REPORT_SCRIPT, "agy-usage", program],
+                    Duration::from_secs(40),
                 )
                 .and_then(|output| {
                     if output.success {
@@ -94,6 +109,40 @@ impl Service for Antigravity {
                 }),
         )
     }
+}
+
+/// Whether the probed host has an `agy` CLI sign-in with plan quotas, rather
+/// than only an Antigravity desktop/IDE folder or an unauthenticated CLI run.
+fn signed_in(probe: &mut Probe, data: impl Fn(&str) -> HostPath) -> bool {
+    if !probe.exists(&data("antigravity-cli")) {
+        return false;
+    }
+    let auth_method = probe.file_text(
+        &data("antigravity-cli/cache/acp-auth-state.json"),
+        &["methodId"],
+    );
+    if auth_method.as_deref() == Some("gemini-api-key") {
+        return false;
+    }
+    let has_file_store = probe.exists(&data("antigravity-cli/authstore.enc"));
+    if probe.is_macos() {
+        // Metadata-only lookup (no `-w`) never prompts Keychain and notices
+        // `/logout`, which deletes the token while leaving cache files behind.
+        return probe.keychain_exists(KEYCHAIN_SERVICE, Some(KEYCHAIN_ACCOUNT)) || has_file_store;
+    }
+    let onboarded = [
+        "onboardingComplete",
+        "consumerOnboardingComplete",
+        "enterpriseOnboardingComplete",
+    ]
+    .into_iter()
+    .any(|field| {
+        probe
+            .file_text(&data("antigravity-cli/cache/onboarding.json"), &[field])
+            .as_deref()
+            == Some("true")
+    });
+    auth_method.is_some() || onboarded || has_file_store
 }
 
 /// A plain `major.minor.patch`; anything else is unknown.
@@ -142,10 +191,13 @@ pub(crate) fn parse(body: &str) -> Result<Report> {
 }
 
 /// The model family a group's limits are named by, or the group's own name.
+/// Only the generic Gemini group is shortened: a specific one such as
+/// `Gemini 4 Argon` has limits of its own and keeps its name.
 fn group_title(name: Option<String>) -> Text {
     let name = name.unwrap_or_default().trim().to_owned();
     let lower = name.to_lowercase();
-    if lower.contains("gemini") {
+    let family = lower.strip_suffix(" models").unwrap_or(&lower).trim_end();
+    if family == "gemini" {
         Text::service("Gemini")
     } else if lower.contains("claude") || lower.contains("gpt") {
         Text::service("Claude/GPT")
@@ -353,6 +405,38 @@ mod tests {
         assert_eq!(
             report.windows[3].resets_at,
             Some(SystemTime::UNIX_EPOCH + Duration::from_secs(1_789_670_427))
+        );
+    }
+
+    #[test]
+    fn a_specific_gemini_group_keeps_its_name() {
+        let report = parse(
+            r#"{"status": "SUCCESS", "command": {"name": "usage", "data": {"groups": [
+              {"name": "Gemini Models", "buckets": [
+                {"id": "gemini-weekly", "name": "Weekly Limit Remaining", "window": "weekly",
+                 "remaining_fraction": 0.3}]},
+              {"name": "Gemini 4 Argon", "buckets": [
+                {"id": "gemini-argon-wtu-weekly", "name": "Weekly Limit Remaining",
+                 "window": "weekly", "remaining_fraction": 0.0}]}
+            ]}}}"#,
+        )
+        .unwrap();
+        let used: Vec<_> = report
+            .windows
+            .iter()
+            .map(|window| (window.kind.clone(), window.percent()))
+            .collect();
+        let weekly = |group: &str| {
+            Kind::Named(
+                Text::message("usage-antigravity-window")
+                    .arg("group", group)
+                    .arg("cadence", "weekly")
+                    .arg("name", ""),
+            )
+        };
+        assert_eq!(
+            used,
+            [(weekly("Gemini"), 70), (weekly("Gemini 4 Argon"), 100)]
         );
     }
 

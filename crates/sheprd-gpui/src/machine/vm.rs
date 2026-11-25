@@ -203,6 +203,42 @@ pub(crate) fn running() -> Vec<Name> {
     names
 }
 
+/// Starting and saving guests still occupy a slot. Called on the app thread.
+pub(crate) fn capacity() -> crate::control::protocol::tabs::MachineCapacity {
+    crate::control::protocol::tabs::MachineCapacity::new(
+        u32::try_from(running().len())
+            .unwrap_or(u32::MAX)
+            .saturating_add(u32::from(crate::machine::install::occupies_slot())),
+    )
+}
+
+/// Opening an already active guest needs no new slot.
+pub(crate) fn check_capacity(name: &Name) -> Result<()> {
+    check_capacity_for(status(name), capacity())
+}
+
+/// [`check_capacity`] against `capacity`, which also counts other
+/// programs' VMs ([`super::lend::Survey`]).
+pub(crate) fn check_capacity_in(
+    name: &Name,
+    capacity: crate::control::protocol::tabs::MachineCapacity,
+) -> Result<()> {
+    check_capacity_for(status(name), capacity)
+}
+
+fn check_capacity_for(
+    status: Status,
+    capacity: crate::control::protocol::tabs::MachineCapacity,
+) -> Result<()> {
+    if matches!(status, Status::Stopped | Status::Failed(_)) && capacity.available == 0 {
+        return Err(Error::Capacity {
+            in_use: capacity.in_use,
+            limit: capacity.limit,
+        });
+    }
+    Ok(())
+}
+
 /// A new view on machine `name`, started if it is not running.
 pub(crate) fn view(name: &Name, cx: &mut App) -> Result<View> {
     let mtm = MainThreadMarker::new().ok_or(Error::Unsupported)?;
@@ -288,6 +324,9 @@ pub(crate) fn start(name: &Name, cx: &mut App) {
     if !free || !startable(name) {
         return;
     }
+    if let Err(error) = check_capacity(name) {
+        return fail(name, &error, cx);
+    }
     APP.with(|app| {
         app.get_or_init(|| cx.to_async());
     });
@@ -306,8 +345,8 @@ pub(crate) fn start(name: &Name, cx: &mut App) {
             if !startable(&name) {
                 return set_phase(&name, Phase::Stopped, cx);
             }
-            if bundle.as_ref().is_ok_and(|bundle| bundle.guide) {
-                super::guide::begin(&name, cx);
+            if let Some(opening) = bundle.as_ref().ok().and_then(|bundle| bundle.guide) {
+                super::guide::begin(&name, opening, cx);
             }
             if let Err(error) = bundle.and_then(|bundle| build(&name, &bundle, cx)) {
                 fail(&name, &error, cx);
@@ -616,3 +655,6 @@ async fn stop_for_delete(name: &Name, cx: &mut AsyncApp) -> Result<()> {
 pub(super) fn description(error: &NSError) -> String {
     error.localizedDescription().to_string()
 }
+
+#[cfg(test)]
+mod tests;

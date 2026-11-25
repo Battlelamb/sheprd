@@ -246,7 +246,16 @@ impl SheprdWindow {
             ..Spawn::default()
         };
         let workspace = source.workspace_id.clone();
-        self.start_core_program(Purpose::Tab { scope, workspace }, spawn, cx);
+        self.start_core_program(
+            Purpose::Tab {
+                focus: true,
+                group: None,
+                scope,
+                workspace,
+            },
+            spawn,
+            cx,
+        );
     }
 }
 

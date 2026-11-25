@@ -108,7 +108,7 @@ the tool, and the handoff says so instead of naming it.
 
 ## Protocol
 
-Revision 3 of the attach wire:
+Revision 5 of the attach wire (4 went to briefs):
 
 - `Transcript::thread`: the `ThreadId` and the segments, so every client
   shows where each agent began.
@@ -126,12 +126,12 @@ field, as revision 2 did for `Change::Harnesses`.
   builder (`sheprd_chat_protocol::handoff`), switch back by resume.
 - The thread record and transcript file (`feat/threads-record`):
   `sheprd_chat_protocol::thread` holds `ThreadId`, `Segment`, `Thread`, the
-  on-disk `Record`, and the transcript file (`thread::file`). Revision 4 of
+  on-disk `Record`, and the transcript file (`thread::file`). Revision 5 of
   the attach wire carries `Transcript::thread`, `Change::Thread`, and
   `EntryKind::Handoff`, which replaced the notice phase 2 pushed; older
   clients get that notice instead. `sheprd-acp --thread ID` continues a
   thread, and both restore paths (Herdr 1's typed line, Herdr 2's recovery
-  relaunch) pass it. The remote control daemon still reads revision 3, so
+  relaunch) pass it. The remote control daemon still reads revision 4, so
   phones keep seeing notices until phase 6.
 
 - `thread_read` (`feat/threads-read`): `sheprd-acp thread-mcp --thread ID`

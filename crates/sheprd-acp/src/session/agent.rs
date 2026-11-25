@@ -4,12 +4,22 @@
 use acp::v1 as wire;
 use serde_json::Value;
 use sheprd_chat_protocol::{
-    Change, NoticeLevel, Permission, PermissionId, PermissionKind, PermissionOption, Question,
-    Status, TurnEnd, TurnSummary,
+    Agent, Change, NoticeLevel, OptionCategory, OptionKind, Permission, PermissionId,
+    PermissionKind, PermissionOption, Question, Status, TurnEnd, TurnSummary,
 };
 
 use super::{Asked, Pending, Session, Update, now_ms};
 use crate::{project, rpc::Inbound};
+
+/// A configured ACP auth method. Never read or copy the agent's credential store.
+fn auth_method(methods: &[wire::AuthMethod], requested: &str) -> Option<wire::AuthMethodId> {
+    methods.iter().find_map(|method| match method {
+        wire::AuthMethod::Agent(method) if method.id.0.as_ref() == requested => {
+            Some(method.id.clone())
+        }
+        _ => None,
+    })
+}
 
 impl<R: FnMut(Update)> Session<R> {
     pub(super) fn agent(&mut self, inbound: Inbound) {
@@ -48,6 +58,7 @@ impl<R: FnMut(Update)> Session<R> {
 
     fn response(&mut self, id: i64, pending: Pending, result: Result<Value, wire::Error>) {
         match pending {
+            Pending::Authenticate { load_session } => self.authenticated(load_session, result),
             Pending::Initialize => self.initialized(result),
             Pending::NewSession | Pending::LoadSession => {
                 self.session_opened(matches!(pending, Pending::LoadSession), result);
@@ -61,6 +72,10 @@ impl<R: FnMut(Update)> Session<R> {
                 self.mode_set(mode, result);
                 self.carry_next();
             }
+            Pending::SetModel(model) => {
+                self.model_set(model, result);
+                self.carry_next();
+            }
         }
     }
 
@@ -70,6 +85,7 @@ impl<R: FnMut(Update)> Session<R> {
                 if let Some(options) = value.get("configOptions") {
                     let options = project::options(Some(options));
                     self.emit(Change::Options { options });
+                    self.remember_picks();
                 }
             }
             Err(error) => {
@@ -92,6 +108,53 @@ impl<R: FnMut(Update)> Session<R> {
                 );
                 self.emit(notice);
             }
+        }
+    }
+
+    fn model_set(&mut self, model: String, result: Result<Value, wire::Error>) {
+        match result {
+            Ok(_) => {
+                let mut options = self.transcript.options.clone();
+                if let Some(option) = options
+                    .iter_mut()
+                    .find(|option| option.id == project::models::OPTION_ID)
+                    && let OptionKind::Select { current, .. } = &mut option.kind
+                {
+                    *current = model;
+                    self.emit(Change::Options { options });
+                    self.remember_picks();
+                }
+            }
+            Err(error) => {
+                let notice = self.projector.notice(
+                    NoticeLevel::Warning,
+                    format!("Could not change the setting: {}", error.message),
+                );
+                self.emit(notice);
+            }
+        }
+    }
+
+    fn auth_method_for(&self, agent: Agent) -> Option<wire::AuthMethodId> {
+        let requested = match agent {
+            Agent::Antigravity => self.config.antigravity_auth_method.as_deref(),
+            Agent::Gemini => self.config.gemini_auth_method.as_deref(),
+            _ => None,
+        }?;
+        auth_method(&self.auth_methods, requested)
+    }
+
+    fn auth_failed_message(&self, error: &wire::Error) -> String {
+        let base = match &self.config.login_hint {
+            Some(hint) => format!("{} needs you to sign in: {hint}", self.config.agent),
+            None => format!("{} needs you to sign in first.", self.config.agent),
+        };
+        let detail = error.message.trim();
+        let plain = detail.trim_end_matches('.');
+        if plain.is_empty() || plain.eq_ignore_ascii_case("Authentication required") {
+            base
+        } else {
+            format!("{base} ({detail})")
         }
     }
 
@@ -121,9 +184,43 @@ impl<R: FnMut(Update)> Session<R> {
             embedded: prompts.embedded_context,
             image: prompts.image,
         };
+        self.auth_methods = response.auth_methods;
+        let load_session = response.agent_capabilities.load_session;
+        self.can_load_session = load_session;
+        if self.config.harness == Some(Agent::Antigravity)
+            && let Some(method_id) = self.auth_method_for(Agent::Antigravity)
+        {
+            self.auth_attempted = true;
+            self.request(
+                "authenticate",
+                &wire::AuthenticateRequest::new(method_id),
+                Pending::Authenticate { load_session },
+            );
+        } else {
+            self.open_session(load_session);
+        }
+    }
+
+    fn authenticated(&mut self, load_session: bool, result: Result<Value, wire::Error>) {
+        match result {
+            Ok(value) => match serde_json::from_value::<wire::AuthenticateResponse>(value) {
+                Ok(_) => self.open_session(load_session),
+                Err(error) => self.fail(&format!(
+                    "{} returned an invalid authentication response: {error}",
+                    self.config.agent
+                )),
+            },
+            Err(error) => {
+                let message = self.auth_failed_message(&error);
+                self.fail(&message);
+            }
+        }
+    }
+
+    fn open_session(&mut self, can_load: bool) {
         let cwd = self.config.cwd.clone();
         match self.config.load.clone() {
-            Some(id) if response.agent_capabilities.load_session => {
+            Some(id) if can_load => {
                 let id = wire::SessionId::new(id);
                 self.acp_session = Some(id.clone());
                 self.request(
@@ -195,15 +292,28 @@ impl<R: FnMut(Update)> Session<R> {
                 return;
             }
             Err(error) => {
-                let message = if error.code == wire::Error::auth_required().code {
-                    match &self.config.login_hint {
-                        Some(hint) => format!("{} needs you to sign in: {hint}", self.config.agent),
-                        None => format!("{} needs you to sign in first.", self.config.agent),
+                if error.code == wire::Error::auth_required().code {
+                    if !self.auth_attempted
+                        && let Some(method_id) = self
+                            .config
+                            .harness
+                            .and_then(|agent| self.auth_method_for(agent))
+                    {
+                        self.auth_attempted = true;
+                        self.acp_session = None;
+                        self.request(
+                            "authenticate",
+                            &wire::AuthenticateRequest::new(method_id),
+                            Pending::Authenticate {
+                                load_session: self.can_load_session,
+                            },
+                        );
+                        return;
                     }
-                } else {
-                    format!("Could not start the session: {}", error.message)
-                };
-                return self.fail(&message);
+                    let message = self.auth_failed_message(&error);
+                    return self.fail(&message);
+                }
+                return self.fail(&format!("Could not start the session: {}", error.message));
             }
         };
         // Read apart from the rest, so a setting of a kind this program does
@@ -211,7 +321,19 @@ impl<R: FnMut(Update)> Session<R> {
         let options = value
             .as_object_mut()
             .and_then(|object| object.remove("configOptions"));
-        let options = project::options(options.as_ref());
+        let models = value
+            .as_object_mut()
+            .and_then(|object| object.remove("models"));
+        let mut options = project::options(options.as_ref());
+        self.legacy_model_option = false;
+        if !options
+            .iter()
+            .any(|option| option.category == OptionCategory::Model)
+            && let Some(model) = project::models::option(models.as_ref())
+        {
+            options.push(model);
+            self.legacy_model_option = true;
+        }
         let modes = if loaded {
             serde_json::from_value::<wire::LoadSessionResponse>(value)
                 .map(|response| response.modes)
@@ -258,7 +380,9 @@ impl<R: FnMut(Update)> Session<R> {
             // A continued session keeps its own settings.
             self.config.settings = None;
         }
+        self.carry_picks(loaded);
         self.carry_deferred();
+        self.note_carried();
         self.carry_next();
         self.next_queued();
     }
@@ -358,13 +482,24 @@ impl<R: FnMut(Update)> Session<R> {
             && let Some((note, rest)) = crate::context::split(&content.text)
         {
             self.context.heard(note);
+            self.replayed_note = Some(note.to_owned());
             if rest.is_empty() {
                 return;
             }
             content.text = rest.to_owned();
         }
         self.commands.keep(&update);
-        let changes = self.projector.update(&self.transcript, update, now_ms());
+        let mut changes = self.projector.update(&self.transcript, update, now_ms());
+        // The note goes with the words that follow it, and with nothing
+        // after something else began.
+        for change in &mut changes {
+            if let Change::Push { entry } = change {
+                let note = self.replayed_note.take();
+                if let sheprd_chat_protocol::EntryKind::User { note: kept, .. } = &mut entry.kind {
+                    *kept = note.map(project::bounded);
+                }
+            }
+        }
         self.emit_all(changes);
     }
 
@@ -549,6 +684,9 @@ impl<R: FnMut(Update)> Session<R> {
 
     pub(super) fn exited(&mut self, code: Option<i32>, stderr: &[String]) {
         let summary = match code {
+            Some(5) if self.config.harness == Some(Agent::Muse) && self.acp_session.is_none() => {
+                "Muse Code could not start ACP. Check `muse acp --help` on this host and verify ACP is enabled for your build.".to_owned()
+            }
             Some(0) => format!("{} exited.", self.config.agent),
             Some(code) => format!("{} exited with status {code}.", self.config.agent),
             None => format!("{} was stopped.", self.config.agent),

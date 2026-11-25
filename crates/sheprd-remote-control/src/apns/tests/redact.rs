@@ -4,6 +4,16 @@ use sheprd_chat_protocol::{PermissionKind, PermissionOption};
 
 fn state(phase: Phase) -> ContentState {
     ContentState {
+        detail: Detail {
+            focus: None,
+            question_revision: None,
+            agents: None,
+            activity: Some("Editing secret.rs".to_owned()),
+            files: Some(3),
+            icon: Some(crate::apns::payload::Icon::Edit),
+            previous_activities: vec!["Reading secret.rs".to_owned()],
+            steps: Some(9),
+        },
         options: vec![PermissionOption {
             id: "allow".to_owned(),
             kind: PermissionKind::AllowOnce,
@@ -50,6 +60,24 @@ fn update(phase: Phase, alert: Option<Alert>) -> Live {
         event: Event::Update { alert },
         pane: "w1-p3".to_owned(),
         state: state(phase),
+    }
+}
+
+#[test]
+fn private_progress_keeps_counts_and_hides_task_names() {
+    let mut live = start();
+    live.state.detail.agents = Some(AgentProgress {
+        done: 1,
+        total: 5,
+        latest: Some("secret task".into()),
+    });
+    for (privacy, detail) in [
+        (Privacy::Generic, ActivityDetail::Detailed),
+        (Privacy::Excerpt, ActivityDetail::Generic),
+    ] {
+        let shown = live.clone().redacted(privacy, detail);
+        let agents = shown.state.detail.agents.unwrap();
+        assert_eq!((agents.done, agents.total, agents.latest), (1, 5, None));
     }
 }
 
@@ -151,4 +179,16 @@ fn the_more_private_choice_wins() {
     assert_eq!(Detailed.stricter(Generic), Generic);
     assert_eq!(Generic.stricter(Detailed), Generic);
     assert_eq!(Generic.stricter(Generic), Generic);
+}
+
+#[test]
+fn generic_leaves_out_the_step_in_words_and_the_counts() {
+    let live = update(Phase::Working, None).redacted(Privacy::Excerpt, ActivityDetail::Generic);
+    assert_eq!(live.state.detail, Detail::default());
+    let detailed =
+        update(Phase::Working, None).redacted(Privacy::Generic, ActivityDetail::Detailed);
+    assert_eq!(
+        detailed.state.detail.activity.as_deref(),
+        Some("Editing secret.rs")
+    );
 }

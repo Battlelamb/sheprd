@@ -7,7 +7,7 @@ mod bonjour;
 mod control;
 pub(crate) use control::version;
 mod listener;
-mod live;
+pub(crate) mod live;
 mod notifier;
 pub(crate) use notifier::forget;
 mod options;
@@ -167,6 +167,8 @@ pub async fn run(options: Options) -> Result<()> {
         changes: Default::default(),
         computer: options::computer_name(),
         connected: Mutex::new(HashMap::new()),
+        drivers: Default::default(),
+        labels: web::labels::Labels::load(&options.state_dir),
         favorites: web::Favorites::load(crate::app::favorites::file(&options.state_dir)),
         fingerprint,
         fleet,
@@ -181,12 +183,13 @@ pub async fn run(options: Options) -> Result<()> {
         look: web::Look::load(&options.state_dir),
         names: RwLock::new(names),
         near: Mutex::default(),
-        opened: web::attention::Opened::default(),
+        opened: web::attention::Opened::load(crate::app::read::file(&options.state_dir)),
         port: options.port,
         previews: Default::default(),
         privacy: options.privacy,
         pull_requests,
         push,
+        launches: Default::default(),
         pushes: Default::default(),
         relay,
         reports: Mutex::new(web::report_limit()),
@@ -221,6 +224,7 @@ pub async fn run(options: Options) -> Result<()> {
         tokio::spawn(crate::fleet::removals::flood(fleet));
     }
     tokio::spawn(web::follow_favorite_boot(state.clone()));
+    tokio::spawn(web::attention::keep(state.clone()));
     tokio::spawn(crate::native::github::checkouts::follow(state.clone()));
     tokio::spawn(crate::native::previews::follow(state.clone()));
     tokio::spawn(crate::native::github::follow_gh_hosts(state.clone()));

@@ -40,6 +40,12 @@ pub struct Transcript {
     /// come, without asking.
     #[serde(default)]
     pub auto_accept: bool,
+    /// Prompts another agent wrote, oldest first (revision 4).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub briefs: Vec<crate::Brief>,
+    /// Parent turn for the initial agent-authored brief.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation: Option<crate::brief::DelegatedTask>,
     /// How many attached clients watch, not counting the program's own view.
     #[serde(default)]
     pub clients: u32,
@@ -197,6 +203,12 @@ pub enum EntryKind {
         /// carried, each starting with [`ATTACHED`]; the user typed the rest.
         #[serde(default, skip_serializing_if = "is_zero")]
         files: usize,
+        /// What the chat program sent the agent ahead of `text` and leaves
+        /// out of it: Sheprd's note, and on a live prompt the conversation
+        /// a newly chosen agent is handed. Clients show it only when asked,
+        /// to see what the agent was told; ones that predate it skip it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
     },
     /// The agent's answer, streamed in chunks.
     Agent {
@@ -215,7 +227,7 @@ pub enum EntryKind {
     /// How a prompt turn ended: how long it took and what it used.
     Turn(TurnSummary),
     /// Another agent took over the conversation, and what it was handed.
-    /// Clients before protocol revision 4 get a [`Self::Notice`] instead.
+    /// Clients before protocol revision 5 get a [`Self::Notice`] instead.
     Handoff(HandedOver),
     /// Something the program says about the session, or an imported system event.
     Notice {
@@ -282,7 +294,7 @@ pub struct HandedOver {
 }
 
 impl HandedOver {
-    /// What a client before revision 4 shows instead, as a notice.
+    /// What a client before revision 5 shows instead, as a notice.
     pub fn notice_text(&self) -> String {
         let what = if self.resumed {
             "what happened since it last took part"
@@ -304,7 +316,7 @@ impl HandedOver {
         text
     }
 
-    /// The entry as a client before revision 4 reads it.
+    /// The entry as a client before revision 5 reads it.
     pub fn as_notice(&self) -> EntryKind {
         EntryKind::Notice {
             answers: Vec::new(),

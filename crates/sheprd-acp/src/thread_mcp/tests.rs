@@ -32,6 +32,7 @@ fn reader() -> (tempfile::TempDir, Reader) {
             kind: EntryKind::User {
                 text: (*text).to_owned(),
                 files: 0,
+                note: None,
             },
         })
         .collect();

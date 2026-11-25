@@ -5,7 +5,7 @@ in a terminal pane, draws the conversation there, and lets Sheprd attach to it
 and show it as a native chat.
 
 ```sh
-sheprd-acp claude             # or codex, copilot, gemini, kimi, opencode
+sheprd-acp claude             # or antigravity, codex, copilot, gemini, kimi, muse, opencode
 sheprd-acp -- goose acp       # any ACP agent command
 sheprd-acp --load ID codex    # continue one of the agent's sessions
 sheprd-acp --resume ID codex  # the same, but never start a new session instead
@@ -275,11 +275,13 @@ it; terminals that do not ignore it.
 
 | Name | Started as |
 | --- | --- |
+| `antigravity` | `agy acp` |
 | `claude` | `claude` itself (see below); with `--acp`, `claude-agent-acp`, else `npx -y @agentclientprotocol/claude-agent-acp` |
 | `codex` | `codex app-server` (see below); with `--acp`, `codex-acp`, else `npx -y @agentclientprotocol/codex-acp` |
 | `copilot` | `copilot --acp` |
 | `gemini` | `gemini --acp` |
 | `kimi` | `kimi acp` |
+| `muse` | `muse acp` (sign in with `muse login`) |
 | `opencode` | `opencode acp` |
 | `pi` | `pi --mode rpc` (see below); with `--acp`, `pi-acp`, else `npx -y pi-acp` |
 

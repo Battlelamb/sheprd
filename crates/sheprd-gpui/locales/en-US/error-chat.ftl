@@ -27,6 +27,7 @@ error-chat-version = the chat program speaks protocol version { $version }
 
 # $agent is an agent's name, such as Claude Code.
 error-chat-start-agent-missing = { $agent } is not installed on this host
+error-chat-start-brief-remote = a brief can only start a chat on this machine
 error-chat-start-disabled = ACP chats are off in Settings
 error-chat-start-line = the chat's command cannot be typed into a shell
 error-chat-start-no-workspace = no workspace is focused
@@ -122,3 +123,5 @@ error-chat-card-json = invalid interactive card JSON
 error-chat-card-title = invalid interactive card: title
 error-chat-card-too-large = the interactive card exceeds its size limit
 error-chat-card-too-many-fields = invalid interactive card: too many editable fields
+
+error-chat-visual-thumbnail = The file preview is unavailable.

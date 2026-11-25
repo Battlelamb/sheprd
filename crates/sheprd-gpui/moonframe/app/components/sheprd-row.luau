@@ -8,9 +8,11 @@
 type Props = {
 	class: string?,
 	selected: boolean?,
+	host: any?,
 	layout: any,
 	theme: any,
 	indent: number?,
+	nest: number?,
 	card: boolean?,
 	stripe: boolean?,
 	msg: any,
@@ -36,9 +38,11 @@ return component {
 	props = {
 		["class"] = "the row's own class, for hover rules and Inspect",
 		["selected"] = "whether the row is the focused one",
+		["host"] = "the row's device, with its wash and opacity",
 		["layout"] = "`app.sheprd.layout`: spacing, inset, radius and highlight",
 		["theme"] = "`app.sheprd_theme`, for the colors",
 		["indent"] = "how far it steps in, for a worktree under its checkout",
+		["nest"] = "how far its contents step in under a device's header, inside its highlight",
 		["card"] = "draw it as a card (Orca) whatever the layout's highlight",
 		["stripe"] = "mark the selected row with a stripe down its leading edge (Superset)",
 		["msg"] = "what a click sends",
@@ -57,21 +61,43 @@ return component {
 		local selected = props.selected == true
 		local outline = props.card or layout.outline
 		local inset = if props.card then 4 else layout.inset or 0
+		local padding = layout.padding or 8
 		local style: any = {
-			padding = { x = layout.padding or 8, y = (layout.row_padding or 0) + (layout.style_padding or 0) },
+			-- A device's rows keep their highlight's edges and step their
+			-- contents in, as Sheprd's own sidebar draws them.
+			padding = {
+				left = padding + (props.nest or 0),
+				right = padding,
+				y = (layout.row_padding or 0) + (layout.style_padding or 0),
+			},
 			margin = { left = inset + (props.indent or 0), right = inset, y = (layout.spacing or 0) / 2 },
 		}
 		if outline then
-			style.radius = if props.card then 6 else layout.radius
+			style.radius = if props.card then layout.radius or 8 else layout.radius
 			style.border = "all"
-			style.border_color = if selected then theme.muted else clear(theme.sidebar)
-			style.background = if selected and theme.foreground then `{theme.foreground}12` else nil
+			style.border_color = if selected and props.card and theme.foreground then `{theme.foreground}2e` elseif selected then theme.muted else clear(theme.sidebar)
+			style.background = if selected and theme.foreground then (if props.card then `{theme.foreground}1a` else `{theme.foreground}12`) else nil
 		elseif props.stripe then
 			style.border = "left"
 			style.border_color = if selected then theme.accent else clear(theme.sidebar)
 			style.background = if selected then theme.active else nil
 		else
 			style.background = if selected then theme.active else nil
+		end
+		-- Keep the host wash behind the text. On a flat row or an Orca card
+		-- it overlays the highlight; rounded rows draw their highlight over it.
+		local inner: any = nil
+		if props.host then
+			style.opacity = props.host.opacity
+			if props.host.wash then
+				local top = props.host.wash
+				if outline and not props.card then
+					top = style.background
+					style.background = props.host.wash
+				end
+				inner = { gap = "none", style = { background = top, padding = style.padding, radius = style.radius } }
+				style.padding = nil
+			end
 		end
 		local row: any = {
 			class = `sheprd-row {props.class or ""}`,
@@ -87,15 +113,19 @@ return component {
 			style = style,
 		}
 		-- Where a dragged row would land, as a line across this one's edge.
+		local content = inner or row
 		local line = ui.row { class = "sheprd-row-drop", height = 2, shrink = false, style = { background = theme.accent } }
 		if props.drop == "before" then
-			table.insert(row, line)
+			table.insert(content, line)
 		end
 		for _, child in ipairs(props :: any) do
-			table.insert(row, child)
+			table.insert(content, child)
 		end
 		if props.drop == "after" then
-			table.insert(row, line)
+			table.insert(content, line)
+		end
+		if inner then
+			table.insert(row, ui.column(inner))
 		end
 		return ui.column(row)
 	end,

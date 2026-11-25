@@ -15,7 +15,13 @@ Chats run through `sheprd-acp`, a program shipped beside the app. It talks to th
 
 `sheprd-acp` is the agent's only client, so the Herdr TUI, a plain terminal, and every Sheprd window see one conversation. Both views stay live: a prompt or an answer from either shows in both, and the first answer to a permission request wins. Closing Sheprd leaves the chat running in its pane.
 
-The built-in agents are Claude, Codex, Copilot, Gemini, Kimi Code, OpenCode, and Pi. Each has to be installed: `claude`, `codex` and `pi` (which `sheprd-acp` drives without an ACP adapter), `copilot --acp`, `gemini --acp`, `kimi acp`, or `opencode acp`. Each agent signs in its own way; when it reports that it needs authentication, the chat says how.
+The built-in agents are Antigravity, Claude, Codex, Copilot, Gemini, Kimi Code, Muse Code, OpenCode, and Pi. Each has to be installed: `agy acp`, `claude`, `codex` and `pi` (which `sheprd-acp` drives without an ACP adapter), `copilot --acp`, `gemini --acp`, `kimi acp`, `muse acp`, or `opencode acp`. For Antigravity, verify `agy acp --help` shows ACP usage; an IDE launcher also named `agy` may not provide ACP. Sign in through the native ACP flow or `agy acp --login`. Use it as the interactive agent, not as another agent's backend or an automated outer loop. See Google's [ACP guide](https://antigravity.google/docs/ide/extensions/acp/) and [Terms](https://antigravity.google/terms/). The model picker shows the models Antigravity makes available to your account and plan, including Gemini 4 Neon when offered by your `agy` version and entitlement.
+
+For Muse Code, run `muse acp --help` on the chat host to verify that the installed build supports ACP, then sign in with `muse login`. Choose **Muse Code** in **New Chat** or run `sheprd chat new muse`. The chat uses the models, reasoning levels, and approval modes that Muse offers for the session. [Meta’s ACP guide](https://meta-models.github.io/muse-code-sdk/1.4/guides/editors-acp/)
+
+When Antigravity advertises ACP authentication methods, Sheprd asks it to run its native sign-in flow, defaulting to `oauth-personal`. Set `SHEPRD_ANTIGRAVITY_AUTH_METHOD` in the chat environment to choose another advertised method, such as `oauth-business`, `gemini-api-key`, or `agent-platform`. Without an override, `GEMINI_API_KEY` selects `gemini-api-key`, and `GOOGLE_CLOUD_PROJECT` plus `GOOGLE_CLOUD_LOCATION` selects `agent-platform`. Set API keys only in a private environment, never a committed file. The agent handles authentication; Sheprd does not read or store its OAuth tokens. See Google's [authentication methods](https://antigravity.google/docs/ide/extensions/acp/#authentication).
+
+Antigravity receives your prompts directly without Sheprd's prompt templates, memory notes, or device annotations. You can switch to or from Antigravity whenever the current agent is idle, and the agent taking over gets the conversation with your next prompt.
 
 ## Turning chats on and configuring them
 
@@ -166,6 +172,10 @@ Besides your words, a chat tells the agent two things it cannot see, in a note a
 - **Where you are typing.** The desktop app on the agent's machine or on another computer over SSH, the terminal pane's own chat view, or Sheprd's iPhone and iPad app or web app, along with how the phone reached the computer: the local network, Tailscale, or Sheprd's relay. The note goes again only when you switch devices, so moving from your desk to your phone and back mid-chat tells the agent each time, while a phone changing networks does not. Opening the same chat from the desktop app on another computer over SSH also counts, since paths are no longer yours to open.
 
 Where you cannot open files on the agent's machine, as on a phone, the agent is asked to put pictures in the chat instead of giving a path: it saves a screenshot or a mockup as an image and links it, which attaches the picture to the message. HTML mockups are rendered to screenshots first.
+
+### Seeing what the agent was told
+
+**As sent** in a chat's header shows the conversation as the agent received it: above each of your messages, the note that went with it, dimmed and in the terminal font, with **Copy** beside it. When the chat switched agents, the conversation handed to the new one shows there too. A message that went alone shows nothing more. Click **As sent** again to hide the notes. The agent's own system prompt, such as Claude Code's, stays inside the agent, so the chat cannot show it. A chat restored from an agent's log shows the notes the log kept.
 
 ### Changing what the agent is told
 

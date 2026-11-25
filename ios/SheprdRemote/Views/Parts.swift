@@ -116,6 +116,18 @@ extension View {
     }
 }
 
+private struct AgentLabels: View {
+    let tags: [String]
+
+    var body: some View {
+        if !tags.isEmpty {
+            PillFlow(spacing: 4) {
+                ForEach(tags, id: \.self) { TagPill(tag: $0) }
+            }
+        }
+    }
+}
+
 struct ChatRowLabel: View {
     @AppStorage(RowLines.key) private var lines = RowLines.choices.lowerBound
     var item: ChatItem
@@ -136,6 +148,7 @@ struct ChatRowLabel: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(title).lineLimit(1)
+                        .fontWeight(item.unread ? .semibold : nil)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if item.drafted {
                         Image(systemName: "pencil.circle.fill")
@@ -147,19 +160,22 @@ struct ChatRowLabel: View {
                             .font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
                             .fixedSize()
                     } else if !item.needsYou, let date = item.lastAnswer {
-                        LastAnswer(date: date)
+                        LastAnswer(date: date, unread: item.unread)
                     }
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    detail.font(.subheadline).foregroundStyle(.secondary).lineLimit(RowLines.clamped(lines))
+                    detail.font(.subheadline).foregroundStyle(item.unread ? .primary : .secondary).lineLimit(RowLines.clamped(lines))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityValue(showsWorkspace && !showsPullRequest && item.workspace.merged ? "Pull request merged" : "")
                     // Its workspace's pull request, colored by state, says at a
                     // glance whether the agent's work is ready or failing.
                     if showsPullRequest { WorkspacePullRequestBadge(workspace: item.workspace).fixedSize() }
                 }
+                AgentLabels(tags: item.workspace.rowLabels(agent: item.chat.labels))
             }
         }
+        // In the row's leading margin, so read and unread rows line up.
+        .overlay(alignment: .leading) { UnreadDot(unread: item.unread).offset(x: -15) }
     }
 
     /// The chat's title, else its first prompt, else its agent's name, so a
@@ -260,8 +276,9 @@ struct AgentTerminalRowLabel: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(item.title).lineLimit(1)
+                        .fontWeight(item.unread ? .semibold : nil)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    if !item.needsYou, !item.working, let date = item.changed { LastAnswer(date: date) }
+                    if !item.needsYou, !item.working, let date = item.changed { LastAnswer(date: date, unread: item.unread) }
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text("\(Image(systemName: "apple.terminal")) \(detail)")
@@ -271,9 +288,11 @@ struct AgentTerminalRowLabel: View {
                         .accessibilityValue(showsWorkspace && !showsPullRequest && item.workspace.merged ? "Pull request merged" : "")
                     if showsPullRequest { WorkspacePullRequestBadge(workspace: item.workspace).fixedSize() }
                 }
+                AgentLabels(tags: item.workspace.rowLabels(agent: item.agent?.labels))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .overlay(alignment: .leading) { UnreadDot(unread: item.unread).offset(x: -15) }
     }
 
     private var detail: AttributedString {
@@ -301,11 +320,14 @@ struct AgentTerminalRowLabel: View {
 /// "3h", a weekday within the week, then the date.
 struct LastAnswer: View {
     let date: Date
+    /// The reply is unread, so the time is in the tint, as Mail shows it.
+    var unread = false
 
     var body: some View {
         TimelineView(.everyMinute) { context in
             Text(Self.label(date, now: context.date))
-                .font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
+                .font(.footnote.monospacedDigit().weight(unread ? .semibold : .regular))
+                .foregroundStyle(unread ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                 .fixedSize()
                 .accessibilityLabel("Last answered \(date.formatted(.relative(presentation: .named)))")
         }
@@ -338,6 +360,7 @@ struct AnswerCard: View {
                     Text("\(item.computer.name) · \(item.workspace.label)").font(.caption).foregroundStyle(.secondary)
                 }
             }
+            AgentLabels(tags: item.workspace.rowLabels(agent: item.chat.labels))
             Text(question.title)
             // Permissions fit on one row; a question's answers get a row each.
             let compact = question.options.allSatisfy { $0.kind != .other } && question.options.count <= 4

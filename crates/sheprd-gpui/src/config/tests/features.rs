@@ -41,3 +41,13 @@ fn feature_preferences_write_under_the_features_table() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn the_moonframe_window_requires_opt_in() -> anyhow::Result<()> {
+    assert!(!Config::parse("")?.features.moonframe_window);
+    assert!(!Config::parse("[features]")?.features.moonframe_window);
+    let config = Config::parse("[features]\nmoonframe_window = true")?;
+    assert!(config.features.moonframe_window);
+    assert!(!config.features.moonframe_tools);
+    Ok(())
+}

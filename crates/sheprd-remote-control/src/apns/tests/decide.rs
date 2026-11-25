@@ -8,6 +8,7 @@ use sheprd_chat_protocol::{
 };
 
 mod buttons;
+mod detail;
 
 const NOW_MS: u64 = 1_800_000_000_000;
 const STARTED_MS: u64 = 1_799_999_990_000;
@@ -33,6 +34,7 @@ fn running() -> Transcript {
         kind: EntryKind::User {
             text: "split the tests".to_owned(),
             files: 0,
+            note: None,
         },
     });
     transcript.usage = Some(Usage {
@@ -340,6 +342,7 @@ fn current_step_prefers_the_running_call_then_the_plan_then_the_last_call() {
         kind: EntryKind::User {
             text: "next".to_owned(),
             files: 0,
+            note: None,
         },
     });
     assert_eq!(current_step(&transcript), DEFAULT_STEP);

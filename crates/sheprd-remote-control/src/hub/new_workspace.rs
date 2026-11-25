@@ -9,8 +9,8 @@
 //! no core answers.
 
 use super::{
-    ApiMethod, CreatedWorkspace, Error, Hub, Layout, Result, command_line, core, created_tab,
-    direct_command_line, on_core, place, sessions, tab_params,
+    ApiMethod, CreatedWorkspace, Error, Hub, Launcher, Layout, Result, command_line, core,
+    created_tab, direct_command_line, on_core, place, sessions, tab_params,
 };
 use crate::native::changes::local::git;
 use serde_json::{Value, json};
@@ -41,19 +41,24 @@ impl Hub {
         if new.session.is_some_and(sessions::is_wsl) {
             return Err(Error::WslChat);
         }
-        let program = self.program().ok_or(Error::ProgramMissing)?;
+        let launcher = self.launcher().await?;
         let core = self.core_for_work().await?;
         if let Some(branch) = new.branch {
             let session = new.session.filter(|name| self.sessions.get(name).is_some());
             let cwd = PathBuf::from(new.cwd);
             // Git, not a workspace's folder, says which repository `cwd`
             // is: a workspace's folder follows its shell elsewhere.
-            let checkout = on_core(move || Ok(Checkout::of(&cwd))).await?;
-            let repository = checkout.and_then(|checkout| {
-                herdr_1_repository(&self.layout(), &checkout, session, |id| {
-                    self.kept_workspace(id)
-                })
-            });
+            let layout = self.layout();
+            let owner = self.core.clone();
+            let session = session.map(str::to_owned);
+            let repository = on_core(move || {
+                Ok(Checkout::of(&cwd).and_then(|checkout| {
+                    herdr_1_repository(&layout, &checkout, session.as_deref(), |id| {
+                        owner.as_ref().is_some_and(|core| core.keeps_workspace(id))
+                    })
+                }))
+            })
+            .await?;
             if let Some(source) = repository {
                 let worktree = Worktree {
                     base: source.base.as_deref(),
@@ -62,14 +67,14 @@ impl Hub {
                     title: new.title,
                 };
                 return self
-                    .herdr_1_worktree(core, worktree, new.agent, &program)
+                    .herdr_1_worktree(core, worktree, new.agent, &launcher)
                     .await;
             }
         }
         if let Some(core) = core {
-            return self.core_workspace(core, new, &program).await;
+            return self.core_workspace(core, new, &launcher).await;
         }
-        self.herdr_1_workspace(new, &program).await
+        self.herdr_1_workspace(new, &launcher).await
     }
 
     /// `new` on the core, in its unlisted group until Sheprd keeps a
@@ -79,7 +84,7 @@ impl Hub {
         &self,
         core: std::sync::Arc<core::Source>,
         new: NewWorkspace<'_>,
-        program: &Path,
+        launcher: &Launcher,
     ) -> Result<CreatedWorkspace> {
         // Herdr 2 keeps no Herdr 1 session: asked for a named one, the
         // workspace could not be where it was asked for.
@@ -89,20 +94,20 @@ impl Hub {
         {
             return Err(Error::SessionOnHerdr2);
         }
-        let (cwd, program, agent) = (new.cwd.to_owned(), program.to_owned(), new.agent);
+        let (cwd, launcher, agent) = (new.cwd.to_owned(), launcher.clone(), new.agent);
         let (branch, root) = (new.branch.map(str::to_owned), self.worktrees.clone());
         let title = new.title.map(str::to_owned);
         let (pane, folder, kept) = on_core(move || {
             let title = title.as_deref();
             let (pane, folder) = match branch {
                 Some(branch) => {
-                    core.open_worktree_chat(agent, &program, &cwd, &branch, title, root.as_deref())
+                    core.open_worktree_chat(agent, &launcher, &cwd, &branch, title, root.as_deref())
                 }
                 // Sheprd keeps a workspace for it, in this folder.
                 None => core
                     .open_chat(
                         agent,
-                        &program,
+                        &launcher,
                         &cwd,
                         Some(core::Place::New { cwd: &cwd, title }),
                     )
@@ -134,7 +139,7 @@ impl Hub {
         core: Option<std::sync::Arc<core::Source>>,
         worktree: Worktree<'_>,
         agent: Agent,
-        program: &Path,
+        launcher: &Launcher,
     ) -> Result<CreatedWorkspace> {
         let created = self
             .call(ApiMethod::WorktreeCreate, worktree.params())
@@ -144,17 +149,17 @@ impl Hub {
             let pane = answered(&created["root_pane"]["pane_id"])?;
             // The worktree's first pane is a shell in its folder; the program
             // path rides in this line because the pane was not made with it.
-            self.run_line(&pane, &direct_command_line(program, agent))
+            self.run_line(&pane, &direct_command_line(launcher, agent))
                 .await?;
             return Ok(CreatedWorkspace { workspace, pane });
         };
         let checkout = answered(&created["worktree"]["path"])?;
-        let (labelled, program) = (workspace.clone(), program.to_owned());
+        let (labelled, launcher) = (workspace.clone(), launcher.clone());
         // Labelled for the new workspace, so Sheprd puts it in a tab there.
         let started = on_core(move || {
             core.open_chat(
                 agent,
-                &program,
+                &launcher,
                 &checkout,
                 Some(place(&labelled, &checkout)),
             )
@@ -171,7 +176,7 @@ impl Hub {
     async fn herdr_1_workspace(
         &self,
         new: NewWorkspace<'_>,
-        program: &Path,
+        launcher: &Launcher,
     ) -> Result<CreatedWorkspace> {
         let mut params = json!({"cwd": new.cwd, "focus": false});
         if let (Some(title), None) = (new.title, new.branch) {
@@ -185,11 +190,12 @@ impl Hub {
             let response = self
                 .call(
                     ApiMethod::TabCreate,
-                    tab_params(&workspace, new.cwd, new.agent, program),
+                    tab_params(&workspace, new.cwd, new.agent, &launcher.program),
                 )
                 .await?;
             let (_, pane) = created_tab(&response).ok_or(Error::Response)?;
-            self.run_line(&pane, &command_line(new.agent)).await?;
+            self.run_line(&pane, &command_line(launcher, new.agent))
+                .await?;
             return Ok(CreatedWorkspace { workspace, pane });
         };
         let worktree = Worktree {
@@ -198,7 +204,7 @@ impl Hub {
             repository: &workspace,
             title: new.title,
         };
-        self.herdr_1_worktree(None, worktree, new.agent, program)
+        self.herdr_1_worktree(None, worktree, new.agent, launcher)
             .await
     }
 }
@@ -276,9 +282,7 @@ impl Checkout {
         )
         .ok()?;
         let branch = git(cwd, &["symbolic-ref", "--quiet", "HEAD"]).ok();
-        Self::parse(&dirs, branch.as_deref(), |path| {
-            std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
-        })
+        Self::parse(&dirs, branch.as_deref(), canonical_path)
     }
 
     /// From `rev-parse`'s common and Git directories and `symbolic-ref`'s
@@ -303,6 +307,10 @@ impl Checkout {
     }
 }
 
+fn canonical_path(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
+}
+
 /// Where Herdr 1 makes a new worktree in `checkout` from, among
 /// `session`'s workspaces (the primary's when `None`): the workspace of
 /// its repository's own checkout, keyed by its Git directory, and for a
@@ -323,15 +331,30 @@ pub(super) fn herdr_1_repository(
         (true, Some(branch)) => Some(branch.clone()),
         (true, None) => return None,
     };
-    let workspace = layout.workspaces.iter().find(|workspace| {
+    let mut eligible = layout.workspaces.iter().filter(|workspace| {
         sessions::split_id(&workspace.id).0 == session
             && !sessions::in_wsl(&workspace.id)
             && !core::is_new_workspace(&workspace.id)
+            && workspace.id != core::UNLISTED
             && !kept(&workspace.id)
-            && workspace.worktree.as_ref().is_some_and(|tree| {
+    });
+    let workspace = eligible
+        .clone()
+        .find(|workspace| {
+            workspace.worktree.as_ref().is_some_and(|tree| {
                 !tree.is_linked_worktree && Path::new(&tree.key) == checkout.common_dir
             })
-    })?;
+        })
+        .or_else(|| {
+            // Before the first worktree, Herdr can omit repository metadata.
+            // worktree.create discovers Git and groups the original workspace too.
+            eligible.find(|workspace| {
+                workspace.worktree.is_none()
+                    && !workspace.cwd.is_empty()
+                    && canonical_path(&Path::new(&workspace.cwd).join(".git"))
+                        == checkout.common_dir
+            })
+        })?;
     Some(Source {
         workspace: workspace.id.clone(),
         base,

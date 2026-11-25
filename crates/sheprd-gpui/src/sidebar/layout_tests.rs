@@ -49,6 +49,8 @@ mod device_tag_groups;
 #[cfg(test)]
 mod devices_layout;
 #[cfg(test)]
+mod drafted_agents;
+#[cfg(test)]
 mod favorite_agents;
 #[cfg(test)]
 mod fold_all_hosts;
@@ -130,6 +132,8 @@ mod superset_badges;
 mod superset_dots;
 #[cfg(test)]
 mod text_width;
+#[cfg(test)]
+mod unread_agents;
 #[cfg(test)]
 mod update_download_caption;
 #[cfg(test)]
@@ -398,6 +402,13 @@ pub(crate) fn within_device_pixel(actual: Pixels, expected: Pixels, scale: f32) 
 }
 
 impl PaintedText {
+    /// Truncation keeps the longest prefix that fits beside the ellipsis. The
+    /// next glyph need not fit, so the fixture allows one glyph plus an ellipsis
+    /// of unused room, just as its child-row checks do.
+    pub(crate) fn fills_truncated_column(&self) -> bool {
+        self.glyph_text.ends_with('\u{2026}') && self.width > self.bounds.size.width - px(16.)
+    }
+
     /// `bar` is the width of the activity bar left of the sidebar, if any;
     /// `scale` is the window's device pixels per logical pixel; see
     /// [`within_device_pixel`].
@@ -464,7 +475,7 @@ impl PaintedText {
             // can fall one glyph plus the ellipsis short. Segoe UI on Windows
             // leaves 13px where macOS's system font left under 12.
             ensure!(
-                self.width > self.bounds.size.width - px(16.),
+                self.fills_truncated_column(),
                 "child glyph width {:?} did not fill label width {:?}",
                 self.width,
                 self.bounds.size.width
@@ -605,11 +616,18 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
     let mark_layer = cx.new(|cx| crate::mark_layer::MarkLayer::new(window, hosts, cx));
     let focus = cx.focus_handle();
     let terminal_focus = SheprdWindow::leave_region_with_terminal(&focus, window, cx);
+    let agent_guidance = cx.new(|_| crate::agent_guidance::State::default());
+    let agent_guidance_changed = cx.observe(&agent_guidance, |_, _, cx| cx.notify());
     SheprdWindow {
+        agent_guidance,
+        _agent_guidance: agent_guidance_changed,
         _terminal_focus: terminal_focus,
         chrome_region: None,
         hosted: false,
+        hosted_full_header: None,
+        chat_drafts: Default::default(),
         chat_rail_width: crate::panel_resize::CHAT_RAIL,
+        chat_turns: Default::default(),
         chats: Default::default(),
         sound: Default::default(),
         bell: Default::default(),
@@ -674,6 +692,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         git: Default::default(),
         git_anchor: Default::default(),
         deliveries: Default::default(),
+        details_visible: false,
         terminal_notes: Default::default(),
         notes_width: crate::panel_resize::NOTES,
         notice_overflow: Default::default(),
@@ -753,6 +772,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         sent_focus: None,
         bounds: Bounds::default(),
         title: crate::WINDOW_TITLE.to_owned(),
+        titlebar_width: 0.,
         cell_width: 9.,
         hovered_terminal_link: false,
         pressed_terminal_link: None,
@@ -813,6 +833,7 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         sidebar_preferences: None,
         sidebar_modified: false,
         agent_favorites: Default::default(),
+        agent_read: Default::default(),
         agent_group: None,
         agent_sort: Default::default(),
         agent_sort_modified: false,
@@ -842,6 +863,8 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<SheprdWindow>
         _browser_tabs: cx.observe_global::<crate::browser::Store>(|_, cx| cx.notify()),
         _agent_favorites: cx
             .observe_global::<crate::agent_favorites::AgentFavorites>(|_, cx| cx.notify()),
+        _agent_read: cx.observe_global::<crate::agent_read::AgentRead>(|_, cx| cx.notify()),
+        _chat_drafts: SheprdWindow::observe_chat_drafts(cx),
         _device_tags: cx.observe_global::<crate::device_tags::DeviceTags>(|_, cx| cx.notify()),
         _worktree_notes: SheprdWindow::observe_worktree_notes(window, cx),
         prefix_armed: false,

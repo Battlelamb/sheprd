@@ -27,14 +27,19 @@ struct ChatItem: Identifiable, Hashable {
     var question: Permission? { answered ? nil : chat.summary?.question }
     var needsYou: Bool { question != nil || (!answered && chat.status == .blocked) }
     var working: Bool { !needsYou && (chat.status == .working || chat.summary?.status == .working) }
+    /// It replied since anyone last read it, on any device.
+    var unread: Bool { chat.unread == true }
 }
 
 enum FleetError: Error, LocalizedError {
     case offline(String)
+    /// A call to one of the demo's computers (`DemoFleet`).
+    case demo
 
     var errorDescription: String? {
         switch self {
         case let .offline(name): "\(name) is not connected."
+        case .demo: "This is a demo, so nothing is sent. Pair a computer to use it for real."
         }
     }
 }
@@ -58,6 +63,8 @@ struct TerminalItem: Identifiable, Hashable {
     /// When the computer saw its agent last change state.
     var changed: Date? { agent?.changedMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
     var working: Bool { agent?.status == .working }
+    /// It finished since anyone last looked at it, on any device.
+    var unread: Bool { agent?.unread == true }
 
     /// Where a list opens it: an agent's conversation, when its computer
     /// shows it as a chat, else the agent's pane, else the focused one.
@@ -82,6 +89,7 @@ final class Fleet {
     struct Machine: Identifiable {
         var computer: Computer
         var status: LinkStatus = .connecting
+        var lastKnownStatus: LinkStatus?
         var home: Home?
         /// `home` came from the cache and the link has not refreshed it.
         var stale = true
@@ -94,12 +102,15 @@ final class Fleet {
         /// changed in between as it happened.
         var watching = false
         var id: String { computer.device }
+        var presentedStatus: LinkStatus { status.presented(lastKnown: lastKnownStatus) }
         /// The computer answered and runs a Sheprd too old for this app. A
         /// cached `home` may predate an update, so only a fresh one counts.
         var needsUpdate: Bool { !stale && home?.needsUpdate == true }
     }
 
     private(set) var machines: [Machine] = []
+    /// The demo's computers are shown (`DemoFleet`), as none is paired.
+    private(set) var demo = false
     private var drafts = DraftMarks<PaneKey>()
     private var links: [String: ComputerLink] = [:]
     private var readers: [String: Task<Void, Never>] = [:]
@@ -146,12 +157,14 @@ final class Fleet {
     /// A computer's relay record changed, or it stopped listening on
     /// relays (nil): the app keeps it with the computer.
     var onRelay: ((String, RelayRecord?) -> Void)?
-    /// Calls that got no answer, for the computer's log once it is back.
+    /// Calls that got no answer, or a late one, for the computer's log.
     @ObservationIgnored private var unreported: [String: UnreportedFailures] = [:]
     /// Addresses named in a report, which the daemon cuts at 600 characters.
     private static let failuresReported = 6
     /// Computers a report is on its way to, so only one task sends them.
     @ObservationIgnored private var reporting: Set<String> = []
+    /// A call that takes this long, though it got its answer, is reported.
+    private static let slowCall: Duration = .seconds(5)
     /// Commands sent to chats that have not come back yet.
     let pending = PendingCommands()
     private var active = false
@@ -176,6 +189,11 @@ final class Fleet {
 
     /// Follows `computers`: new ones get a link, forgotten ones lose theirs.
     func sync(_ computers: [Computer]) {
+        // The demo stands in for paired computers until there is one.
+        if demo {
+            guard !computers.isEmpty else { return }
+            endDemo()
+        }
         let wanted = Set(computers.map(\.device))
         for machine in machines where !wanted.contains(machine.id) {
             carrier?.forget(machine.id)
@@ -205,6 +223,7 @@ final class Fleet {
             }
             return Machine(
                 computer: computer,
+                lastKnownStatus: cache.lastLinkStatus(computer.device),
                 home: cache.home(computer.device),
                 updated: cache.homeDate(computer.device),
                 answers: cache.answers(computer.device)
@@ -215,6 +234,21 @@ final class Fleet {
         // From the cached homes at launch, and without forgotten ones.
         publishSummary()
         rewarm()
+    }
+
+    /// Shows the demo's computers, while none is paired.
+    func startDemo() {
+        guard machines.isEmpty else { return }
+        demo = true
+        machines = DemoFleet.machines()
+    }
+
+    /// Hides the demo's computers, and forgets the chats followed on them.
+    func endDemo() {
+        guard demo else { return }
+        demo = false
+        machines = []
+        for key in chats.keys where DemoFleet.owns(key.device) { drop(key, saving: false) }
     }
 
     /// The app came to the foreground: links connect and catch up.
@@ -247,6 +281,7 @@ final class Fleet {
     /// Keeps what a chat's composer holds across launches; `nil` removes it,
     /// unless another window's composer still holds a draft of that chat.
     func save(draft: Cache.Draft?, for key: PaneKey, by composer: UUID? = nil) {
+        guard !DemoFleet.owns(key.device) else { return }
         let emptied = drafts.set(key, drafted: draft != nil, by: composer)
         guard draft != nil || emptied else { return }
         cache.save(draft: draft, device: key.device, pane: key.pane)
@@ -321,6 +356,7 @@ final class Fleet {
     /// push from one computer adds to the others' counts rather than
     /// replacing them; the badge to show.
     func recordBadge() -> Int {
+        guard !demo else { return 0 }
         let defaults = UserDefaults(suiteName: "group.so.pen.herdr.remote")
         var counts = BadgeCounts.load(from: defaults)
         for machine in machines {
@@ -334,6 +370,8 @@ final class Fleet {
     /// Writes what widgets, Controls, Siri, Spotlight, and the share
     /// extension show, and reloads the widgets when it changed.
     func publishSummary() {
+        // Widgets, Siri, and Spotlight offer only real computers' chats.
+        guard !demo else { return }
         let chats = chatItems.map { item in
             WidgetSummary.Chat(
                 device: item.computer.device,
@@ -375,6 +413,10 @@ final class Fleet {
     /// When the text shortcuts a computer's home reports were edited; `nil`
     /// from a computer too old to keep them.
     @ObservationIgnored var onShortcutsReported: ((UInt64?, String) -> Void)?
+    /// An agent on `Computer` asks the app to do something (`AgentControl`).
+    @ObservationIgnored var onDrive: ((UInt64, AgentCommand, Computer) -> Void)?
+    /// Whether the person lets agents on a computer drive the app.
+    @ObservationIgnored var agentsAllowed: ((Computer) -> Bool)?
     /// A computer's copy of the text shortcuts, as fetched, or as it stood
     /// after the offer that goes with it.
     @ObservationIgnored var onShortcuts: ((TextShortcuts, _ offered: TextShortcuts?, String) -> Void)?
@@ -389,12 +431,19 @@ final class Fleet {
 
     /// Opens a chat, current at once when it was followed (`WarmChats`).
     func openChat(_ key: PaneKey) -> ChatStore {
+        if let sample = DemoFleet.transcript(key) {
+            DemoFleet.markOpened(key, in: &machines)
+            return ChatStore(key: key, sample: sample)
+        }
         chatViewers[key, default: 0] += 1
-        return follow(key, background: false)
+        let store = follow(key, background: false)
+        store.shown(true)
+        return store
     }
 
     func closeChat(_ store: ChatStore) {
         guard chats[store.key] === store, Self.release(store.key, from: &chatViewers) else { return }
+        store.shown(false)
         save(store)
         warmth.closed(store.key, at: .now)
         rewarm()
@@ -436,7 +485,7 @@ final class Fleet {
 
     private func save(_ store: ChatStore) {
         guard let transcript = store.transcript else { return }
-        cache.save(chat: transcript, cursor: store.cursor, device: store.key.device, pane: store.key.pane)
+        cache.save(chat: transcript, cursor: store.cursor, effects: store.effects.ledger.mark, device: store.key.device, pane: store.key.pane)
     }
 
     /// Follows the chats `WarmChats` picks and lets go of the rest no
@@ -451,6 +500,11 @@ final class Fleet {
     }
 
     func openTerm(_ key: PaneKey) -> TermStore {
+        if DemoFleet.owns(key.device) {
+            let store = TermStore(key: key)
+            if let screen = DemoFleet.screen(key) { store.apply(screen) }
+            return store
+        }
         termViewers[key, default: 0] += 1
         if let open = terms[key] { return open }
         let store = TermStore(key: key)
@@ -554,37 +608,65 @@ final class Fleet {
         _ device: String,
         _ body: @Sendable (RemoteClient, String) async throws -> Answer
     ) async throws -> Answer {
+        if DemoFleet.owns(device) { throw FleetError.demo }
         guard let machine = machines.first(where: { $0.id == device }),
               case let .online(origin) = machine.status
         else { throw FleetError.offline(machines.first { $0.id == device }?.computer.name ?? "The computer") }
         let started = ContinuousClock.now
+        let tags = CallTags()
+        // Before any request went out, as when a token could not be had.
+        let unsent = PathFailure.call(tag: "none", origin: origin, began: .now)
         do {
-            let token = try await sessions.token(for: machine.computer, at: origin)
-            let client: RemoteClient
-            if let known = clients[device], known.origin == origin, known.fingerprint == machine.computer.fingerprint {
-                client = known
-            } else {
-                client = RemoteClient(origin: origin, fingerprint: machine.computer.fingerprint)
-                clients[device] = client
+            let answer = try await RemoteClient.$callTags.withValue(tags) {
+                let token = try await sessions.token(for: machine.computer, at: origin)
+                let client: RemoteClient
+                if let known = clients[device], known.origin == origin, known.fingerprint == machine.computer.fingerprint {
+                    client = known
+                } else {
+                    client = RemoteClient(origin: origin, fingerprint: machine.computer.fingerprint)
+                    clients[device] = client
+                }
+                return try await body(client, token)
             }
-            return try await body(client, token)
+            let elapsed = ContinuousClock.now - started
+            if elapsed >= Self.slowCall {
+                // An answer that nearly came too late, which the computer
+                // logs as quick when the time went on the way.
+                let call = tags.report(origin: origin) ?? unsent
+                report("slow \(call): answered after \(PathFailure.seconds(elapsed))", device: device)
+            }
+            return answer
         } catch where PathFailure.isDead(error) {
-            pathFailed(error, device: device, origin: origin, started: started)
+            pathFailed(error, tags: tags, device: device, origin: origin, started: started)
+            throw error
+        } catch {
+            let call = tags.report(origin: origin) ?? unsent
+            log.error("\(call, privacy: .public) failed: \(String(describing: error), privacy: .public)")
             throw error
         }
     }
 
     /// A call got no answer: the link looks for an address that gives one,
     /// and the client goes, as its open connections use the dead path. The
-    /// call is not sent again, as it may have reached the computer.
-    private func pathFailed(_ error: Error, device: String, origin: String, started: ContinuousClock.Instant) {
-        let summary = PathFailure.summary(error, after: ContinuousClock.now - started)
-        let line = "\(PathFailure.route((error as? URLError)?.failingURL)) at \(origin): \(summary)"
-        log.error("no answer from \(device, privacy: .public): \(line, privacy: .public)")
+    /// call is not sent again, as it may have reached the computer. The
+    /// report names the request that failed, the call's last, and how long
+    /// it went unanswered.
+    private func pathFailed(_ error: Error, tags: CallTags, device: String, origin: String, started: ContinuousClock.Instant) {
+        let began = tags.requests.last?.began
+        let waited = began.map { Duration.seconds(Date.now.timeIntervalSince($0)) } ?? ContinuousClock.now - started
+        let summary = PathFailure.summary(error, after: waited)
+        let call = tags.report(origin: origin) ?? PathFailure.call(tag: "none", origin: origin, began: .now)
         clients[device] = nil
-        unreported[device, default: UnreportedFailures()].add(line)
         Task { await links[device]?.pathFailed(origin, started: started) }
-        // The link may already be back elsewhere, with no update to come.
+        report("\(PathFailure.route((error as? URLError)?.failingURL)) \(call): \(summary)", device: device)
+    }
+
+    /// Keeps `line` for the computer's log and sends it, now if the link
+    /// is up, which it may already be again elsewhere, with no update to
+    /// come; otherwise once it is.
+    private func report(_ line: String, device: String) {
+        log.error("\(device, privacy: .public): \(line, privacy: .public)")
+        unreported[device, default: UnreportedFailures()].add(line)
         reportFailures(of: device)
     }
 
@@ -663,98 +745,25 @@ final class Fleet {
         }
     }
 
-    /// Closes the pane a chat runs in, which stops its agent in Sheprd.
-    func closeChatPane(_ key: PaneKey) async throws {
-        let pane = key.pane
-        _ = try await call(key.device) { client, token in
-            try await client.termAction(.closePane, pane: pane, bearer: token)
-        }
-    }
-
-    /// Asks for a chat's row summary; every phone's list shows it when the
-    /// computer has it.
-    /// Stars or unstars the agent in `key`'s pane on its computer, which
-    /// every device then lists first.
-    func setFavorite(_ favorite: Bool, for key: PaneKey) async throws {
-        let pane = key.pane
-        try await call(key.device) { client, token in
-            try await client.setFavorite(favorite, pane: pane, bearer: token)
-        }
-    }
-
-    func summarize(_ key: PaneKey) async throws {
-        let pane = key.pane
-        try await call(key.device) { client, token in
-            try await client.summarize(pane: pane, bearer: token)
-        }
-    }
-
-    /// A short title for a chat from Claude, run once on its own.
-    func suggestTitle(_ key: PaneKey) async throws -> String {
-        let pane = key.pane
-        return try await call(key.device) { client, token in
-            try await client.suggestTitle(pane: pane, bearer: token)
-        }
-    }
-
-    /// Closes the terminal tab a pane is in, with every pane in it.
-    func closeTab(_ key: PaneKey) async throws {
-        let pane = key.pane
-        _ = try await call(key.device) { client, token in
-            try await client.termAction(.closeTab, pane: pane, bearer: token)
-        }
-    }
-
-    /// Names a chat or the terminal tab a pane is in; the next `home` from
-    /// the computer carries the name to every list.
-    func rename(_ key: PaneKey, to label: String) async throws {
-        let pane = key.pane
-        try await call(key.device) { client, token in
-            try await client.rename(label, pane: pane, bearer: token)
-        }
-    }
-
-    /// Names a workspace; the next `home` from the computer carries the
-    /// name to every list.
-    func renameWorkspace(_ key: WorkspaceKey, to label: String) async throws {
-        let workspace = key.workspace
-        try await call(key.device) { client, token in
-            try await client.renameWorkspace(workspace, to: label, bearer: token)
-        }
-    }
-
-    /// Closes a workspace; the next `home` drops it from every list.
-    func closeWorkspace(_ key: WorkspaceKey) async throws {
-        let workspace = key.workspace
-        try await call(key.device) { client, token in
-            try await client.closeWorkspace(workspace, bearer: token)
-        }
-    }
-
-    /// Deletes a workspace's linked worktree and closes the workspace;
-    /// `discard` loses its uncommitted changes, as the person confirmed.
-    func removeWorktree(_ key: WorkspaceKey, discard: Bool) async throws {
-        let workspace = key.workspace
-        try await call(key.device) { client, token in
-            try await client.removeWorktree(workspace, discard: discard, bearer: token)
-        }
-    }
-
     // MARK: Links
 
     private func startLink(_ computer: Computer) {
-        guard links[computer.device] == nil else { return }
+        guard links[computer.device] == nil, !DemoFleet.owns(computer.device) else { return }
+        var io = LiveSocket.io(for: computer, sessions: sessions)
+        io.bannedRelay = { [weak self] in await self?.bannedRelay(for: computer.device) }
         let link = ComputerLink(
             fingerprint: computer.fingerprint.hex,
             origins: origins(computer),
-            io: LiveSocket.io(for: computer, sessions: sessions)
+            io: io
         )
         links[computer.device] = link
         startRelay(computer)
         let device = computer.device
         let watching = chats.filter { $0.key.device == device }.map { ($0.key.pane, $0.value.cursor, self.background.contains($0.key)) }
         let terminals = terms.filter { $0.key.device == device }.map { ($0.key.pane, $0.value.size) }
+        let agents = agentsAllowed?(computer) == true
         readers[device] = Task {
+            if agents { await link.setAgentControl(true) }
             await link.watch(.home)
             for (pane, cursor, background) in watching { await link.watch(.chat(pane: pane), since: cursor, background: background) }
             for (pane, size) in terminals { await link.watch(.term(pane: pane), size: size) }
@@ -783,7 +792,7 @@ final class Fleet {
     }
 
     private func origins(_ computer: Computer) -> [String] {
-        computer.origins + (relayOrigins[computer.device].map { [$0] } ?? [])
+        AddressOrder.preferred(computer.origins) + (relayOrigins[computer.device].map { [$0] } ?? [])
     }
 
     /// Starts the computer's relay proxy, when it has relays, and adds its
@@ -854,6 +863,16 @@ final class Fleet {
         }
     }
 
+    /// Tells `device` whether its agents may drive the app.
+    func setAgentControl(_ allowed: Bool, device: String) {
+        Task { await links[device]?.setAgentControl(allowed) }
+    }
+
+    /// Answers `device`'s `drive` numbered `id`.
+    func driven(_ id: UInt64, _ outcome: AgentOutcome, device: String) {
+        Task { await links[device]?.reply(id: id, outcome: outcome) }
+    }
+
     private func stopLink(_ device: String) {
         stopRelay(device)
         clients[device] = nil
@@ -867,6 +886,10 @@ final class Fleet {
         case let .status(status):
             log.notice("\(self.machines[index].computer.name, privacy: .public) is \(String(describing: status), privacy: .public)")
             machines[index].status = status
+            if status != .connecting, machines[index].lastKnownStatus != status {
+                machines[index].lastKnownStatus = status
+                cache.save(linkStatus: status, for: device)
+            }
             if case .online = status {} else {
                 machines[index].watching = false
                 onOffline?(device)
@@ -939,6 +962,8 @@ final class Fleet {
                     store.problem = message
                 }
             }
+        case let .event(.drive(id, command)):
+            onDrive?(id, command, machines[index].computer)
         case let .event(.reload(.term(pane))):
             log.notice("\(self.machines[index].computer.name, privacy: .public) reloads terminal \(pane, privacy: .public)")
         case let .event(.termScreen(screen)):

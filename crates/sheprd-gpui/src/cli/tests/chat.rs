@@ -75,18 +75,22 @@ fn chat_convert_takes_an_optional_pane() {
 
 #[test]
 fn chat_new_names_a_built_in_agent() {
-    assert_eq!(
-        command(&["chat", "new", "claude"]),
-        ControlCommand::Chat(ChatCommand::New {
-            agent: Some(sheprd_chat_protocol::Agent::Claude),
-            pane: None
-        })
-    );
+    for agent in sheprd_chat_protocol::Agent::ALL {
+        assert_eq!(
+            command(&["chat", "new", agent.name()]),
+            ControlCommand::Chat(ChatCommand::New {
+                agent: Some(*agent),
+                pane: None,
+                brief: None,
+            })
+        );
+    }
     assert_eq!(
         command(&["chat", "new", "--pane", "w1:p2", "codex"]),
         ControlCommand::Chat(ChatCommand::New {
             agent: Some(sheprd_chat_protocol::Agent::Codex),
-            pane: Some("w1:p2".into())
+            pane: Some("w1:p2".into()),
+            brief: None,
         })
     );
     assert!(matches!(
@@ -98,7 +102,8 @@ fn chat_new_names_a_built_in_agent() {
         command(&["chat", "new", "--pane", "w1:p2"]),
         ControlCommand::Chat(ChatCommand::New {
             agent: None,
-            pane: Some("w1:p2".into())
+            pane: Some("w1:p2".into()),
+            brief: None,
         })
     );
     assert!(parse(&["chat", "new", "claude", "codex"]).is_err());

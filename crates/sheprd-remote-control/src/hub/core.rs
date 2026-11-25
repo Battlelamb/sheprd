@@ -140,13 +140,14 @@ impl Source {
         target: &sheprd_client::ConnectTarget,
         endpoint: crate::core_target::CoreTarget,
         state_dir: &std::path::Path,
+        sessions: Arc<super::sessions::Sessions>,
     ) -> std::io::Result<Arc<Self>> {
         let source = Arc::new(Self {
             connected: AtomicBool::new(false),
             endpoint,
             holds: AtomicU64::new(0),
             own: Mutex::new(own::Store::load(state_dir)),
-            poller: Mutex::default(),
+            poller: Mutex::new(poller::Poller::following(sessions)),
             scope: target
                 .socket_path()
                 .ok()
@@ -215,6 +216,9 @@ impl Source {
             own.layouts.apply(&mut next, &boot, &terminals);
             drop(own);
             chats::lift(&mut next, &boot, &terminals);
+            poller
+                .times
+                .stamp_statuses(&boot, &mut next, crate::web::now_ms());
             next
         };
         let tabs = create::tab_panes(&next);

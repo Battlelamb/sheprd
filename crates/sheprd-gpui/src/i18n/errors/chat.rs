@@ -134,6 +134,7 @@ impl Localize for StartError {
                     agent = agent.display_name()
                 )
             }
+            Self::BriefRemote => fl!("error-chat-start-brief-remote"),
             Self::Disabled => fl!("error-chat-start-disabled"),
             Self::Line => fl!("error-chat-start-line"),
             Self::NotConnected => fl!("error-chat-start-not-connected"),
@@ -190,6 +191,7 @@ impl Localize for visual::Error {
             Self::NotAnImage => fl!("error-chat-visual-not-an-image"),
             Self::Panicked => fl!("error-chat-visual-panicked"),
             Self::Raster(_) => fl!("error-chat-visual-raster"),
+            Self::Thumbnail(_) => fl!("error-chat-visual-thumbnail"),
             // keep-sorted end
         }
     }

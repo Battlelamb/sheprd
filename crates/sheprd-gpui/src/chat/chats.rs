@@ -137,6 +137,8 @@ pub(crate) enum SendButton {
 }
 
 pub(crate) struct ChatPane {
+    /// Whether each prompt shows what was sent to the agent ahead of it.
+    pub(crate) as_sent: bool,
     /// Files the next prompt carries, in the order they were added.
     pub(crate) attachments: Vec<std::path::PathBuf>,
     /// What this chat's buttons chose for its code blocks and HTML fences.
@@ -147,6 +149,9 @@ pub(crate) struct ChatPane {
     /// Closes the open menu once the person types in the composer, as a
     /// click outside it would.
     pub(super) composer_typed: Option<gpui::Subscription>,
+    /// The version of the kept draft this composer restored or last wrote,
+    /// the only one it may clear (`super::drafts`).
+    pub(crate) draft_seen: super::drafts::Seen,
     /// The message effects met and playing.
     pub(crate) effects: super::effects::Effects,
     /// The last command this window could not send.
@@ -275,11 +280,13 @@ impl ChatPane {
         let mut prepared = Prepared::default();
         prepared.set_remote_links(!target.is_local());
         Self {
+            as_sent: false,
             attachments: Vec::new(),
             code: Default::default(),
             completion: 0,
             composer: None,
             composer_typed: None,
+            draft_seen: None,
             effects: Default::default(),
             error: None,
             expanded: HashSet::new(),
@@ -510,6 +517,12 @@ impl ChatPane {
         }
     }
 
+    /// How many rows the list has, and the last one's version: what changes
+    /// as entries come and grow.
+    pub(crate) fn revision(&self) -> (usize, Option<(EntryId, u64)>) {
+        (self.list_keys.len(), self.list_keys.last().copied())
+    }
+
     /// Redraws one entry, such as a thought folding open.
     pub(crate) fn remeasure(&self, id: EntryId) {
         if let Some(index) = self.list_keys.iter().position(|(entry, _)| *entry == id) {
@@ -538,6 +551,14 @@ impl ChatPane {
     pub(crate) fn toggle_earlier(&mut self, fold: super::earlier::Earlier) {
         self.toggle_expanded(fold.divider);
         let rows = fold.start + 1;
+        super::glide::splice_in_place(&self.list, 0..rows, rows);
+    }
+
+    /// Shows each prompt with what was sent ahead of it, or stops, then
+    /// measures every row again.
+    pub(crate) fn toggle_as_sent(&mut self) {
+        self.as_sent = !self.as_sent;
+        let rows = self.list_keys.len();
         super::glide::splice_in_place(&self.list, 0..rows, rows);
     }
 
@@ -591,6 +612,9 @@ pub(crate) struct Chats {
     pub(crate) agents: super::harnesses::Harnesses,
     /// New terminal agents `[chat] auto_convert` moves into chats.
     pub(crate) auto_convert: super::auto_convert::Tracker,
+    /// The brief of the chat being started by the call in progress; set
+    /// only around one start, which hands it to the program it launches.
+    pub(crate) brief: Option<super::brief::Brief>,
     /// The terminal agent moving into a chat, one at a time.
     pub(crate) converting: Option<super::convert::Job>,
     /// The herdr-core agent moving into a chat, one at a time with the above.

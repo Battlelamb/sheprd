@@ -15,10 +15,18 @@ use std::{
 pub(super) const AUXILIARY: &str = "auxiliary.bin";
 pub(super) const DISK: &str = "disk.img";
 /// Present from a machine's making until its setup guide is closed: the
-/// guide shows beside its tab from its first start ([`super::guide`]).
+/// guide shows beside its tab from its first start ([`super::guide`]). It
+/// holds [`FROM_IMAGE`] for a machine made from an image without [`READY`].
 pub(super) const GUIDE: &str = "setup-guide";
+/// What [`GUIDE`] holds when the machine came from an image that may be set
+/// up already: its guide waits for the agent before it shows.
+pub(super) const FROM_IMAGE: &[u8] = b"from-image";
 pub(super) const HARDWARE: &str = "hardware.bin";
 pub(super) const IDENTITY: &str = "identity.bin";
+/// Present once the machine's Sheprd Agent answered with both permissions:
+/// an image saved from it keeps it, and a machine made from that image starts
+/// without its setup guide.
+pub(super) const READY: &str = "agent-ready";
 /// What the user chose, for the next boot.
 pub(super) const SETTINGS: &str = "machine.json";
 /// What the machine last booted with, which a saved state needs again.
@@ -62,6 +70,52 @@ pub(super) fn state_file(name: &Name) -> Result<PathBuf> {
 /// Every installed machine, by name.
 pub(crate) fn list() -> Result<Vec<Listing>> {
     list_in(&root()?)
+}
+
+/// Resolve the directory entry's spelling by filesystem identity, including
+/// aliases on case-insensitive volumes. Run on a worker, like `list`.
+pub(crate) fn resolve_name(name: &Name) -> Result<Name> {
+    resolve_name_in(&root()?, name)
+}
+
+/// Restored tabs may contain old aliases. Refuse to boot a disk under a
+/// different live-state key, even when the filesystem accepts the alias.
+pub(super) fn require_installed_name(name: &Name) -> Result<()> {
+    require_installed_name_in(&root()?, name)
+}
+
+fn require_installed_name_in(root: &Path, name: &Name) -> Result<()> {
+    let installed = resolve_name_in(root, name)?;
+    if installed != *name {
+        return Err(Error::NameMismatch {
+            requested: name.clone(),
+            installed,
+        });
+    }
+    Ok(())
+}
+
+fn resolve_name_in(root: &Path, name: &Name) -> Result<Name> {
+    let requested = root.join(name.as_str());
+    let metadata = fs::metadata(&requested).map_err(|source| read_error(&requested, source))?;
+    for entry in fs::read_dir(root).map_err(|source| read_error(root, source))? {
+        let entry = entry.map_err(|source| read_error(root, source))?;
+        let Some(text) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let Ok(installed) = Name::try_from(text) else {
+            continue;
+        };
+        let path = entry.path();
+        let candidate = fs::metadata(&path).map_err(|source| read_error(&path, source))?;
+        if candidate.dev() == metadata.dev()
+            && candidate.ino() == metadata.ino()
+            && path.join(DISK).is_file()
+        {
+            return Ok(installed);
+        }
+    }
+    Err(Error::NotInstalled(requested))
 }
 
 fn list_in(root: &Path) -> Result<Vec<Listing>> {
@@ -273,6 +327,12 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
         .persist(path)
         .map(|_| ())
         .map_err(|error| write_error(error.error))
+}
+
+/// Notes that machine `name`'s agent is set up, for the images saved from it.
+pub(super) fn mark_ready(name: &Name) -> Result<()> {
+    let path = folder(name)?.join(READY);
+    fs::write(&path, b"").map_err(|source| write_error(&path, source))
 }
 
 pub(super) fn write_error(path: &Path, source: std::io::Error) -> Error {

@@ -5,11 +5,13 @@
 //! have one order and a client's catch-up can never interleave with a change.
 
 mod agent;
+mod briefs;
 mod carry;
 mod commands;
 mod harness;
 mod keep;
 mod known;
+mod picks;
 mod pictures;
 mod pull_requests;
 mod thread;
@@ -132,6 +134,7 @@ pub(crate) enum Update {
 }
 
 pub(crate) struct Config {
+    pub antigravity_auth_method: Option<String>,
     pub agent: String,
     /// The agents a client may switch to while the agent is idle, as
     /// `--choose` asks; `None` keeps the agent the chat started with.
@@ -139,6 +142,8 @@ pub(crate) struct Config {
     pub cwd: PathBuf,
     /// Exit when the agent does, rather than leave its last words on screen.
     pub exit_with_agent: bool,
+    /// The ACP auth method Gemini tries when `session/new` asks for sign-in.
+    pub gemini_auth_method: Option<String>,
     /// How the agent running gets the server that reads the chat's thread.
     pub given: crate::thread_mcp::Given,
     /// The built-in agent running, or `None` for a custom command.
@@ -173,11 +178,13 @@ pub(crate) struct Config {
 
 #[derive(Debug)]
 enum Pending {
+    Authenticate { load_session: bool },
     Initialize,
     NewSession,
     LoadSession,
     Prompt,
     SetMode(String),
+    SetModel(String),
     SetOption,
 }
 
@@ -198,6 +205,13 @@ pub(crate) struct Session<R: FnMut(Update)> {
     acp_session: Option<wire::SessionId>,
     activity: Option<Activity>,
     asked: HashMap<PermissionId, Asked>,
+    /// Whether this harness already sent ACP `authenticate`.
+    auth_attempted: bool,
+    /// ACP authentication methods advertised in `initialize`.
+    auth_methods: Vec<wire::AuthMethod>,
+    briefs: briefs::Briefs,
+    /// Whether this harness advertised `loadSession` in `initialize`.
+    can_load_session: bool,
     /// The whole commands of shell calls, which their titles cut short.
     commands: pull_requests::Commands,
     config: Config,
@@ -219,6 +233,9 @@ pub(crate) struct Session<R: FnMut(Update)> {
     keep_failure: Option<String>,
     /// An agent to start once the input that chose it is handled.
     launch: Option<Agent>,
+    /// Whether the `model` config option came from legacy `models` and uses
+    /// `session/set_model` rather than `session/set_config_option`.
+    legacy_model_option: bool,
     log: VecDeque<(u64, Change)>,
     /// What the logged changes weigh, by [`change_size`].
     log_bytes: usize,
@@ -226,12 +243,16 @@ pub(crate) struct Session<R: FnMut(Update)> {
     next_request: i64,
     outbox: rpc::Outbox,
     pending: HashMap<i64, Pending>,
+    picks: picks::Picks,
     pictures: pictures::Pictures,
     projector: Projector,
     /// Where each queued prompt was typed, by its command; the transcript's
     /// queue does not carry it, as no client needs it.
     queued_origins: HashMap<CommandId, Origin>,
     ready: bool,
+    /// The note a replayed message from the person held and the entry
+    /// for their words that comes next takes.
+    replayed_note: Option<String>,
     report: R,
     seq: u64,
     subscribers: Vec<Subscriber>,
@@ -248,6 +269,13 @@ impl<R: FnMut(Update)> Session<R> {
         let mut told = crate::context::Told::default();
         if let Some(mut history) = config.history.take() {
             told = crate::context::hide(&mut history);
+            for entry in &mut history.entries {
+                if let sheprd_chat_protocol::EntryKind::User { text, files: 0, .. } =
+                    &mut entry.kind
+                {
+                    *text = crate::project::shown(text).to_owned();
+                }
+            }
             transcript.entries = history.entries;
             transcript.truncated = history.truncated;
             transcript.usage = history.usage;
@@ -267,7 +295,7 @@ impl<R: FnMut(Update)> Session<R> {
                     start,
                     agent,
                     config.load.as_deref(),
-                    &transcript.entries,
+                    &mut transcript.entries,
                     config.cwd.clone(),
                 )
             });
@@ -285,12 +313,21 @@ impl<R: FnMut(Update)> Session<R> {
             cwd: config.cwd.display().to_string(),
         };
         // Memory opens here, on the session's thread, which also runs the
-        // prompts that recall from it.
-        let recall = config
-            .sheprd
-            .as_ref()
-            .and_then(|_| crate::context::Recall::open(&config.cwd));
-        let context = Context::new(std::mem::take(&mut config.prompts), facts, told)
+        // prompts that recall from it. A fixed Antigravity chat never sends
+        // Sheprd notes, so it skips opening memory; a `--choose` chat keeps
+        // context ready in case it switches to another agent, while bypassing
+        // notes whenever Antigravity is active.
+        let direct = config.harness == Some(Agent::Antigravity);
+        let may_annotate = !direct || config.choices.is_some();
+        let recall = if may_annotate {
+            config
+                .sheprd
+                .as_ref()
+                .and_then(|_| crate::context::Recall::open(&config.cwd))
+        } else {
+            None
+        };
+        let mut context = Context::new(std::mem::take(&mut config.prompts), facts, told)
             .with_memory(config.sheprd.as_deref(), recall)
             .with_pull_requests(config.sheprd.as_deref().filter(|_| config.listens))
             .with_launch(
@@ -299,11 +336,16 @@ impl<R: FnMut(Update)> Session<R> {
                     .as_deref()
                     .filter(|_| config.harness.is_some()),
             );
+        context.set_direct(direct);
         Self {
             accepts: crate::files::Accepts::default(),
             acp_session: None,
             activity: None,
             asked: HashMap::new(),
+            auth_attempted: false,
+            auth_methods: Vec::new(),
+            briefs: briefs::Briefs::default(),
+            can_load_session: false,
             commands: pull_requests::Commands::default(),
             config,
             context,
@@ -315,16 +357,19 @@ impl<R: FnMut(Update)> Session<R> {
             keep,
             keep_failure: None,
             launch: None,
+            legacy_model_option: false,
             log: VecDeque::new(),
             log_bytes: 0,
             next_permission: 0,
             next_request: 0,
             outbox,
             pending: HashMap::new(),
+            picks: picks::Picks::default(),
             pictures: pictures::Pictures::default(),
             projector,
             queued_origins: HashMap::new(),
             ready: false,
+            replayed_note: None,
             report,
             seq: 0,
             subscribers: Vec::new(),
@@ -348,7 +393,7 @@ impl<R: FnMut(Update)> Session<R> {
     /// Opens the ACP connection.
     pub(crate) fn start(&mut self) {
         let mut request = wire::InitializeRequest::new(acp::ProtocolVersion::V1).client_info(
-            wire::Implementation::new("herdr-acp", env!("CARGO_PKG_VERSION")),
+            wire::Implementation::new("sheprd", env!("CARGO_PKG_VERSION")),
         );
         request.client_capabilities.meta = Some(wire::Meta::from_iter([(
             crate::project::opencode::CAPABILITY.to_owned(),
@@ -457,6 +502,7 @@ impl<R: FnMut(Update)> Session<R> {
         self.pictures_after(&change);
         self.find_pull_requests(&change);
         self.keep_after(&change);
+        self.find_brief(&change);
     }
 
     fn emit_all(&mut self, changes: impl IntoIterator<Item = Change>) {
@@ -690,6 +736,8 @@ pub(crate) fn entry_size(entry: &sheprd_chat_protocol::Entry) -> usize {
                     .sum::<usize>()
         }
         EntryKind::Turn(_) => 32,
+        // What went ahead of the person's words travels with them.
+        EntryKind::User { text, note, .. } => text.len() + note.as_ref().map_or(0, String::len),
         kind => kind.text().map_or(0, str::len),
     }
 }

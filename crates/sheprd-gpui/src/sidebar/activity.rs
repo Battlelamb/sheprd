@@ -63,7 +63,7 @@ pub(super) fn label(panel: ActivityPanel) -> SharedString {
     .into()
 }
 
-fn icon(panel: ActivityPanel) -> &'static str {
+pub(super) fn icon(panel: ActivityPanel) -> &'static str {
     match panel {
         ActivityPanel::Overview => "icons/pulse.svg",
         ActivityPanel::Workspaces => "icons/terminal.svg",
@@ -419,6 +419,14 @@ impl SheprdWindow {
     }
 
     pub(crate) fn render_activity_bar(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        self.activity_bar_with_slot(false, cx)
+    }
+
+    pub(crate) fn activity_bar_with_slot(
+        &self,
+        editor_slot: bool,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let theme = &self.theme;
         let counts = self.activity_counts(cx);
         let bar = div()
@@ -491,6 +499,9 @@ impl SheprdWindow {
             tabs = tabs.child(button);
         }
         bar.child(tabs.children(self.mod_activity_buttons(cx)))
+            .when(editor_slot, |bar| {
+                bar.child(div().flex_none().h(px(BUTTON)))
+            })
             .child(
                 self.bar_button(
                     "activity-settings",

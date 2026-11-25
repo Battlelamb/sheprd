@@ -84,6 +84,8 @@ pub enum ParseError {
     CorePair,
     #[error("{0} needs a value")]
     Missing(&'static str),
+    #[error("presence needs --near or --away")]
+    NoPresence,
     #[error("{option} names no relay: put it after a --relay")]
     NoRelay { option: &'static str },
     #[error("--state-dir is required")]
@@ -120,6 +122,13 @@ pub enum Invocation {
     PushStatus {
         state_dir: Option<PathBuf>,
     },
+    /// Marks a device near or away, for Sheprd on the computer the phone
+    /// is near (`app::presence`).
+    Presence {
+        state_dir: Option<PathBuf>,
+        device: String,
+        near: bool,
+    },
     /// Revokes a device that other computer enrolled.
     Revoke {
         state_dir: Option<PathBuf>,
@@ -131,9 +140,20 @@ pub enum Invocation {
         state_dir: Option<PathBuf>,
         offer: bool,
     },
+    Labels {
+        command: crate::control::labels::Command,
+        json: bool,
+    },
     /// Reads this computer's favorite agents, making the change
     /// (`control::favorites::Change`) given on standard input, if any.
     Favorites {
+        state_dir: Option<PathBuf>,
+        offer: bool,
+    },
+    /// Reads which agents are unread here, making the change
+    /// (`control::read::Change`) given on standard input, if any. Prints
+    /// nothing when no daemon runs.
+    Read {
         state_dir: Option<PathBuf>,
         offer: bool,
     },
@@ -185,6 +205,13 @@ pub enum FleetAction {
     Intro,
     /// Forgets the fleet here and the lines and records it wrote.
     Scrub,
+    /// Prints the fleet as this computer's daemon keeps it, for a computer
+    /// in no fleet deciding whether to join it.
+    Status,
+    /// Takes a computer's bundle and signature on standard input
+    /// (`control::fleet::sync::Admission`) and admits it: the person who
+    /// asked reaches this account over SSH, which proves they control it.
+    Admit,
 }
 
 pub const USAGE: &str = "\
@@ -193,14 +220,19 @@ Usage: sheprd-remote-control serve --state-dir DIR [options]
        sheprd-remote-control revoke --device ID [--state-dir DIR]
        sheprd-remote-control relay-enroll [--state-dir DIR] < REQUEST.json
        sheprd-remote-control push-status [--state-dir DIR]
+       sheprd-remote-control presence --device ID --near|--away [--state-dir DIR]
+       sheprd-remote-control labels [list|add TAG|rename OLD NEW|remove TAG] [--worktree] [--pane ID | --workspace ID] [--json]
        sheprd-remote-control tags [--offer] [--state-dir DIR] [< TAGS.json]
        sheprd-remote-control shortcuts [--offer] [--state-dir DIR] [< SHORTCUTS.json]
        sheprd-remote-control favorites [--offer] [--state-dir DIR] [< CHANGE.json]
+       sheprd-remote-control read [--offer] [--state-dir DIR] [< CHANGE.json]
        sheprd-remote-control relays [--offer] [--state-dir DIR] [< RELAYS.json]
        sheprd-remote-control fleet apply [--state-dir DIR] < APPLY.json
        sheprd-remote-control fleet bundle --fleet ID [--state-dir DIR]
        sheprd-remote-control fleet intro [--state-dir DIR]
        sheprd-remote-control fleet scrub [--state-dir DIR]
+       sheprd-remote-control fleet status [--state-dir DIR]
+       sheprd-remote-control fleet admit [--state-dir DIR] < ADMISSION.json
        sheprd-remote-control desktop-pair --name NAME [--link] [--state-dir DIR]
        sheprd-remote-control relay-connect [--state-dir DIR] HOST
 
@@ -257,6 +289,9 @@ push-status prints how the daemon running here sends iPhone pushes, as
 JSON (its mode, and how the last alert and Live Activity push went), so
 Sheprd on another computer can show it; it prints nothing when no daemon
 answers.
+presence --near marks a phone near Sheprd on another computer, so the
+daemon here holds its alerts too until presence --away, or until two
+minutes pass without another --near; Sheprd there runs it over SSH.
 relays --offer takes {\"source\", \"relays\"}, the relays Sheprd on
 another computer listens on, replacing what that computer shared before:
 the daemon listens on them too, beside its own [remote] relays.
@@ -274,6 +309,9 @@ this computer as a host, signed by its certificate authority, for a
 member about to share it; scrub forgets the fleet here, with the
 authorized_keys lines and relay records it wrote, without signing
 anything: for a computer the fleet removed, or a fleet that is gone.
+status prints the fleet this computer is in, and admit admits the
+computer whose signed bundle it reads, for a computer in no fleet whose
+Sheprd reaches this one over SSH and joins its fleet.
 Their state directory defaults to the one Sheprd on this computer uses.
 ";
 
@@ -296,8 +334,34 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Par
                 other => other,
             });
         }
+        Some("presence") => return parse_presence(args),
+        Some("labels") => {
+            let mut words = Vec::new();
+            let mut json = false;
+            for word in args {
+                if word == "--help" || word == "-h" {
+                    return Ok(Invocation::Help);
+                }
+                if word == "--json" {
+                    json = true;
+                } else {
+                    words.push(word);
+                }
+            }
+            let command =
+                crate::control::labels::Command::parse(words).map_err(|_| ParseError::Value {
+                    option: crate::control::labels::USAGE,
+                })?;
+            return Ok(Invocation::Labels { command, json });
+        }
         Some("favorites") => {
             return parse_edited(args, |state_dir, offer| Invocation::Favorites {
+                state_dir,
+                offer,
+            });
+        }
+        Some("read") => {
+            return parse_edited(args, |state_dir, offer| Invocation::Read {
                 state_dir,
                 offer,
             });
@@ -538,6 +602,39 @@ fn parse_host(
     })
 }
 
+/// `presence --device ID --near|--away [--state-dir DIR]`.
+fn parse_presence(mut args: impl Iterator<Item = OsString>) -> Result<Invocation, ParseError> {
+    let (mut state_dir, mut device, mut near) = (None, None, None);
+    while let Some(arg) = args.next() {
+        let name = arg.to_str().unwrap_or_default().to_owned();
+        match name.as_str() {
+            "--state-dir" => {
+                state_dir = Some(PathBuf::from(
+                    args.next().ok_or(ParseError::Missing("--state-dir"))?,
+                ));
+            }
+            "--device" => {
+                device = Some(
+                    args.next()
+                        .ok_or(ParseError::Missing("--device"))?
+                        .into_string()
+                        .ok()
+                        .filter(|device| !device.is_empty())
+                        .ok_or(ParseError::Value { option: "--device" })?,
+                );
+            }
+            "--near" | "--away" if near.is_none() => near = Some(name == "--near"),
+            "-h" | "--help" => return Ok(Invocation::Help),
+            _ => return Err(ParseError::Unknown(name)),
+        }
+    }
+    Ok(Invocation::Presence {
+        state_dir,
+        device: device.ok_or(ParseError::Missing("--device"))?,
+        near: near.ok_or(ParseError::NoPresence)?,
+    })
+}
+
 /// `desktop-pair --name NAME [--link] [--state-dir DIR]` and
 /// `relay-connect [--state-dir DIR] HOST`.
 fn parse_desktop(
@@ -582,12 +679,14 @@ fn parse_desktop(
     })
 }
 
-/// `fleet apply|bundle [--fleet ID] [--state-dir DIR]`.
+/// `fleet apply|bundle|intro|scrub|status|admit [--fleet ID] [--state-dir DIR]`.
 fn parse_fleet(mut args: impl Iterator<Item = OsString>) -> Result<Invocation, ParseError> {
     let verb = args
         .next()
         .and_then(|verb| verb.to_str().map(str::to_owned))
-        .ok_or(ParseError::Missing("apply, bundle, intro, or scrub"))?;
+        .ok_or(ParseError::Missing(
+            "apply, bundle, intro, scrub, status, or admit",
+        ))?;
     let (mut state_dir, mut fleet) = (None, None);
     while let Some(arg) = args.next() {
         let name = arg.to_str().unwrap_or_default().to_owned();
@@ -616,6 +715,8 @@ fn parse_fleet(mut args: impl Iterator<Item = OsString>) -> Result<Invocation, P
         "apply" if fleet.is_none() => FleetAction::Apply,
         "intro" if fleet.is_none() => FleetAction::Intro,
         "scrub" if fleet.is_none() => FleetAction::Scrub,
+        "status" if fleet.is_none() => FleetAction::Status,
+        "admit" if fleet.is_none() => FleetAction::Admit,
         "bundle" => FleetAction::Bundle {
             fleet: fleet.ok_or(ParseError::Missing("--fleet"))?,
         },
@@ -625,7 +726,7 @@ fn parse_fleet(mut args: impl Iterator<Item = OsString>) -> Result<Invocation, P
     Ok(Invocation::Fleet { state_dir, action })
 }
 
-/// `tags`, `shortcuts`, `favorites`, or `relays`, then `[--offer] [--state-dir DIR]`, as `made`.
+/// `tags`, `shortcuts`, `favorites`, `read`, or `relays`, then `[--offer] [--state-dir DIR]`, as `made`.
 fn parse_edited(
     mut args: impl Iterator<Item = OsString>,
     made: fn(Option<PathBuf>, bool) -> Invocation,

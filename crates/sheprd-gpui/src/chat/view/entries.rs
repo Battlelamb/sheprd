@@ -167,12 +167,13 @@ impl SheprdWindow {
                                 cx,
                             ))
                             .child(self.render_chat_copy(
+                                pane_id,
                                 entry.id.0,
                                 text,
                                 CopyPlacement::Footer,
                                 cx,
                             ));
-                        return self.render_chat_entry_row(chat, index, card);
+                        return self.render_chat_entry_row(chat, index, card, cx);
                     }
                     _ => self.render_chat_text(
                         pane_id,
@@ -187,6 +188,7 @@ impl SheprdWindow {
                     .group("chat-agent-message")
                     .child(message)
                     .child(self.render_chat_copy(
+                        pane_id,
                         entry.id.0,
                         text,
                         copy_placement(body.as_deref()),
@@ -239,11 +241,17 @@ impl SheprdWindow {
             ),
             EntryKind::Notice { .. } => self.render_chat_notice(pane_id, entry, cx),
         };
-        self.render_chat_entry_row(chat, index, content)
+        self.render_chat_entry_row(chat, index, content, cx)
     }
 
     /// An entry's row in the list, as the chat's layout draws it.
-    fn render_chat_entry_row(&self, chat: &ChatPane, index: usize, content: Div) -> AnyElement {
+    fn render_chat_entry_row(
+        &self,
+        chat: &ChatPane,
+        index: usize,
+        content: Div,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let entries = &chat.session.transcript().entries;
         let Some(entry) = entries.get(index) else {
             return div().into_any_element();
@@ -279,7 +287,8 @@ impl SheprdWindow {
             },
             content,
         };
-        layout_for(self.config.chat.layout).row(row, &self.chat_look())
+        let row = layout_for(self.config.chat.layout).row(row, &self.chat_look());
+        self.with_chat_sent_note(chat, entry, row, cx)
     }
 
     fn render_chat_thought(
@@ -700,7 +709,13 @@ impl SheprdWindow {
                                     cx,
                                 )),
                         )
-                        .child(self.render_chat_copy(id.0, details, CopyPlacement::Footer, cx)),
+                        .child(self.render_chat_copy(
+                            pane_id,
+                            id.0,
+                            details,
+                            CopyPlacement::Footer,
+                            cx,
+                        )),
                 )
             })
     }

@@ -19,18 +19,20 @@ mod github;
 mod hosts;
 mod indicators;
 mod kept;
+pub(crate) mod labels;
 mod log;
 mod nearby;
 mod origins;
 mod pace;
 pub(crate) mod prompt;
+mod read;
 mod relay;
 mod render;
 mod shortcuts;
 mod stream;
 mod tags;
 mod terminal;
-mod test_push;
+pub(crate) mod test_push;
 mod typed;
 mod update;
 mod uploads;
@@ -92,8 +94,11 @@ pub(crate) struct State {
     pub(crate) computer: String,
     /// Streams open per device.
     pub(crate) connected: Mutex<HashMap<DeviceId, usize>>,
+    /// Phones agents may drive, and drives waiting for them.
+    pub(crate) drivers: crate::native::drive::Drivers,
     /// This computer's favorite agents, which its phones and desktops share.
     pub(crate) favorites: Favorites,
+    pub(crate) labels: labels::Labels,
     pub(crate) fingerprint: String,
     /// The fleet, when its key could be read or made.
     pub(crate) fleet: Option<Arc<crate::fleet::Fleet>>,
@@ -123,6 +128,7 @@ pub(crate) struct State {
     pub(crate) push: Option<Sender>,
     /// How the last APNs push of each kind went.
     pub(crate) pushes: crate::apns::Ledger,
+    pub(crate) launches: crate::server::live::Launches,
     /// The relays this computer listens on, when any are set.
     pub(crate) relay: Option<Arc<crate::relay::Relays>>,
     /// How often each address may write a phone's error to the log.
@@ -279,6 +285,7 @@ pub(crate) fn router(state: Shared) -> Router {
             "/api/v2/fleet/sync",
             post(fleet::sync).layer(DefaultBodyLimit::max(fleet::MAX_SYNC_BODY)),
         )
+        .route("/api/v2/pair/voice", post(api::pair_voice))
         .route("/api/v2/github/token", get(crate::native::github::token))
         .route("/api/v2/home", get(crate::native::get_home))
         .route("/api/v2/hosts", get(hosts::list))
@@ -288,8 +295,10 @@ pub(crate) fn router(state: Shared) -> Router {
         )
         .route("/api/v2/hosts/{host}/pair", post(hosts::pair))
         .route("/api/v2/favorites", post(favorites::post))
+        .route("/api/v2/read", post(read::post))
         .route("/api/v2/live", get(crate::native::live))
         .route("/api/v2/new", get(crate::native::new_options))
+        .route("/api/v2/projects", post(crate::native::create_project))
         .route("/api/v2/search", get(crate::native::search))
         .route(
             "/api/v2/shortcuts",
@@ -530,6 +539,8 @@ pub(crate) enum ApiError {
     #[error("not found")]
     NotFound,
     #[error(transparent)]
+    Project(#[from] crate::native::project::Error),
+    #[error(transparent)]
     Push(#[from] crate::push::Error),
     #[error("too many connections from this device")]
     TooManyStreams,
@@ -549,6 +560,7 @@ impl IntoResponse for ApiError {
             Self::Agent(error) => error.status(),
             Self::Changes(error) => error.status(),
             Self::GitHub(error) => error.status(),
+            Self::Project(error) => error.status(),
             Self::TooManyStreams => StatusCode::TOO_MANY_REQUESTS,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Auth(auth::Error::RateLimited | auth::Error::NearbyBusy) => {

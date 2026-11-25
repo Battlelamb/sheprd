@@ -57,38 +57,61 @@ struct WorkspaceScreen: View {
     private func content(_ machine: Fleet.Machine, _ workspace: Home.Workspace) -> some View {
         let chats = model.fleet.chatItems.filter { $0.computer.device == key.device && $0.workspace.id == key.workspace }
         let terminals = model.fleet.terminalItems.filter { $0.computer.device == key.device && $0.workspace.id == key.workspace }
-        let repository = machine.home?.repositories.first { $0.workspaces.contains { $0.id == key.workspace } }
         // The chat answered last knows best what the workspace is about.
         let namer = chats.filter { $0.chat.summary?.connected == true }
             .max { ($0.lastAnswer ?? .distantPast) < ($1.lastAnswer ?? .distantPast) }
         return endingDialogs(List {
             Section {
-                Summary(workspace: workspace, place: [model.displayName(machine.computer), repository?.label].compactMap { $0 }.joined(separator: " · "))
+                Summary(workspace: workspace)
+                NavigationLink {
+                    ComputerScreen(device: key.device).makesRoomForConnectionToast()
+                } label: {
+                    WorkspaceRowLabel {
+                        ComputerRow(computer: machine.computer, name: model.displayName(machine.computer), status: machine.presentedStatus)
+                    }
+                }
                 if let pullRequest = workspace.pullRequest, let url = URL(string: pullRequest.url) {
                     // Plain text and a chevron, like the rows below, not a
                     // tinted web link.
-                    Link(destination: url) { PullRequestRow(pullRequest: pullRequest) }.tint(.primary)
+                    Link(destination: url) {
+                        WorkspaceRowLabel { PullRequestRow(pullRequest: pullRequest) }
+                    }.tint(.primary)
                 }
                 if workspace.branch != nil {
-                    RouteLink(.changes(key)) { ChangesRow(count: changedFiles) }
+                    RouteLink(.changes(key)) {
+                        WorkspaceRowLabel(showsDisclosure: opener == nil) {
+                            ChangesRow(count: changedFiles, uncommitted: workspace.uncommitted ?? false)
+                        }
+                    }
                 }
             }
+            .navigationLinkIndicatorVisibility(.hidden)
             Section {
                 ForEach(chats) { item in
-                    RouteLink(.chat(item.key, title: item.chat.title)) { ChatRowLabel(item: item, showsComputer: false, showsWorkspace: false, showsPullRequest: false) }
-                        .closeSwipe(.chat(item.key, title: item.chat.title), closing: $closing)
-                        .summarizeSwipe(item.key)
+                    RouteLink(.chat(item.key, title: item.chat.title)) {
+                        WorkspaceRowLabel(showsDisclosure: opener == nil) {
+                            ChatRowLabel(item: item, showsComputer: false, showsWorkspace: false, showsPullRequest: false)
+                        }
+                    }
+                    .closeSwipe(.chat(item.key, title: item.chat.title), closing: $closing)
+                    .summarizeSwipe(item.key)
                 }
                 ForEach(terminals.filter { $0.agent != nil }) { item in
                     if let route = item.route {
-                        RouteLink(route) { AgentTerminalRowLabel(item: item, showsComputer: false, showsWorkspace: false, showsPullRequest: false) }
-                            .closeSwipe(item.closeTarget, closing: $closing)
+                        RouteLink(route) {
+                            WorkspaceRowLabel(showsDisclosure: opener == nil) {
+                                AgentTerminalRowLabel(item: item, showsComputer: false, showsWorkspace: false, showsPullRequest: false)
+                            }
+                        }
+                        .closeSwipe(item.closeTarget, closing: $closing)
                     }
                 }
                 ForEach(terminals.filter { $0.agent == nil }) { item in
                     if let pane = item.terminal.firstPane {
                         RouteLink(.term(PaneKey(device: key.device, pane: pane.pane), title: item.terminal.label)) {
-                            TerminalRowLabel(terminal: item.terminal)
+                            WorkspaceRowLabel(showsDisclosure: opener == nil) {
+                                TerminalRowLabel(terminal: item.terminal)
+                            }
                         }
                         .closeSwipe(item.closeTarget, closing: $closing)
                     }
@@ -98,6 +121,7 @@ struct WorkspaceScreen: View {
                 Text(count == 1 ? "1 tab" : "\(count) tabs")
                     .contentTransition(.numericText(value: Double(count)))
             }
+            .navigationLinkIndicatorVisibility(.hidden)
             WorkspacePictures(pictures: pictures, chats: chats, open: show)
             launcher(workspace, online: isOnline(machine))
             endings(workspace, online: isOnline(machine))
@@ -188,8 +212,9 @@ struct WorkspaceScreen: View {
         .task(id: WorkspacePictureStore.Load(panes: chats.map(\.chat.pane), online: isOnline(machine))) {
             await pictures.load(.init(panes: chats.map(\.chat.pane), online: isOnline(machine)), device: key.device, fleet: model.fleet)
         }
-        // Again on each return, as an agent may have changed more since.
-        .task(id: machine.status) {
+        // Again on each return, as an agent may have changed more since,
+        // and when the computer's pencil comes or goes, so the count follows it.
+        .task(id: ChangesLoad(status: machine.status, uncommitted: workspace.uncommitted)) {
             guard isOnline(machine), workspace.branch != nil else { return }
             let (device, id) = (key.device, key.workspace)
             changedFiles = try? await model.fleet.call(device) { client, token in
@@ -607,10 +632,9 @@ private struct EndProblem: Identifiable {
     let changes: Int
 }
 
-/// The workspace's branch, and where it is.
+/// The project, with the checkout shown beneath it.
 private struct Summary: View {
     var workspace: Home.Workspace
-    var place: String
 
     var body: some View {
         HStack(spacing: 12) {
@@ -618,11 +642,60 @@ private struct Summary: View {
                 .foregroundStyle(.tint)
                 .frame(width: 28, height: 28).background(.tint.opacity(0.15), in: .rect(cornerRadius: 28 * 0.28))
             VStack(alignment: .leading, spacing: 2) {
-                Text(workspace.branch ?? workspace.label)
-                    .font(.body.monospaced()).lineLimit(1).truncationMode(.middle)
-                Text(place).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                Text(workspace.repositoryName).font(.body).lineLimit(1)
+                if let checkout = workspace.checkoutSubtitle {
+                    Text(checkout).font(.subheadline.monospaced()).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
             }
         }
+    }
+}
+
+private struct WorkspaceRowLabel<Content: View>: View {
+    var showsDisclosure = true
+    @ViewBuilder var content: Content
+    @ScaledMetric private var disclosureWidth = 12
+
+    var body: some View {
+        HStack(spacing: 8) {
+            content.frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: "chevron.forward")
+                .font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                .frame(width: disclosureWidth)
+                .opacity(showsDisclosure ? 1 : 0)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+private struct WorkspaceRowStatus<Content: View>: View {
+    @ViewBuilder var content: Content
+    @ScaledMetric private var width = 28
+
+    var body: some View {
+        content.frame(minWidth: width)
+    }
+}
+
+/// The computer the workspace is on, and whether the phone reaches it now;
+/// opens that computer's page.
+private struct ComputerRow: View {
+    var computer: Computer
+    var name: String
+    var status: LinkStatus
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: computer.via == nil ? "laptopcomputer" : "server.rack").font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.tint)
+                .frame(width: 28, height: 28).background(.tint.opacity(0.15), in: .rect(cornerRadius: 28 * 0.28))
+            Text(name).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+            WorkspaceRowStatus {
+                ComputerStatusLine(status: status).font(.subheadline).labelStyle(.iconOnly).imageScale(.small)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -639,8 +712,9 @@ private struct PullRequestRow: View {
                 .frame(width: 28, height: 28).background(tone.color.opacity(0.15), in: .rect(cornerRadius: 28 * 0.28))
             Text(verbatim: "Pull request #\(pullRequest.number)").foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: tone.symbol).foregroundStyle(tone.color).imageScale(.large)
-            Image(systemName: "chevron.forward").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+            WorkspaceRowStatus {
+                Image(systemName: tone.symbol).foregroundStyle(tone.color).imageScale(.large)
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Pull request \(pullRequest.number), \(tone.label)")
@@ -648,17 +722,31 @@ private struct PullRequestRow: View {
     }
 }
 
-/// Opens the workspace's changes, saying how many files are uncommitted.
+/// When the workspace's uncommitted count is read again.
+private struct ChangesLoad: Equatable {
+    var status: LinkStatus
+    var uncommitted: Bool?
+}
+
+/// Opens the workspace's changes, saying how many files are uncommitted,
+/// with the desktop's pencil while there are any.
 private struct ChangesRow: View {
     var count: Int?
+    var uncommitted: Bool
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "plusminus").font(.system(size: 14, weight: .semibold))
-                .frame(width: 28, height: 28).background(.fill.secondary, in: .rect(cornerRadius: 28 * 0.28))
+            if uncommitted || (count ?? 0) > 0 {
+                UncommittedMark(size: 28)
+            } else {
+                Image(systemName: "plusminus").font(.system(size: 14, weight: .semibold))
+                    .frame(width: 28, height: 28).background(.fill.secondary, in: .rect(cornerRadius: 28 * 0.28))
+            }
             Text("Changes").frame(maxWidth: .infinity, alignment: .leading)
             if let count {
-                Text(count, format: .number).foregroundStyle(.secondary).monospacedDigit()
+                WorkspaceRowStatus {
+                    Text(count, format: .number).foregroundStyle(.secondary).monospacedDigit()
+                }
             }
         }
         .accessibilityElement(children: .ignore)

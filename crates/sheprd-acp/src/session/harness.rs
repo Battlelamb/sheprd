@@ -55,12 +55,17 @@ impl<R: FnMut(Update)> Session<R> {
         self.accepts = crate::files::Accepts::default();
         self.acp_session = None;
         self.asked.clear();
+        self.auth_attempted = false;
+        self.auth_methods.clear();
+        self.can_load_session = false;
+        self.legacy_model_option = false;
         self.pending.clear();
         self.pictures = super::pictures::Pictures::default();
         self.ready = false;
         self.turn = None;
         self.config.agent = agent.display_name().to_owned();
         self.context.switched(&self.config.agent);
+        self.context.set_direct(agent == Agent::Antigravity);
         self.config.harness = Some(agent);
         self.config.login_hint = Some(agent.login_hint().to_owned());
 
@@ -82,6 +87,8 @@ impl<R: FnMut(Update)> Session<R> {
         super::known::seed(&self.config.known, Some(agent), &mut transcript);
         self.transcript = transcript;
         self.projector = self.projector.restart();
+        // Settings carried into the chat were for the agent it started with.
+        self.config.settings = None;
 
         // A new epoch: no client's cursor or logged change applies to the
         // new transcript, so every client replaces what it holds.
@@ -110,6 +117,7 @@ impl<R: FnMut(Update)> Session<R> {
             );
             self.emit(notice);
         }
+        self.recall_picks();
         (self.report)(Update::Harness(agent));
         self.report_activity();
         self.launch = Some(agent);

@@ -19,6 +19,7 @@ pub(super) fn remote(command: RemoteCommand, context: &Context) -> crate::Result
         RemoteCommand::Pair { address } => RemoteOp::Pair { address },
         RemoteCommand::Devices => RemoteOp::Devices,
         RemoteCommand::PushStatus => RemoteOp::PushStatus,
+        RemoteCommand::TestPush => RemoteOp::TestPush,
         RemoteCommand::Revoke { device } => RemoteOp::Revoke { device },
         RemoteCommand::Restart => RemoteOp::Restart,
         RemoteCommand::AddLink => RemoteOp::AddLink {
@@ -119,6 +120,17 @@ pub(super) fn output(reply: &Reply) -> crate::Result<Output> {
                 text.push_str(&push_status::hosts(hosts));
             }
             Output::data(text, &json)
+        }
+        Reply::TestPush { mode, pushes } => {
+            let json = serde_json::json!({ "mode": mode, "pushes": pushes });
+            let output = Output::data(push_status::test_text(*mode, pushes), &json)?;
+            Ok(if pushes.is_empty() {
+                output.nothing()
+            } else if pushes.iter().all(|push| push.outcome.worked()) {
+                output
+            } else {
+                output.failed()
+            })
         }
         Reply::RelayToken { relay, token } => {
             let json = serde_json::json!({ "relay": relay, "token": token });

@@ -1,6 +1,7 @@
 //! Native chrome and GitHub account access.
 // i18n: migrated
 mod decorations;
+mod details;
 mod navigation;
 mod status;
 mod tabs;
@@ -378,7 +379,7 @@ impl SheprdWindow {
 
     /// What ends the bar: git actions, the account, and the window controls
     /// a client-decorated window draws.
-    fn titlebar_end(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+    pub(crate) fn titlebar_end(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let image = self
             .pr_profile()
             .and_then(|profile| self.menu.github_avatars.get(&profile.avatar_url));
@@ -501,6 +502,11 @@ impl SheprdWindow {
                                 )
                             }),
                     ),
+            )
+            .when(
+                self.hosted
+                    && (self.hosted_full_header.is_none() || self.config.features.moonframe_tools),
+                |end| end.child(self.details_toggle(cx)),
             )
             // The in-window menu bar carries the window controls instead,
             // until it is hidden and they would leave with it.

@@ -10,27 +10,33 @@ use super::*;
 use crate::rpc::{Inbound, Outbox};
 
 mod activities;
+mod antigravity;
 mod attach;
 mod attachments;
 mod auto_accept;
 mod bounds;
+mod briefs;
 mod carry;
 mod commands;
 mod continued;
 mod flow;
+mod gemini;
 mod harnesses;
 mod history;
 mod kept;
 mod known;
 mod linked_pictures;
 mod media;
+mod muse;
 mod opencode;
 mod origin;
 mod permissions;
+mod picks;
 mod prompt_titles;
 mod pull_requests;
 mod questions;
 mod resume;
+mod sent_notes;
 mod settings;
 mod streaming;
 mod thread_read;
@@ -58,10 +64,12 @@ struct Harness {
 
 fn config() -> Config {
     Config {
+        antigravity_auth_method: None,
         agent: "Claude".to_owned(),
         choices: None,
         cwd: PathBuf::from("/work"),
         exit_with_agent: false,
+        gemini_auth_method: None,
         given: crate::thread_mcp::Given::Not,
         harness: Some(Agent::Claude),
         history: None,

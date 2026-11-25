@@ -8,9 +8,11 @@ mod events;
 mod fleet;
 mod help;
 mod hosts;
+mod labels;
 mod local;
 mod mods;
 mod open;
+mod phone;
 mod remote;
 mod settings;
 mod tabs;
@@ -355,6 +357,12 @@ pub(crate) fn status(error: &crate::Error) -> u8 {
         crate::Error::LinkInput(_) => exit::USAGE,
         crate::Error::Control(crate::control::Error::Unavailable { .. }) => exit::NOT_RUNNING,
         crate::Error::ChatPullRequests(error) => chat_pull_requests_status(error),
+        // A file that could not be read is a failure; a brief that is not
+        // one is the caller's to fix.
+        crate::Error::ChatBrief(
+            crate::control::brief::Error::Open { .. } | crate::control::brief::Error::Read(_),
+        ) => exit::REFUSED,
+        crate::Error::ChatBrief(_) => exit::USAGE,
         crate::Error::Control(crate::control::Error::Rejected { code, .. }) => match code {
             ErrorCode::InvalidUrl => exit::USAGE,
             ErrorCode::NotFound | ErrorCode::WorkspaceNotFound | ErrorCode::NoWindow => {
@@ -549,6 +557,7 @@ pub(crate) fn dispatch(command: ControlCommand, context: &Context) -> crate::Res
         ControlCommand::Review => tabs::review(context),
         ControlCommand::Chat(command) => chat::chat(command, context),
         ControlCommand::Px0 => tabs::px0(context),
+        ControlCommand::Labels(command) => labels::run(command),
         ControlCommand::Notes(command) => work::notes(command, context),
         ControlCommand::Memory(command) => work::memory(command, context),
         #[cfg(feature = "mcp")]
@@ -575,6 +584,7 @@ pub(crate) fn dispatch(command: ControlCommand, context: &Context) -> crate::Res
         ControlCommand::Automation(command) => hosts::automation(command, context),
         ControlCommand::Remote(command) => remote::remote(command, context),
         ControlCommand::Fleet(command) => fleet::fleet(command, context),
+        ControlCommand::Phone(command) => phone::phone(command, context),
         ControlCommand::Mod(command) => mods::run(command, context),
         ControlCommand::Search {
             files,

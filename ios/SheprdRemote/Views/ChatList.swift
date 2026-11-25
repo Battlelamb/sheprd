@@ -152,19 +152,21 @@ struct ChatList: View {
                 }
             }
             .contextMenu {
+                if let read = row.readTarget { ReadMenuButton(target: read) }
                 if let favorite = row.favoriteTarget { FavoriteMenuButton(target: favorite) }
                 Button("Close Chat", systemImage: "xmark.circle", role: .destructive) { closing = .chat(item.key, title: item.chat.title) }
             }
             .closeSwipe(.chat(item.key, title: item.chat.title), closing: $closing)
-            .summarizeSwipe(item.key, favorite: row.favoriteTarget)
+            .summarizeSwipe(item.key, favorite: row.favoriteTarget, read: row.readTarget)
         case let .agent(item):
             if let route = item.route {
                 NavigationLink(value: route) { AgentTerminalRowLabel(item: item, showsComputer: !grouped, showsWorkspace: !grouped) }
                     .contextMenu {
+                        if let read = row.readTarget { ReadMenuButton(target: read) }
                         if let favorite = row.favoriteTarget { FavoriteMenuButton(target: favorite) }
                     }
                     .closeSwipe(item.closeTarget, closing: $closing)
-                    .favoriteSwipe(row.favoriteTarget)
+                    .favoriteSwipe(row.favoriteTarget, read: row.readTarget)
             }
         }
     }

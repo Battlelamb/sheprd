@@ -73,20 +73,28 @@ fn a_file_that_cannot_run_is_not_the_program() {
 #[test]
 fn the_typed_line_names_only_the_agent() {
     for agent in Agent::ALL {
-        let line = command_line(*agent, AgentChoice::Open);
+        let line = command_line(*agent, AgentChoice::Open, None);
         assert!(line.contains(PROGRAM_ENV));
         assert!(line.ends_with(&format!("{agent}'")) || line.ends_with(agent.name()));
         assert!(!line.contains('/'), "{line}");
     }
     if cfg!(unix) {
         assert_eq!(
-            command_line(Agent::Claude, AgentChoice::Open),
+            command_line(Agent::Claude, AgentChoice::Open, None),
             r#" sh -c 'exec "$HERDR_ACP" --choose claude'"#
+        );
+        assert_eq!(
+            command_line(Agent::Antigravity, AgentChoice::Open, None),
+            r#" sh -c 'exec "$HERDR_ACP" --choose antigravity'"#
         );
     } else {
         assert_eq!(
-            command_line(Agent::Claude, AgentChoice::Open),
+            command_line(Agent::Claude, AgentChoice::Open, None),
             "& $env:HERDR_ACP --choose claude"
+        );
+        assert_eq!(
+            command_line(Agent::Antigravity, AgentChoice::Open, None),
+            "& $env:HERDR_ACP --choose antigravity"
         );
     }
 }
@@ -100,6 +108,7 @@ fn the_tab_carries_the_program_in_its_environment() {
         Agent::Codex,
         Some(Path::new("/opt/herdr-acp")),
         &none,
+        true,
     );
     assert_eq!(
         params,
@@ -112,11 +121,12 @@ fn the_tab_carries_the_program_in_its_environment() {
         Agent::Codex,
         Some(Path::new("/opt/herdr-acp")),
         &none,
+        true,
     );
     assert!(params.get("cwd").is_none());
     // A remote chat's tab carries no local path.
     assert!(
-        tab_params("w1", None, Agent::Codex, None, &none)
+        tab_params("w1", None, Agent::Codex, None, &none, true)
             .get("env")
             .is_none()
     );
@@ -137,6 +147,7 @@ fn the_chat_environment_goes_with_every_chat_tab() {
         Agent::Claude,
         Some(Path::new("/opt/herdr-acp")),
         &extra,
+        true,
     );
     assert_eq!(
         local["env"],
@@ -144,7 +155,7 @@ fn the_chat_environment_goes_with_every_chat_tab() {
             "HERDR_ACP": "/opt/herdr-acp"})
     );
     // On an SSH host too, without the local program.
-    let remote = tab_params("w1", None, Agent::Copilot, None, &extra);
+    let remote = tab_params("w1", None, Agent::Copilot, None, &extra, true);
     assert_eq!(remote["env"]["GH_HOST"], "mycompany.ghe.com");
     assert!(remote["env"].get("HERDR_ACP").is_none());
 }
@@ -226,7 +237,11 @@ fn a_new_chat_opens_a_tab_and_types_the_fixed_line(cx: &mut gpui::TestAppContext
             pane_id: "w1:p9".into(),
             events: vec![
                 // The fixture's program was never asked for its help.
-                ClientPaneInputEvent::TextCommit(command_line(Agent::Claude, AgentChoice::Fixed)),
+                ClientPaneInputEvent::TextCommit(command_line(
+                    Agent::Claude,
+                    AgentChoice::Fixed,
+                    None
+                )),
                 crate::menu::enter_key(),
             ],
         }
@@ -306,60 +321,11 @@ fn an_agent_the_host_lacks_does_not_start(cx: &mut gpui::TestAppContext) {
 }
 
 #[test]
-fn only_a_program_that_offers_the_choice_is_asked_for_it() {
-    let help = sheprd_help("  --choose       Let clients switch to another installed agent\n");
-    assert_eq!(AgentChoice::from_help(help.as_bytes()), AgentChoice::Open);
-    let older = sheprd_help("  --acp          Use the agent's ACP adapter\n");
-    assert_eq!(AgentChoice::from_help(older.as_bytes()), AgentChoice::Fixed);
-    assert_eq!(AgentChoice::from_help(b""), AgentChoice::Fixed);
+fn a_fixed_choice_starts_the_agent_alone() {
     if cfg!(unix) {
         assert_eq!(
-            command_line(Agent::Codex, AgentChoice::Fixed),
+            command_line(Agent::Codex, AgentChoice::Fixed, None),
             r#" sh -c 'exec "$HERDR_ACP" codex'"#
         );
     }
-}
-
-fn sheprd_help(options: &str) -> String {
-    format!("Usage:\n  sheprd-acp [OPTIONS] AGENT\n\nOptions:\n{options}")
-}
-
-#[cfg(unix)]
-#[test]
-fn a_program_that_cannot_run_offers_no_choice() {
-    assert_eq!(
-        AgentChoice::of(Path::new("/nonexistent/sheprd-acp")),
-        AgentChoice::Fixed
-    );
-}
-
-/// A wrapper whose child keeps the help's pipe open is given up on at the
-/// deadline, rather than leaving the program's lookup unanswered.
-#[cfg(unix)]
-#[test]
-fn a_program_whose_help_never_ends_offers_no_choice() {
-    use std::os::unix::fs::PermissionsExt;
-    let dir = tempfile::tempdir().unwrap();
-    let wrapper = dir.path().join("sheprd-acp");
-    std::fs::write(&wrapper, "#!/bin/sh\necho '  --choose'\nsleep 30 &\nwait\n").unwrap();
-    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let started = Instant::now();
-    let deadline = Duration::from_millis(300);
-    assert_eq!(
-        AgentChoice::of_within(&wrapper, deadline),
-        AgentChoice::Fixed
-    );
-    assert!(started.elapsed() < Duration::from_secs(5));
-
-    let quick = dir.path().join("quick");
-    std::fs::write(
-        &quick,
-        "#!/bin/sh\necho '  --choose   Let clients switch'\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&quick, std::fs::Permissions::from_mode(0o755)).unwrap();
-    assert_eq!(
-        AgentChoice::of_within(&quick, Duration::from_secs(5)),
-        AgentChoice::Open
-    );
 }

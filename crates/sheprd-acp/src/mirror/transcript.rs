@@ -66,9 +66,13 @@ impl TryFrom<Agent> for TranscriptAgent {
         match agent {
             Agent::Claude => Ok(Self::Claude),
             Agent::Codex => Ok(Self::Codex),
-            Agent::Copilot | Agent::Gemini | Agent::Kimi | Agent::Opencode | Agent::Pi => {
-                Err(agent)
-            }
+            Agent::Antigravity
+            | Agent::Copilot
+            | Agent::Gemini
+            | Agent::Kimi
+            | Agent::Muse
+            | Agent::Opencode
+            | Agent::Pi => Err(agent),
         }
     }
 }
@@ -281,7 +285,11 @@ impl Projection {
             return;
         }
         let kind = match role {
-            Role::User => EntryKind::User { text, files: 0 },
+            Role::User => EntryKind::User {
+                text: crate::project::shown(&text).to_owned(),
+                files: 0,
+                note: None,
+            },
             Role::Agent => EntryKind::Agent { text },
             Role::Thought => EntryKind::Thought { text },
         };

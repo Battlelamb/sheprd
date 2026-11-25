@@ -64,6 +64,7 @@ chat-queued = 已排队
 chat-working = 工作中
 chat-working-writing = 正在撰写
 chat-working-thinking = 正在思考
+chat-working-waiting = 等待后台任务
 chat-working-doing = { $doing }…
 chat-working-deleting = 正在删除{ $target }
 chat-working-editing = 正在编辑{ $target }

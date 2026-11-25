@@ -117,6 +117,12 @@ impl SheprdWindow {
         changed |= self.chats.rewidth(self.config.chat.max_width);
         changed |= self.chats.recode(&self.config.chat);
         changed |= self.chats.relocale(crate::i18n::shown_locale());
+        for pane in self.chats.panes_mut() {
+            if pane.effects.set_enabled(self.config.chat.message_effects) {
+                pane.list.remeasure();
+                changed = true;
+            }
+        }
         changed |= self.chats.poll(now);
         self.settle_chat_modes(cx);
         // Observed panes, whether a discovered agent or a `[chat.mirrors]`

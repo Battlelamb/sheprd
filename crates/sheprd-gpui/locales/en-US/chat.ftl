@@ -87,6 +87,7 @@ chat-queued = Queued
 chat-working = Working
 chat-working-writing = Writing
 chat-working-thinking = Thinking
+chat-working-waiting = Waiting for background work
 # What the agent is doing now: one of the words above, or the step it runs.
 chat-working-doing = { $doing }…
 # What a running step works on, when it names a file.

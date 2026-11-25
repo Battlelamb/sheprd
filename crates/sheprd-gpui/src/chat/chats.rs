@@ -13,7 +13,7 @@ use crate::search_input::SearchInput;
 use gpui::{App, Entity, FocusHandle, ListAlignment, ListState, Window, px};
 use sheprd_chat_protocol::{ClientMessage, Command, Cursor, EntryId};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     time::{Duration, Instant},
 };
 
@@ -660,6 +660,9 @@ pub(crate) struct Chats {
     /// Exact pane/process/host targets the user turned back to their terminal.
     /// Two panes may legitimately observe the same session endpoint.
     raw: HashSet<Target>,
+    /// Files attached to the unsent prompt of a chat the bound let go,
+    /// given back when it attaches again.
+    parked: HashMap<Target, Vec<std::path::PathBuf>>,
     /// Textures of panes no longer attached, for the window to drop.
     released: Vec<std::sync::Arc<gpui::RenderImage>>,
     /// Chats being continued in the panes Herdr restored.
@@ -790,13 +793,31 @@ impl Chats {
         now: Instant,
         connect: &mut Connect<'_>,
     ) -> bool {
+        let known = targets.clone();
+        self.reconcile_within(targets, &known, now, connect)
+    }
+
+    /// [`Self::reconcile`] for `targets` chosen among `known`, the chats
+    /// still running. One let go only for room keeps what the user chose
+    /// for it, its terminal and its unsent files, until it attaches again.
+    pub(crate) fn reconcile_within(
+        &mut self,
+        targets: Vec<Target>,
+        known: &[Target],
+        now: Instant,
+        connect: &mut Connect<'_>,
+    ) -> bool {
         let before = self.panes.len();
+        let parked = &mut self.parked;
         let released = &mut self.released;
         #[cfg(any(target_os = "macos", windows))]
         let closed_pages = &mut self.closed_pages;
         self.panes.retain_mut(|pane| {
             let keep = targets.contains(&pane.target);
             if !keep {
+                if !pane.attachments.is_empty() && known.contains(&pane.target) {
+                    parked.insert(pane.target.clone(), std::mem::take(&mut pane.attachments));
+                }
                 pane.prepared.visuals.clear();
                 released.extend(pane.prepared.visuals.take_released());
                 #[cfg(any(target_os = "macos", windows))]
@@ -812,13 +833,17 @@ impl Chats {
                 Some(index) => self.panes.swap_remove(index),
                 None => {
                     changed = true;
-                    ChatPane::new(target)
+                    let mut pane = ChatPane::new(target);
+                    if let Some(files) = self.parked.remove(&pane.target) {
+                        pane.attachments = files;
+                    }
+                    pane
                 }
             });
         }
         self.panes = panes;
-        let targets: HashSet<&Target> = self.panes.iter().map(|pane| &pane.target).collect();
-        self.raw.retain(|target| targets.contains(target));
+        self.raw.retain(|target| known.contains(target));
+        self.parked.retain(|target, _| known.contains(target));
         for pane in &mut self.panes {
             if pane.target.existing.is_some() && self.existing.take_dismissed(&pane.target.pane_id)
             {

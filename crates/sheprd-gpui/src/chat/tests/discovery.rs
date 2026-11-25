@@ -161,7 +161,7 @@ fn chat_panes_are_bounded() {
     let agents: Vec<_> = panes.iter().map(|pane| (pane.as_str(), ID)).collect();
     let targets = discovery::targets(&snapshot(&agents), Some(&Route::Local));
     assert_eq!(targets.len(), MAX_CHATS + 4);
-    let bounded = discovery::bounded(targets, &[]);
+    let bounded = discovery::bounded(targets, |_| 0);
     let kept: Vec<_> = bounded.iter().map(|t| t.pane_id.as_str()).collect();
     assert_eq!(kept, panes[..MAX_CHATS]);
 }
@@ -172,7 +172,7 @@ fn a_chat_on_screen_attaches_past_the_bound() {
     let agents: Vec<_> = panes.iter().map(|pane| (pane.as_str(), ID)).collect();
     let targets = discovery::targets(&snapshot(&agents), Some(&Route::Local));
     let last = panes[MAX_CHATS + 3].clone();
-    let bounded = discovery::bounded(targets, std::slice::from_ref(&last));
+    let bounded = discovery::bounded(targets, |pane| u8::from(pane != last));
     let kept: Vec<_> = bounded.iter().map(|t| t.pane_id.as_str()).collect();
     assert_eq!(kept.len(), MAX_CHATS);
     assert_eq!(kept[..MAX_CHATS - 1], panes[..MAX_CHATS - 1]);
@@ -188,7 +188,7 @@ fn chats_on_screen_alone_still_respect_the_bound() {
     let panes: Vec<String> = (0..MAX_CHATS + 4).map(|n| format!("p{n}")).collect();
     let agents: Vec<_> = panes.iter().map(|pane| (pane.as_str(), ID)).collect();
     let targets = discovery::targets(&snapshot(&agents), Some(&Route::Local));
-    assert_eq!(discovery::bounded(targets, &panes).len(), MAX_CHATS);
+    assert_eq!(discovery::bounded(targets, |_| 0).len(), MAX_CHATS);
 }
 
 #[test]
@@ -328,10 +328,27 @@ fn an_existing_agent_on_screen_is_probed_past_the_bound() {
     let candidates = existing::candidates(&snapshot);
     assert_eq!(candidates.len(), MAX_CHATS + 1);
     let last = &panes[MAX_CHATS];
-    let probed = discovery::bound_by(candidates, |agent| agent.pane_id == *last);
+    let probed = discovery::bound_by(candidates, MAX_CHATS, |agent| {
+        u8::from(agent.pane_id != *last)
+    });
     assert_eq!(probed.len(), MAX_CHATS);
     assert_eq!(
         probed.last().map(|agent| agent.pane_id.as_str()),
         Some(last.as_str())
+    );
+}
+
+#[test]
+fn hidden_chats_holding_files_never_crowd_out_the_one_on_screen() {
+    let panes: Vec<String> = (0..=MAX_CHATS).map(|n| format!("p{n}")).collect();
+    let agents: Vec<_> = panes.iter().map(|pane| (pane.as_str(), ID)).collect();
+    let targets = discovery::targets(&snapshot(&agents), Some(&Route::Local));
+    let shown = &panes[MAX_CHATS];
+    // Every earlier chat holds files; the last one is on screen.
+    let kept = discovery::bounded(targets, |pane| if pane == shown { 0 } else { 1 });
+    assert_eq!(kept.len(), MAX_CHATS);
+    assert_eq!(
+        kept.last().map(|t| t.pane_id.as_str()),
+        Some(shown.as_str())
     );
 }

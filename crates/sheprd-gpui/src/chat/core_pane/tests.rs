@@ -112,11 +112,11 @@ fn herdr_chats_elsewhere_leave_room_for_the_core_chat_on_screen() {
     let core = targets(&[info("t1", Some(B)), info("t2", Some(B))]);
     let merged = with_core(herdr_chats, core);
     assert_eq!(merged.len(), MAX_CHATS + 2);
-    let kept = bounded(merged.clone(), &["core:t2".to_owned()]);
+    let kept = bounded(merged.clone(), |pane| u8::from(pane != "core:t2"));
     assert_eq!(kept.len(), MAX_CHATS);
     assert!(kept.iter().any(|target| target.pane_id == "core:t2"));
     assert!(!kept.iter().any(|target| target.pane_id == "core:t1"));
-    let unseen = bounded(merged, &[]);
+    let unseen = bounded(merged, |_| 0);
     assert!(unseen.iter().all(|target| target.surface == Surface::Herdr));
 }
 

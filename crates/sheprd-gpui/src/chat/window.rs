@@ -61,21 +61,34 @@ impl SheprdWindow {
                         connection: endpoint.generation,
                     })
             });
-        // The panes on screen and those holding unsent files come first
-        // wherever a bound applies.
-        let mut first = self.on_screen_chat_panes(cx);
-        first.extend(
-            self.chats
-                .panes()
-                .filter(|pane| pane.holds_unsent_files())
-                .map(|pane| pane.target.pane_id.clone()),
-        );
+        // The panes on screen come first wherever a bound applies, then
+        // those holding files for an unsent prompt.
+        let on_screen = self.on_screen_chat_panes(cx);
+        let holding: Vec<String> = self
+            .chats
+            .panes()
+            .filter(|pane| pane.holds_unsent_files())
+            .map(|pane| pane.target.pane_id.clone())
+            .collect();
+        let rank = |pane: &str| {
+            if on_screen.iter().any(|shown| shown == pane) {
+                0
+            } else if holding.iter().any(|held| held == pane) {
+                1
+            } else {
+                2
+            }
+        };
         let agents = self
             .live
             .snapshot
             .as_deref()
             .map(super::existing::candidates)
-            .map(|agents| discovery::bound_by(agents, |agent| first.contains(&agent.pane_id)))
+            .map(|agents| {
+                discovery::bound_by(agents, super::existing::MAX_OBSERVED, |agent| {
+                    rank(&agent.pane_id).min(1)
+                })
+            })
             .unwrap_or_default();
         let candidates: Vec<_> = agents.iter().map(|agent| agent.pane_id.clone()).collect();
         // A new conversation usually moves its pane's reported state, so the
@@ -112,10 +125,8 @@ impl SheprdWindow {
             })
             .unwrap_or_default();
         let core = enabled.then(|| self.core_chat_targets());
-        let targets = discovery::bounded(
-            super::core_pane::with_core(targets, core.unwrap_or_default()),
-            &first,
-        );
+        let known = super::core_pane::with_core(targets, core.unwrap_or_default());
+        let targets = discovery::bounded(known.clone(), rank);
         if enabled {
             self.locate_chat_program(cx);
             self.probe_chat_agents(cx);
@@ -124,7 +135,7 @@ impl SheprdWindow {
         self.poll_chat_start(cx);
         self.poll_chat_convert(cx);
         self.poll_chat_auto_convert(now);
-        let mut changed = self.chats.reconcile(targets, now, connect) || discovered;
+        let mut changed = self.chats.reconcile_within(targets, &known, now, connect) || discovered;
         // A layout saved from Settings or the command line arrives here.
         changed |= self.chats.relayout(self.config.chat.layout);
         changed |= self.chats.rewidth(self.config.chat.max_width);

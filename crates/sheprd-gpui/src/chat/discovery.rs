@@ -76,28 +76,35 @@ pub(crate) fn targets(snapshot: &ClientShellSnapshot, route: Option<&Route>) -> 
         .collect()
 }
 
-/// At most [`MAX_CHATS`] of `targets`, in their order: every pane in
-/// `first` before the others, as room allows. The window puts the panes on
-/// screen there, so a chat the user is looking at attaches however many
-/// chats run elsewhere, and the panes holding files for an unsent prompt,
-/// which letting go would lose.
-pub(crate) fn bounded(targets: Vec<Target>, first: &[String]) -> Vec<Target> {
-    bound_by(targets, |target| first.contains(&target.pane_id))
+/// At most [`MAX_CHATS`] of `targets`, in their order, those `rank`
+/// puts lower first. The window ranks the panes on screen before those
+/// holding files for an unsent prompt, and both before the rest, so a chat
+/// the user is looking at attaches however many chats run elsewhere.
+pub(crate) fn bounded(targets: Vec<Target>, rank: impl Fn(&str) -> u8) -> Vec<Target> {
+    bound_by(targets, MAX_CHATS, |target| rank(&target.pane_id))
 }
 
-/// At most [`MAX_CHATS`] of `items`, in their order, those `first` picks
-/// before the others.
-pub(crate) fn bound_by<T>(mut items: Vec<T>, first: impl Fn(&T) -> bool) -> Vec<T> {
-    let mut room = MAX_CHATS.saturating_sub(items.iter().filter(|item| first(item)).count());
-    items.retain(|item| {
-        if first(item) {
-            return true;
-        }
-        let keep = room > 0;
-        room = room.saturating_sub(1);
-        keep
+/// At most `limit` of `items`, in their order, those `rank` puts lower
+/// first and, within a rank, earlier ones.
+pub(crate) fn bound_by<T>(mut items: Vec<T>, limit: usize, rank: impl Fn(&T) -> u8) -> Vec<T> {
+    if items.len() <= limit {
+        return items;
+    }
+    let mut order: Vec<(u8, usize)> = items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| (rank(item), index))
+        .collect();
+    order.sort_unstable();
+    let mut keep = vec![false; items.len()];
+    for (_, index) in order.into_iter().take(limit) {
+        keep[index] = true;
+    }
+    let mut index = 0;
+    items.retain(|_| {
+        index += 1;
+        keep[index - 1]
     });
-    items.truncate(MAX_CHATS);
     items
 }
 

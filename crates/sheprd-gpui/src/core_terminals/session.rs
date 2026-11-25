@@ -136,7 +136,7 @@ impl SheprdWindow {
                 built.push((scope, Arc::new(session)));
             }
         }
-        super::folders::keep_core_workspace_names(&built, cx);
+        self.keep_core_workspace_names(&built, cx);
         let unchanged = self.core_terminals.sessions == built;
         if !unchanged {
             let recency = &mut self.core_terminals.recency;

@@ -288,9 +288,11 @@ fn check_burst(cx: &mut TestAppContext, full: bool) {
             );
         }
     }
-    wait_until(|| {
-        poll(&view, &program, cx);
-        view.read_with(cx, |view, _| {
+    // The socket worker can deliver the burst across several polls. Keep
+    // those polls between frames, as when the window has been in the background.
+    view.update(cx, |view, _| {
+        wait_until(|| {
+            view.chats.poll(Instant::now());
             let entries = &view
                 .chats
                 .pane("w1:p1")
@@ -300,9 +302,9 @@ fn check_burst(cx: &mut TestAppContext, full: bool) {
                 .entries;
             entries.last().map(|entry| entry.id) == Some(EntryId(80))
                 && entries.len() == if full { 40 } else { 80 }
-        })
+        });
     });
-    redraw(&view, cx);
+    cx.update(|window, cx| crate::sidebar::layout_tests::full_draw(window, cx).clear(cx));
     let left = behind(&view, cx);
     assert!(left <= 1., "at the new end in one frame: {left}");
 }

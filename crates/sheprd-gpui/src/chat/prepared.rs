@@ -225,6 +225,7 @@ pub(crate) enum Part {
 #[derive(Debug)]
 pub(crate) enum Body {
     Message(Vec<Part>),
+    UserTextFile(super::user_text_file::UserTextFile),
     /// Historical Q&A, with its readable copy payload prepared once as well.
     Answers {
         text: Rc<str>,
@@ -242,7 +243,7 @@ impl Body {
     fn visuals(&self, opened: bool) -> impl Iterator<Item = VisualId> + '_ {
         let (parts, images): (&[Part], &[VisualId]) = match self {
             Self::Message(parts) | Self::Answers { parts, .. } => (parts, &[]),
-            Self::Summary(_) => (&[], &[]),
+            Self::Summary(_) | Self::UserTextFile(_) => (&[], &[]),
             Self::Image(id) => (&[], std::slice::from_ref(id)),
             Self::Tool(summary) => (&[], &summary.images),
         };
@@ -398,7 +399,12 @@ impl Prepared {
             }
             let visuals = &mut self.visuals;
             let body = match &entry.kind {
-                EntryKind::User { text, .. } => Body::Message(message(text, Author::User, visuals)),
+                EntryKind::User { text, files, .. } => {
+                    match super::user_text_file::UserTextFile::from_prompt(text, *files) {
+                        Some(file) => Body::UserTextFile(file),
+                        None => Body::Message(message(text, Author::User, visuals)),
+                    }
+                }
                 EntryKind::Notice { answers, .. } if !answers.is_empty() => {
                     let text: Rc<str> = answers_text(answers).into();
                     let parts = vec![prose(&text, visuals)];
@@ -476,7 +482,7 @@ impl Prepared {
                                 }),
                         )
                 }
-                Body::Summary(_) => {}
+                Body::Summary(_) | Body::UserTextFile(_) => {}
             }
             let Body::Tool(summary) = &**body else {
                 continue;

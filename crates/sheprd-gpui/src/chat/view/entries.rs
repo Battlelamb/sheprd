@@ -88,6 +88,9 @@ fn tool_state(activity: Option<ActivityState>, status: ToolStatus) -> ToolState 
 /// An overlay copy control may cover the last block or an inline control.
 /// Plain prose keeps the layout's compact, floating copy treatment.
 fn copy_placement(body: Option<&Body>) -> CopyPlacement {
+    if matches!(body, Some(Body::UserTextFile(_))) {
+        return CopyPlacement::Footer;
+    }
     let Some(Body::Message(parts)) = body else {
         return CopyPlacement::Floating;
     };
@@ -156,6 +159,9 @@ impl SheprdWindow {
                         voice,
                         cx,
                     ),
+                    Some(Body::UserTextFile(file)) => {
+                        self.render_user_text_file(pane_id, entry.id, file, cx)
+                    }
                     Some(Body::Summary(summary)) => {
                         // Copy takes the whole summary, as its cut note says.
                         let card = div()

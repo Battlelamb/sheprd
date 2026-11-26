@@ -18,6 +18,12 @@ fn reveal_selects_the_real_file_and_reports_a_missing_one() {
     let file = directory.path().join("clip.mp4");
     std::fs::write(&file, b"clip").unwrap();
     let real = std::fs::canonicalize(&file).unwrap();
+    // Windows temp folders can be named in their short 8.3 form, which
+    // following links keeps but `canonicalize` expands, with a `\\?\` prefix.
+    #[cfg(windows)]
+    let revealed = |path: &Path| {
+        revealed(path).map(|found| found.map(|path| std::fs::canonicalize(path).unwrap()))
+    };
     assert_eq!(revealed(&file), Some(Ok(real)));
     let missing = directory.path().join("gone.mp4");
     assert_eq!(revealed(&missing), Some(Err(missing.clone())));

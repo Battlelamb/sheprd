@@ -273,6 +273,22 @@ impl ChatPane {
             .chain(self.viewer.iter().map(|viewer| viewer.focus().clone()))
     }
 
+    /// The reader or a keyboard control in one of its rows.
+    pub(super) fn reader_focus(&self, window: &Window, cx: &App) -> Option<FocusHandle> {
+        let focused = window.focused(cx)?;
+        self.text_focus
+            .as_ref()?
+            .contains(&focused, window)
+            .then_some(focused)
+    }
+
+    pub(super) fn focused_handle(&self, window: &Window, cx: &App) -> Option<FocusHandle> {
+        self.reader_focus(window, cx).or_else(|| {
+            self.focus_handles(cx)
+                .find(|focus| focus.is_focused(window))
+        })
+    }
+
     /// Whether the user is reading, with the keyboard on the chat's text.
     pub(crate) fn reading(&self, window: &Window) -> bool {
         self.text_focus
@@ -488,6 +504,9 @@ impl ChatPane {
                         self.glide.note_output();
                     }
                     for Splice { range, count } in splices {
+                        if range.is_empty() {
+                            self.glide.note_added_rows(count);
+                        }
                         super::glide::splice_in_place(&self.list, range, count);
                     }
                 }
@@ -495,6 +514,11 @@ impl ChatPane {
             }
         }
         self.list_keys = keys;
+        // Entries the program dropped to keep its transcript bounded do not
+        // come back, so neither does what was remembered of them.
+        let entries = &self.session.transcript().entries;
+        self.expanded
+            .retain(|id| entries.binary_search_by_key(id, |entry| entry.id).is_ok());
         self.refresh_text();
         self.widgets.retain(&self.prepared);
         let prepared = &self.prepared;

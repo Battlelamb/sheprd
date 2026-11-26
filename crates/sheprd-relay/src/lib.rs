@@ -16,6 +16,8 @@
 //! - Logs carry no addresses, routes, or payloads. The dashboard shows only
 //!   the start of a route.
 //!
+//! - [`ban`]: why and how long a relay banned an address, as it tells
+//!   the client.
 //! - [`directory`]: Sheprd's own relays, listed on sheprd.org.
 //! - [`endpoint`]: a relay's address, Sheprd's or a private one, and the
 //!   URLs built from it.
@@ -36,10 +38,11 @@
 //!   and the dashboard's routes.
 
 //!
-//! Without the `server` feature, only [`directory`], [`endpoint`],
+//! Without the `server` feature, only [`ban`], [`directory`], [`endpoint`],
 //! [`route`], [`socket`], and [`wire`] are built:
 //! what a client needs to reach a relay.
 
+pub mod ban;
 #[cfg(feature = "server")]
 mod broker;
 #[cfg(feature = "server")]

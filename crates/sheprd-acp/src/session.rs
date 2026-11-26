@@ -40,6 +40,11 @@ const LOG: usize = 8192;
 /// Bytes of logged changes kept, so a run of pictures cannot pin the log's
 /// memory; a client older than the log gets a snapshot.
 const LOG_BYTES: usize = 32 * 1024 * 1024;
+/// The most logged changes replayed to a reconnecting client. One further
+/// behind, as a window left in the background is, gets a snapshot instead:
+/// it shows the transcript as it is now in one step, rather than scrolling
+/// through every chunk that streamed while it was away.
+const CATCH_UP: u64 = 256;
 /// Commands remembered so a resent one is not run twice.
 const HANDLED: usize = 256;
 /// The most entries a transcript keeps.
@@ -664,7 +669,10 @@ impl<R: FnMut(Update)> Session<R> {
         }
         let first = self.log.front().map_or(self.seq + 1, |(seq, _)| *seq);
         let catch_up = since.filter(|since| {
-            since.epoch == self.epoch && since.seq <= self.seq && since.seq + 1 >= first
+            since.epoch == self.epoch
+                && since.seq <= self.seq
+                && since.seq + 1 >= first
+                && self.seq - since.seq <= CATCH_UP
         });
         let sent = match catch_up {
             Some(since) => {

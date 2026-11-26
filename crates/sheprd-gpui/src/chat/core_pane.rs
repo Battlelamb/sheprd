@@ -526,8 +526,8 @@ impl SheprdWindow {
         if let Some(focus) = pane.viewer.as_ref().and_then(|viewer| viewer.open_focus()) {
             return Some(focus.clone());
         }
-        if pane.reading(window) {
-            return pane.text_focus.clone();
+        if let Some(focus) = pane.reader_focus(window, cx) {
+            return Some(focus);
         }
         pane.input_focus(cx)
     }
@@ -575,8 +575,8 @@ impl SheprdWindow {
                 }
                 Surface::Herdr => return None,
             };
-            pane.focus_handles(cx)
-                .any(|focus| focus.is_focused(window))
+            pane.focused_handle(window, cx)
+                .is_some()
                 .then(|| (tab, terminal.clone()))
         })
     }

@@ -280,3 +280,6 @@ chat-file-on-host = File on the agent’s computer
 
 chat-viewer-previous = Previous
 chat-viewer-next = Next
+
+chat-open-message-text = Open full message as a text file
+chat-message-file-error = Could not save the message as a text file: { $error }

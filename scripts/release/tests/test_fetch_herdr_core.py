@@ -77,6 +77,7 @@ class BundledHerdrCoreTests(unittest.TestCase):
         licenses = (ROOT / "scripts/release/herdr-core-licenses.txt").read_text()
         self.assertTrue(licenses.startswith(f"herdr-core {version} "), licenses[:80])
         self.assertIn("Apache-2.0", licenses)
+        self.assertNotIn("more lines in file. Use offset=", licenses)
 
 
 if __name__ == "__main__":

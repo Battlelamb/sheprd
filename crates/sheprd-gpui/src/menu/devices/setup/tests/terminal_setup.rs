@@ -35,7 +35,11 @@ fn key_setup_runs_only_ssh_copy_id_without_herdr_1() -> Result<()> {
     let words = after_session(&command);
     assert_eq!(
         words,
-        [OsStr::new("ssh-copy-id"), OsStr::new("--"), OsStr::new("user@host")]
+        [
+            OsStr::new("ssh-copy-id"),
+            OsStr::new("--"),
+            OsStr::new("user@host")
+        ]
     );
 
     let unverified = request.with_host_keys(HostKeys::Skip);
@@ -43,7 +47,10 @@ fn key_setup_runs_only_ssh_copy_id_without_herdr_1() -> Result<()> {
     let words = after_session(&command);
     assert_eq!(words[0], "ssh-copy-id");
     assert!(words.contains(&OsStr::new("StrictHostKeyChecking=no")));
-    assert_eq!(words[words.len() - 2..], [OsStr::new("--"), OsStr::new("user@host")]);
+    assert_eq!(
+        words[words.len() - 2..],
+        [OsStr::new("--"), OsStr::new("user@host")]
+    );
     Ok(())
 }
 
@@ -80,24 +87,32 @@ fn install_core_installs_configures_path_and_stores_without_herdr_1() -> Result<
             Ok(())
         },
     )?;
-    assert_eq!(*steps.borrow(), ["verify", "keys", "install", "path", "store"]);
+    assert_eq!(
+        *steps.borrow(),
+        ["verify", "keys", "install", "path", "store"]
+    );
 
     // An install failure stops before configuring PATH or saving the host.
     let failed_steps = RefCell::new(Vec::new());
-    let error = install_core_with(
+    let Err(error) = install_core_with(
         &request,
         &claim,
         &cancelled,
         |_, _| Ok(()),
         |_| Ok(()),
-        |_, _| Err(crate::Error::Remote(sheprd_remote::core_install::Error::NoCurl.into())),
+        |_, _| {
+            Err(crate::Error::Remote(
+                sheprd_remote::core_install::Error::NoCurl.into(),
+            ))
+        },
         |_, _| failed_steps.borrow_mut().push("path"),
         |_, _| {
             failed_steps.borrow_mut().push("store");
             Ok(())
         },
-    )
-    .unwrap_err();
+    ) else {
+        panic!("expected core install failure");
+    };
     assert!(matches!(
         error,
         crate::Error::Remote(sheprd_remote::Error::CoreInstall(
@@ -105,6 +120,30 @@ fn install_core_installs_configures_path_and_stores_without_herdr_1() -> Result<
         ))
     ));
     assert!(failed_steps.borrow().is_empty());
+
+    // Cancelling during PATH configuration must abort without saving the device.
+    let cancel_during_path = AtomicBool::new(false);
+    let stored = RefCell::new(false);
+    let Err(error) = install_core_with(
+        &request,
+        &claim,
+        &cancel_during_path,
+        |_, _| Ok(()),
+        |_| Ok(()),
+        |_, _| Ok(()),
+        |_, cancelled| cancelled.store(true, Ordering::Release),
+        |_, _| {
+            *stored.borrow_mut() = true;
+            Ok(())
+        },
+    ) else {
+        panic!("expected cancellation error");
+    };
+    assert!(matches!(
+        error,
+        crate::Error::Client(sheprd_client::Error::ScriptCancelled)
+    ));
+    assert!(!*stored.borrow());
     Ok(())
 }
 

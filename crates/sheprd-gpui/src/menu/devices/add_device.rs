@@ -330,10 +330,9 @@ impl SheprdWindow {
                 Some(fl!("add-device-starting", target = request.target()))
             }
             Step::Saving(request, _) => Some(fl!("add-device-saving", target = request.target())),
-            Step::Installing { request, .. } => Some(fl!(
-                "add-device-installing-core",
-                target = request.target()
-            )),
+            Step::Installing { request, .. } => {
+                Some(fl!("add-device-installing-core", target = request.target()))
+            }
             Step::Saved | Step::SavedWarning(_) => None,
             Step::FetchingKey(request) => {
                 Some(fl!("add-device-fetching-key", target = request.target()))

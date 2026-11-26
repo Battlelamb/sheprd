@@ -242,11 +242,14 @@ fn herdr_core_only_hosts_are_reachable_for_fleet_and_tags(cx: &mut gpui::TestApp
             },
             true,
         ));
-        let core_host = crate::core_terminals::Host::Remote(crate::browser::Scope::endpoint(
-            "ssh:core-only",
-        ));
+        let core_host =
+            crate::core_terminals::Host::Remote(crate::browser::Scope::endpoint("ssh:core-only"));
         // Without herdr-core connected (and Herdr 1 disconnected), it is not reachable.
-        assert!(!view.reachable_daemons(|_| false).contains_key("ssh:core-only"));
+        assert!(
+            !view
+                .reachable_daemons(|_| false)
+                .contains_key("ssh:core-only")
+        );
         // Once herdr-core connects, it reaches Fleet and tags even without Herdr 1.
         let reached = view.reachable_daemons(|host| *host == core_host);
         assert!(reached.contains_key("ssh:core-only"));

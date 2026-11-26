@@ -102,9 +102,7 @@ impl SheprdWindow {
         });
         form.task = Some(cx.spawn(async move |this, cx| {
             let (result, claim) = background.await;
-            let _ = this.update(cx, |this, cx| {
-                this.core_install_finished(result, claim, cx)
-            });
+            let _ = this.update(cx, |this, cx| this.core_install_finished(result, claim, cx));
         }));
         cx.notify();
     }

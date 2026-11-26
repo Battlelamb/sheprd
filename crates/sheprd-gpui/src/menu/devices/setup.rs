@@ -366,11 +366,7 @@ fn cli_environment(command: &mut Command) {
 }
 
 #[cfg(unix)]
-fn setup_command(
-    app: &std::ffi::OsStr,
-    herdr: &std::ffi::OsStr,
-    request: &Request,
-) -> Command {
+fn setup_command(app: &std::ffi::OsStr, herdr: &std::ffi::OsStr, request: &Request) -> Command {
     let mut command = sheprd_client::new_command(app);
     command.arg(crate::setup_relay::SESSION);
     command.args([
@@ -414,11 +410,7 @@ fn key_setup_command(app: &std::ffi::OsStr, request: &Request) -> Command {
 /// Installs the pinned herdr-core over SSH, adds `~/.local/bin` to the remote
 /// shell's PATH (best-effort), and saves the device directly without Herdr 1's
 /// CLI. Blocks on SSH: call it from the background executor.
-pub(super) fn install_core(
-    request: &Request,
-    claim: &Claim,
-    cancelled: &AtomicBool,
-) -> Result<()> {
+pub(super) fn install_core(request: &Request, claim: &Claim, cancelled: &AtomicBool) -> Result<()> {
     install_core_with(
         request,
         claim,
@@ -454,8 +446,14 @@ fn install_core_with(
 ) -> Result<()> {
     verify(request, claim)?;
     remember_keys(request)?;
+    if cancelled.load(Ordering::Acquire) {
+        return Err(sheprd_client::Error::ScriptCancelled.into());
+    }
     install(request.target(), cancelled)?;
     configure_path(request.target(), cancelled);
+    if cancelled.load(Ordering::Acquire) {
+        return Err(sheprd_client::Error::ScriptCancelled.into());
+    }
     store(request, claim)
 }
 
@@ -467,12 +465,11 @@ fn configure_remote_path(target: &str, cancelled: &AtomicBool) {
         output: 4 * 1024,
         idle: Duration::from_secs(15),
     };
-    let mut sink = std::io::sink();
     if let Err(error) = sheprd_client::run_script(
         sheprd_client::ScriptHost::Ssh(target, sheprd_client::SshLane::Bulk),
         include_str!("setup/path.sh"),
         std::io::empty(),
-        &mut sink,
+        std::io::sink(),
         limits,
         cancelled,
     ) {

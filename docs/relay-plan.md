@@ -410,7 +410,10 @@ relays = []   # none (the default): LAN and Tailscale only
   relay when `/v1/info` reports another, which a TLS-inspecting proxy or a
   mis-issued certificate could forge; it also hands the pin to phones in
   `GET /api/relay`. When Settings next loads a list whose pin for a saved
-  relay changed, it updates the saved one. `just relays-add` reads the pin
+  relay changed, it updates the saved one, waiting for any other save to
+  finish first. It keeps the newest serial it took
+  (`public-relays-serial.json` in its state directory) and refuses an
+  older list, so a replayed one cannot bring back a retired pin. `just relays-add` reads the pin
   from `/v1/info` and prints it, to compare with the `pin=` the relay logs
   at start before signing.
 - The list is signed (`sheprd_relay::directory::signed`, behind the

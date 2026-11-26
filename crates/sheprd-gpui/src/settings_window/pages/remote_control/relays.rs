@@ -166,9 +166,19 @@ impl SettingsWindow {
     }
 
     /// Brings the pin of each listed relay of Sheprd's in `[remote] relays`
-    /// to what its signed list now says, keeping everything else, so a
-    /// relay whose certificate changed with the list keeps working.
-    fn follow_public_pins(&mut self, listed: &Listed, cx: &mut Context<Self>) {
+    /// to what the offered signed list says, keeping everything else, so a
+    /// relay whose certificate changed with the list keeps working. While
+    /// another save or load runs it waits, pending, and that one's
+    /// completion runs it again on the config it left.
+    pub(in crate::settings_window) fn follow_public_pins(&mut self, cx: &mut Context<Self>) {
+        if self.busy() {
+            self.remote.pins_pending = true;
+            return;
+        }
+        self.remote.pins_pending = false;
+        let Offered::Listed(listed) = &self.remote.offered else {
+            return;
+        };
         let mut relays = self.config.remote.relays.clone();
         let mut changed = false;
         for relay in &mut relays {
@@ -295,15 +305,13 @@ impl SettingsWindow {
             let listed = work.await;
             let _ = this.update(cx, |this, cx| {
                 this.remote.offered = match listed {
-                    Ok(listed) => {
-                        this.follow_public_pins(&listed, cx);
-                        Offered::Listed(listed)
-                    }
+                    Ok(listed) => Offered::Listed(listed),
                     Err(error) => {
                         tracing::warn!(%error, "Could not read Sheprd's relay list");
                         Offered::Failed(error.localize())
                     }
                 };
+                this.follow_public_pins(cx);
                 cx.notify();
             });
         })

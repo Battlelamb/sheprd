@@ -182,6 +182,7 @@ fn a_relay_row_says_how_the_daemon_stands_on_it() {
 fn sheprd_list() -> Listed {
     Listed {
         expires: EXPIRES,
+        serial: 1,
         relays: vec![
             Public {
                 address: HOME.into(),
@@ -276,6 +277,38 @@ fn reading_the_list_brings_a_listed_relays_pin_up_to_date(cx: &mut TestAppContex
 }
 
 #[gpui::test]
+fn a_list_read_while_settings_saves_updates_pins_once_idle(cx: &mut TestAppContext) {
+    let (view, cx, edits) = page(cx);
+    let pinned = Relay {
+        endpoint: HOME.into(),
+        pin: Some([1; 32]),
+        ..Relay::default()
+    };
+    view.update(cx, |view, cx| {
+        view.config.remote.relays = vec![pinned.clone()];
+        view.saving = true;
+        view.load_public_relays(|| Ok(sheprd_list()), cx);
+    });
+    cx.run_until_parked();
+    // Another save was running: the pins wait rather than being dropped.
+    assert!(edits.lock().unwrap().is_empty());
+    view.read_with(cx, |view, _| assert!(view.remote.pins_pending));
+    view.update(cx, |view, cx| {
+        view.saving = false;
+        view.finish_close(cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        *edits.lock().unwrap(),
+        [Preference::Remote(Edit::Relays(vec![Relay {
+            pin: Some([8; 32]),
+            ..pinned
+        }]))]
+    );
+    view.read_with(cx, |view, _| assert!(!view.remote.pins_pending));
+}
+
+#[gpui::test]
 fn an_empty_or_unreadable_list_says_so(cx: &mut TestAppContext) {
     let (view, cx, _) = page(cx);
     offer(
@@ -283,6 +316,7 @@ fn an_empty_or_unreadable_list_says_so(cx: &mut TestAppContext) {
         cx,
         Offered::Listed(Listed {
             expires: EXPIRES,
+            serial: 1,
             relays: Vec::new(),
             signer: Signer::Actions,
         }),

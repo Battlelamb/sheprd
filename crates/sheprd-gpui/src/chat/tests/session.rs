@@ -119,6 +119,15 @@ fn a_gap_in_the_stream_asks_for_a_snapshot_next() {
 }
 
 #[test]
+fn a_view_that_fell_behind_asks_for_a_snapshot_next() {
+    let mut session = live(cursor(1, 4), vec![agent(1, "a")]);
+    assert!(Error::Overflow.desynced());
+    session.lost(&Error::Overflow);
+    assert_eq!(session.since(), None);
+    assert!(session.synced());
+}
+
+#[test]
 fn a_change_from_another_epoch_does_not_apply() {
     let mut session = live(cursor(1, 4), vec![agent(1, "a")]);
     let error = session

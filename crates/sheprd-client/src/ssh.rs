@@ -630,16 +630,31 @@ pub fn shared_script_command(
     shared_command(target, &format!("/bin/sh -c {}", quote(script)), lane)
 }
 
-/// [`shared_script_command`] for a Windows host, whose login shell is
-/// `cmd.exe` or PowerShell: `script` runs under `powershell.exe`, encoded so
-/// neither shell reinterprets it. PowerShell writes progress records to
-/// stderr as CLIXML, so callers reading output should discard stderr.
-pub fn shared_powershell_command(
-    target: &str,
-    script: &str,
-    lane: mux::Lane,
-) -> Result<(Command, Option<SshChannel>)> {
-    shared_command(target, &powershell::encoded_command(script), lane)
+/// A noninteractive `ssh` child that runs `script` on the Windows host
+/// `target`, whose login shell is `cmd.exe` or PowerShell, under
+/// `powershell.exe`, encoded so neither shell reinterprets it. PowerShell
+/// writes progress records to stderr as CLIXML, so callers reading output
+/// should discard stderr.
+///
+/// It connects on its own, never over a shared master, this process's or
+/// one the user's `ControlPath` names: Windows OpenSSH starts the script
+/// under the connection's `sshd`, which a closed channel leaves running, so
+/// only ending the connection tells a long-running script that its reader is
+/// gone. So a host that needs an interactively authenticated master cannot
+/// run one. The caller owns the child: its streams and reaping.
+pub fn powershell_command(target: &str, script: &str) -> Result<Command> {
+    validate_target(target)?;
+    let mut command = noninteractive(target, HostKeys::of(target));
+    command.args([
+        "-o",
+        "ControlPath=none",
+        "-o",
+        "ClearAllForwardings=yes",
+        "--",
+        target,
+    ]);
+    command.arg(powershell::encoded_command(script));
+    Ok(command)
 }
 
 fn shared_command(

@@ -119,9 +119,6 @@ pub(crate) struct Session {
     buffer: Vec<u8>,
     /// Whether an answer has come yet; see [`FIRST_ANSWER`].
     answered: bool,
-    /// The SSH host's shared channel, if any. Fields drop after
-    /// `Drop::drop` reaps the child, so it is freed only then.
-    _channel: Option<sheprd_client::SshChannel>,
 }
 
 impl Drop for Session {
@@ -132,16 +129,12 @@ impl Drop for Session {
 }
 
 impl Session {
-    /// `script` on the Windows host `target`, over SSH.
+    /// `script` on the Windows host `target`, over an SSH connection of its
+    /// own (see `sheprd_client::powershell_command`), so that ending `ssh`
+    /// ends the connection and the script with it.
     pub fn connect(target: &str, script: &str) -> Result<Self> {
-        let (mut command, channel) = sheprd_client::shared_powershell_command(
-            target,
-            &compressed(script)?,
-            sheprd_client::SshLane::Quick,
-        )?;
-        let mut session = Self::start(command.stderr(Stdio::null()))?;
-        session._channel = channel;
-        Ok(session)
+        let mut command = sheprd_client::powershell_command(target, &compressed(script)?)?;
+        Self::start(command.stderr(Stdio::null()))
     }
 
     /// `script` on this Windows machine.
@@ -185,7 +178,6 @@ impl Session {
             output,
             buffer: Vec::new(),
             answered: false,
-            _channel: None,
         })
     }
 

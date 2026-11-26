@@ -168,13 +168,23 @@ fn a_windows_host_with_herdr_core_alone_is_its_own_setup() {
 }
 
 #[test]
-fn a_shared_powershell_script_is_encoded_and_rejects_option_targets() {
-    // A valid target would start a shared master on Unix; only the encoding
-    // and the refusal, which comes first, are checked here.
+fn a_powershell_script_connects_on_its_own_and_rejects_option_targets() {
     let script = "[Console]::In.ReadLine(); 'it''s' | Out-Host";
     assert_eq!(decoded(&powershell::encoded_command(script)), script);
+    let command = powershell_command("me@box", script).unwrap();
+    let args = command
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    // Never a shared master, whose `sshd` would outlive this child (#1560).
+    assert!(
+        args.windows(2)
+            .any(|pair| pair == ["-o", "ControlPath=none"])
+    );
+    assert!(!args.iter().any(|arg| arg.starts_with("-S")));
+    assert_eq!(decoded(args.last().unwrap()), script);
     assert!(matches!(
-        shared_powershell_command("-oProxyCommand=bad", script, mux::Lane::Quick),
+        powershell_command("-oProxyCommand=bad", script),
         Err(crate::Error::Ssh(Error::InvalidTarget))
     ));
 }

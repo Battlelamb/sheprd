@@ -80,3 +80,18 @@ async fn a_pairing_key_keeps_the_dial_rate_on_a_private_relay() {
     assert!(listener.add_pairing_key(public(&invited), Duration::from_secs(60)));
     assert_eq!(dial(&hub, route, address, &invited).await, Status::Limited);
 }
+
+#[tokio::test]
+async fn forged_proofs_past_the_rate_cost_the_same_named_or_not() {
+    let owner = signing_key(198);
+    let (hub, route, address, _listener) = spent(Access::tokens(TOKEN).unwrap(), &owner);
+    let stranger = signing_key(199);
+    let signed = b"dial proof";
+    let forged = sign(&stranger, signed);
+    for _ in 0..20 {
+        let result =
+            crate::broker::dial(&hub, address, route, &public(&owner), &forged, signed).await;
+        assert!(matches!(result, Err(Status::Limited)));
+    }
+    assert!(!hub.is_banned(address));
+}

@@ -131,8 +131,11 @@ pub async fn dial(
     {
         return Err(refuse(Status::Limited, Dial::Limited, offense));
     }
+    // Past the rate, every refusal costs what the rate alone costs: were a
+    // named key's forged proof to earn ban points, the ban closing the
+    // caller's connection would tell it the key was named.
     let unproven = |status, outcome, offense: Option<Offense>| match over {
-        Some(limit) => refuse(Status::Limited, Dial::Limited, offense.or(limit)),
+        Some(limit) => refuse(Status::Limited, Dial::Limited, limit),
         None => refuse(status, outcome, offense),
     };
     if prove(key, signature, signed).is_err() {

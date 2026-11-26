@@ -100,21 +100,19 @@ impl SheprdWindow {
         }
     }
 
-    /// Whether the device `id` is a saved one a pause applies to: an SSH or
-    /// cloud device, while the catalog is the one device setup writes.
+    /// Whether the device `id` is a saved one a pause applies to: a cloud
+    /// device, or an SSH device while its catalog is the one `herdr machine`
+    /// writes (not a development one or an explicit socket's).
     pub(crate) fn device_pausable(&self, id: &str) -> bool {
         self.pausable(id).is_some()
     }
 
     fn pausable(&self, id: &str) -> Option<Pausable> {
-        if self.device_setup_unavailable().is_some() {
-            return None;
-        }
         let endpoint = self.endpoints[1..]
             .iter()
             .find(|endpoint| endpoint.id == id)?;
         match endpoint.saved_target() {
-            ConnectTarget::Ssh { .. } => {
+            ConnectTarget::Ssh { .. } if self.device_setup_unavailable().is_none() => {
                 crate::endpoint::saved_profile_id(id).map(|profile| Pausable::Ssh(profile.into()))
             }
             #[cfg(feature = "cloud")]

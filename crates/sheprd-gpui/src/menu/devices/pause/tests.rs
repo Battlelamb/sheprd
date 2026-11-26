@@ -152,3 +152,34 @@ fn a_paused_device_names_no_core_target(cx: &mut TestAppContext) {
         assert_eq!(view.saved_target(&scope), None);
     });
 }
+
+// Cloud devices keep the app's own list, which development sessions share.
+#[cfg(feature = "cloud")]
+#[gpui::test]
+fn a_cloud_device_pauses_in_a_development_session(cx: &mut TestAppContext) {
+    let (view, cx) = cx.add_window_view(|window, cx| {
+        let mut view = fixture_window(window, cx);
+        add_devices(&mut view, true);
+        view.endpoints[0].connection.target = ConnectTarget::Session {
+            name: "default".into(),
+            development: true,
+        };
+        view.endpoints.push(crate::endpoint::Endpoint::new(
+            "cloud:w1".into(),
+            "Build box".into(),
+            ConnectTarget::Cloud {
+                provider: crate::cloud::CloudProvider::ALL[0],
+                account: "https://cloud.example.com".into(),
+                id: "w1".into(),
+                machine: "herdr-tidy-lark-aa".into(),
+                session: "default".into(),
+            },
+            true,
+        ));
+        view
+    });
+    view.read_with(cx, |view, _| {
+        assert!(view.device_pausable("cloud:w1"));
+        assert!(!view.device_pausable(HOST));
+    });
+}

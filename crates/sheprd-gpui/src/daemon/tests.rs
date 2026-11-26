@@ -2,6 +2,7 @@ use super::*;
 use std::os::unix::net::UnixListener;
 use std::sync::atomic::AtomicUsize;
 
+mod app_store;
 mod config_home;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod endpoint_classification;
@@ -146,7 +147,7 @@ fn explicit_and_remote_targets_never_start_local_daemon() {
             session: "default".into(),
         },
     ] {
-        let _ = connect(&target, &AtomicBool::new(false), || {
+        let _ = connect(&target, &AtomicBool::new(false), true, || {
             panic!("attach-only targets must not launch a local daemon")
         });
     }

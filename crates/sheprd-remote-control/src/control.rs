@@ -4,9 +4,8 @@
 //! only this user reaches it. No Tokio: Sheprd calls [`request`] from a
 //! background thread.
 //!
-//! Secrets never cross it except a pairing offer's URL, whose token is
-//! valid for one minute and one claim. Device keys and session tokens stay
-//! in the daemon.
+//! Pairing offers, borrowed GitHub tokens and approved voice accounts are
+//! sensitive. Device keys and session tokens stay in the daemon.
 
 use sheprd_chat_protocol::{read_frame, write_frame};
 pub mod app_update;
@@ -26,8 +25,10 @@ pub mod pull_requests;
 pub mod push;
 pub mod read;
 pub mod relays;
+pub mod sharing;
 pub mod shortcuts;
 pub mod tags;
+pub mod voice;
 use serde::{Deserialize, Serialize};
 use std::{
     io::{BufReader, BufWriter, Write},
@@ -292,8 +293,13 @@ pub enum Request {
         instance: u32,
         update: app_update::AppUpdate,
     },
-    /// Takes the phones' questions about workspaces, waiting up to
-    /// [`ASK_WAIT`] for one. Sheprd sends it while a phone is connected.
+    /// Takes pending exchanges during approved voice account pairings.
+    VoiceAsks,
+    VoiceAnswer {
+        id: changes::AskId,
+        answer: Option<voice::Answer>,
+    },
+    /// Takes phones' workspace questions, waiting up to [`ASK_WAIT`].
     ChangeAsks,
     /// What Sheprd found for an [`changes::Ask`].
     ChangeAnswer {
@@ -356,6 +362,39 @@ pub enum Request {
     /// them, or a drive, answered once the phone says what it did or
     /// [`ASK_WAIT`] passes. An older daemon closes without answering.
     Phone(phone::Ask),
+    /// Active read-only session shares on this host, without any secrets.
+    ShareList,
+    /// Runs the exact host-side allowlist projection for `pane` under the
+    /// chosen history/tool policy, without creating a share or grant.
+    SharePreview {
+        pane: String,
+        #[serde(default)]
+        history: sharing::ShareHistory,
+        #[serde(default)]
+        include_tools: bool,
+    },
+    /// Owner-confirmed creation of a read-only share for `pane` and its first
+    /// single-relay HTTPS invitation link.
+    ShareCreate {
+        pane: String,
+        #[serde(default)]
+        history: sharing::ShareHistory,
+        #[serde(default)]
+        include_tools: bool,
+        lifetime_secs: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        relay: Option<String>,
+    },
+    /// Revokes one grant on `share`, or stops the whole share when `grant` is
+    /// omitted.
+    ShareRevoke {
+        share: uuid::Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        grant: Option<uuid::Uuid>,
+    },
+    /// Owner kill switch: stops every active share and closes guest streams
+    /// without touching agents or paired phones.
+    ShareStopAll,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -419,6 +458,9 @@ pub enum Response {
         /// A phone asked to update since the last report. Taken by reading.
         requested: bool,
     },
+    VoiceAsks {
+        asks: Vec<voice::Ask>,
+    },
     ChangeAsks {
         asks: Vec<changes::Ask>,
         /// Changes phones ask for in Herdr 2 tabs' layouts. An older
@@ -437,6 +479,11 @@ pub enum Response {
     PushStatus(push::PushStatus),
     TestPushed(push::TestPushes),
     Phone(phone::Answer),
+    Shares {
+        shares: Vec<sharing::ShareSummary>,
+    },
+    SharePreview(sharing::SharePreview),
+    ShareCreated(sharing::ShareCreated),
 }
 
 /// The daemon's answer to a nearby phone's first step, the same JSON over
@@ -482,6 +529,10 @@ pub enum ErrorCode {
     /// The daemon could not write its state; nothing changed, and the
     /// same request may succeed later.
     Unsaved,
+    /// No such chat pane is attached on this daemon.
+    UnknownChat,
+    /// No such active share or grant.
+    UnknownShare,
     #[serde(other)]
     Other,
 }
@@ -515,6 +566,8 @@ pub struct Status {
     /// (`Request::GitHubLeaseAsks`); an older daemon has none.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub github_asks: usize,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub voice_asks: usize,
     /// Each relay this computer listens on, by endpoint; absent when it
     /// listens on none, or the daemon is older.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]

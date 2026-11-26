@@ -32,7 +32,28 @@ fn the_title_bar_region_ends_with_the_details_toggle_and_reports_its_width(
     let view = region.read_with(cx, |region, _| region.view.clone());
     assert!(view.read_with(cx, |view, _| view.titlebar_width) > 0.);
 
+    // Legacy layouts keep the toggle. The stock layout follows Moonframe tools.
+    assert!(cx.debug_bounds("toggle-details").is_some());
+    for enabled in [false, true] {
+        view.update(cx, |view, cx| {
+            view.hosted_full_header = Some(false);
+            view.config.features.moonframe_tools = enabled;
+            cx.notify();
+        });
+        region.update(cx, |_, cx| cx.notify());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(cx.debug_bounds("toggle-details").is_some(), enabled);
+    }
     let toggle = cx.debug_bounds("toggle-details").unwrap();
+    // The glyph clears the bar's end, and the window's rounded corner, as
+    // far as the account avatar before it clears its own slot's end, and is
+    // no taller than the bar's other icons.
+    let glyph = cx.debug_bounds("toggle-details-glyph").unwrap();
+    let avatar = cx.debug_bounds("titlebar-avatar-circle").unwrap();
+    let slot = cx.debug_bounds("titlebar-account-slot").unwrap();
+    let end = cx.update(|window, _| window.viewport_size().width);
+    assert!(end - glyph.right() >= slot.right() - avatar.right());
+    assert!(glyph.size.height <= px(14.));
     cx.simulate_click(toggle.center(), Default::default());
     let shown = view.update(cx, |view, cx| {
         (

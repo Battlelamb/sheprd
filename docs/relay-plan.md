@@ -113,6 +113,18 @@ Statuses: `0` ok, `1` offline, `2` busy, `3` timeout, `4` limited,
 
 #### WebSocket fallback and HTTP
 
+When a relay bans the caller’s network address, its HTTP 403 carries
+`Sheprd-Relay-Banned: 1` and `Cache-Control: no-store`. Clients use this
+response on `/v1/info` to identify a ban before opening a connection. It
+also says why, `Sheprd-Relay-Ban-Reason` (`bad_proof`, `bandwidth`,
+`connection_cap`, `limited`, `malformed`, `manual`, or `probe`), and, for a
+ban that lifts on its own, `Sheprd-Relay-Ban-Seconds` until it does. A QUIC
+connection closed with code 8 carries the same as its reason text,
+`REASON [SECONDS]` (`sheprd_relay::ban`). `relay-connect` passes a ban to the
+app on a `sheprd-relay-ban: REASON [SECONDS]` stderr line, so an SSH host
+behind a banned relay shows the ban, its reason, and when it lifts instead
+of an unreachable host. Unknown words are ignored, never shown.
+
 | Route | What it does |
 | --- | --- |
 | `GET /v1/listen` | A computer's control socket. The relay sends `{"t":"challenge","nonce","version":1}`; the computer answers `{"key","signature","token"?}` over `"sheprd-relay/listen/v1\0" ‖ name ‖ 0x00 ‖ nonce`, where the name is the relay's host and path prefix as its endpoint gives them (`Endpoint::proof_name`, `relay.example.org/sheprd`). Binding the name stops one relay passing another's challenge through, prefixes included. The relay answers `{"t":"ready","route"}`. The computer sends `{"t":"dial_keys","keys"}` and `{"t":"pairing_key","key","seconds"}`, each answered `{"t":"status","status"}`, and hears `{"t":"incoming","session","key"}` for each dial. A newer listener with the same key replaces the older one, which is closed with 4409. |
@@ -370,16 +382,20 @@ Relays and `sheprd remote relays` beside it):
 
 ```toml
 [remote]
-relays = "default"   # Sheprd's relays (the default). Or one of:
-# relays = "off"                                     # LAN and Tailscale only
-# relays = ["https://relay.example.org"]             # only these; ours are never contacted
-# relays = ["default", "https://relay.example.org"]  # both
+relays = []   # none (the default): LAN and Tailscale only
+# relays = ["https://relay.example.org"]   # a private relay
+# relays = [{ endpoint = "https://fra1.relay.sheprd.org", name = "Frankfurt",
+#             pin = "…" }]                  # one of Sheprd's, added from Settings
 ```
 
-- A list replaces the defaults unless it names `"default"`, so someone
-  running a private relay never touches ours, not even to look one up.
-- `"default"` means the relays listed at `https://sheprd.org/relays.json`
-  (`sheprd_relay::directory`, built), never a list compiled into the app:
+- **Sheprd's relays are opt-in.** No relay is used until the user adds
+  one, and the daemon never contacts sheprd.org: someone running a
+  private relay, or none, never touches ours, not even to look one up.
+  Settings fetches the list below only to offer Sheprd's relays, each
+  with an **Add** button, and adding one writes its endpoint, name, and
+  signed `pin` into `relays`.
+- Sheprd's relays are listed at `https://sheprd.org/relays.json`
+  (`sheprd_relay::directory`, built), never in a list compiled into the app:
 
   ```json
   { "version": 1, "relays": [
@@ -397,9 +413,15 @@ relays = "default"   # Sheprd's relays (the default). Or one of:
   ignored).
 - A relay listed with its `quic_pin` keeps its QUIC certificate across
   restarts (`RELAY_QUIC_IDENTITY_DIR`; `deploy/relay` keeps it in
-  `/opt/sheprd-relay/quic`). Clients pin that signed value rather than the
-  one `/v1/info` reports over ordinary HTTPS, which a TLS-inspecting proxy
-  or a mis-issued certificate could forge. `just relays-add` reads the pin
+  `/opt/sheprd-relay/quic`). Settings saves that signed value as the
+  relay's `pin`, the daemon takes it as `--relay-pin`, and refuses the
+  relay when `/v1/info` reports another, which a TLS-inspecting proxy or a
+  mis-issued certificate could forge; it also hands the pin to phones in
+  `GET /api/relay`. When Settings next loads a list whose pin for a saved
+  relay changed, it updates the saved one, waiting for any other save to
+  finish first. It keeps the newest serial it took
+  (`public-relays-serial.json` in its state directory) and refuses an
+  older list, so a replayed one cannot bring back a retired pin. `just relays-add` reads the pin
   from `/v1/info` and prints it, to compare with the `pin=` the relay logs
   at start before signing.
 - The list is signed (`sheprd_relay::directory::signed`, behind the
@@ -433,15 +455,12 @@ relays = "default"   # Sheprd's relays (the default). Or one of:
     hosts, or an IP-in-a-name service pointing at one, are refused.
   - The OpenPGP signing subkey expires on 2030-12-25: extend it, and ship
     the refreshed public key, before then.
-- The daemon fetches the list at start and every hour, and keeps the last
-  good one in its state directory, so a sheprd.org outage changes nothing.
-  It listens on every relay listed and stops on any removed. Settings and
-  `sheprd remote status` say which case holds:
-  - **The list is empty:** "No Sheprd relays are available for now." The
-    computer stays reachable on its LAN and private relays; phones keep
-    trying direct addresses.
-  - **The list could not be loaded, and none was saved:** "Could not load
-    Sheprd's relay list", with the reason, and it retries.
+- The list only offers relays: the daemon listens on the relays in
+  `[remote] relays`, so a sheprd.org outage, or a relay later dropped from
+  the list, changes nothing until the user removes it. Settings says when:
+  - **The list is empty:** "No Sheprd relays are available for now."
+  - **The list could not be loaded:** "Could not load Sheprd's relay
+    list", with the reason.
 - Each endpoint may have a listen token. Tokens are secrets, so they are not
   in the config: the daemon keeps them in `STATE_DIR/relay/tokens.json`
   (0600), keyed by endpoint, set through Settings or
@@ -516,10 +535,12 @@ machines) reaches them through the same relays:
 agent's relays to this computer's, and the device's record keeps them
 (Clients, Sheprd and SSH machines).
 
-**What is not built yet.** The `[remote] relays` setting, the token store,
-Settings, the command, and the phone's side arrive with the daemon and iOS
-work (phase 3). Until then no client reads a relay endpoint, so none of
-these is exposed as if it worked.
+**What is not built yet.** The iPhone does not yet use the pin
+`GET /api/relay` hands it: it still trusts the one each relay's
+`/v1/info` reports over HTTPS. Desktops adding or reaching each other
+through relays (`desktop-pair`, `relay-connect`), SSH machines reached
+through relay sharing, and `sheprd-relay-agent` get addresses only, and do
+the same.
 
 ### Choosing the nearest relay
 
@@ -1083,29 +1104,32 @@ through. B's daemon admits that tunnel key, sees that the device has an
 SSH key, splices the session to its SSH server instead of serving the
 API, and marks the device seen.
 
-**Joining the fleet in the same step** (the protocol is built; Sheprd's
-page no longer uses it). Add Device > Nearby Sheprd only pairs: it claims
-as soon as both screens show the code, with no fleet, so the other
-computer shows Allow at once. Pairing is pairing; joining a fleet is
-Settings > Fleet's, later (Invite on a machine this computer reaches).
-The daemons still carry and check a claim's fleet, as below, for peers
-that send one:
+**Joining the fleet in the same step.** Pairing brings the two
+computers into one fleet whenever one of them is in one, without a
+question on A: Add Device > Nearby Sheprd claims as soon as both screens
+show the code, with the fleet below, so the other computer shows Allow
+at once, and its Allow carries the line that says what it does. When
+neither is in a fleet, A founds one and invites B into it.
 
 - B names its fleet in the sealed offer while it is a live computer
   member (`fleet::bluetooth::hint`: the id, and its computer and host
-  counts for the words, never trusted).
+  counts for the words, never trusted). A pairing link names it too.
 - Once both screens show the code, the child waits for the page's claim
-  (`PairInput::Claim`). Sheprd's page sends it at once with no fleet; a
-  claim with one carries:
+  (`PairInput::Claim`), which the page sends at once
+  (`menu::devices::nearby::fleet`), carrying:
 
-  | A | B | A's page offers | The claim carries |
-  | --- | --- | --- | --- |
-  | In fleet F | In none | Add to fleet, or Pair only | `Invite(F)` |
-  | In none | In fleet G | Join fleet, or Pair only | `Join`: A's bundle for G |
-  | In none | In none | Create a fleet, or Pair only | `Invite` of the fleet A just founded |
-  | In F | In F | Says so | Nothing |
-  | In F | In G | Says B is in another fleet | `Invite(F)`, which B shows and cannot take |
+  | A | B | The claim carries |
+  | --- | --- | --- |
+  | In fleet F | In none | `Invite(F)` |
+  | In none | In fleet G | `Join`: A's bundle for G |
+  | In none | In none | `Invite` of the fleet A just founded |
+  | In F | In F | Nothing |
+  | In F | In G | `Invite(F)`, which B shows and cannot take |
 
+  A `Join` waits for A's daemon to sign the bundle, and a new fleet for
+  it to found one. A daemon that cannot, such as one that listens on no
+  relay, leaves the claim without it: the two pair only, and Settings >
+  Fleet says why.
 - A `Join` is A's bundle with its join signature, as an `Admit` carries
   it, and a second signature by the same fleet key over the fleet, the
   pairing's token hashed (`bluetooth::pairing_digest`), and the bundle
@@ -2458,6 +2482,9 @@ keyless (the version `release.yml` pins), and attests build provenance. CI
 holds no relay secrets and deploys nothing.
 
 ### Before the first public relay
+
+The launch of Sheprd's own two relays is in
+[public-relays-plan.md](public-relays-plan.md).
 
 - Make the GHCR package public once.
 - Create the `relays` environment (allowed on `main`), store

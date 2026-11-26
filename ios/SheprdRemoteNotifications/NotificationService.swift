@@ -76,6 +76,7 @@ final class NotificationService: UNNotificationServiceExtension {
         }
         let alert = opened.alert
         content.title = alert.title
+        content.subtitle = alert.subtitle
         content.body = alert.body
         content.threadIdentifier = AlertKeys.thread(computer: opened.computer.hex, pane: alert.pane)
         // The count is this computer's; the badge is every computer's.
@@ -97,6 +98,7 @@ final class NotificationService: UNNotificationServiceExtension {
         info[AlertKeys.pane] = alert.pane
         if let permission = alert.permission { info[AlertKeys.permission] = NSNumber(value: permission.id.value) }
         if alert.kind.isTerminal { info[AlertKeys.terminal] = true }
+        if let pull = alert.pullRequest { info[AlertKeys.pullRequest] = pull.url.absoluteString }
         content.userInfo = info
         if alert.wizz {
             content.interruptionLevel = .timeSensitive

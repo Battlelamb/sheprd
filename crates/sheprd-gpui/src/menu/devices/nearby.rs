@@ -11,6 +11,7 @@
 //! Nothing here holds a key or decides anything: the child and the other
 //! computer's daemon do.
 
+mod fleet;
 pub(super) mod link;
 mod render;
 
@@ -303,10 +304,16 @@ impl SheprdWindow {
                     cx,
                 );
             }
-            // Pairing is pairing: the claim goes at once, so the other
-            // computer shows Allow while this one shows the code. Joining
-            // a fleet is Settings > Fleet's, later.
-            PairOutput::Code { code, computer, .. } => {
+            // The claim goes at once, so the other computer shows Allow
+            // while this one shows the code, and brings the two into one
+            // fleet when one of them is in one: that computer's Allow
+            // says so.
+            PairOutput::Code {
+                code,
+                computer,
+                fleet,
+                pairing,
+            } => {
                 let Some(found) = setup.step.computer().cloned() else {
                     return;
                 };
@@ -318,9 +325,7 @@ impl SheprdWindow {
                     code,
                     claimed: false,
                 };
-                if let Some(pairing) = &setup.pairing {
-                    pairing.claim(None);
-                }
+                self.nearby_claim(fleet.as_ref(), pairing, cx);
             }
             PairOutput::Claimed { code: claimed_code } => {
                 if let Step::Code { claimed, code, .. } = &mut setup.step {
@@ -392,8 +397,12 @@ impl SheprdWindow {
         }
         // Dropping the child closes its input, which cancels. A save under
         // way still finishes, as the other computer already allowed it, but
-        // its answer no longer moves this page.
+        // its answer no longer moves this page. A claim cancelled before its
+        // Allow leaves the fleet free again.
         setup.pairing = None;
+        if matches!(setup.step, Step::Code { .. } | Step::Exchanging(_)) {
+            crate::fleet::Fleet::release_pairing(cx, setup.attempt);
+        }
         setup.attempt = next_attempt();
         setup.step = Step::Looking;
         cx.notify();
@@ -413,10 +422,11 @@ impl SheprdWindow {
             .nearby_setup
             .as_ref()
             .map_or(0, |setup| setup.attempt);
+        let tmux = self.config.terminal_backend == crate::config::TerminalBackend::Tmux;
         let saving = target.clone();
         let saved = cx
             .background_executor()
-            .spawn(async move { save(&saving, &label) });
+            .spawn(async move { save(&saving, &label, tmux) });
         cx.spawn_in(window, async move |this, cx| {
             let outcome = saved.await;
             let _ = this.update_in(cx, |this, window, cx| {
@@ -424,8 +434,9 @@ impl SheprdWindow {
                 // whatever this page does next. The other computer already
                 // acted on its Allow, so a Herdr check or a device save that
                 // failed here never drops it; `paired` retries its own SSH.
-                if let Some(fleet) = fleet {
-                    crate::fleet::bluetooth::paired(cx, target, fleet);
+                match fleet {
+                    Some(fleet) => crate::fleet::bluetooth::paired(cx, target, fleet, attempt),
+                    None => crate::fleet::Fleet::release_pairing(cx, attempt),
                 }
                 let Some(setup) = &mut this.menu.nearby_setup else {
                     return;
@@ -489,9 +500,14 @@ impl SheprdWindow {
 /// a compatible copy, or herdr-core, answers. A stopped server is fine: the
 /// bridge starts it on the first connection. The same machine paired again
 /// keeps its device. Blocking: runs on the background executor.
-fn save(target: &str, label: &str) -> Outcome {
-    match sheprd_client::probe_host(target, SESSION) {
-        Ok(HostProbe::Core | HostProbe::Running | HostProbe::Stopped) => {
+fn save(target: &str, label: &str, tmux: bool) -> Outcome {
+    match sheprd_client::ssh::probe_terminals(
+        target,
+        SESSION,
+        sheprd_client::HostKeys::of(target),
+        tmux,
+    ) {
+        Ok(HostProbe::Tmux | HostProbe::Core | HostProbe::Running | HostProbe::Stopped) => {
             let host = SavedHost {
                 id: uuid::Uuid::new_v4().simple().to_string(),
                 label: label.to_owned(),

@@ -87,6 +87,7 @@ pub struct Stamp {
     metrics: SidebarMetrics,
     /// Whether Back and Forward fit the left column's header.
     navigation: bool,
+    moonframe_tools: bool,
     panel: ActivityPanel,
     section: bool,
     sidebar_visible: bool,
@@ -118,6 +119,7 @@ impl PartialEq for Stamp {
             && self.devices == other.devices
             && self.merged == other.merged
             && self.metrics == other.metrics
+            && self.moonframe_tools == other.moonframe_tools
             && self.navigation == other.navigation
             && self.panel == other.panel
             && self.section == other.section
@@ -218,6 +220,9 @@ fn layout_state(name: &str, metrics: &SidebarMetrics) -> Value {
     json!({
         "child_details": metrics.child_details,
         "child_indent": metrics.child_indent,
+        "card_indent": metrics.card_indent,
+        "header_padding": metrics.header_padding,
+        "footer_padding": metrics.footer_padding,
         "gap": metrics.gap,
         "name": name,
         // How far rows step in under a device's header, as several devices
@@ -284,8 +289,9 @@ impl SheprdWindow {
             devices: self.hosted_devices_stamp(),
             merged: self.merged_worktrees().len(),
             panel: self.activity_panel(),
-            section: self.activity_section().is_some(),
+            section: self.activity_section().is_some() || self.mod_app().is_some(),
             metrics: self.hosted_metrics(),
+            moonframe_tools: self.config.features.moonframe_tools,
             navigation: self.navigation_fits_sidebar(self.viewport_width),
             sidebar_visible: self.sidebar_visible,
             snapshot: self.live.snapshot.clone(),
@@ -383,6 +389,10 @@ impl SheprdWindow {
             },
             main: json!({
                 "agents": self.hosted_agents(),
+                "sidebar_title_height": self.activity_title_height(),
+                "sidebar_line_height": super::line_height(&self.config.sidebar),
+                "primary_label": crate::i18n::fl!("sidebar-primary").to_string(),
+                "hosts_folded": self.hosts_folded(cx),
                 // Whether the sidebar lists agents in a list of their own,
                 // as the window's own sidebar does.
                 "agents_list": self.hosted_agents_list(),
@@ -395,10 +405,11 @@ impl SheprdWindow {
                 "merged": self.merged_worktrees().len(),
                 "layout": layout_state(self.config.layout.mode.name(), &self.hosted_metrics()),
                 "connected": self.live.status.is_connected(),
+                "moonframe_tools": self.config.features.moonframe_tools,
                 "details_visible": self.details_visible,
                 "panel": panel_id(self.activity_panel()),
                 "panels": panels,
-                "section": self.activity_section().is_some(),
+                "section": self.activity_section().is_some() || self.mod_app().is_some(),
                 "navigation_in_header": self.navigation_fits_sidebar(self.viewport_width),
                 "sidebar_visible": self.sidebar_visible,
                 // The classic status bar's message, absent when it shows none.

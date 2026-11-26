@@ -82,14 +82,17 @@ impl SheprdWindow {
             let host = super::Host::of(&scope);
             // A first shell that failed leaves no workspace behind, so it is
             // tried again, once that host's core may be dialled again.
+            let tmux = self.config.terminal_backend == crate::config::TerminalBackend::Tmux;
             let missing = self.live_at(index).herdr_1_unavailable()
-                && !self.core_terminals.lacks_core(&host)
-                && !self
-                    .core_terminals
-                    .hub_of(&host)
-                    .is_some_and(super::Hub::cooling);
+                && (tmux
+                    || !self.core_terminals.lacks_core(&host)
+                        && !self
+                            .core_terminals
+                            .hub_of(&host)
+                            .is_some_and(super::Hub::cooling));
             if self.keep_default_workspace(missing, &scope, cx) {
                 let purpose = super::Purpose::Tab {
+                    focus: true,
                     group: None,
                     scope,
                     workspace: super::WORKSPACE.to_owned(),
@@ -135,6 +138,7 @@ impl SheprdWindow {
                 built.push((scope, Arc::new(session)));
             }
         }
+        self.keep_core_workspace_names(&built, cx);
         let unchanged = self.core_terminals.sessions == built;
         if !unchanged {
             let recency = &mut self.core_terminals.recency;
@@ -169,7 +173,7 @@ impl SheprdWindow {
             .collect()
     }
 
-    pub(super) fn live_at(&self, index: usize) -> &crate::state::LiveState {
+    pub(crate) fn live_at(&self, index: usize) -> &crate::state::LiveState {
         if index == self.selected_endpoint {
             &self.live
         } else {
@@ -383,7 +387,7 @@ impl SheprdWindow {
             .collect();
         Some(crate::sidebar::CoreAgents {
             index,
-            answers: self.core_terminals.backend_of(&host).is_some(),
+            answers: self.core_terminals.answers(&host),
             agents,
             recency: self.core_terminals.recency.get(&scope),
         })
@@ -399,10 +403,7 @@ impl SheprdWindow {
         };
         let scope = scope(&self.endpoints[index]);
         let core = self.core_terminals.session_of(&scope).cloned();
-        let core_answers = self
-            .core_terminals
-            .backend_of(&super::Host::of(&scope))
-            .is_some();
+        let core_answers = self.core_terminals.answers(&super::Host::of(&scope));
         Sessions {
             core,
             core_answers,

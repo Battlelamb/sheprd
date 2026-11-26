@@ -13,6 +13,7 @@ computers is not collected: we never receive it.
 | Type | Collected | Linked to the user | Tracking | Purpose |
 | --- | --- | --- | --- | --- |
 | Identifiers > Device ID | Yes | No | No | App Functionality |
+| User Content > Other User Content | Yes | Yes | No | App Functionality |
 | Everything else | No | | | |
 
 - **Device ID:** the APNs push token. The phone seals it into a handle only
@@ -20,8 +21,8 @@ computers is not collected: we never receive it.
   it while forwarding a push to Apple. The relay never stores or logs it, so
   this is arguably not "collected"; it is declared to be safe, as Apple counts
   identifiers a developer's server receives.
-- **Not collected:** contact info, user content (prompts, chats, photos, and
-  terminal input go only to the user's own computers), usage data,
+- **Other User Content:** when users enable a cloud voice, spoken text goes to the selected provider under their account and may be retained.
+- **Not collected:** contact info, usage data,
   diagnostics (Send Diagnostics goes to the user's own computer), location,
   and any other identifier. There is no analytics or crash-reporting SDK.
 

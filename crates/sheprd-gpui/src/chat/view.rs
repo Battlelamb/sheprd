@@ -303,7 +303,9 @@ impl SheprdWindow {
         let pane_id = chat.target.pane_id.clone();
         chat.text_geometry.begin_frame();
         chat.prepared.visuals.begin_frame();
-        let entries = {
+        let entries = if chat.session.synced() && chat.session.transcript().entries.is_empty() {
+            self.render_chat_empty(chat).into_any_element()
+        } else {
             let pane_id = pane_id.clone();
             list(
                 chat.list.clone(),
@@ -318,6 +320,7 @@ impl SheprdWindow {
             // Margins rather than padding: the list leaves its padding out
             // of the end it reports, which would stop the glide short.
             .my(px(8.))
+            .into_any_element()
         };
         let focus_pane = pane_id.clone();
         let key_pane = pane_id.clone();
@@ -392,14 +395,14 @@ impl SheprdWindow {
             }))
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(move |this, _, _, _| {
-                    this.release_chat_text(&release_pane);
+                cx.listener(move |this, _, _, cx| {
+                    this.release_chat_text(&release_pane, cx);
                 }),
             )
             .on_mouse_up_out(
                 MouseButton::Left,
-                cx.listener(move |this, _, _, _| {
-                    this.release_chat_text(&release_out_pane);
+                cx.listener(move |this, _, _, cx| {
+                    this.release_chat_text(&release_out_pane, cx);
                 }),
             )
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
@@ -500,6 +503,71 @@ impl SheprdWindow {
             .into_any_element()
     }
 
+    /// What to do while a connected chat has no transcript entries yet.
+    fn render_chat_empty(&self, chat: &ChatPane) -> Div {
+        let theme = &self.theme;
+        let transcript = chat.session.transcript();
+        let (title, detail) = match &transcript.status {
+            Status::Starting => (
+                fl!("chat-empty-starting-title"),
+                fl!("chat-empty-starting-hint"),
+            ),
+            Status::Working => (
+                fl!("chat-empty-working-title"),
+                fl!("chat-empty-working-hint"),
+            ),
+            Status::Failed { .. } | Status::Exited { .. } => {
+                (fl!("chat-empty-ended-title"), fl!("chat-empty-ended-hint"))
+            }
+            _ => {
+                let detail = match chat.input() {
+                    ChatInput::Composer => fl!("chat-empty-prompt-hint"),
+                    ChatInput::Terminal => fl!("chat-empty-terminal-hint"),
+                    ChatInput::ReadOnly => fl!("chat-empty-read-only-hint"),
+                };
+                (fl!("chat-empty-title"), detail)
+            }
+        };
+
+        div()
+            .debug_selector(|| "chat-empty".into())
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .px(px(24.))
+            .child(
+                div()
+                    .max_w(px(360.))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(
+                        svg()
+                            .path(agent_icon(chat.session.agent()))
+                            .size(px(40.))
+                            .text_color(rgb(theme.foreground)),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.chat_text_size() + 4.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(rgb(theme.foreground))
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .text_size(self.chat_small_text())
+                            .text_color(rgb(theme.subtext()))
+                            .text_center()
+                            .child(detail),
+                    ),
+            )
+    }
+
     /// The layout's sign that the agent is working on a turn, with what it
     /// left running said after it.
     fn render_chat_working(
@@ -510,15 +578,19 @@ impl SheprdWindow {
     ) -> Option<Div> {
         let open = chat.steps.is_open();
         let needs_input = self.chat_needs_input(chat);
-        let working = working::Working::of(chat.session.transcript(), super::now_ms())
-            .map(|working| working::Working { open, ..working })
-            .map(|working| {
-                if needs_input {
-                    working.waiting(chat.input())
-                } else {
-                    working
-                }
-            });
+        let working = working::Working::of_at(
+            chat.session.transcript(),
+            super::now_ms(),
+            chat.session.last_activity_ms(),
+        )
+        .map(|working| working::Working { open, ..working })
+        .map(|working| {
+            if needs_input {
+                working.waiting(chat.input())
+            } else {
+                working
+            }
+        });
         let row = layout::layout_for(self.config.chat.layout)
             .working(working.as_ref(), &self.chat_look())
             .map(|row| {
@@ -682,6 +754,34 @@ impl SheprdWindow {
                 .text_color(rgb(hues.yellow))
                 .child(fl!("chat-reconnecting"))
         });
+        let share = (self.selected_endpoint == 0 && chat.attached()).then(|| {
+            let pane_id = pane_id.clone();
+            let agent = chat.session.agent().to_owned();
+            let sharing = crate::remote::Supervisor::is_pane_shared(&pane_id, cx);
+            let ink = if sharing {
+                crate::menu::accent(theme)
+            } else {
+                rgb(theme.subtext())
+            };
+            button("chat-share")
+                .when(sharing, |btn| btn.bg(rgb(theme.active)))
+                .text_color(ink)
+                .child(
+                    svg()
+                        .path("icons/external.svg")
+                        .size(px(12.))
+                        .text_color(ink),
+                )
+                .child(if sharing {
+                    fl!("chat-sharing")
+                } else {
+                    fl!("chat-share")
+                })
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.open_share_session(pane_id.clone(), agent.clone(), window, cx);
+                }))
+        });
         let layout = {
             let current = self.config.chat.layout;
             button("chat-layout")
@@ -778,6 +878,7 @@ impl SheprdWindow {
                     .children(reconnecting)
                     .children(watching)
                     .children(usage)
+                    .children(share)
                     .child(self.render_chat_sent_toggle(chat, cx))
                     .child(layout)
                     .children(rail)

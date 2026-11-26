@@ -498,7 +498,9 @@ on its own thread for the child's life, keeping only a 4 KB tail. When the bridg
 closes before it is ready without naming an incompatible candidate (that is
 `Error::BridgeIncompatible`), the tail and the exit code (255 from `ssh`, 127
 when no Herdr was found) are reduced to an `SshFailure`: `HostKey`, `Auth`,
-`Unreachable`, `HerdrMissing`, or `Other`. The text itself is never retained,
+`Unreachable`, `HerdrMissing`, `RelayBanned` (the `sheprd-relay-ban:` line
+`relay-connect` writes, read into `sheprd_relay::ban::Ban`'s closed set of
+reasons), or `Other`. The text itself is never retained,
 logged, or exposed, as it may name users, keys, and paths. The class is the
 source of `ssh::Error::Refused` and travels on `ClientEvent::Disconnected { ssh }`;
 `SshFailure::needs_user` marks the ones retrying cannot fix. Disconnect reasons
@@ -508,9 +510,11 @@ The worker owns and kills/reaps its SSH child on every exit, including cancellat
 and handshake failure; no GUI-thread join occurs. Quiet SSH connections send
 `endpoint.health.ping.v1` after five seconds and expire ten seconds after an
 unanswered probe. `ClientHandle::check_liveness` sends a probe at once instead,
-or brings an outstanding one's deadline forward, and that probe expires after
-three seconds; callers use it when a link may have died unnoticed, as across a
-sleep. Local connections ignore it. Any complete inbound message satisfies a
+or brings an outstanding one's deadline forward. Its `Suspicion` sets the
+deadline: after a sleep (`Slept`) the probe expires after three seconds; after
+a network change (`NetworkChanged`) it gets a routine ping's ten, since a link
+that survived a short stall may still be retransmitting. Callers use it when a
+link may have died unnoticed. Local connections ignore it. Any complete inbound message satisfies a
 probe, independently of the initial-snapshot deadline. As with local connections, continuously drain
 events: event backpressure pauses transport processing, including health checks.
 

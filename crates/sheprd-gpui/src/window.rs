@@ -8,6 +8,7 @@ mod annotate;
 mod announcement;
 mod app_tab;
 mod backdrop;
+mod body;
 pub(crate) mod chrome_focus;
 pub(crate) mod clipboard;
 #[cfg(target_os = "macos")]
@@ -265,6 +266,9 @@ pub(crate) struct SheprdWindow {
     /// Another app's window holds this view, and draws the sidebar, status bar
     /// and overlays as regions of its own; see `host_regions`.
     pub(crate) hosted: bool,
+    /// A split-header host draws the standalone title bar above all its columns.
+    /// None keeps the standalone bar in the main view for older layouts.
+    pub(crate) hosted_full_header: Option<bool>,
     /// The sidebar row the pointer is resting on, waiting to open its menu.
     pub(crate) hover: Option<sidebar::HoverRest>,
     /// The menu that resting opened, which the pointer closes by leaving it.

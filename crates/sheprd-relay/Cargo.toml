@@ -45,6 +45,10 @@ name              = "relays"
 required-features = ["signed-directory"]
 
 [[example]]
+name              = "probe"
+required-features = ["client"]
+
+[[example]]
 name              = "echo_computer"
 required-features = ["client", "server"]
 

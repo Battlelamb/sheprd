@@ -73,6 +73,8 @@ pub(crate) struct MenuState {
     /// The saved distribution the removal confirmation names.
     pub(super) wsl_remove: Option<String>,
     pub(super) session_edit: Option<super::sessions::Edit>,
+    /// A Luau mod opened the picker and owns its sheet until the menu resets.
+    pub(crate) hosted_picker: bool,
     /// The device whose sessions the picker shows under it, by endpoint id so
     /// a catalog change cannot unfold another one.
     pub(crate) unfolded_device: Option<String>,
@@ -113,9 +115,13 @@ pub(crate) struct MenuState {
     pub(crate) remote_revoke: Option<crate::remote::Revoke>,
     /// A phone's request for another machine, waiting for the user.
     pub(crate) remote_host_ask: Option<crate::remote::links::ask::HostAsk>,
+    /// The open read-only session sharing dialog.
+    pub(crate) remote_share: Option<crate::remote::ShareDialog>,
     /// Whether to borrow another computer's virtual Mac. Dropping it
     /// unanswered declines.
     pub(crate) machine_borrow: Option<crate::machine::borrow::Ask>,
+    #[cfg(target_os = "macos")]
+    pub(crate) machine_settings_request: Option<crate::machine::settings_request::Request>,
     pub(super) devices_scroll: ScrollHandle,
     /// The picker line to scroll into view once the list has been laid out:
     /// on the frame it first appears, GPUI drops a scroll request unapplied.
@@ -214,6 +220,8 @@ pub(crate) struct MenuState {
     /// success until the catalog drops the device, so its header pulses
     /// until it disappears; the confirmation closes as soon as it starts.
     pub(crate) removing_devices: std::collections::HashSet<String>,
+    /// Saved devices' pause requests not yet shown by the catalog.
+    pub(crate) pauses: super::devices::Pauses,
     pub(super) github_selected: Option<github::Action>,
     pub(super) github_scroll: ScrollHandle,
     pub(super) pr_connection: Option<std::sync::Weak<std::sync::Mutex<crate::state::LiveState>>>,
@@ -398,6 +406,7 @@ impl MenuState {
             nearby_setup: None,
             wsl_remove: None,
             session_edit: None,
+            hosted_picker: false,
             unfolded_device: None,
             unfolded_height: Default::default(),
             unfolded_rows: Default::default(),
@@ -416,7 +425,10 @@ impl MenuState {
             remote_pairing: None,
             remote_revoke: None,
             remote_host_ask: None,
+            remote_share: None,
             machine_borrow: None,
+            #[cfg(target_os = "macos")]
+            machine_settings_request: None,
             devices_scroll: ScrollHandle::new(),
             devices_reveal: std::cell::Cell::new(None),
             usage_scroll: ScrollHandle::new(),
@@ -473,6 +485,7 @@ impl MenuState {
             gitlab: Default::default(),
             azure: Default::default(),
             removing_devices: Default::default(),
+            pauses: Default::default(),
             github_selected: None,
             github_scroll: ScrollHandle::new(),
             pr_connection: None,
@@ -502,6 +515,7 @@ impl MenuState {
         self.nearby_setup = None;
         self.wsl_remove = None;
         self.session_edit = None;
+        self.hosted_picker = false;
         self.unfolded_device = None;
         self.folding = None;
         self.open_checkout = None;
@@ -519,7 +533,11 @@ impl MenuState {
         self.remote_pairing = None;
         self.remote_revoke = None;
         self.remote_host_ask = None;
-        self.machine_borrow = None;
+        self.remote_share = None;
+        // Closing the borrow dialog declines it. Other menus leave the pending notice alone.
+        if self.page == Some(Page::BorrowMachine) {
+            self.machine_borrow = None;
+        }
         self.devices_scroll.set_offset(Point::default());
         self.devices_reveal.set(None);
         self.usage_scroll.set_offset(Point::default());

@@ -133,10 +133,10 @@ final class Fleet {
     /// addresses, so a direct path wins when there is one.
     @ObservationIgnored private var relayOrigins: [String: String] = [:]
     /// The relays typed in Settings, dialed for every computer after the
-    /// ones it named. Relays another computer named are not: that would
-    /// show this computer's route to a relay the user never chose for it. A change restarts the running proxies, which open
-    /// their sessions with the list they started with.
-    @ObservationIgnored var savedRelays: [RelayEndpoint] = [] {
+    /// ones it named, and those removed there, dialed for none. Relays another computer named are not
+    /// dialed: that would show this computer's route to a relay the user never chose for it. A change
+    /// restarts the running proxies, which open their sessions with the list they started with.
+    @ObservationIgnored var savedRelays = RelayDialing() {
         didSet {
             guard savedRelays != oldValue else { return }
             for device in Array(proxies.keys) {
@@ -749,10 +749,12 @@ final class Fleet {
 
     private func startLink(_ computer: Computer) {
         guard links[computer.device] == nil, !DemoFleet.owns(computer.device) else { return }
+        var io = LiveSocket.io(for: computer, sessions: sessions)
+        io.bannedRelay = { [weak self] in await self?.bannedRelay(for: computer.device) }
         let link = ComputerLink(
             fingerprint: computer.fingerprint.hex,
             origins: origins(computer),
-            io: LiveSocket.io(for: computer, sessions: sessions)
+            io: io
         )
         links[computer.device] = link
         startRelay(computer)
@@ -798,7 +800,7 @@ final class Fleet {
     private func startRelay(_ computer: Computer) {
         let saved = savedRelays
         guard let relay = computer.relay, proxies[computer.device] == nil,
-              let proxy = try? RelayProxy(open: { try await relay.open(saved: saved) })
+              let proxy = try? RelayProxy(open: { try await relay.open(saved) })
         else { return }
         let device = computer.device
         proxies[device] = proxy

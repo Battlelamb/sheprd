@@ -10,7 +10,7 @@
 //! owning host, through that saved host's authenticated transport.
 
 use super::view::Place;
-use super::{MAX_CHATS, Route, Surface, Target};
+use super::{Route, Surface, Target};
 use crate::{
     SheprdWindow,
     browser::TabId,
@@ -50,8 +50,7 @@ pub(crate) fn terminal_of(key: &str) -> Option<TerminalId> {
     TerminalId::new(key.strip_prefix("core:")?).ok()
 }
 
-/// The chats among `terminals`, in their order, one per terminal and at
-/// most [`MAX_CHATS`]. A terminal on another machine this core added
+/// The chats among `terminals`, in their order, one per terminal. A terminal on another machine this core added
 /// (`box/t7`) runs its program there, out of reach.
 #[cfg(test)]
 pub(super) fn targets<'a>(terminals: impl IntoIterator<Item = &'a TerminalInfo>) -> Vec<Target> {
@@ -80,7 +79,6 @@ fn bounded_targets(targets: impl IntoIterator<Item = Target>) -> Vec<Target> {
     targets
         .into_iter()
         .filter(|target| seen.insert(target.pane_id.clone()))
-        .take(MAX_CHATS)
         .collect()
 }
 
@@ -107,13 +105,10 @@ fn target_on(
     })
 }
 
-/// `herdr` followed by as many of `core` as fit under [`MAX_CHATS`], each
-/// whose key no Herdr chat already holds.
+/// `herdr` followed by each of `core` whose key no Herdr chat already
+/// holds. [`super::discovery::bounded`] then picks the ones that attach.
 pub(super) fn with_core(mut herdr: Vec<Target>, core: Vec<Target>) -> Vec<Target> {
     for target in core {
-        if herdr.len() >= MAX_CHATS {
-            break;
-        }
         if !herdr.iter().any(|known| known.pane_id == target.pane_id) {
             herdr.push(target);
         }
@@ -200,8 +195,7 @@ impl SheprdWindow {
         key_on(&self.core_terminals.host_of(tab), terminal)
     }
 
-    /// Splits `tab`'s pane in use with a chat running `agent`, beside it in
-    /// its folder.
+    /// Starts a background chat tab in the current pane's workspace and folder.
     pub(crate) fn start_core_chat(
         &mut self,
         agent: Agent,
@@ -238,6 +232,7 @@ impl SheprdWindow {
         self.start_core_chat_tab(
             agent,
             Purpose::Tab {
+                focus: true,
                 scope,
                 workspace,
                 group,
@@ -257,6 +252,34 @@ impl SheprdWindow {
         carry: Option<&Settings>,
         cx: &gpui::App,
     ) -> Result<(), super::StartError> {
+        // The stand-in shell has a terminal address but no tab to split.
+        // A chat launched from it gets a tab in its own kept workspace.
+        let local = crate::core_terminals::Host::Local;
+        if let Some(id) = self.core_terminals.fallback_terminal()
+            && key_on(&local, id) == key
+        {
+            let scope = crate::browser::scope(&self.endpoints[self.selected_endpoint]);
+            let purpose = Purpose::Tab {
+                focus: false,
+                scope,
+                workspace: crate::core_terminals::WORKSPACE.to_owned(),
+                group: None,
+            };
+            if self.purpose_host(&purpose) != local {
+                return Err(super::StartError::NoWorkspace);
+            }
+            let backend = crate::config::TerminalBackend::owner(id);
+            let mut spawn = self.prepare_core_chat(agent, &local, carry)?;
+            spawn.cwd = self
+                .core_terminals
+                .reported(&local, id)
+                .and_then(|info| info.cwd.clone());
+            if !self.start_on_provider(purpose, spawn, None, Some(backend), cx) {
+                return Err(super::StartError::SlotBusy);
+            }
+            self.chats.last_started = Some(agent);
+            return Ok(());
+        }
         let (host, info) = self
             .core_terminals
             .routed_chat_terminals()
@@ -281,18 +304,27 @@ impl SheprdWindow {
         if at.as_str().contains('/') {
             return Err(super::StartError::NotLocal);
         }
-        let spawn = self.prepare_core_chat(agent, &self.core_terminals.host_of(tab), carry)?;
-        self.chats.last_started = Some(agent);
-        self.start_core_program(
-            Purpose::Split {
-                tab,
-                at,
-                axis: crate::core_terminals::panes::Axis::Row,
+        let (scope, workspace) = self
+            .core_terminals
+            .tab_workspace(tab)
+            .cloned()
+            .ok_or(super::StartError::NoWorkspace)?;
+        let cwd = self
+            .core_terminals
+            .info(tab, &at)
+            .and_then(|info| info.cwd.clone());
+        self.start_core_chat_tab(
+            agent,
+            Purpose::Tab {
+                scope,
+                workspace,
+                group: None,
+                focus: false,
             },
-            spawn,
+            cwd,
+            carry,
             cx,
-        );
-        Ok(())
+        )
     }
 
     /// A kept workspace with no driven tab still starts its chat on its own
@@ -302,6 +334,7 @@ impl SheprdWindow {
         agent: Agent,
         carry: Option<&Settings>,
         group: Option<crate::browser::GroupId>,
+        focus: bool,
         cx: &gpui::App,
     ) -> Result<(), super::StartError> {
         self.kept_in_front().ok_or(super::StartError::NoWorkspace)?;
@@ -310,6 +343,7 @@ impl SheprdWindow {
         self.start_core_chat_tab(
             agent,
             Purpose::Tab {
+                focus,
                 scope,
                 workspace,
                 group,
@@ -492,8 +526,8 @@ impl SheprdWindow {
         if let Some(focus) = pane.viewer.as_ref().and_then(|viewer| viewer.open_focus()) {
             return Some(focus.clone());
         }
-        if pane.reading(window) {
-            return pane.text_focus.clone();
+        if let Some(focus) = pane.reader_focus(window, cx) {
+            return Some(focus);
         }
         pane.input_focus(cx)
     }
@@ -541,8 +575,8 @@ impl SheprdWindow {
                 }
                 Surface::Herdr => return None,
             };
-            pane.focus_handles(cx)
-                .any(|focus| focus.is_focused(window))
+            pane.focused_handle(window, cx)
+                .is_some()
                 .then(|| (tab, terminal.clone()))
         })
     }

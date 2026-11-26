@@ -3,8 +3,8 @@ use super::{
     add_device::{Offer, Setup, Step},
     setup,
 };
-use crate::{SheprdWindow, search_input::SearchInput, sidebar::layout_tests::fixture_window};
-use gpui::{AppContext, Context};
+use crate::{SheprdWindow, sidebar::layout_tests::fixture_window};
+use gpui::Context;
 use sheprd_client::HostProbe;
 
 #[cfg(feature = "cloud")]
@@ -26,54 +26,44 @@ mod rail;
 mod scope;
 mod selection;
 mod session_chip;
+mod tailscale_address;
 mod version_warning;
 
 #[test]
 fn only_a_present_herdr_is_saved_without_a_terminal() {
-    assert_eq!(Offer::for_probe(HostProbe::Running), None);
-    assert_eq!(Offer::for_probe(HostProbe::Stopped), None);
+    assert_eq!(Offer::for_probe(&HostProbe::Running), None);
+    assert_eq!(Offer::for_probe(&HostProbe::Stopped), None);
     // herdr-core alone is a whole setup: saved as it is, nothing installed.
-    assert_eq!(Offer::for_probe(HostProbe::Core), None);
-    assert_eq!(Offer::for_probe(HostProbe::Missing), Some(Offer::Install));
-    assert_eq!(Offer::for_probe(HostProbe::Outdated), Some(Offer::Update));
+    assert_eq!(Offer::for_probe(&HostProbe::Core), None);
+    assert_eq!(Offer::for_probe(&HostProbe::Missing), Some(Offer::Install));
+    assert_eq!(Offer::for_probe(&HostProbe::Outdated), Some(Offer::Update));
     assert_eq!(
-        Offer::for_probe(HostProbe::SshFailed(sheprd_client::SshFailure::HostKey)),
+        Offer::for_probe(&HostProbe::SshFailed(sheprd_client::SshFailure::HostKey)),
         Some(Offer::Terminal)
     );
     assert_eq!(
-        Offer::for_probe(HostProbe::SshFailed(sheprd_client::SshFailure::Auth)),
+        Offer::for_probe(&HostProbe::SshFailed(sheprd_client::SshFailure::Auth)),
         Some(Offer::InstallKey)
     );
     // Without Fluent's isolation marks around each name.
-    let question = Offer::Install
-        .question("dev@box", Some("dev"))
-        .replace(['\u{2068}', '\u{2069}'], "");
+    let strip = |text: String| text.replace(['\u{2068}', '\u{2069}'], "");
+    assert_eq!(
+        strip(Offer::Install.question("dev@box", Some("dev"))),
+        "herdr-core was not detected on dev@box. Should we install it?"
+    );
+    assert_eq!(
+        strip(Offer::Update.question("dev@box", Some("dev"))),
+        "The Herdr on dev@box is too old for this app. Install herdr-core instead?"
+    );
     if cfg!(windows) {
-        // No terminal setup: the user is told what to run instead.
-        assert!(question.contains("Herdr was not detected there"));
-        assert!(question.contains("`herdr machine add dev@box`"));
-    } else {
-        assert_eq!(
-            question,
-            "Herdr was not detected on dev@box. Should we install it?"
-        );
+        // Interactive SSH prompts still need a terminal on Windows.
+        let terminal = strip(Offer::Terminal.question("dev@box", Some("dev")));
+        assert!(terminal.contains("`herdr machine add dev@box`"));
     }
 }
 
 fn open_form(view: &mut SheprdWindow, step: Step, cx: &mut Context<SheprdWindow>) {
-    view.menu.device_setup = Some(Setup {
-        fields: std::array::from_fn(|_| cx.new(SearchInput::new)),
-        step,
-        claim: None,
-        task: None,
-        discovery: None,
-        suggested_label: None,
-        _edits: Vec::new(),
-        highlight: None,
-        suggestion_scroll: gpui::ScrollHandle::new(),
-        error: None,
-        host_keys: sheprd_client::HostKeys::Verify,
-    });
+    view.menu.device_setup = Some(Setup::fixture(step, cx));
     view.menu.page = Some(Page::AddDevice);
 }
 
@@ -169,7 +159,7 @@ fn a_host_already_saved_or_being_added_returns_to_the_form(cx: &mut gpui::TestAp
                 view.device_probed(Err(error), cx);
                 assert!(matches!(step(view), Step::Form));
                 assert_eq!(
-                    view.menu.device_setup.as_ref().unwrap().error.as_deref(),
+                    view.menu.device_setup.as_ref().unwrap().error(),
                     Some(message)
                 );
             }

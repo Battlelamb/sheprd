@@ -184,6 +184,7 @@ struct SettingsWindow {
     machines: pages::machines::MachinesPage,
     remote: pages::remote_control::RemoteSettings,
     fleet: pages::fleet::FleetPage,
+    voice: pages::voice::VoicePage,
     text_shortcuts: pages::text_shortcuts::TextShortcutsPage,
     /// The open override dropdown, if any; its list renders inside its button.
     dropdown: Option<ui::Dropdown>,
@@ -356,6 +357,7 @@ impl SettingsWindow {
             machines: Default::default(),
             remote: Default::default(),
             fleet: Default::default(),
+            voice: pages::voice::VoicePage::new(cx),
             text_shortcuts: Default::default(),
             dropdown: None,
             number_edit: None,
@@ -660,6 +662,9 @@ impl SettingsWindow {
         if self.sidebar_queued && self.closing.is_none() && !self.busy() {
             self.save_sidebar_draft(cx);
         }
+        if self.remote.pins_pending && self.closing.is_none() && !self.busy() {
+            self.follow_public_pins(cx);
+        }
         if !self.busy() && !self.theme_dirty() && self.closing.is_some() {
             if self.layout_intent.is_some() {
                 self.save_layout_draft(cx);
@@ -715,6 +720,9 @@ impl SettingsWindow {
         self.dropdown = None;
         self.dismiss_control_font_picker(window, cx);
         self.clear_search(cx);
+        if self.section == Section::Voice {
+            self.dismiss_voice_sheet(cx);
+        }
         self.section = section;
         // A page opened from search or elsewhere shows in a short list too.
         self.navigation_scroll.scroll_to_item(section.nav_item());
@@ -728,6 +736,9 @@ impl SettingsWindow {
         #[cfg(target_os = "macos")]
         if section == Section::Machines {
             self.open_machines(cx);
+        }
+        if section == Section::Voice {
+            self.open_voice(cx);
         }
         if section == Section::TextShortcuts {
             self.open_text_shortcuts_page(cx);
@@ -890,6 +901,7 @@ impl Render for SettingsWindow {
                 .as_ref()
                 .and_then(|guide| crate::agent_guidance::banner(guide, &self.theme, window, cx)),
         );
+        let root = root.children(self.voice_sheet(window, cx));
         let border = self.theme.active;
         crate::titlebar::frame(window, border, root)
     }

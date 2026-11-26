@@ -642,8 +642,8 @@ impl SheprdWindow {
     }
 
     /// Pastes the clipboard's text into the composer when it holds several
-    /// lines, which the field takes as several lines. Whether it took
-    /// the paste.
+    /// lines, which the field takes as several lines, or attaches it as a
+    /// `.txt` file when it is long. Whether it took the paste.
     pub(super) fn chat_paste(
         &mut self,
         pane_id: &str,
@@ -702,6 +702,12 @@ impl SheprdWindow {
             self.attach_chat_image(pane_id, image, window, cx);
             return true;
         };
+        // Long text, such as a log, attaches as a file rather than flood the
+        // composer, where the chat's host can take files from here.
+        if super::pasted::is_long_text(&text) && self.chat_takes_pasted_files(pane_id) {
+            self.attach_chat_text(pane_id, text, window, cx);
+            return true;
+        }
         if !text.contains(['\n', '\r']) {
             return false;
         }
@@ -712,6 +718,22 @@ impl SheprdWindow {
         self.redraw_terminal(cx);
         cx.notify();
         true
+    }
+
+    /// Whether a paste saved to a file here can reach the program of the
+    /// chat over `pane_id`; where it cannot, long text pastes as text.
+    fn chat_takes_pasted_files(&self, pane_id: &str) -> bool {
+        match self.chats.pane(pane_id).map(|pane| &pane.target.route) {
+            Some(super::Route::Local) => true,
+            Some(super::Route::Remote(target)) => crate::core_terminals::files::can_upload(target),
+            Some(super::Route::Ssh(host)) => {
+                crate::core_terminals::files::can_upload(&sheprd_client::ConnectTarget::Ssh {
+                    target: host.clone(),
+                    session: String::new(),
+                })
+            }
+            None => false,
+        }
     }
 
     /// Puts `text` in the composer, replacing it; `text` may hold several lines.

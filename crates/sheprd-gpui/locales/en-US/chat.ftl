@@ -61,6 +61,7 @@ chat-files-attach = Attach
 # $error says why, in the system's or the app's words.
 chat-files-not-attached = Files not attached: { $error }
 chat-image-not-attached = Image not attached: { $error }
+chat-text-not-attached = Pasted text not attached: { $error }
 chat-files-too-many = A prompt takes at most { $count } files
 chat-files-copying = Files are still being copied; send once they are attached
 chat-prompt-too-long = The prompt is longer than the agent accepts

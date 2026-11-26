@@ -20,6 +20,7 @@ use super::{
     visuals::Frame,
 };
 use crate::chat::code_block::scroll_sideways;
+use crate::chat::prepared::Picture;
 use crate::{SheprdWindow, config::corners, fonts::StyledFont, i18n::fl, notifications::safe_text};
 use gpui::{prelude::*, *};
 use sheprd_chat_protocol::{
@@ -226,9 +227,13 @@ impl SheprdWindow {
                 cx,
             ),
             EntryKind::Image { author, .. } => match body.as_deref() {
-                Some(Body::Image(id)) => {
-                    self.render_chat_image(pane_id, *author, *id, &chat.prepared.visuals, cx)
-                }
+                Some(Body::Image(id)) => self.render_chat_image(
+                    pane_id,
+                    *author,
+                    Picture::new(entry.id, 0, *id),
+                    &chat.prepared.visuals,
+                    cx,
+                ),
                 _ => div(),
             },
             EntryKind::Tool(tool) => self.render_chat_tool(
@@ -565,8 +570,14 @@ impl SheprdWindow {
                     .flex_wrap()
                     .gap(px(6.))
                     .py(px(2.))
-                    .children(summary.images.iter().map(|id| {
-                        self.render_chat_visual(pane_id, *id, visuals, Frame::ToolImage, cx)
+                    .children(summary.images.iter().enumerate().map(|(index, id)| {
+                        self.render_chat_visual(
+                            pane_id,
+                            Picture::new(entry, index, *id),
+                            visuals,
+                            Frame::ToolImage,
+                            cx,
+                        )
                     }))
                     .into_any_element(),
             );

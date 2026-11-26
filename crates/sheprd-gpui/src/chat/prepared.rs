@@ -274,6 +274,21 @@ impl Body {
     }
 }
 
+/// One occurrence of a clickable picture. Identical textures may appear
+/// in several entries, or twice in the same tool result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Picture {
+    pub(crate) entry: EntryId,
+    pub(crate) part: usize,
+    pub(crate) id: VisualId,
+}
+
+impl Picture {
+    pub(crate) fn new(entry: EntryId, part: usize, id: VisualId) -> Self {
+        Self { entry, part, id }
+    }
+}
+
 /// Bodies by entry, each with the revision it was prepared at, and the
 /// pictures they draw.
 #[derive(Default)]
@@ -284,6 +299,7 @@ pub(crate) struct Prepared {
     changed: Vec<DiffSummary>,
     /// Each sub-agent's steps, by its call id, in order.
     steps: HashMap<String, Vec<EntryId>>,
+    pub(super) pictures: Vec<Picture>,
     text: super::selection::Document,
     pub(crate) visuals: Visuals,
 }
@@ -431,11 +447,37 @@ impl Prepared {
                 self.steps.entry(parent.clone()).or_default().push(entry.id);
             }
         }
+        self.pictures.clear();
         self.changed.clear();
         for entry in &transcript.entries {
             let Some((_, body)) = self.bodies.get(&entry.id) else {
                 continue;
             };
+            let picture = |part, id| Picture::new(entry.id, part, id);
+            match &**body {
+                Body::Image(id) => self.pictures.push(picture(0, *id)),
+                Body::Tool(tool) => self.pictures.extend(
+                    tool.images
+                        .iter()
+                        .enumerate()
+                        .map(|(part, id)| picture(part, *id)),
+                ),
+                Body::Message(parts) | Body::Answers { parts, .. } => {
+                    self.pictures
+                        .extend(
+                            parts
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(part, item)| match item {
+                                    Part::Diagram(id, _) | Part::Remote { id, .. } => {
+                                        Some(picture(part, *id))
+                                    }
+                                    _ => None,
+                                }),
+                        )
+                }
+                Body::Summary(_) => {}
+            }
             let Body::Tool(summary) = &**body else {
                 continue;
             };
@@ -479,6 +521,7 @@ impl Prepared {
     /// Starts over, as after a snapshot that may reuse entry ids.
     pub(crate) fn clear(&mut self) {
         self.bodies.clear();
+        self.pictures.clear();
         self.changed.clear();
         self.steps.clear();
         self.text.clear();

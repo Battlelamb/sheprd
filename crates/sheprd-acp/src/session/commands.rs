@@ -90,18 +90,15 @@ impl<R: FnMut(Update)> Session<R> {
             if waiting.len() >= MAX_QUEUED || text_size + text.len() > MAX_QUEUED_TEXT {
                 return Err(Rejection::QueueFull);
             }
-            // A prompt typed while the agent works goes into its turn, if
-            // its harness can take one and nothing waits ahead of it.
-            let steered = self.can_steer() && self.steer(id, &text, &attachments, origin.clone());
             let mut queued = self.transcript.queued.clone();
             queued.push(Queued {
                 attachments,
                 id,
                 held: false,
-                steered,
+                steered: false,
                 text,
             });
-            if let Some(origin) = origin.filter(|_| !steered) {
+            if let Some(origin) = origin {
                 self.queued_origins.insert(id, origin);
             }
             self.queue_changed(queued);

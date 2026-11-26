@@ -48,7 +48,8 @@ A subagent contributes separately only when Traces indexes it as its own session
 
 The recent count is broken down by agent type and refreshes about every 30 seconds.
 Select the recent count, the peak badge, or a day in the chart to see the
-participating sessions and open their transcripts. Tied peaks use the earliest
+participating sessions and open their transcripts. A selected daily peak keeps
+its timestamp if newer trace history moves the peak. Tied peaks use the earliest
 instant. The chart follows the host, device label, agent, and date filters.
 Search narrows the session list. **Show all sessions** closes the drill-down.
 The drill-down reads up to 1,000 participants directly from the index, including

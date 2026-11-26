@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(super) enum Selection {
     Recent,
-    Day(i64),
+    Peak(i64),
 }
 
 fn day(at: i64) -> i64 {
@@ -32,6 +32,7 @@ pub(super) struct Panel {
     error: Option<sheprd_traces::Error>,
     read: Option<Task<()>>,
     version: u64,
+    selection_dirty: bool,
     refreshed: Option<Instant>,
 }
 
@@ -40,6 +41,7 @@ impl Panel {
         self.version = self.version.wrapping_add(1);
         self.chart = None;
         self.cache = OverlapCache::default();
+        self.selection_dirty = false;
         self.selection = None;
         self.sessions.clear();
         self.error = None;
@@ -47,7 +49,7 @@ impl Panel {
     }
 
     pub(super) fn loading_sessions(&self) -> bool {
-        self.selection.is_some() && self.refreshed.is_none() && self.error.is_none()
+        self.selection.is_some() && self.selection_dirty && self.error.is_none()
     }
 
     #[cfg(any(test, feature = "integration-test"))]
@@ -61,7 +63,7 @@ impl Panel {
         self.sessions.clear();
         self.error = None;
         self.version = self.version.wrapping_add(1);
-        self.refreshed = None;
+        self.selection_dirty = true;
     }
 }
 
@@ -72,8 +74,9 @@ impl SheprdWindow {
         };
         let p = &page.overlap;
         if p.read.is_some()
-            || p.refreshed
-                .is_some_and(|t| t.elapsed() < Duration::from_secs(30))
+            || (!p.selection_dirty
+                && p.refreshed
+                    .is_some_and(|t| t.elapsed() < Duration::from_secs(30)))
         {
             return;
         }
@@ -94,12 +97,10 @@ impl SheprdWindow {
         let agent = page.filter.agent;
         let selection = p.selection;
         let version = p.version;
-        // Drill into the instant shown on screen, even if the clock has advanced.
-        let clicked_at = p
-            .chart
-            .as_ref()
-            .filter(|_| p.refreshed.is_none())
-            .map(|c| c.recent.at);
+        // On a click, query membership against the chart already displayed.
+        // The regular timed refresh picks up newer history independently.
+        let displayed = p.chart.as_ref().filter(|_| p.selection_dirty).cloned();
+        let refresh_chart = displayed.is_none();
         let Some(page) = self.traces.page.as_mut() else {
             return;
         };
@@ -109,11 +110,19 @@ impl SheprdWindow {
             let ids = ids
                 .as_ref()
                 .map(|ids| ids.iter().map(String::as_str).collect::<Vec<_>>());
-            let now = clicked_at.unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
-            let chart = store.cached_overlap(&mut cache, now, days, ids.as_deref(), agent)?;
-            let point = selection.and_then(|s| selected_point(&chart, s));
-            let sessions = match point {
-                Some(point) => store.active_sessions(point.at, ids.as_deref(), agent)?,
+            let chart = match displayed {
+                Some(chart) => chart,
+                None => store.cached_overlap(
+                    &mut cache,
+                    chrono::Utc::now().timestamp_millis(),
+                    days,
+                    ids.as_deref(),
+                    agent,
+                )?,
+            };
+            let at = selection.and_then(|s| selected_at(&chart, s));
+            let sessions = match at {
+                Some(at) => store.active_sessions(at, ids.as_deref(), agent)?,
                 None => Vec::new(),
             };
             Ok((chart, sessions, cache))
@@ -127,11 +136,14 @@ impl SheprdWindow {
                 let p = &mut page.overlap;
                 p.read = None;
                 if p.version == version {
-                    p.refreshed = Some(Instant::now());
+                    p.selection_dirty = false;
+                    if refresh_chart || result.is_err() {
+                        p.refreshed = Some(Instant::now());
+                    }
                     match result {
                         Ok((chart, sessions, cache)) => {
                             if p.selection
-                                .is_some_and(|s| selected_point(&chart, s).is_none())
+                                .is_some_and(|s| selected_at(&chart, s).is_none())
                             {
                                 p.selection = None;
                             }
@@ -192,7 +204,7 @@ impl SheprdWindow {
             return panel;
         };
         let recent = Selection::Recent;
-        let strongest = Selection::Day(day(peak.at));
+        let strongest = Selection::Peak(peak.at);
         let summary = div()
             .flex()
             .flex_wrap()
@@ -229,7 +241,7 @@ impl SheprdWindow {
             });
         let bars =
             chart.daily.iter().map(|point| {
-                let selection = Selection::Day(day(point.at));
+                let selection = Selection::Peak(point.at);
                 let selected = p.selection == Some(selection);
                 let (foreground, surface) = (look.theme.foreground, look.theme.surface);
                 let point = *point;
@@ -290,11 +302,10 @@ impl SheprdWindow {
                         .flex_wrap()
                         .gap_2()
                         .items_center()
-                        .when_some(selected_point(chart, selection), |row, point| {
+                        .when_some(selected_at(chart, selection), |row, at| {
                             row.child(fl!(
                                 "traces-overlap-selection",
-                                time = date(point.at, "%b %-d %H:%M UTC"),
-                                count = point.count
+                                time = date(at, "%b %-d %H:%M UTC")
                             ))
                         })
                         .child(
@@ -317,12 +328,21 @@ fn point_label(point: OverlapPoint) -> String {
     )
 }
 
-fn selected_point(chart: &Overlap, selection: Selection) -> Option<OverlapPoint> {
+fn selected_at(chart: &Overlap, selection: Selection) -> Option<i64> {
     match selection {
-        Selection::Recent => Some(chart.recent),
-        Selection::Day(wanted) => chart.daily.iter().find(|p| day(p.at) == wanted).copied(),
+        Selection::Recent => Some(chart.recent.at),
+        // A replicated event may move today's peak. Keep inspecting the
+        // clicked instant until its day leaves the chart or the user exits.
+        Selection::Peak(at) => chart
+            .daily
+            .iter()
+            .any(|p| day(p.at) == day(at))
+            .then_some(at),
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 /// Put points at the centers of the same equal-width slots used for picking.
 fn line(points: &[OverlapPoint], peak: usize, color: u32) -> impl IntoElement {

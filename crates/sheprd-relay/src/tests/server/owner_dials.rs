@@ -71,3 +71,12 @@ async fn an_open_relay_keeps_its_dial_rate_for_everyone() {
     let (hub, route, address, _listener) = spent(Access::Open, &owner);
     assert_eq!(dial(&hub, route, address, &owner).await, Status::Limited);
 }
+
+#[tokio::test]
+async fn a_pairing_key_keeps_the_dial_rate_on_a_private_relay() {
+    let owner = signing_key(196);
+    let (hub, route, address, listener) = spent(Access::tokens(TOKEN).unwrap(), &owner);
+    let invited = signing_key(197);
+    assert!(listener.add_pairing_key(public(&invited), Duration::from_secs(60)));
+    assert_eq!(dial(&hub, route, address, &invited).await, Status::Limited);
+}

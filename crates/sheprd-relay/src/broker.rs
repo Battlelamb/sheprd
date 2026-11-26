@@ -115,13 +115,16 @@ pub async fn dial(
         status
     };
     // Past the dial rate, a private relay still lets through a dial that
-    // proves a key the computer allows: its owners' devices reconnecting
-    // together are not a flood, so they are only logged. Any other dial
+    // proves a key the computer named among its devices: its owners'
+    // devices reconnecting together are not a flood, so they are only
+    // logged. The key is looked up before its proof is checked, so a
+    // stranger past the rate costs no cryptography, and a pairing key, an
+    // invitation rather than a device, never gets this room. Any other dial
     // past it answers `Limited`, whatever it would have answered, so this
     // reveals nothing about a computer or its keys.
     let over = limited(hub.allow_dial(address));
     if let Some(offense) = over
-        && !hub.access.requires_token()
+        && !(hub.access.requires_token() && hub.names_dial_key(route, key))
     {
         return Err(refuse(Status::Limited, Dial::Limited, offense));
     }

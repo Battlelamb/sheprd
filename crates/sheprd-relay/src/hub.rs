@@ -488,6 +488,17 @@ impl Hub {
 
     /// Tells `route`'s listener that `key` dials, holding a slot for it, if
     /// the listener allows `key`. A pairing key is used up here.
+    /// Whether the listener on `route` names `key` among its dial keys: a
+    /// device it paired, never a pairing key still waiting to be used. A
+    /// lookup only, cheap enough to run before any proof is checked.
+    #[must_use]
+    pub fn names_dial_key(&self, route: RouteId, key: &Key) -> bool {
+        self.state()
+            .listeners
+            .get(&route)
+            .is_some_and(|listener| listener.dial_keys.contains(key))
+    }
+
     pub fn dial(
         self: &Arc<Self>,
         route: RouteId,

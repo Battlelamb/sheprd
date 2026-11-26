@@ -275,6 +275,8 @@ pub(crate) struct Session<R: FnMut(Update)> {
     thread: thread::Thread,
     transcript: Transcript,
     turn: Option<i64>,
+    /// The pull requests the running turn created or pushed to.
+    turn_pulls: pull_requests::TurnPulls,
     watchdog: watchdog::Watchdog,
 }
 
@@ -395,6 +397,7 @@ impl<R: FnMut(Update)> Session<R> {
             thread,
             transcript,
             turn: None,
+            turn_pulls: pull_requests::TurnPulls::default(),
             watchdog: watchdog::Watchdog::default(),
         }
     }

@@ -87,6 +87,17 @@ struct SavedRelaysTests {
         #expect(saved.removed.isEmpty)
     }
 
+    @Test func aRefusedAddLeavesARelayRemoved() {
+        let named = endpoint("https://named.example.org")
+        var saved = SavedRelays()
+        saved.learn([named])
+        saved.drop(named)
+        for index in 0..<SavedRelays.limit { _ = saved.add("https://r\(index).example.org") }
+        let added = saved.add("https://named.example.org")
+        #expect(added == .full)
+        #expect(saved.removed == [named])
+    }
+
     @Test func removalsOfRelaysNoComputerNamesAreForgotten() {
         var saved = SavedRelays()
         saved.learn([endpoint("https://a.example.org"), endpoint("https://b.example.org")])

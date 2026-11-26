@@ -65,8 +65,6 @@ public struct SavedRelays: Codable, Equatable, Sendable {
         guard !text.trimmingCharacters(in: .whitespaces).isEmpty, let endpoint = RelayEndpoint(text) else {
             return .invalid
         }
-        // Typing a removed relay back is the user taking it again.
-        removed.remove(endpoint)
         if relays.contains(endpoint) {
             // Typing a relay a computer named makes it the user's choice
             // for every computer.
@@ -76,6 +74,9 @@ public struct SavedRelays: Codable, Equatable, Sendable {
         guard relays.count < Self.limit else { return .full }
         relays.append(endpoint)
         typed.insert(endpoint)
+        // Typing a removed relay back is the user taking it again; an add
+        // refused leaves it removed.
+        removed.remove(endpoint)
         decide(endpoint)
         return .added(endpoint)
     }

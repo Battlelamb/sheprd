@@ -13,11 +13,13 @@ extension RelayRecord {
     }
 
     /// The relays to try now, and measures this phone's legs for next time.
-    private func order(session: URLSession) async -> [RelayEndpoint] {
+    /// Those in `removed` are neither measured nor returned.
+    private func order(session: URLSession, removed: Set<RelayEndpoint> = []) async -> [RelayEndpoint] {
         let probes = RelayProbes.shared
-        let phone = await probes.rtt(relays)
-        await probes.refresh(relays, session: session)
-        return ranked(phone: phone)
+        let allowed = relays.filter { !removed.contains($0) }
+        let phone = await probes.rtt(allowed)
+        await probes.refresh(allowed, session: session)
+        return ranked(phone: phone).filter { !removed.contains($0) }
     }
 
     /// Opens the pairing session a nearby offer allowed, through the first
@@ -65,7 +67,7 @@ extension RelayRecord {
         let dial = try P256.Signing.PrivateKey(rawRepresentation: dialKey)
         let tunnel = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: tunnelKey)
         let listener = try Tunnel.Identity(bytes: identity)
-        let ordered = await order(session: session).filter { !dialing.removed.contains($0) }
+        let ordered = await order(session: session, removed: dialing.removed)
         let saved = dialing.typed.filter { !dialing.removed.contains($0) }
         let route = route
         return try await RelayRace.first(

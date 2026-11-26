@@ -1,6 +1,8 @@
 //! The chats a window attaches to: one per chat pane of its daemon, each
 //! with its connection, retries, and the view state drawn from it.
 
+mod diagnostics;
+
 use super::{
     Error, MAX_FAILURES, Result, Target,
     link::{Dial, Link},
@@ -271,6 +273,22 @@ impl ChatPane {
             .chain(self.viewer.iter().map(|viewer| viewer.focus().clone()))
     }
 
+    /// The reader or a keyboard control in one of its rows.
+    pub(super) fn reader_focus(&self, window: &Window, cx: &App) -> Option<FocusHandle> {
+        let focused = window.focused(cx)?;
+        self.text_focus
+            .as_ref()?
+            .contains(&focused, window)
+            .then_some(focused)
+    }
+
+    pub(super) fn focused_handle(&self, window: &Window, cx: &App) -> Option<FocusHandle> {
+        self.reader_focus(window, cx).or_else(|| {
+            self.focus_handles(cx)
+                .find(|focus| focus.is_focused(window))
+        })
+    }
+
     /// Whether the user is reading, with the keyboard on the chat's text.
     pub(crate) fn reading(&self, window: &Window) -> bool {
         self.text_focus
@@ -400,7 +418,14 @@ impl ChatPane {
     }
 
     fn fail(&mut self, error: &Error, now: Instant) {
-        tracing::debug!(%error, pane = %self.target.pane_id, "Chat connection ended");
+        tracing::debug!(
+            %error,
+            pane = %self.target.pane_id,
+            transport = self.target.route.transport_label(),
+            welcomed = self.session.welcomed(),
+            had_transcript = self.session.synced(),
+            "Chat connection ended"
+        );
         self.link = None;
         self.session.lost(error);
         self.menu = None;
@@ -479,6 +504,9 @@ impl ChatPane {
                         self.glide.note_output();
                     }
                     for Splice { range, count } in splices {
+                        if range.is_empty() {
+                            self.glide.note_added_rows(count);
+                        }
                         super::glide::splice_in_place(&self.list, range, count);
                     }
                 }
@@ -486,6 +514,11 @@ impl ChatPane {
             }
         }
         self.list_keys = keys;
+        // Entries the program dropped to keep its transcript bounded do not
+        // come back, so neither does what was remembered of them.
+        let entries = &self.session.transcript().entries;
+        self.expanded
+            .retain(|id| entries.binary_search_by_key(id, |entry| entry.id).is_ok());
         self.refresh_text();
         self.widgets.retain(&self.prepared);
         let prepared = &self.prepared;
@@ -625,6 +658,8 @@ pub(crate) struct Chats {
     pub(crate) converting: Option<super::convert::Job>,
     /// The herdr-core agent moving into a chat, one at a time with the above.
     pub(crate) converting_core: Option<super::convert::CoreJob>,
+    /// Last attachment decision logged for the daemon's focused pane.
+    diagnostic: Option<diagnostics::Decision>,
     /// Exact CLI sessions already running in this connected daemon's panes.
     pub(crate) existing: super::existing::Existing,
     /// The agent a chat was last started with, which the strips' one-button

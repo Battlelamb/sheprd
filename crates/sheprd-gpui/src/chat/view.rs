@@ -686,6 +686,34 @@ impl SheprdWindow {
                 .text_color(rgb(hues.yellow))
                 .child(fl!("chat-reconnecting"))
         });
+        let share = (self.selected_endpoint == 0 && chat.attached()).then(|| {
+            let pane_id = pane_id.clone();
+            let agent = chat.session.agent().to_owned();
+            let sharing = crate::remote::Supervisor::is_pane_shared(&pane_id, cx);
+            let ink = if sharing {
+                crate::menu::accent(theme)
+            } else {
+                rgb(theme.subtext())
+            };
+            button("chat-share")
+                .when(sharing, |btn| btn.bg(rgb(theme.active)))
+                .text_color(ink)
+                .child(
+                    svg()
+                        .path("icons/external.svg")
+                        .size(px(12.))
+                        .text_color(ink),
+                )
+                .child(if sharing {
+                    fl!("chat-sharing")
+                } else {
+                    fl!("chat-share")
+                })
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.open_share_session(pane_id.clone(), agent.clone(), window, cx);
+                }))
+        });
         let layout = {
             let current = self.config.chat.layout;
             button("chat-layout")
@@ -782,6 +810,7 @@ impl SheprdWindow {
                     .children(reconnecting)
                     .children(watching)
                     .children(usage)
+                    .children(share)
                     .child(self.render_chat_sent_toggle(chat, cx))
                     .child(layout)
                     .children(rail)

@@ -315,14 +315,26 @@ pub(crate) fn parse(text: &str) -> Result<Scan> {
                     );
                 }
             }
-            Some("A") => {
+            // `A` is a POSIX host's command line, its words space-separated;
+            // `W` a Windows host's, quoted by Windows' rules.
+            Some(tag @ ("A" | "W")) => {
                 let mut words = line.splitn(3, ' ').skip(1);
                 let (Some(Ok(pid)), Some(args)) = (words.next().map(str::parse), words.next())
                 else {
                     continue;
                 };
-                let args = args.split_whitespace().take(MAX_ARGS).map(str::to_owned);
-                commands.insert(pid, args.collect());
+                let args: Vec<String> = if tag == "W" {
+                    super::command_line::windows_args(args)
+                        .into_iter()
+                        .take(MAX_ARGS)
+                        .collect()
+                } else {
+                    args.split_whitespace()
+                        .take(MAX_ARGS)
+                        .map(str::to_owned)
+                        .collect()
+                };
+                commands.insert(pid, args);
             }
             _ => {}
         }

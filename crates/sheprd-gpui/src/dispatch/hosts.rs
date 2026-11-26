@@ -269,7 +269,7 @@ impl SheprdWindow {
                         sheprd_client::ConnectTarget::Cloud { provider: from, .. } if *from == provider)
                 })
             };
-            return crate::cloud::CloudProvider::ALL
+            return crate::cloud::enabled()
                 .iter()
                 .copied()
                 .filter(|&provider| crate::cloud::provision(provider).is_some() && used(provider))

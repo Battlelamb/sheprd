@@ -11425,6 +11425,7 @@ dependencies = [
  "sheprd-chat-protocol",
  "sheprd-client",
  "sheprd-core-client",
+ "sheprd-mcp",
  "sheprd-memory",
  "sheprd-t3",
  "sheprd-tmux",

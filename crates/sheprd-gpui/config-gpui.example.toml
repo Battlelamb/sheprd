@@ -879,6 +879,14 @@ message_effects = true
 # agents installed on the host. Off, chat panes keep their terminal.
 # acp_chats = true
 #
+# Offer machines from cloud providers as devices. Off, no provider is offered
+# and saved cloud devices stay hidden; their terminals keep running. Each
+# provider built in also has its own switch, all on by default: cloud_azure,
+# cloud_boat, cloud_boxd, cloud_coder, cloud_container, cloud_daytona,
+# cloud_opensandbox, cloud_railway, and cloud_sprites. Read when Sheprd starts.
+# cloud_providers = true
+# cloud_daytona = true
+#
 # Open Sheprd in the window Moonframe lays out in Luau, in beta; false opens the
 # classic window (the default). Read when Sheprd starts. On macOS,
 # holding Option as Sheprd starts opens the other window once.

@@ -15,6 +15,7 @@ mod known;
 mod picks;
 mod pictures;
 mod pull_requests;
+mod steer;
 mod thread;
 mod watchdog;
 
@@ -151,6 +152,8 @@ pub(crate) struct Config {
     pub exit_with_agent: bool,
     /// The ACP auth method Gemini tries when `session/new` asks for sign-in.
     pub gemini_auth_method: Option<String>,
+    /// How the agent running gets the server that reads the chat's thread.
+    pub given: crate::thread_mcp::Given,
     /// The built-in agent running, or `None` for a custom command.
     pub harness: Option<Agent>,
     /// The conversation so far, for a continued session whose agent does
@@ -183,7 +186,9 @@ pub(crate) struct Config {
 
 #[derive(Debug)]
 enum Pending {
-    Authenticate { load_session: bool },
+    Authenticate {
+        load_session: bool,
+    },
     Initialize,
     NewSession,
     LoadSession,
@@ -191,6 +196,8 @@ enum Pending {
     SetMode(String),
     SetModel(String),
     SetOption,
+    /// A prompt steered into the running turn.
+    Steer(CommandId),
 }
 
 struct Subscriber {
@@ -217,6 +224,8 @@ pub(crate) struct Session<R: FnMut(Update)> {
     briefs: briefs::Briefs,
     /// Whether this harness advertised `loadSession` in `initialize`.
     can_load_session: bool,
+    /// Whether this harness takes prompts into a running turn.
+    can_steer: bool,
     /// The whole commands of shell calls, which their titles cut short.
     commands: pull_requests::Commands,
     checkpoint: Option<checkpoint::Checkpoint>,
@@ -261,6 +270,9 @@ pub(crate) struct Session<R: FnMut(Update)> {
     replayed_note: Option<String>,
     report: R,
     seq: u64,
+    /// Prompts steered into the running turn, as sent, until the agent
+    /// takes them or they go as the next prompt.
+    steering: HashMap<CommandId, commands::Outgoing>,
     subscribers: Vec<Subscriber>,
     thread: thread::Thread,
     transcript: Transcript,
@@ -354,6 +366,7 @@ impl<R: FnMut(Update)> Session<R> {
             auth_methods: Vec::new(),
             briefs: briefs::Briefs::default(),
             can_load_session: false,
+            can_steer: false,
             commands: pull_requests::Commands::default(),
             config,
             context,
@@ -380,6 +393,7 @@ impl<R: FnMut(Update)> Session<R> {
             replayed_note: None,
             report,
             seq: 0,
+            steering: HashMap::new(),
             subscribers: Vec::new(),
             thread,
             transcript,
@@ -649,6 +663,10 @@ impl<R: FnMut(Update)> Session<R> {
     fn queue_changed(&mut self, queued: Vec<Queued>) {
         self.queued_origins
             .retain(|id, _| queued.iter().any(|waiting| waiting.id == *id));
+        // A prompt that left the queue, withdrawn or dropped, keeps nothing
+        // it was prepared with.
+        self.steering
+            .retain(|id, _| queued.iter().any(|waiting| waiting.id == *id));
         self.emit(Change::Queue { queued });
     }
 
@@ -774,6 +792,7 @@ impl<R: FnMut(Update)> Session<R> {
     }
 
     fn clear_queue(&mut self) {
+        self.steering.clear();
         if !self.transcript.queued.is_empty() {
             self.queue_changed(Vec::new());
         }

@@ -60,15 +60,21 @@ def verified(data, sha256):
 
 
 def executable(data, name):
-    """The one archive member named `name`, at any depth."""
+    """The archive member named `name`: top-level first, else the one at any depth."""
     if data[:2] == b"PK":
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             members = [m for m in archive.namelist() if Path(m).name == name]
+            top = [m for m in members if Path(m).parts == (name,)]
+            if len(top) == 1:
+                return archive.read(top[0])
             if len(members) == 1:
                 return archive.read(members[0])
     else:
         with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
             members = [m for m in archive.getmembers() if m.isfile() and Path(m.name).name == name]
+            top = [m for m in members if Path(m.name).parts == (name,)]
+            if len(top) == 1:
+                return archive.extractfile(top[0]).read()
             if len(members) == 1:
                 return archive.extractfile(members[0]).read()
     raise SystemExit(f"the herdr-core archive has no single {name}")

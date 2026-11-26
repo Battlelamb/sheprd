@@ -5,7 +5,10 @@ use sheprd_client::{Destination, HostKeys, HostProbe, SavedHost};
 use std::{
     io::Read,
     process::{Command, ExitStatus, Stdio},
-    sync::Mutex,
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -367,7 +370,6 @@ fn setup_command(
     app: &std::ffi::OsStr,
     herdr: &std::ffi::OsStr,
     request: &Request,
-    install_key: bool,
 ) -> Command {
     let mut command = sheprd_client::new_command(app);
     command.arg(crate::setup_relay::SESSION);
@@ -376,7 +378,6 @@ fn setup_command(
         "-c",
         include_str!("setup/prepare.sh"),
         "sh",
-        if install_key { "yes" } else { "no" },
         request.target(),
         &format!(
             "/bin/sh -c {}",
@@ -390,6 +391,97 @@ fn setup_command(
     ]);
     command.arg(herdr).args(request.arguments());
     command
+}
+
+#[cfg(unix)]
+fn key_setup_command(app: &std::ffi::OsStr, request: &Request) -> Command {
+    let mut command = sheprd_client::new_command(app);
+    command.args([crate::setup_relay::SESSION, "ssh-copy-id"]);
+    if request.host_keys == HostKeys::Skip {
+        command.args([
+            "-o",
+            "StrictHostKeyChecking=no", // i18n: data
+            "-o",
+            "UserKnownHostsFile=/dev/null", // i18n: data
+            "-o",
+            "GlobalKnownHostsFile=/dev/null", // i18n: data
+        ]);
+    }
+    command.args(["--", request.target()]);
+    command
+}
+
+/// Installs the pinned herdr-core over SSH, adds `~/.local/bin` to the remote
+/// shell's PATH (best-effort), and saves the device directly without Herdr 1's
+/// CLI. Blocks on SSH: call it from the background executor.
+pub(super) fn install_core(
+    request: &Request,
+    claim: &Claim,
+    cancelled: &AtomicBool,
+) -> Result<()> {
+    install_core_with(
+        request,
+        claim,
+        cancelled,
+        verify_unsaved,
+        Request::remember_host_keys,
+        |target, cancelled| {
+            sheprd_remote::core_install::install(
+                sheprd_remote::core_install::Target::Host(sheprd_client::ScriptHost::Ssh(
+                    target,
+                    sheprd_client::SshLane::Bulk,
+                )),
+                cancelled,
+            )
+            .map(|_| ())
+            .map_err(|error| crate::Error::Remote(error.into()))
+        },
+        configure_remote_path,
+        store_host,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn install_core_with(
+    request: &Request,
+    claim: &Claim,
+    cancelled: &AtomicBool,
+    verify: impl FnOnce(&Request, &Claim) -> Result<()>,
+    remember_keys: impl FnOnce(&Request) -> Result<()>,
+    install: impl FnOnce(&str, &AtomicBool) -> Result<()>,
+    configure_path: impl FnOnce(&str, &AtomicBool),
+    store: impl FnOnce(&Request, &Claim) -> Result<()>,
+) -> Result<()> {
+    verify(request, claim)?;
+    remember_keys(request)?;
+    install(request.target(), cancelled)?;
+    configure_path(request.target(), cancelled);
+    store(request, claim)
+}
+
+fn configure_remote_path(target: &str, cancelled: &AtomicBool) {
+    if cancelled.load(Ordering::Acquire) {
+        return;
+    }
+    let limits = sheprd_client::ScriptLimits {
+        output: 4 * 1024,
+        idle: Duration::from_secs(15),
+    };
+    let mut sink = std::io::sink();
+    if let Err(error) = sheprd_client::run_script(
+        sheprd_client::ScriptHost::Ssh(target, sheprd_client::SshLane::Bulk),
+        include_str!("setup/path.sh"),
+        std::io::empty(),
+        &mut sink,
+        limits,
+        cancelled,
+    ) {
+        tracing::warn!(
+            category = "device_setup",
+            %error,
+            "Could not add ~/.local/bin to the remote shell PATH"
+        );
+    }
 }
 
 /// The private terminal connection, held by the Add Device dialog.
@@ -657,7 +749,6 @@ pub(super) fn last_line(output: &[u8]) -> String {
 #[cfg(unix)]
 pub(super) fn native_setup(
     request: &Request,
-    install_key: bool,
     claim: Claim,
 ) -> Result<crate::setup_relay::gui::Session> {
     request.remember_host_keys()?;
@@ -667,11 +758,22 @@ pub(super) fn native_setup(
         app.as_os_str(),
         crate::daemon::executable().as_os_str(),
         request,
-        install_key,
     );
     cli_environment(&mut command);
     let relay: Relay = crate::setup_relay::listen(&dir, command, SETUP_LIMIT)?;
     crate::setup_relay::gui::Session::connect(relay, claim)
+}
+
+#[cfg(unix)]
+pub(super) fn key_setup(request: &Request) -> Result<crate::setup_relay::gui::Session> {
+    request.remember_host_keys()?;
+    let app = std::env::current_exe()?;
+    let dir = crate::preferences::state_dir().ok_or(Error::NoStateDirectory)?;
+    let mut command = key_setup_command(app.as_os_str(), request);
+    cli_environment(&mut command);
+    let relay: crate::setup_relay::Listening<()> =
+        crate::setup_relay::listen(&dir, command, SETUP_LIMIT)?;
+    crate::setup_relay::gui::Session::connect(relay, ())
 }
 
 #[cfg(test)]

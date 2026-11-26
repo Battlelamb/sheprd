@@ -41,6 +41,16 @@ class FetchHerdrCoreTests(unittest.TestCase):
 
     def test_the_binary_is_found_by_name_in_either_archive(self):
         self.assertEqual(fetch.executable(tar_gz({"dir/herdr-core": b"elf", "LICENSE": b"x"}), "herdr-core"), b"elf")
+        self.assertEqual(
+            fetch.executable(
+                tar_gz({
+                    "herdr-core": b"top-macho",
+                    "Herdr Core.app/Contents/MacOS/herdr-core": b"app-macho",
+                }),
+                "herdr-core",
+            ),
+            b"top-macho",
+        )
         data = io.BytesIO()
         with zipfile.ZipFile(data, "w") as archive:
             archive.writestr("herdr-core.exe", b"pe")

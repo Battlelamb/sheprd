@@ -64,7 +64,7 @@
               in
               pkgs.runCommand "herdr-core" { } ''
                 mkdir -p $out/bin
-                tar -xzf ${tarball} -C $out/bin
+                tar -xzf ${tarball} -C $out/bin herdr-core
                 chmod 755 $out/bin/herdr-core
               ''
             else

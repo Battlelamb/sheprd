@@ -1306,7 +1306,13 @@ machine is read in process; each connected Linux or macOS remote host is read
 every two seconds over its own SSH shell, kept open while the host is connected
 (`/proc` on Linux; `vm_stat` and a one-second `iostat` on macOS; `df -Pk
 "$HOME"` on both, with `/proc/uptime` on Linux and `kern.boottime` on macOS).
-Other remote systems show it as unavailable. Set top-level `show_system_load = false`, or turn off **Show CPU
+A Windows SSH host, whose login shell is `cmd.exe` or PowerShell (or Git
+Bash, which has none of those tools), is read through one PowerShell kept
+open over SSH that prints a reading every two seconds: the `_Total`
+processor counters, `Win32_OperatingSystem` for memory and uptime, the
+volume holding the user's profile, and `nvidia-smi` when the GPU is shown.
+It needs nothing installed on the host, and ends itself when its SSH
+session does. Other remote systems show it as unavailable. Set top-level `show_system_load = false`, or turn off **Show CPU
 and memory** in Settings, to hide it and stop sampling while no
 [Devices overview](#devices-overview) is open.
 
@@ -1347,7 +1353,12 @@ machine never claim each other's servers.
 Every five seconds each host runs `ss -ltnp` (Linux) or `lsof -iTCP
 -sTCP:LISTEN` (macOS) in its own shell, this machine's locally, a connected
 remote host's over SSH, and a WSL distribution's through `wsl.exe` (see
-[WSL distributions](#wsl-distributions)), listing only your own processes. A remote server
+[WSL distributions](#wsl-distributions)), listing only your own processes.
+Windows has neither tool: a Windows SSH host, and this machine on a Windows
+client, run `Get-NetTCPConnection` in a PowerShell kept open (over SSH for a
+host), and read each listening process's environment for its workspace
+through the process's memory, which Windows allows for your own processes
+only. A remote server
 always opens at `http://127.0.0.1:<port>` through an SSH tunnel started on the
 first click, never at the address SSH reaches the host by (a Tailscale
 `HostName`, say): `ssh -N -L` from this machine's loopback, with the same
@@ -1362,8 +1373,7 @@ noninteractive authentication (keys or an agent). The tunnel stays up while
 the port is listed, is reused by later clicks, and closes when the port
 stops listening, the host disconnects, scanning is turned off, or the window
 closes; a page reopened after a dropped tunnel keeps its address while that
-local port is free. Windows clients
-do not scan this machine. Set top-level `show_listening_ports = false`, or
+local port is free. Set top-level `show_listening_ports = false`, or
 turn off **Show listening ports** in Settings, to hide them and stop scanning.
 Coding agents' own listeners, such as Claude Code's and Codex's, are left
 out; servers they start show under their own process names.

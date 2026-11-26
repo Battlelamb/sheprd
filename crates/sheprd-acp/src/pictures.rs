@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
-use sheprd_chat_protocol::{Image, ImageType, Tool, ToolContent, ToolStatus};
+use sheprd_chat_protocol::{Image, ImageType, MAX_CAPTION, Tool, ToolContent, ToolStatus};
 
 /// Pictures read for one message or tool call; later ones stay text.
 pub(crate) const MAX_PICTURES: usize = 4;
@@ -42,11 +42,20 @@ fn sniff(bytes: &[u8]) -> Option<ImageType> {
     }
 }
 
+/// A local file a message shows as a Markdown image, with what it says the
+/// picture shows.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Linked {
+    pub(crate) path: PathBuf,
+    /// The alt text, then the title on the line after it, when given.
+    pub(crate) caption: Option<String>,
+}
+
 /// The local files `text` shows as Markdown images, `![alt](target)`, in
 /// order and once each: an absolute path, a `file:` URL, or a path relative
 /// to `cwd`. Web addresses are the client's to load when the user asks.
-pub(crate) fn linked(text: &str, cwd: &Path) -> Vec<PathBuf> {
-    let mut paths: Vec<PathBuf> = Vec::new();
+pub(crate) fn linked(text: &str, cwd: &Path) -> Vec<Linked> {
+    let mut links: Vec<Linked> = Vec::new();
     let mut rest = text;
     while let Some(start) = rest.find("![") {
         rest = &rest[start + 2..];
@@ -56,6 +65,7 @@ pub(crate) fn linked(text: &str, cwd: &Path) -> Vec<PathBuf> {
         if rest[..close].contains('\n') {
             continue;
         }
+        let alt = &rest[..close];
         rest = &rest[close + 2..];
         let Some(end) = rest.find(')') else {
             break;
@@ -63,23 +73,45 @@ pub(crate) fn linked(text: &str, cwd: &Path) -> Vec<PathBuf> {
         let target = rest[..end].trim();
         rest = &rest[end + 1..];
         // A title may follow the target: `![a](path "title")`.
-        let target = target
+        let (target, title) = target
             .strip_prefix('<')
             .and_then(|inner| inner.split_once('>'))
-            .map_or_else(
-                || target.split_whitespace().next().unwrap_or(""),
-                |(inner, _)| inner,
-            );
+            .unwrap_or_else(|| {
+                target
+                    .split_once(char::is_whitespace)
+                    .unwrap_or((target, ""))
+            });
         if let Some(path) = local(target, cwd)
-            && !paths.contains(&path)
+            && !links.iter().any(|link| link.path == path)
         {
-            paths.push(path);
-            if paths.len() == MAX_PICTURES {
+            links.push(Linked {
+                path,
+                caption: caption(alt, title),
+            });
+            if links.len() == MAX_PICTURES {
                 break;
             }
         }
     }
-    paths
+    links
+}
+
+/// A picture's caption from its alt text and its quoted title, each on one
+/// line, bounded to [`MAX_CAPTION`] characters.
+fn caption(alt: &str, title: &str) -> Option<String> {
+    let title = title.trim();
+    let title = ['"', '\'']
+        .iter()
+        .find_map(|quote| title.strip_prefix(*quote)?.strip_suffix(*quote))
+        .or_else(|| title.strip_prefix('(')?.strip_suffix(')'))
+        .unwrap_or("");
+    let line = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let caption = [line(alt), line(title)]
+        .into_iter()
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!caption.is_empty()).then(|| caption.chars().take(MAX_CAPTION).collect())
 }
 
 fn local(target: &str, cwd: &Path) -> Option<PathBuf> {

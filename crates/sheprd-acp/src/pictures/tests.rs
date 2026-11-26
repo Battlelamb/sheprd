@@ -13,8 +13,14 @@ fn links_name_local_files_once_and_skip_the_web() {
         ![abs](/tmp/a.png \"title\") ![web](https://example.com/b.png)\n\
         ![data](data:image/png;base64,AAAA) ![spaced](<docs/my shot.png>)\n\
         ![file](file:///tmp/c.png) [not an image](d.png)";
+    let paths = |text: &str| -> Vec<PathBuf> {
+        linked(text, cwd)
+            .into_iter()
+            .map(|link| link.path)
+            .collect()
+    };
     assert_eq!(
-        linked(text, cwd),
+        paths(text),
         [
             PathBuf::from("/work/out/chart.png"),
             PathBuf::from("/tmp/a.png"),
@@ -26,8 +32,34 @@ fn links_name_local_files_once_and_skip_the_web() {
         .collect::<Vec<_>>()
     );
     let many: String = (0..10).map(|n| format!("![{n}](p{n}.png) ")).collect();
-    assert_eq!(linked(&many, cwd).len(), MAX_PICTURES);
+    assert_eq!(paths(&many).len(), MAX_PICTURES);
     assert!(linked("![broken](", cwd).is_empty());
+}
+
+#[test]
+fn a_link_captions_its_picture_with_its_alt_text_and_title() {
+    let cwd = Path::new("/work");
+    let captions = |text: &str| -> Vec<Option<String>> {
+        linked(text, cwd)
+            .into_iter()
+            .map(|link| link.caption)
+            .collect()
+    };
+    assert_eq!(
+        captions(
+            "![Variant A ·  glass pill](a.png \"Matches the\tviewer's buttons\") \
+             ![](b.png) ![  ](<c d.png> 'Only a title') ![Alt only](e.png)"
+        ),
+        [
+            Some("Variant A · glass pill\nMatches the viewer's buttons".to_owned()),
+            None,
+            Some("Only a title".to_owned()),
+            Some("Alt only".to_owned()),
+        ]
+    );
+    let long = "é".repeat(MAX_CAPTION + 10);
+    let caption = captions(&format!("![{long}](f.png)")).remove(0).unwrap();
+    assert_eq!(caption.chars().count(), MAX_CAPTION);
 }
 
 #[test]

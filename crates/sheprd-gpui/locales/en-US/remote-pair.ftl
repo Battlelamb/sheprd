@@ -62,7 +62,7 @@ remote-pair-link-failed = Could not make a link: { $error }
 remote-pair-wants = { $device } wants remote control of your chats.
 # $app is the address the phone's app was installed from.
 remote-pair-app = It asks from the Sheprd app at { $app }. Allow it only if you are adding this computer to that app.
-remote-pair-same-code = Allow it only if the phone shows the same code.
+remote-pair-same-code = Allow it only if the phone shows the same code. Pairing with the iOS app also shares the connected voice account with a device that has none.
 # Another computer's Sheprd, nearby over Bluetooth, adding this computer.
 # Its name is drawn bold.
 remote-pair-wants-ssh = { $device } wants to open terminals on this computer.

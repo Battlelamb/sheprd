@@ -248,6 +248,8 @@ struct MachineStatus: View {
             }
         case .connecting:
             ProgressView().controlSize(.small)
+        case .relayBanned:
+            Label("Relay ban", systemImage: "nosign").font(.caption).foregroundStyle(.red)
         case .offline:
             Image(systemName: "wifi.slash").foregroundStyle(.secondary).accessibilityLabel("Offline")
         case .revoked:
@@ -259,7 +261,7 @@ struct MachineStatus: View {
 }
 
 /// A share of the computer in use, as Sheprd's host rows draw it.
-private struct LoadGauge: View {
+struct LoadGauge: View {
     var label: String
     var percent: Int
 

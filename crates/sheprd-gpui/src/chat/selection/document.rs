@@ -268,6 +268,12 @@ fn project(
     };
     match body {
         Some(Body::Message(parts)) => builder.parts(parts),
+        Some(Body::UserTextFile(file)) => {
+            builder.plain(Region::Body(0), Cell::default(), file.preview.clone());
+            if !file.attachments.is_empty() {
+                builder.plain(Region::Body(1), Cell::default(), file.attachments.clone());
+            }
+        }
         Some(Body::Answers { parts, .. }) => {
             if let EntryKind::Notice { text, .. } = &entry.kind {
                 builder.plain(Region::Label, Cell::default(), notice_label(text));
@@ -329,6 +335,11 @@ fn project(
                 Region::Body(0),
                 Cell::default(),
                 crate::chat::text::turn(turn),
+            ),
+            EntryKind::Handoff(handoff) => builder.plain(
+                Region::Body(0),
+                Cell::default(),
+                crate::chat::text::handoff(handoff),
             ),
             EntryKind::Tool(_) | EntryKind::Image { .. } => {}
         },

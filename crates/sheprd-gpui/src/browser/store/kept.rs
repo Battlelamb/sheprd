@@ -40,6 +40,16 @@ impl Store {
             .find(|workspace| workspace.scope == scope.as_str() && workspace.id == id)
     }
 
+    /// Whether `scope` holds a tab of a workspace only Herdr 1 lists: one the
+    /// app neither keeps nor gathers a window's tabs in without Herdr 1. The
+    /// window shows such a tab only while Herdr 1 runs there.
+    pub(crate) fn holds_herdr_tabs(&self, scope: &Scope) -> bool {
+        self.in_scope(scope).any(|tab| {
+            tab.workspace_id != sheprd_session::DEFAULT_WORKSPACE
+                && self.kept_workspace(scope, &tab.workspace_id).is_none()
+        })
+    }
+
     /// How many more workspaces the app can keep, across every host.
     pub(crate) fn kept_room(&self) -> usize {
         MAX_WORKSPACES.saturating_sub(self.workspaces.len())
@@ -105,6 +115,25 @@ impl Store {
         workspace.cwd = cwd.to_owned();
         // Automatic labels are projected from the checkout root, not this
         // potentially nested folder. Keep the saved name for linked worktrees.
+        self.save();
+        true
+    }
+
+    /// Saves the name a workspace the user has not named shows, which its
+    /// folder gives it, so other clients can show it too; whether it changed.
+    pub(crate) fn follow_kept_label(&mut self, scope: &Scope, id: &str, label: &str) -> bool {
+        let label = clean_label(label);
+        let Some(workspace) = self
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.scope == scope.as_str() && workspace.id == id)
+        else {
+            return false;
+        };
+        if workspace.custom || label.is_empty() || workspace.label == label {
+            return false;
+        }
+        workspace.label = label;
         self.save();
         true
     }

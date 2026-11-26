@@ -10,12 +10,23 @@ use crate::{
     wire::{Foreground, Run, Status, StatusState, Terminal, TerminalState},
 };
 use sheprd_backend::{
-    AgentStatus, Change, Exit, Generation, Process, Role, RunState, Size, Spawn, TerminalId,
-    TerminalInfo,
+    AgentStatus, Change, Exit, Process, Role, RunState, Size, Spawn, TerminalId, TerminalInfo,
 };
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeMap,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 pub use terminal::CoreTerminal;
+
+/// How long an attach waits for a lost terminal's new shell. The core
+/// starts it after a delay, 3 seconds by default, longer after repeated
+/// losses.
+const RESTART_WAIT: Duration = Duration::from_secs(30);
+/// How often an attach refused while the shell restarts is tried again.
+const RESTART_POLL: Duration = Duration::from_millis(250);
 
 /// One core's terminals, shared by the workers that list, watch, and attach.
 #[derive(Clone)]
@@ -51,13 +62,8 @@ impl CoreBackend {
 }
 
 impl sheprd_backend::Backend for CoreBackend {
-    type Changes = CoreChanges;
     type Error = Error;
     type Terminal = CoreTerminal;
-
-    fn generation(&self) -> Generation {
-        Generation::Herdr2
-    }
 
     fn terminals(&self) -> Result<Vec<TerminalInfo>> {
         let listed = self.core.list(false)?.terminals;
@@ -71,26 +77,24 @@ impl sheprd_backend::Backend for CoreBackend {
         listed.iter().map(info).collect()
     }
 
-    fn watch(&self) -> Result<(Vec<TerminalInfo>, CoreChanges)> {
-        let subscription = self.core.subscribe()?;
-        let records: BTreeMap<String, Terminal> = subscription
-            .terminals
-            .iter()
-            .map(|terminal| (terminal.address.clone(), terminal.clone()))
-            .collect();
-        let snapshot = records.values().map(info).collect::<Result<_>>()?;
-        let changes = CoreChanges {
-            core: Arc::clone(&self.core),
-            records,
-            recovery: Arc::clone(&self.recovery),
-            seq: subscription.seq,
-            subscription,
-        };
-        Ok((snapshot, changes))
-    }
-
+    /// Attaches `id`, waiting while the core restarts its lost program: a
+    /// kept terminal's new shell starts a few seconds after the loss, as
+    /// when the core comes back after a reboot, and an attach meanwhile is
+    /// refused as unavailable rather than failing the view for good.
     fn attach(&self, id: &TerminalId, size: Size, role: Role) -> Result<CoreTerminal> {
-        CoreTerminal::attach(&self.core, id, size, role, self.scrollback)
+        let deadline = Instant::now() + RESTART_WAIT;
+        loop {
+            match CoreTerminal::attach(&self.core, id, size, role, self.scrollback) {
+                Err(Error::Refused { kind, .. })
+                    if kind.as_deref() == Some(crate::wire::UNAVAILABLE)
+                        && Instant::now() < deadline
+                        && !self.core.is_lost() =>
+                {
+                    std::thread::sleep(RESTART_POLL);
+                }
+                attached => return attached,
+            }
+        }
     }
 
     fn spawn(&self, spawn: &Spawn) -> Result<TerminalInfo> {
@@ -127,6 +131,28 @@ impl sheprd_backend::Backend for CoreBackend {
             Some(terminal) => crate::chat_recovery::close_terminal(&self.core, &terminal),
             None => self.core.kill(id.as_str()).map(drop),
         }
+    }
+}
+
+impl sheprd_backend::WatchBackend for CoreBackend {
+    type Changes = CoreChanges;
+
+    fn watch(&self) -> Result<(Vec<TerminalInfo>, CoreChanges)> {
+        let subscription = self.core.subscribe()?;
+        let records: BTreeMap<String, Terminal> = subscription
+            .terminals
+            .iter()
+            .map(|terminal| (terminal.address.clone(), terminal.clone()))
+            .collect();
+        let snapshot = records.values().map(info).collect::<Result<_>>()?;
+        let changes = CoreChanges {
+            core: Arc::clone(&self.core),
+            records,
+            recovery: Arc::clone(&self.recovery),
+            seq: subscription.seq,
+            subscription,
+        };
+        Ok((snapshot, changes))
     }
 }
 

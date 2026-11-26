@@ -24,11 +24,20 @@ impl SheprdWindow {
     /// top-right of the terminal area below the tab strip, whose buttons stay
     /// reachable. A menu page owns the window's attention, and zen mode keeps
     /// the window clear; they wait behind either.
-    fn render_notices(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn render_notices(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.notices_allowed() {
             return None;
         }
         let mut cards = self.config_diagnostic_cards(cx);
+        cards.extend(self.borrow_notice(cx).map(|card| Notice {
+            card,
+            shrinks: false,
+        }));
+        #[cfg(target_os = "macos")]
+        cards.extend(self.machine_settings_notice(cx).map(|card| Notice {
+            card,
+            shrinks: false,
+        }));
         cards.extend(self.announcement_card(cx));
         if cards.is_empty() {
             return None;
@@ -73,6 +82,9 @@ pub(crate) enum NoticeCard {
     IconFont,
     DaemonConfig,
     Announcement,
+    BorrowMachine,
+    #[cfg(target_os = "macos")]
+    MachineSettings,
 }
 
 /// One card in the notice stack, and whether it scrolls, so it can give up
@@ -91,9 +103,17 @@ impl SheprdWindow {
     /// reach the cards as a region of their own.
     pub(super) fn notices_shown(&self) -> bool {
         use NoticeCard::*;
-        [AppConfig, IconFont, DaemonConfig, Announcement]
-            .into_iter()
-            .any(|card| self.notice_shown(card))
+        [
+            AppConfig,
+            IconFont,
+            DaemonConfig,
+            Announcement,
+            BorrowMachine,
+            #[cfg(target_os = "macos")]
+            MachineSettings,
+        ]
+        .into_iter()
+        .any(|card| self.notice_shown(card))
     }
 
     /// Whether [`Self::render_notices`] draws `card`.
@@ -106,6 +126,9 @@ impl SheprdWindow {
                     .endpoints
                     .get(self.selected_endpoint)
                     .is_some_and(|endpoint| endpoint.config_diagnostic.visible().is_some()),
+                #[cfg(target_os = "macos")]
+                NoticeCard::MachineSettings => self.menu.machine_settings_request.is_some(),
+                NoticeCard::BorrowMachine => self.menu.machine_borrow.is_some(),
                 NoticeCard::Announcement => self.live.product_announcement().is_some(),
             }
     }
@@ -760,6 +783,13 @@ impl Render for SheprdWindow {
         // Zen mode keeps toasts and menus: they carry errors and what the
         // user asked for, not chrome.
         let zen = self.zen_layout();
+        let standalone_header = !merged && !zen;
+        if let Some(last) = &mut self.hosted_full_header
+            && *last != standalone_header
+        {
+            *last = standalone_header;
+            cx.notify();
+        }
         let mut root = div()
             .capture_key_down(cx.listener(Self::application_menu_shortcut))
             .capture_key_down(cx.listener(Self::chrome_focus_key))
@@ -903,43 +933,20 @@ impl Render for SheprdWindow {
             .when(crate::menus::IN_WINDOW && !zen, |root| {
                 root.child(self.render_application_bar(window, cx))
             })
-            .when(!merged && !zen, |root| {
-                root.child(self.render_titlebar(window, cx))
-            })
+            .when(
+                standalone_header && self.hosted_full_header.is_none(),
+                |root| root.child(self.render_titlebar(window, cx)),
+            )
             .when(zen, |root| {
                 root.children(crate::titlebar::zen_inset(fill.ground(), window))
             })
-            .child(
-                div()
-                    .debug_selector(|| "window-body".into())
-                    // The sidebar leads, on the right in a right-to-left
-                    // language; the terminal area beside it never mirrors.
-                    .row()
-                    .flex_1()
-                    .min_h_0()
-                    .relative()
-                    .children(sidebar.map(|(sidebar, width)| {
-                        let column = match merged {
-                            true => self.sidebar_column(sidebar, window, cx).into_any_element(),
-                            false => sidebar.into_any_element(),
-                        };
-                        self.sliding_sidebar(column, width)
-                    }))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .min_w_0()
-                            .min_h_0()
-                            .relative()
-                            .child(content)
-                            .children(self.render_notices(cx))
-                            .when(!self.hosted, |column| {
-                                column.children(self.zen_status_bar(cx))
-                            }),
-                    ),
-            );
+            .child(self.render_body(
+                sidebar.map(|(sidebar, width)| (sidebar.into_any_element(), width)),
+                content,
+                merged,
+                window,
+                cx,
+            ));
         // After the body, whose rows reserve the marks it draws, and under
         // everything that covers the body.
         if !self.hosted {

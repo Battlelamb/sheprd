@@ -48,7 +48,7 @@ jobs:
       (github.event_name == 'pull_request' || github.event_name == 'merge_group' ||
        ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
         github.actor == 'penso' && github.triggering_actor == 'penso' &&
-        github.ref == 'refs/heads/main'))
+        (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))))
     name: Workflow Security
     # Members' runs use our own Linux VMs when CI_LINUX_ARM_RUNNER names
     # them, as the checks job does: every other job waits for this one, and
@@ -80,7 +80,7 @@ jobs:
       (github.event_name == 'pull_request' || github.event_name == 'merge_group' ||
        ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
         github.actor == 'penso' && github.triggering_actor == 'penso' &&
-        github.ref == 'refs/heads/main'))
+        (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))))
     name: Commit messages
     outputs:
       cargo_scope: ${{ steps.scope.outputs.cargo_scope }}
@@ -165,7 +165,7 @@ jobs:
       (github.event_name == 'pull_request' || github.event_name == 'merge_group' ||
        ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
         github.actor == 'penso' && github.triggering_actor == 'penso' &&
-        github.ref == 'refs/heads/main'))
+        (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))))
     name: Format, lint, and test (${{ matrix.runner }}, ${{ matrix.features }})
     needs: commits
     strategy:
@@ -316,7 +316,7 @@ jobs:
       (github.event_name == 'pull_request' || github.event_name == 'merge_group' ||
        ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
         github.actor == 'penso' && github.triggering_actor == 'penso' &&
-        github.ref == 'refs/heads/main'))
+        (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))))
     name: Windows check (${{ matrix.runner }}, ${{ matrix.features }})
     needs: commits
     strategy:
@@ -326,7 +326,7 @@ jobs:
         # Split as in the checks job: each test pass with one of the lints.
         features: [default, all]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ matrix.runner == 'windows-11-arm' && matrix.features == 'all' && 90 || 60 }}
     permissions:
       contents: read
     steps:
@@ -354,11 +354,10 @@ jobs:
       - name: Test integration-feature build and executable CLI
         if: matrix.features == 'all'
         run: cargo test --locked --workspace --all-features
-      # The `moonframe` feature's Luau layout loads only at run time: load every
-      # module and report what fails, without a window. The default build
-      # checks the copy compiled in; all features read the sources.
+      # The CLI integration tests already build sheprd.exe with this matrix's features.
       - name: Check the Moonframe layout
-        run: cargo run --locked -p sheprd-gpui ${{ matrix.features == 'all' && '--all-features' || '' }} -- --check
+        shell: bash
+        run: ./target/debug/sheprd.exe --check
 
   # The native GUI tests (`just test-gui`, `just test-sidebar`) on a real
   # Windows desktop session against a pinned, checksummed Herdr daemon in the
@@ -374,7 +373,7 @@ jobs:
       (github.event_name == 'pull_request' || github.event_name == 'merge_group' ||
        ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
         github.actor == 'penso' && github.triggering_actor == 'penso' &&
-        github.ref == 'refs/heads/main'))
+        (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))))
     name: Windows native GUI (${{ matrix.runner }})
     needs: commits
     strategy:
@@ -444,7 +443,7 @@ jobs:
       (github.event_name == 'pull_request' || github.event_name == 'merge_group' ||
        ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
         github.actor == 'penso' && github.triggering_actor == 'penso' &&
-        github.ref == 'refs/heads/main'))
+        (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))))
     name: Windows package and installer
     needs: commits
     runs-on: windows-2025
@@ -506,7 +505,7 @@ jobs:
       (github.event_name == 'pull_request' || github.event_name == 'merge_group' ||
        ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
         github.actor == 'penso' && github.triggering_actor == 'penso' &&
-        github.ref == 'refs/heads/main'))
+        (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))))
     name: Website and docs
     needs: commits
     # Members' runs use our own Linux VMs when CI_LINUX_ARM_RUNNER names
@@ -548,7 +547,7 @@ jobs:
       (github.event_name == 'pull_request' || github.event_name == 'merge_group' ||
        ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
         github.actor == 'penso' && github.triggering_actor == 'penso' &&
-        github.ref == 'refs/heads/main'))
+        (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))))
     # Members' runs use our own Linux VMs when CI_LINUX_ARM_RUNNER names
     # them, as the checks job does: every other job waits for this one, and
     # hosted runners are shared with every repository of the account.
@@ -633,7 +632,7 @@ jobs:
     if: >-
       needs.commits.outputs.code == 'true' &&
       (github.repository == 'sheprd-labs/sheprd' || github.repository == 'penso/herdr-gpui') &&
-      github.ref == 'refs/heads/main' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       github.actor == 'penso' && github.triggering_actor == 'penso'
     name: Release (${{ matrix.target }})

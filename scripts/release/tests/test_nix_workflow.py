@@ -24,7 +24,7 @@ class NixWorkflowTests(unittest.TestCase):
         inputs = [
             "flake.nix", "flake.lock", "Cargo.lock", "rust-toolchain.toml",
             "LICENSE", "NOTICE", "crates/sheprd-gpui/SOUND-NOTICE.md",
-            "scripts/release/herdr-core.json", "scripts/release/herdr-core-licenses.txt",
+            "scripts/release/herdr-core.json",
             ".github/workflows/nix.yml",
         ]
         for directory in ("assets/macos", "assets/icons", "macos/sheprd-nearby"):
@@ -54,13 +54,14 @@ class NixWorkflowTests(unittest.TestCase):
     def test_non_pr_builds_keep_the_owner_main_boundary(self):
         for event, ref, actor, triggering_actor in itertools.product(
                 ("push", "workflow_dispatch", "pull_request_target", "workflow_run"),
-                ("refs/heads/main", "refs/heads/topic"),
+                ("refs/heads/main", f"refs/heads/release/{'a' * 40}", "refs/heads/topic"),
                 ("penso", "contributor"), ("penso", "contributor")):
             context = policy.CiPolicy().context(**{
                 "github.event_name": event, "github.ref": ref,
                 "github.actor": actor, "github.triggering_actor": triggering_actor,
             })
-            expected = (event in ("push", "workflow_dispatch") and ref == "refs/heads/main"
+            expected = (event in ("push", "workflow_dispatch")
+                        and (ref == "refs/heads/main" or ref.startswith("refs/heads/release/"))
                         and actor == triggering_actor == "penso")
             self.assertEqual(policy.condition_matches("build", context, JOBS), expected)
 

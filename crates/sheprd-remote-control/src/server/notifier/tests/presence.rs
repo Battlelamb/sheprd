@@ -11,6 +11,8 @@ fn question(pane: &str) -> Notification {
         kind: Kind::Question,
         pane: pane.to_owned(),
         permission: None,
+        subtitle: String::new(),
+        pr: None,
         tag: format!("chat-{pane}"),
         title: "Claude needs an answer".to_owned(),
         urgency: Urgency::High,

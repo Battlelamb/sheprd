@@ -12,9 +12,11 @@ pub const VERSION: u32 = 1;
 
 /// Additions to [`VERSION`] a client declares it reads in its greeting:
 /// 1 is `Change::Activity`, 2 is `Change::Harnesses`, 3 is
-/// `Change::PullRequest`, 4 is `Change::Brief`. A program sends a client of
-/// an earlier revision only what that client can decode.
-pub const REVISION: u32 = 4;
+/// `Change::PullRequest`, 4 is `Change::Brief`, 5 is threads:
+/// `Change::Thread`, `Transcript::thread`, and `EntryKind::Handoff`. A
+/// program sends a client of an earlier revision only what that client can
+/// decode.
+pub const REVISION: u32 = 5;
 
 /// The longest prompt a client may send, in bytes.
 pub const MAX_PROMPT_SIZE: usize = 256 * 1024;
@@ -98,8 +100,8 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         origin: Option<Origin>,
     },
-    /// Ends the running turn, declines its pending permission requests, and
-    /// drops queued prompts.
+    /// Ends the running turn and declines its pending permission requests.
+    /// Queued prompts stay, held until sent now or withdrawn.
     Cancel,
     Answer {
         option: String,
@@ -121,6 +123,11 @@ pub enum Command {
     },
     /// Withdraws a queued prompt before it is sent.
     Unqueue {
+        id: CommandId,
+    },
+    /// Sends a queued prompt ahead of the others: into the running turn when
+    /// the agent steers, else in place of it, as the turn is stopped.
+    SendNow {
         id: CommandId,
     },
     /// Answers permission requests with their allow option from now on,

@@ -20,6 +20,7 @@ use super::{
     visuals::Frame,
 };
 use crate::chat::code_block::scroll_sideways;
+use crate::chat::prepared::Picture;
 use crate::{SheprdWindow, config::corners, fonts::StyledFont, i18n::fl, notifications::safe_text};
 use gpui::{prelude::*, *};
 use sheprd_chat_protocol::{
@@ -87,6 +88,9 @@ fn tool_state(activity: Option<ActivityState>, status: ToolStatus) -> ToolState 
 /// An overlay copy control may cover the last block or an inline control.
 /// Plain prose keeps the layout's compact, floating copy treatment.
 fn copy_placement(body: Option<&Body>) -> CopyPlacement {
+    if matches!(body, Some(Body::UserTextFile(_))) {
+        return CopyPlacement::Footer;
+    }
     let Some(Body::Message(parts)) = body else {
         return CopyPlacement::Floating;
     };
@@ -155,6 +159,9 @@ impl SheprdWindow {
                         voice,
                         cx,
                     ),
+                    Some(Body::UserTextFile(file)) => {
+                        self.render_user_text_file(pane_id, entry.id, file, cx)
+                    }
                     Some(Body::Summary(summary)) => {
                         // Copy takes the whole summary, as its cut note says.
                         let card = div()
@@ -167,6 +174,7 @@ impl SheprdWindow {
                                 cx,
                             ))
                             .child(self.render_chat_copy(
+                                pane_id,
                                 entry.id.0,
                                 text,
                                 CopyPlacement::Footer,
@@ -187,6 +195,7 @@ impl SheprdWindow {
                     .group("chat-agent-message")
                     .child(message)
                     .child(self.render_chat_copy(
+                        pane_id,
                         entry.id.0,
                         text,
                         copy_placement(body.as_deref()),
@@ -204,6 +213,18 @@ impl SheprdWindow {
                 );
                 layout_for(self.config.chat.layout).turn(text.into_any_element(), &self.chat_look())
             }
+            // Drawn as a divider, as a turn's end is, never as a message.
+            EntryKind::Handoff(handoff) => {
+                let text = self.render_chat_text(
+                    pane_id,
+                    entry.id,
+                    Region::Body(0),
+                    Cell::default(),
+                    crate::chat::text::handoff(handoff),
+                    cx,
+                );
+                layout_for(self.config.chat.layout).turn(text.into_any_element(), &self.chat_look())
+            }
             EntryKind::Thought { text } => self.render_chat_thought(
                 pane_id,
                 entry,
@@ -212,9 +233,13 @@ impl SheprdWindow {
                 cx,
             ),
             EntryKind::Image { author, .. } => match body.as_deref() {
-                Some(Body::Image(id)) => {
-                    self.render_chat_image(pane_id, *author, *id, &chat.prepared.visuals, cx)
-                }
+                Some(Body::Image(id)) => self.render_chat_image(
+                    pane_id,
+                    *author,
+                    Picture::new(entry.id, 0, *id),
+                    &chat.prepared.visuals,
+                    cx,
+                ),
                 _ => div(),
             },
             EntryKind::Tool(tool) => self.render_chat_tool(
@@ -551,8 +576,14 @@ impl SheprdWindow {
                     .flex_wrap()
                     .gap(px(6.))
                     .py(px(2.))
-                    .children(summary.images.iter().map(|id| {
-                        self.render_chat_visual(pane_id, *id, visuals, Frame::ToolImage, cx)
+                    .children(summary.images.iter().enumerate().map(|(index, id)| {
+                        self.render_chat_visual(
+                            pane_id,
+                            Picture::new(entry, index, *id),
+                            visuals,
+                            Frame::ToolImage,
+                            cx,
+                        )
                     }))
                     .into_any_element(),
             );
@@ -695,7 +726,13 @@ impl SheprdWindow {
                                     cx,
                                 )),
                         )
-                        .child(self.render_chat_copy(id.0, details, CopyPlacement::Footer, cx)),
+                        .child(self.render_chat_copy(
+                            pane_id,
+                            id.0,
+                            details,
+                            CopyPlacement::Footer,
+                            cx,
+                        )),
                 )
             })
     }

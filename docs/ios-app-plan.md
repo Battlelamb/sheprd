@@ -310,7 +310,11 @@ daemon sends it over the held attach as one mouse wheel scroll at the
 middle of the terminal, so Herdr hands it to an app that reports the
 mouse (`less`, `vim`, an agent's TUI) or scrolls the terminal's own
 history otherwise, and reads the screen again at once and shortly after,
-as after typing. `lines` of 0 answers `error` "scroll out of range"; more
+as after typing. A Herdr 2 terminal routes it the same way: one wheel
+notch at the middle of the terminal goes to an app that reports the mouse,
+or as an arrow key to a full-screen app under alternate scroll mode
+(DECSET 1007); otherwise the view scrolls through the history the daemon
+keeps. `lines` of 0 answers `error` "scroll out of range"; more
 than 50 either way moves 50. A terminal the view follows without an
 attach (no `size`, or Herdr refused it) answers `error` "this terminal
 cannot scroll from the phone" once per subscription and ignores later
@@ -696,8 +700,15 @@ field order:
   last two days (at most 128, `SeenAlerts`, in the App Group), and a copy
   that arrives again replaces the first silently, so the phone shows and
   buzzes once. Older daemons leave it out.
+- `pr` appears only on a `turn_ended` whose turn created or pushed to a
+  pull request (the last one), as `https://github.com/OWNER/REPO/pull/N`.
+  The notification then offers Open PR #N beside Reply, in a category
+  `finished.pr.N`; it opens the app's pull request screen, or Safari when
+  the app cannot name the host. The chat program lists such a pull request
+  once in every turn that touches it, so the daemon sees each turn's.
 - The privacy setting decides what `body` quotes.
-- `body` is shortened, ending in `…`, until the whole payload fits 4 KB.
+- `body` is shortened, ending in `…`, until the whole payload fits 4 KB;
+  `pr` is dropped before the push fails to fit.
 
 **A clear** (the last question was answered from any client) is push type
 `background`, priority 5:
@@ -715,7 +726,8 @@ notifications (those whose `computer` and `pane` match).
 - `previous`, the two steps before `step`, oldest first, for the step stack.
 
 The shared fixtures are `Fixtures/notify/alert.json` (device key, plaintext,
-whole payload) and `Fixtures/update.json`.
+whole payload), `Fixtures/notify/finished-pr.json` (a finished turn with its
+pull request), and `Fixtures/update.json`.
 
 ### Bluetooth on the desktop
 
@@ -773,9 +785,10 @@ connections).
     devices, and encrypted current addresses.
   - `l2cap` (read): the PSM of the fallback channel, when it is on.
 - Advertising runs only while the pairing dialog is open, or while presence
-  is on (opt-in) for at least one paired device. The advertisement carries
-  only the service UUID, which iOS background scanning needs. The
-  computer's name and identity never appear unauthenticated.
+  is on (on by default; can be turned off) for at least one paired device.
+  The advertisement carries only the service UUID, which iOS background
+  scanning needs. The computer's name and identity never appear
+  unauthenticated.
 
 ### Flow on the phone
 
@@ -788,8 +801,11 @@ connections).
 
 ## Bluetooth after pairing
 
-All of this is opt-in per device, under Settings > Remote control on both
-sides.
+Presence is on by default on both sides: per computer on the phone
+(Settings > Notifications > Hold Alerts at the Desk, and on each
+computer's page) and on the desktop (Settings > Remote control, "Hold
+phone alerts while I'm here", `[remote] presence`). Saved choices are
+preserved when turned off.
 
 - **Presence: notifications follow you.**
   - The phone keeps a background Bluetooth connection to each paired
@@ -822,6 +838,9 @@ sides.
 
 ### Presence, exactly
 
+On by default for newly paired computers on the phone and for older phone
+records without a saved presence setting. Saved choices are preserved; the
+phone switch is Settings > Notifications > Hold Alerts at the Desk.
 On by default on the desktop, `[remote] presence` (Settings > Remote
 control, "Hold phone alerts while I'm here"), which `presence = false`
 turns off.
@@ -1211,8 +1230,9 @@ That fallback waits for its throughput spike to run on a device.
   phone, under their own info.
 - **Wake:** state restoration relaunches the app when a computer comes
   back in range.
-- **Settings:** off by default on both sides, a switch per computer on
-  the phone and `[remote] presence` on the desktop.
+- **Settings:** on by default on both sides (preserved if turned off), a
+  switch per computer on the phone (Settings > Notifications > Hold Alerts
+  at the Desk) and `[remote] presence` on the desktop.
 - **Checked:** against shared fixtures (the signed bytes, the signature
   encoding, the sealed addresses) and unit tests on each side.
 - **Needs a device:** the Bluetooth path itself.

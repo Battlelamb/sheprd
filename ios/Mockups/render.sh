@@ -31,11 +31,15 @@ case "$round" in
      ipad="" ;;
   ask) phone="ask-A-0 ask-A-1 ask-B-0 ask-B-1 ask-C-0 ask-C-1 ask-D-0 ask-D-1"
      ipad="" ;;
+  perm) phone="perm-A-0 perm-B-0 perm-C-0 perm-D-0 perm-D-2 perm-Real-0 perm-Real-1"
+     ipad="" ;;
   voice) phone="voice-A-0 voice-A-1 voice-A-2 voice-A-3 voice-B-0 voice-B-1 voice-B-2 voice-B-3 voice-C-0 voice-C-1 voice-C-2 voice-C-3 voice-D-0 voice-D-1 voice-D-2 voice-D-3"
      ipad="" ;;
   github) phone="prhead-A-0 prhead-A-1 prhead-B-0 prhead-B-1 prhead-C-0 prhead-C-1 prhead-D-0 prhead-D-1 prdetail-A-0 prdetail-A-1 prdetail-B-0 prdetail-B-1 prdetail-C-0 prdetail-C-1 prdetail-D-0 prdetail-D-1 prlist-A-0 prlist-A-1 prlist-B-0 prlist-B-1 prlist-C-0 prlist-C-1 prlist-D-0 prlist-D-1 ghsettings-A-0 ghsettings-A-1 ghsettings-A-2 ghsettings-A-3 ghsettings-B-0 ghsettings-B-1 ghsettings-C-0 ghsettings-C-1 ghsettings-D-0 ghsettings-D-1"
      ipad="" ;;
   ghsignin) phone="ghsettings-A-0 ghsettings-A-1 ghsettings-A-2 ghsettings-A-3 ghsettings-B-0 ghsettings-B-1 ghsettings-C-0 ghsettings-C-1 ghsettings-D-0 ghsettings-D-1 ghsignin-A-0 ghsignin-A-1 ghsignin-A-2 ghsignin-A-3 ghsignin-A-4 ghsignin-B-0 ghsignin-B-1 ghsignin-B-2 ghsignin-B-3 ghsignin-B-4 ghsignin-C-0 ghsignin-C-1 ghsignin-C-2 ghsignin-C-3 ghsignin-C-4"
+     ipad="" ;;
+  pushpr) phone="pushpr-A-0 pushpr-A-1 pushpr-B-0 pushpr-B-1 pushpr-C-0 pushpr-C-1 pushpr-D-0 pushpr-D-1"
      ipad="" ;;
   agentpr) phone="agentpr-A-0 agentpr-B-0 agentpr-C-0"
      ipad="" ;;
@@ -48,6 +52,8 @@ case "$round" in
   effects) phone="effects-Sizes-0 effects-Bubbles-0 effects-Bubbles-1 effects-Screen-0 effects-Screen-1 effects-Screen-2 effects-Screen-3"
      ipad="" ;;
   live) phone="live-Now-0 live-A-0 live-B-0 live-C-0 live-D-0 live-Now-1 live-A-1 live-B-1 live-C-1 live-D-1 live-Pick-0"
+     ipad="" ;;
+  csettings) phone="csettings-A-0 csettings-B-0 csettings-B-1 csettings-C-0 csettings-D-0"
      ipad="" ;;
   *) echo "unknown round $round" >&2; exit 2 ;;
 esac

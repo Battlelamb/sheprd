@@ -39,7 +39,6 @@ on:
       - macos/sheprd-nearby/**
       - crates/sheprd-gpui/SOUND-NOTICE.md
       - scripts/release/herdr-core.json
-      - scripts/release/herdr-core-licenses.txt
       - .github/workflows/nix.yml
   workflow_dispatch:
 
@@ -62,7 +61,7 @@ jobs:
       (github.event_name == 'pull_request' ||
        ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
         github.actor == 'penso' && github.triggering_actor == 'penso' &&
-        github.ref == 'refs/heads/main'))
+        (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))))
     name: Nix flake (${{ matrix.runner }})
     strategy:
       fail-fast: false

@@ -69,7 +69,7 @@ struct HostsTests {
         #expect(computer.origins == ["https://b:7443", "https://c:7443"])
         #expect(computer.fingerprint == Self.devbox)
         #expect(computer.keyKind == .software && computer.keyData == Data([1, 2, 3]))
-        #expect(!computer.presence)
+        #expect(computer.presence)
         #expect(computer.via == Self.laptop)
     }
 

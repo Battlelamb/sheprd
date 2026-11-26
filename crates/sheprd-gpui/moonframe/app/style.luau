@@ -13,6 +13,11 @@ return style {
 		[".activity-tile:hover"] = { background = "secondary" },
 		-- The sparkles' button (the feedback mod's) as an activity tile.
 		[".feedback-button"] = { width = 32, height = 32, padding = 0, radius = 8, size = "title" },
+		-- The window the sparkles open ("Make it yours"). Its mod paints it
+		-- `background`, which Sheprd leaves transparent on macOS for native
+		-- pages; in a window of its own that shows black. Sheprd's dialog
+		-- surface (`card`) keeps it on the theme in light and dark.
+		[".feedback-window"] = { background = "card" },
 		[".status-item:hover"] = { opacity = 0.75 },
 		[".sheprd-link:hover"] = { opacity = 0.75 },
 		-- The device footer and its sheet, as Sheprd's own answer the pointer.
@@ -23,7 +28,6 @@ return style {
 		[".sheprd-device-trash:hover"] = { background = "secondary" },
 		[".sheprd-device-activity:hover"] = { border_color = "muted-foreground" },
 		-- The left pane's edge: a hairline; the shell draws its handle.
-		[".sheprd-left-edge-line"] = { background = "border" },
 		-- An edge's handle, as Sheprd's own (src/panel_resize/grip.rs): its
 		-- accent pill, 3 across, growing and easing in over 180ms.
 		[".sheprd-grip"] = { background = "#78a9ff", radius = 999, opacity = 0, transition = "fade 180ms ease-out" },

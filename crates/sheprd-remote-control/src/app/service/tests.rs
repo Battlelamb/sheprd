@@ -101,6 +101,7 @@ fn the_daemon_runs_with_every_setting_as_an_argument() {
                     name: Some("fra3".into()),
                     tags: vec!["eu".into()],
                 },
+                pin: Some([7; 32]),
             },
         ],
     };
@@ -132,6 +133,8 @@ fn the_daemon_runs_with_every_setting_as_an_argument() {
             "not for public use",
             "--relay-tag",
             "eu",
+            "--relay-pin",
+            "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
         ]
     );
 }
@@ -340,6 +343,7 @@ fn status(version: &str) -> Response {
         devices: 0,
         connected: 0,
         github_asks: 0,
+        voice_asks: 0,
         relays: Default::default(),
     })
 }

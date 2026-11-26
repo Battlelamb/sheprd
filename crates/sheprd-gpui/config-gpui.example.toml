@@ -205,13 +205,12 @@ layout = "normal"
 # between tabs), or "compact" (icons only, the chosen tab named). View > Tab
 # Layout lists them all.
 tab_layout = "classic"
-# New tabs run in herdr-core (Herdr 2), whose terminals Sheprd draws and
-# splits into native panes, instead of in Herdr 1. Herdr 1 tabs keep running
-# beside them. Without Herdr 1 installed, terminals are Herdr 2's anyway.
-# herdr-core runs on this computer only, so tabs on other hosts stay Herdr's.
-# Also under Settings > Tabs.
+# Settings > Tabs > Terminal backend accepts "herdr", "herdr-core", or "tmux" in tmux-enabled builds.
+# It applies to new terminals. Each saved pane reattaches to its original server.
+# terminal_backend = "tmux"
+# Older configurations use this switch when terminal_backend is omitted.
 herdr_2_terminals = false
-# Lines of output each Herdr 2 terminal keeps to scroll back through, from
+# Lines of output each Herdr 2 or tmux terminal keeps to scroll back through, from
 # 1000 to 100000. Terminals opened after a change use the new size.
 # Also under Settings > Tabs.
 herdr_2_scrollback = 10000
@@ -563,7 +562,9 @@ size = 12
 # "imessage" (blue and gray bubbles with tails, like Apple's Messages), or
 # "opencode" (tinted blocks, finished tools on one line, like OpenCode).
 # The button in a chat's header steps through them.
-# [chat]
+[chat]
+# Play bubble and screen effects in agent replies. Settings > Chat edits this.
+message_effects = true
 # layout = "timeline"
 # Maximum reading-column width in logical pixels: 320–4000, or 0 for full width.
 # Settings > General offers a width slider and Full-width chat switch.
@@ -886,10 +887,18 @@ size = 12
 # agents installed on the host. Off, chat panes keep their terminal.
 # acp_chats = true
 #
+# Offer machines from cloud providers as devices. Off, no provider is offered
+# and saved cloud devices stay hidden; their terminals keep running. Each
+# provider built in also has its own switch, all on by default: cloud_azure,
+# cloud_boat, cloud_boxd, cloud_coder, cloud_container, cloud_daytona,
+# cloud_opensandbox, cloud_railway, and cloud_sprites. Read when Sheprd starts.
+# cloud_providers = true
+# cloud_daytona = true
+#
 # Open Sheprd in the window Moonframe lays out in Luau, in beta; false opens the
-# classic window. Read when Sheprd starts. Off by default on Windows. On macOS,
+# classic window (the default). Read when Sheprd starts. On macOS,
 # holding Option as Sheprd starts opens the other window once.
-# moonframe_window = true
+# moonframe_window = false
 #
 # Open a space's menu when the pointer rests on its sidebar row, without a
 # right click. Moving the pointer anywhere but into that menu closes it again.
@@ -1091,9 +1100,9 @@ size = 12
 # Antigravity (antigravity)
 # [usage.providers.antigravity]
 #   The agy executable on the probed host when it is not on the PATH (install it
-#   with `brew install --cask antigravity-cli`, run `agy` once, and sign in).
-#   agy runs only when this is set or antigravity is in show_providers, as a
-#   signed-out agy opens a browser to sign in.
+#   with `brew install --cask antigravity-cli`, run `agy` or `agy acp --login`,
+#   and sign in). A signed-in agy CLI is detected automatically; set this or
+#   list antigravity in show_providers to override detection.
 # cli_path = ""  # or ANTIGRAVITY_CLI_PATH
 #
 # Copilot (copilot)

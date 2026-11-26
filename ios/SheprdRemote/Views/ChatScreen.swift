@@ -230,6 +230,14 @@ private struct ChatDocument: View {
     @State private var shownTurns = 5
     /// The latest prompt has scrolled up past the top of the chat.
     @State private var promptAbove = false
+    /// Scrolled past the end, as when the content shrank under a resting
+    /// offset: the screen shows nothing until a drag.
+    @State private var overshot = false
+    @State private var scrolling = false
+    /// Resting on the latest message, not merely near it as `away` allows:
+    /// only then does the chat follow it back there.
+    @State private var atLatest = true
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Lines stay this wide at most on an iPad or an unfolded iPhone, so
     /// the answer reads like a page rather than a banner.
@@ -276,15 +284,22 @@ private struct ChatDocument: View {
                         Text("Queued").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
                         ForEach(transcript.queued, id: \.id) { queued in
                             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Image(systemName: "clock").foregroundStyle(.secondary)
+                                Image(systemName: queued.steered ? "arrow.turn.down.right" : queued.held ? "pause.circle" : "clock").foregroundStyle(.secondary)
+                                    .accessibilityLabel(queued.steered ? "Steering" : queued.held ? "Held" : "Queued")
                                 Text(queued.text).font(.subheadline).lineLimit(3)
                                 if !queued.attachments.isEmpty {
                                     Label("\(queued.attachments.count)", systemImage: "photo").font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                Button { unqueue(queued) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel("Remove from the queue")
+                                // A steered prompt is already with the agent.
+                                if !queued.steered {
+                                    Button { sendNow(queued) } label: { Image(systemName: "arrow.up.circle.fill").foregroundStyle(.tint) }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("Send now")
+                                    Button { unqueue(queued) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("Remove from the queue")
+                                }
                             }
                             .padding(10)
                             .background(.fill.quinary, in: .rect(cornerRadius: 12))
@@ -309,6 +324,36 @@ private struct ChatDocument: View {
             geometry.contentSize.height - geometry.contentOffset.y - geometry.containerSize.height > 240
         } action: { _, now in
             away = now
+        }
+        // A snapshot on return, lazy rows measured anew, or the composer
+        // changing size can shorten the content under a resting offset;
+        // UIKit leaves it past the end until a touch, a blank screen.
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            let end = geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height
+            return geometry.contentOffset.y > max(end, -geometry.contentInsets.top) + 1
+        } action: { _, now in
+            overshot = now
+            if now, !scrolling { position.scrollTo(edge: .bottom) }
+        }
+        .onScrollPhaseChange { _, phase in
+            scrolling = phase != .idle
+            if !scrolling, overshot { position.scrollTo(edge: .bottom) }
+        }
+        // Only a reader's own scroll moves them off the latest; content
+        // shrinking under them while idle is repaired above instead.
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            let end = geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height
+            return geometry.contentOffset.y >= end - 8
+        } action: { _, now in
+            if scrolling || now { atLatest = now }
+        }
+        // Back in the app, or a fresh snapshot replacing the cached one: a
+        // reader at the latest stays there.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, atLatest { position.scrollTo(edge: .bottom) }
+        }
+        .onChange(of: store.stale) { _, stale in
+            if !stale, atLatest { position.scrollTo(edge: .bottom) }
         }
         // Dragging the conversation puts the keyboard away, as Messages does.
         .scrollDismissesKeyboard(.interactively)
@@ -395,6 +440,10 @@ private struct ChatDocument: View {
 
     private func unqueue(_ queued: Queued) {
         Task { problem = await model.fleet.send(.unqueue(queued.id), to: key) }
+    }
+
+    private func sendNow(_ queued: Queued) {
+        Task { problem = await model.fleet.send(.sendNow(queued.id), to: key) }
     }
 }
 

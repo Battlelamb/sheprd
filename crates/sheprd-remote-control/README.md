@@ -12,6 +12,13 @@ without Herdr 1 (below).
 
 ## Herdr 1 sessions
 
+With the optional `tmux` feature, the service also discovers managed local
+tmux chats and serves their private ACP endpoints to paired phone and web
+clients. Choosing tmux in the host's desktop settings sends new chats there.
+When the service starts after a host reboot, it resumes up to 64 chats with a saved
+provider session even while the desktop is closed. Install a tmux-enabled
+`sheprd-acp` alongside the service. Raw terminal control still requires Herdr.
+
 The daemon follows the Herdr 1 session at `--herdr-socket` (discovered when
 absent) and every other running session of this user's installation
 (`herdr --session NAME`, under `sessions/` in Herdr's configuration
@@ -652,3 +659,16 @@ Node is needed only for these optional checks, not for building the daemon.
 ## Errors
 
 The crate exports `Error` and `Result<T>`.
+
+## Shared sessions (in development)
+
+The `sharing` module, behind `server`, implements persistent read-only grants,
+expiry/revocation, an allowlist transcript projection, a bounded blocking worker,
+and a dedicated encrypted relay gateway with a native reference peer. Draft
+HTTPS invitations carry anonymous view credentials in the URL fragment and
+require an independently trusted relay endpoint to decode. Daemon startup,
+owner controls and the browser viewer are still pending. Its owner methods must only run
+on the daemon worker after local confirmation; guests get the separate bounded
+read schema in `sheprd-chat-protocol::sharing`. See
+[implementation progress](../../docs/session-sharing/implementation.md) for the
+security boundary, conservative restart behavior, limits and remaining gates.

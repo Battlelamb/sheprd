@@ -26,6 +26,7 @@ mod handle;
 pub mod herdr;
 mod host_theme;
 mod limits;
+mod liveness;
 mod local_network;
 pub mod local_path;
 pub mod login_env;
@@ -84,6 +85,7 @@ pub use event::ClientEvent;
 pub use forward::{ForwardEvent, PortForward, preferred_local_port};
 pub use handle::{Client, ClientHandle};
 pub use host_theme::HostTheme;
+pub use liveness::Suspicion;
 pub use local_network::{LocalNetworkAccess, local_network_access, wait_for_local_network};
 pub use method::Method;
 pub use options::ConnectOptions;
@@ -100,14 +102,15 @@ pub use sessions::{
 };
 pub use ssh::mux::Lane as SshLane;
 pub use ssh::{
-    Bridge, SshChannel, connect_command, remote_socket, script_command, serve_command,
-    shared_script_command,
+    Bridge, SshChannel, connect_command, powershell_command, remote_socket, script_command,
+    serve_command, shared_script_command,
 };
 pub use ssh::{
     Destination, FORWARD_READY, HostKeyFingerprint, HostKeyScan, HostKeys, HostProbe,
-    MAX_UNVERIFIED_HOSTS, NewHostKey, SshFailure, confirm_host_key, forward_command,
-    known_host_keys, probe_host, probe_host_with, remote_config_value, remote_origin_url,
-    resolve_destination, scan_host_key, set_host_keys, set_unverified_hosts, trust_host_key,
+    MAX_UNVERIFIED_HOSTS, NewHostKey, SshFailure, TailscaleCheck, confirm_host_key,
+    forward_command, known_host_keys, probe_host, probe_host_with, remote_config_value,
+    remote_origin_url, resolve_destination, scan_host_key, set_host_keys, set_unverified_hosts,
+    trust_host_key,
 };
 pub use surface_images::{
     ImageStore, MAX_IMAGE_BYTES, MAX_IMAGE_SIDE, MAX_IMAGES, MAX_PLACEMENTS, SurfaceImage,

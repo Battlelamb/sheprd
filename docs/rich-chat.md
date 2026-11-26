@@ -69,7 +69,7 @@ short: when its plan has hit a limit, is 80% used, or is half used and on
 pace to run out before it resets, the button starts the installed agent with
 the most room instead, and its tooltip says why. Usage comes from the status
 bar's last reading of the selected host, matched by name (Claude, Codex,
-Copilot, Gemini, Kimi Code, OpenCode, Pi); every window counts, so a weekly limit
+Copilot, Gemini, Kimi Code, Muse Code, OpenCode, Pi); every window counts, so a weekly limit
 running out matters even when a session window is fuller. An agent without
 a reading, or whose limits have reset since, counts as having room, and one
 tight plan never replaces another. With usage turned off
@@ -106,8 +106,8 @@ In a Herdr 2 (herdr-core) tab, starting a chat from the tab strip's launcher
 or the group menu opens a new chat tab in that group, using the terminal's
 current folder. The requested group stays with the start while the agent
 launches, even if you switch to the editor meanwhile. This leaves room for an editor in another group without
-adding a terminal beside the chat. `sheprd chat new --pane` can still split
-a core pane explicitly; a tab can hold several chats and plain terminals. The window picks the chat's endpoint before `sheprd-acp` starts:
+adding a terminal beside the chat. `sheprd chat new --pane` starts a background tab in that
+pane's workspace and folder; a tab can hold several chats and plain terminals. The window picks the chat's endpoint before `sheprd-acp` starts:
 it passes the id in `HERDR_ACP_ENDPOINT` and labels the terminal `acp=<id>`
 in herdr-core. Because herdr-core keeps the label, the chat view comes back
 after a restart and appears in every window that shows the pane.
@@ -229,6 +229,25 @@ change. It is off by default.
 
 ## Chats after a reboot
 
+On a tmux-enabled build, opening a saved driving pane after its host reboots
+restarts the chat helper under the original terminal ID and endpoint. The
+helper asks the provider to load the exact recorded conversation. Native
+Codex and Claude read history from their session logs. ACP adapters can replay
+history through `session/load`. A provider that cannot load the saved session
+reports the failure. Closing a chat clears its continuation record. If the tmux-enabled remote service starts before the desktop, it resumes the recorded chats so paired clients can reconnect. Other shells wait for an owning desktop view.
+
+For managed chats, Sheprd also keeps a private conversation checkpoint in
+`conversations` beside the restore directory. When a provider successfully
+loads the exact session but returns no conversation, Sheprd can display its
+own saved entries. It also restores the chat’s pull-request references.
+Permissions and queued commands are live state and require a new request.
+Checkpoints keep the same bounded history as the chat view. The host retains
+up to 64 recent session checkpoints.
+
+On herdr-core, its kept terminal and the recovery document identify the
+conversation. When Sheprd reconnects to that core, it resumes the chat and
+maps the replacement terminal to its saved pane.
+
 When Herdr restores its panes after a reboot or a server restart, a pane that
 ran a chat comes back as a shell in the chat's folder: Herdr keeps neither the
 `sheprd-acp` that ran there nor the token Sheprd found it by. Sheprd
@@ -301,7 +320,7 @@ Limitations:
   folder could be handed the old chat.
 - A chat whose shell folder differs from the chat's own (started with
   `--cwd`) is not continued.
-- Only the built-in agents (`claude`, `codex`, `copilot`, `gemini`, `kimi`,
+- Only the built-in agents (`antigravity`, `claude`, `codex`, `copilot`, `gemini`, `kimi`, `muse`,
   `opencode`, `pi`) started without extra agent arguments. Custom commands
   are not continued.
 - `[chat.env]` variables are not set again: typing their values into a shell
@@ -506,6 +525,14 @@ this, and how, is in the [`sheprd-acp` README](../crates/sheprd-acp/README.md#be
 
 ## Messages and controls
 
+In the desktop conversation, a user message with at least 12 lines or 2,048
+characters shows a first-line preview and a **Message.txt** button. Click the
+button to open the full text in your default text editor. Tab or Shift-Tab
+reaches the file buttons. Enter or Space opens a file, and Escape returns to
+the chat input. This applies to
+existing conversations too. In the desktop composer, a new paste of at least
+800 characters or more than 10 lines becomes a separate text attachment.
+
 Write normal Markdown and TeX in user and agent messages. Rich chat supports
 headings, lists, links, aligned tables with horizontal scrolling, Mermaid,
 attached images, and explicitly loaded remote pictures. Conversation prose uses
@@ -585,6 +612,21 @@ computer's and every connected SSH host's that has the program, keeps the
 latest edit, and offers it to the others, so an edit made anywhere reaches all
 of them. A host without the program is skipped.
 
+A prompt sent while Claude Code, Codex or pi works goes into the running turn
+rather than waiting for it to end: the agent reads it at its next step, such
+as after the tool call running now, and the conversation shows it there. Until
+then it waits above the composer marked **Steering**, and cannot be withdrawn,
+as the agent already has it. One the agent did not take before its turn ended
+goes as the next prompt. Other agents, and a prompt sent behind one still
+waiting to be sent, keep the queue: it waits marked **Queued** until the turn
+ends, and its × withdraws it.
+
+**Send now** on a queued prompt sends it ahead of the others: into the running
+turn when the agent steers, otherwise in place of the turn, which it stops.
+**Stop** keeps what you typed: queued prompts, and those still marked
+**Steering**, wait marked **Held**, and no later turn sends them on its own.
+Send one now, or withdraw it with ×; a new prompt goes at once meanwhile.
+
 ACP chats retain their native composer, permissions, tools, plans, context
 information and file attachments. Tool and thinking cards start collapsed and
 expand to show retained text and diffs.
@@ -640,7 +682,8 @@ All 214 tests pass.
   did: the chat shakes for a second and, on a phone, buzzes. A turn whose
   last reply holds it sends a time-sensitive push that plays the same buzz,
   whatever the push privacy, so a locked phone buzzes too. The excerpt a
-  push shows leaves every directive line out.
+  push shows leaves every directive line out and reads as plain text,
+  without size marks or Markdown.
 
 Only an agent's replies play effects; a user's message shows its effect
 directives as text, though its size spans still apply. Each effect plays once,
@@ -650,6 +693,10 @@ the system's reduce motion setting on, nothing moves, and invisible ink still
 hides until hovered. The agent learns the syntax from the note Sheprd sends
 with the first prompt on a desktop (`desktop.md` and `remote.md` in
 `crates/sheprd-acp/prompts`) and in the iPhone and iPad app (`phone-app.md`).
+
+On desktop, turn off **Settings > Chat > Message effects** to stop bubble and
+screen effects, including wizz. Invisible ink becomes readable and replay links
+disappear, including in existing messages.
 
 The iPhone and iPad app draws the same sizes and effects
 (`ios/SheprdRemoteCore/Sources/SheprdRemoteCore/Chat/TextSize.swift` and
@@ -713,6 +760,8 @@ GitHub CLI's credentials rather than SSH, and stops rather than turning
 off signing when a commit needs a key (`phone.md` and `remote.md`; the
 iPhone and iPad app's `phone-app.md` follows `phone.md`, so says it once
 through it). An older program ignores the origin field, and an older client sends none.
+Antigravity receives direct prompts without these annotations or Sheprd's
+prompt templates and memory notes.
 The transcript shows only the person's words, and keeps what went ahead of
 them in the user entry's optional `note`: the note and, on a live prompt, a
 handed-over conversation; on a replay or a restored log, the note alone. The

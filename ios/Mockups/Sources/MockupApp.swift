@@ -89,6 +89,11 @@ struct Mockup: View {
         case ("ask", "B"): QuestionListSheet(state: state)
         case ("ask", "C"): QuestionInlineCard(state: state)
         case ("ask", "D"): QuestionPages(state: state)
+        case ("perm", "A"): PermissionCodeCard(state: state)
+        case ("perm", "B"): PermissionSteps(state: state)
+        case ("perm", "C"): PermissionSummary(state: state)
+        case ("perm", "D"): PermissionPeek(state: state)
+        case ("perm", "Real"): PermissionShipped(state: state)
         case ("voice", "A"): VoiceSheetLayout(state: state)
         case ("voice", "B"): VoiceChecklist(state: state)
         case ("voice", "C"): VoiceAmbient(state: state)
@@ -129,6 +134,11 @@ struct Mockup: View {
         case ("live", _): LiveStyle(variant: variant, state: state)
         case ("effects", "Bubbles"): EffectsBubbles(state: state)
         case ("effects", "Screen"): EffectsScreen(state: state)
+        case ("pushpr", _): PushPR(variant: variant, state: state)
+        case ("csettings", "A"): ComputersSettingsClean()
+        case ("csettings", "B"): ComputersSettingsGrouped(state: state)
+        case ("csettings", "C"): ComputersSettingsHealth()
+        case ("csettings", "D"): ComputersSettingsConnection()
         default: Text("No mockup \(screen) \(variant)")
         }
     }
@@ -173,10 +183,13 @@ struct Catalog: View {
         ("ghsignin", "C", 0),
         ("ghsignin", "C", 1), ("ghsignin", "C", 2), ("ghsignin", "C", 3), ("ghsignin", "C", 4),
         ("agentpr", "A", 0), ("agentpr", "B", 0), ("agentpr", "C", 0),
+        ("pushpr", "A", 0), ("pushpr", "A", 1), ("pushpr", "B", 0), ("pushpr", "B", 1),
+        ("pushpr", "C", 0), ("pushpr", "C", 1), ("pushpr", "D", 0), ("pushpr", "D", 1),
         ("effects", "Sizes", 0), ("effects", "Bubbles", 0), ("effects", "Bubbles", 1),
         ("live", "Now", 0), ("live", "A", 0), ("live", "B", 0), ("live", "C", 0), ("live", "D", 0),
         ("live", "Now", 1), ("live", "A", 1), ("live", "B", 1), ("live", "C", 1), ("live", "D", 1), ("live", "Pick", 0),
         ("effects", "Screen", 0), ("effects", "Screen", 1), ("effects", "Screen", 2), ("effects", "Screen", 3),
+        ("csettings", "A", 0), ("csettings", "B", 0), ("csettings", "B", 1), ("csettings", "C", 0), ("csettings", "D", 0),
     ]
 
     var body: some View {

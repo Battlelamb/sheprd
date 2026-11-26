@@ -8,16 +8,22 @@ mod checkouts;
 mod convert;
 mod create;
 pub(super) use create::Place;
+#[cfg(feature = "tmux")]
+pub(super) use create::place_labels;
 pub(crate) use saved::TabRef;
 mod error;
 mod hold;
 mod job;
 mod kept;
+#[cfg(feature = "tmux")]
+pub(super) use kept::tmux_placements;
 mod lines;
 mod new_workspace;
 mod own;
 mod poller;
 mod projection;
+#[cfg(feature = "tmux")]
+pub(super) use projection::read as read_tabs;
 mod saved;
 mod screen;
 mod spaces;
@@ -166,6 +172,14 @@ impl Source {
         self.connected.load(Ordering::Acquire)
     }
 
+    /// Maps a desktop herdr-core terminal address (e.g. `t4t` from `core:t4t`)
+    /// to the boot-scoped pane key (`control::favorites::core_pane`) that the
+    /// hub's chat table uses.
+    pub(super) fn pane_id_for_address(&self, address: &str) -> Option<String> {
+        let core = lock(&self.state).core.clone()?;
+        Some(pane_id(&core.hello().core.id, address))
+    }
+
     /// The connection, made again when it was lost.
     fn connection(&self) -> Result<Arc<Core>> {
         {
@@ -258,6 +272,16 @@ impl Source {
         let mut screen = lock(&screen);
         screen.follow_size(&terminal)?;
         screen.call(&core, method, params)
+    }
+
+    /// Turns the wheel for the program `pane` runs; false when it reads
+    /// none. Blocking.
+    pub(super) fn wheel(&self, pane: &str, lines: i32) -> Result<bool> {
+        let (core, terminal) = self.terminal(pane)?;
+        let screen = self.screen(&core, &terminal)?;
+        let mut screen = lock(&screen);
+        screen.follow_size(&terminal)?;
+        screen.send_wheel(&core, lines)
     }
 
     /// The connection and the terminal `pane` names, as the last poll saw.
@@ -433,20 +457,24 @@ fn merge(daemon: &Layout, core: &Layout) -> Layout {
     if !daemon.connected {
         merged.boot = core.boot.clone();
     }
+    let mut room = super::layout::MAX_CHATS.saturating_sub(merged.chats().count());
     for workspace in &core.workspaces {
         // An empty stand-in shows only when nothing else is listed (below).
         if empty_unlisted(workspace) {
             continue;
         }
+        let mut workspace = workspace.clone();
+        workspace.chats.truncate(room);
+        room -= workspace.chats.len();
         if let Some(existing) = merged
             .workspaces
             .iter_mut()
             .find(|row| row.id == workspace.id)
         {
-            existing.chats.extend(workspace.chats.clone());
-            existing.terminals.extend(workspace.terminals.clone());
+            existing.chats.extend(workspace.chats);
+            existing.terminals.extend(workspace.terminals);
         } else {
-            merged.workspaces.push(workspace.clone());
+            merged.workspaces.push(workspace);
         }
     }
     // A core with nothing in it, as one just started after a reboot, still
@@ -522,7 +550,7 @@ pub(super) fn tests_support_source(
     }
 }
 
-fn tabs_path(state_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+pub(super) fn tabs_path(state_dir: &std::path::Path) -> Option<std::path::PathBuf> {
     state_dir.parent().map(|dir| dir.join("browser-tabs.json"))
 }
 

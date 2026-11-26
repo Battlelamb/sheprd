@@ -27,7 +27,6 @@ pub(super) async fn run(
 ) {
     let mut wait = FIRST;
     loop {
-        relays.set_status(&endpoint, Status::Connecting);
         let result = tokio::select! {
             result = session(&relays, &endpoint, &served, &mut wait) => result,
             _ = stopped.wait_for(|stop| *stop) => {
@@ -78,7 +77,7 @@ async fn session(
     let token = token
         .as_ref()
         .map_or(&[][..], |token| token.expose().as_bytes());
-    let connection = client::reach(endpoint).await?;
+    let connection = client::reach_pinned(endpoint, relays.pin(endpoint)).await?;
     let mut listener = Listener::listen(connection, &relays.keys.route, token).await?;
     let mut changed = relays.changed.subscribe();
     let mut pairing = relays.pairing_changed.subscribe();

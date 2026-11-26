@@ -40,11 +40,13 @@ fn a_brief_rides_in_the_tab_and_its_line(cx: &mut gpui::TestAppContext) {
                 parent: Some(parent.clone()),
                 ..brief()
             });
-            view.start_chat(Agent::Codex, None, None).unwrap();
+            view.start_chat_with_focus(Agent::Codex, None, None, false)
+                .unwrap();
             view.chats.brief = None;
         })
     });
     let tab = peer.request();
+    assert_eq!(tab["params"]["focus"], false);
     assert_eq!(
         tab["params"]["env"],
         json!({"HERDR_ACP": "/opt/herdr-acp", FILE_ENV: "/tmp/sheprd-brief-1.md",
@@ -58,6 +60,7 @@ fn a_brief_rides_in_the_tab_and_its_line(cx: &mut gpui::TestAppContext) {
             let id = tab["id"].as_str().unwrap().to_owned();
             view.live.script_response = Some((id, Some(Ok(created))));
             view.poll_chat_start(cx);
+            assert!(view.pending_navigation.is_none());
             assert!(view.flash.is_none(), "{:?}", view.flash);
         })
     });

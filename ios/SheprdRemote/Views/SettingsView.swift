@@ -9,6 +9,7 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @AppStorage(PushRelaySetting.key, store: PushRelaySetting.store) private var pushRelay = true
     @AppStorage(AppAppearance.key) private var appearance = AppAppearance.system
+    @AppStorage(LinkOpening.key) private var linkOpening = LinkOpening.sheprd
     #if DEBUG
     @State private var showingComputers = false
     @State private var showingRelays = false
@@ -36,7 +37,7 @@ struct SettingsView: View {
                 }
             }
             Section {
-                SettingsLink("Computers", symbol: "desktopcomputer", color: .blue, value: "\(model.computers.count)", page: .computers)
+                SettingsLink("Computers", symbol: "desktopcomputer", color: .blue, value: model.fleetHealthSummary.settingsValue, page: .computers)
                 SettingsLink("Fleet", symbol: "point.3.connected.trianglepath.dotted", color: .indigo, value: fleetSummary, page: .fleet)
                 SettingsLink("Relays", symbol: "antenna.radiowaves.left.and.right", color: .teal,
                              value: "\(model.savedRelays.relays.count)", page: .relays)
@@ -55,6 +56,12 @@ struct SettingsView: View {
                     ForEach(AppAppearance.allCases) { Text($0.title).tag($0) }
                 } label: {
                     Label { Text("Appearance") } icon: { SettingsIcon(symbol: "circle.lefthalf.filled", color: .blue) }
+                }
+                .pickerStyle(.menu)
+                Picker(selection: $linkOpening) {
+                    ForEach(LinkOpening.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    Label { Text("Open Links In") } icon: { SettingsIcon(symbol: "safari.fill", color: .blue) }
                 }
                 .pickerStyle(.menu)
                 SettingsLink("Privacy & Storage", symbol: "hand.raised.fill", color: .blue, page: .privacy)

@@ -808,6 +808,7 @@ set -eu
 if [[ $1 == base64 ]]; then
     printf 'certificate'
 elif [[ $1 == x509 ]]; then
+    [[ $(cat) == certificate ]]
     printf 'X509v3 Subject Alternative Name: critical\\n    URI:https://github.com/sheprd-labs/sheprd/.github/workflows/release.yml@%s\\n' "$TEST_SAN_REF"
 else
     exit 99

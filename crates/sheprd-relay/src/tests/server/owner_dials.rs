@@ -111,3 +111,16 @@ async fn forged_proofs_past_the_rate_stop_being_checked() {
     assert!(!hub.may_prove_past_rate(address));
     assert!(!hub.is_banned(address));
 }
+
+#[tokio::test]
+async fn refusals_past_the_rate_spend_alike_named_or_not() {
+    let owner = signing_key(202);
+    let (hub, route, address, _listener) = spent(Access::tokens(TOKEN).unwrap(), &owner);
+    let stranger = signing_key(203);
+    for _ in 0..100 {
+        assert_eq!(dial(&hub, route, address, &stranger).await, Status::Limited);
+    }
+    // An unnamed key emptied the budget as a forged named one would.
+    assert!(!hub.may_prove_past_rate(address));
+    assert_eq!(dial(&hub, route, address, &owner).await, Status::Limited);
+}

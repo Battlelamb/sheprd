@@ -42,9 +42,9 @@ use tokio::sync::{Notify, mpsc, oneshot};
 const INCOMING_QUEUE: usize = 16;
 /// The most sessions the dashboard lists.
 const MAX_ROWS: usize = 50;
-/// Forged proofs one address may send past the dial rate a minute before
+/// Refused dials one address may make past the dial rate a minute before
 /// the relay stops checking its proofs there; a quarter of it at once.
-const FORGED_PER_MINUTE: u32 = 20;
+const REFUSED_PER_MINUTE: u32 = 20;
 /// The least time between two warnings about owners' dial bursts.
 const OWNER_WARNING: Duration = Duration::from_secs(60);
 /// Pairing keys one listener may hold at once: a pairing dialog or two.
@@ -62,7 +62,7 @@ pub struct Hub {
     /// New QUIC connections, per address and wide block.
     connects: PerAddress,
     dials: PerAddress,
-    /// Forged proofs past `dials` on a private relay ([`Hub::may_prove_past_rate`]).
+    /// Refused dials past `dials` on a private relay ([`Hub::may_prove_past_rate`]).
     forged: PerAddress,
     /// Owners' dials past `dials` since the last warning about them, and
     /// when that was ([`Hub::owner_burst`]).
@@ -228,7 +228,7 @@ impl Hub {
             connects: PerAddress::new(limits.connections_per_minute, origin),
             dials: PerAddress::new(limits.dials_per_minute, origin),
             owner_bursts: Mutex::default(),
-            forged: PerAddress::new(FORGED_PER_MINUTE, origin),
+            forged: PerAddress::new(REFUSED_PER_MINUTE, origin),
             guard: Guard::new(limits.auto_ban, limits.max_transfer_per_hour),
             limits,
             listens: PerAddress::new(limits.listens_per_minute, origin),
@@ -265,17 +265,18 @@ impl Hub {
     }
 
     /// Whether a dial past the dial rate from `address` may still have its
-    /// proof checked: not once it has sent too many forged ones. This
-    /// bounds the signature work past the rate without a ban, which would
-    /// tell the caller the key it forged for is named. An owner's devices
-    /// never forge, so never spend from it.
+    /// proof checked: not once it has had too many refused. This bounds
+    /// the signature work past the rate without a ban, which would tell the
+    /// caller the key it forged for is named. Every refusal spends from it,
+    /// named key or not, so what it has left tells nothing either; only an
+    /// owner's dial that goes through spends nothing.
     #[must_use]
     pub fn may_prove_past_rate(&self, address: IpAddr) -> bool {
         self.forged.peek(address) == Outcome::Allowed
     }
 
-    /// A dial past the dial rate from `address` failed its proof.
-    pub fn forged_past_rate(&self, address: IpAddr) {
+    /// A dial past the dial rate from `address` was refused.
+    pub fn refused_past_rate(&self, address: IpAddr) {
         let _ = self.forged.check(address);
     }
 

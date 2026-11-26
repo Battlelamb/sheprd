@@ -131,19 +131,22 @@ pub async fn dial(
             && hub.names_dial_key(route, key)
             && hub.may_prove_past_rate(address))
     {
+        if hub.access.requires_token() {
+            hub.refused_past_rate(address);
+        }
         return Err(refuse(Status::Limited, Dial::Limited, offense));
     }
     // Past the rate, every refusal costs what the rate alone costs: were a
     // named key's forged proof to earn ban points, the ban closing the
     // caller's connection would tell it the key was named.
     let unproven = |status, outcome, offense: Option<Offense>| match over {
-        Some(limit) => refuse(Status::Limited, Dial::Limited, limit),
+        Some(limit) => {
+            hub.refused_past_rate(address);
+            refuse(Status::Limited, Dial::Limited, limit)
+        }
         None => refuse(status, outcome, offense),
     };
     if prove(key, signature, signed).is_err() {
-        if over.is_some() {
-            hub.forged_past_rate(address);
-        }
         let offense = Some(Offense::BadProof);
         return Err(unproven(Status::Offline, Dial::Unauthorized, offense));
     }

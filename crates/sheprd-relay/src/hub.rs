@@ -269,10 +269,13 @@ impl Hub {
     /// the signature work past the rate without a ban, which would tell the
     /// caller the key it forged for is named. Every refusal spends from it,
     /// named key or not, so what it has left tells nothing either; only an
-    /// owner's dial that goes through spends nothing.
+    /// owner's dial that goes through spends nothing. Only an address that
+    /// spent its own budget is held back: a table full of others' leaves
+    /// a new one as it was, so a flood from many addresses cannot close
+    /// this room to every owner.
     #[must_use]
     pub fn may_prove_past_rate(&self, address: IpAddr) -> bool {
-        self.forged.peek(address) == Outcome::Allowed
+        self.forged.peek(address) != Outcome::Limited
     }
 
     /// A dial past the dial rate from `address` was refused.

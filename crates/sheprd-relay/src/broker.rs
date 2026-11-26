@@ -131,7 +131,7 @@ pub async fn dial(
             && hub.names_dial_key(route, key)
             && hub.may_prove_past_rate(address))
     {
-        if hub.access.requires_token() {
+        if hub.access.requires_token() && offense.is_some() {
             hub.refused_past_rate(address);
         }
         return Err(refuse(Status::Limited, Dial::Limited, offense));
@@ -141,7 +141,11 @@ pub async fn dial(
     // caller's connection would tell it the key was named.
     let unproven = |status, outcome, offense: Option<Offense>| match over {
         Some(limit) => {
-            hub.refused_past_rate(address);
+            // Only a caller that went too fast itself spends; one refused
+            // because the limiter was full of others did nothing wrong.
+            if limit.is_some() {
+                hub.refused_past_rate(address);
+            }
             refuse(Status::Limited, Dial::Limited, limit)
         }
         None => refuse(status, outcome, offense),

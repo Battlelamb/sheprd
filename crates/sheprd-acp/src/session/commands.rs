@@ -243,10 +243,13 @@ impl<R: FnMut(Update)> Session<R> {
         }
         let next = queued.remove(0);
         let origin = self.queued_origins.get(&next.id).cloned();
-        self.queue_changed(queued);
         // A prompt steered into a turn that ended without it goes as it was
-        // sent: what it told the agent besides is not told again.
-        match self.steering.remove(&next.id) {
+        // sent: what it told the agent besides is not told again, and its
+        // files as they were then. Taken before the queue changes, which
+        // drops what prompts no longer waiting were prepared with.
+        let sent = self.steering.remove(&next.id);
+        self.queue_changed(queued);
+        match sent {
             Some(outgoing) => self.send_outgoing(outgoing),
             None => self.send_prompt(&next.text, &next.attachments, origin),
         }

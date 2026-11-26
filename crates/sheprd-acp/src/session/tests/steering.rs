@@ -189,3 +189,44 @@ fn withdrawing_a_refused_steer_keeps_nothing_it_was_prepared_with() {
     assert!(harness.transcript().queued.is_empty());
     assert!(harness.session.steering.is_empty());
 }
+
+#[test]
+fn a_steer_given_back_goes_with_its_files_as_they_were_sent() {
+    let mut harness = harness_with(config());
+    harness.session.start();
+    let initialize = harness.last_request("initialize");
+    harness.respond(
+        initialize["id"].as_i64().unwrap(),
+        json!({"protocolVersion": 1, "agentCapabilities": {
+            "promptCapabilities": {"embeddedContext": true},
+            "_meta": {steer::CAPABILITY: true},
+        }}),
+    );
+    let new = harness.last_request("session/new");
+    harness.respond(new["id"].as_i64().unwrap(), json!({"sessionId": "s1"}));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("notes.txt");
+    std::fs::write(&path, "as sent").unwrap();
+
+    let first = prompt(&mut harness, 0, "one");
+    let id = harness.command(
+        0,
+        Command::Prompt {
+            origin: None,
+            text: "read this".to_owned(),
+            attachments: vec![sheprd_chat_protocol::Attachment {
+                path: path.display().to_string(),
+            }],
+        },
+    );
+    let request = harness.last_request(steer::METHOD);
+    assert!(request.to_string().contains("as sent"));
+    harness.respond(request["id"].as_i64().unwrap(), json!({}));
+    // The agent changes the file, then the turn ends without the steer.
+    std::fs::write(&path, "changed by the agent").unwrap();
+    notify(&mut harness, steer::UNSTEERED, id);
+    harness.respond(first, json!({"stopReason": "end_turn"}));
+    let next = harness.last_request("session/prompt");
+    assert_eq!(next["params"]["prompt"], request["params"]["prompt"]);
+    assert!(harness.session.steering.is_empty());
+}

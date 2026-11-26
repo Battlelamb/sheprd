@@ -91,7 +91,7 @@ impl SettingsWindow {
         let ready = !self.busy() && self.closing.is_none();
         let mut color = ui::row(
             theme,
-            "edge-light-color",
+            "indicators-edge-light-color",
             fl!("settings-indicators-edge-light-color"),
         )
         .description(fl!("settings-indicators-edge-light-color-description"));
@@ -178,7 +178,7 @@ impl SettingsWindow {
         for (field, id, title, description, saved, unit) in [
             (
                 NumberField::EdgeLightWidth,
-                "edge-light-width",
+                "indicators-edge-light-width",
                 fl!("settings-indicators-edge-light-width"),
                 fl!("settings-indicators-edge-light-width-description"),
                 light.width,
@@ -186,7 +186,7 @@ impl SettingsWindow {
             ),
             (
                 NumberField::EdgeLightTrail,
-                "edge-light-trail",
+                "indicators-edge-light-trail",
                 fl!("settings-indicators-edge-light-trail"),
                 fl!("settings-indicators-edge-light-trail-description"),
                 light.trail,

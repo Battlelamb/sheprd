@@ -245,19 +245,19 @@ pub(super) const CATALOG: &[Entry] = &[
     ),
     entry(
         Section::Indicators,
-        "edge-light-color",
+        "indicators-edge-light-color",
         "settings-indicators-edge-light-color",
         "settings-indicators-edge-light-color-description",
     ),
     entry(
         Section::Indicators,
-        "edge-light-width",
+        "indicators-edge-light-width",
         "settings-indicators-edge-light-width",
         "settings-indicators-edge-light-width-description",
     ),
     entry(
         Section::Indicators,
-        "edge-light-trail",
+        "indicators-edge-light-trail",
         "settings-indicators-edge-light-trail",
         "settings-indicators-edge-light-trail-description",
     ),

@@ -553,7 +553,7 @@ impl SheprdWindow {
                     )
                     .child(
                         div()
-                            .text_size(px(17.))
+                            .text_size(px(self.chat_text_size() + 4.))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(rgb(theme.foreground))
                             .child(title),

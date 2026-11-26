@@ -18,7 +18,9 @@ fn reveal_selects_the_real_file_and_reports_a_missing_one() {
     let file = directory.path().join("clip.mp4");
     std::fs::write(&file, b"clip").unwrap();
     let real = std::fs::canonicalize(&file).unwrap();
-    assert_eq!(revealed(&file), Some(Ok(real)));
+    // Windows canonical paths gain a `\\?\` prefix `real_path` keeps out.
+    let revealed_path = revealed(&file).unwrap().unwrap();
+    assert_eq!(std::fs::canonicalize(revealed_path).unwrap(), real);
     let missing = directory.path().join("gone.mp4");
     assert_eq!(revealed(&missing), Some(Err(missing.clone())));
 }

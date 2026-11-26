@@ -12,7 +12,7 @@ final class HomeQuestionTests: XCTestCase {
         app.launchArguments = [
             "-demo", "YES", "-hideDemoBar", "YES", "-provisionalAlerts", "YES", "-AppleLanguages", "(en)",
             "-collapsedHomeSections", "()", "-agentSort", "priority", "-agentScope", "<>",
-            "-computerTagFilter", "", "-computerDeviceFilter", "", "-homeSearch", ""
+            "-computerTagFilter", "", "-computerDeviceFilter", "", "-homeSearch", "", "-homeUnreadOnly", "NO"
         ]
         app.launch()
 

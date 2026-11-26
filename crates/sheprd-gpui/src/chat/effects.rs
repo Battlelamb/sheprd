@@ -15,7 +15,7 @@ use gpui::{Bounds, Pixels};
 use sheprd_chat_protocol::EntryId;
 use std::{
     cell::Cell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -277,6 +277,33 @@ impl Effects {
         }
         self.started
             .retain(|_, since| now.saturating_duration_since(*since) < LONGEST);
+        // Every key was noted above, so more noted than shown means the
+        // program dropped some: forget them, or a long chat grows forever.
+        if self.revisions.len() > keys.len() {
+            let live: HashSet<EntryId> = keys.iter().map(|(id, _)| *id).collect();
+            self.revisions.retain(|id, _| live.contains(id));
+            self.bubbles.retain(|id, _| live.contains(id));
+            self.screens.retain(|id, _| live.contains(id));
+            self.started.retain(|(id, _), _| live.contains(id));
+            if self
+                .playing
+                .as_ref()
+                .is_some_and(|playing| !live.contains(&playing.entry))
+            {
+                self.playing = None;
+                self.target.set(None);
+            }
+        }
+    }
+
+    /// How many messages anything is remembered of.
+    #[cfg(test)]
+    pub(crate) fn remembered(&self) -> usize {
+        let mut ids: HashSet<EntryId> = self.revisions.keys().copied().collect();
+        ids.extend(self.bubbles.keys());
+        ids.extend(self.screens.keys());
+        ids.extend(self.started.keys().map(|(id, _)| *id));
+        ids.len()
     }
 
     /// Plays a message's bubble again, as its replay link asks.

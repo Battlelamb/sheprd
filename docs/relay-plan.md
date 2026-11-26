@@ -115,7 +115,15 @@ Statuses: `0` ok, `1` offline, `2` busy, `3` timeout, `4` limited,
 
 When a relay bans the caller’s network address, its HTTP 403 carries
 `Sheprd-Relay-Banned: 1` and `Cache-Control: no-store`. Clients use this
-response on `/v1/info` to identify a ban before opening a connection.
+response on `/v1/info` to identify a ban before opening a connection. It
+also says why, `Sheprd-Relay-Ban-Reason` (`bad_proof`, `bandwidth`,
+`connection_cap`, `limited`, `malformed`, `manual`, or `probe`), and, for a
+ban that lifts on its own, `Sheprd-Relay-Ban-Seconds` until it does. A QUIC
+connection closed with code 8 carries the same as its reason text,
+`REASON [SECONDS]` (`sheprd_relay::ban`). `relay-connect` passes a ban to the
+app on a `sheprd-relay-ban: REASON [SECONDS]` stderr line, so an SSH host
+behind a banned relay shows the ban, its reason, and when it lifts instead
+of an unreachable host. Unknown words are ignored, never shown.
 
 | Route | What it does |
 | --- | --- |

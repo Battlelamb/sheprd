@@ -142,7 +142,12 @@ impl SheprdWindow {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .child(svg().path("icons/steer.svg").size(px(15.)))
+                                .child(
+                                    svg()
+                                        .path("icons/steer.svg")
+                                        .size(px(15.))
+                                        .text_color(rgb(theme.primary())),
+                                )
                                 .tooltip(move |_, cx| {
                                     cx.new(|_| crate::menu::SettingsHint {
                                         text: hint.clone(),

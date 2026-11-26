@@ -1,4 +1,5 @@
 //! Appearance of the native perimeter trail for the focused agent.
+use crate::i18n::fl;
 use serde::{Deserialize, Deserializer, de::Error as _};
 use std::ops::RangeInclusive;
 
@@ -39,7 +40,7 @@ fn color<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u32>, D::Error> {
     digits
         .and_then(|s| u32::from_str_radix(s, 16).ok())
         .map(Some)
-        .ok_or_else(|| D::Error::custom("edge_light.color must be auto or #RRGGBB"))
+        .ok_or_else(|| D::Error::custom(fl!("error-config-invalid-edge-light-color")))
 }
 
 fn width<'de, D: Deserializer<'de>>(d: D) -> Result<u8, D::Error> {
@@ -47,7 +48,9 @@ fn width<'de, D: Deserializer<'de>>(d: D) -> Result<u8, D::Error> {
     if EdgeLight::WIDTH.contains(&value) {
         Ok(value)
     } else {
-        Err(D::Error::custom("edge_light.width must be 1–12 pixels"))
+        Err(D::Error::custom(fl!(
+            "error-config-invalid-edge-light-width"
+        )))
     }
 }
 
@@ -56,6 +59,8 @@ fn trail<'de, D: Deserializer<'de>>(d: D) -> Result<u8, D::Error> {
     if EdgeLight::TRAIL.contains(&value) {
         Ok(value)
     } else {
-        Err(D::Error::custom("edge_light.trail must be 5–50 percent"))
+        Err(D::Error::custom(fl!(
+            "error-config-invalid-edge-light-trail"
+        )))
     }
 }

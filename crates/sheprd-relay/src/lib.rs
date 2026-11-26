@@ -77,6 +77,8 @@ pub mod socket;
 #[cfg(feature = "server")]
 pub mod splice;
 #[cfg(feature = "server")]
+mod viewer;
+#[cfg(feature = "server")]
 pub mod web;
 pub mod wire;
 

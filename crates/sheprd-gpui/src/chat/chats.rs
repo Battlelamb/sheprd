@@ -504,6 +504,9 @@ impl ChatPane {
                         self.glide.note_output();
                     }
                     for Splice { range, count } in splices {
+                        if range.is_empty() {
+                            self.glide.note_added_rows(count);
+                        }
                         super::glide::splice_in_place(&self.list, range, count);
                     }
                 }
@@ -511,6 +514,11 @@ impl ChatPane {
             }
         }
         self.list_keys = keys;
+        // Entries the program dropped to keep its transcript bounded do not
+        // come back, so neither does what was remembered of them.
+        let entries = &self.session.transcript().entries;
+        self.expanded
+            .retain(|id| entries.binary_search_by_key(id, |entry| entry.id).is_ok());
         self.refresh_text();
         self.widgets.retain(&self.prepared);
         let prepared = &self.prepared;

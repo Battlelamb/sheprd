@@ -114,28 +114,45 @@ pub async fn dial(
         }
         status
     };
-    if let Some(offense) = limited(hub.allow_dial(address)) {
+    // Past the dial rate, a private relay still lets through a dial that
+    // proves a key the computer allows: its owners' devices reconnecting
+    // together are not a flood, so they are only logged. Any other dial
+    // past it answers `Limited`, whatever it would have answered, so this
+    // reveals nothing about a computer or its keys.
+    let over = limited(hub.allow_dial(address));
+    if let Some(offense) = over
+        && !hub.access.requires_token()
+    {
         return Err(refuse(Status::Limited, Dial::Limited, offense));
     }
+    let unproven = |status, outcome, offense: Option<Offense>| match over {
+        Some(limit) => refuse(Status::Limited, Dial::Limited, offense.or(limit)),
+        None => refuse(status, outcome, offense),
+    };
     if prove(key, signature, signed).is_err() {
         let offense = Some(Offense::BadProof);
-        return Err(refuse(Status::Offline, Dial::Unauthorized, offense));
+        return Err(unproven(Status::Offline, Dial::Unauthorized, offense));
     }
     let waiting = match hub.dial(route, *key, address) {
-        Ok(Ok(waiting)) => waiting,
+        Ok(Ok(waiting)) => {
+            if over.is_some() {
+                hub.owner_burst();
+            }
+            waiting
+        }
         // Neither an empty route nor a key the listener did not name costs
         // a point: they must cost the same, as they answer the same, so a
         // caller's ban cannot reveal whether a computer is online; and a
         // phone retrying while its computer is off must not get its
         // household banned. The dial rate limit catches a flood of either.
         Ok(Err(DialRefusal::Offline)) => {
-            return Err(refuse(Status::Offline, Dial::Offline, None));
+            return Err(unproven(Status::Offline, Dial::Offline, None));
         }
         Ok(Err(DialRefusal::Unauthorized)) => {
-            return Err(refuse(Status::Offline, Dial::Unauthorized, None));
+            return Err(unproven(Status::Offline, Dial::Unauthorized, None));
         }
         Ok(Err(DialRefusal::Busy)) | Err(_) => {
-            return Err(refuse(Status::Busy, Dial::Busy, None));
+            return Err(unproven(Status::Busy, Dial::Busy, None));
         }
     };
     let accepted = match timeout(hub.limits.accept_timeout, waiting.accepted).await {

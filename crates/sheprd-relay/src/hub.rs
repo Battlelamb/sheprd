@@ -42,6 +42,8 @@ use tokio::sync::{Notify, mpsc, oneshot};
 const INCOMING_QUEUE: usize = 16;
 /// The most sessions the dashboard lists.
 const MAX_ROWS: usize = 50;
+/// The least time between two warnings about owners' dial bursts.
+const OWNER_WARNING: Duration = Duration::from_secs(60);
 /// Pairing keys one listener may hold at once: a pairing dialog or two.
 pub const MAX_PAIRING_KEYS: usize = 4;
 /// The longest a session opened with a pairing key may last.
@@ -57,6 +59,9 @@ pub struct Hub {
     /// New QUIC connections, per address and wide block.
     connects: PerAddress,
     dials: PerAddress,
+    /// Owners' dials past `dials` since the last warning about them, and
+    /// when that was ([`Hub::owner_burst`]).
+    owner_bursts: Mutex<(u64, Option<Instant>)>,
     /// Bans, earned and manual.
     pub guard: Guard,
     pub limits: Limits,
@@ -217,6 +222,7 @@ impl Hub {
             bans: tokio::sync::broadcast::channel(16).0,
             connects: PerAddress::new(limits.connections_per_minute, origin),
             dials: PerAddress::new(limits.dials_per_minute, origin),
+            owner_bursts: Mutex::default(),
             guard: Guard::new(limits.auto_ban, limits.max_transfer_per_hour),
             limits,
             listens: PerAddress::new(limits.listens_per_minute, origin),
@@ -250,6 +256,34 @@ impl Hub {
     /// Whether `address` may start another dial now.
     pub fn allow_dial(&self, address: IpAddr) -> Outcome {
         self.dials.check(address)
+    }
+
+    /// An owner's dial went past the dial rate on a private relay, which
+    /// lets it through ([`crate::broker::dial`]). Warns at most once a
+    /// minute, with how many did since, so a device stuck reconnecting
+    /// shows in the log without flooding it. Like every line, it names no
+    /// address.
+    pub fn owner_burst(&self) {
+        let mut bursts = match self.owner_bursts.lock() {
+            Ok(bursts) => bursts,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        bursts.0 = bursts.0.saturating_add(1);
+        let now = Instant::now();
+        if bursts
+            .1
+            .is_some_and(|warned| now.saturating_duration_since(warned) < OWNER_WARNING)
+        {
+            return;
+        }
+        let dials = std::mem::take(&mut bursts.0);
+        bursts.1 = Some(now);
+        drop(bursts);
+        tracing::warn!(
+            dials,
+            per_minute = self.limits.dials_per_minute,
+            "an owner's devices dialed past the dial rate; let through"
+        );
     }
 
     /// Whether `address` may start another listen now.

@@ -120,8 +120,11 @@ pub async fn dial(
     // logged. The key is looked up before its proof is checked, so a
     // stranger past the rate costs no cryptography, and a pairing key, an
     // invitation rather than a device, never gets this room. Any other dial
-    // past it answers `Limited`, whatever it would have answered, so this
-    // reveals nothing about a computer or its keys.
+    // past it answers `Limited`, whatever it would have answered. Only its
+    // timing differs: a named key's forged proof is refused one signature
+    // check later, which could confirm to a caller who already holds both a
+    // route and a device's public key that they belong together. That is
+    // the price of sparing the relay that check for every other caller.
     let over = limited(hub.allow_dial(address));
     if let Some(offense) = over
         && !(hub.access.requires_token() && hub.names_dial_key(route, key))

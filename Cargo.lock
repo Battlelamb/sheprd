@@ -11421,12 +11421,14 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
+ "sheprd-backend",
  "sheprd-chat-protocol",
  "sheprd-client",
  "sheprd-core-client",
  "sheprd-mcp",
  "sheprd-memory",
  "sheprd-t3",
+ "sheprd-tmux",
  "sheprd-traces",
  "sysinfo 0.39.6",
  "tempfile",
@@ -11752,6 +11754,7 @@ dependencies = [
  "sheprd-remote-control",
  "sheprd-session",
  "sheprd-terminal",
+ "sheprd-tmux",
  "sheprd-traces",
  "sheprd-updater",
  "sheprd-usage",
@@ -12006,6 +12009,7 @@ dependencies = [
  "sheprd-core-client",
  "sheprd-credentials",
  "sheprd-session",
+ "sheprd-tmux",
  "sheprd-vcs",
  "tar",
  "tempfile",
@@ -12061,6 +12065,7 @@ dependencies = [
  "sheprd-relay-agent",
  "sheprd-session",
  "sheprd-terminal",
+ "sheprd-tmux",
  "sheprd-tunnel",
  "socket2",
  "sysinfo 0.39.6",
@@ -12118,6 +12123,23 @@ dependencies = [
  "sheprd-backend",
  "sheprd-protocol",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "sheprd-tmux"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "serde",
+ "serde_json",
+ "sheprd-backend",
+ "sheprd-chat-protocol",
+ "sheprd-client",
+ "sheprd-session",
+ "sheprd-terminal",
+ "tempfile",
+ "thiserror 2.0.21",
+ "uuid",
 ]
 
 [[package]]

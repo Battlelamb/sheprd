@@ -284,6 +284,7 @@ pub(super) struct Request {
     label: String,
     session: String,
     host_keys: HostKeys,
+    pub(super) tmux: bool,
 }
 
 impl Request {
@@ -322,6 +323,7 @@ impl Request {
             label,
             session: session.into(),
             host_keys: HostKeys::Verify,
+            tmux: false,
         })
     }
 
@@ -341,10 +343,11 @@ impl Request {
 
     /// Blocks on SSH: call it from the background executor.
     pub(super) fn probe(&self) -> Result<HostProbe> {
-        Ok(sheprd_client::probe_host_with(
+        Ok(sheprd_client::ssh::probe_terminals(
             &self.target,
             &self.session,
             self.host_keys,
+            self.tmux,
         )?)
     }
 
@@ -518,7 +521,7 @@ pub(super) fn save(request: &Request, claim: &Claim, probe: HostProbe) -> Result
     request.remember_host_keys()?;
     // Herdr 1's `machine add` provisions Herdr 1 there; a host with
     // herdr-core alone needs none of that, only the device.
-    if probe == HostProbe::Core {
+    if matches!(probe, HostProbe::Tmux | HostProbe::Core) {
         store_host(request, claim)?;
         return Ok(SaveOutcome::Ready);
     }

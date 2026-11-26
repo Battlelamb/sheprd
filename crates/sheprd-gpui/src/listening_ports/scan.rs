@@ -76,10 +76,13 @@ for herdr_pid in $(printf '%s\n' "$herdr_ports" | awk '$1 == "L" { print $2 }' |
     herdr_socket=$(printf '%s\n' "$herdr_env" | sed -n 's/^HERDR_SOCKET_PATH=//p' | head -n 1)
     herdr_terminal=$(printf '%s\n' "$herdr_env" | sed -n 's/^HC_TERMINAL_ID=//p' | head -n 1)
     herdr_core=$(printf '%s\n' "$herdr_env" | sed -n 's/^HC_TERMINAL_SOCKET=//p' | head -n 1)
+    tmux_terminal=$(printf '%s\n' "$herdr_env" | sed -n 's/^SHEPRD_TERMINAL_ID=//p' | head -n 1)
     if [ -n "$herdr_workspace" ]; then
         printf 'E %s %s %s\n' "$herdr_pid" "$herdr_workspace" "$herdr_socket"
     elif [ -n "$herdr_terminal" ]; then
         printf 'C %s %s %s\n' "$herdr_pid" "$herdr_terminal" "$herdr_core"
+    elif [ -n "$tmux_terminal" ]; then
+        printf 'C %s %s\n' "$herdr_pid" "$tmux_terminal"
     else
         continue
     fi

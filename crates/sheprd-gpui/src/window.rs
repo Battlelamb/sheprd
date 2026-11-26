@@ -8,6 +8,7 @@ mod annotate;
 mod announcement;
 mod app_tab;
 mod backdrop;
+mod body;
 pub(crate) mod chrome_focus;
 pub(crate) mod clipboard;
 #[cfg(target_os = "macos")]

@@ -395,14 +395,14 @@ impl SheprdWindow {
             }))
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(move |this, _, _, _| {
-                    this.release_chat_text(&release_pane);
+                cx.listener(move |this, _, _, cx| {
+                    this.release_chat_text(&release_pane, cx);
                 }),
             )
             .on_mouse_up_out(
                 MouseButton::Left,
-                cx.listener(move |this, _, _, _| {
-                    this.release_chat_text(&release_out_pane);
+                cx.listener(move |this, _, _, cx| {
+                    this.release_chat_text(&release_out_pane, cx);
                 }),
             )
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {

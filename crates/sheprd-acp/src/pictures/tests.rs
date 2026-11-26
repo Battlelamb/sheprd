@@ -95,6 +95,14 @@ fn a_link_captions_its_picture_with_its_alt_text_and_title() {
             },
         ]
     );
+    assert_eq!(
+        captions(r#"![Use \\. for a dot](a.png "x\\.\\\"b \c")"#),
+        [Some(
+            r#"Use \. for a dot
+x\.\"b \c"#
+                .to_owned()
+        )]
+    );
     let long = "é".repeat(MAX_CAPTION + 10);
     let caption = captions(&format!("![{long}](f.png)")).remove(0).unwrap();
     assert_eq!(caption.chars().count(), MAX_CAPTION);

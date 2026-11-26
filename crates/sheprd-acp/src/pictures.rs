@@ -133,10 +133,9 @@ fn unescaped(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     while let Some(ch) = chars.next() {
-        if ch == '\\' && chars.peek().is_some_and(char::is_ascii_punctuation) {
-            continue;
-        }
-        out.push(ch);
+        // The escaped character is kept as is, even another backslash.
+        let escaped = (ch == '\\').then(|| chars.next_if(char::is_ascii_punctuation));
+        out.push(escaped.flatten().unwrap_or(ch));
     }
     out
 }

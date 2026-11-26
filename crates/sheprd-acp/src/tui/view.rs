@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::text::Line;
 use sheprd_chat_protocol::{
-    Attachment, ByeReason, Change, Command, Cursor, Device, EntryId, MAX_ATTACHMENTS, Origin, Rejection,
-    ServerMessage, Status, Transcript, Via,
+    Attachment, ByeReason, Change, Command, Cursor, Device, EntryId, MAX_ATTACHMENTS, Origin,
+    Rejection, ServerMessage, Status, Transcript, Via,
 };
 use unicode_width::UnicodeWidthChar;
 

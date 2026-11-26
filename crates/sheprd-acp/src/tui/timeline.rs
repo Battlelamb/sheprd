@@ -8,7 +8,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
-use sheprd_chat_protocol::{Author, Entry, EntryId, EntryKind};
+use sheprd_chat_protocol::{Author, Entry, EntryId, EntryKind, thread::Thread};
 
 use super::lines;
 
@@ -78,6 +78,25 @@ fn railed(entry: &Entry, width: usize) -> Vec<Line<'static>> {
         .collect()
 }
 
+/// The name of the agent that held the conversation at entry `id`: the
+/// segment it falls in, or `current` for the segment holding it now and
+/// for a chat that keeps no thread.
+fn agent_at<'a>(thread: Option<&Thread>, current: &'a str, id: EntryId) -> &'a str {
+    let Some(thread) = thread else {
+        return current;
+    };
+    let last = thread.segments.len().saturating_sub(1);
+    let index = thread
+        .segments
+        .iter()
+        .rposition(|segment| segment.after.is_none_or(|after| after < id))
+        .unwrap_or(0);
+    match thread.segments.get(index) {
+        Some(segment) if index < last => segment.agent.display_name(),
+        _ => current,
+    }
+}
+
 fn header(group: Group, agent: &str) -> Line<'static> {
     let style = Style::default()
         .fg(group.color())
@@ -89,11 +108,13 @@ fn header(group: Group, agent: &str) -> Line<'static> {
     Line::from(vec![Span::styled(mark, style), Span::styled(name, style)])
 }
 
-/// Every entry's lines, with a header where the author changes. Entry lines
+/// Every entry's lines, with a header where the author changes, naming the
+/// agent of the `thread` segment each reply falls in. Entry lines
 /// come from `cache`, filled at `width`; headers and spacing are cheap and
 /// drawn fresh, since they depend on the neighbors.
 pub(crate) fn lines(
     entries: &[Entry],
+    thread: Option<&Thread>,
     agent: &str,
     width: usize,
     cache: &mut HashMap<EntryId, Vec<Line<'static>>>,
@@ -104,9 +125,13 @@ pub(crate) fn lines(
     for (index, entry) in shown.iter().enumerate() {
         let turn = matches!(entry.kind, EntryKind::Turn(_));
         let group = Group::of(entry);
-        if !turn && current != Some(group) {
-            out.push(header(group, agent));
-            current = Some(group);
+        let author = match group {
+            Group::User => None,
+            Group::Agent => Some(agent_at(thread, agent, entry.id)),
+        };
+        if !turn && current != Some((group, author)) {
+            out.push(header(group, author.unwrap_or(agent)));
+            current = Some((group, author));
         }
         if turn {
             current = None;

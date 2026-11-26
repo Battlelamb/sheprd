@@ -5,6 +5,7 @@
 mod dropped;
 mod lines;
 mod render;
+mod timeline;
 mod view;
 
 use std::{

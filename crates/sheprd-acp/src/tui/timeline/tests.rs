@@ -1,6 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use sheprd_chat_protocol::{Tool, ToolKind, ToolStatus, TurnEnd, TurnSummary};
+use sheprd_chat_protocol::{
+    Agent, Tool, ToolKind, ToolStatus, TurnEnd, TurnSummary,
+    thread::{Thread, ThreadId},
+};
 
 use super::*;
 
@@ -53,7 +56,11 @@ fn turn(id: u64) -> Entry {
 }
 
 fn plain(entries: &[Entry]) -> Vec<String> {
-    lines(entries, "Claude", 60, &mut HashMap::new())
+    threaded(entries, None, "Claude")
+}
+
+fn threaded(entries: &[Entry], thread: Option<&Thread>, agent: &str) -> Vec<String> {
+    lines(entries, thread, agent, 60, &mut HashMap::new())
         .iter()
         .map(|line| {
             line.spans
@@ -119,6 +126,7 @@ fn no_line_is_wider_than_asked() {
     for width in [12, 20, 60] {
         let all = lines(
             &[user(1, &long), agent(2, &long), turn(3)],
+            None,
             "Claude",
             width,
             &mut HashMap::new(),
@@ -127,4 +135,34 @@ fn no_line_is_wider_than_asked() {
             assert!(line.width() <= width, "{line:?} at {width}");
         }
     }
+}
+
+fn agent_headers(text: &[String]) -> Vec<&str> {
+    text.iter()
+        .map(String::as_str)
+        .filter(|line| line.starts_with(" ◇"))
+        .collect()
+}
+
+#[test]
+fn replies_keep_the_agent_that_wrote_them_after_a_switch() {
+    let mut thread = Thread::new(ThreadId::random(), Agent::Claude);
+    thread.switch(Agent::Codex, Some(EntryId(3)));
+    let entries = [
+        user(1, "one"),
+        agent(2, "a"),
+        turn(3),
+        user(4, "two"),
+        agent(5, "b"),
+    ];
+    let text = threaded(&entries, Some(&thread), "Codex");
+    assert_eq!(agent_headers(&text), [" ◇ Claude", " ◇ Codex"]);
+}
+
+#[test]
+fn a_switch_inside_a_reply_names_the_new_agent() {
+    let mut thread = Thread::new(ThreadId::random(), Agent::Claude);
+    thread.switch(Agent::Codex, Some(EntryId(2)));
+    let text = threaded(&[agent(2, "a"), agent(3, "b")], Some(&thread), "Codex");
+    assert_eq!(agent_headers(&text), [" ◇ Claude", " ◇ Codex"]);
 }

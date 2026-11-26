@@ -227,6 +227,7 @@ impl View {
         }
         out.extend(super::timeline::lines(
             &self.transcript.entries,
+            self.transcript.thread.as_ref(),
             &self.transcript.agent,
             width,
             &mut self.cache,

@@ -52,6 +52,8 @@ pub enum Error {
         #[source]
         source: client::Error,
     },
+    #[error("This relay has banned your network address{0}")]
+    RelayBanned(sheprd_relay::ban::Ban),
     #[error("the other computer's relay details are not valid")]
     RelayInfo,
     #[error("could not start the async runtime")]
@@ -90,7 +92,8 @@ impl Error {
             Self::Relay {
                 source: client::Error::Banned(ban),
                 ..
-            } => Some(*ban),
+            }
+            | Self::RelayBanned(ban) => Some(*ban),
             _ => None,
         }
     }

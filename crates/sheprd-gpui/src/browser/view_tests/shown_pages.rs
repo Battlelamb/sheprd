@@ -104,15 +104,18 @@ fn a_machine_a_restored_layout_shows_gets_its_display_on_the_next_tick(
 /// host's workspace gets no display, and its tab says why.
 #[cfg(target_os = "macos")]
 #[gpui::test]
-fn a_machine_tab_of_another_hosts_workspace_never_shows_the_machine(
-    cx: &mut gpui::TestAppContext,
-) {
+fn a_machine_tab_of_another_hosts_workspace_never_shows_the_machine(cx: &mut gpui::TestAppContext) {
     let (view, cx) = window(cx);
     let name = crate::machine::Name::try_from("remote-scope-test".to_owned()).unwrap();
     let id = cx.update(|_, cx| {
         let location = Some(Location::Machine { name });
         Store::update(cx, |store| {
-            store.open(crate::browser::Scope::endpoint("ssh-host"), "w0", location, None)
+            store.open(
+                crate::browser::Scope::endpoint("ssh-host"),
+                "w0",
+                location,
+                None,
+            )
         })
         .unwrap()
     });

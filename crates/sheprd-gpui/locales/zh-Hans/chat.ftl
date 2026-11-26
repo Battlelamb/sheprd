@@ -192,3 +192,6 @@ chat-form-busy = 请先完成当前消息，再发送此表单
 
 chat-viewer-previous = 上一张
 chat-viewer-next = 下一张
+
+chat-open-message-text = 将完整消息作为文本文件打开
+chat-message-file-error = 无法将消息保存为文本文件：{ $error }

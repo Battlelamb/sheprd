@@ -82,6 +82,19 @@ fn a_link_captions_its_picture_with_its_alt_text_and_title() {
             },
         ]
     );
+    assert_eq!(
+        linked(r#"![A](a.png "A \"quoted\" (draft") ![B](b.png)"#, cwd),
+        [
+            Linked {
+                path: PathBuf::from("/work/a.png"),
+                caption: Some("A\nA \"quoted\" (draft".to_owned()),
+            },
+            Linked {
+                path: PathBuf::from("/work/b.png"),
+                caption: Some("B".to_owned()),
+            },
+        ]
+    );
     let long = "é".repeat(MAX_CAPTION + 10);
     let caption = captions(&format!("![{long}](f.png)")).remove(0).unwrap();
     assert_eq!(caption.chars().count(), MAX_CAPTION);

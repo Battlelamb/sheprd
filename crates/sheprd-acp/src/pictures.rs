@@ -97,15 +97,22 @@ pub(crate) fn linked(text: &str, cwd: &Path) -> Vec<Linked> {
 }
 
 /// Where the `)` closing a link's target and title is in `rest`: not one
-/// inside `<…>`, a quoted title, or balanced parentheses, so a path such as
-/// `shot (1).png` and a title such as `"Revenue (USD)"` stay whole.
+/// inside `<…>`, a quoted title, or balanced parentheses, nor one escaped
+/// with a backslash, so a path such as `shot (1).png` and a title such as
+/// `"Revenue (USD)"` or `"A \"draft\" (v2)"` stay whole.
 fn link_end(rest: &str) -> Option<usize> {
     let mut quote = None;
     let mut angle = false;
     let mut depth = 0usize;
     let mut after_space = false;
+    let mut escaped = false;
     for (index, ch) in rest.char_indices() {
+        if std::mem::take(&mut escaped) {
+            after_space = false;
+            continue;
+        }
         match (quote, ch) {
+            (_, '\\') => escaped = true,
             (Some(open), _) if ch == open => quote = None,
             (Some(_), _) => {}
             _ if angle => angle = ch != '>',
@@ -121,6 +128,19 @@ fn link_end(rest: &str) -> Option<usize> {
     None
 }
 
+/// `text` with Markdown's backslash escapes of punctuation undone.
+fn unescaped(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' && chars.peek().is_some_and(char::is_ascii_punctuation) {
+            continue;
+        }
+        out.push(ch);
+    }
+    out
+}
+
 /// A picture's caption from its alt text and its quoted title, each on one
 /// line, bounded to [`MAX_CAPTION`] characters.
 fn caption(alt: &str, title: &str) -> Option<String> {
@@ -131,7 +151,7 @@ fn caption(alt: &str, title: &str) -> Option<String> {
         .or_else(|| title.strip_prefix('(')?.strip_suffix(')'))
         .unwrap_or("");
     let line = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let caption = [line(alt), line(title)]
+    let caption = [line(&unescaped(alt)), line(&unescaped(title))]
         .into_iter()
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()

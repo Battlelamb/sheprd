@@ -53,6 +53,7 @@ mod terminal;
 mod text;
 pub(crate) mod turns;
 mod upload;
+mod user_text_file;
 mod view;
 pub(crate) mod visual;
 pub(crate) mod widgets;

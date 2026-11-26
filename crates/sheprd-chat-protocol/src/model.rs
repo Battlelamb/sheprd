@@ -571,6 +571,9 @@ impl Attachment {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SessionInfo {
+    /// The agent accepts a queued message inside its running turn.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub can_steer: bool,
     /// The notice that closes the conversation a continued session brought
     /// with it, such as a terminal agent's moved into this chat: entries up
     /// to it came before this chat, and a client may fold them.

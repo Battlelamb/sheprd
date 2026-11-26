@@ -302,6 +302,7 @@ fn session() -> Vector {
         Change::Clients { count: 2 },
         Change::Session {
             session: Some(SessionInfo {
+                can_steer: false,
                 continued: None,
                 cwd: Some("/work".into()),
                 id: "s1".into(),

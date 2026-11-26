@@ -9,8 +9,8 @@ use std::collections::{HashMap, HashSet};
 use acp::v1 as wire;
 use sheprd_chat_protocol::{
     ActivityKind, ActivityState, Author, Change, Cost, EDIT_OMITTED, Entry, EntryId, EntryKind,
-    Image, NoticeLevel, PlanEntry, PlanPriority, PlanStatus, SessionInfo, SlashCommand, Tokens,
-    Tool, ToolContent, ToolKind, ToolStatus, Transcript, TurnSummary, Usage,
+    Image, NoticeLevel, PlanEntry, PlanPriority, PlanStatus, SlashCommand, Tokens, Tool,
+    ToolContent, ToolKind, ToolStatus, Transcript, TurnSummary, Usage,
 };
 
 /// Sub-agents whose step counts are kept before forgetting those that left
@@ -707,15 +707,6 @@ pub(crate) fn tokens(result: &serde_json::Value) -> Option<Tokens> {
         thought: usage.thought_tokens,
         total: usage.total_tokens,
     })
-}
-
-pub(crate) fn session(id: &wire::SessionId, cwd: &std::path::Path) -> SessionInfo {
-    SessionInfo {
-        continued: None,
-        cwd: Some(cwd.display().to_string()),
-        id: id.0.to_string(),
-        title: None,
-    }
 }
 
 /// A content block's picture, when it is one every client can draw; any

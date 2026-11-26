@@ -3,7 +3,9 @@ import SheprdRemoteCore
 
 /// A permission request without choices, in a half-height sheet: what the
 /// agent asks for, shortened to a peek, and the answers pinned in thumb
-/// reach. A command shows as code; tapping the peek reads it in full at
+/// reach. A long list of answers (an extension's pick list) scrolls with
+/// the request instead, so none falls off the screen. A command shows as
+/// code; tapping the peek reads it in full at
 /// full height, with copy.
 struct PermissionRequest: View {
     let permission: Permission
@@ -20,15 +22,22 @@ struct PermissionRequest: View {
                 } else {
                     titleText
                 }
+                if !pinsAnswers { answers.padding(.horizontal, -24) }
             }
             .padding(24)
         }
-        .safeAreaInset(edge: .bottom) { answers }
+        .safeAreaInset(edge: .bottom) { if pinsAnswers { answers } }
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationContentInteraction(.resizes)
         .presentationDragIndicator(.visible)
         .onChange(of: detent) { _, now in expanded = now == .large }
     }
+
+    /// Approvals stay in thumb reach; a longer list scrolls.
+    private var pinsAnswers: Bool { permission.options.count <= Self.pinnedAnswers }
+
+    /// Yes, No and two "always" answers: the most an approval offers.
+    private static let pinnedAnswers = 4
 
     private var header: some View {
         let tint = Home.AgentStatus.blocked.color

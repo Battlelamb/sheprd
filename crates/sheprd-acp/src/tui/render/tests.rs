@@ -106,3 +106,24 @@ fn the_view_scrolls_back_and_clamps() {
     assert!(screen.contains("› please fix"));
     assert!(view.scroll < 1000);
 }
+
+#[test]
+fn the_header_drops_usage_before_the_agent() {
+    let mut view = busy();
+    let wide = screen(&mut view, 80, 20);
+    let header = wide.lines().next().unwrap();
+    assert!(header.contains("Claude") && header.contains("1 client attached"));
+    let narrow = screen(&mut view, 32, 20);
+    let header = narrow.lines().next().unwrap();
+    assert!(header.contains("Claude"), "{header}");
+    assert!(!header.contains("client"), "{header}");
+}
+
+#[test]
+fn the_composer_marks_where_the_prompt_goes() {
+    let mut view = busy();
+    view.transcript.permissions.clear();
+    let screen = screen(&mut view, 60, 16);
+    assert!(screen.contains("› Type to queue a prompt…"), "{screen}");
+    assert!(screen.contains('╭'), "{screen}");
+}

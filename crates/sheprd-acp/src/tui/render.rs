@@ -2,10 +2,10 @@
 
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Position, Rect},
+    layout::{Alignment, Constraint, Layout, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, BorderType, Borders, Padding, Paragraph},
 };
 use sheprd_chat_protocol::{OptionCategory, PermissionKind, Status, display};
 
@@ -13,6 +13,9 @@ use super::{lines, view::View};
 
 const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 const COMPOSER_ROWS: usize = 8;
+/// The mark before the composer's first row; later rows line up under it.
+const PROMPT: &str = "› ";
+const PROMPT_WIDTH: usize = 2;
 
 pub(crate) fn draw(frame: &mut Frame<'_>, view: &mut View, tick: usize) {
     let area = frame.area();
@@ -34,6 +37,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, view: &mut View, tick: usize) {
     };
     let [
         header,
+        rule,
         body,
         plan_area,
         queue_area,
@@ -41,6 +45,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, view: &mut View, tick: usize) {
         bottom_area,
         footer,
     ] = Layout::vertical([
+        Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Min(1),
         Constraint::Length(height(plan_height)),
@@ -50,7 +55,14 @@ pub(crate) fn draw(frame: &mut Frame<'_>, view: &mut View, tick: usize) {
         Constraint::Length(1),
     ])
     .areas(area);
-    frame.render_widget(Paragraph::new(header_line(view, tick)), header);
+    draw_header(frame, view, tick, header);
+    frame.render_widget(
+        Paragraph::new(Line::styled(
+            "─".repeat(width),
+            Style::default().fg(Color::DarkGray),
+        )),
+        rule,
+    );
     draw_body(frame, view, body);
     frame.render_widget(
         Paragraph::new(plan.into_iter().take(plan_height).collect::<Vec<_>>()),
@@ -79,27 +91,55 @@ pub(crate) fn draw(frame: &mut Frame<'_>, view: &mut View, tick: usize) {
     let footer_line = match &view.flash {
         Some(flash) => Line::styled(flash.clone(), Style::default().fg(Color::Yellow)),
         None => {
-            let hints: &[&str] = if bottom == Bottom::Settings {
+            let hints: &[&[(&str, &str)]] = if bottom == Bottom::Settings {
                 &[
-                    "↑/↓ setting · ←/→ change · Esc close",
-                    "←/→ change · Esc close",
+                    &[("↑/↓", "setting"), ("←/→", "change"), ("Esc", "close")],
+                    &[("←/→", "change"), ("Esc", "close")],
                 ]
             } else {
                 &[
-                    "Enter send · Alt+Enter newline · Esc cancel · Shift+Tab mode · Ctrl+O settings · Ctrl+D quit",
-                    "Enter send · Esc cancel · Ctrl+O settings · Ctrl+D quit",
-                    "Enter send · Ctrl+D quit",
+                    &[
+                        ("Enter", "send"),
+                        ("Alt+Enter", "newline"),
+                        ("Esc", "cancel"),
+                        ("Shift+Tab", "mode"),
+                        ("Ctrl+O", "settings"),
+                        ("Ctrl+D", "quit"),
+                    ],
+                    &[
+                        ("Enter", "send"),
+                        ("Esc", "cancel"),
+                        ("Ctrl+O", "settings"),
+                        ("Ctrl+D", "quit"),
+                    ],
+                    &[("Enter", "send"), ("Ctrl+D", "quit")],
                 ]
             };
-            let hint = hints
+            hints
                 .iter()
-                .copied()
-                .find(|hint| hint.chars().count() <= width)
-                .unwrap_or_default();
-            Line::styled(hint, Style::default().fg(Color::DarkGray))
+                .map(|hints| hint_line(hints))
+                .find(|line| line.width() <= width)
+                .unwrap_or_default()
         }
     };
     frame.render_widget(Paragraph::new(footer_line), footer);
+}
+
+/// Keys and what they do, the keys standing out from their quiet labels.
+fn hint_line(hints: &[(&str, &str)]) -> Line<'static> {
+    let dim = Style::default().fg(Color::DarkGray);
+    let mut spans = Vec::new();
+    for (index, (key, label)) in hints.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(" · ", dim));
+        }
+        spans.push(Span::styled(
+            (*key).to_owned(),
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(format!(" {label}"), dim));
+    }
+    Line::from(spans)
 }
 
 fn height(rows: usize) -> u16 {
@@ -139,6 +179,7 @@ fn draw_completions(frame: &mut Frame<'_>, view: &View, area: Rect) {
 fn draw_settings(frame: &mut Frame<'_>, view: &View, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .title(" Settings ")
         .border_style(Style::default().fg(Color::Cyan));
     let inner = block.inner(area);
@@ -178,6 +219,30 @@ fn draw_settings(frame: &mut Frame<'_>, view: &View, area: Rect) {
     frame.render_widget(Paragraph::new(rows), inner);
 }
 
+/// The status badge, the agent and its settings on the left; what the
+/// session uses on the right, dropped from its end when the row is short.
+fn draw_header(frame: &mut Frame<'_>, view: &View, tick: usize, area: Rect) {
+    let left = header_line(view, tick);
+    let mut right = usage_spans(view);
+    let room = usize::from(area.width);
+    while !right.is_empty() && left.width() + spans_width(&right) + 2 > room {
+        // Each part is a separator and its text.
+        right.truncate(right.len().saturating_sub(2));
+    }
+    frame.render_widget(Paragraph::new(left), area);
+    if !right.is_empty() {
+        right.push(Span::raw(" "));
+        frame.render_widget(
+            Paragraph::new(Line::from(right)).alignment(Alignment::Right),
+            area,
+        );
+    }
+}
+
+fn spans_width(spans: &[Span<'_>]) -> usize {
+    spans.iter().map(Span::width).sum()
+}
+
 fn header_line(view: &View, tick: usize) -> Line<'static> {
     let transcript = &view.transcript;
     let (status, color) = match &transcript.status {
@@ -186,7 +251,7 @@ fn header_line(view: &View, tick: usize) -> Line<'static> {
             format!("{} starting", SPINNER[tick % SPINNER.len()]),
             Color::Yellow,
         ),
-        Status::Idle => ("ready".to_owned(), Color::Green),
+        Status::Idle => ("● ready".to_owned(), Color::Green),
         Status::Working => {
             let elapsed = transcript.turn.map(|turn| {
                 display::duration(crate::session::now_ms().saturating_sub(turn.started_ms))
@@ -199,16 +264,22 @@ fn header_line(view: &View, tick: usize) -> Line<'static> {
                 Color::Yellow,
             )
         }
-        Status::Failed { .. } => ("failed".to_owned(), Color::Red),
-        Status::Exited { .. } => ("exited".to_owned(), Color::Red),
+        Status::Failed { .. } => ("✗ failed".to_owned(), Color::Red),
+        Status::Exited { .. } => ("✗ exited".to_owned(), Color::Red),
     };
     let dim = Style::default().fg(Color::DarkGray);
+    // Reversed, the badge takes the status's color whatever the theme.
     let mut spans = vec![
         Span::styled(
-            format!(" {} ", transcript.agent),
+            format!(" {status} "),
+            Style::default()
+                .fg(color)
+                .add_modifier(Modifier::REVERSED | Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" {}", transcript.agent),
             Style::default().add_modifier(Modifier::BOLD),
         ),
-        Span::styled(status, Style::default().fg(color)),
     ];
     // The settings the agent offers come first; its older modes only when it
     // offers no mode setting.
@@ -239,6 +310,15 @@ fn header_line(view: &View, tick: usize) -> Line<'static> {
         spans.push(Span::styled(" · ", dim));
         spans.push(Span::styled(title, dim));
     }
+    Line::from(spans)
+}
+
+/// The context used, the cost, and the clients attached, each after its
+/// separator, most useful first.
+fn usage_spans(view: &View) -> Vec<Span<'static>> {
+    let transcript = &view.transcript;
+    let dim = Style::default().fg(Color::DarkGray);
+    let mut spans = Vec::new();
     if let Some(usage) = transcript.usage.as_ref().filter(|usage| usage.size > 0) {
         let percent = usage.percent();
         let color = match percent {
@@ -256,7 +336,8 @@ fn header_line(view: &View, tick: usize) -> Line<'static> {
             Style::default().fg(color),
         ));
         if let Some(cost) = usage.cost.as_ref().filter(|cost| cost.micros > 0) {
-            spans.push(Span::styled(format!(" · {}", display::cost(cost)), dim));
+            spans.push(Span::styled(" · ", dim));
+            spans.push(Span::styled(display::cost(cost), dim));
         }
     }
     if transcript.clients > 0 {
@@ -267,7 +348,11 @@ fn header_line(view: &View, tick: usize) -> Line<'static> {
         spans.push(Span::styled(" · ", dim));
         spans.push(Span::styled(attached, Style::default().fg(Color::Cyan)));
     }
-    Line::from(spans)
+    // The first part needs no separator before it.
+    if !spans.is_empty() {
+        spans.remove(0);
+    }
+    spans
 }
 
 fn draw_body(frame: &mut Frame<'_>, view: &mut View, area: Rect) {
@@ -281,14 +366,24 @@ fn draw_body(frame: &mut Frame<'_>, view: &mut View, area: Rect) {
 }
 
 fn composer_height(view: &View, width: usize) -> (usize, Bottom) {
-    let (rows, _) = view.composer.layout(width.saturating_sub(2));
+    let (rows, _) = view
+        .composer
+        .layout(width.saturating_sub(4 + PROMPT_WIDTH).max(1));
     (rows.len().clamp(1, COMPOSER_ROWS) + 2, Bottom::Composer)
 }
 
 fn draw_composer(frame: &mut Frame<'_>, view: &View, area: Rect) {
+    // The border says whether a prompt goes now or waits in the queue.
+    let border = match view.transcript.status {
+        Status::Idle => Color::Cyan,
+        Status::Working | Status::Starting => Color::Yellow,
+        Status::Failed { .. } | Status::Exited { .. } => Color::DarkGray,
+    };
     let mut block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_type(BorderType::Rounded)
+        .padding(Padding::horizontal(1))
+        .border_style(Style::default().fg(border));
     // Files the prompt carries name themselves on the composer's border.
     if !view.attachments.is_empty() {
         let names: Vec<&str> = view.attachments.iter().map(|file| file.name()).collect();
@@ -297,8 +392,18 @@ fn draw_composer(frame: &mut Frame<'_>, view: &View, area: Rect) {
             Style::default().fg(Color::Cyan),
         ));
     }
-    let inner = block.inner(area);
+    let framed = block.inner(area);
     frame.render_widget(block, area);
+    let [mark, inner] =
+        Layout::horizontal([Constraint::Length(height(PROMPT_WIDTH)), Constraint::Min(1)])
+            .areas(framed);
+    frame.render_widget(
+        Paragraph::new(Line::styled(
+            PROMPT,
+            Style::default().fg(border).add_modifier(Modifier::BOLD),
+        )),
+        mark,
+    );
     if view.composer.text.is_empty() {
         let hint = match view.transcript.status {
             Status::Working => "Type to queue a prompt…".to_owned(),
@@ -351,6 +456,7 @@ fn draw_permission(frame: &mut Frame<'_>, view: &View, area: Rect) {
     };
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .title(title)
         .border_style(Style::default().fg(Color::Magenta));
     let inner = block.inner(area);

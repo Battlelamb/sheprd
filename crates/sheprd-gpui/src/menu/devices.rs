@@ -146,7 +146,7 @@ impl SheprdWindow {
         if crate::cloud::unavailable().is_some() {
             return Vec::new();
         }
-        crate::cloud::CloudProvider::ALL
+        crate::cloud::enabled()
             .iter()
             .copied()
             .filter(|provider| match provider {

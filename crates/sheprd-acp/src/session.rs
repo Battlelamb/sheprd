@@ -151,6 +151,8 @@ pub(crate) struct Config {
     pub exit_with_agent: bool,
     /// The ACP auth method Gemini tries when `session/new` asks for sign-in.
     pub gemini_auth_method: Option<String>,
+    /// How the agent running gets the server that reads the chat's thread.
+    pub given: crate::thread_mcp::Given,
     /// The built-in agent running, or `None` for a custom command.
     pub harness: Option<Agent>,
     /// The conversation so far, for a continued session whose agent does

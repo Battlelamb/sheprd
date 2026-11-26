@@ -233,7 +233,7 @@ impl<R: FnMut(Update)> Session<R> {
                 self.acp_session = Some(id.clone());
                 self.request(
                     "session/load",
-                    &wire::LoadSessionRequest::new(id, cwd),
+                    &wire::LoadSessionRequest::new(id, cwd).mcp_servers(self.mcp_servers()),
                     Pending::LoadSession,
                 );
             }
@@ -254,10 +254,24 @@ impl<R: FnMut(Update)> Session<R> {
                 }
                 self.request(
                     "session/new",
-                    &wire::NewSessionRequest::new(cwd),
+                    &wire::NewSessionRequest::new(cwd).mcp_servers(self.mcp_servers()),
                     Pending::NewSession,
                 );
             }
+        }
+    }
+
+    /// The MCP servers an ACP agent's session gets: the one reading the
+    /// chat's thread, when the agent takes it in its session.
+    fn mcp_servers(&self) -> Vec<wire::McpServer> {
+        match &self.config.given {
+            crate::thread_mcp::Given::InSession(server) => {
+                vec![wire::McpServer::Stdio(
+                    wire::McpServerStdio::new(crate::thread_mcp::NAME, &server.program)
+                        .args(server.args.clone()),
+                )]
+            }
+            _ => Vec::new(),
         }
     }
 
@@ -280,7 +294,7 @@ impl<R: FnMut(Update)> Session<R> {
                 let cwd = self.config.cwd.clone();
                 self.request(
                     "session/new",
-                    &wire::NewSessionRequest::new(cwd),
+                    &wire::NewSessionRequest::new(cwd).mcp_servers(self.mcp_servers()),
                     Pending::NewSession,
                 );
                 return;
@@ -423,7 +437,15 @@ impl<R: FnMut(Update)> Session<R> {
         let Some(agent) = self.config.harness else {
             return;
         };
-        let Some((joining, handoff)) = self.thread.opened(agent, loaded, &self.transcript.entries)
+        // The thread's file holds the whole conversation, which the
+        // transcript's window may not.
+        let kept = self.kept_conversation();
+        let tool = kept.is_some() && self.config.given.reads();
+        let (entries, trimmed) = match &kept {
+            Some(contents) => (contents.entries.as_slice(), contents.trimmed.as_slice()),
+            None => (self.transcript.entries.as_slice(), &[][..]),
+        };
+        let Some((joining, handoff)) = self.thread.opened(agent, loaded, entries, tool, trimmed)
         else {
             return;
         };

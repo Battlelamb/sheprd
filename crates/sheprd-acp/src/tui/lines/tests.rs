@@ -125,9 +125,12 @@ fn effect_lines_are_left_out_but_their_text_stays() {
         !shown.iter().any(|line| line.starts_with(":::")),
         "{shown:?}"
     );
-    // Code is shown as written.
+    // Code is shown as written, after its bar.
     assert_eq!(
-        shown.iter().filter(|line| **line == "::confetti").count(),
+        shown
+            .iter()
+            .filter(|line| line.ends_with("::confetti"))
+            .count(),
         1
     );
 }

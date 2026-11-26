@@ -4,7 +4,47 @@ use super::*;
 use crate::cli::{Parsed, parse};
 
 const TOKEN: &str = "abcdefghijklmnopqrstuvwxyz0123_-";
-const PROGRAM: &str = "/opt/sheprd/sheprd-acp";
+
+/// `path`, absolute on this platform: Windows wants a drive.
+fn abs(path: &str) -> String {
+    if cfg!(windows) {
+        format!("C:{path}")
+    } else {
+        path.to_owned()
+    }
+}
+
+fn program() -> String {
+    abs("/opt/sheprd/sheprd-acp")
+}
+
+/// A resumer for the chat `args` start, writing to a buffer.
+fn build(
+    args: &[&str],
+    adapter: bool,
+    cwd: &str,
+    thread: Option<ThreadId>,
+) -> Option<Resumer<Vec<u8>>> {
+    build_with(TOKEN, &program(), args, adapter, cwd, thread)
+}
+
+fn build_with(
+    token: &str,
+    program: &str,
+    args: &[&str],
+    adapter: bool,
+    cwd: &str,
+    thread: Option<ThreadId>,
+) -> Option<Resumer<Vec<u8>>> {
+    let launch = Launch::new(
+        OsStr::new(program),
+        &options(args),
+        adapter,
+        Path::new(cwd),
+        thread,
+    )?;
+    Resumer::new(OsStr::new(token), launch, 4242, Vec::new())
+}
 
 fn options(args: &[&str]) -> Options {
     match parse(args.iter().map(OsString::from)).unwrap() {
@@ -14,15 +54,8 @@ fn options(args: &[&str]) -> Options {
 }
 
 fn resumer(args: &[&str]) -> Option<Resumer<Vec<u8>>> {
-    Resumer::new(
-        OsStr::new(TOKEN),
-        OsStr::new(PROGRAM),
-        &options(args),
-        Path::new("/home/user/project"),
-        None,
-        4242,
-        Vec::new(),
-    )
+    let adapter = args.contains(&"--acp");
+    build(args, adapter, &abs("/home/user/project"), None)
 }
 
 /// Each report written, as its body's `key=value` pairs, with the mac
@@ -93,11 +126,11 @@ fn reports_the_command_that_continues_the_session() {
     assert_eq!(value(report, "pid"), Some("4242"));
     assert_eq!(
         argv(report),
-        [PROGRAM, "--resume", "s-1", "--acp", "claude"]
+        [program().as_str(), "--resume", "s-1", "--acp", "claude"]
     );
     assert_eq!(
         value(report, "cwd"),
-        Some(STANDARD.encode("/home/user/project").as_str())
+        Some(STANDARD.encode(abs("/home/user/project")).as_str())
     );
     assert_eq!(report.last().unwrap().0, "cwd");
 }
@@ -105,14 +138,11 @@ fn reports_the_command_that_continues_the_session() {
 #[test]
 fn keeps_thread_and_view_choices() {
     let thread = ThreadId::random();
-    let mut resumer = Resumer::new(
-        OsStr::new(TOKEN),
-        OsStr::new(PROGRAM),
-        &options(&["--headless", "--no-attach", "codex"]),
-        Path::new("/w"),
+    let mut resumer = build(
+        &["--headless", "--no-attach", "codex"],
+        false,
+        &abs("/w"),
         Some(thread),
-        1,
-        Vec::new(),
     )
     .unwrap();
     resumer.opened("t-9");
@@ -120,7 +150,7 @@ fn keeps_thread_and_view_choices() {
     assert_eq!(
         argv(&reports[0]),
         [
-            PROGRAM,
+            program().as_str(),
             "--resume",
             "t-9",
             "--thread",
@@ -176,16 +206,8 @@ fn a_session_it_cannot_type_back_clears_the_earlier_one() {
 
 #[test]
 fn a_report_too_long_for_every_terminal_is_not_sent() {
-    let mut resumer = Resumer::new(
-        OsStr::new(TOKEN),
-        OsStr::new(PROGRAM),
-        &options(&["claude"]),
-        Path::new(&format!("/{}", "d".repeat(1600))),
-        None,
-        1,
-        Vec::new(),
-    )
-    .unwrap();
+    let cwd = abs(&format!("/{}", "d".repeat(1600)));
+    let mut resumer = build(&["claude"], false, &cwd, None).unwrap();
     resumer.opened("s-1");
     assert!(resumer.out.is_empty());
 }
@@ -193,29 +215,36 @@ fn a_report_too_long_for_every_terminal_is_not_sent() {
 #[test]
 fn keeps_nothing_it_could_not_resume_safely() {
     let new = |token: &str, program: &str, args: &[&str], cwd: &str| {
-        Resumer::new(
-            OsStr::new(token),
-            OsStr::new(program),
-            &options(args),
-            Path::new(cwd),
-            None,
-            1,
-            Vec::new(),
-        )
-        .is_some()
+        build_with(token, program, args, false, cwd, None).is_some()
     };
-    assert!(new(TOKEN, PROGRAM, &["claude"], "/w"));
-    assert!(!new("short", PROGRAM, &["claude"], "/w"));
-    assert!(!new(&"t".repeat(65), PROGRAM, &["claude"], "/w"));
-    assert!(!new("abcdefghijklmnopqrstuv:x", PROGRAM, &["claude"], "/w"));
-    assert!(!new(TOKEN, "sheprd-acp", &["claude"], "/w"));
-    assert!(!new(TOKEN, PROGRAM, &["claude"], "relative"));
-    assert!(!new(TOKEN, PROGRAM, &["claude"], "/w\u{1b}]0;x"));
+    let (program, cwd) = (program(), abs("/w"));
+    assert!(new(TOKEN, &program, &["claude"], &cwd));
+    assert!(!new("short", &program, &["claude"], &cwd));
+    assert!(!new(&"t".repeat(65), &program, &["claude"], &cwd));
+    assert!(!new(
+        "abcdefghijklmnopqrstuv:x",
+        &program,
+        &["claude"],
+        &cwd
+    ));
+    assert!(!new(TOKEN, "sheprd-acp", &["claude"], &cwd));
+    assert!(!new(TOKEN, &program, &["claude"], "relative"));
+    assert!(!new(TOKEN, &program, &["claude"], &abs("/w\u{1b}]0;x")));
     assert!(!new(
         TOKEN,
-        PROGRAM,
+        &program,
         &["claude", "--", "--model", "x"],
-        "/w"
+        &cwd
     ));
-    assert!(!new(TOKEN, PROGRAM, &["--", "my-agent"], "/w"));
+    assert!(!new(TOKEN, &program, &["--", "my-agent"], &cwd));
+}
+
+#[test]
+fn keeps_the_adapter_the_environment_chose() {
+    // `HERDR_ACP_ADAPTER=1` chose the adapter, not `--acp`: a restarted
+    // pane may not set it, so the command says so itself.
+    let mut resumer = build(&["claude"], true, &abs("/w"), None).unwrap();
+    resumer.opened("s-1");
+    let reports = reports(&resumer.out);
+    assert!(argv(&reports[0]).iter().any(|arg| arg == "--acp"));
 }

@@ -441,7 +441,7 @@ pub(crate) fn run_owned(
             },
         );
     let mut keeper = keeper.map(|keeper| keeper.with_thread(thread_id));
-    let resumer = crate::resume::from_env(&options, &cwd, thread_id);
+    let resumer = crate::resume::from_env(&options, adapter(&options), &cwd, thread_id);
     let session_resumer = resumer.clone();
     if let Some(keeper) = &mut keeper {
         keeper.child = Some(agent_process.id());

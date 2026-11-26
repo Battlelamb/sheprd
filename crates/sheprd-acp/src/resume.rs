@@ -49,6 +49,34 @@ struct Launch {
 }
 
 impl Launch {
+    /// How the chat `options` asked for is started again by `program`;
+    /// `adapter` is the choice the chat made, its environment's included.
+    fn new(
+        program: &OsStr,
+        options: &Options,
+        adapter: bool,
+        cwd: &Path,
+        thread: Option<ThreadId>,
+    ) -> Option<Self> {
+        let AgentChoice::Builtin { agent, args } = &options.agent else {
+            return None;
+        };
+        if !args.is_empty() {
+            return None;
+        }
+        let program = text(program).filter(|_| Path::new(program).is_absolute())?;
+        let cwd = text(cwd.as_os_str()).filter(|_| cwd.is_absolute())?;
+        Some(Self {
+            adapter,
+            agent: *agent,
+            attach: options.attach,
+            cwd,
+            headless: options.headless,
+            program,
+            thread,
+        })
+    }
+
     /// The command that continues `session`, as `sheprd-acp`'s own restore
     /// types it, or `None` when it could not be typed back safely.
     fn argv(&self, session: &str) -> Option<Vec<String>> {
@@ -94,8 +122,14 @@ pub(crate) type Shared = Arc<Mutex<Resumer<std::io::Stdout>>>;
 
 /// The resumer of a chat in a terminal that reads reports, or `None`: a
 /// custom command, extra agent arguments, or a program path or folder a
-/// report cannot carry keep nothing, as a restore record does not.
-pub(crate) fn from_env(options: &Options, cwd: &Path, thread: Option<ThreadId>) -> Option<Shared> {
+/// report cannot carry keep nothing. `adapter` is the chat's effective
+/// choice, `HERDR_ACP_ADAPTER` included, which a restarted pane may not set.
+pub(crate) fn from_env(
+    options: &Options,
+    adapter: bool,
+    cwd: &Path,
+    thread: Option<ThreadId>,
+) -> Option<Shared> {
     use std::io::IsTerminal as _;
     let out = std::io::stdout();
     if !out.is_terminal() {
@@ -103,15 +137,8 @@ pub(crate) fn from_env(options: &Options, cwd: &Path, thread: Option<ThreadId>) 
     }
     let token = std::env::var_os(TOKEN_ENV)?;
     let program = std::env::current_exe().ok()?;
-    let resumer = Resumer::new(
-        &token,
-        program.as_os_str(),
-        options,
-        cwd,
-        thread,
-        std::process::id(),
-        out,
-    )?;
+    let launch = Launch::new(program.as_os_str(), options, adapter, cwd, thread)?;
+    let resumer = Resumer::new(&token, launch, std::process::id(), out)?;
     Some(Arc::new(Mutex::new(resumer)))
 }
 
@@ -123,34 +150,10 @@ pub(crate) fn with(shared: Option<&Shared>, f: impl FnOnce(&mut Resumer<std::io:
 }
 
 impl<W: Write> Resumer<W> {
-    fn new(
-        token: &OsStr,
-        program: &OsStr,
-        options: &Options,
-        cwd: &Path,
-        thread: Option<ThreadId>,
-        pid: u32,
-        out: W,
-    ) -> Option<Self> {
+    fn new(token: &OsStr, launch: Launch, pid: u32, out: W) -> Option<Self> {
         let token = token.to_str().filter(|token| token_is_valid(token))?;
-        let AgentChoice::Builtin { agent, args } = &options.agent else {
-            return None;
-        };
-        if !args.is_empty() {
-            return None;
-        }
-        let program = text(program).filter(|_| Path::new(program).is_absolute())?;
-        let cwd = text(cwd.as_os_str()).filter(|_| cwd.is_absolute())?;
         Some(Self {
-            launch: Launch {
-                adapter: options.adapter,
-                agent: *agent,
-                attach: options.attach,
-                cwd,
-                headless: options.headless,
-                program,
-                thread,
-            },
+            launch,
             out,
             pid,
             reported: false,

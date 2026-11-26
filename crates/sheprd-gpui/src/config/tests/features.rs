@@ -91,6 +91,10 @@ const BUILD_ONLY: &[(&str, &str)] = &[
         "moonframe-studio",
         "reloads the layout from a checkout, never in a release build",
     ),
+    (
+        "tmux",
+        "an opt-in build whose backend runs only once chosen under Settings > Tabs",
+    ),
 ];
 
 /// A new Cargo feature that users would see needs a `[features]` switch, so

@@ -36,7 +36,7 @@ pub use host_key::{
 pub use unverified::{HostKeys, MAX_UNVERIFIED_HOSTS, set_host_keys, set_unverified_hosts};
 pub(crate) mod powershell;
 mod serve;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use git_config::config_command;
 pub use git_config::{remote_config_value, remote_origin_url};
 pub use serve::{remote_socket, serve_command};

@@ -77,6 +77,11 @@ impl Session {
         self.snapshots > 0
     }
 
+    /// Whether this connection has delivered its protocol greeting.
+    pub(super) fn welcomed(&self) -> bool {
+        self.welcomed
+    }
+
     /// Greeted, and holding the program's current transcript.
     pub(crate) fn live(&self) -> bool {
         self.welcomed && self.cursor.is_some()

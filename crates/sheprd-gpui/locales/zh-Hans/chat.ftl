@@ -42,6 +42,7 @@ chat-preparing-pictures = 正在准备 { $count } 张图片…
 chat-files-attach = 添加附件
 chat-files-not-attached = 添加文件失败：{ $error }
 chat-image-not-attached = 添加图片失败：{ $error }
+chat-text-not-attached = 添加粘贴的文本失败：{ $error }
 chat-files-too-many = 每条消息最多可附加 { $count } 个文件
 chat-files-copying = 正在拷贝文件，请等待附件就绪后再发送
 chat-prompt-too-long = 提示词超出了智能体接受的长度
@@ -188,3 +189,9 @@ chat-form-read-only = 只读聊天记录
 chat-form-range = { $min } 至 { $max }
 chat-form-not-ready = 智能体尚无法接收此表单
 chat-form-busy = 请先完成当前消息，再发送此表单
+
+chat-viewer-previous = 上一张
+chat-viewer-next = 下一张
+
+chat-open-message-text = 将完整消息作为文本文件打开
+chat-message-file-error = 无法将消息保存为文本文件：{ $error }

@@ -273,3 +273,20 @@ fn the_message_effects_switch_reveals_ink_and_hides_replay(cx: &mut gpui::TestAp
         assert!(cx.debug_bounds("chat-prose").is_some());
     }
 }
+
+#[test]
+fn messages_the_program_dropped_are_forgotten() {
+    let now = Instant::now();
+    let mut effects = Effects::default();
+    let texts = [":::slam\nold\n:::", "::confetti\nold", "kept"];
+    sync(&mut effects, &texts[..1], true, now);
+    sync(&mut effects, &texts, false, now);
+    assert_eq!(effects.remembered(), 3);
+    // The program truncated its transcript down to the last message.
+    let (prepared, keys) = prepared(&texts);
+    let kept = &keys[2..];
+    effects.sync(|entry| prepared.body(entry), kept, false, now);
+    assert_eq!(effects.remembered(), 1);
+    assert!(effects.bubble_since(EntryId(1), 0).is_none());
+    assert!(effects.playing(now).is_none());
+}

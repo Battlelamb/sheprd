@@ -450,26 +450,30 @@ never installs or starts anything while checking:
 - herdr-core (Herdr 2) installed with no compatible Herdr: the device is
   saved as it is, without `herdr machine add`, and its terminals run in
   herdr-core.
-- Herdr missing: the dialog asks "Herdr was not detected on the host. Should we
-  install it?" An outdated Herdr asks to update it instead.
+- Neither Herdr nor herdr-core detected, or only an outdated Herdr: the dialog
+  asks whether to install the pinned herdr-core (Herdr 2). Accepting installs
+  herdr-core into `~/.local/bin` over SSH (verifying its pinned SHA-256
+  checksum), adds `~/.local/bin` to the remote shell's PATH, and saves the
+  device directly without invoking Herdr 1's CLI.
 - SSH needs a prompt (unknown host key, password, passphrase), the check failed,
-  or saving without a terminal failed: the dialog offers to continue here.
+  or saving an existing Herdr 1 host without a terminal failed: the dialog
+  offers to continue here. When the host refused every SSH key, setup runs
+  `ssh-copy-id` in the dialog and then re-checks the host so a missing daemon
+  still offers to install herdr-core.
 
-Accepting keeps setup inside **Add Device**: progress is plain text,
-installation and restart approvals have **Yes** and **No** buttons, and SSH
+Accepting interactive setup keeps progress inside **Add Device**: output is
+plain text, restart approvals have **Yes** and **No** buttons, and SSH
 passwords or passphrases use a masked response field. Enter sends a response;
 confirmations require a button click. Nothing is automatically approved. No
 workspace or terminal tab is created, and the selected device stays selected;
 setup works even when the local daemon is disconnected.
 
-The setup itself, `herdr machine add` (after `ssh-copy-id` when the host refused
-every key), still runs as this app's child on a private terminal, using the
-user's login `PATH`, SSH config, agent, and security key. Before installing, it
-adds `~/.local/bin` to the remote shell's PATH: zsh's `.zshenv`, bash's
-`.bashrc` and existing login profile, fish's `conf.d`, or `.profile` for other
-POSIX shells. Existing content and symlinks are preserved; repeated setup does
-not duplicate the entry. Bash's entry precedes interactive-only early returns,
-so non-interactive SSH commands see it too.
+Before installing into `~/.local/bin`, setup adds `~/.local/bin` to the remote
+shell's PATH: zsh's `.zshenv`, bash's `.bashrc` and existing login profile,
+fish's `conf.d`, or `.profile` for other POSIX shells. Existing content and
+symlinks are preserved; repeated setup does not duplicate the entry. Bash's
+entry precedes interactive-only early returns, so non-interactive SSH commands
+see it too.
 
 Responses are not logged or saved; the field is cleared after sending.
 Output is bounded to one terminal viewport and terminal escapes cannot run UI

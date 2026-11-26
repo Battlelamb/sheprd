@@ -15,6 +15,7 @@ struct ChatScreen: View {
     @State private var showingSession = false
     @State private var showingPanel = false
     @State private var panelDetent = PresentationDetent.medium
+    @State private var filter = TurnFilterState()
     @Environment(\.horizontalSizeClass) private var width
     @Environment(\.dismiss) private var dismiss
     @Environment(\.offersWorkspace) private var offersWorkspace
@@ -30,16 +31,38 @@ struct ChatScreen: View {
         return model.fleet.terminalItems.first { $0.computer.device == key.device && $0.agent?.pane == key.pane }
     }
 
+    private var workspace: Home.Workspace? {
+        item?.workspace ?? terminal?.workspace
+    }
+
     /// The chat's name as the computer last sent it, so a rename shows at
     /// once; the route's title until the home arrives.
     private var name: String {
         item?.chat.title ?? terminal?.title ?? title
     }
 
+    private var promptCount: Int {
+        store?.transcript.map { ChatTurns.promptCount(in: $0.entries) } ?? 0
+    }
+
+    private var subtitle: String {
+        store?.transcript.map { sessionLine(model.fleet.chat($0, for: key)) } ?? ""
+    }
+
     var body: some View {
         Group {
             if let store, let transcript = store.transcript {
-                ChatDocument(key: key, store: store, transcript: model.fleet.chat(transcript, for: key), terminal: terminal)
+                ChatDocument(
+                    key: key,
+                    store: store,
+                    transcript: model.fleet.chat(transcript, for: key),
+                    terminal: terminal,
+                    name: name,
+                    subtitle: subtitle,
+                    canOpenSession: terminal == nil,
+                    openSession: { showingSession = true },
+                    filter: $filter
+                )
             } else if let problem = store?.problem {
                 ContentUnavailableView {
                     Label("Can't show this conversation", systemImage: "text.bubble")
@@ -59,49 +82,55 @@ struct ChatScreen: View {
             guard let transcript = store?.transcript else { return }
             model.updateStart(for: transcript.agent) { $0.learn(from: transcript) }
         }
-        // The principal item below draws the header; the title is what the
-        // iPad's split view and the window's name fall back to.
-        // Window titles show in Stage Manager and the app switcher.
+        // The title ribbon below the bar draws the chat's full name; the
+        // navigation title is what Stage Manager and the app switcher use.
         .navigationTitle(LockState.shared.hidesNames ? "Sheprd" : name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .hidesConnectionToast()
         .toolbar {
-            // A terminal agent's conversation has no chat item; its tab's
-            // workspace is the same place, on the same computer.
-            if offersWorkspace, let workspace = item?.workspace ?? terminal?.workspace {
+            // The space pill takes the bar's leading side so the workspace
+            // name stays visible alongside the trailing controls.
+            if let workspace {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { model.pendingWorkspace = WorkspaceKey(device: key.device, workspace: workspace.id) } label: {
-                        Image(systemName: "square.stack.3d.up")
+                    Button {
+                        if offersWorkspace {
+                            model.pendingWorkspace = WorkspaceKey(device: key.device, workspace: workspace.id)
+                        } else {
+                            dismiss()
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "square.stack.3d.up")
+                                .foregroundStyle(.tint)
+                            Text(LockState.shared.hidesNames ? "Space" : workspace.label)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: width == .regular ? 240 : 150, alignment: .leading)
                     }
                     .accessibilityLabel("Go to \(workspace.label)")
                 }
             }
-            // Centered over the chat on an iPad too: the terminal
-            // inspector sits outside the chat's stack, so the bar's middle
-            // is the chat's.
+            // Keeps the system from drawing a second truncated title between
+            // the space pill and the trailing buttons; the full title lives in
+            // the ribbon right under the bar.
             ToolbarItem(placement: .principal) {
-                Button { showingSession = store != nil && terminal == nil } label: {
-                    VStack(spacing: 0) {
-                        HStack(spacing: 4) {
-                            Text(name).font(.headline).lineLimit(1)
-                            if terminal == nil {
-                                Image(systemName: "chevron.down.circle.fill").font(.caption).foregroundStyle(.tertiary)
-                            }
-                        }
-                        if let line = store?.transcript.map({ sessionLine(model.fleet.chat($0, for: key)) }), !line.isEmpty {
-                            Text(line).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-                .frame(maxWidth: width == .regular ? 480 : 360)
-                .accessibilityHint(terminal == nil ? "Shows the session's settings" : "")
+                EmptyView()
             }
             if let route = terminal?.terminalRoute {
                 ToolbarItem(placement: .topBarTrailing) {
                     RouteLink(route) { Image(systemName: "apple.terminal") }
                         .accessibilityLabel("Open the terminal")
+                }
+            }
+            if promptCount > 0 {
+                ToolbarItem(placement: .topBarTrailing) {
+                    PromptsFilterButton(active: filter.promptsOnly, count: promptCount) {
+                        withAnimation(.snappy(duration: 0.34)) {
+                            filter.toggleFilter()
+                        }
+                    }
                 }
             }
             // The desktop rail's sections: sub-agents, shells, the plan,
@@ -135,6 +164,7 @@ struct ChatScreen: View {
         }
         .onAppear {
             #if DEBUG
+            if UserDefaults.standard.bool(forKey: "promptsOnly") { filter.promptsOnly = true }
             if key == .sample {
                 store = ChatStore(key: key, sample: .sample)
                 if UserDefaults.standard.bool(forKey: "session") { showingSession = true }
@@ -221,6 +251,11 @@ private struct ChatDocument: View {
     let transcript: Transcript
     /// The terminal tab whose agent this is; replies go to its terminal.
     let terminal: TerminalItem?
+    let name: String
+    let subtitle: String
+    let canOpenSession: Bool
+    let openSession: () -> Void
+    @Binding var filter: TurnFilterState
     @State private var problem: String?
     @State private var dismissedQuestion: PermissionId?
     @State private var position = ScrollPosition(edge: .bottom)
@@ -245,6 +280,8 @@ private struct ChatDocument: View {
 
     var body: some View {
         let turns = ChatTurn.split(transcript.entries)
+        let promptCount = ChatTurns.promptCount(in: transcript.entries)
+        let visible = filter.visibleTurns(from: turns, shownTurns: shownTurns)
         let tools: [Tool] = (turns.last ?? []).compactMap { entry in
             if case let .tool(tool) = entry.kind { tool } else { nil }
         }
@@ -255,13 +292,12 @@ private struct ChatDocument: View {
             nil
         }
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
-                let hidden = max(turns.count - shownTurns, 0)
-                if hidden > 0 {
+            LazyVStack(alignment: .leading, spacing: filter.promptsOnly ? 8 : 16) {
+                if visible.hidden > 0 {
                     Button {
                         shownTurns += 10
                     } label: {
-                        Label("Show \(min(hidden, 10)) earlier of \(hidden)", systemImage: "arrow.up.circle")
+                        Label("Show \(min(visible.hidden, 10)) earlier of \(visible.hidden)", systemImage: "arrow.up.circle")
                             .font(.subheadline.weight(.medium))
                     }
                     .buttonStyle(.glass)
@@ -270,14 +306,46 @@ private struct ChatDocument: View {
                     Label("Older messages stay on the computer", systemImage: "clock.arrow.circlepath")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                ForEach(Array(turns.enumerated().dropFirst(hidden)), id: \.element.first?.id) { index, turn in
-                    if index > hidden { Divider().padding(.vertical, 8) }
+                ForEach(Array(visible.turns.enumerated()), id: \.element.first?.id) { offset, turn in
+                    let turnId = turn.first?.id
+                    let isLatest = turnId == turns.last?.first?.id
+                    if offset > 0 {
+                        Divider().padding(.vertical, filter.promptsOnly ? 4 : 8)
+                    }
                     // Only the latest turn's prompt pins once scrolled past.
                     ChatTurn(
                         entries: turn,
-                        promptAbove: index == turns.count - 1 ? $promptAbove : nil,
-                        brief: turn.first.flatMap { transcript.brief($0.id) }
+                        promptAbove: !filter.promptsOnly && isLatest ? $promptAbove : nil,
+                        brief: turnId.flatMap { transcript.brief($0) },
+                        promptsOnly: filter.promptsOnly,
+                        peeked: filter.isPeeked(turnId),
+                        onTogglePeek: turnId.map { id in
+                            {
+                                withAnimation(.snappy(duration: 0.34)) {
+                                    filter.togglePeek(id)
+                                }
+                            }
+                        },
+                        onShowFullHere: turnId.map { id in
+                            {
+                                shownTurns = TurnFilterState.expandedShownTurns(
+                                    current: shownTurns,
+                                    allTurns: turns,
+                                    jumpingTo: id
+                                )
+                                withAnimation(.snappy(duration: 0.34)) {
+                                    filter.clear()
+                                }
+                                Task { @MainActor in
+                                    try? await Task.sleep(for: .milliseconds(80))
+                                    withAnimation(.snappy(duration: 0.34)) {
+                                        position.scrollTo(id: id, anchor: .top)
+                                    }
+                                }
+                            }
+                        }
                     )
+                    .id(turnId)
                 }
                 if !transcript.queued.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
@@ -312,14 +380,24 @@ private struct ChatDocument: View {
                 if let problem { Text(problem).font(.footnote).foregroundStyle(.red) }
             }
             .animation(.snappy, value: store.outgoing)
+            .animation(.snappy(duration: 0.34), value: filter)
             .frame(maxWidth: Self.readableWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 20)
-            .padding(.top, 16)
+            .padding(.top, 10)
             .padding(.bottom, 24)
         }
         .defaultScrollAnchor(.bottom)
         .scrollPosition($position)
+        .onChange(of: filter.promptsOnly) { _, now in
+            if now {
+                promptAbove = false
+                // Bring the collapsed prompts neatly into view when folding a long thread.
+                withAnimation(.snappy(duration: 0.34)) {
+                    position.scrollTo(edge: .bottom)
+                }
+            }
+        }
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.contentSize.height - geometry.contentOffset.y - geometry.containerSize.height > 240
         } action: { _, now in
@@ -371,15 +449,31 @@ private struct ChatDocument: View {
         // A picture opened full screen swipes through the chat's others.
         .environment(\.chatPictures, transcript.pictures.map(GalleryPicture.init))
         .opacity(store.stale ? 0.6 : 1)
-        .overlay(alignment: .top) {
-            if let prompt, promptAbove {
-                PinnedPrompt(text: String(InlineMarkdown.plainSized(prompt).characters)) {
-                    withAnimation(.snappy) { position.scrollTo(id: PinnedPrompt.anchor, anchor: .top) }
+        .safeAreaBar(edge: .top) {
+            VStack(spacing: 6) {
+                ChatTitleRibbon(
+                    title: LockState.shared.hidesNames ? "Sheprd" : name,
+                    subtitle: subtitle,
+                    canOpenSession: canOpenSession,
+                    promptsOnly: filter.promptsOnly,
+                    promptCount: promptCount,
+                    openSession: openSession,
+                    clearFilter: {
+                        withAnimation(.snappy(duration: 0.34)) {
+                            filter.clear()
+                        }
+                    }
+                )
+                if !filter.promptsOnly, let prompt, promptAbove {
+                    PinnedPrompt(text: String(InlineMarkdown.plainSized(prompt).characters)) {
+                        withAnimation(.snappy) { position.scrollTo(id: PinnedPrompt.anchor, anchor: .top) }
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                .transition(.move(edge: .top).combined(with: .opacity))
             }
+            .animation(.snappy(duration: 0.34), value: filter.promptsOnly)
+            .animation(.snappy, value: !filter.promptsOnly && promptAbove && prompt != nil)
         }
-        .animation(.snappy, value: promptAbove && prompt != nil)
         // A bar, not an inset: what scrolls under it fades as under the
         // system's own toolbars.
         .safeAreaBar(edge: .bottom) {
@@ -447,6 +541,102 @@ private struct ChatDocument: View {
     }
 }
 
+/// Toolbar button that toggles prompts-only mode.
+private struct PromptsFilterButton: View {
+    let active: Bool
+    let count: Int
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            Image(systemName: "line.3.horizontal.decrease")
+                .fontWeight(active ? .semibold : .regular)
+        }
+        .modifier(ActiveToolbarGlass(active: active))
+        .haptic(.selection, trigger: active)
+        .accessibilityLabel("My prompts only")
+        .accessibilityValue(active ? "On, \(count) prompt\(count == 1 ? "" : "s")" : "Off")
+        .accessibilityHint("Collapses responses so only prompts you sent show")
+    }
+}
+
+private struct ActiveToolbarGlass: ViewModifier {
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        if active {
+            content.buttonStyle(.glassProminent)
+        } else {
+            content
+        }
+    }
+}
+
+/// Full-width Liquid Glass ribbon directly under the navigation bar: gives the
+/// chat title and model line room to breathe, and merges the active prompts
+/// filter chip inline so filtering adds no third bar.
+private struct ChatTitleRibbon: View {
+    let title: String
+    let subtitle: String
+    let canOpenSession: Bool
+    let promptsOnly: Bool
+    let promptCount: Int
+    let openSession: () -> Void
+    let clearFilter: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button(action: openSession) {
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text(title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        if canOpenSession {
+                            Image(systemName: "chevron.down.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canOpenSession)
+            .accessibilityHint(canOpenSession ? "Shows the session's settings" : "")
+
+            if promptsOnly {
+                Button(action: clearFilter) {
+                    HStack(spacing: 4) {
+                        Text("\(promptCount) prompt\(promptCount == 1 ? "" : "s")")
+                        Image(systemName: "xmark").font(.caption2.weight(.bold))
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.tint, in: .capsule)
+                }
+                .buttonStyle(.plain)
+                .transition(.scale(scale: 0.85).combined(with: .opacity))
+                .accessibilityLabel("Showing \(promptCount) prompt\(promptCount == 1 ? "" : "s"). Show all messages")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .frame(maxWidth: ChatDocument.readableWidth + 40)
+        .padding(.horizontal, 14)
+        .padding(.top, 4)
+        .padding(.bottom, 2)
+    }
+}
+
 /// The latest prompt, three lines at most, over the top of the chat while
 /// its heading is scrolled away; a tap scrolls back to it.
 struct PinnedPrompt: View {
@@ -467,8 +657,8 @@ struct PinnedPrompt: View {
         }
         .buttonStyle(.plain)
         .frame(maxWidth: ChatDocument.readableWidth + 40)
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
+        .padding(.horizontal, 14)
+        .padding(.bottom, 2)
         .accessibilityLabel("Your prompt: \(text)")
         .accessibilityHint("Scrolls to it")
     }

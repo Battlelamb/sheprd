@@ -149,6 +149,7 @@ impl SheprdWindow {
         }
         changed |= self.chats.poll(now);
         self.chats.log_focused_attachment(
+            &known,
             self.live.snapshot.as_deref(),
             self.selected_endpoint,
             enabled,

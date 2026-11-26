@@ -2,7 +2,7 @@
 //! make it into the bounded set and therefore never produce a link error.
 
 use super::Chats;
-use crate::chat::{MAX_CHATS, Route, discovery};
+use crate::chat::{MAX_CHATS, Route, Target};
 use sheprd_chat_protocol::TOKEN;
 use sheprd_client::protocol::ClientShellSnapshot;
 
@@ -27,6 +27,7 @@ impl Route {
 impl Chats {
     pub(in crate::chat) fn log_focused_attachment(
         &mut self,
+        known: &[Target],
         snapshot: Option<&ClientShellSnapshot>,
         host_index: usize,
         enabled: bool,
@@ -57,7 +58,7 @@ impl Chats {
                 "awaiting_transcript"
             }
         } else {
-            untracked_reason(snapshot, pane)
+            untracked_reason(snapshot, pane, known)
         };
         let transport = route.map_or("none", Route::transport_label);
         if self.diagnostic.as_ref().is_some_and(|last| {
@@ -86,14 +87,13 @@ impl Chats {
     }
 }
 
-// With a route, discovery admits every unique valid ACP pane in snapshot
-// order until the limit. Existing sessions and mirrors take the remaining slots.
-fn untracked_reason(snapshot: &ClientShellSnapshot, pane: &str) -> &'static str {
+// A known target without an attached pane was excluded by the window's bound.
+fn untracked_reason(snapshot: &ClientShellSnapshot, pane: &str, known: &[Target]) -> &'static str {
+    if known.iter().any(|target| target.pane_id == pane) {
+        return "chat_limit_reached";
+    }
     let mut reason = "no_agent_report";
     for agent in snapshot.agents.iter().filter(|agent| agent.pane_id == pane) {
-        if discovery::endpoint(&agent.tokens).is_some() {
-            return "chat_limit_reached";
-        }
         if agent.tokens.iter().any(|(name, _)| name == TOKEN) {
             reason = "invalid_acp_endpoint";
         } else if reason == "no_agent_report" {
@@ -106,6 +106,7 @@ fn untracked_reason(snapshot: &ClientShellSnapshot, pane: &str) -> &'static str 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::discovery;
 
     #[test]
     fn paired_ssh_routes_have_a_distinct_transport_label() {
@@ -131,16 +132,30 @@ mod tests {
             })
             .collect();
         let excluded = format!("p{MAX_CHATS}");
-        let targets = discovery::targets(&snapshot, Some(&Route::Local));
+        let known = discovery::targets(&snapshot, Some(&Route::Local));
+        let targets = discovery::bounded(known.clone(), |_| 2);
         assert!(targets.iter().all(|target| target.pane_id != excluded));
-        assert_eq!(untracked_reason(&snapshot, &excluded), "chat_limit_reached");
+        assert_eq!(
+            untracked_reason(&snapshot, &excluded, &known),
+            "chat_limit_reached"
+        );
+
+        let visible = discovery::bounded(known, |pane| u8::from(pane != excluded));
+        assert!(visible.iter().any(|target| target.pane_id == excluded));
+
         snapshot.agents[MAX_CHATS].tokens[0].1.clear();
         assert_eq!(
-            untracked_reason(&snapshot, &excluded),
+            untracked_reason(&snapshot, &excluded, &[]),
             "invalid_acp_endpoint"
         );
         snapshot.agents[MAX_CHATS].tokens.clear();
-        assert_eq!(untracked_reason(&snapshot, &excluded), "no_acp_endpoint");
-        assert_eq!(untracked_reason(&snapshot, "absent"), "no_agent_report");
+        assert_eq!(
+            untracked_reason(&snapshot, &excluded, &[]),
+            "no_acp_endpoint"
+        );
+        assert_eq!(
+            untracked_reason(&snapshot, "absent", &[]),
+            "no_agent_report"
+        );
     }
 }

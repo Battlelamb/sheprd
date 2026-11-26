@@ -3828,8 +3828,9 @@ If a focused Herdr 1 pane stays in the TUI, open **Window > Logs** and search
 on the Mac displaying the TUI for `Focused pane chat attachment`. The record
 gives the pane ID, transport (`relay_ssh` for a relay-paired host), reason,
 number of selected chat targets, and limit. For example, `chat_limit_reached`
-means earlier panes in the daemon snapshot filled the window's attachment
-slots. For an attachment failure, search the same pane ID for
+means the window filled its attachment slots with other panes. It selects
+on-screen chats first, then chats holding unsent files, with snapshot order
+breaking ties. For an attachment failure, search the same pane ID for
 `Chat connection ended` to see the error and whether the remote chat program
 had greeted this connection (`welcomed`).
 

@@ -8,6 +8,7 @@ import UIKit
 struct ComputersSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(WindowState.self) private var window: WindowState?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var forgetting: Computer?
     @State private var editMode = EditMode.inactive
 
@@ -19,14 +20,9 @@ struct ComputersSettingsView: View {
         List {
             if !model.computers.isEmpty {
                 Section {
-                    HStack(spacing: 8) {
-                        FleetSummaryChip(dot: .green, value: summary.online, label: "Online")
-                        FleetSummaryChip(dot: .secondary.opacity(0.5), value: summary.offline, label: "Offline")
-                        FleetSummaryChip(dot: Home.AgentStatus.working.color, value: summary.working, label: "Working")
-                        FleetSummaryChip(dot: Home.AgentStatus.blocked.color, value: summary.waiting, label: "Waiting")
-                    }
-                    .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
-                    .listRowBackground(Color.clear)
+                    summaryChips
+                        .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+                        .listRowBackground(Color.clear)
                 }
             }
             Section {
@@ -61,16 +57,40 @@ struct ComputersSettingsView: View {
         .task { if UserDefaults.standard.bool(forKey: "editComputers") { editMode = .active } }
         #endif
     }
+
+    @ViewBuilder
+    private var summaryChips: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                chipViews
+            }
+        } else {
+            HStack(spacing: 8) {
+                chipViews
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var chipViews: some View {
+        FleetSummaryChip(dot: .green, value: summary.online, label: "Online")
+        FleetSummaryChip(dot: .secondary.opacity(0.5), value: summary.offline, label: "Offline")
+        FleetSummaryChip(dot: Home.AgentStatus.working.color, value: summary.working, label: "Working")
+        FleetSummaryChip(dot: Home.AgentStatus.blocked.color, value: summary.waiting, label: "Waiting")
+    }
 }
 
 extension AppModel {
-    /// Fleet health counts across the paired computers for Settings.
+    /// Live fleet health counts across paired computers for Settings. Uses
+    /// actual `status` (not cached `presentedStatus`) and marks stale homes
+    /// so cached counts never look live while reconnecting.
     var fleetHealthSummary: FleetHealth.Summary {
         let machinesById = Dictionary(uniqueKeysWithValues: fleet.machines.map { ($0.id, $0) })
         let entries = computers.map { computer in
             let machine = machinesById[computer.device]
             return FleetHealth.Entry(
-                status: machine?.presentedStatus ?? .connecting,
+                status: machine?.status ?? .connecting,
+                stale: machine?.stale ?? true,
                 needsUpdate: machine?.needsUpdate == true,
                 working: machine?.home?.workingAgents ?? 0,
                 waiting: machine?.home?.waiting ?? 0
@@ -107,6 +127,7 @@ private struct FleetSummaryChip: View {
 /// routes when offline.
 private struct ComputerHealthRow: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     var computer: Computer
 
     private var machine: Fleet.Machine? {
@@ -114,12 +135,17 @@ private struct ComputerHealthRow: View {
     }
 
     private var status: LinkStatus {
-        machine?.presentedStatus ?? .connecting
+        machine?.status ?? .connecting
     }
 
     private var isOnline: Bool {
         if case .online = status { return true }
         return false
+    }
+
+    private var liveHome: Home? {
+        guard isOnline, let machine, !machine.stale else { return nil }
+        return machine.home
     }
 
     private var needsUpdate: Bool {
@@ -136,23 +162,17 @@ private struct ComputerHealthRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 7) {
-                Image(systemName: computer.via == nil ? "laptopcomputer" : "server.rack")
-                    .font(.subheadline)
-                    .foregroundStyle(iconStyle)
-                    .frame(width: 18)
-                Text(model.displayName(computer))
-                    .fontWeight(.medium)
-                    .foregroundStyle(isOnline || hasProblem ? .primary : .secondary)
-                    .lineLimit(1)
-                if let version = FleetHealth.versionLabel(machine?.home?.version) {
-                    Text(version)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 4) {
+                    headerIdentity
+                    statusBadge
                 }
-                Spacer(minLength: 4)
-                statusBadge
+            } else {
+                HStack(spacing: 7) {
+                    headerIdentity
+                    Spacer(minLength: 4)
+                    statusBadge
+                }
             }
 
             if isOnline {
@@ -162,6 +182,25 @@ private struct ComputerHealthRow: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    private var headerIdentity: some View {
+        HStack(spacing: 7) {
+            Image(systemName: computer.via == nil ? "laptopcomputer" : "server.rack")
+                .font(.subheadline)
+                .foregroundStyle(iconStyle)
+                .frame(width: 18)
+            Text(model.displayName(computer))
+                .fontWeight(.medium)
+                .foregroundStyle(isOnline || hasProblem ? .primary : .secondary)
+                .lineLimit(1)
+            if let version = FleetHealth.versionLabel(machine?.home?.version) {
+                Text(version)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+        }
     }
 
     private var hasProblem: Bool {
@@ -244,33 +283,32 @@ private struct ComputerHealthRow: View {
 
     @ViewBuilder
     private var onlineDetails: some View {
-        let load = machine?.home?.load
-        let waiting = machine?.home?.waiting ?? 0
-        let working = machine?.home?.workingAgents ?? 0
+        let load = liveHome?.load
+        let waiting = liveHome?.waiting ?? 0
+        let working = liveHome?.workingAgents ?? 0
 
         if needsUpdate {
             ComputerStatusLine(status: .outdated).font(.caption)
         }
 
         if load != nil || waiting > 0 || working > 0 {
-            HStack(spacing: 10) {
-                if let load {
-                    LoadGauge(label: "CPU", percent: load.cpu)
-                    LoadGauge(label: "MEM", percent: load.memory)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    if let load { loadGauges(load) }
+                    Spacer(minLength: 0)
+                    activityBadge(waiting: waiting, working: working)
                 }
-                Spacer(minLength: 0)
-                if waiting > 0 {
-                    Text(waiting == 1 ? "1 needs you" : "\(waiting) need you")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(Home.AgentStatus.blocked.color, in: .capsule)
-                        .fixedSize()
-                } else if working > 0 {
-                    Text("\(working) working")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(Home.AgentStatus.working.color)
-                        .fixedSize()
+                VStack(alignment: .leading, spacing: 4) {
+                    if let load {
+                        ViewThatFits(in: .horizontal) {
+                            loadGauges(load)
+                            VStack(alignment: .leading, spacing: 2) {
+                                LoadGauge(label: "CPU", percent: load.cpu)
+                                LoadGauge(label: "MEM", percent: load.memory)
+                            }
+                        }
+                    }
+                    activityBadge(waiting: waiting, working: working)
                 }
             }
         }
@@ -298,6 +336,30 @@ private struct ComputerHealthRow: View {
                     TagPill(tag: tag)
                 }
             }
+        }
+    }
+
+    private func loadGauges(_ load: Home.Load) -> some View {
+        HStack(spacing: 10) {
+            LoadGauge(label: "CPU", percent: load.cpu)
+            LoadGauge(label: "MEM", percent: load.memory)
+        }
+    }
+
+    @ViewBuilder
+    private func activityBadge(waiting: Int, working: Int) -> some View {
+        if waiting > 0 {
+            Text(waiting == 1 ? "1 needs you" : "\(waiting) need you")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(Home.AgentStatus.blocked.color, in: .capsule)
+                .fixedSize()
+        } else if working > 0 {
+            Text("\(working) working")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(Home.AgentStatus.working.color)
+                .fixedSize()
         }
     }
 

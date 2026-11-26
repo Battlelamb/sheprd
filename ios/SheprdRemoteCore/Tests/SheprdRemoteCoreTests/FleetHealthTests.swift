@@ -18,21 +18,32 @@ struct FleetHealthTests {
         #expect(FleetHealth.RouteKind.online.label == "Online")
     }
 
-    @Test func summaryCountsLiveOnlineWorkAndIgnoresOfflineCache() {
+    @Test func summaryCountsLiveOnlineWorkAndIgnoresOfflineAndStaleCache() {
         let summary = FleetHealth.Summary(entries: [
-            .init(status: .online(origin: "https://192.168.1.20:8443"), working: 2, waiting: 1),
-            .init(status: .online(origin: "https://100.88.4.2:8443"), working: 4, waiting: 2),
-            .init(status: .offline(reason: "timeout"), working: 9, waiting: 5),
-            .init(status: .connecting, working: 3, waiting: 1),
-            .init(status: .revoked, working: 1, waiting: 1),
-            .init(status: .outdated, working: 2, waiting: 0),
+            .init(status: .online(origin: "https://192.168.1.20:8443"), stale: false, working: 2, waiting: 1),
+            .init(status: .online(origin: "https://100.88.4.2:8443"), stale: false, working: 4, waiting: 2),
+            // Online socket before its first fresh home arrives: counts as online, not live workload.
+            .init(status: .online(origin: "https://100.88.4.9:8443"), stale: true, working: 7, waiting: 3),
+            .init(status: .offline(reason: "timeout"), stale: true, working: 9, waiting: 5),
+            .init(status: .connecting, stale: true, working: 3, waiting: 1),
+            .init(status: .revoked, stale: true, working: 1, waiting: 1),
+            .init(status: .outdated, stale: true, working: 2, waiting: 0),
         ])
-        #expect(summary.online == 2)
+        #expect(summary.online == 3)
         #expect(summary.offline == 4)
-        #expect(summary.total == 6)
+        #expect(summary.total == 7)
         #expect(summary.working == 6)
         #expect(summary.waiting == 3)
-        #expect(summary.settingsValue == "2 of 6 online")
+        #expect(summary.settingsValue == "3 of 7 online")
+    }
+
+    @Test func lastSeenPersistThrottle() {
+        let t0 = Date(timeIntervalSince1970: 1_763_000_000)
+        #expect(FleetHealth.shouldPersistLastSeen(lastSaved: nil, now: t0))
+        #expect(!FleetHealth.shouldPersistLastSeen(lastSaved: t0, now: t0.addingTimeInterval(59)))
+        #expect(FleetHealth.shouldPersistLastSeen(lastSaved: t0, now: t0.addingTimeInterval(60)))
+        #expect(FleetHealth.shouldPersistLastSeen(lastSaved: t0, now: t0.addingTimeInterval(120)))
+        #expect(FleetHealth.shouldPersistLastSeen(lastSaved: t0, now: t0.addingTimeInterval(-5)))
     }
 
     @Test func summarySettingsValueFormatsEdgeCases() {

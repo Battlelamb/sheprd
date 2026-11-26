@@ -23,12 +23,20 @@ public enum FleetHealth {
     /// One paired computer's contribution to the Settings health summary.
     public struct Entry: Equatable, Sendable {
         public var status: LinkStatus
+        public var stale: Bool
         public var needsUpdate: Bool
         public var working: Int
         public var waiting: Int
 
-        public init(status: LinkStatus, needsUpdate: Bool = false, working: Int = 0, waiting: Int = 0) {
+        public init(
+            status: LinkStatus,
+            stale: Bool = false,
+            needsUpdate: Bool = false,
+            working: Int = 0,
+            waiting: Int = 0
+        ) {
             self.status = status
+            self.stale = stale
             self.needsUpdate = needsUpdate
             self.working = working
             self.waiting = waiting
@@ -45,10 +53,10 @@ public enum FleetHealth {
     public struct Summary: Equatable, Sendable {
         public var online: Int
         public var offline: Int
-        /// Agents working across online computers; offline computers hold
-        /// cached snapshots that may be stale, so they are excluded.
+        /// Agents working across online computers with a fresh snapshot;
+        /// offline and stale cached snapshots are excluded.
         public var working: Int
-        /// Agents waiting for you across online computers.
+        /// Agents waiting for you across online computers with a fresh snapshot.
         public var waiting: Int
 
         public var total: Int { online + offline }
@@ -61,8 +69,10 @@ public enum FleetHealth {
             for entry in entries {
                 if entry.isOnline {
                     online += 1
-                    working += max(entry.working, 0)
-                    waiting += max(entry.waiting, 0)
+                    if !entry.stale {
+                        working += max(entry.working, 0)
+                        waiting += max(entry.waiting, 0)
+                    }
                 } else {
                     offline += 1
                 }
@@ -112,6 +122,21 @@ public enum FleetHealth {
         if seconds < 3600 { return "\(Int(seconds / 60))m ago" }
         if seconds < 86400 { return "\(Int(seconds / 3600))h ago" }
         return date.formatted(.dateTime.month(.abbreviated).day())
+    }
+
+    /// Minimum gap between persisted last-seen writes during steady load-only
+    /// updates so the cache stays current without writing every few seconds.
+    public static let lastSeenPersistInterval: TimeInterval = 60
+
+    /// Whether a load-only update should persist `last-seen.json` now.
+    public static func shouldPersistLastSeen(
+        lastSaved: Date?,
+        now: Date,
+        interval: TimeInterval = lastSeenPersistInterval
+    ) -> Bool {
+        guard let lastSaved else { return true }
+        let elapsed = now.timeIntervalSince(lastSaved)
+        return elapsed >= interval || elapsed < 0
     }
 
     /// Detail line for an offline computer: last-seen time and configured

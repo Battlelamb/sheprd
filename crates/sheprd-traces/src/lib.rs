@@ -33,5 +33,5 @@ pub use location::{FILE, path};
 pub use model::{ActiveAgent, Activity, Event, EventKind, Session, Visibility};
 pub use roots::{configured_roots, default_roots};
 pub use scan::{Report, Root, index, index_paths};
-pub use store::{MAX_LIMIT, Overlap, OverlapPoint, SCHEMA_VERSION, Store};
+pub use store::{MAX_LIMIT, Overlap, OverlapCache, OverlapPoint, SCHEMA_VERSION, Store};
 pub use watch::{RESCAN, SETTLE, Tick, watch};

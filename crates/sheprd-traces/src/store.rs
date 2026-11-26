@@ -1,7 +1,7 @@
 //! The index, open: the schema, writes from a scan, and the reads the CLI
 //! and the app need (sessions, events, activity).
 mod overlap;
-pub use overlap::{Overlap, OverlapPoint};
+pub use overlap::{Overlap, OverlapCache, OverlapPoint};
 
 use crate::{
     Error, Host, Result,

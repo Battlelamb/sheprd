@@ -91,3 +91,74 @@ fn daily_peaks_recent_counts_and_membership_share_a_half_open_window() {
         0
     );
 }
+
+#[test]
+fn idle_refresh_reuses_peaks_ages_sessions_and_rolls_the_range_forward() {
+    let mut store = Store::in_memory().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    write(&claude_file(files.path()), fixtures::CLAUDE);
+    index(&mut store, &host(), &roots(files.path()), &redactor(), NOW).unwrap();
+    let at = chrono::DateTime::parse_from_rfc3339("2026-11-17T10:00:05Z")
+        .unwrap()
+        .timestamp_millis();
+    let mut cache = crate::OverlapCache::default();
+    let minute = 60_000;
+    let day = 24 * 60 * minute;
+    // The index already contains events beyond the first sample. The cached
+    // chart must match a full scan as they arrive, expire, and cross UTC days.
+    for now in [
+        at - minute,
+        at,
+        at + 15 * minute,
+        at + 16 * minute,
+        at + day,
+        at - minute,
+    ] {
+        let actual = store
+            .cached_overlap(&mut cache, now, 365, None, None)
+            .unwrap();
+        let full = store.overlap(now, 365, None, None).unwrap();
+        assert_eq!(actual.daily, full.daily);
+        assert_eq!(actual.recent, full.recent);
+        assert_eq!(actual.recent_by_agent, full.recent_by_agent);
+    }
+}
+
+#[test]
+fn cached_history_changes_only_with_the_journal_or_selection() {
+    let files = tempfile::tempdir().unwrap();
+    write(&claude_file(files.path()), fixtures::CLAUDE);
+    let mut store = Store::in_memory().unwrap();
+    let host = host();
+    let roots = roots(files.path());
+    index(&mut store, &host, &roots, &redactor(), NOW).unwrap();
+    let mut cache = crate::OverlapCache::default();
+    let first = store
+        .cached_overlap(&mut cache, NOW, 365, None, None)
+        .unwrap();
+    assert!(first.daily.iter().any(|p| p.count == 1));
+    // Remove the historical input without advancing the journal, so an
+    // accidental rescan of unchanged history is observable.
+    store.connection.execute("DELETE FROM events", []).unwrap();
+    let idle = store
+        .cached_overlap(&mut cache, NOW + 30_000, 365, None, None)
+        .unwrap();
+    assert_eq!(first.daily, idle.daily);
+    append(&claude_file(files.path()), fixtures::CLAUDE_MORE);
+    index(&mut store, &host, &roots, &redactor(), NOW).unwrap();
+    let backfilled = store
+        .cached_overlap(&mut cache, NOW + 30_000, 365, None, None)
+        .unwrap();
+    assert!(backfilled.daily.iter().all(|p| p.count == 0));
+
+    let mut other = Store::in_memory().unwrap();
+    index(&mut other, &host, &roots, &redactor(), NOW).unwrap();
+    let included = other
+        .cached_overlap(&mut cache, NOW, 365, Some(&[&host.id]), None)
+        .unwrap();
+    assert!(included.daily.iter().any(|p| p.count == 1));
+    let excluded = other
+        .cached_overlap(&mut cache, NOW, 365, Some(&[]), None)
+        .unwrap();
+    assert!(excluded.daily.iter().all(|p| p.count == 0));
+}

@@ -4,7 +4,7 @@ use super::{Page, Service, view};
 use crate::{SheprdWindow, config::corners, i18n::fl, orchestrator::Look};
 use gpui::{prelude::*, *};
 use sheprd_control_protocol::protocol::app::TraceFilter;
-use sheprd_traces::{Overlap, OverlapPoint, Session, Store};
+use sheprd_traces::{Overlap, OverlapCache, OverlapPoint, Session, Store};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -26,6 +26,7 @@ fn date(at: i64, format: &str) -> String {
 #[derive(Default)]
 pub(super) struct Panel {
     chart: Option<Overlap>,
+    cache: OverlapCache,
     pub(super) selection: Option<Selection>,
     pub(super) sessions: Vec<Session>,
     error: Option<sheprd_traces::Error>,
@@ -38,6 +39,7 @@ impl Panel {
     pub(super) fn reset(&mut self) {
         self.version = self.version.wrapping_add(1);
         self.chart = None;
+        self.cache = OverlapCache::default();
         self.selection = None;
         self.sessions.clear();
         self.error = None;
@@ -92,29 +94,29 @@ impl SheprdWindow {
         let agent = page.filter.agent;
         let selection = p.selection;
         let version = p.version;
-        // A click can use the exact chart the user saw. Periodic refreshes
-        // recompute both the chart and the selected membership together.
-        let cached = p.refreshed.is_none().then(|| p.chart.clone()).flatten();
+        // Drill into the instant shown on screen, even if the clock has advanced.
+        let clicked_at = p
+            .chart
+            .as_ref()
+            .filter(|_| p.refreshed.is_none())
+            .map(|c| c.recent.at);
+        let Some(page) = self.traces.page.as_mut() else {
+            return;
+        };
+        let mut cache = std::mem::take(&mut page.overlap.cache);
         let read = cx.background_executor().spawn(async move {
             let store = Store::open(&path.ok_or(sheprd_traces::Error::NoStateDirectory)?)?;
             let ids = ids
                 .as_ref()
                 .map(|ids| ids.iter().map(String::as_str).collect::<Vec<_>>());
-            let chart = match cached {
-                Some(chart) => chart,
-                None => store.overlap(
-                    chrono::Utc::now().timestamp_millis(),
-                    days,
-                    ids.as_deref(),
-                    agent,
-                )?,
-            };
+            let now = clicked_at.unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+            let chart = store.cached_overlap(&mut cache, now, days, ids.as_deref(), agent)?;
             let point = selection.and_then(|s| selected_point(&chart, s));
             let sessions = match point {
                 Some(point) => store.active_sessions(point.at, ids.as_deref(), agent)?,
                 None => Vec::new(),
             };
-            Ok((chart, sessions))
+            Ok((chart, sessions, cache))
         });
         let task = cx.spawn(async move |this, cx| {
             let result = read.await;
@@ -127,12 +129,13 @@ impl SheprdWindow {
                 if p.version == version {
                     p.refreshed = Some(Instant::now());
                     match result {
-                        Ok((chart, sessions)) => {
+                        Ok((chart, sessions, cache)) => {
                             if p.selection
                                 .is_some_and(|s| selected_point(&chart, s).is_none())
                             {
                                 p.selection = None;
                             }
+                            p.cache = cache;
                             p.chart = Some(chart);
                             p.sessions = sessions;
                             p.error = None;

@@ -103,7 +103,7 @@ struct SessionSheet: View {
                 } else {
                     Text("No usage reported yet").font(.subheadline).foregroundStyle(.secondary)
                 }
-                if let host {
+                if let host = model.shownComputers.displayName(forDevice: key.device) {
                     Label(host, systemImage: "desktopcomputer").font(.subheadline).foregroundStyle(.secondary)
                 }
             }
@@ -344,12 +344,6 @@ struct SessionSheet: View {
             problem = await model.fleet.send(command, to: key)
             if problem == nil { save?() }
         }
-    }
-
-    /// The computer the chat runs on, as the phone paired it.
-    private var host: String? {
-        model.fleet.chatItems.first { $0.key == key }?.computer.name
-            ?? model.computers.first { $0.device == key.device }?.name
     }
 
     private func currentName(_ option: ConfigOption?) -> String? {

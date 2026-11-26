@@ -252,3 +252,50 @@ fn a_process_that_never_stops_printing_is_refused() {
     ));
     assert!(started.elapsed() < Duration::from_secs(60));
 }
+
+/// A real Windows SSH host, named by `SHEPRD_TEST_WINDOWS_SSH`: a script
+/// whose session is dropped stops on the host, also when this process holds
+/// other connections to it, as a GPU setting change replacing the load script
+/// does (#1560).
+#[test]
+#[ignore = "needs a Windows SSH host named in SHEPRD_TEST_WINDOWS_SSH"]
+fn a_dropped_session_stops_its_script_on_the_host() {
+    let target = std::env::var("SHEPRD_TEST_WINDOWS_SSH").unwrap();
+    let pid_of = |session: &mut Session| -> u32 {
+        let answer = session.sample(Duration::from_secs(30)).unwrap();
+        answer.trim().parse().unwrap()
+    };
+    let pid_script = script(
+        "",
+        "    [void]$herdrOut.AppendLine($PID)",
+        Duration::from_secs(1),
+    );
+    // Kept open throughout, so the host keeps a connection from this process.
+    let mut kept = Session::connect(&target, &pid_script).unwrap();
+    let kept_pid = pid_of(&mut kept);
+    let mut dropped = Session::connect(&target, &pid_script).unwrap();
+    let dropped_pid = pid_of(&mut dropped);
+    assert_ne!(kept_pid, dropped_pid);
+    drop(dropped);
+    // Asked through a session of its own: a one-shot `ssh` on Windows stalls
+    // writing its output into a synchronous pipe.
+    let check = format!(
+        "    [void]$herdrOut.AppendLine($(if (Get-Process -Id {dropped_pid}) {{ 'running' }} else {{ 'gone' }}))"
+    );
+    let mut checker =
+        Session::connect(&target, &script("", &check, Duration::from_secs(1))).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let state = checker.sample(Duration::from_secs(30)).unwrap();
+        if state.trim() == "gone" {
+            break;
+        }
+        assert_eq!(state.trim(), "running");
+        assert!(Instant::now() < deadline, "the dropped script kept running");
+    }
+    assert_eq!(
+        pid_of(&mut kept),
+        kept_pid,
+        "the other script still answers"
+    );
+}

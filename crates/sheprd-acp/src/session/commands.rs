@@ -226,7 +226,7 @@ impl<R: FnMut(Update)> Session<R> {
         let prompt = self.projector.prompt(shown, files, sent);
         self.emit(prompt);
         for image in images {
-            let change = self.projector.image(Author::User, image);
+            let change = self.projector.image(Author::User, image, None);
             self.emit(change);
         }
     }

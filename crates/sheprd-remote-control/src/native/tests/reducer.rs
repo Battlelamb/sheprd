@@ -142,6 +142,7 @@ fn entries() -> Vector {
                         data: "R0lGODlhAQABAAAAACw=".into(),
                         kind: ImageType::Gif,
                     },
+                    caption: None,
                 },
             ),
         },

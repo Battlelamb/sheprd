@@ -222,6 +222,10 @@ pub enum EntryKind {
     Image {
         author: Author,
         image: Image,
+        /// What the picture shows, in at most [`crate::MAX_CAPTION`]
+        /// characters: a title line, then any detail on the lines after it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        caption: Option<String>,
     },
     Tool(Tool),
     /// How a prompt turn ended: how long it took and what it used.

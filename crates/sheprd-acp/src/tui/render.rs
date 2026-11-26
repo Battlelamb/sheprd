@@ -2,20 +2,19 @@
 
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Layout, Position, Rect},
+    layout::{Constraint, Layout, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Padding, Paragraph},
+    widgets::{Block, Borders, Paragraph},
 };
-use sheprd_chat_protocol::{OptionCategory, PermissionKind, Status, display};
+use sheprd_chat_protocol::{PermissionKind, Status};
 
 use super::{lines, view::View};
 
-const SPINNER: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+mod status;
+mod welcome;
+
 const COMPOSER_ROWS: usize = 8;
-/// The mark before the composer's first row; later rows line up under it.
-const PROMPT: &str = "› ";
-const PROMPT_WIDTH: usize = 2;
 
 pub(crate) fn draw(frame: &mut Frame<'_>, view: &mut View, tick: usize) {
     let area = frame.area();
@@ -36,8 +35,6 @@ pub(crate) fn draw(frame: &mut Frame<'_>, view: &mut View, tick: usize) {
         0
     };
     let [
-        header,
-        rule,
         body,
         plan_area,
         queue_area,
@@ -45,8 +42,6 @@ pub(crate) fn draw(frame: &mut Frame<'_>, view: &mut View, tick: usize) {
         bottom_area,
         footer,
     ] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
         Constraint::Min(1),
         Constraint::Length(height(plan_height)),
         Constraint::Length(height(queued)),
@@ -55,15 +50,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, view: &mut View, tick: usize) {
         Constraint::Length(1),
     ])
     .areas(area);
-    draw_header(frame, view, tick, header);
-    frame.render_widget(
-        Paragraph::new(Line::styled(
-            "─".repeat(width),
-            Style::default().fg(Color::DarkGray),
-        )),
-        rule,
-    );
-    draw_body(frame, view, body);
+    draw_body(frame, view, body, tick);
     frame.render_widget(
         Paragraph::new(plan.into_iter().take(plan_height).collect::<Vec<_>>()),
         plan_area,
@@ -88,58 +75,8 @@ pub(crate) fn draw(frame: &mut Frame<'_>, view: &mut View, tick: usize) {
         Bottom::Permission => draw_permission(frame, view, bottom_area),
         Bottom::Settings => draw_settings(frame, view, bottom_area),
     }
-    let footer_line = match &view.flash {
-        Some(flash) => Line::styled(flash.clone(), Style::default().fg(Color::Yellow)),
-        None => {
-            let hints: &[&[(&str, &str)]] = if bottom == Bottom::Settings {
-                &[
-                    &[("↑/↓", "setting"), ("←/→", "change"), ("Esc", "close")],
-                    &[("←/→", "change"), ("Esc", "close")],
-                ]
-            } else {
-                &[
-                    &[
-                        ("Enter", "send"),
-                        ("Alt+Enter", "newline"),
-                        ("Esc", "cancel"),
-                        ("Shift+Tab", "mode"),
-                        ("Ctrl+O", "settings"),
-                        ("Ctrl+D", "quit"),
-                    ],
-                    &[
-                        ("Enter", "send"),
-                        ("Esc", "cancel"),
-                        ("Ctrl+O", "settings"),
-                        ("Ctrl+D", "quit"),
-                    ],
-                    &[("Enter", "send"), ("Ctrl+D", "quit")],
-                ]
-            };
-            hints
-                .iter()
-                .map(|hints| hint_line(hints))
-                .find(|line| line.width() <= width)
-                .unwrap_or_default()
-        }
-    };
-    frame.render_widget(Paragraph::new(footer_line), footer);
-}
-
-/// Keys and what they do, the keys standing out from their quiet labels.
-fn hint_line(hints: &[(&str, &str)]) -> Line<'static> {
-    let dim = Style::default().fg(Color::DarkGray);
-    let mut spans = Vec::new();
-    for (index, (key, label)) in hints.iter().enumerate() {
-        if index > 0 {
-            spans.push(Span::styled(" · ", dim));
-        }
-        spans.push(Span::styled(
-            (*key).to_owned(),
-            Style::default().add_modifier(Modifier::BOLD),
-        ));
-        spans.push(Span::styled(format!(" {label}"), dim));
-    }
-    Line::from(spans)
+    let bar = status::line(view, tick, width, bottom == Bottom::Settings);
+    frame.render_widget(Paragraph::new(bar), footer);
 }
 
 fn height(rows: usize) -> u16 {
@@ -179,7 +116,6 @@ fn draw_completions(frame: &mut Frame<'_>, view: &View, area: Rect) {
 fn draw_settings(frame: &mut Frame<'_>, view: &View, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
         .title(" Settings ")
         .border_style(Style::default().fg(Color::Cyan));
     let inner = block.inner(area);
@@ -219,143 +155,11 @@ fn draw_settings(frame: &mut Frame<'_>, view: &View, area: Rect) {
     frame.render_widget(Paragraph::new(rows), inner);
 }
 
-/// The status badge, the agent and its settings on the left; what the
-/// session uses on the right, dropped from its end when the row is short.
-fn draw_header(frame: &mut Frame<'_>, view: &View, tick: usize, area: Rect) {
-    let left = header_line(view, tick);
-    let mut right = usage_spans(view);
-    let room = usize::from(area.width);
-    while !right.is_empty() && left.width() + spans_width(&right) + 2 > room {
-        // Each part is a separator and its text.
-        right.truncate(right.len().saturating_sub(2));
+fn draw_body(frame: &mut Frame<'_>, view: &mut View, area: Rect, tick: usize) {
+    if view.transcript.entries.is_empty() && !view.transcript.truncated {
+        welcome::draw(frame, view, area, tick);
+        return;
     }
-    frame.render_widget(Paragraph::new(left), area);
-    if !right.is_empty() {
-        right.push(Span::raw(" "));
-        frame.render_widget(
-            Paragraph::new(Line::from(right)).alignment(Alignment::Right),
-            area,
-        );
-    }
-}
-
-fn spans_width(spans: &[Span<'_>]) -> usize {
-    spans.iter().map(Span::width).sum()
-}
-
-fn header_line(view: &View, tick: usize) -> Line<'static> {
-    let transcript = &view.transcript;
-    let (status, color) = match &transcript.status {
-        _ if transcript.is_blocked() => ("waiting for you".to_owned(), Color::Magenta),
-        Status::Starting => (
-            format!("{} starting", SPINNER[tick % SPINNER.len()]),
-            Color::Yellow,
-        ),
-        Status::Idle => ("● ready".to_owned(), Color::Green),
-        Status::Working => {
-            let elapsed = transcript.turn.map(|turn| {
-                display::duration(crate::session::now_ms().saturating_sub(turn.started_ms))
-            });
-            let elapsed = elapsed
-                .filter(|elapsed| !elapsed.ends_with("ms"))
-                .map_or_else(String::new, |elapsed| format!(" {elapsed}"));
-            (
-                format!("{} working{elapsed}", SPINNER[tick % SPINNER.len()]),
-                Color::Yellow,
-            )
-        }
-        Status::Failed { .. } => ("✗ failed".to_owned(), Color::Red),
-        Status::Exited { .. } => ("✗ exited".to_owned(), Color::Red),
-    };
-    let dim = Style::default().fg(Color::DarkGray);
-    // Reversed, the badge takes the status's color whatever the theme.
-    let mut spans = vec![
-        Span::styled(
-            format!(" {status} "),
-            Style::default()
-                .fg(color)
-                .add_modifier(Modifier::REVERSED | Modifier::BOLD),
-        ),
-        Span::styled(
-            format!(" {}", transcript.agent),
-            Style::default().add_modifier(Modifier::BOLD),
-        ),
-    ];
-    // The settings the agent offers come first; its older modes only when it
-    // offers no mode setting.
-    for category in [
-        OptionCategory::Model,
-        OptionCategory::ThoughtLevel,
-        OptionCategory::Mode,
-    ] {
-        if let Some(option) = transcript.option(category) {
-            spans.push(Span::styled(" · ", dim));
-            spans.push(Span::raw(option.current_name()));
-        }
-    }
-    if transcript.option(OptionCategory::Mode).is_none()
-        && let Some(mode) = transcript.modes.as_ref().and_then(|modes| modes.current())
-    {
-        spans.push(Span::styled(" · ", dim));
-        spans.push(Span::raw(mode.name.clone()));
-    }
-    if transcript.auto_accept {
-        spans.push(Span::styled(" · ", dim));
-        spans.push(Span::styled(
-            "auto-accepting",
-            Style::default().fg(Color::Yellow),
-        ));
-    }
-    if let Some(title) = transcript.session.as_ref().and_then(|s| s.title.clone()) {
-        spans.push(Span::styled(" · ", dim));
-        spans.push(Span::styled(title, dim));
-    }
-    Line::from(spans)
-}
-
-/// The context used, the cost, and the clients attached, each after its
-/// separator, most useful first.
-fn usage_spans(view: &View) -> Vec<Span<'static>> {
-    let transcript = &view.transcript;
-    let dim = Style::default().fg(Color::DarkGray);
-    let mut spans = Vec::new();
-    if let Some(usage) = transcript.usage.as_ref().filter(|usage| usage.size > 0) {
-        let percent = usage.percent();
-        let color = match percent {
-            90.. => Color::Red,
-            75..90 => Color::Yellow,
-            _ => Color::DarkGray,
-        };
-        spans.push(Span::styled(" · ", dim));
-        spans.push(Span::styled(
-            format!(
-                "{}/{} context ({percent}%)",
-                display::tokens(usage.used),
-                display::tokens(usage.size)
-            ),
-            Style::default().fg(color),
-        ));
-        if let Some(cost) = usage.cost.as_ref().filter(|cost| cost.micros > 0) {
-            spans.push(Span::styled(" · ", dim));
-            spans.push(Span::styled(display::cost(cost), dim));
-        }
-    }
-    if transcript.clients > 0 {
-        let attached = match transcript.clients {
-            1 => "1 client attached".to_owned(),
-            count => format!("{count} clients attached"),
-        };
-        spans.push(Span::styled(" · ", dim));
-        spans.push(Span::styled(attached, Style::default().fg(Color::Cyan)));
-    }
-    // The first part needs no separator before it.
-    if !spans.is_empty() {
-        spans.remove(0);
-    }
-    spans
-}
-
-fn draw_body(frame: &mut Frame<'_>, view: &mut View, area: Rect) {
     let lines = view.lines(usize::from(area.width));
     let rows = usize::from(area.height);
     let most = lines.len().saturating_sub(rows);
@@ -366,41 +170,42 @@ fn draw_body(frame: &mut Frame<'_>, view: &mut View, area: Rect) {
 }
 
 fn composer_height(view: &View, width: usize) -> (usize, Bottom) {
-    let (rows, _) = view
-        .composer
-        .layout(width.saturating_sub(4 + PROMPT_WIDTH).max(1));
-    (rows.len().clamp(1, COMPOSER_ROWS) + 2, Bottom::Composer)
+    let (rows, _) = view.composer.layout(width.saturating_sub(PROMPT_MARK));
+    // A rule above the prompt's rows sets it apart from the transcript.
+    (rows.len().clamp(1, COMPOSER_ROWS) + 1, Bottom::Composer)
 }
 
+/// Columns of the `❯ ` mark before the prompt's text.
+const PROMPT_MARK: usize = 2;
+
 fn draw_composer(frame: &mut Frame<'_>, view: &View, area: Rect) {
-    // The border says whether a prompt goes now or waits in the queue.
-    let border = match view.transcript.status {
-        Status::Idle => Color::Cyan,
-        Status::Working | Status::Starting => Color::Yellow,
-        Status::Failed { .. } | Status::Exited { .. } => Color::DarkGray,
-    };
-    let mut block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .padding(Padding::horizontal(1))
-        .border_style(Style::default().fg(border));
-    // Files the prompt carries name themselves on the composer's border.
-    if !view.attachments.is_empty() {
+    let [rule, rows] = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
+    let dim = Style::default().fg(Color::DarkGray);
+    let fill = "─".repeat(usize::from(rule.width));
+    // Files the prompt carries name themselves on the rule.
+    let rule_line = if view.attachments.is_empty() {
+        Line::styled(fill, dim)
+    } else {
         let names: Vec<&str> = view.attachments.iter().map(|file| file.name()).collect();
-        block = block.title(Line::styled(
-            format!(" \u{1f4ce} {} ", names.join(" \u{b7} ")),
-            Style::default().fg(Color::Cyan),
-        ));
-    }
-    let framed = block.inner(area);
-    frame.render_widget(block, area);
+        Line::from(vec![
+            Span::styled("─ ", dim),
+            Span::styled(
+                format!("\u{1f4ce} {} ", names.join(" \u{b7} ")),
+                Style::default().fg(Color::Cyan),
+            ),
+            Span::styled(fill, dim),
+        ])
+    };
+    frame.render_widget(Paragraph::new(rule_line), rule);
     let [mark, inner] =
-        Layout::horizontal([Constraint::Length(height(PROMPT_WIDTH)), Constraint::Min(1)])
-            .areas(framed);
+        Layout::horizontal([Constraint::Length(height(PROMPT_MARK)), Constraint::Min(1)])
+            .areas(rows);
     frame.render_widget(
         Paragraph::new(Line::styled(
-            PROMPT,
-            Style::default().fg(border).add_modifier(Modifier::BOLD),
+            "❯ ",
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
         )),
         mark,
     );
@@ -456,7 +261,6 @@ fn draw_permission(frame: &mut Frame<'_>, view: &View, area: Rect) {
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
         .title(title)
         .border_style(Style::default().fg(Color::Magenta));
     let inner = block.inner(area);

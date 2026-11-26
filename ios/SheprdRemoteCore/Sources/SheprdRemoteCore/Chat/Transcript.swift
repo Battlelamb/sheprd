@@ -109,6 +109,10 @@ public struct Transcript: Codable, Hashable, Sendable {
         usage = try c.decodeIfPresent(Usage.self, forKey: .usage)
     }
 
+    /// Whether the agent is answering: the daemon then refuses to switch
+    /// agents (`Rejection::AgentFixed`) until the turn ends.
+    public var answering: Bool { status == .working || turn != nil }
+
     public func entry(_ id: EntryId) -> Entry? { position(of: id).map { entries[$0] } }
 
     /// The index of `id`; entries are kept in increasing id order.

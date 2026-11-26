@@ -76,8 +76,11 @@ pub(crate) fn connect(
                     .map(|arg| sheprd_client::shell_quote(arg))
                     .collect::<Vec<_>>()
                     .join(" ");
-                let script = super::remote_program_script(&args);
-                sheprd_client::script_command(host, &script).map_err(Error::Remote)?
+                return Link::start(
+                    Dial::Ssh(host.clone(), super::remote_program_script(&args)),
+                    since,
+                    resend,
+                );
             }
         };
         return Link::start(Dial::Process(command), since, resend);

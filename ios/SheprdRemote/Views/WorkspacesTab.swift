@@ -261,7 +261,7 @@ struct MachineStatus: View {
 }
 
 /// A share of the computer in use, as Sheprd's host rows draw it.
-private struct LoadGauge: View {
+struct LoadGauge: View {
     var label: String
     var percent: Int
 

@@ -1,4 +1,6 @@
-use super::*;
+use super::{Panel, Selection, selected_at};
+use sheprd_traces::{Overlap, OverlapPoint};
+use std::time::Instant;
 
 #[test]
 fn a_selected_peak_keeps_its_instant_when_replication_moves_the_peak() {

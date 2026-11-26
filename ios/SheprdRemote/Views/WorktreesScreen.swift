@@ -42,7 +42,7 @@ struct WorktreesScreen: View {
         .navigationTitle(name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if let own = checkouts.first?.workspaces.first(where: \.isOwnCheckout) {
+            if let own = workspace.ownCheckout(among: checkouts.first?.workspaces ?? []) {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("New Worktree", systemImage: "plus") {
                         model.creating = .workspace(device: key.device, folder: own.cwd, session: own.session)

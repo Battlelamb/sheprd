@@ -49,4 +49,25 @@ struct RepositoryCheckoutsTests {
         #expect(checkouts.map(\.device) == ["studio", "macbook"])
         #expect(checkouts[0].workspaces.map(\.id) == ["vault"])
     }
+
+    @Test func branchesANewWorktreeFromTheOwnCheckoutOfItsRepositoryAndSession() {
+        func own(_ id: String, key: String, session: String) -> Home.Workspace {
+            var workspace = Self.workspace(id, key: key, github: Self.moonmail)
+            workspace.session = session
+            return workspace
+        }
+        var current = Self.workspace("vault", key: "/a/.git", linked: true, github: Self.moonmail)
+        current.session = "pilots"
+        let others = [
+            own("clone", key: "/b/.git", session: "pilots"),
+            own("coding", key: "/a/.git", session: "coding"),
+            own("pilots", key: "/a/.git", session: "pilots"),
+        ]
+        #expect(current.ownCheckout(among: others)?.id == "pilots")
+        current.session = "other"
+        #expect(current.ownCheckout(among: others)?.id == "coding")
+        #expect(others[1].ownCheckout(among: others)?.id == "coding")
+        current.worktree = nil
+        #expect(current.ownCheckout(among: others) == nil)
+    }
 }

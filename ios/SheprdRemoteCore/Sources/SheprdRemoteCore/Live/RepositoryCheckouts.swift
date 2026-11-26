@@ -29,6 +29,17 @@ extension Home.Workspace {
         return found.contains { $0.device == device } ? found : [ComputerCheckouts(device: device, workspaces: [self])] + found
     }
 
+    /// The checkout a new worktree of this workspace branches from: among
+    /// `workspaces` on its own computer, the own checkout of its repository
+    /// (its worktree key), in its Herdr session when one is there; nil when
+    /// Sheprd names no repository for it or none is open.
+    public func ownCheckout(among workspaces: [Home.Workspace]) -> Home.Workspace? {
+        if isOwnCheckout, worktree != nil { return self }
+        guard let key = worktree?.key else { return nil }
+        let own = workspaces.filter { $0.isOwnCheckout && $0.worktree?.key == key }
+        return own.first { $0.session == session } ?? own.first
+    }
+
     /// Both push to one GitHub repository, whatever the letters' case.
     private func sameRemote(as other: Home.Workspace) -> Bool {
         guard let mine = github, let theirs = other.github else { return false }

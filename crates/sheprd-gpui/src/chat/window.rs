@@ -118,6 +118,12 @@ impl SheprdWindow {
         changed |= self.chats.recode(&self.config.chat);
         changed |= self.chats.relocale(crate::i18n::shown_locale());
         changed |= self.chats.poll(now);
+        self.chats.log_focused_attachment(
+            self.live.snapshot.as_deref(),
+            self.selected_endpoint,
+            enabled,
+            route.as_ref(),
+        );
         self.settle_chat_modes(cx);
         // Observed panes, whether a discovered agent or a `[chat.mirrors]`
         // entry, take their status from the daemon; live chats ignore it.

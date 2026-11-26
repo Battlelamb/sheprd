@@ -1,6 +1,8 @@
 //! The chats a window attaches to: one per chat pane of its daemon, each
 //! with its connection, retries, and the view state drawn from it.
 
+mod diagnostics;
+
 use super::{
     Error, MAX_FAILURES, Result, Target,
     link::{Dial, Link},
@@ -394,7 +396,14 @@ impl ChatPane {
     }
 
     fn fail(&mut self, error: &Error, now: Instant) {
-        tracing::debug!(%error, pane = %self.target.pane_id, "Chat connection ended");
+        tracing::debug!(
+            %error,
+            pane = %self.target.pane_id,
+            transport = self.target.route.transport_label(),
+            welcomed = self.session.welcomed(),
+            had_transcript = self.session.synced(),
+            "Chat connection ended"
+        );
         self.link = None;
         self.session.lost(error);
         self.menu = None;
@@ -619,6 +628,8 @@ pub(crate) struct Chats {
     pub(crate) converting: Option<super::convert::Job>,
     /// The herdr-core agent moving into a chat, one at a time with the above.
     pub(crate) converting_core: Option<super::convert::CoreJob>,
+    /// Last attachment decision logged for the daemon's focused pane.
+    diagnostic: Option<diagnostics::Decision>,
     /// Exact CLI sessions already running in this connected daemon's panes.
     pub(crate) existing: super::existing::Existing,
     /// The agent a chat was last started with, which the strips' one-button

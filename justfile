@@ -405,6 +405,14 @@ relays-remove endpoint:
     python3 scripts/relays.py remove {{relays_list}} "{{endpoint}}"
     just relays-sign
 
+# Create open public relays at REGION.relay.sheprd.org, then check them; publishes nothing.
+relays-deploy +regions:
+    bash scripts/public-relays.sh deploy {{regions}}
+
+# Wait for public relays' DNS, HTTPS, and QUIC, then print their relays-add lines.
+relays-check +regions:
+    bash scripts/public-relays.sh check {{regions}}
+
 # Re-stamp and re-sign the list as it is, before it expires.
 relays-sign:
     python3 scripts/relays.py stamp {{relays_list}}

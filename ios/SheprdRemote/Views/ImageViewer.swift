@@ -40,6 +40,8 @@ struct ImageViewer: View {
     var openTab: ((GalleryPicture) -> Void)?
     @State private var selection: String
     @State private var chromeHidden = false
+    /// The viewer's height, which bounds an opened caption.
+    @State private var height: CGFloat = 0
     /// The pictures decoded so far, kept only around the one shown.
     @State private var decoded: [String: UIImage]
 
@@ -73,6 +75,7 @@ struct ImageViewer: View {
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
         .ignoresSafeArea()
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
         .background(.black)
         .onChange(of: selection) { forgetFarPictures() }
         .overlay(alignment: .top) {
@@ -82,7 +85,7 @@ struct ImageViewer: View {
             if !chromeHidden, let picture = pictures.first(where: { $0.id == selection }) {
                 VStack(spacing: 10) {
                     if let about = picture.about {
-                        PictureCaption(text: about).id(picture.id)
+                        PictureCaption(text: about, maxHeight: max(height * 0.4, 80)).id(picture.id)
                     }
                     if let openTab, picture.tab != nil {
                         tabButton(picture, open: openTab)
@@ -171,21 +174,21 @@ struct ImageViewer: View {
 }
 
 /// What the agent said a picture shows, on glass over its bottom edge: the
-/// first line as a title, the rest as detail that a tap opens in full.
+/// first line as a title, the rest as detail that a tap opens in full,
+/// scrolling when it is taller than a share of the screen, as at large
+/// text sizes or in landscape.
 private struct PictureCaption: View {
     let text: String
+    /// The tallest it grows when opened in full.
+    let maxHeight: CGFloat
     @State private var expanded = false
 
     var body: some View {
-        let lines = text.split(separator: "\n", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-        let detail = lines.count > 1 ? lines[1] : nil
-        VStack(alignment: .leading, spacing: 3) {
-            Text(lines.first ?? text).font(.body.weight(.semibold)).lineLimit(expanded ? nil : 2)
-            if let detail, !detail.isEmpty {
-                Text(detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(expanded ? nil : 2)
-            }
+        ViewThatFits(in: .vertical) {
+            lines
+            ScrollView { lines }.scrollBounceBehavior(.basedOnSize)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxHeight: expanded ? maxHeight : nil)
         .padding(.horizontal, 16).padding(.vertical, 12)
         .glassEffect(in: .rect(cornerRadius: 22))
         .contentShape(.rect)
@@ -193,6 +196,18 @@ private struct PictureCaption: View {
         .padding(.horizontal, 20)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isStaticText)
+    }
+
+    private var lines: some View {
+        let lines = text.split(separator: "\n", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+        let detail = lines.count > 1 ? lines[1] : nil
+        return VStack(alignment: .leading, spacing: 3) {
+            Text(lines.first ?? text).font(.body.weight(.semibold)).lineLimit(expanded ? nil : 2)
+            if let detail, !detail.isEmpty {
+                Text(detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(expanded ? nil : 2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

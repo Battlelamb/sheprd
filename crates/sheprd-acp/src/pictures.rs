@@ -67,7 +67,7 @@ pub(crate) fn linked(text: &str, cwd: &Path) -> Vec<Linked> {
         }
         let alt = &rest[..close];
         rest = &rest[close + 2..];
-        let Some(end) = rest.find(')') else {
+        let Some(end) = link_end(rest) else {
             break;
         };
         let target = rest[..end].trim();
@@ -94,6 +94,31 @@ pub(crate) fn linked(text: &str, cwd: &Path) -> Vec<Linked> {
         }
     }
     links
+}
+
+/// Where the `)` closing a link's target and title is in `rest`: not one
+/// inside `<…>`, a quoted title, or balanced parentheses, so a path such as
+/// `shot (1).png` and a title such as `"Revenue (USD)"` stay whole.
+fn link_end(rest: &str) -> Option<usize> {
+    let mut quote = None;
+    let mut angle = false;
+    let mut depth = 0usize;
+    let mut after_space = false;
+    for (index, ch) in rest.char_indices() {
+        match (quote, ch) {
+            (Some(open), _) if ch == open => quote = None,
+            (Some(_), _) => {}
+            _ if angle => angle = ch != '>',
+            (None, '<') if index == rest.len() - rest.trim_start().len() => angle = true,
+            (None, '"' | '\'') if after_space => quote = Some(ch),
+            (None, '(') => depth += 1,
+            (None, ')') if depth == 0 => return Some(index),
+            (None, ')') => depth -= 1,
+            _ => {}
+        }
+        after_space = ch.is_whitespace();
+    }
+    None
 }
 
 /// A picture's caption from its alt text and its quoted title, each on one

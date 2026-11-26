@@ -57,6 +57,31 @@ fn a_link_captions_its_picture_with_its_alt_text_and_title() {
             Some("Alt only".to_owned()),
         ]
     );
+    assert_eq!(
+        linked(
+            "![Chart](chart.png \"Revenue (USD)\") ![Chart](<a b.png> (Per region)) \
+             ![Shot](<shot (1).png> 'Second try') ![Plain](it's.png)",
+            cwd
+        ),
+        [
+            Linked {
+                path: PathBuf::from("/work/chart.png"),
+                caption: Some("Chart\nRevenue (USD)".to_owned()),
+            },
+            Linked {
+                path: PathBuf::from("/work/a b.png"),
+                caption: Some("Chart\nPer region".to_owned()),
+            },
+            Linked {
+                path: PathBuf::from("/work/shot (1).png"),
+                caption: Some("Shot\nSecond try".to_owned()),
+            },
+            Linked {
+                path: PathBuf::from("/work/it's.png"),
+                caption: Some("Plain".to_owned()),
+            },
+        ]
+    );
     let long = "é".repeat(MAX_CAPTION + 10);
     let caption = captions(&format!("![{long}](f.png)")).remove(0).unwrap();
     assert_eq!(caption.chars().count(), MAX_CAPTION);

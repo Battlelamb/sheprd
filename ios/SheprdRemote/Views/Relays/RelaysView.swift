@@ -86,13 +86,15 @@ struct RelaysView: View {
                 Text("Type the address of a relay a paired computer listens on, to reach that computer through it. A computer not paired yet is still paired nearby or on its network first.")
             }
         }
-        .confirmationDialog(
+        // An alert, not a confirmation dialog: on iPhone that one floats over
+        // the bottom of the list, away from the row swiped.
+        .alert(
             "Remove this relay?",
             isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
-            titleVisibility: .visible,
             presenting: removing
         ) { relay in
-            Button("Remove Relay", role: .destructive) { model.removeRelay(relay) }
+            Button("Remove", role: .destructive) { model.removeRelay(relay) }
+            Button("Cancel", role: .cancel) {}
         } message: { relay in
             let names = model.computers(naming: relay).map(model.displayName).formatted(.list(type: .and))
             Text("\(names) will no longer be reached through it, until you add it back.")

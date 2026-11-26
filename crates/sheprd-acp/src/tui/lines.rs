@@ -176,10 +176,43 @@ pub(crate) fn entry(entry: &Entry, width: usize) -> Vec<Line<'static>> {
     lines
 }
 
+/// The effects Sheprd's chat plays around a message (`:::slam` … `:::`)
+/// or over its pane (`::confetti`). A terminal plays none, so their lines
+/// are left out and the text they wrap reads as any other.
+const BUBBLE_EFFECTS: [&str; 4] = ["gentle", "ink", "loud", "slam"];
+const PANE_EFFECTS: [&str; 10] = [
+    "balloons",
+    "celebration",
+    "confetti",
+    "echo",
+    "fireworks",
+    "lasers",
+    "love",
+    "spotlight",
+    "wizz",
+    "zap",
+];
+
+/// Whether `line` only asks Sheprd's chat for an effect.
+fn effect_line(line: &str) -> bool {
+    let line = line.trim();
+    if line == ":::" {
+        return true;
+    }
+    if let Some(name) = line.strip_prefix(":::") {
+        return BUBBLE_EFFECTS.contains(&name);
+    }
+    line.strip_prefix("::")
+        .is_some_and(|name| PANE_EFFECTS.contains(&name))
+}
+
 /// Agent text with fenced code set apart and the rest drawn as prose.
 fn agent_text(lines: &mut Vec<Line<'static>>, text: &str, width: usize) {
     let mut code = false;
     for raw in text.trim_end().split('\n') {
+        if !code && effect_line(raw) {
+            continue;
+        }
         // A bar down the left sets code apart; the fences themselves go.
         if raw.trim_start().starts_with("```") {
             code = !code;

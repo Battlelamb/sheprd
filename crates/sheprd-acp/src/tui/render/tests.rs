@@ -164,3 +164,11 @@ fn the_view_scrolls_back_and_clamps() {
     assert!(screen.contains(" │ please fix"));
     assert!(view.scroll < 1000);
 }
+
+#[test]
+fn the_composer_marks_where_the_prompt_goes() {
+    let mut view = busy();
+    view.transcript.permissions.clear();
+    let screen = screen(&mut view, 60, 16);
+    assert!(screen.contains("❯ Type to queue a prompt…"), "{screen}");
+}

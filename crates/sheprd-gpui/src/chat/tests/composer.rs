@@ -138,6 +138,7 @@ fn a_long_queue_keeps_the_composer_in_the_pane(cx: &mut TestAppContext) {
         .map(|n| sheprd_chat_protocol::Queued {
             attachments: Vec::new(),
             id: sheprd_chat_protocol::CommandId::random(),
+            held: false,
             steered: false,
             text: format!("queued {n}"),
         })
@@ -163,7 +164,7 @@ fn a_long_queue_keeps_the_composer_in_the_pane(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_steered_prompt_cannot_be_withdrawn(cx: &mut TestAppContext) {
+fn a_steered_prompt_cannot_be_withdrawn_or_sent_now(cx: &mut TestAppContext) {
     let (view, _peer, cx) = open(cx, ConnectTarget::Local);
     let program = Program::new();
     let mut transcript = Transcript::new("Claude");
@@ -173,6 +174,7 @@ fn a_steered_prompt_cannot_be_withdrawn(cx: &mut TestAppContext) {
         .map(|steered| sheprd_chat_protocol::Queued {
             attachments: Vec::new(),
             id: sheprd_chat_protocol::CommandId::random(),
+            held: false,
             steered,
             text: format!("steered {steered}"),
         })
@@ -184,7 +186,9 @@ fn a_steered_prompt_cannot_be_withdrawn(cx: &mut TestAppContext) {
     let _stream = attach_with(&view, &program, snapshot, cx);
     // The agent already has the first; only the second waits to be sent.
     assert!(cx.debug_bounds("chat-unqueue-0").is_none());
+    assert!(cx.debug_bounds("chat-send-now-0").is_none());
     assert!(cx.debug_bounds("chat-unqueue-1").is_some());
+    assert!(cx.debug_bounds("chat-send-now-1").is_some());
 }
 
 #[gpui::test]

@@ -106,12 +106,33 @@ impl SheprdWindow {
                 let pane_id = chat.target.pane_id.clone();
                 let id = queued.id;
                 // A steered prompt is already with the agent, waiting for
-                // its next step, so it cannot be withdrawn.
+                // its next step, so it cannot be withdrawn or sent again.
+                // One held by a stop waits until sent now.
                 let label = if queued.steered {
                     fl!("chat-steering")
+                } else if queued.held {
+                    fl!("chat-held")
                 } else {
                     fl!("chat-queued")
                 };
+                let send_pane = pane_id.clone();
+                let send_now = (!queued.steered).then(|| {
+                    div()
+                        .id(("chat-send-now", index))
+                        .debug_selector(move || format!("chat-send-now-{index}"))
+                        .flex_none()
+                        .px(px(6.))
+                        .rounded(px(corners::SMALL))
+                        .cursor_pointer()
+                        .text_color(rgb(theme.primary()))
+                        .hover(|button| button.bg(rgb(theme.active)))
+                        .child(fl!("chat-send-now"))
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            cx.stop_propagation();
+                            this.chat_send(&send_pane, Command::SendNow { id }, cx);
+                        }))
+                });
                 let withdraw = (!queued.steered).then(|| {
                     div()
                         .id(("chat-unqueue", index))
@@ -155,6 +176,7 @@ impl SheprdWindow {
                             .truncate()
                             .child(safe_text(&queued.text, QUEUED)),
                     )
+                    .children(send_now)
                     .children(withdraw)
             })
             .collect();

@@ -49,6 +49,7 @@ impl<R: FnMut(Update)> Session<R> {
             Command::SetMode { id } => self.set_mode(id),
             Command::SetOption { id, value } => self.set_option(id, &value),
             Command::Unqueue { id } => self.unqueue(id),
+            Command::SendNow { id } => self.send_now(id),
             Command::SetAutoAccept { on } => {
                 self.set_auto_accept(on);
                 Ok(())
@@ -96,6 +97,7 @@ impl<R: FnMut(Update)> Session<R> {
             queued.push(Queued {
                 attachments,
                 id,
+                held: false,
                 steered,
                 text,
             });
@@ -232,16 +234,17 @@ impl<R: FnMut(Update)> Session<R> {
         }
     }
 
-    /// Sends the oldest queued prompt once the agent is free.
+    /// Sends the oldest queued prompt once the agent is free; those held
+    /// when a turn was stopped wait to be sent now.
     pub(super) fn next_queued(&mut self) {
         if self.turn.is_some() || !self.ready || self.carrying() {
             return;
         }
         let mut queued = self.transcript.queued.clone();
-        if queued.is_empty() {
+        let Some(index) = queued.iter().position(|queued| !queued.held) else {
             return;
-        }
-        let next = queued.remove(0);
+        };
+        let next = queued.remove(index);
         let origin = self.queued_origins.get(&next.id).cloned();
         // A prompt steered into a turn that ended without it goes as it was
         // sent: what it told the agent besides is not told again, and its
@@ -256,10 +259,16 @@ impl<R: FnMut(Update)> Session<R> {
     }
 
     fn cancel(&mut self) -> Result<(), Rejection> {
-        if self.turn.is_none() && self.transcript.queued.is_empty() {
+        let waiting = self.transcript.queued.iter().any(|queued| !queued.held);
+        if self.turn.is_none() && !waiting {
             return Err(Rejection::NotWorking);
         }
-        self.clear_queue();
+        self.hold_queue();
+        self.stop_turn()
+    }
+
+    /// Ends the running turn, declining what it asked.
+    pub(super) fn stop_turn(&mut self) -> Result<(), Rejection> {
         self.resolve_all();
         self.watchdog.clear();
         if self.turn.is_some()

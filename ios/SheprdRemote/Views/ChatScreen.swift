@@ -284,8 +284,8 @@ private struct ChatDocument: View {
                         Text("Queued").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
                         ForEach(transcript.queued, id: \.id) { queued in
                             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Image(systemName: queued.steered ? "arrow.turn.down.right" : "clock").foregroundStyle(.secondary)
-                                    .accessibilityLabel(queued.steered ? "Steering" : "Queued")
+                                Image(systemName: queued.steered ? "arrow.turn.down.right" : queued.held ? "pause.circle" : "clock").foregroundStyle(.secondary)
+                                    .accessibilityLabel(queued.steered ? "Steering" : queued.held ? "Held" : "Queued")
                                 Text(queued.text).font(.subheadline).lineLimit(3)
                                 if !queued.attachments.isEmpty {
                                     Label("\(queued.attachments.count)", systemImage: "photo").font(.caption).foregroundStyle(.secondary)
@@ -293,6 +293,9 @@ private struct ChatDocument: View {
                                 Spacer()
                                 // A steered prompt is already with the agent.
                                 if !queued.steered {
+                                    Button { sendNow(queued) } label: { Image(systemName: "arrow.up.circle.fill").foregroundStyle(.tint) }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("Send now")
                                     Button { unqueue(queued) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
                                         .buttonStyle(.plain)
                                         .accessibilityLabel("Remove from the queue")
@@ -437,6 +440,10 @@ private struct ChatDocument: View {
 
     private func unqueue(_ queued: Queued) {
         Task { problem = await model.fleet.send(.unqueue(queued.id), to: key) }
+    }
+
+    private func sendNow(_ queued: Queued) {
+        Task { problem = await model.fleet.send(.sendNow(queued.id), to: key) }
     }
 }
 

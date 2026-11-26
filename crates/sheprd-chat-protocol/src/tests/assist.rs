@@ -88,6 +88,7 @@ fn history_recalls_prompts_from_every_client_and_the_queue() {
     transcript.queued = vec![Queued {
         attachments: Vec::new(),
         id: CommandId::random(),
+        held: false,
         steered: false,
         text: "waiting".to_owned(),
     }];
@@ -172,6 +173,7 @@ fn history_knows_a_sent_prompt_that_waits_in_the_queue() {
     let waiting = |text: &str| Queued {
         attachments: Vec::new(),
         id: CommandId::random(),
+        held: false,
         steered: false,
         text: text.to_owned(),
     };

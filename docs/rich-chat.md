@@ -592,7 +592,13 @@ then it waits above the composer marked **Steering**, and cannot be withdrawn,
 as the agent already has it. One the agent did not take before its turn ended
 goes as the next prompt. Other agents, and a prompt sent behind one still
 waiting to be sent, keep the queue: it waits marked **Queued** until the turn
-ends, and its × withdraws it. **Stop** drops both.
+ends, and its × withdraws it.
+
+**Send now** on a queued prompt sends it ahead of the others: into the running
+turn when the agent steers, otherwise in place of the turn, which it stops.
+**Stop** keeps what you typed: queued prompts, and those still marked
+**Steering**, wait marked **Held**, and no later turn sends them on its own.
+Send one now, or withdraw it with ×; a new prompt goes at once meanwhile.
 
 ACP chats retain their native composer, permissions, tools, plans, context
 information and file attachments. Tool and thinking cards start collapsed and

@@ -36,6 +36,7 @@ mod prompt_titles;
 mod pull_requests;
 mod questions;
 mod resume;
+mod send_now;
 mod sent_notes;
 mod settings;
 mod steering;

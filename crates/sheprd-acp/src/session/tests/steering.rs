@@ -149,15 +149,18 @@ fn a_turn_that_ends_without_a_steer_sends_it_next() {
 }
 
 #[test]
-fn cancelling_drops_steered_prompts() {
+fn cancelling_holds_steered_prompts_unless_the_agent_took_them() {
     let mut harness = steering();
     prompt(&mut harness, 0, "one");
     let id = typed(&mut harness, "two");
     harness.command(0, Command::Cancel);
-    assert!(harness.transcript().queued.is_empty());
-    // A late word that the agent took it shows nothing.
+    let queued = &harness.transcript().queued;
+    assert_eq!(queued.len(), 1);
+    assert!(queued[0].held && !queued[0].steered);
+    // The agent took it before the stop reached it: it shows, once.
     notify(&mut harness, steer::STEERED, id);
-    assert_eq!(users(&harness), ["one"]);
+    assert!(harness.transcript().queued.is_empty());
+    assert_eq!(users(&harness), ["one", "two"]);
 }
 
 #[test]

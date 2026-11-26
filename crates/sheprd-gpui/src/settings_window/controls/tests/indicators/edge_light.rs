@@ -48,7 +48,13 @@ fn typed_hex_stays_open_until_a_busy_save_finishes(cx: &mut TestAppContext) {
     });
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.select_section(Section::Sidebar, window, cx)
+        })
+    });
     view.read_with(cx, |view, _| {
+        assert_eq!(view.section, Section::Indicators);
         assert!(
             view.hex_edit.is_some(),
             "busy save must preserve the hex draft"

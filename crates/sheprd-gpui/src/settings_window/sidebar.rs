@@ -501,6 +501,7 @@ impl SettingsWindow {
     /// Commits or abandons the typed colour. False means the text is not a
     /// colour (or is mid-composition) and the field stays open, marked.
     pub(super) fn finish_hex_edit(&mut self, save: bool, cx: &mut Context<Self>) -> bool {
+        let busy = self.busy();
         let Some(edit) = &mut self.hex_edit else {
             return true;
         };
@@ -517,9 +518,8 @@ impl SettingsWindow {
         } else {
             None
         };
-        // A save/reload owns persistence while busy. Keep the valid draft open
-        // rather than closing it before save_preference can reject the write.
-        if save && self.busy() {
+        // Host colors queue through commit_sidebar. Edge colors write directly.
+        if save && busy && matches!(edit.target, HexTarget::EdgeLight) {
             return false;
         }
         if let Some(edit) = self.hex_edit.take()

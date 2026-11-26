@@ -707,6 +707,9 @@ impl SettingsWindow {
             self.finish_number_edit(false, cx);
         }
         if !self.finish_hex_edit(true, cx) {
+            if self.busy() {
+                return;
+            }
             self.finish_hex_edit(false, cx);
         }
         if !self.finish_code_edit(true, cx) {

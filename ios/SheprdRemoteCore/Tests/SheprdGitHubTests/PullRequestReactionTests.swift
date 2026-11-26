@@ -1,0 +1,129 @@
+import Foundation
+import Testing
+@testable import SheprdGitHub
+@testable import SheprdRemoteCore
+
+struct PullRequestReactionTests {
+    private let transport = FakeTransport()
+    private let lenders = FakeLenders()
+    private let store = TokenStore(vault: .memory())
+
+    private func api() -> GitHubAPI {
+        GitHubAPI(transport: transport.transport, now: { GitHubFixtures.start })
+    }
+
+    private func reader(signIn: GitHubSignIn? = nil) -> PullRequestReader {
+        PullRequestReader(leases: GitHubLeases(store: store, now: { GitHubFixtures.start }), api: api(), signIn: signIn)
+    }
+
+    private var source: Lenders { Lenders(lenders: [GitHubFixtures.lender("mac")], fetch: lenders.fetch) }
+
+    private func reactionResponse(add: Bool, groups: [[String: Any]]) throws -> GitHubResponse {
+        let field = add ? "addReaction" : "removeReaction"
+        let body = try JSONSerialization.data(withJSONObject: [
+            "data": [field: ["subject": ["reactionGroups": groups]]],
+        ])
+        return GitHubResponse(status: 200, body: body)
+    }
+
+    @Test func mutationSendsSubjectIdAndContentAsVariables() throws {
+        let add = PullRequestReactionMutation(subjectId: "PR_\"injected", content: .rocket, add: true)
+        let sent = try #require(try JSONSerialization.jsonObject(with: add.body) as? [String: Any])
+        let variables = try #require(sent["variables"] as? [String: Any])
+        #expect(variables["subjectId"] as? String == "PR_\"injected")
+        #expect(variables["content"] as? String == "ROCKET")
+        let query = try #require(sent["query"] as? String)
+        #expect(query.contains("addReaction"))
+        #expect(!query.contains("injected"))
+
+        let remove = PullRequestReactionMutation(subjectId: "PR_1", content: .thumbsUp, add: false)
+        let removeSent = try #require(try JSONSerialization.jsonObject(with: remove.body) as? [String: Any])
+        let removeQuery = try #require(removeSent["query"] as? String)
+        #expect(removeQuery.contains("removeReaction"))
+    }
+
+    @Test func apiRejectsInvalidSubjectIdWithoutSending() async {
+        let api = api()
+        await #expect(throws: GitHubError.malformed) {
+            try await api.setReaction(host: GitHubFixtures.host, subjectId: "bad id\n", content: .thumbsUp, add: true, token: GitHubToken("t"))
+        }
+        #expect(transport.requests.isEmpty)
+    }
+
+    @Test func addAndRemoveParseUpdatedReactionGroups() async throws {
+        lenders.answer("mac", GitHubFixtures.answer("t1"))
+        transport.enqueue(try reactionResponse(add: true, groups: [
+            ["content": "THUMBS_UP", "viewerHasReacted": true, "reactors": ["totalCount": 2]],
+            ["content": "HEART", "viewerHasReacted": false, "reactors": ["totalCount": 0]],
+            ["content": "THUMBS_UP", "viewerHasReacted": true, "reactors": ["totalCount": 99]],
+        ]))
+        let added = await reader().setReaction(.thumbsUp, add: true, on: "PR_kwDO42", host: GitHubFixtures.host, source: source)
+        #expect(added == .success([.init(content: .thumbsUp, count: 2, viewerHasReacted: true)]))
+
+        transport.enqueue(try reactionResponse(add: false, groups: [
+            ["content": "THUMBS_UP", "viewerHasReacted": false, "reactors": ["totalCount": 1]],
+        ]))
+        let removed = await reader().setReaction(.thumbsUp, add: false, on: "PR_kwDO42", host: GitHubFixtures.host, source: source)
+        #expect(removed == .success([.init(content: .thumbsUp, count: 1, viewerHasReacted: false)]))
+    }
+
+    @Test func refusedTokenRenewsOnce() async throws {
+        lenders.answer("mac", GitHubFixtures.answer("t1"), GitHubFixtures.answer("t2"))
+        transport.enqueue(GitHubResponse(status: 401))
+        transport.enqueue(try reactionResponse(add: true, groups: [
+            ["content": "EYES", "viewerHasReacted": true, "reactors": ["totalCount": 1]],
+        ]))
+        let result = await reader().setReaction(.eyes, add: true, on: "PR_kwDO42", host: GitHubFixtures.host, source: source)
+        #expect(result == .success([.init(content: .eyes, count: 1, viewerHasReacted: true)]))
+        #expect(transport.requests.map { $0.value(forHTTPHeaderField: "Authorization") } == ["Bearer t1", "Bearer t2"])
+    }
+
+    @Test func failuresMapToTypedReactionErrors() async throws {
+        let missing = await reader().setReaction(.thumbsUp, add: true, on: "PR_kwDO42", host: GitHubFixtures.host, source: source)
+        #expect(missing == .failure(.noAccount))
+
+        lenders.answer("mac", GitHubFixtures.answer("t1"))
+        transport.enqueue(GitHubResponse(
+            status: 200,
+            body: Data(#"{"data":{"addReaction":null},"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}]}"#.utf8)
+        ))
+        let forbidden = await reader().setReaction(.thumbsUp, add: true, on: "PR_kwDO42", host: GitHubFixtures.host, source: source)
+        #expect(forbidden == .failure(.forbidden))
+
+        transport.enqueue(GitHubResponse(
+            status: 200,
+            headers: ["X-GitHub-SSO": "required; url=https://github.com/orgs/acme/sso"],
+            body: Data(#"{"data":{"addReaction":null},"errors":[{"type":"FORBIDDEN","message":"SSO required"}]}"#.utf8)
+        ))
+        let sso = await reader().setReaction(.thumbsUp, add: true, on: "PR_kwDO42", host: GitHubFixtures.host, source: source)
+        #expect(sso == .failure(.ssoRequired))
+
+        transport.enqueue(GitHubResponse(
+            status: 200,
+            headers: ["Retry-After": "120"],
+            body: Data(#"{"data":null,"errors":[{"type":"RATE_LIMITED","message":"API rate limit exceeded"}]}"#.utf8)
+        ))
+        let limited = await reader().setReaction(.thumbsUp, add: true, on: "PR_kwDO42", host: GitHubFixtures.host, source: source)
+        #expect(limited == .failure(.rateLimited))
+    }
+
+    @Test func ownSignInFallsBackToLentTokenWhenForbidden() async throws {
+        let signInStore = GitHubSignInStore(vault: .memory())
+        try signInStore.save(SignInFixtures.credential())
+        let signIn = GitHubSignIn(
+            flow: GitHubDeviceFlow(transport: FakeTransport().transport, now: { GitHubFixtures.start }),
+            store: signInStore
+        )
+        lenders.answer("mac", GitHubFixtures.answer("lent-token"))
+        transport.enqueue(GitHubResponse(
+            status: 200,
+            body: Data(#"{"data":{"addReaction":null},"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}]}"#.utf8)
+        ))
+        transport.enqueue(try reactionResponse(add: true, groups: [
+            ["content": "HOORAY", "viewerHasReacted": true, "reactors": ["totalCount": 1]],
+        ]))
+        let result = await reader(signIn: signIn).setReaction(.hooray, add: true, on: "PR_kwDO42", host: GitHubFixtures.host, source: source)
+        #expect(result == .success([.init(content: .hooray, count: 1, viewerHasReacted: true)]))
+        #expect(transport.requests.map { $0.value(forHTTPHeaderField: "Authorization") } == ["Bearer ghu_a1", "Bearer lent-token"])
+    }
+}

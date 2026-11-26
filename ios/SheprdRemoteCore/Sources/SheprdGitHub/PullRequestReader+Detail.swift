@@ -90,4 +90,19 @@ extension PullRequestReader {
             return PullRequestReading(detail: detail, files: files)
         }
     }
+
+    /// Adds or removes an emoji reaction on `subjectId` and returns the
+    /// updated reaction groups.
+    public func setReaction(
+        _ content: PullRequestDetail.ReactionContent,
+        add: Bool,
+        on subjectId: String,
+        host: GitHubHost,
+        source: Lenders
+    ) async -> Result<[PullRequestDetail.ReactionGroup], PullRequestReactionError> {
+        let result = await mutate(host: host, source: source) { api, token in
+            try await api.setReaction(host: host, subjectId: subjectId, content: content, add: add, token: token)
+        }
+        return result.mapError(PullRequestReactionError.init)
+    }
 }

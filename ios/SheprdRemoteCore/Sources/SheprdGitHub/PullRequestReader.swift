@@ -164,6 +164,71 @@ public actor PullRequestReader {
         return nil
     }
 
+    /// Runs a GraphQL mutation with the phone's own sign-in when `host` is
+    /// github.com, falling back to a lent token only when that sign-in is
+    /// absent or refused before acting (401/403/404/SSO).
+    func mutate<Value: Sendable>(
+        host: GitHubHost,
+        source: Lenders,
+        _ run: @Sendable (GitHubAPI, GitHubToken) async throws -> Value
+    ) async -> Result<Value, GitHubError> {
+        var firstError: GitHubError?
+        if let ownSignIn, host == Self.signInHost {
+            switch await ownResult(ownSignIn, run) {
+            case let .success(value): return .success(value)
+            case let .failure(error):
+                switch error {
+                case .unauthorized, .forbidden, .notFound, .ssoRequired:
+                    firstError = error
+                default:
+                    return .failure(error)
+                }
+            case nil:
+                break
+            }
+        }
+        var lastError = firstError
+        for _ in 0..<2 {
+            guard !Task.isCancelled else { return .failure(.status(0)) }
+            if await api.isPaused(host) { return .failure(.rateLimited(until: Date.distantFuture)) }
+            guard let lease = try? await leases.lease(for: host, lenders: source.lenders, fetch: source.fetch) else {
+                return .failure(lastError ?? .unauthorized)
+            }
+            do {
+                return .success(try await run(api, lease.token))
+            } catch GitHubError.unauthorized {
+                lastError = .unauthorized
+                await leases.rejected(lease)
+            } catch let error as GitHubError {
+                return .failure(error)
+            } catch {
+                return .failure(.status(0))
+            }
+        }
+        return .failure(lastError ?? .unauthorized)
+    }
+
+    /// `run` with the own sign-in; nil when signed out.
+    private func ownResult<Value: Sendable>(
+        _ signIn: GitHubSignIn,
+        _ run: @Sendable (GitHubAPI, GitHubToken) async throws -> Value
+    ) async -> Result<Value, GitHubError>? {
+        guard !Task.isCancelled, var token = try? await signIn.token() else { return nil }
+        for renewed in [false, true] {
+            do {
+                return .success(try await run(api, token))
+            } catch GitHubError.unauthorized where !renewed {
+                guard let next = try? await signIn.renew(rejected: token) else { return .failure(.unauthorized) }
+                token = next
+            } catch let error as GitHubError {
+                return .failure(error)
+            } catch {
+                return .failure(.status(0))
+            }
+        }
+        return .failure(.unauthorized)
+    }
+
     /// The host the phone signs in to itself: Sheprd's GitHub App exists on
     /// github.com alone.
     private static let signInHost = GitHubHost("github.com")

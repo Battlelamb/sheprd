@@ -3,11 +3,12 @@ import SheprdRemoteCore
 import SwiftUI
 import UIKit
 
-/// A pull request, read-only: its title and reviewers as chips, the
-/// conversation as GitHub's timeline reads, review comments with their
-/// file and line, and the files it changes, each opening its patch.
-/// Everything comes straight from GitHub; with no token that reads it,
-/// the screen shows what the Changes screen knew and GitHub's page.
+/// A pull request: its title and reviewers as chips, the conversation as
+/// GitHub's timeline reads (with reactions on its description), review
+/// comments with their file and line, and the files it changes, each
+/// opening its patch. Everything comes straight from GitHub; with no token
+/// that reads it, the screen shows what the Changes screen knew and
+/// GitHub's page.
 struct PullRequestDetailScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var phase
@@ -19,6 +20,9 @@ struct PullRequestDetailScreen: View {
     /// that account, and is not shown.
     @State private var held: (reading: PullRequestReading, signOuts: Int)?
     @State private var tried = false
+    /// Reactions currently being added or removed on the PR description.
+    @State private var pendingReactions: Set<PullRequestDetail.ReactionContent> = []
+    @State private var reactionError: String?
 
     /// How often the screen reads again while it stays in front.
     static let refresh: Duration = .seconds(60)
@@ -40,7 +44,12 @@ struct PullRequestDetailScreen: View {
         List {
             Section { titleBlock }
             if let detail = reading?.detail {
-                PullRequestConversation(detail: detail)
+                PullRequestConversation(
+                    detail: detail,
+                    pendingReactions: pendingReactions,
+                    reactionError: reactionError,
+                    onToggleReaction: toggleReaction
+                )
                 filesSection(detail)
             } else if tried {
                 unavailable
@@ -75,6 +84,8 @@ struct PullRequestDetailScreen: View {
             if let held, held.signOuts != GitHubDirect.shared.signOuts {
                 self.held = nil
                 tried = false
+                pendingReactions = []
+                reactionError = nil
             }
             guard phase == .active else { return }
             while !Task.isCancelled {
@@ -110,12 +121,81 @@ struct PullRequestDetailScreen: View {
         guard !Task.isCancelled, signOuts == GitHubDirect.shared.signOuts else { return }
         // A failed refresh keeps what was read before, unless that was read
         // before a sign-out.
-        if let read {
+        if var read {
+            // Keep optimistic reactions while a toggle is still in flight.
+            if !pendingReactions.isEmpty, let existing = held, existing.signOuts == signOuts {
+                read.detail.reactions = existing.reading.detail.reactions
+            }
             held = (read, signOuts)
         } else if let held, held.signOuts != signOuts {
             self.held = nil
         }
         tried = true
+    }
+
+    private func toggleReaction(_ content: PullRequestDetail.ReactionContent) {
+        guard let target, let current = reading, current.detail.canReact, !pendingReactions.contains(content) else {
+            return
+        }
+        let add = !(current.detail.reactions.first { $0.content == content }?.viewerHasReacted ?? false)
+        let subjectId = current.detail.id
+        let signOuts = GitHubDirect.shared.signOuts
+        pendingReactions.insert(content)
+        reactionError = nil
+        if var latest = held, latest.signOuts == signOuts {
+            latest.reading.detail = latest.reading.detail.togglingReaction(content)
+            held = latest
+        }
+        Task {
+            defer { pendingReactions.remove(content) }
+            #if DEBUG
+            if let demo = PullRequestDemo.toggledReactions(current.detail, content: content, target: target) {
+                guard signOuts == GitHubDirect.shared.signOuts else { return }
+                applyReactions(demo, for: content, signOuts: signOuts)
+                return
+            }
+            #endif
+            let result = await GitHubReads.reader.setReaction(
+                content, add: add, on: subjectId, host: target.host, source: model.fleet.gitHubLenders
+            )
+            guard signOuts == GitHubDirect.shared.signOuts else { return }
+            switch result {
+            case let .success(groups):
+                applyReactions(groups, for: content, signOuts: signOuts)
+            case let .failure(error):
+                if var latest = held, latest.signOuts == signOuts {
+                    latest.reading.detail = latest.reading.detail.togglingReaction(content)
+                    held = latest
+                }
+                reactionError = error.localizedDescription
+            }
+        }
+    }
+
+    /// Applies GitHub's authoritative reaction groups, preserving any other
+    /// reaction that is still in flight.
+    private func applyReactions(
+        _ groups: [PullRequestDetail.ReactionGroup],
+        for content: PullRequestDetail.ReactionContent,
+        signOuts: Int
+    ) {
+        guard var latest = held, latest.signOuts == signOuts else { return }
+        if pendingReactions.subtracting([content]).isEmpty {
+            latest.reading.detail.reactions = groups
+        } else {
+            var merged = latest.reading.detail.reactions
+            if let authoritative = groups.first(where: { $0.content == content }) {
+                if let index = merged.firstIndex(where: { $0.content == content }) {
+                    merged[index] = authoritative
+                } else {
+                    merged.append(authoritative)
+                }
+            } else {
+                merged.removeAll { $0.content == content }
+            }
+            latest.reading.detail.reactions = merged
+        }
+        held = latest
     }
 
     private var titleBlock: some View {

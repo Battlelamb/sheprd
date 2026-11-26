@@ -53,7 +53,7 @@ The window layout is defined in `crates/sheprd-gpui/moonframe/app`:
 | `mods/turns/main.luau` | The optional chat turn timeline in the left gutter, with Moonframe tools enabled: a tight stack of ticks in the gutter's middle, one per prompt, the prompt and the start of its reply on the card under the pointer, the turn being read marked, and a click back to a prompt. The shell floats it where Sheprd laid the gutter out |
 | `mods/build/main.luau` | Hosts the shared worktree build strip with its branch and pull request link |
 | `mods/status/main.luau` | Hosts the classic status bar with `region = "status"`, including the version and update button, configured controls, and mod items |
-| `components/sheprd-*.luau` | Reusable Luau rows, status dots and section headings for custom mods |
+| `components/sheprd-*.luau` | Reusable Luau rows, Orca status marks (working spinner, blocked question bubble, completed check and idle dot), and section headings for custom mods |
 | `style.luau` | The hover looks, for every mod |
 
 The stock shell places the terminals, tabs and pages with `region = "body"`.

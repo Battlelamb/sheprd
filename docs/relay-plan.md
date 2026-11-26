@@ -615,7 +615,9 @@ all. `RELAY_LISTEN_TOKEN` holds a single one. On a relay with listen
 tokens, a dial past `dials-per-minute` that proves a key the computer it
 dials allows still goes through: an owner's devices reconnecting together
 are only logged, at most one warning a minute. Every other dial past it
-answers `Limited` as on an open relay.
+answers `Limited` as on an open relay, and costs no ban points, named key
+or not. An address that sends 20 forged proofs a minute past the rate has
+its proofs there left unchecked until its budget refills.
 
 ### Keys drop themselves
 

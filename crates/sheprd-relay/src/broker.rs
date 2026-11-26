@@ -127,7 +127,9 @@ pub async fn dial(
     // the price of sparing the relay that check for every other caller.
     let over = limited(hub.allow_dial(address));
     if let Some(offense) = over
-        && !(hub.access.requires_token() && hub.names_dial_key(route, key))
+        && !(hub.access.requires_token()
+            && hub.names_dial_key(route, key)
+            && hub.may_prove_past_rate(address))
     {
         return Err(refuse(Status::Limited, Dial::Limited, offense));
     }
@@ -139,6 +141,9 @@ pub async fn dial(
         None => refuse(status, outcome, offense),
     };
     if prove(key, signature, signed).is_err() {
+        if over.is_some() {
+            hub.forged_past_rate(address);
+        }
         let offense = Some(Offense::BadProof);
         return Err(unproven(Status::Offline, Dial::Unauthorized, offense));
     }

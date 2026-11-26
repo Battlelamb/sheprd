@@ -95,3 +95,19 @@ async fn forged_proofs_past_the_rate_cost_the_same_named_or_not() {
     }
     assert!(!hub.is_banned(address));
 }
+
+#[tokio::test]
+async fn forged_proofs_past_the_rate_stop_being_checked() {
+    let owner = signing_key(200);
+    let (hub, route, address, _listener) = spent(Access::tokens(TOKEN).unwrap(), &owner);
+    let signed = b"dial proof";
+    let forged = sign(&signing_key(201), signed);
+    assert!(hub.may_prove_past_rate(address));
+    for _ in 0..100 {
+        let result =
+            crate::broker::dial(&hub, address, route, &public(&owner), &forged, signed).await;
+        assert!(matches!(result, Err(Status::Limited)));
+    }
+    assert!(!hub.may_prove_past_rate(address));
+    assert!(!hub.is_banned(address));
+}

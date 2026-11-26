@@ -177,7 +177,7 @@ impl SheprdWindow {
     /// Starts writing the latest request for `id`.
     fn write_pause(&mut self, id: &str, cx: &mut Context<Self>) {
         let Some(pausable) = self.pausable(id) else {
-            self.pause_written(id, None, Err("The device is no longer saved".into()), cx);
+            self.pause_written(id, None, Err(fl!("host-menu-pause-gone")), cx);
             return;
         };
         let Some(pending) = self.menu.pauses.devices.get_mut(id) else {

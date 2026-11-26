@@ -23,13 +23,13 @@ pub enum Error {
     NoProfile,
     #[error("Sheprd has no state directory.")]
     NoStateDirectory,
-    #[error("Removing the device failed ({status}){}", if detail.is_empty() { String::new() } else { format!(": {detail}") })]
-    Remove {
+    #[error("Pausing or resuming the device failed ({status}){}", if detail.is_empty() { String::new() } else { format!(": {detail}") })]
+    Pause {
         status: std::process::ExitStatus,
         detail: String,
     },
-    #[error("Pausing or resuming the device failed ({status}){}", if detail.is_empty() { String::new() } else { format!(": {detail}") })]
-    Pause {
+    #[error("Removing the device failed ({status}){}", if detail.is_empty() { String::new() } else { format!(": {detail}") })]
+    Remove {
         status: std::process::ExitStatus,
         detail: String,
     },

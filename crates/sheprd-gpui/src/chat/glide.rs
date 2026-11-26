@@ -61,8 +61,8 @@ pub(crate) struct Glide {
     last_step: Option<Instant>,
     /// The spring's speed, in pixels a second.
     speed: f32,
-    /// How many rows the list had at the last frame's step.
-    rows: usize,
+    /// Rows appended since the last step, including those offset by truncation.
+    added_rows: usize,
     /// The button back to the end, open while the list stays behind it.
     /// Shared with [`Self::watch`], which alone knows the list's real end.
     away: Rc<Cell<motion::Toggle>>,
@@ -87,7 +87,7 @@ impl Glide {
             scrolled,
             last_step: None,
             speed: 0.,
-            rows: list.item_count(),
+            added_rows: 0,
             away: Rc::default(),
             waiting: Rc::default(),
             top: Rc::default(),
@@ -101,7 +101,7 @@ impl Glide {
         self.scrolled.set(false);
         self.last_step = None;
         self.speed = 0.;
-        self.rows = list.item_count();
+        self.added_rows = 0;
         list.scroll_to(ListOffset {
             item_ix: list.item_count(),
             offset_in_item: px(0.),
@@ -122,6 +122,10 @@ impl Glide {
     /// Where the last layout left the list's top.
     pub(crate) fn top(&self) -> ListOffset {
         self.top.get()
+    }
+
+    pub(crate) fn note_added_rows(&mut self, count: usize) {
+        self.added_rows = self.added_rows.saturating_add(count);
     }
 
     /// New output landed at the end of the list.
@@ -192,9 +196,7 @@ impl Glide {
     /// off or many rows new since the last frame all the way there, and
     /// says whether to draw another frame.
     pub(crate) fn tick(&mut self, list: &ListState, now: Instant, smooth: bool) -> bool {
-        let rows = list.item_count();
-        let burst = rows > self.rows.saturating_add(BURST_ROWS);
-        self.rows = rows;
+        let burst = std::mem::take(&mut self.added_rows) > BURST_ROWS;
         let smooth = smooth && !burst;
         // The user's scroll stands until this frame's layout judges it.
         if self.scrolled.get() {

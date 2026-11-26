@@ -479,6 +479,9 @@ impl ChatPane {
                         self.glide.note_output();
                     }
                     for Splice { range, count } in splices {
+                        if range.is_empty() {
+                            self.glide.note_added_rows(count);
+                        }
                         super::glide::splice_in_place(&self.list, range, count);
                     }
                 }

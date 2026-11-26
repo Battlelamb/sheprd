@@ -250,6 +250,15 @@ fn a_sent_prompt_shows_whole_with_its_delivered_note(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn many_entries_landing_at_once_are_jumped_past_not_glided_through(cx: &mut TestAppContext) {
+    check_burst(cx, false);
+}
+
+#[gpui::test]
+fn a_burst_replacing_truncated_rows_jumps_to_the_end(cx: &mut TestAppContext) {
+    check_burst(cx, true);
+}
+
+fn check_burst(cx: &mut TestAppContext, full: bool) {
     let (view, _peer, cx) = gliding(cx);
     let program = Program::new();
     let entries = (1..=40)
@@ -261,24 +270,36 @@ fn many_entries_landing_at_once_are_jumped_past_not_glided_through(cx: &mut Test
 
     // What streamed while the window was in the background lands at once.
     let reply = "A paragraph that arrived while the window was away.\n\n".repeat(4);
-    for (seq, id) in (41..=80).enumerate() {
+    let mut seq = 0;
+    for id in 41..=80 {
+        seq += 1;
         let entry = agent(id, &reply);
-        send(
-            &mut stream,
-            &change(Change::Push { entry }, cursor(1, seq as u64 + 1)),
-        );
+        send(&mut stream, &change(Change::Push { entry }, cursor(1, seq)));
+        if full {
+            seq += 1;
+            send(
+                &mut stream,
+                &change(
+                    Change::Truncate {
+                        before: EntryId(id - 39),
+                    },
+                    cursor(1, seq),
+                ),
+            );
+        }
     }
     wait_until(|| {
         poll(&view, &program, cx);
         view.read_with(cx, |view, _| {
-            view.chats
+            let entries = &view
+                .chats
                 .pane("w1:p1")
                 .unwrap()
                 .session
                 .transcript()
-                .entries
-                .len()
-                == 80
+                .entries;
+            entries.last().map(|entry| entry.id) == Some(EntryId(80))
+                && entries.len() == if full { 40 } else { 80 }
         })
     });
     redraw(&view, cx);

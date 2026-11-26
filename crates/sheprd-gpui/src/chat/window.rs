@@ -548,8 +548,15 @@ impl SheprdWindow {
         // A picture shown large takes the keyboard: Escape closes it, and
         // nothing typed reaches the composer hidden behind it.
         if self.chat_viewer_open(pane_id) {
-            if event.keystroke.key == "escape" && !event.keystroke.modifiers.modified() {
-                self.close_chat_viewer(pane_id, window, cx);
+            if !event.keystroke.modifiers.modified() {
+                match event.keystroke.key.as_str() {
+                    "escape" => {
+                        self.close_chat_viewer(pane_id, window, cx);
+                    }
+                    "left" => self.step_chat_viewer(pane_id, false, cx),
+                    "right" => self.step_chat_viewer(pane_id, true, cx),
+                    _ => {}
+                }
             }
             cx.stop_propagation();
             window.prevent_default();

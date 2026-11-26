@@ -29,3 +29,15 @@ async fn a_herdr_1_view_scrolls_only_through_a_held_attach() {
     assert!(!sizing.scroll(&state, "p2", 5).await);
     assert_eq!(sizing.up, 0);
 }
+
+#[test]
+fn a_herdr_2_program_taking_the_wheel_returns_the_view_to_the_live_screen() {
+    let mut sizing = Sizing {
+        history: 20,
+        ..Sizing::default()
+    };
+    sizing.scroll_core(8, false);
+    assert_eq!(sizing.up, 8);
+    sizing.scroll_core(3, true);
+    assert_eq!(sizing.up, 0);
+}

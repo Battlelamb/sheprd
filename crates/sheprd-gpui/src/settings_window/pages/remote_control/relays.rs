@@ -156,13 +156,38 @@ impl SettingsWindow {
             })
     }
 
-    fn save_with_relay(&mut self, address: String, cx: &mut Context<Self>) {
-        if self.lists_relay(&address) {
+    fn save_with_relay(&mut self, relay: Relay, cx: &mut Context<Self>) {
+        if self.lists_relay(&relay.endpoint) {
             return;
         }
         let mut relays = self.config.remote.relays.clone();
-        relays.push(address.into());
+        relays.push(relay);
         self.save_remote(Edit::Relays(relays), cx);
+    }
+
+    /// Brings the pin of each listed relay of Sheprd's in `[remote] relays`
+    /// to what its signed list now says, keeping everything else, so a
+    /// relay whose certificate changed with the list keeps working.
+    fn follow_public_pins(&mut self, listed: &Listed, cx: &mut Context<Self>) {
+        let mut relays = self.config.remote.relays.clone();
+        let mut changed = false;
+        for relay in &mut relays {
+            let Ok(address) = relay_address(&relay.endpoint) else {
+                continue;
+            };
+            if let Some(public) = listed
+                .relays
+                .iter()
+                .find(|public| public.address == address)
+                && relay.pin != public.quic_pin
+            {
+                relay.pin = public.quic_pin;
+                changed = true;
+            }
+        }
+        if changed {
+            self.save_remote(Edit::Relays(relays), cx);
+        }
     }
 
     /// Add's click: the address typed joins the list, unless it is not a
@@ -178,7 +203,7 @@ impl SettingsWindow {
         };
         self.remote.relay_invalid = false;
         input.update(cx, |input, cx| input.clear(cx));
-        self.save_with_relay(address.clone(), cx);
+        self.save_with_relay(address.clone().into(), cx);
         // A private relay admits this computer only with its token.
         self.check_relay_token(address, cx);
         cx.notify();
@@ -206,8 +231,15 @@ impl SettingsWindow {
         let Offered::Listed(listed) = &self.remote.offered else {
             return;
         };
-        if let Some(relay) = listed.relays.get(index) {
-            self.save_with_relay(relay.address.clone(), cx);
+        if let Some(public) = listed.relays.get(index) {
+            // The list's pin goes with it, so the daemon trusts only the
+            // certificate the signed list names.
+            let relay = Relay {
+                endpoint: public.address.clone(),
+                pin: public.quic_pin,
+                ..Relay::default()
+            };
+            self.save_with_relay(relay, cx);
         }
     }
 
@@ -263,7 +295,10 @@ impl SettingsWindow {
             let listed = work.await;
             let _ = this.update(cx, |this, cx| {
                 this.remote.offered = match listed {
-                    Ok(listed) => Offered::Listed(listed),
+                    Ok(listed) => {
+                        this.follow_public_pins(&listed, cx);
+                        Offered::Listed(listed)
+                    }
                     Err(error) => {
                         tracing::warn!(%error, "Could not read Sheprd's relay list");
                         Offered::Failed(error.localize())

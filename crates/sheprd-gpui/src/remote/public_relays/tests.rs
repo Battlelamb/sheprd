@@ -53,7 +53,7 @@ fn each_relay_is_offered_by_the_address_the_daemon_names_it_by() {
                 endpoint: Endpoint::parse("https://fra1.relay.sheprd.org/").unwrap(),
                 region: Some("fra1".into()),
                 name: Some("Frankfurt".into()),
-                quic_pin: None,
+                quic_pin: Some([7; 32]),
             }],
             serial: Some(1),
         },
@@ -68,6 +68,7 @@ fn each_relay_is_offered_by_the_address_the_daemon_names_it_by() {
             address: "https://fra1.relay.sheprd.org".into(),
             name: Some("Frankfurt".into()),
             region: Some("fra1".into()),
+            quic_pin: Some([7; 32]),
         }]
     );
 }

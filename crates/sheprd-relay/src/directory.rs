@@ -31,7 +31,6 @@ pub mod signed;
 pub use error::Error;
 
 use crate::Endpoint;
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Deserialize;
 
 /// Where Sheprd's relays are listed. Compiled in, so a paired device or
@@ -147,10 +146,7 @@ impl Directory {
             }
             let quic_pin = entry
                 .quic_pin
-                .map(|text| {
-                    let bytes = URL_SAFE_NO_PAD.decode(text).ok()?;
-                    <[u8; 32]>::try_from(bytes).ok()
-                })
+                .map(|text| crate::endpoint::decode_pin(&text))
                 .map(|pin| pin.ok_or(Error::Pin { index }))
                 .transpose()?;
             relays.push(Relay {

@@ -47,6 +47,9 @@ pub(crate) struct Public {
     pub(crate) name: Option<String>,
     /// A short region code, such as `fra1`.
     pub(crate) region: Option<String>,
+    /// The SHA-256 of its QUIC certificate, signed with the list: once
+    /// added, the daemon trusts only that certificate there.
+    pub(crate) quic_pin: Option<[u8; 32]>,
 }
 
 /// Downloads the list and its signatures, and checks them. Blocking: run
@@ -113,6 +116,7 @@ impl From<signed::Signed> for Listed {
                     address: relay.endpoint.to_string(),
                     name: relay.name,
                     region: relay.region,
+                    quic_pin: relay.quic_pin,
                 })
                 .collect(),
             signer: signed.signer,

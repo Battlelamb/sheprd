@@ -13,6 +13,17 @@ use std::sync::Arc;
 mod wrapped;
 
 #[test]
+fn reveal_selects_the_real_file_and_reports_a_missing_one() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("clip.mp4");
+    std::fs::write(&file, b"clip").unwrap();
+    let real = std::fs::canonicalize(&file).unwrap();
+    assert_eq!(revealed(&file), Some(Ok(real)));
+    let missing = directory.path().join("gone.mp4");
+    assert_eq!(revealed(&missing), Some(Err(missing.clone())));
+}
+
+#[test]
 fn paths_resolve_under_home_or_the_pane_directory() {
     let home = Path::new("home");
     let root = std::env::temp_dir();

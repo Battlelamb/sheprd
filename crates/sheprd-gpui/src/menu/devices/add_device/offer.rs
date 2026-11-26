@@ -25,7 +25,7 @@ impl Offer {
     /// `None` when a usable daemon is present, so the device is saved directly.
     pub(in crate::menu::devices) fn for_probe(probe: HostProbe) -> Option<Self> {
         match probe {
-            HostProbe::Core | HostProbe::Running | HostProbe::Stopped => None,
+            HostProbe::Tmux | HostProbe::Core | HostProbe::Running | HostProbe::Stopped => None,
             HostProbe::Missing => Some(Self::Install),
             HostProbe::Outdated => Some(Self::Update),
             HostProbe::SshFailed(SshFailure::Auth) => Some(Self::InstallKey),

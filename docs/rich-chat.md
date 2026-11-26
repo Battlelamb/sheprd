@@ -229,6 +229,25 @@ change. It is off by default.
 
 ## Chats after a reboot
 
+On a tmux-enabled build, opening a saved driving pane after its host reboots
+restarts the chat helper under the original terminal ID and endpoint. The
+helper asks the provider to load the exact recorded conversation. Native
+Codex and Claude read history from their session logs. ACP adapters can replay
+history through `session/load`. A provider that cannot load the saved session
+reports the failure. Closing a chat clears its continuation record. If the tmux-enabled remote service starts before the desktop, it resumes the recorded chats so paired clients can reconnect. Other shells wait for an owning desktop view.
+
+For managed chats, Sheprd also keeps a private conversation checkpoint in
+`conversations` beside the restore directory. When a provider successfully
+loads the exact session but returns no conversation, Sheprd can display its
+own saved entries. It also restores the chat’s pull-request references.
+Permissions and queued commands are live state and require a new request.
+Checkpoints keep the same bounded history as the chat view. The host retains
+up to 64 recent session checkpoints.
+
+On herdr-core, its kept terminal and the recovery document identify the
+conversation. When Sheprd reconnects to that core, it resumes the chat and
+maps the replacement terminal to its saved pane.
+
 When Herdr restores its panes after a reboot or a server restart, a pane that
 ran a chat comes back as a shell in the chat's folder: Herdr keeps neither the
 `sheprd-acp` that ran there nor the token Sheprd found it by. Sheprd

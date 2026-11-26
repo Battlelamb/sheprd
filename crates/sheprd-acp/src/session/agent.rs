@@ -360,6 +360,7 @@ impl<R: FnMut(Update)> Session<R> {
         let Some(id) = self.acp_session.clone() else {
             return;
         };
+        self.open_history(&id.0, loaded);
         self.ready = true;
         (self.report)(Update::Opened(id.0.to_string()));
         self.keep_opened(id.0.as_ref());

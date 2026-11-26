@@ -443,25 +443,6 @@ pub(crate) fn run_owned(
     };
     let listens = endpoint.is_some();
     let target = Target::from_env();
-    let keeper = if target.is_none() && std::env::var_os("HC_TERMINAL_ID").is_some() {
-        crate::restore::Keeper::core(
-            sheprd_chat_protocol::restore::restore_dir(),
-            endpoint.as_ref(),
-            &options.agent,
-            adapter(&options),
-            &cwd,
-            |name| std::env::var_os(name),
-        )
-    } else {
-        crate::restore::Keeper::new(
-            sheprd_chat_protocol::restore::restore_dir(),
-            target.as_ref(),
-            endpoint.as_ref(),
-            &options.agent,
-            adapter(&options),
-            &cwd,
-        )
-    };
     let thread = thread_id
         .zip(sheprd_chat_protocol::thread::threads_dir())
         .and_then(
@@ -476,17 +457,20 @@ pub(crate) fn run_owned(
                 }
             },
         );
-    let mut keeper = keeper.map(|keeper| keeper.with_thread(thread_id));
+    let keeper = crate::restore::keeper(
+        target.as_ref(),
+        endpoint.as_ref(),
+        &options.agent,
+        adapter(&options),
+        &cwd,
+        agent_process.id(),
+        thread_id,
+    );
     let resumer = crate::resume::from_env(&options, adapter(&options), &cwd, thread_id);
     let session_resumer = resumer.clone();
-    if let Some(keeper) = &mut keeper {
-        keeper.child = Some(agent_process.id());
-    }
-    if target.is_none()
-        && let Some(keeper) = &keeper
+    if let Some(keeper) = &keeper
         && let Err(error) = keeper.agent_started(agent_process.id())
     {
-        // A later restore then refuses rather than guessing the agent ended.
         notices.push((
             NoticeLevel::Warning,
             format!("This chat cannot be restored if it is lost: {error:#}"),
@@ -498,11 +482,15 @@ pub(crate) fn run_owned(
             agent.display.clone(),
             endpoint.map(|id| id.to_string()),
         )?),
+        #[cfg(feature = "tmux")]
+        None => Reporter::on_tmux(agent.display.clone(), endpoint.map(|id| id.to_string()))?,
+        #[cfg(not(feature = "tmux"))]
         None => None,
     };
     let report = reporter.as_ref().map(Reporter::handle);
-    let mut session_keeper = keeper.clone();
-    let switch_keeper = keeper.clone();
+    let mut session_keeper = keeper.as_ref().map(|k| k.copy());
+    let keep_history = keeper.is_some();
+    let switch_keeper = keeper.as_ref().map(|k| k.copy());
     let adapter = adapter(&options);
 
     let harness = match &options.agent {
@@ -616,6 +604,9 @@ pub(crate) fn run_owned(
                     }
                 }
             });
+            if keep_history && let Some(dir) = sheprd_chat_protocol::restore::restore_dir() {
+                session.keep_history(dir.with_file_name("conversations"));
+            }
             if let Some(brief) = &brief {
                 session.link_delegation(&brief.text);
             }

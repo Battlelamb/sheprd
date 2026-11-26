@@ -17,6 +17,8 @@ mod legitimate_load;
 mod lockout;
 mod metrics;
 mod options;
+#[cfg(feature = "client")]
+mod pinned;
 mod pools;
 mod quic;
 mod races;

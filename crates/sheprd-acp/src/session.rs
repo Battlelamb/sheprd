@@ -7,6 +7,7 @@
 mod agent;
 mod briefs;
 mod carry;
+mod checkpoint;
 mod commands;
 mod harness;
 mod keep;
@@ -227,6 +228,7 @@ pub(crate) struct Session<R: FnMut(Update)> {
     can_steer: bool,
     /// The whole commands of shell calls, which their titles cut short.
     commands: pull_requests::Commands,
+    checkpoint: Option<checkpoint::Checkpoint>,
     config: Config,
     /// What the agent has been told besides the person's words.
     context: Context,
@@ -275,6 +277,8 @@ pub(crate) struct Session<R: FnMut(Update)> {
     thread: thread::Thread,
     transcript: Transcript,
     turn: Option<i64>,
+    /// The pull requests the running turn created or pushed to.
+    turn_pulls: pull_requests::TurnPulls,
     watchdog: watchdog::Watchdog,
 }
 
@@ -357,6 +361,7 @@ impl<R: FnMut(Update)> Session<R> {
         Self {
             accepts: crate::files::Accepts::default(),
             acp_session: None,
+            checkpoint: None,
             activity: None,
             asked: HashMap::new(),
             auth_attempted: false,
@@ -395,6 +400,7 @@ impl<R: FnMut(Update)> Session<R> {
             thread,
             transcript,
             turn: None,
+            turn_pulls: pull_requests::TurnPulls::default(),
             watchdog: watchdog::Watchdog::default(),
         }
     }
@@ -424,6 +430,7 @@ impl<R: FnMut(Update)> Session<R> {
     }
 
     pub(crate) fn handle(&mut self, input: Input) -> Flow {
+        let turning = self.turn.is_some();
         match input {
             Input::Agent(harness, inbound) if harness == self.harness => self.agent(inbound),
             Input::AgentExited {
@@ -447,11 +454,13 @@ impl<R: FnMut(Update)> Session<R> {
                 self.ack(conn, id, Some(Rejection::Unsupported));
             }
             Input::Shutdown => {
+                self.save_history(true);
                 self.keep_entries();
                 self.bye(ByeReason::Exiting);
                 return Flow::Exit;
             }
         }
+        self.save_history(turning != self.turn.is_some());
         match self.launch.take() {
             Some(agent) => Flow::Launch {
                 agent,
@@ -569,6 +578,9 @@ impl<R: FnMut(Update)> Session<R> {
         }
         if let Change::Truncate { before } = &change {
             self.projector.forget_before(*before);
+        }
+        if let Some(checkpoint) = &mut self.checkpoint {
+            checkpoint.changed(&change);
         }
         self.keep_mark(&change);
         self.seq += 1;

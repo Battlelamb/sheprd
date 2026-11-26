@@ -133,6 +133,12 @@ agents in Herdr panes can use what only this client shows or keeps
 - Put dependency versions in root `[workspace.dependencies]`; member crates inherit with `{ workspace = true }`.
 - Use the pinned `rust-toolchain.toml` and GPUI version. Do not copy toolchain, feature, or release assumptions from Moltis/Arbor.
 - Keep workspace lint inheritance and fix warnings rather than widening allowances.
+- Give every `sheprd-gpui` Cargo feature that users would see a `[features]`
+  switch behind the same `#[cfg]` (`src/config/features.rs`), so it can ship
+  compiled in and still be turned off later. A feature that only shapes the
+  build (test code, development tools, the App Store build) goes in
+  `BUILD_ONLY` in `src/config/tests/features.rs` with its reason instead; that
+  test fails until a new Cargo feature is in one list or the other.
 - Keep `integration-test` opt-in. Gate imports, modules, and call sites consistently, and verify both default and all-feature builds.
 - Do not introduce Tokio or another runtime to wrap the existing blocking socket worker.
 - Avoid unrelated lockfile upgrades. Use `--locked` for reproducible verification.

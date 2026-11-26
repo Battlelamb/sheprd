@@ -144,6 +144,22 @@ impl Tmux {
         Ok(format!("{}\n", script("shell", id, &saved.json()?)?))
     }
 
+    /// Saves the folder a running shell pane is in now, as `info` reports it,
+    /// so a new host boot reopens the shell there rather than where it
+    /// started. A pane with no shell recipe, such as a chat, is left alone.
+    pub fn keep_cwd(&self, info: &TerminalInfo) -> Result<()> {
+        let saved = Saved {
+            id: info.id.to_string(),
+            cwd: Some(info.cwd.clone().ok_or(Error::Invalid)?),
+            name: info.name.clone(),
+            chat: None,
+            labels: placement(info.labels.clone()),
+        };
+        let json = saved.json()?;
+        saved.spawn(&info.id)?;
+        self.recovery_command("cwd", &info.id, &json).map(drop)
+    }
+
     /// Called only by the chat that has opened the provider session.
     pub fn keep_chat(&self, id: &TerminalId, cwd: PathBuf, chat: ChatRecovery) -> Result<()> {
         let (name, labels) = std::env::var("SHEPRD_TMUX_METADATA")
@@ -241,6 +257,68 @@ mod tests {
         assert_eq!(run("read", ""), "shell\n");
         run("forget", "");
         assert_eq!(run("read", ""), "");
+    }
+
+    #[test]
+    fn a_moved_shell_reopens_in_its_last_folder_and_a_chat_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Tmux::named_id("moved").unwrap();
+        let run = |action, json| {
+            let out = sheprd_client::new_command("/bin/sh")
+                .env("XDG_STATE_HOME", dir.path())
+                .args(["-c", &script(action, &id, json).unwrap()])
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{:?}", out.stderr);
+        };
+        let file = dir.path().join("herdr/acp/restore/tmux").join(id.as_str());
+        run("cwd", "moved");
+        assert!(
+            !file.with_extension("shell").exists(),
+            "no recipe without a shell"
+        );
+        run("shell", "started");
+        run("chat", "chat");
+        run("cwd", "moved");
+        let shell = fs::read_to_string(file.with_extension("shell")).unwrap();
+        assert_eq!(shell.lines().nth(1), Some("moved"));
+        let chat = fs::read_to_string(file.with_extension("chat")).unwrap();
+        assert_eq!(chat.lines().nth(1), Some("chat"));
+
+        let info = TerminalInfo {
+            id: id.clone(),
+            agent: sheprd_backend::AgentStatus::Unknown,
+            cwd: Some("/work/api".into()),
+            foreground: None,
+            labels: [
+                (sheprd_session::WORKSPACE_LABEL.into(), "desk".into()),
+                (TOKEN.into(), "live-endpoint".into()),
+            ]
+            .into(),
+            name: Some("moved".into()),
+            reporter: None,
+            state: sheprd_backend::RunState::Running,
+            title: None,
+        };
+        let saved = Saved {
+            id: id.to_string(),
+            cwd: info.cwd.clone(),
+            name: info.name.clone(),
+            chat: None,
+            labels: placement(info.labels.clone()),
+        };
+        let spawn = saved.spawn(&id).unwrap();
+        assert_eq!(
+            spawn.cwd.as_deref(),
+            Some(std::path::Path::new("/work/api"))
+        );
+        assert!(spawn.argv.is_empty());
+        assert!(!spawn.labels.contains_key(TOKEN), "{:?}", spawn.labels);
+        let relative = TerminalInfo {
+            cwd: Some("work".into()),
+            ..info
+        };
+        assert!(Tmux::new(0).keep_cwd(&relative).is_err());
     }
 
     #[test]

@@ -17,7 +17,10 @@ through the session environment, including while its view is detached. The
 tmux server owns the programs and their scrollback. Stopping that server or
 rebooting the host ends those processes. When an owning view reopens after a new
 host boot, the adapter recreates its managed shell or ACP chat with the same
-pane ID. The ACP helper records the endpoint, built-in agent, session ID and
+pane ID. A shell reopens in the folder it was last in: the desktop's inventory
+saves a running shell's new folder to its recovery record when tmux reports
+that it moved. Tabs the desktop saved in a Herdr 1 workspace keep that backend,
+so the desktop starts Herdr 1 for them at launch even with tmux selected. The ACP helper records the endpoint, built-in agent, session ID and
 provider history directories and workspace labels on the machine that runs the chat. A tmux-enabled remote service also reopens recorded chats on startup after a host reboot, even with the desktop closed. It requires
 the provider to load that exact session. Shell screen contents and arbitrary
 programs have no comparable continuation protocol.

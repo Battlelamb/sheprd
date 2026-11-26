@@ -61,6 +61,30 @@ impl Provider {
         }
     }
 
+    /// Saves the folder each running tmux shell in `listed` moved to since it
+    /// was `seen`, so a new host boot reopens it there. Off the UI thread.
+    pub(super) fn keep_folders(
+        &self,
+        listed: &[TerminalInfo],
+        seen: &std::collections::HashMap<TerminalId, Option<std::path::PathBuf>>,
+    ) {
+        #[cfg(feature = "tmux")]
+        if let Self::Tmux(tmux) = self {
+            let moved = listed.iter().filter(|info| {
+                info.cwd.is_some()
+                    && info.state == sheprd_backend::RunState::Running
+                    && seen.get(&info.id) != Some(&info.cwd)
+            });
+            for info in moved {
+                if let Err(error) = tmux.keep_cwd(info) {
+                    tracing::debug!(%error, "Could not save a tmux shell's folder");
+                }
+            }
+        }
+        #[cfg(not(feature = "tmux"))]
+        let _ = (listed, seen);
+    }
+
     pub(super) fn spawn(&self, spawn: &Spawn) -> Result<TerminalInfo, Error> {
         match self {
             Self::Core(core) => Ok(core.spawn(spawn)?),

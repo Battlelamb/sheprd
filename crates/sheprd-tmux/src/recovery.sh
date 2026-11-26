@@ -12,6 +12,9 @@ case $1 in
         elif [ "$1" = read ]; then exit 0
         else exit 1; fi ;;
     shell|chat) file=$file.$1 ;;
+    # A shell that moved keeps its new folder; a chat or a closed pane has no
+    # shell recipe to update.
+    cwd) file=$file.shell; [ -f "$file" ] || exit 0 ;;
     *) exit 1 ;;
 esac
 if [ -r /proc/sys/kernel/random/boot_id ]; then

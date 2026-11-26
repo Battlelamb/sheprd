@@ -1,6 +1,7 @@
 //! What each backend reports about its terminals: its agent's status, its
 //! folder, and its name, for the chrome of split panes. Read on a short-lived
 //! thread every few seconds while a split is shown, never on the UI thread.
+//! The same read saves where each tmux shell moved, for a reboot to reopen.
 
 use super::provider::Provider;
 use sheprd_backend::{TerminalId, TerminalInfo};
@@ -185,12 +186,26 @@ impl Infos {
         if (core.is_some() || tmux.is_some()) && self.pending.is_none() && due {
             self.last = Some(now);
             let (send, receive) = sync_channel(1);
+            // Where each tmux shell was last seen, so only one that moved is
+            // saved again.
+            let seen: HashMap<_, _> = self
+                .known
+                .values()
+                .filter(|info| info.id.is_tmux())
+                .map(|info| (info.id.clone(), info.cwd.clone()))
+                .collect();
             let started = std::thread::Builder::new()
                 .name("terminal-inventory".into())
                 .spawn(move || {
                     let _ = send.send(Listed {
                         core: core.map(|b| b.terminals()),
-                        tmux: tmux.map(|b| b.terminals()),
+                        tmux: tmux.map(|b| {
+                            let listed = b.terminals();
+                            if let Ok(list) = &listed {
+                                b.keep_folders(list, &seen);
+                            }
+                            listed
+                        }),
                     });
                 });
             match started {

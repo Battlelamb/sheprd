@@ -81,13 +81,22 @@ fn info(url: &str) -> Result<Info> {
         .into();
     let mut response = agent.get(url).call().map_err(Box::new)?;
     let status = response.status();
+    let headers = response.headers();
     if status.as_u16() == 403
-        && response
-            .headers()
+        && headers
             .get(crate::endpoint::BAN_HEADER)
             .is_some_and(|value| value == "1")
     {
-        return Err(Error::Banned);
+        let header = |name| {
+            headers
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+        };
+        return Err(Error::Banned(crate::ban::Ban::from_parts(
+            header(crate::ban::REASON_HEADER),
+            header(crate::ban::SECONDS_HEADER),
+        )));
     }
     if !status.is_success() {
         return Err(Error::Info(Box::new(ureq::Error::StatusCode(

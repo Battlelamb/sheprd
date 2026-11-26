@@ -45,8 +45,9 @@ sha=$(git rev-parse HEAD)
 ref=main
 if [[ $workflow == release.yml ]]; then
     ref=release/$sha
+    # gh api --jq takes only a filter, so match the exact ref with jq itself.
     existing=$(gh api "repos/$repo/git/matching-refs/heads/$ref" \
-        --jq --arg ref "refs/heads/$ref" '.[] | select(.ref == $ref) | .object.sha')
+        | jq -r --arg ref "refs/heads/$ref" '.[] | select(.ref == $ref) | .object.sha')
     if [[ -z "$existing" ]]; then
         gh api "repos/$repo/git/refs" -f "ref=refs/heads/$ref" -f "sha=$sha" --silent
         printf 'Created branch %s\n' "$ref"

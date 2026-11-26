@@ -8,6 +8,7 @@
 mod automation;
 mod local_ports;
 mod mute;
+mod pause;
 mod ports;
 mod pr;
 mod security;
@@ -50,7 +51,7 @@ pub(super) fn serve(
             select(view, &id, |view, id| view.select_endpoint(id, cx))
         }),
         HostOp::Pause { host, paused } => {
-            in_window(caller, cx, |view, _, cx| pause(view, &host, paused, cx))
+            return pause::run(call.caller, &host, paused, incoming, watches, cx);
         }
         HostOp::Tag { id, tags } => in_window(caller, cx, |view, _, cx| tag(view, &id, tags, cx)),
         HostOp::Update { host } => in_window(caller, cx, |view, window, cx| {
@@ -208,45 +209,6 @@ fn tag(view: &mut SheprdWindow, name: &str, tags: Vec<String>, cx: &mut App) -> 
     let (id, label) = (endpoint.id.clone(), endpoint.label.clone());
     crate::device_tags::DeviceTags::set(cx, &id, tags);
     Response::done(format!("Tagged {label}"))
-}
-
-/// Pauses or resumes the saved device named by ID or label. The change is
-/// written in the background; `host list` shows it once the catalog reloads.
-fn pause(
-    view: &mut SheprdWindow,
-    name: &str,
-    paused: bool,
-    cx: &mut gpui::Context<SheprdWindow>,
-) -> Response {
-    let endpoint = match named(view, name) {
-        Ok(endpoint) => endpoint,
-        Err(response) => return response,
-    };
-    let (id, label, enabled) = (
-        endpoint.id.clone(),
-        endpoint.label.clone(),
-        endpoint.enabled,
-    );
-    if !view.device_pausable(&id) {
-        return Response::error(
-            ErrorCode::Unsupported,
-            format!("{label} cannot be paused: only saved SSH and cloud devices can"),
-        );
-    }
-    if enabled != paused {
-        let state = if paused {
-            "already paused"
-        } else {
-            "not paused"
-        };
-        return Response::done(format!("{label} is {state}"));
-    }
-    view.set_device_paused(&id, paused, cx);
-    Response::done(if paused {
-        format!("Pausing {label}; it stays listed but disconnects")
-    } else {
-        format!("Resuming {label}; it reconnects shortly")
-    })
 }
 
 /// Shows the host named by ID or label. `choose` is the window's own

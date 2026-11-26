@@ -528,9 +528,12 @@ impl SheprdWindow {
     }
 
     /// Where the saved device `scope` names connects now.
+    /// A paused device names none, so its hub goes and no new one opens
+    /// until it is resumed.
     pub(crate) fn saved_target(&self, scope: &Scope) -> Option<&ConnectTarget> {
         self.endpoints
             .iter()
+            .filter(|endpoint| endpoint.enabled)
             .find(|endpoint| crate::browser::scope(endpoint) == *scope)
             .map(|endpoint| &endpoint.connection.target)
     }

@@ -647,6 +647,10 @@ impl<R: FnMut(Update)> Session<R> {
     fn queue_changed(&mut self, queued: Vec<Queued>) {
         self.queued_origins
             .retain(|id, _| queued.iter().any(|waiting| waiting.id == *id));
+        // A prompt that left the queue, withdrawn or dropped, keeps nothing
+        // it was prepared with.
+        self.steering
+            .retain(|id, _| queued.iter().any(|waiting| waiting.id == *id));
         self.emit(Change::Queue { queued });
     }
 

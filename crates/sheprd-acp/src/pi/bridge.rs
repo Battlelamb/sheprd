@@ -81,6 +81,8 @@ pub(super) struct Bridge {
     /// The messages of a run that ended while pi still queued steered
     /// prompts, kept until the run that takes them ends.
     held: Option<Value>,
+    /// When a held run stops waiting for a pi not yet heard to settle.
+    held_until: Option<Instant>,
     /// pi says when it settles, so a run ending with steered prompts still
     /// queued is followed by one that takes them.
     settles: bool,
@@ -96,13 +98,19 @@ pub(super) struct Bridge {
 
 impl Translator for Bridge {
     fn next_tick(&self) -> Option<Instant> {
-        self.tool_output.next_tick()
+        [self.tool_output.next_tick(), self.held_until]
+            .into_iter()
+            .flatten()
+            .min()
     }
 
     fn tick(&mut self) -> Vec<Out> {
         let session = &self.session;
-        self.tool_output
-            .flush(|id, progress| partial(session, id, progress))
+        let mut outs = self
+            .tool_output
+            .flush(|id, progress| partial(session, id, progress));
+        outs.extend(self.waited());
+        outs
     }
 
     fn start(&mut self) -> Vec<Out> {
@@ -516,6 +524,7 @@ impl Bridge {
                 )]
             }
             "agent_end" => self.run_ended(message.get("messages")),
+            "agent_start" => self.run_started(),
             "agent_settled" => self.settled(),
             "queue_update" => self.queue_changed(message),
             "compaction_end"

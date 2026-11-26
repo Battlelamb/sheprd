@@ -3,7 +3,11 @@
 //! what still waits: a steered prompt that leaves that list was taken. A
 //! prompt that waits when a run ends is taken by the run pi then continues
 //! with, which the session's prompt waits for; one pi kept without running
-//! is withdrawn and given back to the session.
+//! is withdrawn and given back to the session. A pi not yet heard to settle
+//! is given [`SETTLE_WAIT`] to continue or settle, so a pi too old to say
+//! never holds a prompt for good.
+
+use std::time::{Duration, Instant};
 
 use acp::v1 as wire;
 use serde_json::{Value, json};
@@ -11,6 +15,10 @@ use uuid::Uuid;
 
 use super::{Bridge, Pending};
 use crate::harness::{Out, out, steer};
+
+/// How long a run that ended with steered prompts still queued waits for a
+/// pi not yet heard to settle to continue or settle.
+pub(super) const SETTLE_WAIT: Duration = Duration::from_secs(3);
 
 /// A prompt sent to pi's steering queue.
 #[derive(Debug)]
@@ -118,8 +126,9 @@ impl Bridge {
 
     /// A run ended with `messages`. Prompts pi still queues are taken by
     /// the run it continues with, so the run's messages are held until that
-    /// one ends. A cancelled run does not continue, and a pi too old to say
-    /// when it settles is not waited for: what it queues is given back.
+    /// one ends, or until pi settles without it. A pi not yet heard to
+    /// settle may be too old to: it gets [`SETTLE_WAIT`] to continue. A
+    /// cancelled run does not continue, and what it queues is given back.
     pub(super) fn give_back_unless_held(
         &mut self,
         messages: Option<&Value>,
@@ -127,12 +136,37 @@ impl Bridge {
     ) -> Vec<Out> {
         let mut outs = self.taken();
         let waiting = self.steers.iter().any(|steer| steer.queued);
-        if waiting && !aborted && self.settles {
+        if waiting && !aborted {
             self.held = Some(messages.cloned().unwrap_or(Value::Null));
+            self.held_until = (!self.settles).then(|| Instant::now() + SETTLE_WAIT);
             return outs;
         }
         self.held = None;
+        self.held_until = None;
         outs.extend(self.give_back());
+        outs
+    }
+
+    /// pi started a run, which takes what it queues: a held prompt waits
+    /// for it to end however long it runs.
+    pub(super) fn run_started(&mut self) -> Vec<Out> {
+        self.held_until = None;
+        Vec::new()
+    }
+
+    /// A pi not heard to settle neither continued nor settled in time: it
+    /// is taken to be too old to, and the held run ends without what it
+    /// queues.
+    pub(super) fn waited(&mut self) -> Vec<Out> {
+        if self.held_until.is_none_or(|until| Instant::now() < until) {
+            return Vec::new();
+        }
+        self.held_until = None;
+        let Some(messages) = self.held.take() else {
+            return Vec::new();
+        };
+        let mut outs = self.give_back();
+        outs.extend(self.finished(Some(&messages)));
         outs
     }
 
@@ -159,6 +193,7 @@ impl Bridge {
     /// run, and the run held for it ends.
     pub(super) fn settled(&mut self) -> Vec<Out> {
         self.settles = true;
+        self.held_until = None;
         let Some(messages) = self.held.take() else {
             return Vec::new();
         };

@@ -112,7 +112,7 @@ impl<R: FnMut(Update)> Session<R> {
     }
 
     /// The turn ended: a prompt still marked steered waits for the next
-    /// one, and nothing is kept for prompts no longer waiting.
+    /// one.
     pub(super) fn turn_ended_steering(&mut self) {
         if self.transcript.queued.iter().any(|queued| queued.steered) {
             let mut queued = self.transcript.queued.clone();
@@ -121,8 +121,5 @@ impl<R: FnMut(Update)> Session<R> {
             }
             self.queue_changed(queued);
         }
-        let waiting = &self.transcript.queued;
-        self.steering
-            .retain(|id, _| waiting.iter().any(|queued| queued.id == *id));
     }
 }

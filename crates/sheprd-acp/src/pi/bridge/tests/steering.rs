@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use super::*;
 use crate::harness::steer;
 
@@ -87,13 +89,40 @@ fn a_steer_pi_kept_once_it_settled_is_given_back() {
 }
 
 #[test]
-fn a_pi_that_never_settles_gives_queued_steers_back_when_the_run_ends() {
+fn a_first_run_ending_with_a_queued_steer_waits_for_pi_to_continue() {
     let mut bridge = opened();
     prompt(&mut bridge, 2);
     steered(&mut bridge, 3);
+    // pi has not been heard to settle yet, so it gets a while to continue.
     let outs = end(&mut bridge);
+    assert!(!answered(&outs, 2));
+    assert!(notified(&outs, steer::UNSTEERED).is_none(), "{outs:?}");
+    assert!(bridge.next_tick().is_some());
+    // It continued: the prompt waits for that run however long it takes.
+    bridge.on_harness(&json!({"type": "agent_start"}));
+    assert!(bridge.held_until.is_none());
+    let outs = queue(&mut bridge, &[]);
+    assert_eq!(notified(&outs, steer::STEERED), Some(&json!(STEER)));
+    let outs = end(&mut bridge);
+    assert!(answered(&outs, 2));
+    assert!(notified(&outs, steer::UNSTEERED).is_none());
+}
+
+#[test]
+fn a_pi_that_neither_continues_nor_settles_gives_queued_steers_back() {
+    let mut bridge = opened();
+    prompt(&mut bridge, 2);
+    steered(&mut bridge, 3);
+    assert!(!answered(&end(&mut bridge), 2));
+    bridge.held_until = Some(Instant::now());
+    let outs = bridge.tick();
+    assert!(
+        outs.iter()
+            .any(|out| matches!(out, Out::Harness(command) if command["type"] == "clear_queue"))
+    );
     assert_eq!(notified(&outs, steer::UNSTEERED), Some(&json!(STEER)));
     assert!(answered(&outs, 2));
+    assert!(bridge.next_tick().is_none());
 }
 
 #[test]

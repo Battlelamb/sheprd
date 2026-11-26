@@ -173,3 +173,19 @@ fn an_agent_that_cannot_steer_queues_as_before() {
     );
     assert!(!harness.transcript().queued[0].steered);
 }
+
+#[test]
+fn withdrawing_a_refused_steer_keeps_nothing_it_was_prepared_with() {
+    let mut harness = steering();
+    prompt(&mut harness, 0, "one");
+    let id = typed(&mut harness, "two");
+    let request = harness.last_request(steer::METHOD);
+    harness.fail(
+        request["id"].as_i64().unwrap(),
+        wire::Error::new(-32603, "No turn is running."),
+    );
+    assert!(harness.session.steering.contains_key(&id));
+    harness.command(0, Command::Unqueue { id });
+    assert!(harness.transcript().queued.is_empty());
+    assert!(harness.session.steering.is_empty());
+}

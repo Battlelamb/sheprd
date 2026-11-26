@@ -300,8 +300,8 @@ impl SheprdWindow {
         if let Some(focus) = pane.viewer.as_ref().and_then(|viewer| viewer.open_focus()) {
             return Some(focus.clone());
         }
-        if pane.reading(window) {
-            return pane.text_focus.clone();
+        if let Some(focus) = pane.reader_focus(window, cx) {
+            return Some(focus);
         }
         pane.input_focus(cx)
     }
@@ -316,10 +316,7 @@ impl SheprdWindow {
             .chats
             .panes()
             .filter(|pane| pane.target.surface == super::Surface::Herdr)
-            .find_map(|pane| {
-                pane.focus_handles(cx)
-                    .find(|focus| focus.is_focused(window))
-            });
+            .find_map(|pane| pane.focused_handle(window, cx));
         match (holding, target) {
             (Some(holding), target) if target.as_ref() != Some(&holding) => {
                 let focus = target.unwrap_or_else(|| self.focus.clone());
@@ -340,7 +337,7 @@ impl SheprdWindow {
     /// on a keystroke bubbling out of the overlay or one of its fields.
     pub(crate) fn chat_focused(&self, window: &Window, cx: &App) -> bool {
         self.chats.panes().any(|pane| {
-            pane.focus_handles(cx).any(|focus| focus.is_focused(window))
+            pane.focused_handle(window, cx).is_some()
                 || pane
                     .menu_search
                     .as_ref()
@@ -480,6 +477,23 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if Self::message_tab(event)
+            && self.chats.pane(pane_id).is_some_and(|pane| {
+                pane.menu.is_none()
+                    && pane
+                        .input_focus(cx)
+                        .is_some_and(|focus| focus.is_focused(window))
+                    && !pane
+                        .composer
+                        .as_ref()
+                        .is_some_and(|input| input.read(cx).is_composing())
+            })
+            && self.step_message_file(pane_id, None, event.keystroke.modifiers.shift, window, cx)
+        {
+            cx.stop_propagation();
+            window.prevent_default();
+            return;
+        }
         if self.chat_reader_key(pane_id, event, window, cx) {
             return;
         }
@@ -596,6 +610,9 @@ impl SheprdWindow {
             return;
         };
         if input.read(cx).is_composing() {
+            return;
+        }
+        if !input.read(cx).focus.is_focused(window) {
             return;
         }
         let text = input.read(cx).text().to_owned();

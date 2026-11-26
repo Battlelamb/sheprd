@@ -271,6 +271,22 @@ impl ChatPane {
             .chain(self.viewer.iter().map(|viewer| viewer.focus().clone()))
     }
 
+    /// The reader or a keyboard control in one of its rows.
+    pub(super) fn reader_focus(&self, window: &Window, cx: &App) -> Option<FocusHandle> {
+        let focused = window.focused(cx)?;
+        self.text_focus
+            .as_ref()?
+            .contains(&focused, window)
+            .then_some(focused)
+    }
+
+    pub(super) fn focused_handle(&self, window: &Window, cx: &App) -> Option<FocusHandle> {
+        self.reader_focus(window, cx).or_else(|| {
+            self.focus_handles(cx)
+                .find(|focus| focus.is_focused(window))
+        })
+    }
+
     /// Whether the user is reading, with the keyboard on the chat's text.
     pub(crate) fn reading(&self, window: &Window) -> bool {
         self.text_focus

@@ -212,6 +212,20 @@ fn compact_message_limits_apply_to_the_prompt_and_count_unicode_characters() {
 
 #[gpui::test]
 fn clicking_a_long_prompt_opens_its_exact_text(cx: &mut TestAppContext) {
+    open_long_prompt(None, cx);
+}
+
+#[gpui::test]
+fn tab_then_enter_opens_the_message(cx: &mut TestAppContext) {
+    open_long_prompt(Some("enter"), cx);
+}
+
+#[gpui::test]
+fn shift_tab_then_space_opens_the_message(cx: &mut TestAppContext) {
+    open_long_prompt(Some("space"), cx);
+}
+
+fn open_long_prompt(key: Option<&str>, cx: &mut TestAppContext) {
     let (view, _peer, cx) = overlay::open(cx, ConnectTarget::Local);
     let program = Program::new();
     let prompt = format!(
@@ -227,7 +241,19 @@ fn clicking_a_long_prompt_opens_its_exact_text(cx: &mut TestAppContext) {
     let _stream = overlay::attach_with(&view, &program, snapshot(cursor(1, 0), vec![entry]), cx);
     assert!(cx.opened_url().is_none());
     let button = cx.debug_bounds("chat-open-message").unwrap();
-    cx.simulate_click(button.center(), Modifiers::default());
+    if let Some(key) = key {
+        cx.simulate_keystrokes(if key == "space" { "shift-tab" } else { "tab" });
+        overlay::poll(&view, &program, cx);
+        let keystroke = crate::keymap::parse_keystroke(key).unwrap();
+        cx.simulate_event(gpui::KeyDownEvent {
+            keystroke: keystroke.clone(),
+            is_held: false,
+            prefer_character_input: false,
+        });
+        cx.simulate_event(gpui::KeyUpEvent { keystroke });
+    } else {
+        cx.simulate_click(button.center(), Modifiers::default());
+    }
     wait_until(|| {
         cx.run_until_parked();
         cx.opened_url().is_some()

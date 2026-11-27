@@ -50,8 +50,8 @@ fn chats_on_one_host_share_one_multiplexer() {
         starts.fetch_add(1, Ordering::SeqCst);
         Ok(echoing())
     };
-    let first = registry.open("host", &endpoint(), start).unwrap();
-    let second = registry.open("host", &endpoint(), start).unwrap();
+    let first = registry.open("host", &endpoint(), 0, start).unwrap();
+    let second = registry.open("host", &endpoint(), 0, start).unwrap();
     assert_eq!(starts.load(Ordering::SeqCst), 1);
     assert_ne!(first.id(), second.id());
     second.clone().write_all(b"hi").unwrap();
@@ -59,7 +59,7 @@ fn chats_on_one_host_share_one_multiplexer() {
     second.clone().read_exact(&mut back).unwrap();
     assert_eq!(&back, b"hi");
     // Another host gets its own.
-    registry.open("other", &endpoint(), start).unwrap();
+    registry.open("other", &endpoint(), 0, start).unwrap();
     assert_eq!(starts.load(Ordering::SeqCst), 2);
 }
 
@@ -71,8 +71,8 @@ fn a_host_that_refuses_falls_back_without_asking_again() {
         starts.fetch_add(1, Ordering::SeqCst);
         Err(Failed::Refused)
     };
-    assert!(registry.open("old", &endpoint(), refuse).is_none());
-    assert!(registry.open("old", &endpoint(), refuse).is_none());
+    assert!(registry.open("old", &endpoint(), 0, refuse).is_none());
+    assert!(registry.open("old", &endpoint(), 0, refuse).is_none());
     assert_eq!(starts.load(Ordering::SeqCst), 1);
 }
 
@@ -84,16 +84,16 @@ fn an_ended_multiplexer_is_started_again() {
         starts.fetch_add(1, Ordering::SeqCst);
         Ok(echoing())
     };
-    let stream = registry.open("host", &endpoint(), start).unwrap();
+    let stream = registry.open("host", &endpoint(), 0, start).unwrap();
     {
         let hosts = registry.hosts.lock().unwrap();
-        let Slot::Up(mux) = &*hosts["host"].lock().unwrap() else {
+        let Slot::Up { mux, .. } = &*hosts["host"].lock().unwrap() else {
             panic!("no multiplexer");
         };
         mux.shutdown();
     }
     assert_eq!(stream.clone().read(&mut [0; 1]).unwrap(), 0);
-    assert!(registry.open("host", &endpoint(), start).is_some());
+    assert!(registry.open("host", &endpoint(), 0, start).is_some());
     assert_eq!(starts.load(Ordering::SeqCst), 2);
 }
 
@@ -117,4 +117,28 @@ fn a_greeting_host_multiplexes() {
     let mux = spawn(shell(&format!("printf '{hello}'; exec cat >/dev/null")), ()).unwrap();
     assert!(!mux.is_ended());
     mux.shutdown();
+}
+
+#[test]
+fn a_reconnected_host_gets_a_new_multiplexer() {
+    let registry = Registry::default();
+    let starts = AtomicUsize::new(0);
+    let start = || {
+        starts.fetch_add(1, Ordering::SeqCst);
+        Ok(echoing())
+    };
+    let before = registry.open("host", &endpoint(), 0, start).unwrap();
+    // The target may name another machine now: new chats go there.
+    let after = registry.open("host", &endpoint(), 1, start).unwrap();
+    assert_eq!(starts.load(Ordering::SeqCst), 2);
+    // A chat attached before keeps its stream on the old one.
+    before.clone().write_all(b"old").unwrap();
+    let mut back = [0; 3];
+    before.clone().read_exact(&mut back).unwrap();
+    assert_eq!(&back, b"old");
+    after.clone().write_all(b"new").unwrap();
+    after.clone().read_exact(&mut back).unwrap();
+    assert_eq!(&back, b"new");
+    assert!(registry.open("host", &endpoint(), 1, start).is_some());
+    assert_eq!(starts.load(Ordering::SeqCst), 2);
 }

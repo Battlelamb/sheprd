@@ -48,7 +48,8 @@ static HOSTS: LazyLock<Registry> = LazyLock::new(Registry::default);
 /// A stream to `endpoint`'s chat over `host`'s multiplexer, started if it
 /// has none. `None` means dial the chat on a channel of its own.
 pub(super) fn open(host: &str, endpoint: &EndpointId) -> Option<Stream> {
-    HOSTS.open(host, endpoint, || start(host))
+    let generation = sheprd_client::shared_generation(host);
+    HOSTS.open(host, endpoint, generation, || start(host))
 }
 
 /// Each host's multiplexer, by SSH target.
@@ -61,7 +62,9 @@ struct Registry {
 enum Slot {
     #[default]
     None,
-    Up(Mux),
+    /// Started under the host's connection `generation`
+    /// ([`sheprd_client::shared_generation`]).
+    Up { mux: Mux, generation: u64 },
     /// Chats dial on their own until then.
     Direct(Instant),
 }
@@ -77,13 +80,17 @@ enum Failed {
 
 impl Registry {
     /// Opens a stream on `host`'s multiplexer, starting one with `start`
-    /// when there is none or it ended. A host's slot stays locked while it
-    /// starts, so the chats attaching at once wait for one multiplexer
-    /// rather than each starting their own.
+    /// when there is none, it ended, or it was started under an earlier
+    /// connection `generation`: after a reconnect the target may name
+    /// another machine, so new chats must not reach the old one. A replaced
+    /// multiplexer keeps the chats it carries and ends once they close. A
+    /// host's slot stays locked while it starts, so the chats attaching at
+    /// once wait for one multiplexer rather than each starting their own.
     fn open(
         &self,
         host: &str,
         endpoint: &EndpointId,
+        generation: u64,
         start: impl Fn() -> Result<Mux, Failed>,
     ) -> Option<Stream> {
         let slot = self
@@ -99,16 +106,19 @@ impl Registry {
         for _ in 0..2 {
             match &*slot {
                 Slot::Direct(until) if Instant::now() < *until => return None,
-                Slot::Up(mux) => match mux.open(endpoint) {
+                Slot::Up {
+                    mux,
+                    generation: started,
+                } if *started == generation => match mux.open(endpoint) {
                     Ok(stream) => return Some(stream),
                     Err(mux::Error::Ended) => {}
                     // Full: this chat dials on its own.
                     Err(_) => return None,
                 },
-                Slot::Direct(_) | Slot::None => {}
+                Slot::Up { .. } | Slot::Direct(_) | Slot::None => {}
             }
             *slot = match start() {
-                Ok(mux) => Slot::Up(mux),
+                Ok(mux) => Slot::Up { mux, generation },
                 Err(failed) => {
                     let wait = match failed {
                         Failed::Refused => FALLBACK,
@@ -202,8 +212,7 @@ fn reaper(mux: Mux, child: Child, keep: impl Send + 'static) -> Option<Receiver<
     let spawned = thread::Builder::new()
         .name("herdr-gui-chat-mux".into())
         .spawn(move || {
-            mux.wait_idle(IDLE);
-            mux.shutdown();
+            mux.end_when_idle(IDLE);
             let code = reap(&reaped);
             drop(keep);
             let _ = sender.send(code);

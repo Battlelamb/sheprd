@@ -41,6 +41,8 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     // keep-sorted start
+    #[error("the mux peer stopped reading")]
+    Backlog,
     #[error("a mux peer sent stream {0} more than its window")]
     Credit(StreamId),
     #[error("the multiplexed connection ended")]

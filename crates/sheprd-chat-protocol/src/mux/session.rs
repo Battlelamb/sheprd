@@ -40,9 +40,11 @@ enum Role {
 struct State {
     role: Role,
     streams: HashMap<StreamId, Entry>,
-    /// Frames to send, in order. Data is bounded by credit, and each stream
-    /// queues at most one grant, so this stays bounded too.
+    /// Frames to send, in order, costing `queued` bytes in all. A peer that
+    /// stops reading would let replies and closed streams' data pile up,
+    /// so past [`State::max_queued`] the connection ends instead.
     out: VecDeque<Out>,
+    queued: usize,
     /// Streams the client opened that the host has not taken yet.
     accepted: VecDeque<(StreamId, EndpointId)>,
     /// The client's last opened stream; the host's last seen.
@@ -82,6 +84,34 @@ enum Out {
     Grant(StreamId),
 }
 
+/// Room in a connection's queue for frames other than data, beyond every
+/// stream's window: opens, grants, closes, and refusals.
+const MAX_CONTROL: usize = 64 * 1024;
+
+impl Out {
+    /// Its bytes on the wire, which is what it holds while queued.
+    fn cost(&self) -> usize {
+        match self {
+            Self::Frame(frame) => Self::cost_of(frame),
+            Self::Grant(_) => HEADER + 4,
+        }
+    }
+
+    fn cost_of(frame: &Frame) -> usize {
+        HEADER
+            + match frame {
+                Frame::Hello(_) => 16,
+                Frame::Open { .. } => 32,
+                Frame::Data { bytes, .. } => bytes.len(),
+                Frame::Credit { .. } => 4,
+                Frame::Close { .. } => 1,
+            }
+    }
+}
+
+/// A frame's kind, stream, and length.
+const HEADER: usize = 9;
+
 impl Mux {
     /// The client side: it opens streams once the host greets.
     pub fn client() -> Self {
@@ -98,6 +128,7 @@ impl Mux {
         let state = State {
             role,
             streams: HashMap::new(),
+            queued: greeting.as_ref().map_or(0, Out::cost_of),
             out: greeting.map(Out::Frame).into_iter().collect(),
             accepted: VecDeque::new(),
             last_id: 0,
@@ -128,6 +159,7 @@ impl Mux {
                     }
                     match state.out.pop_front() {
                         Some(out) => {
+                            state.queued = state.queued.saturating_sub(out.cost());
                             if let Some(frame) = state.frame(out) {
                                 frame.encode(&mut bytes)?;
                                 break;
@@ -193,10 +225,13 @@ impl Mux {
                 }
                 state.last_id = stream;
                 if state.streams.len() >= state.max_streams {
-                    state.out.push_back(Out::Frame(Frame::Close {
+                    let refusal = Out::Frame(Frame::Close {
                         stream,
                         reason: CloseReason::Limit,
-                    }));
+                    });
+                    if !state.queue(refusal) {
+                        return Err(Error::Backlog);
+                    }
                 } else {
                     state.add(stream);
                     state.accepted.push_back((stream, endpoint));
@@ -271,10 +306,15 @@ impl Mux {
         let id = state.last_id.checked_add(1).ok_or(Error::Limit)?;
         state.last_id = id;
         state.add(id);
-        state.out.push_back(Out::Frame(Frame::Open {
+        let opening = Out::Frame(Frame::Open {
             stream: id,
             endpoint: endpoint.clone(),
-        }));
+        });
+        if !state.queue(opening) {
+            drop(state);
+            self.shared.changed.notify_all();
+            return Err(Error::Backlog);
+        }
         drop(state);
         self.shared.changed.notify_all();
         Ok(Stream {
@@ -302,16 +342,22 @@ impl Mux {
         }
     }
 
-    /// Returns once the connection ended or has carried no stream for
-    /// `idle`.
-    pub fn wait_idle(&self, idle: Duration) {
+    /// Returns once the connection ended, ending it once it has carried no
+    /// stream for `idle`. The check and the end happen under one lock, so
+    /// a stream opened meanwhile either keeps it up or finds it ended.
+    pub fn end_when_idle(&self, idle: Duration) {
         let mut state = self.shared.lock();
         loop {
             if state.ended.is_some() {
                 return;
             }
             state = match state.idle_since {
-                Some(since) if since.elapsed() >= idle => return,
+                Some(since) if since.elapsed() >= idle => {
+                    state.finish(End::Clean);
+                    drop(state);
+                    self.shared.changed.notify_all();
+                    return;
+                }
                 Some(since) => self
                     .shared
                     .wait_for(state, idle.saturating_sub(since.elapsed())),
@@ -336,11 +382,7 @@ impl Mux {
     }
 
     fn end(&self, end: End) {
-        let mut state = self.shared.lock();
-        state.ended.get_or_insert(end);
-        state.out.clear();
-        state.accepted.clear();
-        drop(state);
+        self.shared.lock().finish(end);
         self.shared.changed.notify_all();
     }
 }
@@ -366,6 +408,35 @@ impl std::fmt::Debug for Stream {
 }
 
 impl State {
+    /// Queues `out`, or ends the connection when it would pass
+    /// [`Self::max_queued`]; false then.
+    fn queue(&mut self, out: Out) -> bool {
+        let queued = self.queued.saturating_add(out.cost());
+        if queued > self.max_queued() {
+            self.finish(End::Failed);
+            return false;
+        }
+        self.queued = queued;
+        self.out.push_back(out);
+        true
+    }
+
+    /// The most bytes queued at once: every stream's full window of data,
+    /// and room for the small frames that go with them.
+    fn max_queued(&self) -> usize {
+        self.max_streams
+            .max(1)
+            .saturating_mul(WINDOW as usize)
+            .saturating_add(MAX_CONTROL)
+    }
+
+    fn finish(&mut self, end: End) {
+        self.ended.get_or_insert(end);
+        self.out.clear();
+        self.queued = 0;
+        self.accepted.clear();
+    }
+
     fn add(&mut self, id: StreamId) {
         self.idle_since = None;
         self.streams.insert(
@@ -428,7 +499,7 @@ impl Stream {
             return;
         };
         if entry.remote.is_none() && state.ended.is_none() {
-            state.out.push_back(Out::Frame(Frame::Close {
+            state.queue(Out::Frame(Frame::Close {
                 stream: self.id,
                 reason,
             }));
@@ -472,7 +543,7 @@ impl Read for Stream {
                     .saturating_add(u32::try_from(read).unwrap_or(u32::MAX));
                 if !entry.granting && ended.is_none() {
                     entry.granting = true;
-                    state.out.push_back(Out::Grant(self.id));
+                    state.queue(Out::Grant(self.id));
                     self.shared.changed.notify_all();
                 }
                 return Ok(read);
@@ -513,19 +584,25 @@ impl Write for Stream {
             entry.credit -= u32::try_from(len).unwrap_or(entry.credit);
             let chunk = &buffer[..len];
             // Coalesce with this stream's last queued data while it fits.
-            match state.out.back_mut() {
+            let fits = state.queued.saturating_add(len) <= state.max_queued();
+            let queued = match state.out.back_mut() {
                 Some(Out::Frame(Frame::Data { stream, bytes }))
-                    if *stream == self.id && bytes.len() + len <= MAX_DATA =>
+                    if fits && *stream == self.id && bytes.len() + len <= MAX_DATA =>
                 {
                     bytes.extend_from_slice(chunk);
+                    state.queued += len;
+                    true
                 }
-                _ => state.out.push_back(Out::Frame(Frame::Data {
+                _ => state.queue(Out::Frame(Frame::Data {
                     stream: self.id,
                     bytes: chunk.to_vec(),
                 })),
-            }
+            };
             drop(state);
             self.shared.changed.notify_all();
+            if !queued {
+                return Err(io::ErrorKind::BrokenPipe.into());
+            }
             return Ok(len);
         }
     }

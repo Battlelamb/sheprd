@@ -609,6 +609,14 @@ fn shared_command(
     Ok((command, channel.map(SshChannel)))
 }
 
+/// The generation of `target`'s shared connections: it changes when they
+/// are given up for new ones, on a reconnect (whose path may now reach
+/// another machine) or a host key change. A caller keeping a long-lived
+/// stream to the host opens new work on a fresh one once it changes.
+pub fn shared_generation(target: &str) -> u64 {
+    mux::generation(target)
+}
+
 /// How long [`shared_script_command`] waits for a host's shared connection
 /// before connecting directly.
 const SHARED_WAIT: Duration = Duration::from_secs(10);

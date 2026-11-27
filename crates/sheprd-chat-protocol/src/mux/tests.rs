@@ -311,16 +311,66 @@ fn ending_the_connection_ends_every_stream() {
 }
 
 #[test]
-fn an_idle_connection_reports_it() {
+fn an_idle_connection_ends_itself() {
     let (client, _host) = echoing(MAX_STREAMS);
     let stream = client.open(&endpoint(ID)).unwrap();
     let waiting = client.clone();
     let (done, idle) = mpsc::channel();
     thread::spawn(move || {
-        waiting.wait_idle(Duration::from_millis(50));
+        waiting.end_when_idle(Duration::from_millis(50));
         let _ = done.send(());
     });
     assert!(idle.recv_timeout(Duration::from_millis(200)).is_err());
+    assert!(!client.is_ended());
     stream.close();
     assert!(idle.recv_timeout(Duration::from_secs(5)).is_ok());
+    // Ended under the lock that saw it idle, so no stream slips in after.
+    assert!(client.is_ended());
+    assert!(matches!(client.open(&endpoint(ID)), Err(Error::Ended)));
+}
+
+#[test]
+fn a_peer_that_stops_reading_cannot_grow_the_queue() {
+    // A full host's every refusal is a queued reply; a client that keeps
+    // opening and never reads would grow them without end.
+    let host = Mux::host(1);
+    let opens: Vec<Frame> = (1..=40_000)
+        .map(|stream| Frame::Open {
+            stream,
+            endpoint: endpoint(ID),
+        })
+        .collect();
+    let bytes = encoded(&opens);
+    assert!(matches!(
+        host.receive_loop(bytes.as_slice()),
+        Err(Error::Backlog)
+    ));
+    assert!(host.is_ended());
+}
+
+#[test]
+fn closed_streams_data_counts_against_the_queue() {
+    // Nothing sends: whatever streams write stays queued.
+    let host = Mux::host(1);
+    let mut frames = Vec::new();
+    for stream in 1..=2 {
+        frames.push(Frame::Open {
+            stream,
+            endpoint: endpoint(ID),
+        });
+    }
+    let bytes = encoded(&frames[..1]);
+    let (mut input, mut feed) = io::pipe().unwrap();
+    feed.write_all(&bytes).unwrap();
+    let receiver = host.clone();
+    thread::spawn(move || receiver.receive_loop(&mut input));
+    let (_, first) = host.accept().unwrap();
+    first.clone().write_all(&vec![1; WINDOW as usize]).unwrap();
+    first.close();
+    feed.write_all(&encoded(&frames[1..2])).unwrap();
+    let (_, second) = host.accept().unwrap();
+    // The first stream's window is still queued, so the second cannot
+    // queue a full window more.
+    assert!(second.clone().write_all(&vec![2; WINDOW as usize]).is_err());
+    assert!(host.is_ended());
 }

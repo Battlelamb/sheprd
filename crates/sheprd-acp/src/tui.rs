@@ -18,7 +18,8 @@ use crossbeam_channel::{Receiver, Sender, bounded, never, select};
 use crossterm::{
     event::{
         DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-        Event, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+        Event, KeyboardEnhancementFlags, MouseEventKind, PopKeyboardEnhancementFlags,
+        PushKeyboardEnhancementFlags,
     },
     execute,
 };
@@ -126,12 +127,30 @@ fn terminal_events() -> std::io::Result<Receiver<std::io::Result<Event>>> {
             loop {
                 let event = crossterm::event::read();
                 let failed = event.is_err();
+                if event
+                    .as_ref()
+                    .is_ok_and(|event| !terminal_event_is_relevant(event))
+                {
+                    continue;
+                }
                 if sender.send(event).is_err() || failed {
                     return;
                 }
             }
         })?;
     Ok(receiver)
+}
+
+/// Only wheel events affect the view; forwarding pointer movement would make
+/// the main loop redraw the transcript for input it does not use.
+fn terminal_event_is_relevant(event: &Event) -> bool {
+    match event {
+        Event::Mouse(mouse) => matches!(
+            mouse.kind,
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+        ),
+        _ => true,
+    }
 }
 
 /// A terminal event, or why there will be none. Losing the terminal is a

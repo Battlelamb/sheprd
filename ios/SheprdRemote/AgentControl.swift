@@ -112,7 +112,7 @@ final class AgentControl {
             guidingDevice = computer.device
             guide = Banner(
                 computer: model.displayName(computer), text: guide?.text ?? "Highlighted in Settings", note: true,
-                from: from ?? guide?.from, device: computer.device
+                from: from, device: computer.device
             )
             showHighlight(target, model: model)
             answerAfterNavigation(computer, model: model, answer: answer)
@@ -137,6 +137,12 @@ final class AgentControl {
               !LockState.shared.hidesNames
         else { return }
         // Its chat may have closed since: the note just goes then.
+        guard Self.route(from, on: computer.device, fleet: model.fleet) != nil else { return }
+        // The person asked for the chat: a sheet over every tab, such as
+        // the new workspace form or the voice sheet, would hide it.
+        model.creating = nil
+        model.voice = nil
+        model.pendingPullRequest = nil
         _ = open(from, on: computer, model: model)
     }
 
@@ -196,6 +202,16 @@ final class AgentControl {
         let terminal = fleet.terminalItems.first { $0.computer.device == device && $0.agent?.pane == pane }
         if case let .chat(key, title)? = terminal?.route { return .chat(key, title: title) }
         return nil
+    }
+
+    /// The chat or terminal `screen` names on `device`, when it is one this
+    /// app lists; `nil` for any other screen.
+    static func route(_ screen: AgentScreen, on device: String, fleet: Fleet) -> Route? {
+        switch screen {
+        case let .chat(pane): chat(pane, on: device, fleet: fleet) ?? term(pane, on: device, fleet: fleet)
+        case let .term(pane): term(pane, on: device, fleet: fleet)
+        default: nil
+        }
     }
 
     /// The route of the terminal holding `pane`.

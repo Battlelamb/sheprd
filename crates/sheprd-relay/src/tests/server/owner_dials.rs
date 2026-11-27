@@ -129,10 +129,17 @@ async fn refusals_past_the_rate_spend_alike_named_or_not() {
 async fn an_owner_holds_more_sessions_than_a_key_may_on_a_private_relay() {
     let owner = signing_key(204);
     let (hub, route, address, _listener) = spent(Access::tokens(TOKEN).unwrap(), &owner);
-    let held: Vec<_> = (0..hub.limits.max_sessions_per_key + 2)
+    let half = hub.limits.max_sessions_per_route / 2;
+    assert!(half > hub.limits.max_sessions_per_key);
+    let held: Vec<_> = (0..half)
         .map(|_| hub.dial(route, public(&owner), address).unwrap().unwrap())
         .collect();
-    assert_eq!(held.len(), hub.limits.max_sessions_per_key + 2);
+    // Even a stolen owner key leaves half the computer's room to the rest.
+    assert!(matches!(
+        hub.dial(route, public(&owner), address).unwrap(),
+        Err(crate::hub::DialRefusal::Busy)
+    ));
+    drop(held);
 }
 
 #[tokio::test]

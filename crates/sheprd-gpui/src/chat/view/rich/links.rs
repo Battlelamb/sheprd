@@ -118,7 +118,12 @@ impl Links {
                 return;
             }
             let endpoint = view.endpoints[view.selected_endpoint].id.clone();
-            view.navigate_endpoint(&endpoint, screen.as_deref(), cx);
+            if view.navigate_endpoint(&endpoint, screen.as_deref(), cx)
+                && let crate::NavigationTarget::Pane(pane) = screen
+            {
+                view.reveal_herdr_pane(pane);
+                cx.notify();
+            }
         });
     }
 

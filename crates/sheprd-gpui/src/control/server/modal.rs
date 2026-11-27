@@ -175,6 +175,7 @@ pub(super) fn serve(call: Call<ModalOp>, cx: &mut App) -> Response {
                     workspace_label,
                     workspace_root,
                     entry_id: None,
+                    source_revision: None,
                     directive_index: None,
                     parsed,
                     display_level,

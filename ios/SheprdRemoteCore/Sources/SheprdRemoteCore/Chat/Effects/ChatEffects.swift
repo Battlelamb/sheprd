@@ -32,12 +32,28 @@ public struct ChatEffects: Hashable, Sendable {
         public var bubbles: Int
         /// Whether its screen effect was met.
         public var screen: Bool
+        /// Its interaction cues met, as a reply may stream more blocks in later.
+        public var interactionCues: Int
 
-        public init(epoch: UUID?, entry: EntryId, bubbles: Int, screen: Bool) {
+        public init(epoch: UUID?, entry: EntryId, bubbles: Int, screen: Bool, interactionCues: Int = 0) {
             self.epoch = epoch
             self.entry = entry
             self.bubbles = bubbles
             self.screen = screen
+            self.interactionCues = interactionCues
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case epoch, entry, bubbles, screen, interactionCues
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            epoch = try c.decodeIfPresent(UUID.self, forKey: .epoch)
+            entry = try c.decode(EntryId.self, forKey: .entry)
+            bubbles = try c.decode(Int.self, forKey: .bubbles)
+            screen = try c.decode(Bool.self, forKey: .screen)
+            interactionCues = try c.decodeIfPresent(Int.self, forKey: .interactionCues) ?? 0
         }
     }
 
@@ -147,8 +163,8 @@ public struct ChatEffects: Hashable, Sendable {
             let met = min(mark.bubbles, message.bubbles)
             if met > 0 { bubbles[mark.entry] = met }
             if mark.screen, message.screen != nil { screens.insert(mark.entry) }
-            let cueCount = message.allCues.count
-            if cueCount > 0 { interactionCues[mark.entry] = cueCount }
+            let metCues = min(mark.interactionCues, message.allCues.count)
+            if metCues > 0 { interactionCues[mark.entry] = metCues }
         }
         self.mark = mark
     }
@@ -252,7 +268,13 @@ public struct ChatEffects: Hashable, Sendable {
     /// Moves the mark to `entry`, as met now, unless it is already past it.
     private mutating func advance(to entry: EntryId) {
         if let mark, mark.entry > entry { return }
-        mark = Mark(epoch: epoch, entry: entry, bubbles: bubbles[entry] ?? 0, screen: screens.contains(entry))
+        mark = Mark(
+            epoch: epoch,
+            entry: entry,
+            bubbles: bubbles[entry] ?? 0,
+            screen: screens.contains(entry),
+            interactionCues: interactionCues[entry] ?? 0
+        )
     }
 
     /// Notes the effects of the entries `noted` picks without playing them.

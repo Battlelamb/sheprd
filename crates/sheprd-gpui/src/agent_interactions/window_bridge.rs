@@ -19,7 +19,7 @@ struct PendingPane {
     agent: String,
     workspace_label: String,
     workspace_root: Option<PathBuf>,
-    entries: Vec<(EntryId, Vec<ParsedInteraction>, Vec<CueKind>)>,
+    entries: Vec<(EntryId, u64, Vec<ParsedInteraction>, Vec<CueKind>)>,
 }
 
 impl SheprdWindow {
@@ -41,12 +41,12 @@ impl SheprdWindow {
             let agent = pane.session.transcript().agent.clone();
             let (workspace_label, workspace_root) = self.workspace_info_for_pane(&pane_id);
             let mut entries = Vec::new();
-            for (entry_id, _revision) in pane.session.keys() {
+            for (entry_id, revision) in pane.session.keys() {
                 let Some(body) = pane.prepared.body(entry_id) else {
                     continue;
                 };
                 let (interactions, cues) = extract_interactions(&body);
-                entries.push((entry_id, interactions, cues));
+                entries.push((entry_id, revision, interactions, cues));
             }
             pending.push(PendingPane {
                 pane_id,
@@ -85,7 +85,7 @@ impl SheprdWindow {
                     } else {
                         Presence::OtherApp
                     };
-                for (entry_id, interactions, cues) in pane.entries {
+                for (entry_id, revision, interactions, cues) in pane.entries {
                     any_changed |= s.sync_chat_entry(ChatEntrySync {
                         window_id: win_id,
                         pane_id: &pane.pane_id,
@@ -93,6 +93,7 @@ impl SheprdWindow {
                         workspace_label: &pane.workspace_label,
                         workspace_root: pane.workspace_root.clone(),
                         entry_id,
+                        revision,
                         history: is_history,
                         presence,
                         interactions: &interactions,

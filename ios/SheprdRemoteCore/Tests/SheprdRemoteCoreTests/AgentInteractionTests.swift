@@ -89,6 +89,35 @@ final class AgentInteractionTests: XCTestCase {
         XCTAssertTrue(second.isEmpty)
     }
 
+    func testRestoringSavedMarkPlaysNewInteractionCuesStreamedWhileAway() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let epoch = UUID()
+
+        // User was viewing the entry while it only contained plain prose (0 cues).
+        var before = Transcript(agent: "Claude")
+        before.entries = [Entry(id: EntryId(1), kind: .agent(text: "Starting push…"))]
+        var initial = ChatEffects()
+        initial.history(before, epoch: epoch, mark: nil)
+        _ = initial.catchUp(before, now: now)
+        let savedMark = try XCTUnwrap(initial.mark)
+        XCTAssertEqual(savedMark.interactionCues, 0)
+
+        // While disconnected, an urgent block streamed into that same entry.
+        var after = Transcript(agent: "Claude")
+        after.entries = [Entry(id: EntryId(1), kind: .agent(text: "Starting push…\n:::urgent Tap YubiKey\nWaiting\n:::"))]
+
+        var reopened = ChatEffects()
+        reopened.history(after, epoch: epoch, mark: savedMark)
+        let caughtUp = reopened.catchUp(after, now: now.addingTimeInterval(5))
+        XCTAssertEqual(caughtUp, [.interactionCue(.yubikey)])
+        XCTAssertEqual(reopened.mark?.interactionCues, 1)
+
+        // Legacy cached Mark JSON without `interactionCues` still decodes cleanly.
+        let legacyJSON = #"{"epoch":null,"entry":1,"bubbles":0,"screen":false}"#
+        let decoded = try JSONDecoder().decode(ChatEffects.Mark.self, from: Data(legacyJSON.utf8))
+        XCTAssertEqual(decoded.interactionCues, 0)
+    }
+
     func testIgnoresDirectivesInsideCodeFencesAndStripsRowLine() {
         let fenced = "```md\n:::urgent Not real\n:::\n::cue yubikey\n```"
         let msg = AgentMessage.parse(fenced)

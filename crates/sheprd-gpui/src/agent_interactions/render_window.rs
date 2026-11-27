@@ -37,7 +37,7 @@ impl SheprdWindow {
     }
 
     /// Compact inline chip rendered inside an agent's chat message for an
-    /// interaction directive (shows Active / Dismissed state + Reopen/Dismiss).
+    /// interaction directive (shows Open / Active / Dismissed state + actions).
     pub(crate) fn render_chat_interaction_chip(
         &self,
         pane_id: &str,
@@ -45,16 +45,19 @@ impl SheprdWindow {
         parsed: &ParsedInteraction,
         cx: &mut Context<Self>,
     ) -> Div {
-        let is_active = InteractionStore::try_global(cx)
-            .is_some_and(|s| s.read(cx).has_active_for_entry(pane_id, entry));
+        let is_progress = matches!(parsed.payload, Payload::Progress { .. });
+        let state = InteractionStore::try_global(cx).map_or(super::EntryModalState::None, |s| {
+            s.read(cx).entry_modal_state(pane_id, entry, is_progress)
+        });
         let accent = match &parsed.payload {
             Payload::Secret { .. } => rgb(0x8b6cf6),
             Payload::Progress { done: true, .. } => rgb(0x3ea866),
             _ if parsed.scope == ModalScope::All => rgb(0xe59a24),
             _ => rgb(self.theme.primary()),
         };
-        let label = if is_active {
-            format!(
+        let is_highlighted = !matches!(state, super::EntryModalState::None);
+        let label = match &state {
+            super::EntryModalState::Open(_) => format!(
                 "{} active · {}",
                 if parsed.scope == ModalScope::All {
                     "Global modal"
@@ -62,12 +65,133 @@ impl SheprdWindow {
                     "Window modal"
                 },
                 parsed.title
-            )
-        } else {
-            format!("{} · {}", parsed.directive.kind_name(), parsed.title)
+            ),
+            super::EntryModalState::InlineOnly(_) => {
+                format!("Action ready · {}", parsed.title)
+            }
+            super::EntryModalState::None => {
+                format!("{} · {}", parsed.directive.kind_name(), parsed.title)
+            }
         };
         let pane_owned = pane_id.to_owned();
         let parsed_reopen = parsed.clone();
+
+        let actions = match state {
+            super::EntryModalState::InlineOnly(id) => {
+                let open_id = id.clone();
+                let dismiss_id = id;
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(
+                        div()
+                            .id(("chat-interaction-open", entry.0))
+                            .px(px(8.))
+                            .py(px(4.))
+                            .rounded(px(6.))
+                            .bg(rgb(self.theme.primary()))
+                            .text_color(rgb(0xffffff))
+                            .text_size(px(self.config.ui.size * 0.85))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .cursor_pointer()
+                            .child("Open")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                let store = InteractionStore::global(cx);
+                                let global_ok = this.config.chat.global_modals;
+                                store.update(cx, |s, cx| {
+                                    if s.open_card(&open_id, global_ok) {
+                                        super::sync_hud_deferred(cx);
+                                        cx.notify();
+                                    }
+                                });
+                            })),
+                    )
+                    .child(
+                        div()
+                            .id(("chat-interaction-dismiss", entry.0))
+                            .px(px(8.))
+                            .py(px(4.))
+                            .rounded(px(6.))
+                            .bg(rgb(self.theme.active))
+                            .text_size(px(self.config.ui.size * 0.85))
+                            .cursor_pointer()
+                            .child("Dismiss")
+                            .on_click(cx.listener(move |_, _, _, cx| {
+                                let store = InteractionStore::global(cx);
+                                store.update(cx, |s, cx| {
+                                    s.dismiss(&dismiss_id);
+                                    cx.notify();
+                                });
+                            })),
+                    )
+            }
+            super::EntryModalState::Open(id) => div().child(
+                div()
+                    .id(("chat-interaction-toggle", entry.0))
+                    .px(px(8.))
+                    .py(px(4.))
+                    .rounded(px(6.))
+                    .bg(rgb(self.theme.active))
+                    .text_size(px(self.config.ui.size * 0.85))
+                    .cursor_pointer()
+                    .child("Dismiss")
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        let store = InteractionStore::global(cx);
+                        store.update(cx, |s, cx| {
+                            s.dismiss(&id);
+                            cx.notify();
+                        });
+                    })),
+            ),
+            super::EntryModalState::None => div().child(
+                div()
+                    .id(("chat-interaction-toggle", entry.0))
+                    .px(px(8.))
+                    .py(px(4.))
+                    .rounded(px(6.))
+                    .bg(rgb(self.theme.active))
+                    .text_size(px(self.config.ui.size * 0.85))
+                    .cursor_pointer()
+                    .child("Show")
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        let store = InteractionStore::global(cx);
+                        let now = Instant::now();
+                        let volume = this.config.sound.volume;
+                        let win_id = window.window_handle().window_id();
+                        let (workspace_label, workspace_root) =
+                            this.workspace_info_for_pane(&pane_owned);
+                        let display_level = if parsed_reopen.scope == ModalScope::All
+                            && this.config.chat.global_modals
+                        {
+                            super::EscalationLevel::GlobalHud
+                        } else {
+                            super::EscalationLevel::WindowModal
+                        };
+                        store.update(cx, |s, cx| {
+                            s.upsert(super::UpsertInteraction {
+                                source: super::SourceKey {
+                                    window_id: Some(win_id),
+                                    pane_id: Some(pane_owned.clone()),
+                                },
+                                agent_label: "Agent".to_owned(),
+                                workspace_label,
+                                workspace_root,
+                                entry_id: Some(entry),
+                                source_revision: None,
+                                directive_index: None,
+                                parsed: parsed_reopen.clone(),
+                                display_level,
+                                manual_open: true,
+                                now,
+                                volume,
+                            });
+                            super::sync_hud_deferred(cx);
+                            cx.notify();
+                        });
+                    })),
+            ),
+        };
 
         div()
             .rounded(px(8.))
@@ -75,7 +199,7 @@ impl SheprdWindow {
             .py(px(7.))
             .bg(rgb(self.theme.surface))
             .border_1()
-            .border_color(if is_active {
+            .border_color(if is_highlighted {
                 accent
             } else {
                 rgb(self.theme.active)
@@ -107,59 +231,7 @@ impl SheprdWindow {
                         )
                     }),
             )
-            .child(
-                div()
-                    .id(("chat-interaction-toggle", entry.0))
-                    .px(px(8.))
-                    .py(px(4.))
-                    .rounded(px(6.))
-                    .bg(rgb(self.theme.active))
-                    .text_size(px(self.config.ui.size * 0.85))
-                    .cursor_pointer()
-                    .child(if is_active { "Dismiss" } else { "Show" })
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        let store = InteractionStore::global(cx);
-                        let now = Instant::now();
-                        let volume = this.config.sound.volume;
-                        if is_active {
-                            store.update(cx, |s, cx| {
-                                s.clear_for_pane(&pane_owned);
-                                cx.notify();
-                            });
-                        } else {
-                            let win_id = window.window_handle().window_id();
-                            let (workspace_label, workspace_root) =
-                                this.workspace_info_for_pane(&pane_owned);
-                            let display_level = if parsed_reopen.scope == ModalScope::All
-                                && this.config.chat.global_modals
-                            {
-                                super::EscalationLevel::GlobalHud
-                            } else {
-                                super::EscalationLevel::WindowModal
-                            };
-                            store.update(cx, |s, cx| {
-                                s.upsert(super::UpsertInteraction {
-                                    source: super::SourceKey {
-                                        window_id: Some(win_id),
-                                        pane_id: Some(pane_owned.clone()),
-                                    },
-                                    agent_label: "Agent".to_owned(),
-                                    workspace_label,
-                                    workspace_root,
-                                    entry_id: Some(entry),
-                                    directive_index: None,
-                                    parsed: parsed_reopen.clone(),
-                                    display_level,
-                                    manual_open: true,
-                                    now,
-                                    volume,
-                                });
-                                super::sync_hud_deferred(cx);
-                                cx.notify();
-                            });
-                        }
-                    })),
-            )
+            .child(actions)
     }
 
     fn render_window_modal_card(

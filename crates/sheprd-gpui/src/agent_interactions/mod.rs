@@ -102,6 +102,7 @@ pub(crate) struct UpsertInteraction {
     pub(crate) workspace_label: String,
     pub(crate) workspace_root: Option<PathBuf>,
     pub(crate) entry_id: Option<EntryId>,
+    pub(crate) source_revision: Option<u64>,
     pub(crate) directive_index: Option<usize>,
     pub(crate) parsed: ParsedInteraction,
     pub(crate) display_level: EscalationLevel,
@@ -118,6 +119,7 @@ pub(crate) struct ChatEntrySync<'a> {
     pub(crate) workspace_label: &'a str,
     pub(crate) workspace_root: Option<PathBuf>,
     pub(crate) entry_id: EntryId,
+    pub(crate) revision: u64,
     pub(crate) history: bool,
     pub(crate) presence: Presence,
     pub(crate) interactions: &'a [ParsedInteraction],
@@ -127,6 +129,15 @@ pub(crate) struct ChatEntrySync<'a> {
     pub(crate) window_modals_enabled: bool,
     pub(crate) global_modals_enabled: bool,
     pub(crate) progress_pill_enabled: bool,
+}
+
+/// Visibility state of a chat entry's interaction card, used by the inline chat
+/// chip so focused-chat `InlineOnly` requests offer an immediate "Open" control.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum EntryModalState {
+    None,
+    InlineOnly(String),
+    Open(String),
 }
 
 /// One live persistent interaction tracked by [`InteractionStore`].
@@ -139,6 +150,9 @@ pub(crate) struct ActiveInteraction {
     /// Root directory of the originating workspace (for secret-safe `.env` writes).
     pub(crate) workspace_root: Option<PathBuf>,
     pub(crate) entry_id: Option<EntryId>,
+    /// Last transcript entry revision applied to `parsed`, so unchanged polls
+    /// never overwrite locally toggled runbook checkboxes.
+    pub(crate) source_revision: Option<u64>,
     /// Ordinal index of the directive within `entry_id`, so streaming chunks
     /// update the active card in-place without reopening dismissed cards.
     pub(crate) directive_index: Option<usize>,
@@ -289,6 +303,7 @@ impl InteractionStore {
             workspace_label: req.workspace_label,
             workspace_root: req.workspace_root,
             entry_id: req.entry_id,
+            source_revision: req.source_revision,
             directive_index: req.directive_index,
             parsed: req.parsed,
             display_level: req.display_level,
@@ -369,8 +384,9 @@ impl InteractionStore {
         }
 
         // Streamed updates to already-ingested directives update active items
-        // in-place (preserving created_at, snooze, and feedback) and never
-        // reopen dismissed ones or replay cues.
+        // in-place (preserving created_at, snooze, feedback, and locally
+        // completed runbook steps) only when the transcript revision actually
+        // advanced, and never reopen dismissed items or replay cues.
         let update_limit = prev_seen.interactions.min(sync.interactions.len());
         for (idx, parsed) in sync.interactions[..update_limit].iter().enumerate() {
             if let Some(existing) = self.items.iter_mut().find(|item| {
@@ -378,6 +394,10 @@ impl InteractionStore {
                     && item.entry_id == Some(sync.entry_id)
                     && item.directive_index == Some(idx)
             }) {
+                if existing.source_revision == Some(sync.revision) {
+                    continue;
+                }
+                existing.source_revision = Some(sync.revision);
                 let mut updated = parsed.clone();
                 if !matches!(updated.payload, Payload::Progress { .. })
                     && updated.scope == ModalScope::All
@@ -385,6 +405,7 @@ impl InteractionStore {
                 {
                     updated.scope = ModalScope::Window;
                 }
+                preserve_completed_runbook_steps(&existing.parsed, &mut updated);
                 if existing.parsed != updated {
                     let was_done = matches!(
                         existing.parsed.payload,
@@ -440,6 +461,7 @@ impl InteractionStore {
                     workspace_label: sync.workspace_label.to_owned(),
                     workspace_root: sync.workspace_root.clone(),
                     entry_id: Some(sync.entry_id),
+                    source_revision: Some(sync.revision),
                     directive_index: Some(idx),
                     parsed,
                     display_level,
@@ -628,10 +650,42 @@ impl InteractionStore {
             .collect()
     }
 
-    pub(crate) fn has_active_for_entry(&self, pane_id: &str, entry_id: EntryId) -> bool {
-        self.items.iter().any(|item| {
-            item.source.pane_id.as_deref() == Some(pane_id) && item.entry_id == Some(entry_id)
-        })
+    /// Promotes an active (possibly `InlineOnly` or snoozed) card so its full
+    /// action controls appear immediately without dismissing or recreating it.
+    pub(crate) fn open_card(&mut self, id: &str, global_modals_enabled: bool) -> bool {
+        let Some(item) = self.items.iter_mut().find(|item| item.id == id) else {
+            return false;
+        };
+        item.manual_open = true;
+        item.snoozed_until = None;
+        item.display_level = if item.is_progress()
+            || (item.parsed.scope == ModalScope::All && global_modals_enabled)
+        {
+            EscalationLevel::GlobalHud
+        } else {
+            EscalationLevel::WindowModal
+        };
+        true
+    }
+
+    pub(crate) fn entry_modal_state(
+        &self,
+        pane_id: &str,
+        entry_id: EntryId,
+        is_progress: bool,
+    ) -> EntryModalState {
+        let Some(item) = self.items.iter().find(|item| {
+            item.source.pane_id.as_deref() == Some(pane_id)
+                && item.entry_id == Some(entry_id)
+                && item.is_progress() == is_progress
+        }) else {
+            return EntryModalState::None;
+        };
+        if item.display_level == EscalationLevel::InlineOnly {
+            EntryModalState::InlineOnly(item.id.clone())
+        } else {
+            EntryModalState::Open(item.id.clone())
+        }
     }
 
     pub(crate) fn step_deck(&mut self, delta: isize, len: usize) {
@@ -664,4 +718,33 @@ pub(crate) fn sync_hud_deferred(cx: &mut Context<InteractionStore>) {
     cx.defer(move |cx| {
         InteractionStore::ensure_hud(&entity, cx);
     });
+}
+
+/// Preserves locally completed human runbook steps when a newer streamed
+/// transcript revision updates the same runbook block.
+fn preserve_completed_runbook_steps(existing: &ParsedInteraction, updated: &mut ParsedInteraction) {
+    let (
+        Payload::Runbook {
+            steps: existing_steps,
+        },
+        Payload::Runbook {
+            steps: updated_steps,
+        },
+    ) = (&existing.payload, &mut updated.payload)
+    else {
+        return;
+    };
+    for (idx, step) in updated_steps.iter_mut().enumerate() {
+        if step.done || !step.human {
+            continue;
+        }
+        let locally_done = existing_steps
+            .get(idx)
+            .filter(|prev| prev.label == step.label)
+            .or_else(|| existing_steps.iter().find(|prev| prev.label == step.label))
+            .is_some_and(|prev| prev.done);
+        if locally_done {
+            step.done = true;
+        }
+    }
 }

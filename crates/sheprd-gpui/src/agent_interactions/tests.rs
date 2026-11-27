@@ -146,6 +146,7 @@ fn initial_snapshot_history_never_replays_saved_alerts_even_starting_at_entry_1(
         workspace_label: "repo",
         workspace_root: None,
         entry_id: EntryId(1),
+        revision: 1,
         history: true,
         presence: Presence::OtherApp,
         interactions: std::slice::from_ref(&urgent),
@@ -168,6 +169,7 @@ fn initial_snapshot_history_never_replays_saved_alerts_even_starting_at_entry_1(
         workspace_label: "repo",
         workspace_root: None,
         entry_id: EntryId(1),
+        revision: 1,
         history: false,
         presence: Presence::OtherApp,
         interactions: std::slice::from_ref(&urgent),
@@ -203,6 +205,7 @@ fn streaming_chunks_update_in_place_and_never_reopen_dismissed_alerts() {
         workspace_label: "repo",
         workspace_root: None,
         entry_id: EntryId(2),
+        revision: 1,
         history: false,
         presence: Presence::OtherApp,
         interactions: &[partial],
@@ -225,6 +228,7 @@ fn streaming_chunks_update_in_place_and_never_reopen_dismissed_alerts() {
         workspace_label: "repo",
         workspace_root: None,
         entry_id: EntryId(2),
+        revision: 2,
         history: false,
         presence: Presence::OtherApp,
         interactions: std::slice::from_ref(&complete),
@@ -251,6 +255,7 @@ fn streaming_chunks_update_in_place_and_never_reopen_dismissed_alerts() {
         workspace_label: "repo",
         workspace_root: None,
         entry_id: EntryId(2),
+        revision: 3,
         history: false,
         presence: Presence::OtherApp,
         interactions: &[complete],
@@ -262,6 +267,97 @@ fn streaming_chunks_update_in_place_and_never_reopen_dismissed_alerts() {
         progress_pill_enabled: true,
     }));
     assert!(store.summaries(later + Duration::from_secs(1)).is_empty());
+}
+
+#[test]
+fn checked_runbook_steps_survive_unchanged_polls_and_streamed_revisions() {
+    let mut store = InteractionStore::default();
+    let now = Instant::now();
+    let win = WindowId::from(1u64);
+    assert!(store.begin_pane_sync("p1", 1));
+
+    let runbook_v1 = parse::parse_block(
+        BlockDirective::Runbook,
+        "Ship v0.18",
+        "- [x] agent: Run just ci\n- [ ] you: Tap YubiKey\n",
+    );
+    assert!(store.sync_chat_entry(ChatEntrySync {
+        window_id: win,
+        pane_id: "p1",
+        agent_label: "Claude",
+        workspace_label: "repo",
+        workspace_root: None,
+        entry_id: EntryId(2),
+        revision: 1,
+        history: false,
+        presence: Presence::SameWindowOtherTab,
+        interactions: std::slice::from_ref(&runbook_v1),
+        cues: &[],
+        now,
+        volume: 0,
+        window_modals_enabled: true,
+        global_modals_enabled: true,
+        progress_pill_enabled: true,
+    }));
+    let id = store.summaries(now)[0].id.clone();
+
+    // User checks off step 1 ("Tap YubiKey").
+    let toggled = store.toggle_runbook_step(&id, 1).unwrap();
+    assert!(toggled.done);
+
+    // Subsequent poll with the same revision must NOT overwrite the local check.
+    assert!(!store.sync_chat_entry(ChatEntrySync {
+        window_id: win,
+        pane_id: "p1",
+        agent_label: "Claude",
+        workspace_label: "repo",
+        workspace_root: None,
+        entry_id: EntryId(2),
+        revision: 1,
+        history: false,
+        presence: Presence::SameWindowOtherTab,
+        interactions: &[runbook_v1],
+        cues: &[],
+        now: now + Duration::from_secs(1),
+        volume: 0,
+        window_modals_enabled: true,
+        global_modals_enabled: true,
+        progress_pill_enabled: true,
+    }));
+
+    // Even a newer streamed revision adding another step preserves the locally checked step.
+    let runbook_v2 = parse::parse_block(
+        BlockDirective::Runbook,
+        "Ship v0.18",
+        "- [x] agent: Run just ci\n- [ ] you: Tap YubiKey\n- [ ] agent: Verify release\n",
+    );
+    assert!(store.sync_chat_entry(ChatEntrySync {
+        window_id: win,
+        pane_id: "p1",
+        agent_label: "Claude",
+        workspace_label: "repo",
+        workspace_root: None,
+        entry_id: EntryId(2),
+        revision: 2,
+        history: false,
+        presence: Presence::SameWindowOtherTab,
+        interactions: &[runbook_v2],
+        cues: &[],
+        now: now + Duration::from_secs(2),
+        volume: 0,
+        window_modals_enabled: true,
+        global_modals_enabled: true,
+        progress_pill_enabled: true,
+    }));
+    let items = store.for_window(win, now + Duration::from_secs(2));
+    match &items[0].parsed.payload {
+        Payload::Runbook { steps } => {
+            assert_eq!(steps.len(), 3);
+            assert!(steps[1].done, "locally checked step must stay checked");
+            assert!(!steps[2].done);
+        }
+        other => panic!("unexpected payload: {other:?}"),
+    }
 }
 
 #[test]
@@ -280,6 +376,7 @@ fn presence_routing_respects_in_chat_and_escalates_on_tab_or_app_switch() {
         workspace_label: "repo",
         workspace_root: None,
         entry_id: EntryId(2),
+        revision: 1,
         history: false,
         presence: Presence::InChat,
         interactions: &[urgent],
@@ -292,6 +389,10 @@ fn presence_routing_respects_in_chat_and_escalates_on_tab_or_app_switch() {
     }));
     assert!(store.for_window(win, now).is_empty());
     assert!(store.global_hud_items(now).is_empty());
+    let inline_id = match store.entry_modal_state("p1", EntryId(2), false) {
+        EntryModalState::InlineOnly(id) => id,
+        other => panic!("expected InlineOnly state, got {other:?}"),
+    };
 
     // User switches to another tab in the same window -> promotes to WindowModal.
     assert!(store.refresh_presence(win, true, Some("p2"), true, now));
@@ -306,6 +407,15 @@ fn presence_routing_respects_in_chat_and_escalates_on_tab_or_app_switch() {
     assert!(store.refresh_presence(win, true, Some("p1"), true, now));
     assert!(store.for_window(win, now).is_empty());
     assert!(store.global_hud_items(now).is_empty());
+
+    // Clicking "Open" on the inline chip promotes the same card directly without dismissing.
+    assert!(store.open_card(&inline_id, false));
+    assert_eq!(store.for_window(win, now).len(), 1);
+    assert_eq!(store.for_window(win, now)[0].id, inline_id);
+    assert_eq!(
+        store.entry_modal_state("p1", EntryId(2), false),
+        EntryModalState::Open(inline_id)
+    );
 }
 
 #[test]
@@ -324,6 +434,7 @@ fn newer_entry_auto_clears_modals_but_preserves_progress_and_runbook() {
         workspace_label: "repo",
         workspace_root: None,
         entry_id: EntryId(2),
+        revision: 1,
         history: false,
         presence: Presence::OtherApp,
         interactions: &[urgent, progress],
@@ -345,6 +456,7 @@ fn newer_entry_auto_clears_modals_but_preserves_progress_and_runbook() {
         workspace_label: "repo",
         workspace_root: None,
         entry_id: EntryId(3),
+        revision: 1,
         history: false,
         presence: Presence::OtherApp,
         interactions: &[],

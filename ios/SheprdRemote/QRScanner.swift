@@ -21,6 +21,7 @@ final class ScannerController: UIViewController, @preconcurrency AVCaptureMetada
     private let session = AVCaptureSession()
     private var preview: AVCaptureVideoPreviewLayer?
     private var reported = false
+    private var stopped = false
 
     init(onCode: @escaping (String) -> Void) {
         self.onCode = onCode
@@ -45,6 +46,7 @@ final class ScannerController: UIViewController, @preconcurrency AVCaptureMetada
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        stopped = true
         let session = session
         DispatchQueue.global(qos: .userInitiated).async { session.stopRunning() }
     }
@@ -53,6 +55,7 @@ final class ScannerController: UIViewController, @preconcurrency AVCaptureMetada
         guard await AVCaptureDevice.requestAccess(for: .video) else {
             return show("Camera access is off. Allow it in Settings, or paste the link below.")
         }
+        guard !stopped else { return }
         guard let camera = AVCaptureDevice.default(for: .video),
               let input = try? AVCaptureDeviceInput(device: camera),
               session.canAddInput(input)
@@ -61,6 +64,10 @@ final class ScannerController: UIViewController, @preconcurrency AVCaptureMetada
         let output = AVCaptureMetadataOutput()
         guard session.canAddOutput(output) else { return show("The camera cannot read codes.") }
         session.addOutput(output)
+        guard output.availableMetadataObjectTypes.contains(.qr) else {
+            session.removeOutput(output)
+            return show("This camera cannot read QR codes. Pick a computer under Nearby above.")
+        }
         output.setMetadataObjectsDelegate(self, queue: .main)
         output.metadataObjectTypes = [.qr]
 

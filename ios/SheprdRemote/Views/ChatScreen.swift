@@ -136,12 +136,14 @@ struct ChatScreen: View {
                     showingSession = false
                     dismiss()
                 }
+                .environment(model)
                 .presentationDetents([.medium, .large])
             }
         }
         .sheet(isPresented: $showingPanel) {
             if let store {
                 AgentPanel(key: key, store: store)
+                    .environment(model)
                     .presentationDetents([.medium, .large], selection: $panelDetent)
                     .presentationBackground(Color(.systemGroupedBackground))
             }
@@ -301,246 +303,259 @@ private struct ChatDocument: View {
         let turns = ChatTurn.split(transcript.entries)
         let promptCount = ChatTurns.promptCount(in: transcript.entries)
         let visible = filter.visibleTurns(from: turns, shownTurns: shownTurns)
-        let turnRows: [(id: EntryId, entries: ArraySlice<Entry>)] = visible.turns.compactMap { turn in
-            guard let id = turn.first?.id else { return nil }
-            return (id, turn)
-        }
+        let latestTurnId = turns.last?.first?.id
+        let rows = ChatTurns.rows(from: visible.turns, latestTurnId: latestTurnId, filter: filter)
         let tools: [Tool] = (turns.last ?? []).compactMap { entry in
             if case let .tool(tool) = entry.kind { tool } else { nil }
         }
         let prompt: String? = if case let .user(text, _) = turns.last?.first?.kind {
             // A brief pins its goal alone, not a screenful.
-            if let id = turns.last?.first?.id, transcript.brief(id) != nil { BriefOutline(text).goal } else { PastedEnvelope.unwrap(text) }
+            if let id = latestTurnId, transcript.brief(id) != nil { BriefOutline(text).goal } else { PastedEnvelope.unwrap(text) }
         } else {
             nil
         }
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: filter.promptsOnly ? 8 : 16) {
-                if visible.hidden > 0 {
-                    Button {
-                        shownTurns += 10
-                    } label: {
-                        Label("Show \(min(visible.hidden, 10)) earlier of \(visible.hidden)", systemImage: "arrow.up.circle")
-                            .font(.subheadline.weight(.medium))
-                    }
-                    .buttonStyle(.glass)
-                    .frame(maxWidth: .infinity)
-                } else if transcript.truncated {
-                    Label("Older messages stay on the computer", systemImage: "clock.arrow.circlepath")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-                ForEach(Array(turnRows.enumerated()), id: \.element.id) { offset, row in
-                    let isLatest = row.id == turns.last?.first?.id
-                    VStack(alignment: .leading, spacing: 0) {
-                        if offset > 0 {
-                            Divider().padding(.vertical, filter.promptsOnly ? 4 : 8)
+        ScrollViewReader { scrollProxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: filter.promptsOnly ? 8 : 12) {
+                    if visible.hidden > 0 {
+                        Button {
+                            shownTurns += 10
+                        } label: {
+                            Label("Show \(min(visible.hidden, 10)) earlier of \(visible.hidden)", systemImage: "arrow.up.circle")
+                                .font(.subheadline.weight(.medium))
                         }
-                        // Only the latest turn's prompt pins once scrolled past.
-                        ChatTurn(
-                            entries: row.entries,
-                            promptAbove: !filter.promptsOnly && isLatest ? $promptAbove : nil,
-                            brief: transcript.brief(row.id),
-                            promptsOnly: filter.promptsOnly,
-                            peeked: filter.isPeeked(row.id),
-                            onTogglePeek: {
-                                withAnimation(.snappy(duration: 0.34)) {
-                                    filter.togglePeek(row.id)
+                        .buttonStyle(.glass)
+                        .frame(maxWidth: .infinity)
+                    } else if transcript.truncated {
+                        Label("Older messages stay on the computer", systemImage: "clock.arrow.circlepath")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    ForEach(rows) { row in
+                        rowView(row, allTurns: turns)
+                    }
+                    if !transcript.queued.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Queued").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                            ForEach(transcript.queued, id: \.id) { queued in
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Image(systemName: queued.steered ? "arrow.turn.down.right" : queued.held ? "pause.circle" : "clock").foregroundStyle(.secondary)
+                                        .accessibilityLabel(queued.steered ? "Steering" : queued.held ? "Held" : "Queued")
+                                    Text(queued.text).font(.subheadline).lineLimit(3)
+                                    if !queued.attachments.isEmpty {
+                                        Label("\(queued.attachments.count)", systemImage: "photo").font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    // A steered prompt is already with the agent.
+                                    if !queued.steered {
+                                        Button { sendNow(queued) } label: { Image(systemName: "arrow.up.circle.fill").foregroundStyle(.tint) }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("Send now")
+                                        Button { unqueue(queued) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("Remove from the queue")
+                                    }
                                 }
-                            },
-                            onShowFullHere: {
-                                shownTurns = TurnFilterState.expandedShownTurns(
-                                    current: shownTurns,
-                                    allTurns: turns,
-                                    jumpingTo: row.id
-                                )
-                                withAnimation(.snappy(duration: 0.34)) {
-                                    filter.clear()
-                                }
-                                pendingJump = row.id
+                                .padding(10)
+                                .background(.fill.quinary, in: .rect(cornerRadius: 12))
                             }
-                        )
-                    }
-                    .id(row.id)
-                }
-                if !transcript.queued.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Queued").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
-                        ForEach(transcript.queued, id: \.id) { queued in
-                            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Image(systemName: queued.steered ? "arrow.turn.down.right" : queued.held ? "pause.circle" : "clock").foregroundStyle(.secondary)
-                                    .accessibilityLabel(queued.steered ? "Steering" : queued.held ? "Held" : "Queued")
-                                Text(queued.text).font(.subheadline).lineLimit(3)
-                                if !queued.attachments.isEmpty {
-                                    Label("\(queued.attachments.count)", systemImage: "photo").font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                // A steered prompt is already with the agent.
-                                if !queued.steered {
-                                    Button { sendNow(queued) } label: { Image(systemName: "arrow.up.circle.fill").foregroundStyle(.tint) }
-                                        .buttonStyle(.plain)
-                                        .accessibilityLabel("Send now")
-                                    Button { unqueue(queued) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                                        .buttonStyle(.plain)
-                                        .accessibilityLabel("Remove from the queue")
-                                }
-                            }
-                            .padding(10)
-                            .background(.fill.quinary, in: .rect(cornerRadius: 12))
                         }
                     }
-                }
-                ForEach(store.outgoing) { outgoing in
-                    OutgoingRow(outgoing: outgoing, computer: computerName, agent: transcript.agent)
-                }
-                if let problem { Text(problem).font(.footnote).foregroundStyle(.red) }
-            }
-            .scrollTargetLayout()
-            .animation(.snappy, value: store.outgoing)
-            .animation(.snappy(duration: 0.34), value: filter)
-            .frame(maxWidth: Self.readableWidth, alignment: .leading)
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 20)
-            .padding(.top, 10)
-            .padding(.bottom, 24)
-        }
-        .defaultScrollAnchor(.bottom)
-        .scrollPosition($position)
-        .task(id: pendingJump) {
-            guard let target = pendingJump else { return }
-            await Task.yield()
-            guard !Task.isCancelled else { return }
-            withAnimation(.snappy(duration: 0.34)) {
-                position.scrollTo(id: target, anchor: .top)
-            }
-            pendingJump = nil
-        }
-        .onChange(of: filter.promptsOnly) { _, now in
-            if now {
-                promptAbove = false
-                // Bring the collapsed prompts neatly into view when folding a long thread.
-                withAnimation(.snappy(duration: 0.34)) {
-                    position.scrollTo(edge: .bottom)
-                }
-            }
-        }
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-            geometry.contentSize.height - geometry.contentOffset.y - geometry.containerSize.height > 240
-        } action: { _, now in
-            away = now
-        }
-        // A snapshot on return, lazy rows measured anew, or the composer
-        // changing size can shorten the content under a resting offset;
-        // UIKit leaves it past the end until a touch, a blank screen.
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-            let end = geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height
-            return geometry.contentOffset.y > max(end, -geometry.contentInsets.top) + 1
-        } action: { _, now in
-            overshot = now
-            if now, !scrolling { position.scrollTo(edge: .bottom) }
-        }
-        .onScrollPhaseChange { _, phase in
-            scrolling = phase != .idle
-            if !scrolling, overshot { position.scrollTo(edge: .bottom) }
-        }
-        // Only a reader's own scroll moves them off the latest; content
-        // shrinking under them while idle is repaired above instead.
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-            let end = geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height
-            return geometry.contentOffset.y >= end - 8
-        } action: { _, now in
-            if scrolling || now { atLatest = now }
-        }
-        // Back in the app, or a fresh snapshot replacing the cached one: a
-        // reader at the latest stays there.
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active, atLatest { position.scrollTo(edge: .bottom) }
-        }
-        .onChange(of: store.stale) { _, stale in
-            if !stale, atLatest { position.scrollTo(edge: .bottom) }
-        }
-        // Dragging the conversation puts the keyboard away, as Messages does.
-        .scrollDismissesKeyboard(.interactively)
-        .coordinateSpace(.named(ChatEffectsModel.space))
-        .environment(\.chatEffects, store.effects)
-        .modifier(WizzShake(since: store.effects.ledger.playing(at: .now).flatMap { $0.effect == .wizz ? $0.since : nil }))
-        // A screen effect plays over the chat alone, never the composer,
-        // and takes no touches.
-        .overlay {
-            let effects = store.effects
-            ScreenEffectOverlay(playing: effects.ledger.playing(at: .now)) { [effects] playing in
-                effects.target(of: playing)
-            }
-        }
-        // A picture opened full screen swipes through the chat's others.
-        .environment(\.chatPictures, transcript.pictures.map(GalleryPicture.init))
-        .opacity(store.stale ? 0.6 : 1)
-        .safeAreaBar(edge: .top) {
-            VStack(spacing: 6) {
-                ChatTitleRibbon(
-                    title: LockState.shared.hidesNames ? "Sheprd" : name,
-                    subtitle: subtitle,
-                    canOpenSession: canOpenSession,
-                    promptsOnly: filter.promptsOnly,
-                    promptCount: promptCount,
-                    openSession: openSession,
-                    clearFilter: {
-                        withAnimation(.snappy(duration: 0.34)) {
-                            filter.clear()
-                        }
+                    ForEach(store.outgoing) { outgoing in
+                        OutgoingRow(outgoing: outgoing, computer: computerName, agent: transcript.agent)
                     }
-                )
-                if !filter.promptsOnly, let prompt, promptAbove, let latestId = turns.last?.first?.id {
-                    PinnedPrompt(text: String(InlineMarkdown.plainSized(prompt).characters)) {
-                        withAnimation(.snappy) { position.scrollTo(id: latestId, anchor: .top) }
-                    }
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    if let problem { Text(problem).font(.footnote).foregroundStyle(.red) }
                 }
-            }
-            .animation(.snappy(duration: 0.34), value: filter.promptsOnly)
-            .animation(.snappy, value: !filter.promptsOnly && promptAbove && prompt != nil)
-        }
-        // A bar, not an inset: what scrolls under it fades as under the
-        // system's own toolbars.
-        .safeAreaBar(edge: .bottom) {
-            // The running turn's status sits where the turn grows, just
-            // above the composer, not over the earlier answers at the top.
-            VStack(spacing: 8) {
-                if away {
-                    Button {
-                        withAnimation(.snappy) { position.scrollTo(edge: .bottom) }
-                    } label: {
-                        Image(systemName: "arrow.down").font(.body.weight(.semibold)).frame(width: 36, height: 36)
-                    }
-                    .buttonStyle(.glass).buttonBorderShape(.circle)
-                    .accessibilityLabel("Jump to the latest")
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.trailing, 16)
-                    .transition(.scale.combined(with: .opacity))
-                }
-                if let terminal {
-                    PromptCard(key: key, agent: transcript.agent, waiting: terminal.needsYou, terminal: terminal.terminalRoute)
-                }
-                if transcript.status == .working {
-                    RunningCapsule(transcript: transcript, tools: tools)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-                Composer(
-                    key: key,
-                    store: store,
-                    transcript: transcript,
-                    destination: terminal == nil ? .chat : .terminal,
-                    problem: $problem
-                )
-                .frame(maxWidth: Self.readableWidth + 40)
+                .animation(.snappy, value: store.outgoing)
+                .frame(maxWidth: Self.readableWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                .padding(.bottom, 24)
             }
-            .animation(.snappy, value: transcript.status == .working)
-            .animation(.snappy, value: away)
+            .defaultScrollAnchor(.bottom)
+            .scrollPosition($position)
+            .task(id: pendingJump) {
+                guard let target = pendingJump else { return }
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                withAnimation(.snappy(duration: 0.34)) {
+                    scrollProxy.scrollTo(ChatTurnRow.ID.prompt(target), anchor: .top)
+                }
+                pendingJump = nil
+            }
+            .onChange(of: filter.promptsOnly) { _, now in
+                if now {
+                    promptAbove = false
+                    // Bring the collapsed prompts neatly into view when folding a long thread.
+                    withAnimation(.snappy(duration: 0.34)) {
+                        position.scrollTo(edge: .bottom)
+                    }
+                }
+            }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentSize.height - geometry.contentOffset.y - geometry.containerSize.height > 240
+            } action: { _, now in
+                away = now
+            }
+            // A snapshot on return, lazy rows measured anew, or the composer
+            // changing size can shorten the content under a resting offset;
+            // UIKit leaves it past the end until a touch, a blank screen.
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                let end = geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height
+                return geometry.contentOffset.y > max(end, -geometry.contentInsets.top) + 1
+            } action: { _, now in
+                overshot = now
+                if now, !scrolling { position.scrollTo(edge: .bottom) }
+            }
+            .onScrollPhaseChange { _, phase in
+                scrolling = phase != .idle
+                if !scrolling, overshot { position.scrollTo(edge: .bottom) }
+            }
+            // Only a reader's own scroll moves them off the latest; content
+            // shrinking under them while idle is repaired above instead.
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                let end = geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height
+                return geometry.contentOffset.y >= end - 8
+            } action: { _, now in
+                if scrolling || now { atLatest = now }
+            }
+            // Back in the app, or a fresh snapshot replacing the cached one: a
+            // reader at the latest stays there.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active, atLatest { position.scrollTo(edge: .bottom) }
+            }
+            .onChange(of: store.stale) { _, stale in
+                if !stale, atLatest { position.scrollTo(edge: .bottom) }
+            }
+            // Dragging the conversation puts the keyboard away, as Messages does.
+            .scrollDismissesKeyboard(.interactively)
+            .coordinateSpace(.named(ChatEffectsModel.space))
+            .environment(\.chatEffects, store.effects)
+            .modifier(WizzShake(since: store.effects.ledger.playing(at: .now).flatMap { $0.effect == .wizz ? $0.since : nil }))
+            // A screen effect plays over the chat alone, never the composer,
+            // and takes no touches.
+            .overlay {
+                let effects = store.effects
+                ScreenEffectOverlay(playing: effects.ledger.playing(at: .now)) { [effects] playing in
+                    effects.target(of: playing)
+                }
+            }
+            // A picture opened full screen swipes through the chat's others.
+            .environment(\.chatPictures, transcript.pictures.map(GalleryPicture.init))
+            .opacity(store.stale ? 0.6 : 1)
+            .safeAreaBar(edge: .top) {
+                VStack(spacing: 6) {
+                    ChatTitleRibbon(
+                        title: LockState.shared.hidesNames ? "Sheprd" : name,
+                        subtitle: subtitle,
+                        canOpenSession: canOpenSession,
+                        promptsOnly: filter.promptsOnly,
+                        promptCount: promptCount,
+                        openSession: openSession,
+                        clearFilter: {
+                            withAnimation(.snappy(duration: 0.34)) {
+                                filter.clear()
+                            }
+                        }
+                    )
+                    if !filter.promptsOnly, let prompt, promptAbove, let latestId = latestTurnId {
+                        PinnedPrompt(text: String(InlineMarkdown.plainSized(prompt).characters)) {
+                            withAnimation(.snappy) {
+                                scrollProxy.scrollTo(ChatTurnRow.ID.prompt(latestId), anchor: .top)
+                            }
+                        }
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                }
+                .animation(.snappy(duration: 0.34), value: filter.promptsOnly)
+                .animation(.snappy, value: !filter.promptsOnly && promptAbove && prompt != nil)
+            }
+            // A bar, not an inset: what scrolls under it fades as under the
+            // system's own toolbars.
+            .safeAreaBar(edge: .bottom) {
+                // The running turn's status sits where the turn grows, just
+                // above the composer, not over the earlier answers at the top.
+                VStack(spacing: 8) {
+                    if away {
+                        Button {
+                            withAnimation(.snappy) { position.scrollTo(edge: .bottom) }
+                        } label: {
+                            Image(systemName: "arrow.down").font(.body.weight(.semibold)).frame(width: 36, height: 36)
+                        }
+                        .buttonStyle(.glass).buttonBorderShape(.circle)
+                        .accessibilityLabel("Jump to the latest")
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.trailing, 16)
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                    if let terminal {
+                        PromptCard(key: key, agent: transcript.agent, waiting: terminal.needsYou, terminal: terminal.terminalRoute)
+                    }
+                    if transcript.status == .working {
+                        RunningCapsule(transcript: transcript, tools: tools)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                    Composer(
+                        key: key,
+                        store: store,
+                        transcript: transcript,
+                        destination: terminal == nil ? .chat : .terminal,
+                        problem: $problem
+                    )
+                    .frame(maxWidth: Self.readableWidth + 40)
+                    .frame(maxWidth: .infinity)
+                }
+                .animation(.snappy, value: transcript.status == .working)
+                .animation(.snappy, value: away)
+            }
+            .opensScreenLinks(on: key.device)
+            .browsesLinks(schemes: MarkdownView.webSchemes)
+            .sheet(item: question) { permission in
+                QuestionSheet(key: key, permission: permission)
+                    .environment(model)
+            }
         }
-        .opensScreenLinks(on: key.device)
-        .browsesLinks(schemes: MarkdownView.webSchemes)
-        .sheet(item: question) { permission in
-            QuestionSheet(key: key, permission: permission)
+    }
+
+    @ViewBuilder
+    private func rowView(_ row: ChatTurnRow, allTurns: [ArraySlice<Entry>]) -> some View {
+        switch row.kind {
+        case .divider:
+            Divider().padding(.vertical, filter.promptsOnly ? 2 : 6)
+        case let .prompt(turnId, text, isLatest, collapsedMeta):
+            ChatPromptRow(
+                text: text,
+                promptAbove: !filter.promptsOnly && isLatest ? $promptAbove : nil,
+                brief: transcript.brief(turnId),
+                promptsOnly: filter.promptsOnly,
+                peeked: filter.isPeeked(turnId),
+                collapsedMeta: collapsedMeta,
+                onTogglePeek: {
+                    withAnimation(.snappy(duration: 0.34)) {
+                        filter.togglePeek(turnId)
+                    }
+                }
+            )
+        case let .steps(tools):
+            ChatStepsRow(tools: tools)
+        case let .entry(entry):
+            EntryView(entry: entry)
+        case let .markdownBlock(block):
+            BlockView(block: block)
+        case let .diff(path, old, new):
+            DiffBlock(path: path, old: old, new: new)
+        case let .showFullHere(turnId):
+            ChatShowFullRow {
+                shownTurns = TurnFilterState.expandedShownTurns(
+                    current: shownTurns,
+                    allTurns: allTurns,
+                    jumpingTo: turnId
+                )
+                withAnimation(.snappy(duration: 0.34)) {
+                    filter.clear()
+                }
+                pendingJump = turnId
+            }
         }
     }
 

@@ -137,3 +137,125 @@ public struct TurnFilterState: Equatable, Sendable {
         return max(current, allTurns.count - index)
     }
 }
+
+/// One flat row in a chat's `LazyVStack`. Flattening turns into direct
+/// `LazyVStack` children lets SwiftUI materialize only the rows near the
+/// viewport instead of building an entire long turn's entries, markdown
+/// blocks, and diffs synchronously during a navigation push.
+public struct ChatTurnRow: Identifiable, Sendable {
+    public enum ID: Hashable, Sendable {
+        case divider(EntryId)
+        case prompt(EntryId)
+        case steps(EntryId)
+        case entry(EntryId)
+        case markdownBlock(EntryId, Int)
+        case diff(EntryId, String, Int)
+        case showFullHere(EntryId)
+    }
+
+    public enum Kind: Sendable {
+        case divider
+        case prompt(turnId: EntryId, text: String, isLatest: Bool, collapsedMeta: String?)
+        case steps(tools: [Tool])
+        case entry(Entry)
+        case markdownBlock(MarkdownBlock)
+        case diff(path: String, old: String?, new: String)
+        case showFullHere(turnId: EntryId)
+    }
+
+    public let id: ID
+    public let kind: Kind
+
+    public init(id: ID, kind: Kind) {
+        self.id = id
+        self.kind = kind
+    }
+}
+
+extension ChatTurns {
+    /// Flattens visible turns into direct `LazyVStack` rows with stable,
+    /// unique IDs. Plain agent replies (without bubble or screen effects) are
+    /// flattened to individual `MarkdownBlock` rows so even a single long
+    /// reply stays lazy; replies with effects stay whole for `AgentMessageView`.
+    public static func rows(
+        from turns: [ArraySlice<Entry>],
+        latestTurnId: EntryId?,
+        filter: TurnFilterState
+    ) -> [ChatTurnRow] {
+        var rows: [ChatTurnRow] = []
+        for (offset, turn) in turns.enumerated() {
+            guard let turnId = turn.first?.id else { continue }
+            if offset > 0 {
+                rows.append(ChatTurnRow(id: .divider(turnId), kind: .divider))
+            }
+            let prompt: (text: String, rest: ArraySlice<Entry>)? = if case let .user(text, _) = turn.first?.kind {
+                (text, turn.dropFirst())
+            } else {
+                nil
+            }
+            let showBody = filter.isBodyVisible(for: turnId)
+            if let prompt {
+                let collapsedMeta = filter.promptsOnly && !showBody ? collapsedSummary(for: turn) : nil
+                rows.append(ChatTurnRow(
+                    id: .prompt(turnId),
+                    kind: .prompt(
+                        turnId: turnId,
+                        text: prompt.text,
+                        isLatest: turnId == latestTurnId,
+                        collapsedMeta: collapsedMeta
+                    )
+                ))
+            }
+            guard showBody else { continue }
+            let tools = turn.compactMap { if case let .tool(tool) = $0.kind { tool } else { nil } }
+            if !tools.isEmpty {
+                rows.append(ChatTurnRow(id: .steps(turnId), kind: .steps(tools: tools)))
+            }
+            for entry in prompt?.rest ?? turn {
+                switch entry.kind {
+                case .tool:
+                    continue
+                case let .agent(text):
+                    let message = AgentMessage.parse(text)
+                    let plainMarkdown = message.screen == nil && message.parts.allSatisfy {
+                        if case .markdown = $0 { true } else { false }
+                    }
+                    if plainMarkdown {
+                        var blockIndex = 0
+                        for part in message.parts {
+                            if case let .markdown(blocks) = part {
+                                for block in blocks {
+                                    rows.append(ChatTurnRow(
+                                        id: .markdownBlock(entry.id, blockIndex),
+                                        kind: .markdownBlock(block)
+                                    ))
+                                    blockIndex += 1
+                                }
+                            }
+                        }
+                    } else {
+                        rows.append(ChatTurnRow(id: .entry(entry.id), kind: .entry(entry)))
+                    }
+                default:
+                    rows.append(ChatTurnRow(id: .entry(entry.id), kind: .entry(entry)))
+                }
+            }
+            for tool in tools {
+                var diffIndex = 0
+                for item in tool.content {
+                    if case let .diff(path, old, new) = item {
+                        rows.append(ChatTurnRow(
+                            id: .diff(turnId, tool.callId, diffIndex),
+                            kind: .diff(path: path, old: old, new: new)
+                        ))
+                        diffIndex += 1
+                    }
+                }
+            }
+            if filter.promptsOnly, filter.isPeeked(turnId) {
+                rows.append(ChatTurnRow(id: .showFullHere(turnId), kind: .showFullHere(turnId: turnId)))
+            }
+        }
+        return rows
+    }
+}

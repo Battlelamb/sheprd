@@ -206,7 +206,7 @@ struct WorkspaceScreen: View {
         }
         // This screen is right behind what it opens, so Back is the way here.
         .navigationDestination(isPresented: $showsWorktrees) { WorktreesScreen(key: key).makesRoomForConnectionToast() }
-        .navigationDestination(item: $opened) { $0.screen.makesRoomForConnectionToast().environment(\.offersWorkspace, false) }
+        .navigationDestination(item: $opened) { $0.screen.makesRoomForConnectionToast().environment(\.workspaceDestination, .dismiss) }
         // Keyed on the whole status, so a link that comes back at another
         // address loads again: a phone waking from sleep still shows the
         // address it had, and the first try there fails.

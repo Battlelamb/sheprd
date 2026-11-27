@@ -17,6 +17,7 @@ mod legitimate_load;
 mod lockout;
 mod metrics;
 mod options;
+mod owner_dials;
 #[cfg(feature = "client")]
 mod pinned;
 mod pools;

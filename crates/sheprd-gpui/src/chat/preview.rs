@@ -29,6 +29,7 @@ use crate::{SheprdWindow, config::ChatLayoutMode};
 mod attachments;
 mod continued;
 mod effects;
+mod guests;
 mod input_resize;
 mod progress;
 mod pull_requests;
@@ -123,6 +124,7 @@ impl Options {
                 | "activity-open"
                 | "attachments"
                 | "files"
+                | "guests"
                 | "questions"
                 | "selection"
                 | "user"
@@ -154,7 +156,7 @@ impl Options {
                 | "all"
         ) {
             bail!(
-                "HERDR_TEST_RICH_CHAT expects math, code, diagram, effects, empty, activity, activity-open, running-rail, attachments, files, questions, selection, user, widgets, widgets-end, jump, conversation, continued, continued-before, continued-open, existing, loading, input-resize, tools, turns, progress, progress-before, pull-requests, pull-requests-before, running, running-open, steps, steps-open, state-completed, state-failed, state-stopped, state-waiting, or all"
+                "HERDR_TEST_RICH_CHAT expects math, code, diagram, effects, empty, activity, activity-open, running-rail, attachments, files, guests, questions, selection, user, widgets, widgets-end, jump, conversation, continued, continued-before, continued-open, existing, loading, input-resize, tools, turns, progress, progress-before, pull-requests, pull-requests-before, running, running-open, steps, steps-open, state-completed, state-failed, state-stopped, state-waiting, or all"
             );
         }
         let hold = std::env::var("HERDR_TEST_RICH_CHAT_HOLD_MS")
@@ -486,6 +488,9 @@ fn install(
     }
     if options.case == "questions" {
         transcript.entries = question_entries();
+    }
+    if options.case == "guests" {
+        guests::apply(&mut transcript);
     }
     if options.working {
         transcript.turn = Some(sheprd_chat_protocol::Turn {

@@ -455,7 +455,7 @@ fn install(
         },
         read_only: options.read_only || existing, // i18n: data
         entries: vec![
-            Entry { id: EntryId(1), kind: EntryKind::User { text: "Show the result with equations, clear formatting, and controls I can explore.".into(), files: 0, note: None} }, // i18n: data
+            Entry { id: EntryId(1), kind: EntryKind::User { guest: None, text: "Show the result with equations, clear formatting, and controls I can explore.".into(), files: 0, note: None} }, // i18n: data
             Entry { id: EntryId(2), kind: EntryKind::Agent { text: content } },
         ],
         ..Transcript::default()
@@ -472,6 +472,7 @@ fn install(
     }
     if options.case == "files" {
         transcript.entries[0].kind = EntryKind::User {
+            guest: None,
             text: "Attach the video walkthrough and the PDF report to this session.".into(), // i18n: data
             files: 0,
             note: None,
@@ -555,6 +556,7 @@ fn install(
         transcript.entries = vec![Entry {
             id: EntryId(1),
             kind: EntryKind::User {
+                guest: None,
                 text: USER.into(),
                 files: 0,
                 note: None,
@@ -810,6 +812,7 @@ fn earlier_turns() -> Vec<Entry> {
     let user = |id, text: &str| Entry {
         id: EntryId(id),
         kind: EntryKind::User {
+            guest: None,
             text: text.into(),
             files: 0,
             note: None,
@@ -857,7 +860,7 @@ fn tool_entries() -> Vec<Entry> {
     vec![
         Entry {
             id: EntryId(1),
-            kind: EntryKind::User {
+            kind: EntryKind::User { guest: None,
                 text: "Why does the send button stay pink when the box is empty?".into(), // i18n: data
                 files: 0,
                 note: None,

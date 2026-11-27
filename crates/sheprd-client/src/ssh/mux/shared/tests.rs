@@ -100,6 +100,20 @@ fn concurrent_commands_share_one_dial() {
 }
 
 #[test]
+fn streams_open_a_second_master_when_the_first_is_full() {
+    let (registry, fixture) = fake("streams", READY);
+    let per_master = Lane::Stream.channels();
+    let streams: Vec<Channel> = (0..per_master * Lane::Stream.masters())
+        .map(|_| open(&registry, Lane::Stream).unwrap())
+        .collect();
+    assert_eq!(fixture.starts(), 2);
+    assert_ne!(streams[0].socket, streams[per_master].socket);
+    // Both full: the next stream connects directly, and no third master starts.
+    assert!(open(&registry, Lane::Stream).is_none());
+    assert_eq!(fixture.starts(), 2);
+}
+
+#[test]
 fn a_full_master_sends_the_next_command_direct() {
     let (registry, fixture) = fake("full", READY);
     let mut quick: Vec<Channel> = (0..Lane::Quick.channels())

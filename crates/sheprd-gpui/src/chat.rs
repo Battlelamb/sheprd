@@ -83,11 +83,11 @@ use std::io;
 
 /// Chat panes attached at once; more are left to their terminal views.
 const MAX_CHATS: usize = 16;
-/// Chat panes attached at once on an SSH host: as many as the host's one
-/// shared stream connection carries (`sheprd_client::SshLane::Stream`).
+/// Chat panes attached at once on an SSH host: as many as the host's shared
+/// stream connections carry (`sheprd_client::SshLane::Stream`, two of 8).
 /// Past it each chat would log in on its own, and through a relay, which
 /// holds each device's key to a few sessions, those are refused.
-const MAX_SSH_CHATS: usize = 8;
+const MAX_SSH_CHATS: usize = 16;
 /// Commands waiting for their acknowledgement, per pane.
 const MAX_PENDING: usize = 32;
 /// Messages a worker holds for the window before it gives the connection up

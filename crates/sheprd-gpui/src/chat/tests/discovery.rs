@@ -203,7 +203,7 @@ fn an_ssh_host_attaches_only_what_its_shared_connection_carries() {
     let targets = discovery::targets(&snapshot(&agents), Some(&route));
     let shown = panes[29].clone();
     let limit = route.max_chats();
-    assert!(limit < MAX_CHATS);
+    assert!(limit <= MAX_CHATS);
     let kept = discovery::bounded(targets, limit, |pane| u8::from(pane != shown));
     assert_eq!(kept.len(), limit);
     assert!(kept.iter().any(|target| target.pane_id == shown));

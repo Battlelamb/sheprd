@@ -61,8 +61,14 @@ impl SheprdWindow {
                         connection: endpoint.generation,
                     })
             });
-        // The panes on screen come first wherever a bound applies, then
-        // those holding files for an unsent prompt.
+        // The focused pane comes first wherever a bound applies, then the
+        // other panes on screen, then those holding files for an unsent
+        // prompt.
+        let focused = self
+            .live
+            .snapshot
+            .as_ref()
+            .map(|s| s.focused_pane_id.clone());
         let on_screen = self.on_screen_chat_panes(cx);
         let holding: Vec<String> = self
             .chats
@@ -71,12 +77,14 @@ impl SheprdWindow {
             .map(|pane| pane.target.pane_id.clone())
             .collect();
         let rank = |pane: &str| {
-            if on_screen.iter().any(|shown| shown == pane) {
+            if focused.as_ref().and_then(Option::as_deref) == Some(pane) {
                 0
-            } else if holding.iter().any(|held| held == pane) {
+            } else if on_screen.iter().any(|shown| shown == pane) {
                 1
-            } else {
+            } else if holding.iter().any(|held| held == pane) {
                 2
+            } else {
+                3
             }
         };
         let agents = self
@@ -86,7 +94,7 @@ impl SheprdWindow {
             .map(super::existing::candidates)
             .map(|agents| {
                 discovery::bound_by(agents, super::existing::MAX_OBSERVED, |agent| {
-                    rank(&agent.pane_id).min(1)
+                    rank(&agent.pane_id).min(2)
                 })
             })
             .unwrap_or_default();
@@ -126,10 +134,7 @@ impl SheprdWindow {
             .unwrap_or_default();
         let core = enabled.then(|| self.core_chat_targets());
         let known = super::core_pane::with_core(targets, core.unwrap_or_default());
-        let limit = route
-            .as_ref()
-            .map_or(super::MAX_CHATS, super::Route::max_chats);
-        let targets = discovery::bounded(known.clone(), limit, rank);
+        let targets = discovery::bounded(known.clone(), rank);
         if enabled {
             self.locate_chat_program(cx);
             self.probe_chat_agents(cx);

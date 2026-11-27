@@ -161,7 +161,7 @@ fn chat_panes_are_bounded() {
     let agents: Vec<_> = panes.iter().map(|pane| (pane.as_str(), ID)).collect();
     let targets = discovery::targets(&snapshot(&agents), Some(&Route::Local));
     assert_eq!(targets.len(), MAX_CHATS + 4);
-    let bounded = discovery::bounded(targets, MAX_CHATS, |_| 0);
+    let bounded = discovery::bounded(targets, |_| 0);
     let kept: Vec<_> = bounded.iter().map(|t| t.pane_id.as_str()).collect();
     assert_eq!(kept, panes[..MAX_CHATS]);
 }
@@ -172,7 +172,7 @@ fn a_chat_on_screen_attaches_past_the_bound() {
     let agents: Vec<_> = panes.iter().map(|pane| (pane.as_str(), ID)).collect();
     let targets = discovery::targets(&snapshot(&agents), Some(&Route::Local));
     let last = panes[MAX_CHATS + 3].clone();
-    let bounded = discovery::bounded(targets, MAX_CHATS, |pane| u8::from(pane != last));
+    let bounded = discovery::bounded(targets, |pane| u8::from(pane != last));
     let kept: Vec<_> = bounded.iter().map(|t| t.pane_id.as_str()).collect();
     assert_eq!(kept.len(), MAX_CHATS);
     assert_eq!(kept[..MAX_CHATS - 1], panes[..MAX_CHATS - 1]);
@@ -188,26 +188,39 @@ fn chats_on_screen_alone_still_respect_the_bound() {
     let panes: Vec<String> = (0..MAX_CHATS + 4).map(|n| format!("p{n}")).collect();
     let agents: Vec<_> = panes.iter().map(|pane| (pane.as_str(), ID)).collect();
     let targets = discovery::targets(&snapshot(&agents), Some(&Route::Local));
-    assert_eq!(
-        discovery::bounded(targets, MAX_CHATS, |_| 0).len(),
-        MAX_CHATS
-    );
+    assert_eq!(discovery::bounded(targets, |_| 0).len(), MAX_CHATS);
 }
 
 #[test]
-fn an_ssh_host_attaches_only_what_its_shared_connection_carries() {
-    // Studio's 30 chats, the one on screen last.
+fn the_focused_chat_attaches_among_more_on_screen_than_fit() {
+    // Studio's 30 chats, every one on screen, the focused one last.
     let panes: Vec<String> = (0..30).map(|n| format!("p{n}")).collect();
     let agents: Vec<_> = panes.iter().map(|pane| (pane.as_str(), ID)).collect();
     let route = Route::Ssh("penso@r-c83c5296e5b87858.sheprd.invalid".into());
     let targets = discovery::targets(&snapshot(&agents), Some(&route));
-    let shown = panes[29].clone();
-    let limit = route.max_chats();
-    assert!(limit <= MAX_CHATS);
-    let kept = discovery::bounded(targets, limit, |pane| u8::from(pane != shown));
-    assert_eq!(kept.len(), limit);
-    assert!(kept.iter().any(|target| target.pane_id == shown));
-    assert_eq!(Route::Local.max_chats(), MAX_CHATS);
+    let focused = panes[29].clone();
+    let kept = discovery::bounded(targets, |pane| u8::from(pane != focused));
+    assert_eq!(kept.len(), route.max_chats().min(MAX_CHATS));
+    assert!(kept.iter().any(|target| target.pane_id == focused));
+}
+
+#[test]
+fn an_ssh_host_limit_counts_only_that_hosts_chats() {
+    let route = Route::Ssh("devbox".into());
+    let remote: Vec<String> = (0..30).map(|n| format!("r{n}")).collect();
+    let agents: Vec<_> = remote.iter().map(|pane| (pane.as_str(), ID)).collect();
+    let mut targets = discovery::targets(&snapshot(&agents), Some(&route));
+    let local: Vec<String> = (0..4).map(|n| format!("l{n}")).collect();
+    let agents: Vec<_> = local.iter().map(|pane| (pane.as_str(), ID)).collect();
+    targets.extend(discovery::targets(&snapshot(&agents), Some(&Route::Local)));
+    // The local chats are on screen; the host's fill the rest.
+    let kept = discovery::bounded(targets, |pane| u8::from(!pane.starts_with('l')));
+    let on_host = kept.iter().filter(|target| target.route == route).count();
+    assert!(on_host <= route.max_chats());
+    assert_eq!(kept.len(), MAX_CHATS);
+    for pane in &local {
+        assert!(kept.iter().any(|target| &target.pane_id == pane));
+    }
 }
 
 #[test]
@@ -364,7 +377,7 @@ fn hidden_chats_holding_files_never_crowd_out_the_one_on_screen() {
     let targets = discovery::targets(&snapshot(&agents), Some(&Route::Local));
     let shown = &panes[MAX_CHATS];
     // Every earlier chat holds files; the last one is on screen.
-    let kept = discovery::bounded(targets, MAX_CHATS, |pane| if pane == shown { 0 } else { 1 });
+    let kept = discovery::bounded(targets, |pane| if pane == shown { 0 } else { 1 });
     assert_eq!(kept.len(), MAX_CHATS);
     assert_eq!(
         kept.last().map(|t| t.pane_id.as_str()),

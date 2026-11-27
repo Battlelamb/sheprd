@@ -216,18 +216,20 @@ impl Projector {
             if raw.len() <= MAX_ENTRY_TEXT {
                 raw.push_str(&text);
             }
-            // The note a replay gave the entry stays with it.
-            let note = transcript
+            // The note a replay gave the entry stays with it, and so does
+            // the guest it names.
+            let (guest, note) = transcript
                 .entry(*entry)
                 .and_then(|entry| match &entry.kind {
-                    EntryKind::User { note, .. } => note.clone(),
+                    EntryKind::User { guest, note, .. } => Some((guest.clone(), note.clone())),
                     _ => None,
-                });
+                })
+                .unwrap_or_default();
             return Some(Change::Replace {
                 entry: Entry {
                     id: *entry,
                     kind: EntryKind::User {
-                        guest: None,
+                        guest,
                         text: bounded(unwrapped(raw).to_owned()),
                         files: 0,
                         note,

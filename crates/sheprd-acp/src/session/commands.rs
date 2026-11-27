@@ -29,6 +29,21 @@ const MAX_QUEUED_TEXT: usize = 1024 * 1024;
 
 impl<R: FnMut(Update)> Session<R> {
     pub(super) fn command(&mut self, conn: ConnId, id: CommandId, command: Command) {
+        // A guest connection is one before anything else, so a resend
+        // answered from `handled` cannot slip past it.
+        if super::guests::relayed(&command).is_some() {
+            self.guests.relays(conn);
+        } else if self.guests.is_guest(conn) {
+            // Not recorded: the refusal is the connection's, not the
+            // command's.
+            return self.send_to(
+                conn,
+                sheprd_chat_protocol::ServerMessage::Ack {
+                    id,
+                    rejected: Some(Rejection::GuestOnly),
+                },
+            );
+        }
         if let Some((_, rejected)) = self.handled.iter().find(|(handled, _)| *handled == id) {
             let rejected = *rejected;
             return self.send_to(
@@ -214,12 +229,12 @@ impl<R: FnMut(Update)> Session<R> {
             sent,
             shown,
         } = outgoing;
-        self.show_prompt(&shown, files, sent, images, guest);
+        self.show_prompt(&shown, files, sent, images, guest.clone());
         let request = wire::PromptRequest::new(session, blocks);
         if self.request("session/prompt", &request, Pending::Prompt) {
             // Only a prompt the agent received names the chat and starts
             // the conversation a later agent is handed.
-            self.thread.prompted(&shown, handoff);
+            self.thread.prompted(&shown, guest.as_ref(), handoff);
             self.keep_started(&shown);
             (self.report)(Update::Prompt(shown));
             self.turn = Some(self.next_request);
@@ -269,7 +284,7 @@ impl<R: FnMut(Update)> Session<R> {
             return;
         };
         let next = queued.remove(index);
-        let origin = self.queued_origins.get(&next.id).cloned();
+        let origin = self.queued_origin(&next);
         // A prompt steered into a turn that ended without it goes as it was
         // sent: what it told the agent besides is not told again, and its
         // files as they were then. Taken before the queue changes, which
@@ -280,6 +295,15 @@ impl<R: FnMut(Update)> Session<R> {
             Some(outgoing) => self.send_outgoing(outgoing),
             None => self.send_prompt(&next.text, &next.attachments, origin),
         }
+    }
+
+    /// What a queued prompt was sent with. A guest's stays a guest's even
+    /// once steering it, which keeps no origin, was undone.
+    pub(super) fn queued_origin(&self, queued: &Queued) -> Option<Origin> {
+        self.queued_origins
+            .get(&queued.id)
+            .cloned()
+            .or_else(|| queued.guest.clone().map(Origin::guest))
     }
 
     fn cancel(&mut self) -> Result<(), Rejection> {

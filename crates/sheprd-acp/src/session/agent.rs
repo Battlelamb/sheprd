@@ -505,7 +505,12 @@ impl<R: FnMut(Update)> Session<R> {
         for change in &mut changes {
             if let Change::Push { entry } = change {
                 let note = self.replayed_note.take();
-                if let sheprd_chat_protocol::EntryKind::User { note: kept, .. } = &mut entry.kind {
+                if let sheprd_chat_protocol::EntryKind::User {
+                    guest, note: kept, ..
+                } = &mut entry.kind
+                {
+                    // A guest's words stay theirs when replayed.
+                    *guest = note.as_deref().and_then(crate::context::guest_of);
                     *kept = note.map(project::bounded);
                 }
             }

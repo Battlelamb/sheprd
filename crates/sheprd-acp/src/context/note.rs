@@ -187,8 +187,11 @@ pub(crate) fn hide(transcript: &mut Transcript) -> Told {
             return true;
         };
         let Some((heard, rest)) = split(text) else {
-            if carried.is_some() {
-                *note = carried.take();
+            if let Some(heard) = carried.take() {
+                if let Some(by) = guest_of(&heard) {
+                    *guest = Some(by);
+                }
+                *note = Some(heard);
             }
             return true;
         };
@@ -238,7 +241,7 @@ fn place_of(note: &str) -> Option<Place> {
 }
 
 /// The guest a note says wrote the words after it.
-fn guest_of(note: &str) -> Option<Guest> {
+pub(crate) fn guest_of(note: &str) -> Option<Guest> {
     let tag = &note[..note.find('>')?];
     let guest = Guest::new(attribute(tag, "guest")?, attribute(tag, "tool")?);
     guest.is_valid().then_some(guest)

@@ -162,8 +162,10 @@ or approval …
 
 Then the guest's text, with anything that would open or close such a note
 broken up. An agent that takes no notes (Antigravity) gets a one-line
-header naming the guest instead. A restored chat reads the note back and
-names the guest again.
+header naming the guest instead. A restored or replayed chat reads the
+note back and names the guest again, and an agent the person switches to
+is handed the guest's words as a guest's, never the person's. Guest
+prompts still waiting when the person switches agents keep waiting.
 
 ## Limits and guarantees
 

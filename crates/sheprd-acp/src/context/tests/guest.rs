@@ -63,3 +63,34 @@ fn a_restored_guest_prompt_is_named_again() {
     assert_eq!(guest.as_ref(), Some(&bob()));
     assert_eq!(text, "hello");
 }
+
+#[test]
+fn a_restored_guest_prompt_logged_apart_from_its_note_is_named_again() {
+    let mut context = Context::new(Prompts::default(), Facts::default(), Told::default());
+    let note = context.before(Some(Origin::guest(bob()))).unwrap();
+    let user = |id, text: &str| Entry {
+        id: EntryId(id),
+        kind: EntryKind::User {
+            guest: None,
+            text: text.to_owned(),
+            files: 0,
+            note: None,
+        },
+    };
+    let mut transcript = Transcript::new("Claude");
+    transcript.entries = vec![user(1, &note), user(2, "hello")];
+    hide(&mut transcript);
+    assert_eq!(transcript.entries.len(), 1);
+    let EntryKind::User {
+        guest,
+        text,
+        note: kept,
+        ..
+    } = &transcript.entries[0].kind
+    else {
+        panic!("not a prompt");
+    };
+    assert_eq!(guest.as_ref(), Some(&bob()));
+    assert_eq!(text, "hello");
+    assert_eq!(kept.as_deref(), Some(note.as_str()));
+}

@@ -11,7 +11,7 @@
 use std::collections::{HashMap, HashSet};
 
 use sheprd_chat_protocol::{
-    Change, CommandId, GUEST_ALLOW, GUEST_DENY, Guest, GuestPrompt, MAX_GUEST_PROMPT_SIZE,
+    Change, Command, CommandId, GUEST_ALLOW, GUEST_DENY, Guest, GuestPrompt, MAX_GUEST_PROMPT_SIZE,
     MAX_GUESTS_WAITING, Origin, Permission, PermissionId, PermissionKind, PermissionOption,
     Rejection,
 };
@@ -44,36 +44,27 @@ impl Guests {
         self.waiting.contains_key(&permission)
     }
 
+    /// Marks `conn` as relaying guests from now on.
+    pub(super) fn relays(&mut self, conn: ConnId) {
+        self.conns.insert(conn);
+    }
+
     pub(super) fn detached(&mut self, conn: ConnId) {
         self.conns.remove(&conn);
     }
 }
 
 impl<R: FnMut(Update)> Session<R> {
-    /// Runs `command` from `conn` when it is a guest prompt, or refuses it
-    /// when `conn` relays guests; `None` leaves it to the person's commands.
-    /// `Some(None)` means the outcome waits for the person.
+    /// Runs `command` when it is a guest prompt; `None` leaves it to the
+    /// person's commands. `Some(None)` means the outcome waits for the
+    /// person.
     pub(super) fn guest_command(
         &mut self,
         conn: ConnId,
         id: CommandId,
-        command: &sheprd_chat_protocol::Command,
+        command: &Command,
     ) -> Option<Option<Rejection>> {
-        use sheprd_chat_protocol::Command;
-        let (text, guest) = match command {
-            Command::GuestPrompt { text, guest } => (text, guest),
-            // A prompt that names a guest is one, however it was sent.
-            Command::Prompt {
-                text,
-                origin: Some(Origin {
-                    guest: Some(guest), ..
-                }),
-                ..
-            } => (text, guest),
-            _ if self.guests.is_guest(conn) => return Some(Some(Rejection::GuestOnly)),
-            _ => return None,
-        };
-        self.guests.conns.insert(conn);
+        let (text, guest) = relayed(command)?;
         // A resend while it waits: the outcome goes to the newer connection.
         if let Some(waiting) = self
             .guests
@@ -189,6 +180,22 @@ impl<R: FnMut(Update)> Session<R> {
             self.emit(Change::PermissionResolved { id: permission });
             self.ack(waiting.conn, waiting.id, Some(rejection));
         }
+    }
+}
+
+/// The text and guest of a command that relays a guest's prompt: a guest
+/// prompt, or a prompt that names a guest, however it was sent.
+pub(super) fn relayed(command: &Command) -> Option<(&str, &Guest)> {
+    match command {
+        Command::GuestPrompt { text, guest } => Some((text, guest)),
+        Command::Prompt {
+            text,
+            origin: Some(Origin {
+                guest: Some(guest), ..
+            }),
+            ..
+        } => Some((text, guest)),
+        _ => None,
     }
 }
 

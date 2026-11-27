@@ -86,6 +86,7 @@ mod tests {
         let mut child = Command::new("/bin/sh")
             .args([
                 "-c",
+                // i18n: data
                 "printf 'noise\\n%.0s' $(seq 200) >&2; printf 'relay-connect: the relay answered Limited\\033[31m\\n' >&2; exit 1",
             ])
             .stderr(Stdio::piped())

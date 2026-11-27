@@ -153,11 +153,19 @@ public struct PullRequestReactionTracker: Equatable, Sendable {
         return ToggleToken(content: content, id: version)
     }
 
+    /// Whether `token` is still the active in-flight toggle (not invalidated by
+    /// a reset or superseded by a newer toggle).
+    public func isActive(_ token: ToggleToken) -> Bool {
+        inFlight[token.content] == token.id
+    }
+
     /// Ends the toggle identified by `token`, ignoring stale tokens from before a reset.
-    public mutating func finishToggle(_ token: ToggleToken) {
-        guard inFlight[token.content] == token.id else { return }
+    @discardableResult
+    public mutating func finishToggle(_ token: ToggleToken) -> Bool {
+        guard inFlight[token.content] == token.id else { return false }
         inFlight.removeValue(forKey: token.content)
         version += 1
+        return true
     }
 
     /// Drops all in-flight tracking (for example after sign-out or viewer switch).

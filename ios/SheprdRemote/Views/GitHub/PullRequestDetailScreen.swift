@@ -165,7 +165,7 @@ struct PullRequestDetailScreen: View {
             defer { reactions.finishToggle(toggle) }
             #if DEBUG
             if let demo = PullRequestDemo.toggledReactions(current.detail, content: content, target: target) {
-                guard signOuts == GitHubDirect.shared.signOuts else { return }
+                guard reactions.isActive(toggle), signOuts == GitHubDirect.shared.signOuts else { return }
                 applyReaction(demo, for: content, viewer: current, signOuts: signOuts)
                 return
             }
@@ -174,7 +174,7 @@ struct PullRequestDetailScreen: View {
                 content, add: add, on: subjectId, host: target.host,
                 asLogin: current.viewerLogin, source: model.fleet.gitHubLenders
             )
-            guard signOuts == GitHubDirect.shared.signOuts else { return }
+            guard reactions.isActive(toggle), signOuts == GitHubDirect.shared.signOuts else { return }
             switch result {
             case let .success(groups):
                 applyReaction(groups, for: content, viewer: current, signOuts: signOuts)

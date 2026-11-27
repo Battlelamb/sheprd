@@ -228,15 +228,21 @@ struct PullRequestReactionTests {
             .init(content: .rocket, count: 2, viewerHasReacted: true),
         ])
 
-        // Case 5: Stale toggle finishing after reset does not clear a newer toggle.
+        // Case 5: Stale toggle finishing after reset is no longer active and does not clear a newer toggle.
         let third = tracker.beginToggle(.heart)
         let staleToggle = try #require(third)
+        #expect(tracker.isActive(staleToggle))
         tracker.reset()
+        #expect(!tracker.isActive(staleToggle))
         let fourth = tracker.beginToggle(.heart)
         let freshToggle = try #require(fourth)
-        tracker.finishToggle(staleToggle)
+        #expect(!tracker.isActive(staleToggle))
+        #expect(tracker.isActive(freshToggle))
+        let staleFinished = tracker.finishToggle(staleToggle)
+        #expect(!staleFinished)
         #expect(tracker.pending == [.heart])
-        tracker.finishToggle(freshToggle)
+        let freshFinished = tracker.finishToggle(freshToggle)
+        #expect(freshFinished)
         #expect(tracker.pending.isEmpty)
     }
 }

@@ -6,7 +6,7 @@ Paths are relative to the repository root.
 | --- | --- |
 | `crates/sheprd-protocol` | Generation-1 wire types, framing, validation, and atomic surface patches |
 | `crates/sheprd-acp` | `sheprd-acp` binary run inside a Herdr pane: the only ACP client of an agent, its in-pane chat view, the attach socket Sheprd connects to, and Herdr status reports |
-| `crates/sheprd-chat-protocol` | Attach wire between `sheprd-acp` and its clients: transcript model, the shared change reducer, framing, and endpoint discovery; no ACP or GPUI types |
+| `crates/sheprd-chat-protocol` | Attach wire between `sheprd-acp` and its clients: transcript model, the shared change reducer, framing, the multiplexer that carries many chat connections over one stream, and endpoint discovery; no ACP or GPUI types |
 | `crates/sheprd-client` | Discovery, socket worker, session transitions, ordered commands, client-local activity projection, and `herdr`: Herdr's pane and agent views (`AgentKind`, the API snapshot, process info) and the move of a terminal agent into a chat, shared by Teleport, the app, and the remote control daemon |
 | `crates/sheprd-backend` | Shared terminal lifecycle and attached terminal traits, optional ordered inventory, rendered cells and semantic input |
 | `crates/sheprd-core-client` | herdr-core (`hc`, Herdr 2): endpoint discovery, the framed JSON-RPC connection worker, credit-flowed terminal and event streams, starting a core, and its `sheprd-backend` implementation; no GPUI |

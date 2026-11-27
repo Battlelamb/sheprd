@@ -18,7 +18,7 @@ struct ChatScreen: View {
     @State private var filter = TurnFilterState()
     @Environment(\.horizontalSizeClass) private var width
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.offersWorkspace) private var offersWorkspace
+    @Environment(\.workspaceDestination) private var workspaceDestination
 
     private var item: ChatItem? {
         model.fleet.chatItems.first { $0.key == key }
@@ -93,23 +93,7 @@ struct ChatScreen: View {
             // name stays visible alongside the trailing controls.
             if let workspace {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        if offersWorkspace {
-                            model.pendingWorkspace = WorkspaceKey(device: key.device, workspace: workspace.id)
-                        } else {
-                            dismiss()
-                        }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "square.stack.3d.up")
-                                .foregroundStyle(.tint)
-                            Text(LockState.shared.hidesNames ? "Space" : workspace.label)
-                                .font(.subheadline.weight(.semibold))
-                                .lineLimit(1)
-                        }
-                        .frame(maxWidth: width == .regular ? 240 : 150, alignment: .leading)
-                    }
-                    .accessibilityLabel("Go to \(workspace.label)")
+                    spacePill(workspace)
                 }
             }
             // Keeps the system from drawing a second truncated title between
@@ -211,6 +195,39 @@ struct ChatScreen: View {
     }
     #endif
 
+    @ViewBuilder
+    private func spacePill(_ workspace: Home.Workspace) -> some View {
+        let workspaceKey = WorkspaceKey(device: key.device, workspace: workspace.id)
+        switch workspaceDestination {
+        case .pending:
+            Button { model.pendingWorkspace = workspaceKey } label: {
+                spacePillLabel(workspace)
+            }
+            .accessibilityLabel("Go to \(workspace.label)")
+        case .dismiss:
+            Button { dismiss() } label: {
+                spacePillLabel(workspace)
+            }
+            .accessibilityLabel("Go to \(workspace.label)")
+        case .push:
+            NavigationLink(value: Route.workspace(workspaceKey)) {
+                spacePillLabel(workspace)
+            }
+            .accessibilityLabel("Go to \(workspace.label)")
+        }
+    }
+
+    private func spacePillLabel(_ workspace: Home.Workspace) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "square.stack.3d.up")
+                .foregroundStyle(.tint)
+            Text(LockState.shared.hidesNames ? "Space" : workspace.label)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+        }
+        .frame(maxWidth: width == .regular ? 240 : 150, alignment: .leading)
+    }
+
     /// "Opus 5.5 · High · Bypass permissions", from the session's settings.
     private func sessionLine(_ transcript: Transcript) -> String {
         let model = transcript.options.first { $0.category == .model }.map(currentName)
@@ -272,6 +289,8 @@ private struct ChatDocument: View {
     /// Resting on the latest message, not merely near it as `away` allows:
     /// only then does the chat follow it back there.
     @State private var atLatest = true
+    /// Turn to scroll to right after expanding from prompts-only mode.
+    @State private var pendingJump: EntryId?
     @Environment(\.scenePhase) private var scenePhase
 
     /// Lines stay this wide at most on an iPad or an unfolded iPhone, so
@@ -282,6 +301,10 @@ private struct ChatDocument: View {
         let turns = ChatTurn.split(transcript.entries)
         let promptCount = ChatTurns.promptCount(in: transcript.entries)
         let visible = filter.visibleTurns(from: turns, shownTurns: shownTurns)
+        let turnRows: [(id: EntryId, entries: ArraySlice<Entry>)] = visible.turns.compactMap { turn in
+            guard let id = turn.first?.id else { return nil }
+            return (id, turn)
+        }
         let tools: [Tool] = (turns.last ?? []).compactMap { entry in
             if case let .tool(tool) = entry.kind { tool } else { nil }
         }
@@ -306,46 +329,38 @@ private struct ChatDocument: View {
                     Label("Older messages stay on the computer", systemImage: "clock.arrow.circlepath")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                ForEach(Array(visible.turns.enumerated()), id: \.element.first?.id) { offset, turn in
-                    let turnId = turn.first?.id
-                    let isLatest = turnId == turns.last?.first?.id
-                    if offset > 0 {
-                        Divider().padding(.vertical, filter.promptsOnly ? 4 : 8)
-                    }
-                    // Only the latest turn's prompt pins once scrolled past.
-                    ChatTurn(
-                        entries: turn,
-                        promptAbove: !filter.promptsOnly && isLatest ? $promptAbove : nil,
-                        brief: turnId.flatMap { transcript.brief($0) },
-                        promptsOnly: filter.promptsOnly,
-                        peeked: filter.isPeeked(turnId),
-                        onTogglePeek: turnId.map { id in
-                            {
+                ForEach(Array(turnRows.enumerated()), id: \.element.id) { offset, row in
+                    let isLatest = row.id == turns.last?.first?.id
+                    VStack(alignment: .leading, spacing: 0) {
+                        if offset > 0 {
+                            Divider().padding(.vertical, filter.promptsOnly ? 4 : 8)
+                        }
+                        // Only the latest turn's prompt pins once scrolled past.
+                        ChatTurn(
+                            entries: row.entries,
+                            promptAbove: !filter.promptsOnly && isLatest ? $promptAbove : nil,
+                            brief: transcript.brief(row.id),
+                            promptsOnly: filter.promptsOnly,
+                            peeked: filter.isPeeked(row.id),
+                            onTogglePeek: {
                                 withAnimation(.snappy(duration: 0.34)) {
-                                    filter.togglePeek(id)
+                                    filter.togglePeek(row.id)
                                 }
-                            }
-                        },
-                        onShowFullHere: turnId.map { id in
-                            {
+                            },
+                            onShowFullHere: {
                                 shownTurns = TurnFilterState.expandedShownTurns(
                                     current: shownTurns,
                                     allTurns: turns,
-                                    jumpingTo: id
+                                    jumpingTo: row.id
                                 )
                                 withAnimation(.snappy(duration: 0.34)) {
                                     filter.clear()
                                 }
-                                Task { @MainActor in
-                                    try? await Task.sleep(for: .milliseconds(80))
-                                    withAnimation(.snappy(duration: 0.34)) {
-                                        position.scrollTo(id: id, anchor: .top)
-                                    }
-                                }
+                                pendingJump = row.id
                             }
-                        }
-                    )
-                    .id(turnId)
+                        )
+                    }
+                    .id(row.id)
                 }
                 if !transcript.queued.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
@@ -379,6 +394,7 @@ private struct ChatDocument: View {
                 }
                 if let problem { Text(problem).font(.footnote).foregroundStyle(.red) }
             }
+            .scrollTargetLayout()
             .animation(.snappy, value: store.outgoing)
             .animation(.snappy(duration: 0.34), value: filter)
             .frame(maxWidth: Self.readableWidth, alignment: .leading)
@@ -389,6 +405,15 @@ private struct ChatDocument: View {
         }
         .defaultScrollAnchor(.bottom)
         .scrollPosition($position)
+        .task(id: pendingJump) {
+            guard let target = pendingJump else { return }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            withAnimation(.snappy(duration: 0.34)) {
+                position.scrollTo(id: target, anchor: .top)
+            }
+            pendingJump = nil
+        }
         .onChange(of: filter.promptsOnly) { _, now in
             if now {
                 promptAbove = false
@@ -464,9 +489,9 @@ private struct ChatDocument: View {
                         }
                     }
                 )
-                if !filter.promptsOnly, let prompt, promptAbove {
+                if !filter.promptsOnly, let prompt, promptAbove, let latestId = turns.last?.first?.id {
                     PinnedPrompt(text: String(InlineMarkdown.plainSized(prompt).characters)) {
-                        withAnimation(.snappy) { position.scrollTo(id: PinnedPrompt.anchor, anchor: .top) }
+                        withAnimation(.snappy) { position.scrollTo(id: latestId, anchor: .top) }
                     }
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }

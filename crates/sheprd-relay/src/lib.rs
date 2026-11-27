@@ -49,6 +49,7 @@ mod broker;
 pub mod bucket;
 #[cfg(feature = "client")]
 pub mod client;
+mod commit;
 #[cfg(feature = "server")]
 pub mod dashboard;
 pub mod directory;
@@ -82,6 +83,7 @@ mod viewer;
 pub mod web;
 pub mod wire;
 
+pub use commit::commit;
 pub use endpoint::Endpoint;
 pub use error::{Error, Result};
 #[cfg(feature = "server")]

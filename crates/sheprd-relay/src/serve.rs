@@ -265,6 +265,11 @@ pub async fn serve(options: Options) -> Result<()> {
     if let Some(file) = options.listen_token_file.clone() {
         tokio::spawn(watch_token_file(Arc::clone(&hub), file));
     }
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        commit = crate::commit().unwrap_or("unknown"),
+        "starting the relay"
+    );
     if !options.limits.auto_ban {
         tracing::info!("automatic bans are off");
     }

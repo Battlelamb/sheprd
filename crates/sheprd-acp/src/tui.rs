@@ -17,8 +17,8 @@ use std::{
 use crossbeam_channel::{Receiver, Sender, bounded, never, select};
 use crossterm::{
     event::{
-        DisableBracketedPaste, EnableBracketedPaste, Event, KeyboardEnhancementFlags,
-        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
 };
@@ -80,6 +80,7 @@ pub(crate) fn run(inputs: &Sender<Input>) -> anyhow::Result<()> {
     let mut terminal = ratatui::try_init()?;
     let mut out = stdout();
     let _ = execute!(out, EnableBracketedPaste);
+    let _ = execute!(out, EnableMouseCapture);
     let keyboard = matches!(
         crossterm::terminal::supports_keyboard_enhancement(),
         Ok(true)
@@ -94,6 +95,7 @@ pub(crate) fn run(inputs: &Sender<Input>) -> anyhow::Result<()> {
     if keyboard {
         let _ = execute!(out, PopKeyboardEnhancementFlags);
     }
+    let _ = execute!(out, DisableMouseCapture);
     let _ = execute!(out, DisableBracketedPaste);
     let _ = write!(out, "\x1b]7501;state=clear\x1b\\");
     ratatui::restore();
@@ -198,6 +200,7 @@ fn event_loop(
                     None => {}
                 },
                 Event::Paste(text) => view.paste(&text),
+                Event::Mouse(mouse) => view.mouse(mouse.kind),
                 _ => {}
             },
             recv(timer) -> _ => tick = tick.wrapping_add(1),

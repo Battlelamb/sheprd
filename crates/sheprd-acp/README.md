@@ -424,7 +424,8 @@ how long it took and the tokens it used. Settings the agent offers through
 ACP's session config options (model, thinking level, mode, and any others)
 change from **Ctrl+O** here and from the header's buttons in Sheprd; the
 agent's slash commands complete after `/`, and Up and Down step through the
-session's earlier prompts, whichever client sent them.
+session's earlier prompts, whichever client sent them. PgUp/PgDn and the mouse
+wheel scroll back through the transcript without changing the prompt.
 
 ## Choosing the agent
 

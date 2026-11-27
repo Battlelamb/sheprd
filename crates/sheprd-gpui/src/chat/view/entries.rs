@@ -299,6 +299,7 @@ impl SheprdWindow {
             content,
         };
         let row = layout_for(self.config.chat.layout).row(row, &self.chat_look());
+        let row = self.with_chat_guest(entry, row);
         self.with_chat_sent_note(chat, entry, row, cx)
     }
 

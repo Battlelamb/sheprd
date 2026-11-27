@@ -294,8 +294,9 @@ impl Registry {
         false
     }
 
-    /// See `super::bridge_connecting`.
-    pub(crate) fn bridge_connecting(&self, target: &str, session: &str) {
+    /// See `super::bridge_connecting`. True when it is a reconnect, which
+    /// retired the host's masters.
+    pub(crate) fn bridge_connecting(&self, target: &str, session: &str) -> bool {
         let first = self
             .bridges
             .lock()
@@ -304,6 +305,7 @@ impl Registry {
         if !first {
             self.retire(target);
         }
+        !first
     }
 
     /// Retire `target`'s masters in every lane: no new channels, and each

@@ -378,11 +378,11 @@ fn only_a_reconnecting_bridge_retires_the_masters() {
     let (registry, fixture) = fake("bridge", READY);
     let first = open(&registry, Lane::Quick).unwrap();
     // The first connect of a bridge keeps the master a startup read opened.
-    registry.bridge_connecting("devbox", "default");
-    registry.bridge_connecting("devbox", "work");
+    assert!(!registry.bridge_connecting("devbox", "default"));
+    assert!(!registry.bridge_connecting("devbox", "work"));
     assert_eq!(open(&registry, Lane::Quick).unwrap().socket, first.socket);
     // A reconnect may take another network path.
-    registry.bridge_connecting("devbox", "default");
+    assert!(registry.bridge_connecting("devbox", "default"));
     assert_ne!(open(&registry, Lane::Quick).unwrap().socket, first.socket);
     assert_eq!(fixture.starts(), 2);
 }
@@ -483,4 +483,14 @@ fn a_master_for_a_skipped_host_reads_no_known_hosts_ahead_of_the_default() {
             .iter()
             .any(|arg| arg == "UserKnownHostsFile=/dev/null")
     );
+}
+
+#[test]
+fn reconnects_and_new_host_keys_advance_the_generation() {
+    let target = "generation-test-host";
+    let before = super::super::generation(target);
+    super::super::host_keys_changed(target);
+    assert_eq!(super::super::generation(target), before + 1);
+    // Another target's is its own.
+    assert_eq!(super::super::generation("generation-other-host"), 0);
 }

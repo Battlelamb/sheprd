@@ -14,6 +14,7 @@ pub mod handoff;
 mod harnesses;
 mod media;
 mod model;
+pub mod mux;
 pub mod naming;
 mod origin;
 mod private;

@@ -139,6 +139,10 @@ struct Mockup: View {
         case ("csettings", "B"): ComputersSettingsGrouped(state: state)
         case ("csettings", "C"): ComputersSettingsHealth()
         case ("csettings", "D"): ComputersSettingsConnection()
+        case ("trees", "A"): WorktreesByComputer()
+        case ("trees", "B"): WorktreesActivity()
+        case ("trees", "C"): WorktreesTree()
+        case ("trees", "D"): WorktreesSheet()
         default: Text("No mockup \(screen) \(variant)")
         }
     }

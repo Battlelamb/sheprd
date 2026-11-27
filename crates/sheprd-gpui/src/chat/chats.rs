@@ -31,7 +31,8 @@ pub(crate) type Connect<'a> =
 
 /// The connector the app uses: the program's endpoint by the id its pane
 /// reported, a socket in this user's private directory or a named pipe, or
-/// for a chat on an SSH host, `herdr-acp connect` run there over `ssh`. An
+/// for a chat on an SSH host, a stream of the host's multiplexer, or
+/// `herdr-acp connect` run there over `ssh` where it has none. An
 /// existing agent on this machine is observed by `program`, the same
 /// `herdr-acp` new chats start with.
 pub(crate) fn connect(
@@ -93,10 +94,7 @@ pub(crate) fn connect(
         super::Route::Local => Dial::Socket(
             sheprd_chat_protocol::endpoint_address(&target.endpoint).ok_or(Error::NoEndpointDir)?,
         ),
-        super::Route::Ssh(host) => Dial::Ssh(
-            host.clone(),
-            super::remote_program_script(&format!("connect {}", target.endpoint)),
-        ),
+        super::Route::Ssh(host) => Dial::Mux(host.clone(), target.endpoint.clone()),
     };
     Link::start(dial, since, resend)
 }

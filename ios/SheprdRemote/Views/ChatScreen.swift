@@ -291,7 +291,8 @@ private struct ChatDocument: View {
     /// Resting on the latest message, not merely near it as `away` allows:
     /// only then does the chat follow it back there.
     @State private var atLatest = true
-    /// Turn to scroll to right after expanding from prompts-only mode.
+    /// Turn to scroll to the top: after expanding from prompts-only mode,
+    /// or on a tap on the pinned prompt.
     @State private var pendingJump: EntryId?
     @Environment(\.scenePhase) private var scenePhase
 
@@ -314,8 +315,8 @@ private struct ChatDocument: View {
         } else {
             nil
         }
-        ScrollViewReader { scrollProxy in
-            ScrollView {
+        ScrollView {
+            ScrollViewReader { proxy in
                 LazyVStack(alignment: .leading, spacing: filter.promptsOnly ? 8 : 12) {
                     if snapshot.hidden > 0 {
                         Button {
@@ -371,149 +372,151 @@ private struct ChatDocument: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 10)
                 .padding(.bottom, 24)
-            }
-            .defaultScrollAnchor(.bottom)
-            .scrollPosition($position)
-            .task(id: pendingJump) {
-                guard let target = pendingJump else { return }
-                await Task.yield()
-                guard !Task.isCancelled else { return }
-                withAnimation(.snappy(duration: 0.34)) {
-                    scrollProxy.scrollTo(ChatTurnRow.ID.prompt(target), anchor: .top)
-                }
-                pendingJump = nil
-            }
-            .onChange(of: filter.promptsOnly) { _, now in
-                if now {
-                    promptAbove = false
-                    // Bring the collapsed prompts neatly into view when folding a long thread.
+                // A turn is jumped to by its proxy, which finds lazy rows
+                // by `.id` alone. A scroll target layout would do it through
+                // the position instead, but then the position follows the
+                // reader's scroll, and the chat jumped to the latest when a
+                // scroll up came to rest.
+                .task(id: pendingJump) {
+                    guard let target = pendingJump else { return }
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
                     withAnimation(.snappy(duration: 0.34)) {
-                        position.scrollTo(edge: .bottom)
+                        proxy.scrollTo(ChatTurnRow.ID.prompt(target), anchor: .top)
                     }
+                    pendingJump = nil
                 }
             }
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentSize.height - geometry.contentOffset.y - geometry.containerSize.height > 240
-            } action: { _, now in
-                away = now
-            }
-            // A snapshot on return, lazy rows measured anew, or the composer
-            // changing size can shorten the content under a resting offset;
-            // UIKit leaves it past the end until a touch, a blank screen.
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                let end = geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height
-                return geometry.contentOffset.y > max(end, -geometry.contentInsets.top) + 1
-            } action: { _, now in
-                overshot = now
-                if now, !scrolling { position.scrollTo(edge: .bottom) }
-            }
-            .onScrollPhaseChange { _, phase in
-                scrolling = phase != .idle
-                if !scrolling, overshot { position.scrollTo(edge: .bottom) }
-            }
-            // Only a reader's own scroll moves them off the latest; content
-            // shrinking under them while idle is repaired above instead.
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                let end = geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height
-                return geometry.contentOffset.y >= end - 8
-            } action: { _, now in
-                if scrolling || now { atLatest = now }
-            }
-            // Back in the app, or a fresh snapshot replacing the cached one: a
-            // reader at the latest stays there.
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active, atLatest { position.scrollTo(edge: .bottom) }
-            }
-            .onChange(of: store.stale) { _, stale in
-                if !stale, atLatest { position.scrollTo(edge: .bottom) }
-            }
-            // Dragging the conversation puts the keyboard away, as Messages does.
-            .scrollDismissesKeyboard(.interactively)
-            .coordinateSpace(.named(ChatEffectsModel.space))
-            .environment(\.chatEffects, store.effects)
-            .modifier(WizzShake(since: store.effects.ledger.playing(at: .now).flatMap { $0.effect == .wizz ? $0.since : nil }))
-            // A screen effect plays over the chat alone, never the composer,
-            // and takes no touches.
-            .overlay {
-                let effects = store.effects
-                ScreenEffectOverlay(playing: effects.ledger.playing(at: .now)) { [effects] playing in
-                    effects.target(of: playing)
+        }
+        .defaultScrollAnchor(.bottom)
+        .scrollPosition($position)
+        .onChange(of: filter.promptsOnly) { _, now in
+            if now {
+                promptAbove = false
+                // Bring the collapsed prompts neatly into view when folding a long thread.
+                withAnimation(.snappy(duration: 0.34)) {
+                    position.scrollTo(edge: .bottom)
                 }
             }
-            // A picture opened full screen swipes through the chat's others.
-            .environment(\.chatPictures, transcript.pictures.map(GalleryPicture.init))
-            .opacity(store.stale ? 0.6 : 1)
-            .safeAreaBar(edge: .top) {
-                VStack(spacing: 6) {
-                    ChatTitleRibbon(
-                        title: LockState.shared.hidesNames ? "Sheprd" : name,
-                        subtitle: subtitle,
-                        canOpenSession: canOpenSession,
-                        promptsOnly: filter.promptsOnly,
-                        promptCount: promptCount,
-                        openSession: openSession,
-                        clearFilter: {
-                            withAnimation(.snappy(duration: 0.34)) {
-                                filter.clear()
-                            }
+        }
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentSize.height - geometry.contentOffset.y - geometry.containerSize.height > 240
+        } action: { _, now in
+            away = now
+        }
+        // A snapshot on return, lazy rows measured anew, or the composer
+        // changing size can shorten the content under a resting offset;
+        // UIKit leaves it past the end until a touch, a blank screen.
+        .onScrollGeometryChange(for: Bool.self) { $0.pastEnd } action: { _, now in
+            overshot = now
+            if now, !scrolling { position.scrollTo(edge: .bottom) }
+        }
+        // Coming to rest, the geometry of that moment decides, not a flag
+        // a frame during the scroll left behind.
+        .onScrollPhaseChange { _, phase, context in
+            scrolling = phase != .idle
+            if !scrolling, overshot, context.geometry.pastEnd { position.scrollTo(edge: .bottom) }
+        }
+        // Only a reader's own scroll moves them off the latest; content
+        // shrinking under them while idle is repaired above instead.
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            let end = geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height
+            return geometry.contentOffset.y >= end - 8
+        } action: { _, now in
+            if scrolling || now { atLatest = now }
+        }
+        // Back in the app, or a fresh snapshot replacing the cached one: a
+        // reader at the latest stays there.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, atLatest { position.scrollTo(edge: .bottom) }
+        }
+        .onChange(of: store.stale) { _, stale in
+            if !stale, atLatest { position.scrollTo(edge: .bottom) }
+        }
+        // Dragging the conversation puts the keyboard away, as Messages does.
+        .scrollDismissesKeyboard(.interactively)
+        .coordinateSpace(.named(ChatEffectsModel.space))
+        .environment(\.chatEffects, store.effects)
+        .modifier(WizzShake(since: store.effects.ledger.playing(at: .now).flatMap { $0.effect == .wizz ? $0.since : nil }))
+        // A screen effect plays over the chat alone, never the composer,
+        // and takes no touches.
+        .overlay {
+            let effects = store.effects
+            ScreenEffectOverlay(playing: effects.ledger.playing(at: .now)) { [effects] playing in
+                effects.target(of: playing)
+            }
+        }
+        // A picture opened full screen swipes through the chat's others.
+        .environment(\.chatPictures, transcript.pictures.map(GalleryPicture.init))
+        .opacity(store.stale ? 0.6 : 1)
+        .safeAreaBar(edge: .top) {
+            VStack(spacing: 6) {
+                ChatTitleRibbon(
+                    title: LockState.shared.hidesNames ? "Sheprd" : name,
+                    subtitle: subtitle,
+                    canOpenSession: canOpenSession,
+                    promptsOnly: filter.promptsOnly,
+                    promptCount: promptCount,
+                    openSession: openSession,
+                    clearFilter: {
+                        withAnimation(.snappy(duration: 0.34)) {
+                            filter.clear()
                         }
-                    )
-                    if !filter.promptsOnly, let prompt, promptAbove, let latestId = latestTurnId {
-                        PinnedPrompt(text: String(InlineMarkdown.plainSized(prompt).characters)) {
-                            withAnimation(.snappy) {
-                                scrollProxy.scrollTo(ChatTurnRow.ID.prompt(latestId), anchor: .top)
-                            }
-                        }
-                        .transition(.move(edge: .top).combined(with: .opacity))
                     }
+                )
+                if !filter.promptsOnly, let prompt, promptAbove, let latestId = latestTurnId {
+                    PinnedPrompt(text: String(InlineMarkdown.plainSized(prompt).characters)) {
+                        pendingJump = latestId
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                .animation(.snappy(duration: 0.34), value: filter.promptsOnly)
-                .animation(.snappy, value: !filter.promptsOnly && promptAbove && prompt != nil)
             }
-            // A bar, not an inset: what scrolls under it fades as under the
-            // system's own toolbars.
-            .safeAreaBar(edge: .bottom) {
-                // The running turn's status sits where the turn grows, just
-                // above the composer, not over the earlier answers at the top.
-                VStack(spacing: 8) {
-                    if away {
-                        Button {
-                            withAnimation(.snappy) { position.scrollTo(edge: .bottom) }
-                        } label: {
-                            Image(systemName: "arrow.down").font(.body.weight(.semibold)).frame(width: 36, height: 36)
-                        }
-                        .buttonStyle(.glass).buttonBorderShape(.circle)
-                        .accessibilityLabel("Jump to the latest")
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .padding(.trailing, 16)
-                        .transition(.scale.combined(with: .opacity))
+            .animation(.snappy(duration: 0.34), value: filter.promptsOnly)
+            .animation(.snappy, value: !filter.promptsOnly && promptAbove && prompt != nil)
+        }
+        // A bar, not an inset: what scrolls under it fades as under the
+        // system's own toolbars.
+        .safeAreaBar(edge: .bottom) {
+            // The running turn's status sits where the turn grows, just
+            // above the composer, not over the earlier answers at the top.
+            VStack(spacing: 8) {
+                if away {
+                    Button {
+                        withAnimation(.snappy) { position.scrollTo(edge: .bottom) }
+                    } label: {
+                        Image(systemName: "arrow.down").font(.body.weight(.semibold)).frame(width: 36, height: 36)
                     }
-                    if let terminal {
-                        PromptCard(key: key, agent: transcript.agent, waiting: terminal.needsYou, terminal: terminal.terminalRoute)
-                    }
-                    if transcript.status == .working {
-                        RunningCapsule(transcript: transcript, tools: tools)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                    Composer(
-                        key: key,
-                        store: store,
-                        transcript: transcript,
-                        destination: terminal == nil ? .chat : .terminal,
-                        problem: $problem
-                    )
-                    .frame(maxWidth: Self.readableWidth + 40)
-                    .frame(maxWidth: .infinity)
+                    .buttonStyle(.glass).buttonBorderShape(.circle)
+                    .accessibilityLabel("Jump to the latest")
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.trailing, 16)
+                    .transition(.scale.combined(with: .opacity))
                 }
-                .animation(.snappy, value: transcript.status == .working)
-                .animation(.snappy, value: away)
+                if let terminal {
+                    PromptCard(key: key, agent: transcript.agent, waiting: terminal.needsYou, terminal: terminal.terminalRoute)
+                }
+                if transcript.status == .working {
+                    RunningCapsule(transcript: transcript, tools: tools)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                Composer(
+                    key: key,
+                    store: store,
+                    transcript: transcript,
+                    destination: terminal == nil ? .chat : .terminal,
+                    problem: $problem
+                )
+                .frame(maxWidth: Self.readableWidth + 40)
+                .frame(maxWidth: .infinity)
             }
-            .opensScreenLinks(on: key.device)
-            .browsesLinks(schemes: MarkdownView.webSchemes)
-            .sheet(item: question) { permission in
-                QuestionSheet(key: key, permission: permission)
-                    .environment(model)
-            }
+            .animation(.snappy, value: transcript.status == .working)
+            .animation(.snappy, value: away)
+        }
+        .opensScreenLinks(on: key.device)
+        .browsesLinks(schemes: MarkdownView.webSchemes)
+        .sheet(item: question) { permission in
+            QuestionSheet(key: key, permission: permission)
+                .environment(model)
         }
     }
 
@@ -581,6 +584,19 @@ private struct ChatDocument: View {
 
     private func sendNow(_ queued: Queued) {
         Task { problem = await model.fleet.send(.sendNow(queued.id), to: key) }
+    }
+}
+
+private extension ScrollGeometry {
+    /// Resting past the end of the content (`ChatScroll.pastEnd`).
+    var pastEnd: Bool {
+        ChatScroll.pastEnd(
+            offset: contentOffset.y,
+            contentHeight: contentSize.height,
+            containerHeight: containerSize.height,
+            insetTop: contentInsets.top,
+            insetBottom: contentInsets.bottom
+        )
     }
 }
 

@@ -17,6 +17,7 @@ mod legitimate_load;
 mod lockout;
 mod metrics;
 mod options;
+mod owner_dials;
 #[cfg(feature = "client")]
 mod pinned;
 mod pools;
@@ -29,6 +30,7 @@ mod shared_address;
 #[cfg(feature = "client")]
 mod through;
 mod tokens;
+mod viewer;
 
 pub(crate) use crate::tests::{hello, public, sign, signing_key};
 use crate::{

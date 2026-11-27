@@ -1,5 +1,5 @@
-//! The session's modes and settings as ACP offers them, as the transcript
-//! keeps them, and a setting's new value as ACP takes it.
+//! Session modes and settings as ACP reports them, projected for clients,
+//! and a client's new setting value back as ACP expects it.
 
 use acp::v1 as wire;
 use sheprd_chat_protocol::{

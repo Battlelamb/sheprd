@@ -12,6 +12,7 @@ fn sample_transcript() -> Transcript {
     Transcript {
         agent: "Codex".into(),
         session: Some(SessionInfo {
+            can_steer: false,
             id: "session-phase2".into(),
             cwd: Some("/private/worktree".into()),
             title: Some("Private title".into()),
@@ -195,3 +196,5 @@ async fn service_creates_lists_streams_and_revokes_over_real_loopback_relay() {
     assert!(service.list().is_empty());
     assert!(peer.read(Some(pub_cursor)).await.is_err());
 }
+
+mod browser;

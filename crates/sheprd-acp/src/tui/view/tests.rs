@@ -10,6 +10,7 @@ use super::*;
 
 mod attachments;
 mod harnesses;
+mod mouse;
 
 fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
     KeyEvent {

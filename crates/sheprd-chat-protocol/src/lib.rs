@@ -15,6 +15,7 @@ pub mod handoff;
 mod harnesses;
 mod media;
 mod model;
+pub mod mux;
 pub mod naming;
 mod origin;
 mod private;
@@ -38,7 +39,7 @@ pub use guest::{
     MAX_GUEST_TOOL, MAX_GUESTS_WAITING, shows_as_written,
 };
 pub use harnesses::Harnesses;
-pub use media::{Author, Image, ImageType, MAX_IMAGE_DATA};
+pub use media::{Author, Image, ImageType, MAX_CAPTION, MAX_IMAGE_DATA};
 pub use model::*;
 pub use origin::{Device, Origin, Via};
 pub use settings::{MAX_SETTINGS, SETTINGS_ENV, Setting, Settings};

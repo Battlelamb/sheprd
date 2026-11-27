@@ -100,6 +100,20 @@ fn concurrent_commands_share_one_dial() {
 }
 
 #[test]
+fn streams_open_a_second_master_when_the_first_is_full() {
+    let (registry, fixture) = fake("streams", READY);
+    let per_master = Lane::Stream.channels();
+    let streams: Vec<Channel> = (0..per_master * Lane::Stream.masters())
+        .map(|_| open(&registry, Lane::Stream).unwrap())
+        .collect();
+    assert_eq!(fixture.starts(), 2);
+    assert_ne!(streams[0].socket, streams[per_master].socket);
+    // Both full: the next stream connects directly, and no third master starts.
+    assert!(open(&registry, Lane::Stream).is_none());
+    assert_eq!(fixture.starts(), 2);
+}
+
+#[test]
 fn a_full_master_sends_the_next_command_direct() {
     let (registry, fixture) = fake("full", READY);
     let mut quick: Vec<Channel> = (0..Lane::Quick.channels())
@@ -344,11 +358,11 @@ fn only_a_reconnecting_bridge_retires_the_masters() {
     let (registry, fixture) = fake("bridge", READY);
     let first = open(&registry, Lane::Quick).unwrap();
     // The first connect of a bridge keeps the master a startup read opened.
-    registry.bridge_connecting("devbox", "default");
-    registry.bridge_connecting("devbox", "work");
+    assert!(!registry.bridge_connecting("devbox", "default"));
+    assert!(!registry.bridge_connecting("devbox", "work"));
     assert_eq!(open(&registry, Lane::Quick).unwrap().socket, first.socket);
     // A reconnect may take another network path.
-    registry.bridge_connecting("devbox", "default");
+    assert!(registry.bridge_connecting("devbox", "default"));
     assert_ne!(open(&registry, Lane::Quick).unwrap().socket, first.socket);
     assert_eq!(fixture.starts(), 2);
 }
@@ -449,4 +463,14 @@ fn a_master_for_a_skipped_host_reads_no_known_hosts_ahead_of_the_default() {
             .iter()
             .any(|arg| arg == "UserKnownHostsFile=/dev/null")
     );
+}
+
+#[test]
+fn reconnects_and_new_host_keys_advance_the_generation() {
+    let target = "generation-test-host";
+    let before = super::super::generation(target);
+    super::super::host_keys_changed(target);
+    assert_eq!(super::super::generation(target), before + 1);
+    // Another target's is its own.
+    assert_eq!(super::super::generation("generation-other-host"), 0);
 }

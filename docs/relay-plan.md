@@ -172,7 +172,7 @@ All settings are flags or `RELAY_*` variables (`sheprd-relay --help`).
 | `max-listeners-per-ip` | 16 | Per IPv4 address or IPv6 /64; a /24 or /48 holds 16 times this |
 | `max-sessions` | 5,000 | Sessions and waiting dials |
 | `max-sessions-per-ip` | 64 | Per dialing address; a /24 or /48 holds 16 times this |
-| `max-sessions-per-key` | 4 | Per dial key, so a stolen key cannot take every slot of its computer |
+| `max-sessions-per-key` | 4 | Per dial key, so a stolen key cannot take every slot of its computer; with listen tokens, a device the computer named may hold half of `max-sessions-per-route` |
 | `max-sessions-per-route` | 32 | Per computer |
 | `max-buffer` | 512 MiB | What QUIC peers may make the relay hold, across connections |
 | `session-bandwidth` | 4 MiB/s | Each way, per session; 0 is unlimited |
@@ -611,7 +611,13 @@ its owner's computers; dialers never need one. A token file
 (`--listen-token-file`) holds one per person or machine, `NAME: TOKEN` per
 line, re-read every 30 seconds: taking a token out closes the listeners it
 admitted and no one else's, and emptying or deleting the file closes them
-all. `RELAY_LISTEN_TOKEN` holds a single one.
+all. `RELAY_LISTEN_TOKEN` holds a single one. On a relay with listen
+tokens, a dial past `dials-per-minute` that proves a key the computer it
+dials allows still goes through: an owner's devices reconnecting together
+are only logged, at most one warning a minute. Every other dial past it
+answers `Limited` as on an open relay, and costs no ban points, named key
+or not. An address with 20 dials a minute refused past the rate, for
+any reason, has its proofs there left unchecked until its budget refills.
 
 ### Keys drop themselves
 

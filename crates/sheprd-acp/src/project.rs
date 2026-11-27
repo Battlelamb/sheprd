@@ -9,8 +9,8 @@ use std::collections::{HashMap, HashSet};
 use acp::v1 as wire;
 use sheprd_chat_protocol::{
     ActivityKind, ActivityState, Author, Change, Cost, EDIT_OMITTED, Entry, EntryId, EntryKind,
-    Image, NoticeLevel, PlanEntry, PlanPriority, PlanStatus, SessionInfo, SlashCommand, Tokens,
-    Tool, ToolContent, ToolKind, ToolStatus, Transcript, TurnSummary, Usage,
+    Image, NoticeLevel, PlanEntry, PlanPriority, PlanStatus, SlashCommand, Tokens, Tool,
+    ToolContent, ToolKind, ToolStatus, Transcript, TurnSummary, Usage,
 };
 
 /// Sub-agents whose step counts are kept before forgetting those that left
@@ -31,11 +31,11 @@ pub(crate) mod activity;
 mod claude_code;
 pub(crate) mod models;
 pub(crate) mod opencode;
-mod settings;
+mod options;
 mod subagents;
 pub(crate) mod todos;
 pub(crate) use activity::{Report, STOP_METHOD, Tag, kill_all};
-pub(crate) use settings::{modes, option_value, options};
+pub(crate) use options::{modes, option_value, options};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Stream {
@@ -160,13 +160,22 @@ impl Projector {
     }
 
     /// A picture of its own, between the text before and after it.
-    pub(crate) fn image(&mut self, author: Author, image: Image) -> Change {
+    pub(crate) fn image(
+        &mut self,
+        author: Author,
+        image: Image,
+        caption: Option<String>,
+    ) -> Change {
         self.close();
         let id = self.next_id();
         Change::Push {
             entry: Entry {
                 id,
-                kind: EntryKind::Image { author, image },
+                kind: EntryKind::Image {
+                    author,
+                    image,
+                    caption,
+                },
             },
         }
     }
@@ -650,7 +659,7 @@ impl Projector {
                 Stream::Thought => None,
             };
             if let Some(author) = author {
-                return Some(self.image(author, image));
+                return Some(self.image(author, image, None));
             }
         }
         let message = chunk.message_id.map(|id| id.0.to_string());
@@ -703,15 +712,6 @@ pub(crate) fn tokens(result: &serde_json::Value) -> Option<Tokens> {
         thought: usage.thought_tokens,
         total: usage.total_tokens,
     })
-}
-
-pub(crate) fn session(id: &wire::SessionId, cwd: &std::path::Path) -> SessionInfo {
-    SessionInfo {
-        continued: None,
-        cwd: Some(cwd.display().to_string()),
-        id: id.0.to_string(),
-        title: None,
-    }
 }
 
 /// A content block's picture, when it is one every client can draw; any

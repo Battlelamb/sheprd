@@ -90,7 +90,8 @@ struct Host {
     /// Bumped when the host's masters are retired, so a master that was
     /// starting at the time is not handed out once it is ready.
     generation: u64,
-    /// At most one that is not retired; retired ones only drain.
+    /// At most [`Lane::masters`] that are not retired; retired ones only
+    /// drain.
     masters: Vec<Master>,
 }
 
@@ -214,9 +215,10 @@ impl Registry {
         self.hosts.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// A channel on `target`'s `lane` master, starting one if there is none.
-    /// `None` means connect directly: the master is full, failed recently, or
-    /// was not ready by `deadline` or before `cancelled`.
+    /// A channel on one of `target`'s `lane` masters, starting one when
+    /// every master is full and the lane may have another. `None` means
+    /// connect directly: every master the lane may have is full, one failed
+    /// recently, or none was ready by `deadline` or before `cancelled`.
     pub(crate) fn open(
         self: &Arc<Self>,
         target: &str,
@@ -230,10 +232,12 @@ impl Registry {
             let now = Instant::now();
             sweep(&mut hosts, now, self.idle);
             let host = hosts.entry(key.clone()).or_default();
-            if let Some(master) = host.masters.iter_mut().find(|m| !m.retired) {
-                if master.channels >= lane.channels() {
-                    return None;
-                }
+            let live = host.masters.iter().filter(|m| !m.retired).count();
+            if let Some(master) = host
+                .masters
+                .iter_mut()
+                .find(|m| !m.retired && m.channels < lane.channels())
+            {
                 master.channels += 1;
                 master.last_used = now;
                 return Some(Channel {
@@ -242,6 +246,9 @@ impl Registry {
                     socket: master.socket.clone(),
                     key,
                 });
+            }
+            if live >= lane.masters() {
+                return None;
             }
             match host.phase {
                 Phase::Direct { until } if now < until => return None,
@@ -267,8 +274,9 @@ impl Registry {
         }
     }
 
-    /// See `super::bridge_connecting`.
-    pub(crate) fn bridge_connecting(&self, target: &str, session: &str) {
+    /// See `super::bridge_connecting`. True when it is a reconnect, which
+    /// retired the host's masters.
+    pub(crate) fn bridge_connecting(&self, target: &str, session: &str) -> bool {
         let first = self
             .bridges
             .lock()
@@ -277,6 +285,7 @@ impl Registry {
         if !first {
             self.retire(target);
         }
+        !first
     }
 
     /// Retire `target`'s masters in every lane: no new channels, and each
@@ -475,11 +484,11 @@ fn launch(program: &OsString, target: &str, lane: Lane, id: u64) -> Result<Maste
 /// watchdog follows the pid it started, so neither `ControlPersist` nor the
 /// user's `ForkAfterAuthentication` may detach it. OpenSSH before 8.7 does
 /// not know that option and refuses to start, before dialing, so such a
-/// client connects directly as before. The quick lane compresses; the bulk
-/// lane's data is often compressed already.
+/// client connects directly as before. The quick and stream lanes compress;
+/// the bulk lane's data is often compressed already.
 pub(super) fn master_args(target: &str, lane: Lane, socket: &Path) -> Vec<String> {
     let compression = match lane {
-        Lane::Quick => "Compression=yes",
+        Lane::Quick | Lane::Stream => "Compression=yes",
         Lane::Bulk => "Compression=no",
     };
     let mut args = vec!["-N".to_owned(), "-T".to_owned()];

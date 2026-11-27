@@ -9,10 +9,20 @@ struct WorkspaceKey: Codable, Hashable, Identifiable {
     var id: Self { self }
 }
 
+/// How a chat screen's Space pill opens its workspace.
+enum WorkspaceDestination: Sendable {
+    /// Separate window or stack with `.withRoutes()`: push the workspace route
+    /// onto the current `NavigationStack`.
+    case push
+    /// Main window (Home tab or iPad split): route through `model.pendingWorkspace`.
+    case pending
+    /// Already pushed directly from `WorkspaceScreen`: dismissing returns there.
+    case dismiss
+}
+
 extension EnvironmentValues {
-    /// Whether a tab offers a button to its workspace: on Home, whose
-    /// lists open tabs straight away, so nothing behind them leads there.
-    @Entry var offersWorkspace = false
+    /// How a tab's Space pill navigates to its workspace.
+    @Entry var workspaceDestination = WorkspaceDestination.push
 }
 
 /// The Workspaces tab, laid out like Sheprd's sidebar: every computer
@@ -103,7 +113,7 @@ struct WorkspacesTab: View {
                         Section {
                             ForEach(repository.workspaces) { workspace in
                                 NavigationLink(value: WorkspaceKey(device: machine.id, workspace: workspace.id)) {
-                                    WorkspaceRow(workspace: workspace, repository: repository)
+                                    WorkspaceRow(workspace: workspace, repositoryLabel: repository.label)
                                 }
                             }
                         } header: {
@@ -333,9 +343,9 @@ struct RepositoryAvatar: View {
 
 /// A workspace in its repository's section: the checkout's branch, or the
 /// worktree's name, its agents, and its pull request.
-private struct WorkspaceRow: View {
+struct WorkspaceRow: View {
     var workspace: Home.Workspace
-    var repository: Repository
+    var repositoryLabel: String
 
     var body: some View {
         HStack(spacing: 10) {
@@ -357,7 +367,7 @@ private struct WorkspaceRow: View {
     /// A repository's own checkout named after it shows its branch, as the
     /// desktop shows `main` under the repository.
     private var ownBranch: String? {
-        guard workspace.worktree?.linked != true, workspace.label == repository.label else { return nil }
+        guard workspace.worktree?.linked != true, workspace.label == repositoryLabel else { return nil }
         return workspace.branch
     }
 

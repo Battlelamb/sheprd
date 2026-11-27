@@ -12097,6 +12097,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sheprd-share-viewer"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "getrandom 0.4.3",
+ "p256 0.14.0",
+ "serde_json",
+ "sheprd-chat-protocol",
+ "sheprd-relay",
+ "sheprd-tunnel",
+ "uuid",
+ "wasm-bindgen",
+ "web-time",
+]
+
+[[package]]
 name = "sheprd-t3"
 version = "0.1.0"
 dependencies = [
@@ -12163,6 +12179,7 @@ dependencies = [
 name = "sheprd-tunnel"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.3.4",
  "getrandom 0.4.3",
  "hkdf 0.13.0",
  "ml-kem",
@@ -12171,6 +12188,7 @@ dependencies = [
  "snow",
  "thiserror 2.0.21",
  "tokio",
+ "web-time",
  "x25519-dalek 3.0.0",
 ]
 

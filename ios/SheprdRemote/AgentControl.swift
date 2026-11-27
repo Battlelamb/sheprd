@@ -109,7 +109,7 @@ final class AgentControl {
             banner = Banner(computer: model.displayName(computer), text: text, note: true)
             answer(.done(state(for: computer, model: model)))
         case let .open(screen):
-            guard open(screen, on: computer, model: model) else { return answer(.refused(.notFound)) }
+            guard open(screen, on: computer.device, model: model) else { return answer(.refused(.notFound)) }
             log.notice("an agent on \(computer.name, privacy: .public) opened \(String(describing: screen), privacy: .public)")
             banner = Banner(computer: model.displayName(computer), text: "Opened by an agent on \(model.displayName(computer))", note: false)
             answerAfterNavigation(computer, model: model, answer: answer)
@@ -123,9 +123,10 @@ final class AgentControl {
         }
     }
 
-    /// Shows `screen`; false when `computer` lists no such pane or workspace.
-    private func open(_ screen: AgentScreen, on computer: Computer, model: AppModel) -> Bool {
-        let device = computer.device
+    /// Shows `screen` of the computer `device`; false when it lists no
+    /// such pane or workspace. An agent's `sheprd phone open` and a
+    /// `ScreenLink` tapped in its chat both come here.
+    func open(_ screen: AgentScreen, on device: String, model: AppModel) -> Bool {
         switch screen {
         case .home: showTab(.home, model: model)
         case .workspaces: showTab(.workspaces, model: model)

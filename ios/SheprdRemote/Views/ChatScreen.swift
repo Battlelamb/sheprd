@@ -418,6 +418,7 @@ private struct ChatDocument: View {
             .animation(.snappy, value: transcript.status == .working)
             .animation(.snappy, value: away)
         }
+        .opensScreenLinks(on: key.device)
         .browsesLinks(schemes: MarkdownView.webSchemes)
         .sheet(item: question) { permission in
             QuestionSheet(key: key, permission: permission)

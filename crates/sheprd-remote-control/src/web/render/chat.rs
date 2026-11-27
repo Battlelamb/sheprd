@@ -364,6 +364,7 @@ fn sheet(row: &ChatRow, transcript: &Transcript) -> Markup {
                     Some(prompt) => {
                         small class="uppercase tracking-wider font-bold text-amber" { (prompt.guest.label()) " asks to send" }
                         div class="text-[15px] whitespace-pre-wrap" data-guest-ask
+                            data-keep-scroll={ "guest-" (permission.id.0) }
                             style="max-height:45vh;overflow-y:auto;overflow-wrap:anywhere" { (prompt.text) }
                     }
                     None => {

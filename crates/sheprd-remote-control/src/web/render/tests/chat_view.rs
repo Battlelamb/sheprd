@@ -83,6 +83,8 @@ fn a_guest_prompt_shows_whole_in_a_sheet_that_scrolls() {
     assert!(!sheet.contains("claude asks"));
     let ask = &sheet[sheet.find("data-guest-ask").unwrap()..];
     assert!(ask.contains("overflow-y:auto"));
+    // app.js keeps where it was read to across live redraws.
+    assert!(ask.contains(r#"data-keep-scroll="guest-7""#));
     assert!(ask.contains("whitespace-pre-wrap") || sheet.contains("whitespace-pre-wrap"));
     assert_eq!(ask.matches("line one").count(), 2_000, "every word shows");
 }

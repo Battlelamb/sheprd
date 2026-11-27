@@ -68,7 +68,10 @@ fn a_guest_prompt_waits_for_the_person_and_goes_named_once_allowed() {
     let asked = waiting.guest.as_ref().unwrap();
     assert_eq!(asked.guest, bob());
     assert_eq!(asked.text, "can you add a test?");
-    assert!(waiting.title.starts_with("Bob via tma asks to send: "));
+    assert_eq!(
+        waiting.title,
+        "Bob via tma asks to send:\ncan you add a test?"
+    );
 
     answer(&mut harness, GUEST_ALLOW);
     assert!(harness.transcript().permissions.is_empty());
@@ -193,6 +196,18 @@ fn bad_guest_prompts_are_refused_at_once() {
         assert_eq!(acks(&relay, id), [Some(rejection)]);
     }
     assert!(harness.transcript().permissions.is_empty());
+}
+
+#[test]
+fn a_long_guest_prompt_is_titled_in_full_for_clients_before_guests() {
+    let mut harness = ready();
+    let text = "word ".repeat(2000);
+    harness.command(RELAY, guest_prompt(&text));
+    let title = &harness.transcript().permissions[0].title;
+    assert!(
+        title.ends_with(&text),
+        "every word an older client allows is shown"
+    );
 }
 
 #[test]

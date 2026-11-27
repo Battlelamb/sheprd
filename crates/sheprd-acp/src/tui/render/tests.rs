@@ -8,6 +8,8 @@ use sheprd_chat_protocol::{
 
 use super::*;
 
+mod guests;
+
 fn screen(view: &mut View, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     terminal.draw(|frame| draw(frame, view, 0)).unwrap();

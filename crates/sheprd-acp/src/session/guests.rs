@@ -18,10 +18,6 @@ use sheprd_chat_protocol::{
 
 use crate::session::{ConnId, Session, Update};
 
-/// The most characters of a guest's prompt the request's title quotes;
-/// clients that know guests show the whole prompt from its `guest` field.
-const TITLE_EXCERPT: usize = 280;
-
 #[derive(Debug, Default)]
 pub(super) struct Guests {
     /// Connections that relayed a guest prompt.
@@ -192,13 +188,8 @@ impl<R: FnMut(Update)> Session<R> {
     }
 }
 
-/// What a client that predates guests shows: who asks, and the start of
-/// what they wrote.
+/// The request's title: who asks, then every word they would send, so a
+/// client that predates guests shows all that its person allows.
 fn title(prompt: &GuestPrompt) -> String {
-    let text = prompt.text.trim();
-    let mut excerpt: String = text.chars().take(TITLE_EXCERPT).collect();
-    if excerpt.len() < text.len() {
-        excerpt.push('…');
-    }
-    format!("{} asks to send: {excerpt}", prompt.guest.label())
+    format!("{} asks to send:\n{}", prompt.guest.label(), prompt.text)
 }

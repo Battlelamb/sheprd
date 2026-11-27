@@ -138,22 +138,15 @@ final class AgentControl {
             settingsPath = page.path
             showTab(.settings, model: model)
         case .newWorkspace: model.creating = .workspace(device: device)
-        case let .chat(pane):
+        case .chat, .term, .changes:
             // A terminal agent this phone does not show as a chat opens
             // in its terminal.
-            guard let route = Self.chat(pane, on: device, fleet: model.fleet) ?? Self.term(pane, on: device, fleet: model.fleet)
-            else { return false }
-            model.pendingRoute = route
-        case let .term(pane):
-            guard let route = Self.term(pane, on: device, fleet: model.fleet) else { return false }
+            guard let route = Self.route(for: screen, on: device, fleet: model.fleet) else { return false }
             model.pendingRoute = route
         case let .workspace(workspace):
             guard Self.lists(workspace, on: device, fleet: model.fleet) else { return false }
             model.pendingTab = .home
             model.pendingWorkspace = WorkspaceKey(device: device, workspace: workspace)
-        case let .changes(workspace):
-            guard Self.lists(workspace, on: device, fleet: model.fleet) else { return false }
-            model.pendingRoute = .changes(WorkspaceKey(device: device, workspace: workspace))
         }
         return true
     }
@@ -164,22 +157,44 @@ final class AgentControl {
         showTab(.settings, model: model)
     }
 
+    /// The chat, terminal, workspace, or changes `screen` names on
+    /// `device`, as a stack shows it; `nil` for a tab or form, or when the
+    /// computer lists no such pane or workspace.
+    static func route(for screen: AgentScreen, on device: String, fleet: Fleet) -> Route? {
+        switch screen {
+        case let .chat(pane): chat(pane, on: device, fleet: fleet) ?? term(pane, on: device, fleet: fleet)
+        case let .term(pane): term(pane, on: device, fleet: fleet)
+        case let .workspace(workspace):
+            lists(workspace, on: device, fleet: fleet) ? .workspace(WorkspaceKey(device: device, workspace: workspace)) : nil
+        case let .changes(workspace):
+            lists(workspace, on: device, fleet: fleet) ? .changes(WorkspaceKey(device: device, workspace: workspace)) : nil
+        case .home, .workspaces, .pullRequests, .settings, .settingsPage, .newWorkspace: nil
+        }
+    }
+
     /// A chat's route, or a terminal agent's conversation when its
     /// computer shows it as a chat, as a link to it opens (`AppModel.open`).
+    /// `pane` may be a herdr-core terminal as the desktop names it
+    /// (`ScreenLink.pane(_:isNamed:)`).
     private static func chat(_ pane: String, on device: String, fleet: Fleet) -> Route? {
-        if let item = fleet.chatItems.first(where: { $0.computer.device == device && $0.chat.pane == pane }) {
-            return .chat(PaneKey(device: device, pane: pane), title: item.chat.title)
+        if let item = fleet.chatItems.first(where: { $0.computer.device == device && ScreenLink.pane($0.chat.pane, isNamed: pane) }) {
+            return .chat(PaneKey(device: device, pane: item.chat.pane), title: item.chat.title)
         }
-        let terminal = fleet.terminalItems.first { $0.computer.device == device && $0.agent?.pane == pane }
+        let terminal = fleet.terminalItems.first { item in
+            item.computer.device == device && item.agent?.pane.map { ScreenLink.pane($0, isNamed: pane) } == true
+        }
         if case let .chat(key, title)? = terminal?.route { return .chat(key, title: title) }
         return nil
     }
 
     /// The route of the terminal holding `pane`.
     private static func term(_ pane: String, on device: String, fleet: Fleet) -> Route? {
-        guard let terminal = fleet.terminalItems.first(where: { $0.computer.device == device && $0.terminal.panes.contains { $0.pane == pane } })
-        else { return nil }
-        return .term(PaneKey(device: device, pane: pane), title: terminal.terminal.label)
+        for item in fleet.terminalItems where item.computer.device == device {
+            if let listed = item.terminal.panes.first(where: { ScreenLink.pane($0.pane, isNamed: pane) }) {
+                return .term(PaneKey(device: device, pane: listed.pane), title: item.terminal.label)
+            }
+        }
+        return nil
     }
 
     /// Shows `tab` at its root: an agent asking for a tab means the tab,

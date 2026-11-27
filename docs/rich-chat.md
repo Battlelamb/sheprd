@@ -729,7 +729,11 @@ tab, or agent the agent just made with a tap or a click: `sheprd://workspace/WOR
 agent has no chat), or `sheprd://term/PANE`, with Herdr's ids
 (`ScreenLink.swift`). A link names no computer: the chat showing it opens it
 on that chat's computer, so one computer's text never reaches another's
-screens. It only shows a screen, as `sheprd phone open` does, without the
+screens. A Herdr 2 pane goes by the id the desktop and `sheprd chat
+list` give it, `core:t7`; the phone matches it to its own `core:TAG-HEX`
+(`ScreenLink.pane(_:isNamed:)`), and the desktop opens its herdr-core tab.
+On an iPad, a link in a chat shown in a window of its own pushes onto that
+window's stack. It only shows a screen, as `sheprd phone open` does, without the
 banner or **Let agents open screens**, since the person tapped it. Every
 other non-web link in agent text stays plain text. `phone-app.md` and
 `desktop.md` tell the agent to write these links; the phone web app and

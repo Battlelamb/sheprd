@@ -28,4 +28,22 @@ public enum ScreenLink {
         default: return nil
         }
     }
+
+    /// Whether `listed`, a pane id as the phone lists it, is the pane
+    /// `named` that an agent wrote: the same id, or, for a herdr-core
+    /// terminal the desktop and `sheprd chat list` call `core:ADDRESS`, the
+    /// phone's `core:TAG-HEX`, its boot's tag then the address's bytes in
+    /// hex (`control::favorites::core_pane`).
+    public static func pane(_ listed: String, isNamed named: String) -> Bool {
+        if listed == named { return true }
+        let prefix = "core:"
+        guard named.hasPrefix(prefix), listed.hasPrefix(prefix) else { return false }
+        let address = named.dropFirst(prefix.count)
+        guard !address.isEmpty, !address.contains("-") else { return false }
+        let hex = address.utf8.map { String(format: "%02x", $0) }.joined()
+        let rest = listed.dropFirst(prefix.count)
+        guard let dash = rest.firstIndex(of: "-") else { return false }
+        let tag = rest[..<dash]
+        return tag.count == 8 && tag.allSatisfy(\.isHexDigit) && rest[rest.index(after: dash)...] == hex[...]
+    }
 }

@@ -30,4 +30,15 @@ struct ScreenLinkTests {
             #expect(try screen(text) == nil, "\(text)")
         }
     }
+
+    @Test func namesACoreTerminalAsTheDesktopDoes() {
+        // `t7` is 74 37 in hex; 0a1b2c3d is the boot's tag.
+        #expect(ScreenLink.pane("core:0a1b2c3d-7437", isNamed: "core:t7"))
+        #expect(ScreenLink.pane("core:0a1b2c3d-7437", isNamed: "core:0a1b2c3d-7437"))
+        #expect(ScreenLink.pane("wF9:p1", isNamed: "wF9:p1"))
+        #expect(!ScreenLink.pane("core:0a1b2c3d-7438", isNamed: "core:t7"))
+        #expect(!ScreenLink.pane("core:0a1b2c3d-7437", isNamed: "core:"))
+        #expect(!ScreenLink.pane("core:zz-7437", isNamed: "core:t7"))
+        #expect(!ScreenLink.pane("wF9:7437", isNamed: "core:t7"))
+    }
 }

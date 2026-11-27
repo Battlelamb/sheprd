@@ -79,6 +79,43 @@ impl SheprdWindow {
         self.show_core_pane(tab, &terminal, window, cx);
     }
 
+    /// Shows the tab of this computer's core holding `terminal`, in its
+    /// workspace, as a `sheprd://chat/core:t7` link in a chat asks. False
+    /// when no local tab holds it.
+    pub(crate) fn show_local_core_terminal(
+        &mut self,
+        terminal: &TerminalId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(index) = self.core_host() else {
+            return false;
+        };
+        let Some((tab, workspace)) = cx.try_global::<Store>().and_then(|store| {
+            store.tabs().find_map(|tab| match &tab.location {
+                Some(Location::CoreTerminal { panes, .. })
+                    if tab.scope.is_local() && panes.terminals().contains(&terminal) =>
+                {
+                    Some((tab.id, tab.workspace_id.clone()))
+                }
+                _ => None,
+            })
+        }) else {
+            return false;
+        };
+        let endpoint = self.endpoints[index].id.clone();
+        self.navigate_endpoint(
+            &endpoint,
+            crate::NavigationTarget::Workspace(&workspace),
+            cx,
+        );
+        if !self.core_terminals.tabs.contains_key(&tab) {
+            self.sync_core_views(cx);
+        }
+        self.show_core_pane(tab, terminal, window, cx);
+        true
+    }
+
     /// Shows `tab` with `terminal` as its pane in use, unzoomed if another
     /// pane filled it, and gives that pane the keyboard.
     pub(crate) fn show_core_pane(

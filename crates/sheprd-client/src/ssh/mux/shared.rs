@@ -277,12 +277,21 @@ impl Registry {
         }
     }
 
-    /// Whether `target`'s `lane` commands ride a master of the user's own,
-    /// as the last attempt to start one of this process's found.
+    /// Whether `target`'s `lane` commands ride a master of the user's own:
+    /// the last attempt to start one of this process's found one, and it
+    /// still answers. One that has since closed is forgotten, so a command
+    /// counting on it never opens a login of its own instead. Asks `ssh`,
+    /// locally: call it off the UI thread.
     pub(crate) fn rides_user_master(&self, target: &str, lane: Lane) -> bool {
-        self.lock()
-            .get(&(target.to_owned(), lane))
-            .is_some_and(|host| host.user_master)
+        let key = (target.to_owned(), lane);
+        let found = self.lock().get(&key).is_some_and(|host| host.user_master);
+        if !found || user_master_alive(&self.program, target) {
+            return found;
+        }
+        if let Some(host) = self.lock().get_mut(&key) {
+            host.user_master = false;
+        }
+        false
     }
 
     /// See `super::bridge_connecting`.
@@ -437,15 +446,21 @@ fn backoff(failures: u32) -> Duration {
 /// How long asking for the user's own master may take; it is local.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Whether a master of the user's own (their `ControlPath`) serves
+/// `target` now. The question is local: `ssh -O check` asks the socket.
+fn user_master_alive(program: &OsString, target: &str) -> bool {
+    let mut check = crate::environment::command(&program.to_string_lossy());
+    check.args(["-O", "check", "--", target]);
+    let checked = crate::ssh::run(&mut check, CHECK_TIMEOUT, || false);
+    matches!(checked, Ok((status, _)) if status.success())
+}
+
 /// Starts a master and waits until it has authenticated, which is when it
 /// creates its control socket. A host with a live master from the user's own
 /// config gets none: commands connecting directly ride that one, which may
 /// have been authenticated interactively where this master cannot be.
 fn launch(program: &OsString, target: &str, lane: Lane, id: u64) -> Result<Master, StartError> {
-    let mut check = crate::environment::command(&program.to_string_lossy());
-    check.args(["-O", "check", "--", target]);
-    let checked = crate::ssh::run(&mut check, CHECK_TIMEOUT, || false);
-    if matches!(checked, Ok((status, _)) if status.success()) {
+    if user_master_alive(program, target) {
         return Err(StartError::UserMaster);
     }
     let dir = ControlDir::create("herdr-mux").map_err(StartError::Directory)?;

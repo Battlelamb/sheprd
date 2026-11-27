@@ -115,9 +115,17 @@ fn streams_open_a_second_master_when_the_first_is_full() {
 
 #[test]
 fn a_users_own_master_is_remembered_for_the_host() {
-    let (registry, fixture) = fake_with("user-master", "exit 0", READY, IDLE);
+    let (registry, fixture) = fake_with("remembered-master", "exit 0", READY, IDLE);
     assert!(open(&registry, Lane::Stream).is_none());
     assert!(registry.rides_user_master("devbox", Lane::Stream));
+    // The user's master closes: it is forgotten, not counted on.
+    let check = fixture.dir.join("ssh");
+    let script = fs::read_to_string(&check)
+        .unwrap()
+        .replace("-O) exit 0;;", "-O) exit 255;;");
+    crate::test_executable::write(&check, script, 0o700).unwrap();
+    assert!(!registry.rides_user_master("devbox", Lane::Stream));
+    assert!(!registry.rides_user_master("devbox", Lane::Stream));
     // No master of this process's was started for it.
     assert_eq!(fixture.starts(), 0);
     let (registry, _fixture) = fake("own-master", READY);

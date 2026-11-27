@@ -87,6 +87,9 @@ struct Host {
     phase: Phase,
     /// Failed starts in a row, which lengthen the backoff.
     failures: u32,
+    /// The last start found a master of the user's own, which commands
+    /// connecting directly ride without another login.
+    user_master: bool,
     /// Bumped when the host's masters are retired, so a master that was
     /// starting at the time is not handed out once it is ready.
     generation: u64,
@@ -274,6 +277,14 @@ impl Registry {
         }
     }
 
+    /// Whether `target`'s `lane` commands ride a master of the user's own,
+    /// as the last attempt to start one of this process's found.
+    pub(crate) fn rides_user_master(&self, target: &str, lane: Lane) -> bool {
+        self.lock()
+            .get(&(target.to_owned(), lane))
+            .is_some_and(|host| host.user_master)
+    }
+
     /// See `super::bridge_connecting`.
     pub(crate) fn bridge_connecting(&self, target: &str, session: &str) {
         let first = self
@@ -326,6 +337,7 @@ impl Registry {
                         host.masters.push(master);
                         host.phase = Phase::Free;
                         host.failures = 0;
+                        host.user_master = false;
                         registry.watch_idle();
                     }
                     Err(error) => {
@@ -337,7 +349,8 @@ impl Registry {
                         );
                         // The user's own master is no failed login: look
                         // again at the base interval.
-                        if !matches!(error, StartError::UserMaster) {
+                        host.user_master = matches!(error, StartError::UserMaster);
+                        if !host.user_master {
                             host.failures = host.failures.saturating_add(1);
                         }
                         host.phase = Phase::Direct {

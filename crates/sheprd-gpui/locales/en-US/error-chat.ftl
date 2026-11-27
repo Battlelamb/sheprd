@@ -14,6 +14,7 @@ error-chat-environment-size = [chat.env] holds more than { $count } variables or
 error-chat-handshake = the chat program did not greet first
 error-chat-mirror-config = [chat.mirrors] needs at most 16 valid pane and endpoint identifiers
 error-chat-no-endpoint-dir = no private directory holds chat sockets
+error-chat-no-shared-login = waiting for a shared connection to the host
 error-chat-not-attached = the chat view is not attached
 error-chat-overflow = the chat view fell behind the program
 error-chat-read = could not read from the chat program

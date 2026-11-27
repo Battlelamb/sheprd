@@ -1,0 +1,89 @@
+import SheprdRemoteCore
+import XCTest
+
+final class AgentInteractionTests: XCTestCase {
+    func testParsesUrgentYubiKeyAndCue() {
+        let text = """
+        Rebased cleanly.
+        :::urgent Tap your YubiKey
+        preset: yubikey
+        Waiting on git push origin main
+        :::
+        ::cue yubikey
+        """
+        let msg = AgentMessage.parse(text)
+        XCTAssertEqual(msg.interactions.count, 1)
+        let first = msg.interactions[0]
+        XCTAssertEqual(first.directive, .urgent)
+        XCTAssertEqual(first.scope, .all)
+        XCTAssertEqual(first.title, "Tap your YubiKey")
+        XCTAssertEqual(first.body, "Waiting on git push origin main")
+        XCTAssertEqual(first.cue, .yubikey)
+        XCTAssertEqual(msg.cues, [.yubikey])
+    }
+
+    func testParsesSecretVaultAndRunbookAndProgress() {
+        let text = """
+        :::secret Provide STRIPE_TEST_KEY
+        key: STRIPE_TEST_KEY
+        dest: env-file:.env.test.local
+        Needed to run webhook tests.
+        :::
+
+        :::runbook Ship v0.18.0
+        - [x] agent: Run just ci
+        - [ ] you: Tap YubiKey
+        :::
+
+        :::progress Running 412 tests
+        percent: 68%
+        step: chat::effects
+        :::
+        """
+        let msg = AgentMessage.parse(text)
+        XCTAssertEqual(msg.interactions.count, 3)
+
+        if case let .secret(key, dest, saveKeychain) = msg.interactions[0].payload {
+            XCTAssertEqual(key, "STRIPE_TEST_KEY")
+            XCTAssertEqual(dest, "env-file:.env.test.local")
+            XCTAssertTrue(saveKeychain)
+        } else {
+            XCTFail("expected secret payload")
+        }
+
+        if case let .runbook(steps) = msg.interactions[1].payload {
+            XCTAssertEqual(steps.count, 2)
+            XCTAssertEqual(steps[0], RunbookStep(label: "Run just ci", human: false, done: true))
+            XCTAssertEqual(steps[1], RunbookStep(label: "Tap YubiKey", human: true, done: false))
+        } else {
+            XCTFail("expected runbook payload")
+        }
+
+        if case let .progress(percent, step, done) = msg.interactions[2].payload {
+            XCTAssertEqual(percent, 68)
+            XCTAssertEqual(step, "chat::effects")
+            XCTAssertFalse(done)
+        } else {
+            XCTFail("expected progress payload")
+        }
+    }
+
+    func testIgnoresDirectivesInsideCodeFencesAndStripsRowLine() {
+        let fenced = "```md\n:::urgent Not real\n:::\n::cue yubikey\n```"
+        let msg = AgentMessage.parse(fenced)
+        XCTAssertTrue(msg.interactions.isEmpty)
+        XCTAssertTrue(msg.cues.isEmpty)
+
+        XCTAssertEqual(
+            AgentMessage.rowLine(":::urgent Tap your YubiKey :::"),
+            "Tap your YubiKey"
+        )
+    }
+
+    func testEveryInteractionCueHasAudioAndHaptics() {
+        for cue in InteractionCue.allCases {
+            XCTAssertFalse(cue.cue.sound.voices.isEmpty, "\(cue)")
+            XCTAssertFalse(cue.cue.taps.isEmpty, "\(cue)")
+        }
+    }
+}

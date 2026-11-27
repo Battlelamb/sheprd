@@ -104,3 +104,86 @@ public enum PullRequestReactionError: Error, Equatable, Sendable, LocalizedError
         }
     }
 }
+
+/// Coordinates optimistic PR description reaction toggles against periodic
+/// refreshes and concurrent mutations so older answers never overwrite newer
+/// reaction state.
+public struct PullRequestReactionTracker: Equatable, Sendable {
+    private var inFlight: [PullRequestDetail.ReactionContent: Int] = [:]
+    /// Monotonic counter bumped whenever a toggle starts, finishes, or resets.
+    private var version = 0
+
+    public init() {}
+
+    /// Reactions currently being written to GitHub.
+    public var pending: Set<PullRequestDetail.ReactionContent> {
+        Set(inFlight.keys)
+    }
+
+    /// Snapshot captured when a detail refresh starts.
+    public struct RefreshToken: Equatable, Sendable {
+        fileprivate let version: Int
+        fileprivate let startedIdle: Bool
+    }
+
+    /// Token identifying one in-flight toggle, so a stale task finishing after
+    /// a reset cannot clear a newer toggle for the same emoji.
+    public struct ToggleToken: Equatable, Sendable {
+        public let content: PullRequestDetail.ReactionContent
+        fileprivate let id: Int
+    }
+
+    /// Captures the current reaction version before starting a refresh.
+    public func beginRefresh() -> RefreshToken {
+        RefreshToken(version: version, startedIdle: inFlight.isEmpty)
+    }
+
+    /// Whether a refresh started with `token` is still fresh enough to replace
+    /// the displayed reactions: no write was in flight when it started, none
+    /// ran while it was in flight, and none is in flight now.
+    public func acceptsRefresh(_ token: RefreshToken) -> Bool {
+        token.startedIdle && token.version == version && inFlight.isEmpty
+    }
+
+    /// Begins an optimistic toggle for `content`; nil if one is already in flight.
+    public mutating func beginToggle(_ content: PullRequestDetail.ReactionContent) -> ToggleToken? {
+        guard inFlight[content] == nil else { return nil }
+        version += 1
+        inFlight[content] = version
+        return ToggleToken(content: content, id: version)
+    }
+
+    /// Ends the toggle identified by `token`, ignoring stale tokens from before a reset.
+    public mutating func finishToggle(_ token: ToggleToken) {
+        guard inFlight[token.content] == token.id else { return }
+        inFlight.removeValue(forKey: token.content)
+        version += 1
+    }
+
+    /// Drops all in-flight tracking (for example after sign-out or viewer switch).
+    public mutating func reset() {
+        inFlight.removeAll()
+        version += 1
+    }
+
+    /// Merges the authoritative server result for `content` into `current`
+    /// without overwriting any other reaction, so out-of-order concurrent
+    /// writes for different emojis never clobber one another.
+    public static func apply(
+        _ serverGroups: [PullRequestDetail.ReactionGroup],
+        for content: PullRequestDetail.ReactionContent,
+        into current: [PullRequestDetail.ReactionGroup]
+    ) -> [PullRequestDetail.ReactionGroup] {
+        var merged = current
+        if let updated = serverGroups.first(where: { $0.content == content }) {
+            if let index = merged.firstIndex(where: { $0.content == content }) {
+                merged[index] = updated
+            } else {
+                merged.append(updated)
+            }
+        } else {
+            merged.removeAll { $0.content == content }
+        }
+        return merged
+    }
+}

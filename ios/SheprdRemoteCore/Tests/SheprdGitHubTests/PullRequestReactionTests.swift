@@ -107,9 +107,9 @@ struct PullRequestReactionTests {
         #expect(limited == .failure(.rateLimited))
     }
 
-    @Test func ownSignInFallsBackToLentTokenWhenForbidden() async throws {
+    @Test func ownSignInFallsBackToLentTokenWhenSameLoginAndForbidden() async throws {
         let signInStore = GitHubSignInStore(vault: .memory())
-        try signInStore.save(SignInFixtures.credential())
+        try signInStore.save(SignInFixtures.credential(login: "ana"))
         let signIn = GitHubSignIn(
             flow: GitHubDeviceFlow(transport: FakeTransport().transport, now: { GitHubFixtures.start }),
             store: signInStore
@@ -122,8 +122,121 @@ struct PullRequestReactionTests {
         transport.enqueue(try reactionResponse(add: true, groups: [
             ["content": "HOORAY", "viewerHasReacted": true, "reactors": ["totalCount": 1]],
         ]))
-        let result = await reader(signIn: signIn).setReaction(.hooray, add: true, on: "PR_kwDO42", host: GitHubFixtures.host, source: source)
+        let result = await reader(signIn: signIn).setReaction(
+            .hooray, add: true, on: "PR_kwDO42", host: GitHubFixtures.host, asLogin: "ANA", source: source
+        )
         #expect(result == .success([.init(content: .hooray, count: 1, viewerHasReacted: true)]))
         #expect(transport.requests.map { $0.value(forHTTPHeaderField: "Authorization") } == ["Bearer ghu_a1", "Bearer lent-token"])
+    }
+
+    @Test func fallbackRefusesDifferentAccountLogin() async throws {
+        let signInStore = GitHubSignInStore(vault: .memory())
+        try signInStore.save(SignInFixtures.credential(login: "ana"))
+        let signIn = GitHubSignIn(
+            flow: GitHubDeviceFlow(transport: FakeTransport().transport, now: { GitHubFixtures.start }),
+            store: signInStore
+        )
+        let bobLease = LeaseFetch.lease(LeaseAnswer(
+            host: "github.com", login: "bob", token: GitHubToken("bob-token"), source: .gh
+        ))
+        lenders.answer("mac", bobLease)
+        transport.enqueue(GitHubResponse(
+            status: 200,
+            body: Data(#"{"data":{"removeReaction":null},"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}]}"#.utf8)
+        ))
+        let result = await reader(signIn: signIn).setReaction(
+            .thumbsUp, add: false, on: "PR_kwDO42", host: GitHubFixtures.host, asLogin: "ana", source: source
+        )
+        #expect(result == .failure(.forbidden))
+        #expect(transport.requests.map { $0.value(forHTTPHeaderField: "Authorization") } == ["Bearer ghu_a1"])
+    }
+
+    @Test func actionBoundToLentAccountSkipsDifferentOwnSignIn() async throws {
+        let signInStore = GitHubSignInStore(vault: .memory())
+        try signInStore.save(SignInFixtures.credential(login: "ana"))
+        let signIn = GitHubSignIn(
+            flow: GitHubDeviceFlow(transport: FakeTransport().transport, now: { GitHubFixtures.start }),
+            store: signInStore
+        )
+        let bobLease = LeaseFetch.lease(LeaseAnswer(
+            host: "github.com", login: "bob", token: GitHubToken("bob-token"), source: .gh
+        ))
+        lenders.answer("mac", bobLease)
+        // detail() fails as ana (404), succeeds as bob -> viewerLogin == "bob".
+        transport.enqueue(GitHubResponse(status: 404))
+        transport.enqueue(try GitHubFixtures.response("pr_detail"))
+        transport.enqueue(try PullRequestFilesTests.page(1))
+        let target = PullRequestTarget(host: GitHubFixtures.host, owner: "acme", repo: "app", number: 42)
+        let r = reader(signIn: signIn)
+        let read = try #require(await r.detail(target, source: source))
+        #expect(read.viewerLogin == "bob")
+
+        transport.enqueue(try reactionResponse(add: false, groups: [
+            ["content": "THUMBS_UP", "viewerHasReacted": false, "reactors": ["totalCount": 2]],
+        ]))
+        let toggled = await r.setReaction(
+            .thumbsUp, add: false, on: read.detail.id, host: GitHubFixtures.host,
+            asLogin: read.viewerLogin, source: source
+        )
+        #expect(toggled == .success([.init(content: .thumbsUp, count: 2, viewerHasReacted: false)]))
+        // The mutation went directly to bob's token without touching ana's account.
+        #expect(transport.requests.last?.value(forHTTPHeaderField: "Authorization") == "Bearer bob-token")
+    }
+
+    @Test func trackerRejectsStaleRefreshesAndPreservesConcurrentWrites() throws {
+        var tracker = PullRequestReactionTracker()
+        // Case 1: Refresh starts before a toggle, and finishes after the toggle already completed.
+        let refreshBeforeToggle = tracker.beginRefresh()
+        let first = tracker.beginToggle(.thumbsUp)
+        let toggle1 = try #require(first)
+        let duplicate = tracker.beginToggle(.thumbsUp)
+        #expect(duplicate == nil)
+        tracker.finishToggle(toggle1)
+        #expect(tracker.pending.isEmpty)
+        #expect(!tracker.acceptsRefresh(refreshBeforeToggle))
+
+        // Case 2: Refresh starts while a toggle is in flight, and finishes after it completes.
+        let second = tracker.beginToggle(.rocket)
+        let toggle2 = try #require(second)
+        let refreshDuringToggle = tracker.beginRefresh()
+        tracker.finishToggle(toggle2)
+        #expect(!tracker.acceptsRefresh(refreshDuringToggle))
+
+        // Case 3: Refresh starts after all writes settled -> accepted.
+        let freshRefresh = tracker.beginRefresh()
+        #expect(tracker.acceptsRefresh(freshRefresh))
+
+        // Case 4: Out-of-order concurrent writes for thumbsUp and rocket never overwrite each other.
+        var shown: [PullRequestDetail.ReactionGroup] = [
+            .init(content: .thumbsUp, count: 1, viewerHasReacted: true),
+            .init(content: .rocket, count: 1, viewerHasReacted: true),
+        ]
+        // Rocket finishes first with server snapshot lacking thumbsUp.
+        shown = PullRequestReactionTracker.apply(
+            [.init(content: .rocket, count: 2, viewerHasReacted: true)],
+            for: .rocket,
+            into: shown
+        )
+        // ThumbsUp finishes second with server snapshot lacking rocket.
+        shown = PullRequestReactionTracker.apply(
+            [.init(content: .thumbsUp, count: 3, viewerHasReacted: true)],
+            for: .thumbsUp,
+            into: shown
+        )
+        #expect(shown == [
+            .init(content: .thumbsUp, count: 3, viewerHasReacted: true),
+            .init(content: .rocket, count: 2, viewerHasReacted: true),
+        ])
+
+        // Case 5: Stale toggle finishing after reset does not clear a newer toggle.
+        let third = tracker.beginToggle(.heart)
+        let staleToggle = try #require(third)
+        tracker.reset()
+        let fourth = tracker.beginToggle(.heart)
+        let freshToggle = try #require(fourth)
+        tracker.finishToggle(staleToggle)
+        #expect(tracker.pending == [.heart])
+        tracker.finishToggle(freshToggle)
+        #expect(tracker.pending.isEmpty)
     }
 }

@@ -20,8 +20,9 @@ struct PullRequestDetailScreen: View {
     /// that account, and is not shown.
     @State private var held: (reading: PullRequestReading, signOuts: Int)?
     @State private var tried = false
-    /// Reactions currently being added or removed on the PR description.
-    @State private var pendingReactions: Set<PullRequestDetail.ReactionContent> = []
+    /// Tracks reaction versions and in-flight toggles so stale refreshes and
+    /// out-of-order writes cannot overwrite newer reaction state.
+    @State private var reactions = PullRequestReactionTracker()
     @State private var reactionError: String?
 
     /// How often the screen reads again while it stays in front.
@@ -46,7 +47,7 @@ struct PullRequestDetailScreen: View {
             if let detail = reading?.detail {
                 PullRequestConversation(
                     detail: detail,
-                    pendingReactions: pendingReactions,
+                    pendingReactions: reactions.pending,
                     reactionError: reactionError,
                     onToggleReaction: toggleReaction
                 )
@@ -84,7 +85,7 @@ struct PullRequestDetailScreen: View {
             if let held, held.signOuts != GitHubDirect.shared.signOuts {
                 self.held = nil
                 tried = false
-                pendingReactions = []
+                reactions.reset()
                 reactionError = nil
             }
             guard phase == .active else { return }
@@ -105,13 +106,14 @@ struct PullRequestDetailScreen: View {
 
     private func load() async {
         let signOuts = GitHubDirect.shared.signOuts
+        let refreshToken = reactions.beginRefresh()
         guard let target else {
             tried = true
             return
         }
         #if DEBUG
         if let demo = await PullRequestDemo.reading(target) {
-            held = (demo, signOuts)
+            applyRefresh(demo, token: refreshToken, signOuts: signOuts)
             tried = true
             return
         }
@@ -121,80 +123,83 @@ struct PullRequestDetailScreen: View {
         guard !Task.isCancelled, signOuts == GitHubDirect.shared.signOuts else { return }
         // A failed refresh keeps what was read before, unless that was read
         // before a sign-out.
-        if var read {
-            // Keep optimistic reactions while a toggle is still in flight.
-            if !pendingReactions.isEmpty, let existing = held, existing.signOuts == signOuts {
-                read.detail.reactions = existing.reading.detail.reactions
-            }
-            held = (read, signOuts)
+        if let read {
+            applyRefresh(read, token: refreshToken, signOuts: signOuts)
         } else if let held, held.signOuts != signOuts {
             self.held = nil
+            reactions.reset()
         }
         tried = true
     }
 
-    private func toggleReaction(_ content: PullRequestDetail.ReactionContent) {
-        guard let target, let current = reading, current.detail.canReact, !pendingReactions.contains(content) else {
-            return
+    private func applyRefresh(
+        _ read: PullRequestReading,
+        token: PullRequestReactionTracker.RefreshToken,
+        signOuts: Int
+    ) {
+        var next = read
+        if let existing = held, existing.signOuts == signOuts {
+            if !existing.reading.sameViewer(as: read) {
+                reactions.reset()
+                reactionError = nil
+            } else if !reactions.acceptsRefresh(token) {
+                next.detail.reactions = existing.reading.detail.reactions
+            }
         }
+        held = (next, signOuts)
+    }
+
+    private func toggleReaction(_ content: PullRequestDetail.ReactionContent) {
+        guard let target, let current = reading, current.detail.canReact,
+              let toggle = reactions.beginToggle(content)
+        else { return }
         let add = !(current.detail.reactions.first { $0.content == content }?.viewerHasReacted ?? false)
         let subjectId = current.detail.id
         let signOuts = GitHubDirect.shared.signOuts
-        pendingReactions.insert(content)
         reactionError = nil
         if var latest = held, latest.signOuts == signOuts {
             latest.reading.detail = latest.reading.detail.togglingReaction(content)
             held = latest
         }
         Task {
-            defer { pendingReactions.remove(content) }
+            defer { reactions.finishToggle(toggle) }
             #if DEBUG
             if let demo = PullRequestDemo.toggledReactions(current.detail, content: content, target: target) {
                 guard signOuts == GitHubDirect.shared.signOuts else { return }
-                applyReactions(demo, for: content, signOuts: signOuts)
+                applyReaction(demo, for: content, viewer: current, signOuts: signOuts)
                 return
             }
             #endif
             let result = await GitHubReads.reader.setReaction(
-                content, add: add, on: subjectId, host: target.host, source: model.fleet.gitHubLenders
+                content, add: add, on: subjectId, host: target.host,
+                asLogin: current.viewerLogin, source: model.fleet.gitHubLenders
             )
             guard signOuts == GitHubDirect.shared.signOuts else { return }
             switch result {
             case let .success(groups):
-                applyReactions(groups, for: content, signOuts: signOuts)
+                applyReaction(groups, for: content, viewer: current, signOuts: signOuts)
             case let .failure(error):
-                if var latest = held, latest.signOuts == signOuts {
+                if var latest = held, latest.signOuts == signOuts, latest.reading.sameViewer(as: current) {
                     latest.reading.detail = latest.reading.detail.togglingReaction(content)
                     held = latest
+                    reactionError = error.localizedDescription
                 }
-                reactionError = error.localizedDescription
             }
         }
     }
 
-    /// Applies GitHub's authoritative reaction groups, preserving any other
-    /// reaction that is still in flight.
-    private func applyReactions(
+    /// Merges GitHub's authoritative reaction group for `content` alone so
+    /// out-of-order concurrent writes for other emojis cannot overwrite each other.
+    private func applyReaction(
         _ groups: [PullRequestDetail.ReactionGroup],
         for content: PullRequestDetail.ReactionContent,
+        viewer: PullRequestReading,
         signOuts: Int
     ) {
-        guard var latest = held, latest.signOuts == signOuts else { return }
-        if pendingReactions.subtracting([content]).isEmpty {
-            latest.reading.detail.reactions = groups
-        } else {
-            var merged = latest.reading.detail.reactions
-            if let authoritative = groups.first(where: { $0.content == content }) {
-                if let index = merged.firstIndex(where: { $0.content == content }) {
-                    merged[index] = authoritative
-                } else {
-                    merged.append(authoritative)
-                }
-            } else {
-                merged.removeAll { $0.content == content }
-            }
-            latest.reading.detail.reactions = merged
-        }
+        guard var latest = held, latest.signOuts == signOuts, latest.reading.sameViewer(as: viewer) else { return }
+        latest.reading.detail.reactions = PullRequestReactionTracker.apply(
+            groups, for: content, into: latest.reading.detail.reactions
+        )
         held = latest
     }
 

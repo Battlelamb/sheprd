@@ -91,13 +91,22 @@ pub(crate) fn parse_destination(raw: &str) -> Result<Destination, Error> {
         if rel.is_empty() || rel.contains('\0') {
             return Err(Error::InvalidDestination);
         }
+        if rel.starts_with('/') || rel.starts_with('\\') {
+            return Err(Error::PathEscapesRoot);
+        }
         let path = PathBuf::from(rel);
         if path.is_absolute()
-            || path
-                .components()
-                .any(|c| matches!(c, Component::ParentDir | Component::Prefix(_)))
+            || path.components().any(|c| {
+                matches!(
+                    c,
+                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                )
+            })
         {
             return Err(Error::PathEscapesRoot);
+        }
+        if !path.components().any(|c| matches!(c, Component::Normal(_))) {
+            return Err(Error::InvalidDestination);
         }
         return Ok(Destination::EnvFile(path));
     }

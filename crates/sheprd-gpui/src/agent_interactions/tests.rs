@@ -478,6 +478,8 @@ fn vault_injects_0600_env_file_uses_private_credentials_store_and_redacts_debug(
     assert!(!format!("{secret:?}").contains("sk_test_super_secret_999"));
     assert!(vault::parse_destination("env-file:../escape.env").is_err());
     assert!(vault::parse_destination("env-file:/etc/passwd").is_err());
+    assert!(vault::parse_destination(r"env-file:\Windows\win.ini").is_err());
+    assert!(vault::parse_destination("env-file:.").is_err());
     assert!(vault::validate_key("BAD KEY").is_err());
 
     let workspace = tempfile::tempdir().unwrap();

@@ -74,7 +74,8 @@ fn printable(bytes: &[u8]) -> String {
         .join(" | ")
 }
 
-#[cfg(test)]
+// The tests run `/bin/sh`.
+#[cfg(all(test, unix))]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;

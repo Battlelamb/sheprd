@@ -289,7 +289,8 @@ private struct ChatDocument: View {
     /// Resting on the latest message, not merely near it as `away` allows:
     /// only then does the chat follow it back there.
     @State private var atLatest = true
-    /// Turn to scroll to right after expanding from prompts-only mode.
+    /// Turn to scroll to the top: after expanding from prompts-only mode,
+    /// or on a tap on the pinned prompt.
     @State private var pendingJump: EntryId?
     @Environment(\.scenePhase) private var scenePhase
 
@@ -315,105 +316,111 @@ private struct ChatDocument: View {
             nil
         }
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: filter.promptsOnly ? 8 : 16) {
-                if visible.hidden > 0 {
-                    Button {
-                        shownTurns += 10
-                    } label: {
-                        Label("Show \(min(visible.hidden, 10)) earlier of \(visible.hidden)", systemImage: "arrow.up.circle")
-                            .font(.subheadline.weight(.medium))
-                    }
-                    .buttonStyle(.glass)
-                    .frame(maxWidth: .infinity)
-                } else if transcript.truncated {
-                    Label("Older messages stay on the computer", systemImage: "clock.arrow.circlepath")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-                ForEach(Array(turnRows.enumerated()), id: \.element.id) { offset, row in
-                    let isLatest = row.id == turns.last?.first?.id
-                    VStack(alignment: .leading, spacing: 0) {
-                        if offset > 0 {
-                            Divider().padding(.vertical, filter.promptsOnly ? 4 : 8)
+            ScrollViewReader { proxy in
+                LazyVStack(alignment: .leading, spacing: filter.promptsOnly ? 8 : 16) {
+                    if visible.hidden > 0 {
+                        Button {
+                            shownTurns += 10
+                        } label: {
+                            Label("Show \(min(visible.hidden, 10)) earlier of \(visible.hidden)", systemImage: "arrow.up.circle")
+                                .font(.subheadline.weight(.medium))
                         }
-                        // Only the latest turn's prompt pins once scrolled past.
-                        ChatTurn(
-                            entries: row.entries,
-                            promptAbove: !filter.promptsOnly && isLatest ? $promptAbove : nil,
-                            brief: transcript.brief(row.id),
-                            promptsOnly: filter.promptsOnly,
-                            peeked: filter.isPeeked(row.id),
-                            onTogglePeek: {
-                                withAnimation(.snappy(duration: 0.34)) {
-                                    filter.togglePeek(row.id)
-                                }
-                            },
-                            onShowFullHere: {
-                                shownTurns = TurnFilterState.expandedShownTurns(
-                                    current: shownTurns,
-                                    allTurns: turns,
-                                    jumpingTo: row.id
-                                )
-                                withAnimation(.snappy(duration: 0.34)) {
-                                    filter.clear()
-                                }
-                                pendingJump = row.id
-                            }
-                        )
+                        .buttonStyle(.glass)
+                        .frame(maxWidth: .infinity)
+                    } else if transcript.truncated {
+                        Label("Older messages stay on the computer", systemImage: "clock.arrow.circlepath")
+                            .font(.footnote).foregroundStyle(.secondary)
                     }
-                    .id(row.id)
-                }
-                if !transcript.queued.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Queued").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
-                        ForEach(transcript.queued, id: \.id) { queued in
-                            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Image(systemName: queued.steered ? "arrow.turn.down.right" : queued.held ? "pause.circle" : "clock").foregroundStyle(.secondary)
-                                    .accessibilityLabel(queued.steered ? "Steering" : queued.held ? "Held" : "Queued")
-                                Text(queued.text).font(.subheadline).lineLimit(3)
-                                if !queued.attachments.isEmpty {
-                                    Label("\(queued.attachments.count)", systemImage: "photo").font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                // A steered prompt is already with the agent.
-                                if !queued.steered {
-                                    Button { sendNow(queued) } label: { Image(systemName: "arrow.up.circle.fill").foregroundStyle(.tint) }
-                                        .buttonStyle(.plain)
-                                        .accessibilityLabel("Send now")
-                                    Button { unqueue(queued) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                                        .buttonStyle(.plain)
-                                        .accessibilityLabel("Remove from the queue")
-                                }
+                    ForEach(Array(turnRows.enumerated()), id: \.element.id) { offset, row in
+                        let isLatest = row.id == turns.last?.first?.id
+                        VStack(alignment: .leading, spacing: 0) {
+                            if offset > 0 {
+                                Divider().padding(.vertical, filter.promptsOnly ? 4 : 8)
                             }
-                            .padding(10)
-                            .background(.fill.quinary, in: .rect(cornerRadius: 12))
+                            // Only the latest turn's prompt pins once scrolled past.
+                            ChatTurn(
+                                entries: row.entries,
+                                promptAbove: !filter.promptsOnly && isLatest ? $promptAbove : nil,
+                                brief: transcript.brief(row.id),
+                                promptsOnly: filter.promptsOnly,
+                                peeked: filter.isPeeked(row.id),
+                                onTogglePeek: {
+                                    withAnimation(.snappy(duration: 0.34)) {
+                                        filter.togglePeek(row.id)
+                                    }
+                                },
+                                onShowFullHere: {
+                                    shownTurns = TurnFilterState.expandedShownTurns(
+                                        current: shownTurns,
+                                        allTurns: turns,
+                                        jumpingTo: row.id
+                                    )
+                                    withAnimation(.snappy(duration: 0.34)) {
+                                        filter.clear()
+                                    }
+                                    pendingJump = row.id
+                                }
+                            )
+                        }
+                        .id(row.id)
+                    }
+                    if !transcript.queued.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Queued").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                            ForEach(transcript.queued, id: \.id) { queued in
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Image(systemName: queued.steered ? "arrow.turn.down.right" : queued.held ? "pause.circle" : "clock").foregroundStyle(.secondary)
+                                        .accessibilityLabel(queued.steered ? "Steering" : queued.held ? "Held" : "Queued")
+                                    Text(queued.text).font(.subheadline).lineLimit(3)
+                                    if !queued.attachments.isEmpty {
+                                        Label("\(queued.attachments.count)", systemImage: "photo").font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    // A steered prompt is already with the agent.
+                                    if !queued.steered {
+                                        Button { sendNow(queued) } label: { Image(systemName: "arrow.up.circle.fill").foregroundStyle(.tint) }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("Send now")
+                                        Button { unqueue(queued) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("Remove from the queue")
+                                    }
+                                }
+                                .padding(10)
+                                .background(.fill.quinary, in: .rect(cornerRadius: 12))
+                            }
                         }
                     }
+                    ForEach(store.outgoing) { outgoing in
+                        OutgoingRow(outgoing: outgoing, computer: computerName, agent: transcript.agent)
+                    }
+                    if let problem { Text(problem).font(.footnote).foregroundStyle(.red) }
                 }
-                ForEach(store.outgoing) { outgoing in
-                    OutgoingRow(outgoing: outgoing, computer: computerName, agent: transcript.agent)
+                .animation(.snappy, value: store.outgoing)
+                .animation(.snappy(duration: 0.34), value: filter)
+                .frame(maxWidth: Self.readableWidth, alignment: .leading)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                .padding(.bottom, 24)
+                // A turn is jumped to by its proxy, which finds lazy rows
+                // by `.id` alone. A scroll target layout would do it through
+                // the position instead, but then the position follows the
+                // reader's scroll, and the chat jumped to the latest when a
+                // scroll up came to rest.
+                .task(id: pendingJump) {
+                    guard let target = pendingJump else { return }
+                    await Task.yield()
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.snappy(duration: 0.34)) {
+                        proxy.scrollTo(target, anchor: .top)
+                    }
+                    pendingJump = nil
                 }
-                if let problem { Text(problem).font(.footnote).foregroundStyle(.red) }
             }
-            .scrollTargetLayout()
-            .animation(.snappy, value: store.outgoing)
-            .animation(.snappy(duration: 0.34), value: filter)
-            .frame(maxWidth: Self.readableWidth, alignment: .leading)
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 20)
-            .padding(.top, 10)
-            .padding(.bottom, 24)
         }
         .defaultScrollAnchor(.bottom)
         .scrollPosition($position)
-        .task(id: pendingJump) {
-            guard let target = pendingJump else { return }
-            await Task.yield()
-            guard !Task.isCancelled else { return }
-            withAnimation(.snappy(duration: 0.34)) {
-                position.scrollTo(id: target, anchor: .top)
-            }
-            pendingJump = nil
-        }
         .onChange(of: filter.promptsOnly) { _, now in
             if now {
                 promptAbove = false
@@ -431,16 +438,15 @@ private struct ChatDocument: View {
         // A snapshot on return, lazy rows measured anew, or the composer
         // changing size can shorten the content under a resting offset;
         // UIKit leaves it past the end until a touch, a blank screen.
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-            let end = geometry.contentSize.height + geometry.contentInsets.bottom - geometry.containerSize.height
-            return geometry.contentOffset.y > max(end, -geometry.contentInsets.top) + 1
-        } action: { _, now in
+        .onScrollGeometryChange(for: Bool.self) { $0.pastEnd } action: { _, now in
             overshot = now
             if now, !scrolling { position.scrollTo(edge: .bottom) }
         }
-        .onScrollPhaseChange { _, phase in
+        // Coming to rest, the geometry of that moment decides, not a flag
+        // a frame during the scroll left behind.
+        .onScrollPhaseChange { _, phase, context in
             scrolling = phase != .idle
-            if !scrolling, overshot { position.scrollTo(edge: .bottom) }
+            if !scrolling, overshot, context.geometry.pastEnd { position.scrollTo(edge: .bottom) }
         }
         // Only a reader's own scroll moves them off the latest; content
         // shrinking under them while idle is repaired above instead.
@@ -491,7 +497,7 @@ private struct ChatDocument: View {
                 )
                 if !filter.promptsOnly, let prompt, promptAbove, let latestId = turns.last?.first?.id {
                     PinnedPrompt(text: String(InlineMarkdown.plainSized(prompt).characters)) {
-                        withAnimation(.snappy) { position.scrollTo(id: latestId, anchor: .top) }
+                        pendingJump = latestId
                     }
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
@@ -564,6 +570,19 @@ private struct ChatDocument: View {
 
     private func sendNow(_ queued: Queued) {
         Task { problem = await model.fleet.send(.sendNow(queued.id), to: key) }
+    }
+}
+
+private extension ScrollGeometry {
+    /// Resting past the end of the content (`ChatScroll.pastEnd`).
+    var pastEnd: Bool {
+        ChatScroll.pastEnd(
+            offset: contentOffset.y,
+            contentHeight: contentSize.height,
+            containerHeight: containerSize.height,
+            insetTop: contentInsets.top,
+            insetBottom: contentInsets.bottom
+        )
     }
 }
 

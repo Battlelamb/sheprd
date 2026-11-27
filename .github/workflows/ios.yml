@@ -96,6 +96,8 @@ jobs:
           xcodebuild -project SheprdRemote.xcodeproj -scheme SheprdRemote \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO -quiet build
+      - name: The store app carries no live editing (MoonLive)
+        run: sh ios/tools/luau_store_audit.sh
 
   testflight:
     name: TestFlight upload

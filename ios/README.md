@@ -42,6 +42,7 @@ The native app for Sheprd's remote control (`docs/ios-app-plan.md`).
 | `SheprdRemoteWidgets/` | The lock screen and Dynamic Island layouts |
 | `Shared/` | The Live Activity's attributes, compiled into both targets |
 | `Mockups/` | The SwiftUI mockups the screens were picked from (`just ios-mockups`); the `effects` round draws text sizes and message effects with the app's own `Views/Effects` |
+| `SheprdRemote/Luau/`, `Luau/` | Screens moving to Luau, drawn by [MoonKit](https://github.com/moonframehq/moonswift) (pinned in `project.yml`): the Swift seam and providers, and the bundled Luau. See [Screens in Luau](#screens-in-luau) |
 | `Spikes/` | Phase 0 spikes (`docs/ios-spikes.md`) |
 | `tools/` | The simulator loop's control client and the TestFlight upload scripts |
 
@@ -165,6 +166,27 @@ and nothing goes through your phone.
      (`xcrun simctl get_app_container DEVICE so.pen.herdr.remote group.so.pen.herdr.remote`).
    - Avoid `simctl openurl`: its confirmation alert needs a tap, and it
      keeps the app inactive until the simulator restarts.
+
+## Screens in Luau
+
+The Pull Requests tab also exists in Luau (`Luau/pull-requests`), drawn by
+MoonKit from the same model: `PullRequestsProvider` publishes the lists,
+searched and sorted by the same Swift, as `app.pulls`, and opens what a
+row asks for. Luau has no network and opens nothing itself. Settings ›
+Developer › PRs Tab switches between SwiftUI (the default) and Luau at once.
+Everything Luau is behind `PullRequestsTab`, `SheprdRemote/Luau/`, and
+`Luau/`, so dropping it is one revert.
+
+- **Store builds:** the app links MoonKit and MoonUI, never MoonLive, so only
+  the bundled Luau runs. `tools/luau_store_audit.sh` (in CI) builds Release
+  and fails on any trace of live editing.
+- **Measuring:** `tools/prs_bench.sh SIMULATOR_UDID [RUNS]` builds optimized,
+  then launches with `-gitHubDemo bench` (50 pull requests in each section)
+  and `-prsBench YES`, once per engine and run. Each run opens the tab, times
+  its first frame with rows, scrolls it end to end at a steady speed, and
+  times every frame and the memory (`PullRequestsBench.swift`). On a device,
+  pass the same arguments and read `Documents/prs-bench.json` or the
+  `PRS_BENCH` log line.
 
 ## Speaking voices and dictation
 

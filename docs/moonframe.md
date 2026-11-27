@@ -78,6 +78,20 @@ Sheprd's main region paints around page rectangles. Sidebar, toolbar and
 popover backgrounds remain solid. Adding a full-window background to the shell
 hides loaded pages, even when WebKit text and page captures look correct.
 
+## Edge lighting
+
+The window can carry a passive light around its edge, following the focused
+workspace's `agent_status`: a clockwise comet while working, two pulses while
+blocked, split waves when done, and a quiet breath while idle. No focused
+workspace or an unknown status clears it. This is native
+(`crates/sheprd-gpui/src/window/edge_light.rs`), not a Luau mod: it follows
+both sides of each macOS window corner and uses square corners in fullscreen.
+
+**Settings > Indicators > Edge Lighting** chooses **Auto (status)**, a
+preset, or a custom `#RRGGBB` color; the stroke width (1–12 logical pixels)
+and trail length (5–50% of the perimeter). The same values are available as
+`[edge_light] color`, `width` and `trail` in `config-gpui.toml`.
+
 ## Changing it
 
 In `just run-moonframe`, saving a file reloads the window. To keep a change of

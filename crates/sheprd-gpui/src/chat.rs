@@ -128,6 +128,10 @@ pub enum Error {
     MirrorConfig,
     #[error("no private directory holds chat sockets")]
     NoEndpointDir,
+    /// A relay host's shared connection is full or not up: a login of the
+    /// chat's own would be another dial the relay counts, so it waits.
+    #[error("waiting for a shared connection to the host")]
+    NoSharedLogin,
     #[error("the chat view is not attached")]
     NotAttached,
     #[error("the chat view fell behind the program")]

@@ -29,6 +29,7 @@ impl Localize for Error {
             Self::Handshake => fl!("error-chat-handshake"),
             Self::MirrorConfig => fl!("error-chat-mirror-config"),
             Self::NoEndpointDir => fl!("error-chat-no-endpoint-dir"),
+            Self::NoSharedLogin => fl!("error-chat-no-shared-login"),
             Self::NotAttached => fl!("error-chat-not-attached"),
             Self::Overflow => fl!("error-chat-overflow"),
             Self::Pasted(error) => error.localize(),

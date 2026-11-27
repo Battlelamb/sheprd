@@ -170,7 +170,7 @@ struct IPadRoot: View {
                     .connectionToast(pairing: $pairing)
             }
             Tab("PRs", systemImage: "arrow.triangle.pull", value: SidebarTab.pullRequests) {
-                NavigationStack { PullRequestsList().toolbar { hideSidebar }.makesRoomForConnectionToast() }
+                NavigationStack { PullRequestsTab().toolbar { hideSidebar }.makesRoomForConnectionToast() }
                     .connectionToast(pairing: $pairing)
             }
             Tab("Settings", systemImage: "gearshape", value: SidebarTab.settings) {

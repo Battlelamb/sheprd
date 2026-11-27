@@ -26,7 +26,8 @@ enum GitHubSample {
     }
 
     static var lists: PullRequestLists {
-        PullRequestLists(
+        if let bench = PullRequestsBench.lists { return bench }
+        return PullRequestLists(
             mine: [
                 pull("sheprd-labs", "sheprd", 1342, "Read pull requests on the phone with a lent GitHub sign-in", ago: 2400,
                      review: .changesRequested, branch: "feat/ios-native-github", checks: .init(failing: 2, pending: 1, passed: 5)),

@@ -209,7 +209,7 @@ struct RootView: View {
                     .connectionToast(pairing: $window.pairing)
             }
             Tab("PRs", systemImage: "arrow.triangle.pull", value: RootTab.pullRequests) {
-                NavigationStack { PullRequestsList().makesRoomForConnectionToast() }
+                NavigationStack { PullRequestsTab().makesRoomForConnectionToast() }
                     .connectionToast(pairing: $window.pairing)
             }
             Tab("Settings", systemImage: "gearshape", value: RootTab.settings) {
@@ -308,6 +308,7 @@ extension RootView {
                 model.pendingRoute = .term(PaneKey(device: item.computer.device, pane: pane), title: item.terminal.label)
             }
         }
+        await PullRequestsBench.runIfAsked(model: model)
     }
 }
 #endif

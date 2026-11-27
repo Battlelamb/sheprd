@@ -136,12 +136,14 @@ struct ChatScreen: View {
                     showingSession = false
                     dismiss()
                 }
+                .environment(model)
                 .presentationDetents([.medium, .large])
             }
         }
         .sheet(isPresented: $showingPanel) {
             if let store {
                 AgentPanel(key: key, store: store)
+                    .environment(model)
                     .presentationDetents([.medium, .large], selection: $panelDetent)
                     .presentationBackground(Color(.systemGroupedBackground))
             }
@@ -299,30 +301,28 @@ private struct ChatDocument: View {
     static let readableWidth: CGFloat = 680
 
     var body: some View {
-        let turns = ChatTurn.split(transcript.entries)
-        let promptCount = ChatTurns.promptCount(in: transcript.entries)
-        let visible = filter.visibleTurns(from: turns, shownTurns: shownTurns)
-        let turnRows: [(id: EntryId, entries: ArraySlice<Entry>)] = visible.turns.compactMap { turn in
-            guard let id = turn.first?.id else { return nil }
-            return (id, turn)
-        }
+        let snapshot = store.rowCache.snapshot(entries: transcript.entries, shownTurns: shownTurns, filter: filter)
+        let turns = snapshot.turns
+        let promptCount = snapshot.promptCount
+        let latestTurnId = snapshot.latestTurnId
+        let rows = snapshot.rows
         let tools: [Tool] = (turns.last ?? []).compactMap { entry in
             if case let .tool(tool) = entry.kind { tool } else { nil }
         }
         let prompt: String? = if case let .user(text, _) = turns.last?.first?.kind {
             // A brief pins its goal alone, not a screenful.
-            if let id = turns.last?.first?.id, transcript.brief(id) != nil { BriefOutline(text).goal } else { PastedEnvelope.unwrap(text) }
+            if let id = latestTurnId, transcript.brief(id) != nil { BriefOutline(text).goal } else { PastedEnvelope.unwrap(text) }
         } else {
             nil
         }
         ScrollView {
             ScrollViewReader { proxy in
-                LazyVStack(alignment: .leading, spacing: filter.promptsOnly ? 8 : 16) {
-                    if visible.hidden > 0 {
+                LazyVStack(alignment: .leading, spacing: filter.promptsOnly ? 8 : 12) {
+                    if snapshot.hidden > 0 {
                         Button {
                             shownTurns += 10
                         } label: {
-                            Label("Show \(min(visible.hidden, 10)) earlier of \(visible.hidden)", systemImage: "arrow.up.circle")
+                            Label("Show \(min(snapshot.hidden, 10)) earlier of \(snapshot.hidden)", systemImage: "arrow.up.circle")
                                 .font(.subheadline.weight(.medium))
                         }
                         .buttonStyle(.glass)
@@ -331,38 +331,8 @@ private struct ChatDocument: View {
                         Label("Older messages stay on the computer", systemImage: "clock.arrow.circlepath")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
-                    ForEach(Array(turnRows.enumerated()), id: \.element.id) { offset, row in
-                        let isLatest = row.id == turns.last?.first?.id
-                        VStack(alignment: .leading, spacing: 0) {
-                            if offset > 0 {
-                                Divider().padding(.vertical, filter.promptsOnly ? 4 : 8)
-                            }
-                            // Only the latest turn's prompt pins once scrolled past.
-                            ChatTurn(
-                                entries: row.entries,
-                                promptAbove: !filter.promptsOnly && isLatest ? $promptAbove : nil,
-                                brief: transcript.brief(row.id),
-                                promptsOnly: filter.promptsOnly,
-                                peeked: filter.isPeeked(row.id),
-                                onTogglePeek: {
-                                    withAnimation(.snappy(duration: 0.34)) {
-                                        filter.togglePeek(row.id)
-                                    }
-                                },
-                                onShowFullHere: {
-                                    shownTurns = TurnFilterState.expandedShownTurns(
-                                        current: shownTurns,
-                                        allTurns: turns,
-                                        jumpingTo: row.id
-                                    )
-                                    withAnimation(.snappy(duration: 0.34)) {
-                                        filter.clear()
-                                    }
-                                    pendingJump = row.id
-                                }
-                            )
-                        }
-                        .id(row.id)
+                    ForEach(rows) { row in
+                        rowView(row, allTurns: turns)
                     }
                     if !transcript.queued.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
@@ -397,7 +367,6 @@ private struct ChatDocument: View {
                     if let problem { Text(problem).font(.footnote).foregroundStyle(.red) }
                 }
                 .animation(.snappy, value: store.outgoing)
-                .animation(.snappy(duration: 0.34), value: filter)
                 .frame(maxWidth: Self.readableWidth, alignment: .leading)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 20)
@@ -413,7 +382,7 @@ private struct ChatDocument: View {
                     await Task.yield()
                     guard !Task.isCancelled else { return }
                     withAnimation(.snappy(duration: 0.34)) {
-                        proxy.scrollTo(target, anchor: .top)
+                        proxy.scrollTo(ChatTurnRow.ID.prompt(target), anchor: .top)
                     }
                     pendingJump = nil
                 }
@@ -495,7 +464,7 @@ private struct ChatDocument: View {
                         }
                     }
                 )
-                if !filter.promptsOnly, let prompt, promptAbove, let latestId = turns.last?.first?.id {
+                if !filter.promptsOnly, let prompt, promptAbove, let latestId = latestTurnId {
                     PinnedPrompt(text: String(InlineMarkdown.plainSized(prompt).characters)) {
                         pendingJump = latestId
                     }
@@ -547,6 +516,51 @@ private struct ChatDocument: View {
         .browsesLinks(schemes: MarkdownView.webSchemes)
         .sheet(item: question) { permission in
             QuestionSheet(key: key, permission: permission)
+                .environment(model)
+        }
+    }
+
+    @ViewBuilder
+    private func rowView(_ row: ChatTurnRow, allTurns: [ArraySlice<Entry>]) -> some View {
+        switch row.kind {
+        case .divider:
+            Divider().padding(.vertical, filter.promptsOnly ? 2 : 6)
+        case let .prompt(turnId, text, isLatest, collapsedMeta):
+            ChatPromptRow(
+                text: text,
+                promptAbove: !filter.promptsOnly && isLatest ? $promptAbove : nil,
+                brief: transcript.brief(turnId),
+                promptsOnly: filter.promptsOnly,
+                peeked: filter.isPeeked(turnId),
+                collapsedMeta: collapsedMeta,
+                onTogglePeek: {
+                    withAnimation(.snappy(duration: 0.34)) {
+                        filter.togglePeek(turnId)
+                    }
+                }
+            )
+        case let .steps(tools):
+            ChatStepsRow(tools: tools)
+        case let .entry(entry):
+            EntryView(entry: entry)
+        case let .agentMessage(id, text, message):
+            AgentMessageView(id: id, text: text, parsed: message)
+        case let .markdownBlock(block):
+            BlockView(block: block)
+        case let .diff(path, old, new):
+            DiffBlock(path: path, old: old, new: new)
+        case let .showFullHere(turnId):
+            ChatShowFullRow {
+                shownTurns = TurnFilterState.expandedShownTurns(
+                    current: shownTurns,
+                    allTurns: allTurns,
+                    jumpingTo: turnId
+                )
+                withAnimation(.snappy(duration: 0.34)) {
+                    filter.clear()
+                }
+                pendingJump = turnId
+            }
         }
     }
 

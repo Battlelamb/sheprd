@@ -535,8 +535,8 @@ sheprd remote relays token relay.example.org --clear
 
 Agents bring the person to a screen of the Sheprd phone app, or put a note
 in front of them there. A phone is driven only while the app is open on it
-and its person turned on **Let agents open screens** for this computer (that
-computer's page in the app's Settings; off by default). It refuses while its
+and its person left **Let agents open screens** on for this computer (that
+computer's page in the app's Settings; on by default). It refuses while its
 app is locked, and shows which computer's agent opened a screen. Nothing
 pairs, approves, or changes a setting from here. Remote control must be on.
 
@@ -552,8 +552,8 @@ pairs, approves, or changes a setting from here. Remote control must be on.
 | `phone open settings [PAGE]` | Open Settings or a named page, including nested delivery, desk-hold, and text-shortcuts pages |
 | `phone highlight TARGET` | Open the target's page, scroll to it, and highlight the control |
 | `phone guide TEXT [--highlight TARGET]` | Replace the persistent top banner, optionally highlighting a control; maximum three lines including the source |
-| `phone guide --clear` | Clear this computer's banner and highlight; tapping the banner also dismisses both |
-| `phone show TEXT` | A note on the phone, from this computer's agent (at most 500 characters) |
+| `phone guide --clear` | Clear this computer's banner and highlight; tapping the banner also dismisses both and opens the caller's chat, and its close button only dismisses |
+| `phone show TEXT` | A note on the phone, from this computer's agent (at most 500 characters); tapping it opens the caller's chat |
 
 Every `phone` command takes `--device ID|NAME`; without it, the phone with
 the most recent connection traffic is selected. This is not proof of user
@@ -568,7 +568,11 @@ example, `phone guide "This controls push delivery" --highlight push-relay
 --device ID` opens Notifications and highlights the push-relay switch. Guides
 remain until cleared or dismissed, or the phone backgrounds, locks, or revokes
 that computer's permission. Repeating `guide` updates the existing banner.
-Opening, highlighting, and guiding do not change settings. Keep notes short;
+Run from a Herdr pane, `show`, `guide`, and `highlight` name the caller's pane
+(`HERDR_PANE_ID`), so a tap on the note brings the person back to that agent's
+chat, or its terminal; from outside a pane, or for a pane the phone does not
+list, the tap only dismisses it. Opening, highlighting, and guiding do not
+change settings. Keep notes short;
 long text is clipped to the three-line banner. `ui settings --json` discovers
 the desktop's available Settings pages and row IDs; `ui guide` and `ui highlight`
 use those row IDs. Desktop guidance is scoped to the caller's main window and

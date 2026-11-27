@@ -5,18 +5,22 @@ import SheprdRemoteCore
 private let log = Logger(subsystem: "so.pen.herdr.remote", category: "agents")
 
 /// Agents on a paired computer driving this app (`sheprd phone` there):
-/// opening a screen, saying which one is in front, and showing a note. Off
-/// for every computer until its person turns it on in that computer's page;
-/// refused while the app is locked. Every open and note says which
-/// computer's agent did it, so the screen never changes unexplained.
+/// opening a screen, saying which one is in front, and showing a note. On
+/// for every paired computer until its person turns it off in that
+/// computer's page; refused while the app is locked. Every open and note
+/// says which computer's agent did it, so the screen never changes
+/// unexplained, and a tap on a note opens the agent's own chat.
 @MainActor
 @Observable
 final class AgentControl {
-    /// The computers whose agents may drive the app, by fingerprint.
-    private(set) var allowed: Set<String> = Set(UserDefaults.standard.stringArray(forKey: AgentControl.key) ?? []) {
-        didSet { UserDefaults.standard.set(allowed.sorted(), forKey: Self.key) }
+    /// The computers whose person turned agents off, by fingerprint; every
+    /// other paired computer's agents may drive the app.
+    private(set) var turnedOff: Set<String> = Set(UserDefaults.standard.stringArray(forKey: AgentControl.key) ?? []) {
+        didSet { UserDefaults.standard.set(turnedOff.sorted(), forKey: Self.key) }
     }
-    private static let key = "agentControl"
+    /// Not the older `agentControl` key, which listed the computers turned
+    /// on while agents were off by default.
+    private static let key = "agentControlOff"
     /// The note on screen, from an agent or about what one opened. It
     /// shows in a window of its own above every sheet (`AgentBannerWindows`).
     var banner: Banner? {
@@ -49,6 +53,10 @@ final class AgentControl {
         let text: String
         /// An agent's own note, rather than word of what it opened.
         let note: Bool
+        /// The asking agent's chat or terminal on `device`, which a tap
+        /// opens.
+        var from: AgentScreen? = nil
+        var device: String? = nil
 
         /// How long it stays unless tapped away.
         var shown: Duration { note ? .seconds(8) : .seconds(3) }
@@ -65,11 +73,11 @@ final class AgentControl {
         var settingsPage: AgentSettingsPage?
     }
 
-    func allows(_ computer: Computer) -> Bool { allowed.contains(computer.fingerprint.hex) }
+    func allows(_ computer: Computer) -> Bool { !turnedOff.contains(computer.fingerprint.hex) }
 
     /// Turns agents on or off for `computer`, which hears it at once.
     func set(_ on: Bool, for computer: Computer, fleet: Fleet) {
-        if on { allowed.insert(computer.fingerprint.hex) } else { allowed.remove(computer.fingerprint.hex) }
+        if on { turnedOff.remove(computer.fingerprint.hex) } else { turnedOff.insert(computer.fingerprint.hex) }
         fleet.setAgentControl(on, device: computer.device)
         if !on, guidingDevice == computer.device { clearGuide() }
     }
@@ -90,23 +98,26 @@ final class AgentControl {
             guard guidingDevice == nil || guidingDevice == computer.device else { return answer(.refused(.other)) }
             clearGuide()
             answer(.done(state(for: computer, model: model)))
-        case let .guide(text, target):
+        case let .guide(text, target, from):
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.unicodeScalars.count <= 500 else { return answer(.refused(.other)) }
             if target == .haptics, !FeedbackSettings.canTap { return answer(.refused(.notFound)) }
             if guidingDevice != computer.device { clearGuide() }
             guidingDevice = computer.device
-            guide = Banner(computer: model.displayName(computer), text: text, note: true)
+            guide = Banner(computer: model.displayName(computer), text: text, note: true, from: from, device: computer.device)
             if let target { showHighlight(target, model: model) }
             answerAfterNavigation(computer, model: model, answer: answer)
-        case let .highlight(target):
+        case let .highlight(target, from):
             if target == .haptics, !FeedbackSettings.canTap { return answer(.refused(.notFound)) }
             if guidingDevice != computer.device { clearGuide() }
             guidingDevice = computer.device
-            guide = Banner(computer: model.displayName(computer), text: guide?.text ?? "Highlighted in Settings", note: true)
+            guide = Banner(
+                computer: model.displayName(computer), text: guide?.text ?? "Highlighted in Settings", note: true,
+                from: from ?? guide?.from, device: computer.device
+            )
             showHighlight(target, model: model)
             answerAfterNavigation(computer, model: model, answer: answer)
-        case let .show(text):
-            banner = Banner(computer: model.displayName(computer), text: text, note: true)
+        case let .show(text, from):
+            banner = Banner(computer: model.displayName(computer), text: text, note: true, from: from, device: computer.device)
             answer(.done(state(for: computer, model: model)))
         case let .open(screen):
             guard open(screen, on: computer, model: model) else { return answer(.refused(.notFound)) }
@@ -114,6 +125,19 @@ final class AgentControl {
             banner = Banner(computer: model.displayName(computer), text: "Opened by an agent on \(model.displayName(computer))", note: false)
             answerAfterNavigation(computer, model: model, answer: answer)
         }
+    }
+
+    /// A tap on `banner`: dismisses it and opens the chat or terminal of
+    /// the agent that showed it, when it named one this app still lists.
+    func tapped(_ banner: Banner, model: AppModel) {
+        self.banner = nil
+        clearGuide()
+        guard let from = banner.from, let device = banner.device,
+              let computer = model.computers.first(where: { $0.device == device }), allows(computer),
+              !LockState.shared.hidesNames
+        else { return }
+        // Its chat may have closed since: the note just goes then.
+        _ = open(from, on: computer, model: model)
     }
 
     private func answerAfterNavigation(_ computer: Computer, model: AppModel, answer: @escaping (AgentOutcome) -> Void) {

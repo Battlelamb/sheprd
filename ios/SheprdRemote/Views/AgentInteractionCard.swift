@@ -1,6 +1,12 @@
 import SheprdRemoteCore
 import SwiftUI
 
+extension EnvironmentValues {
+    /// Sends a user reply back to the open chat (returns `nil` on success or
+    /// an error message when delivery fails). `nil` in read-only previews.
+    @Entry var sendChatReply: (@MainActor (String) async -> String?)?
+}
+
 /// Native SwiftUI presentation for persistent agent interactions (`:::modal`,
 /// `:::urgent`, `:::countdown`, `:::otp`, `:::oauth`, `:::secret`, `:::progress`,
 /// `:::runbook`, `:::drop`, `:::diff`, `:::spotlight`) inside iOS/iPadOS chats.
@@ -8,14 +14,19 @@ import SwiftUI
 /// behind Face ID App Lock.
 struct AgentInteractionCard: View {
     let interaction: AgentInteraction
-    var onReply: ((String) -> Void)?
+    var onReply: (@MainActor (String) async -> String?)?
 
-    @State private var otpCode = ""
-    @State private var secretInput = ""
     @State private var completedSteps: Set<Int> = []
     @State private var feedback: String?
+    @State private var errorMessage: String?
+    @State private var sending = false
     @State private var dismissed = false
     @Environment(\.openURL) private var openURL
+    @Environment(\.sendChatReply) private var envSendReply
+
+    private var replySender: (@MainActor (String) async -> String?)? {
+        onReply ?? envSendReply
+    }
 
     var body: some View {
         if dismissed {
@@ -47,6 +58,23 @@ struct AgentInteractionCard: View {
                     RoundedRectangle(cornerRadius: 18)
                         .stroke(accentColor.opacity(0.65), lineWidth: interaction.scope == .all ? 1.5 : 1)
                 )
+        }
+    }
+
+    private func send(_ text: String, confirmation: String, onSuccess: (@MainActor () -> Void)? = nil) {
+        guard let sender = replySender, !sending else { return }
+        sending = true
+        errorMessage = nil
+        Task {
+            let problem = await sender(text)
+            sending = false
+            if let problem {
+                errorMessage = problem
+            } else {
+                onSuccess?()
+                feedback = confirmation
+                Feedback.shared.touch(.send)
+            }
         }
     }
 
@@ -112,7 +140,11 @@ struct AgentInteractionCard: View {
 
             payloadView
 
-            if let feedback {
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.red)
+            } else if let feedback {
                 Text(feedback)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.green)
@@ -128,11 +160,11 @@ struct AgentInteractionCard: View {
                 HStack(spacing: 8) {
                     ForEach(choices, id: \.self) { choice in
                         Button(choice) {
-                            onReply?(choice)
-                            feedback = "Sent: \(choice)"
+                            send(choice, confirmation: "Sent: \(choice)")
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
+                        .disabled(replySender == nil || sending)
                     }
                 }
             }
@@ -143,26 +175,19 @@ struct AgentInteractionCard: View {
                     .foregroundStyle(.orange)
                 Spacer()
                 Button("Cancel", role: .destructive) {
-                    onReply?("Cancel the scheduled action.")
-                    feedback = "Cancelled"
+                    send("Cancel the scheduled action.", confirmation: "Cancelled")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .disabled(replySender == nil || sending)
             }
         case .otp:
-            HStack(spacing: 8) {
-                TextField("6-digit code", text: $otpCode)
-                    .textContentType(.oneTimeCode)
-                    .keyboardType(.numberPad)
-                    .textFieldStyle(.roundedBorder)
-                Button("Send") {
-                    guard !otpCode.isEmpty else { return }
-                    otpCode = ""
-                    feedback = "Code submitted (redacted)"
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            }
+            Label(
+                "Enter your one-time code directly in Sheprd on your Mac so it is never stored in chat transcripts.",
+                systemImage: "desktopcomputer"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
         case let .oauth(url, code):
             VStack(alignment: .leading, spacing: 6) {
                 if let code {
@@ -178,22 +203,16 @@ struct AgentInteractionCard: View {
                 }
             }
         case let .secret(key, dest, _):
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Destination: \(dest) · never stored in transcript or cache")
-                    .font(.caption)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Key: \(key) → \(dest)")
+                    .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
-                SecureField("Enter \(key)", text: $secretInput)
-                    .textContentType(.password)
-                    .textFieldStyle(.roundedBorder)
-                Button("Inject securely") {
-                    guard !secretInput.isEmpty else { return }
-                    let count = secretInput.utf8.count
-                    secretInput = ""
-                    feedback = "Provided \(key) (\(count) bytes; redacted)"
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.purple)
-                .controlSize(.small)
+                Label(
+                    "Secret injection is handled on your Mac in Sheprd so credentials never enter chat transcripts or cross the relay.",
+                    systemImage: "lock.shield"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
         case let .progress(percent, step, done):
             VStack(alignment: .leading, spacing: 6) {
@@ -212,10 +231,13 @@ struct AgentInteractionCard: View {
                 ForEach(Array(steps.enumerated()), id: \.offset) { idx, step in
                     let checked = step.done || completedSteps.contains(idx)
                     Button {
-                        guard step.human else { return }
-                        completedSteps.insert(idx)
-                        onReply?("Completed runbook step: \(step.label)")
-                        feedback = "Completed: \(step.label)"
+                        guard step.human, !checked else { return }
+                        send(
+                            "Completed runbook step: \(step.label)",
+                            confirmation: "Completed: \(step.label)"
+                        ) {
+                            completedSteps.insert(idx)
+                        }
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: checked ? "checkmark.circle.fill" : "circle")
@@ -230,7 +252,7 @@ struct AgentInteractionCard: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .disabled(!step.human)
+                    .disabled(!step.human || checked || replySender == nil || sending)
                 }
             }
         case let .drop(accept):
@@ -250,17 +272,17 @@ struct AgentInteractionCard: View {
                 }
                 HStack(spacing: 8) {
                     Button("Reject", role: .destructive) {
-                        onReply?("Rejected proposed diff.")
-                        feedback = "Rejected"
+                        send("Rejected proposed diff.", confirmation: "Rejected")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .disabled(replySender == nil || sending)
                     Button("Approve") {
-                        onReply?("Approved proposed diff — proceed.")
-                        feedback = "Approved"
+                        send("Approved proposed diff — proceed.", confirmation: "Approved")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
+                    .disabled(replySender == nil || sending)
                 }
             }
         case let .spotlight(target, step):

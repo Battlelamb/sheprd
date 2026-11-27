@@ -73,6 +73,8 @@ public struct ChatEffects: Hashable, Sendable {
         /// More of the letters zap shoots down streamed in, `at` seconds
         /// after it began: their shots are still to come.
         case letters(Range<Int>, at: Double)
+        /// A semantic interaction cue (`::cue yubikey` or an interaction's default cue).
+        case interactionCue(InteractionCue)
 
         /// Where its sound and taps play: a bubble's beside anything else,
         /// a screen effect's in place of the one before.
@@ -87,7 +89,7 @@ public struct ChatEffects: Hashable, Sendable {
 
         public var lane: Lane {
             switch self {
-            case .bubble: .bubble
+            case .bubble, .interactionCue: .bubble
             case .screen: .newScreen
             case .letters: .screen
             }
@@ -98,12 +100,15 @@ public struct ChatEffects: Hashable, Sendable {
             case let .bubble(effect): effect.cue
             case let .screen(effect, text): effect.cue(letters: EffectScene.letters(in: text))
             case let .letters(letters, at): ScreenEffect.zap(letters).after(at)
+            case let .interactionCue(cue): cue.cue
             }
         }
     }
 
     /// Bubbles met in each message, so only a new one plays.
     private var bubbles: [EntryId: Int] = [:]
+    /// Semantic interaction cues met in each message, so streaming never repeats them.
+    private var interactionCues: [EntryId: Int] = [:]
     /// Messages whose screen effect was met.
     private var screens: Set<EntryId> = []
     /// When each bubble last began to play.
@@ -142,6 +147,8 @@ public struct ChatEffects: Hashable, Sendable {
             let met = min(mark.bubbles, message.bubbles)
             if met > 0 { bubbles[mark.entry] = met }
             if mark.screen, message.screen != nil { screens.insert(mark.entry) }
+            let cueCount = message.allCues.count
+            if cueCount > 0 { interactionCues[mark.entry] = cueCount }
         }
         self.mark = mark
     }
@@ -190,6 +197,14 @@ public struct ChatEffects: Hashable, Sendable {
             if let effect = message.screen, screens.insert(id).inserted, playing(at: now) == nil {
                 playing = Playing(entry: id, effect: effect, since: now, text: message.gist())
                 began.append(.screen(effect, text: message.gist()))
+            }
+            let metCues = interactionCues[id] ?? 0
+            let allCues = message.allCues
+            if allCues.count > metCues {
+                interactionCues[id] = allCues.count
+                for cue in allCues[metCues..<allCues.count] where !began.contains(.interactionCue(cue)) {
+                    began.append(.interactionCue(cue))
+                }
             }
         }
         if let newest = seen.max() { advance(to: newest) }
@@ -247,6 +262,8 @@ public struct ChatEffects: Hashable, Sendable {
             let count = message.bubbles
             if count > bubbles[entry.id] ?? 0 { bubbles[entry.id] = count }
             if message.screen != nil { screens.insert(entry.id) }
+            let cueCount = message.allCues.count
+            if cueCount > interactionCues[entry.id] ?? 0 { interactionCues[entry.id] = cueCount }
         }
     }
 

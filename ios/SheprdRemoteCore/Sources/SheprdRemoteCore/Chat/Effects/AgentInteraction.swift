@@ -137,6 +137,13 @@ public enum InteractionDirective: String, CaseIterable, Codable, Hashable, Senda
         }
     }
 
+    public var defaultAutoClear: Bool {
+        switch self {
+        case .progress, .runbook: false
+        default: true
+        }
+    }
+
     public var defaultTitle: String {
         switch self {
         case .modal: "Agent needs your attention"
@@ -217,7 +224,7 @@ public struct AgentInteraction: Hashable, Sendable {
     public static func parse(directive: InteractionDirective, title rawTitle: String, inner: String) -> Self {
         var scope = directive.defaultScope
         var cue = directive.defaultCue
-        var autoClear = true
+        var autoClear = directive.defaultAutoClear
         var preset: String?
         var choices: [String] = []
         var quickReply = false

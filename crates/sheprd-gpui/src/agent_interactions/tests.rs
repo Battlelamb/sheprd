@@ -18,6 +18,7 @@ fn parses_all_interaction_directives_and_cues() {
     );
     assert_eq!(urgent.scope, ModalScope::All);
     assert_eq!(urgent.cue, Some(CueKind::Yubikey));
+    assert!(urgent.auto_clear);
     assert_eq!(urgent.body, "Waiting on git push origin main");
     assert_eq!(parse::cue_line("::cue yubikey"), Some(CueKind::Yubikey));
     assert_eq!(parse::cue_line(":::cue yubikey"), None);
@@ -28,6 +29,7 @@ fn parses_all_interaction_directives_and_cues() {
         "choices: Push | Open diff | Cancel\nreply: true\nReady to push.",
     );
     assert_eq!(modal.scope, ModalScope::Window);
+    assert!(modal.auto_clear);
     match modal.payload {
         Payload::Modal {
             choices,
@@ -59,6 +61,10 @@ fn parses_all_interaction_directives_and_cues() {
         "Ship v0.18",
         "- [x] agent: Run just ci\n- [ ] you: Tap YubiKey\n",
     );
+    assert!(
+        !runbook.auto_clear,
+        "runbooks should stay pinned across chat turns by default"
+    );
     match runbook.payload {
         Payload::Runbook { steps } => {
             assert_eq!(steps.len(), 2);
@@ -74,6 +80,10 @@ fn parses_all_interaction_directives_and_cues() {
         "percent: 68%\nstep: chat::effects",
     );
     assert_eq!(progress.scope, ModalScope::All);
+    assert!(
+        !progress.auto_clear,
+        "progress pills should stay pinned across chat turns by default"
+    );
     match progress.payload {
         Payload::Progress {
             percent,
@@ -121,103 +131,316 @@ fn escalation_ladder_routes_by_presence_and_idle_time() {
 }
 
 #[test]
-fn store_deduplicates_per_pane_and_auto_clears_on_newer_entry() {
+fn initial_snapshot_history_never_replays_saved_alerts_even_starting_at_entry_1() {
     let mut store = InteractionStore::default();
     let now = Instant::now();
     let win = WindowId::from(1u64);
-    let urgent = parse::parse_block(BlockDirective::Urgent, "Tap YubiKey", "Blocked on push");
+    let urgent = parse::parse_block(BlockDirective::Urgent, "Tap YubiKey", "Old saved alert");
 
-    // History load never opens modals.
-    assert!(!store.sync_chat_entry(
-        win,
-        "p1",
-        "Claude",
-        "repo",
-        EntryId(1),
-        1,
-        true,
-        std::slice::from_ref(&urgent),
-        &[],
+    // First snapshot load for a pane (entry IDs start at 1 in Projector).
+    assert!(store.begin_pane_sync("p1", 1));
+    assert!(!store.sync_chat_entry(ChatEntrySync {
+        window_id: win,
+        pane_id: "p1",
+        agent_label: "Claude",
+        workspace_label: "repo",
+        workspace_root: None,
+        entry_id: EntryId(1),
+        history: true,
+        presence: Presence::OtherApp,
+        interactions: std::slice::from_ref(&urgent),
+        cues: &[CueKind::Yubikey],
         now,
-        0,
-        true,
-        true,
-        true,
-    ));
+        volume: 0,
+        window_modals_enabled: true,
+        global_modals_enabled: true,
+        progress_pill_enabled: true,
+    }));
     assert!(store.summaries(now).is_empty());
+    assert_eq!(store.active_edge_cue(now), None);
 
-    // Live entry opens modal.
-    assert!(store.sync_chat_entry(
-        win,
-        "p1",
-        "Claude",
-        "repo",
-        EntryId(2),
-        1,
-        false,
-        &[urgent],
-        &[],
+    // Subsequent poll on the same snapshot is live, and entry 1 is still seen.
+    assert!(!store.begin_pane_sync("p1", 1));
+    assert!(!store.sync_chat_entry(ChatEntrySync {
+        window_id: win,
+        pane_id: "p1",
+        agent_label: "Claude",
+        workspace_label: "repo",
+        workspace_root: None,
+        entry_id: EntryId(1),
+        history: false,
+        presence: Presence::OtherApp,
+        interactions: std::slice::from_ref(&urgent),
+        cues: &[CueKind::Yubikey],
         now,
-        0,
-        true,
-        true,
-        true,
-    ));
-    assert_eq!(store.summaries(now).len(), 1);
-    assert_eq!(store.active_edge_cue(now), Some(CueKind::Yubikey));
-
-    // Newer entry from the same chat auto-clears the earlier YubiKey modal.
-    assert!(store.sync_chat_entry(
-        win,
-        "p1",
-        "Claude",
-        "repo",
-        EntryId(3),
-        1,
-        false,
-        &[],
-        &[],
-        now + Duration::from_secs(2),
-        0,
-        true,
-        true,
-        true,
-    ));
-    assert!(store.summaries(now + Duration::from_secs(2)).is_empty());
+        volume: 0,
+        window_modals_enabled: true,
+        global_modals_enabled: true,
+        progress_pill_enabled: true,
+    }));
+    assert!(store.summaries(now).is_empty());
 }
 
 #[test]
-fn vault_injects_0600_env_file_and_redacts_secret_debug() {
+fn streaming_chunks_update_in_place_and_never_reopen_dismissed_alerts() {
+    let mut store = InteractionStore::default();
+    let now = Instant::now();
+    let win = WindowId::from(1u64);
+    assert!(store.begin_pane_sync("p1", 1));
+
+    let partial = parse::parse_block(BlockDirective::Urgent, "Tap YubiKey", "Waiting on");
+    let complete = parse::parse_block(
+        BlockDirective::Urgent,
+        "Tap YubiKey",
+        "Waiting on git push origin main",
+    );
+
+    // First streamed chunk creates modal.
+    assert!(store.sync_chat_entry(ChatEntrySync {
+        window_id: win,
+        pane_id: "p1",
+        agent_label: "Claude",
+        workspace_label: "repo",
+        workspace_root: None,
+        entry_id: EntryId(2),
+        history: false,
+        presence: Presence::OtherApp,
+        interactions: &[partial],
+        cues: &[],
+        now,
+        volume: 0,
+        window_modals_enabled: true,
+        global_modals_enabled: true,
+        progress_pill_enabled: true,
+    }));
+    let id = store.summaries(now)[0].id.clone();
+    store.set_feedback(&id, "custom feedback".to_owned());
+
+    // Second streamed chunk updates parsed body in-place without changing ID or feedback.
+    let later = now + Duration::from_secs(2);
+    assert!(store.sync_chat_entry(ChatEntrySync {
+        window_id: win,
+        pane_id: "p1",
+        agent_label: "Claude",
+        workspace_label: "repo",
+        workspace_root: None,
+        entry_id: EntryId(2),
+        history: false,
+        presence: Presence::OtherApp,
+        interactions: std::slice::from_ref(&complete),
+        cues: &[],
+        now: later,
+        volume: 0,
+        window_modals_enabled: true,
+        global_modals_enabled: true,
+        progress_pill_enabled: true,
+    }));
+    let items = store.global_hud_items(later);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].id, id);
+    assert_eq!(items[0].parsed.body, "Waiting on git push origin main");
+    assert_eq!(items[0].created_at, now);
+    assert_eq!(items[0].feedback.as_deref(), Some("custom feedback"));
+
+    // User dismisses it; another streamed chunk of the same entry must NOT reopen it.
+    assert!(store.dismiss(&id));
+    assert!(!store.sync_chat_entry(ChatEntrySync {
+        window_id: win,
+        pane_id: "p1",
+        agent_label: "Claude",
+        workspace_label: "repo",
+        workspace_root: None,
+        entry_id: EntryId(2),
+        history: false,
+        presence: Presence::OtherApp,
+        interactions: &[complete],
+        cues: &[],
+        now: later + Duration::from_secs(1),
+        volume: 0,
+        window_modals_enabled: true,
+        global_modals_enabled: true,
+        progress_pill_enabled: true,
+    }));
+    assert!(store.summaries(later + Duration::from_secs(1)).is_empty());
+}
+
+#[test]
+fn presence_routing_respects_in_chat_and_escalates_on_tab_or_app_switch() {
+    let mut store = InteractionStore::default();
+    let now = Instant::now();
+    let win = WindowId::from(1u64);
+    assert!(store.begin_pane_sync("p1", 1));
+
+    let urgent = parse::parse_block(BlockDirective::Urgent, "Tap YubiKey", "Waiting on push");
+    // Arrives while user is actively looking at p1: stays InlineOnly (no HUD or window modal).
+    assert!(store.sync_chat_entry(ChatEntrySync {
+        window_id: win,
+        pane_id: "p1",
+        agent_label: "Claude",
+        workspace_label: "repo",
+        workspace_root: None,
+        entry_id: EntryId(2),
+        history: false,
+        presence: Presence::InChat,
+        interactions: &[urgent],
+        cues: &[],
+        now,
+        volume: 0,
+        window_modals_enabled: true,
+        global_modals_enabled: true,
+        progress_pill_enabled: true,
+    }));
+    assert!(store.for_window(win, now).is_empty());
+    assert!(store.global_hud_items(now).is_empty());
+
+    // User switches to another tab in the same window -> promotes to WindowModal.
+    assert!(store.refresh_presence(win, true, Some("p2"), true, now));
+    assert_eq!(store.for_window(win, now).len(), 1);
+    assert!(store.global_hud_items(now).is_empty());
+
+    // User switches to another app -> promotes to GlobalHud.
+    assert!(store.refresh_presence(win, false, Some("p2"), true, now));
+    assert_eq!(store.global_hud_items(now).len(), 1);
+
+    // User returns to p1 -> drops back to InlineOnly.
+    assert!(store.refresh_presence(win, true, Some("p1"), true, now));
+    assert!(store.for_window(win, now).is_empty());
+    assert!(store.global_hud_items(now).is_empty());
+}
+
+#[test]
+fn newer_entry_auto_clears_modals_but_preserves_progress_and_runbook() {
+    let mut store = InteractionStore::default();
+    let now = Instant::now();
+    let win = WindowId::from(1u64);
+    assert!(store.begin_pane_sync("p1", 1));
+
+    let urgent = parse::parse_block(BlockDirective::Urgent, "Tap YubiKey", "Blocked on push");
+    let progress = parse::parse_block(BlockDirective::Progress, "Building", "percent: 40%");
+    assert!(store.sync_chat_entry(ChatEntrySync {
+        window_id: win,
+        pane_id: "p1",
+        agent_label: "Claude",
+        workspace_label: "repo",
+        workspace_root: None,
+        entry_id: EntryId(2),
+        history: false,
+        presence: Presence::OtherApp,
+        interactions: &[urgent, progress],
+        cues: &[],
+        now,
+        volume: 0,
+        window_modals_enabled: true,
+        global_modals_enabled: true,
+        progress_pill_enabled: true,
+    }));
+    assert_eq!(store.summaries(now).len(), 2);
+
+    // Newer entry clears urgent (`auto_clear = true`) while keeping progress (`auto_clear = false`).
+    let later = now + Duration::from_secs(2);
+    assert!(store.sync_chat_entry(ChatEntrySync {
+        window_id: win,
+        pane_id: "p1",
+        agent_label: "Claude",
+        workspace_label: "repo",
+        workspace_root: None,
+        entry_id: EntryId(3),
+        history: false,
+        presence: Presence::OtherApp,
+        interactions: &[],
+        cues: &[],
+        now: later,
+        volume: 0,
+        window_modals_enabled: true,
+        global_modals_enabled: true,
+        progress_pill_enabled: true,
+    }));
+    let remaining = store.summaries(later);
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].kind, "progress");
+}
+
+#[test]
+fn vault_injects_0600_env_file_uses_private_credentials_store_and_redacts_debug() {
     let secret = vault::SecretValue::new("sk_test_super_secret_999".to_owned()).unwrap();
     assert!(!format!("{secret:?}").contains("sk_test_super_secret_999"));
     assert!(vault::parse_destination("env-file:../escape.env").is_err());
     assert!(vault::parse_destination("env-file:/etc/passwd").is_err());
     assert!(vault::validate_key("BAD KEY").is_err());
 
-    let dir = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let creds = tempfile::tempdir().unwrap();
     let dest = vault::parse_destination("env-file:.env.test.local").unwrap();
-    let receipt = vault::inject(dir.path(), "STRIPE_TEST_KEY", &dest, &secret).unwrap();
+
+    // Missing workspace root must fail rather than falling back to temp dir.
+    assert!(matches!(
+        vault::inject_with_store(
+            None,
+            creds.path(),
+            sheprd_credentials::Store::File,
+            "STRIPE_TEST_KEY",
+            &dest,
+            &secret,
+        ),
+        Err(error::Error::WorkspaceNotFound)
+    ));
+
+    let receipt = vault::inject_with_store(
+        Some(workspace.path()),
+        creds.path(),
+        sheprd_credentials::Store::File,
+        "STRIPE_TEST_KEY",
+        &dest,
+        &secret,
+    )
+    .unwrap();
     assert!(!receipt.summary.contains("sk_test_super_secret_999"));
 
-    let written = std::fs::read_to_string(dir.path().join(".env.test.local")).unwrap();
+    let written = std::fs::read_to_string(workspace.path().join(".env.test.local")).unwrap();
     assert_eq!(written, "STRIPE_TEST_KEY=sk_test_super_secret_999\n");
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        let mode = std::fs::metadata(dir.path().join(".env.test.local"))
+        let mode = std::fs::metadata(workspace.path().join(".env.test.local"))
             .unwrap()
             .permissions()
             .mode()
             & 0o777;
         assert_eq!(mode, 0o600);
 
+        // Keychain destination must store in credentials_dir (outside workspace),
+        // never in a `.sheprd-vault` directory inside the project repo.
+        let kc_dest = vault::parse_destination("keychain:stripe-dev").unwrap();
+        let kc_receipt = vault::inject_with_store(
+            Some(workspace.path()),
+            creds.path(),
+            sheprd_credentials::Store::File,
+            "STRIPE_TEST_KEY",
+            &kc_dest,
+            &secret,
+        )
+        .unwrap();
+        assert!(!kc_receipt.summary.contains("sk_test_super_secret_999"));
+        assert!(!workspace.path().join(".sheprd-vault").exists());
+        let saved_path = creds.path().join("agent-stripe-dev-STRIPE_TEST_KEY");
+        assert!(saved_path.exists());
+        let saved_mode = std::fs::metadata(&saved_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(saved_mode, 0o600);
+
         // Refuse symlink target.
-        let link = dir.path().join(".env.link");
-        std::os::unix::fs::symlink(dir.path().join(".env.test.local"), &link).unwrap();
+        let link = workspace.path().join(".env.link");
+        std::os::unix::fs::symlink(workspace.path().join(".env.test.local"), &link).unwrap();
         let link_dest = vault::parse_destination("env-file:.env.link").unwrap();
         assert!(matches!(
-            vault::inject(dir.path(), "STRIPE_TEST_KEY", &link_dest, &secret),
+            vault::inject_with_store(
+                Some(workspace.path()),
+                creds.path(),
+                sheprd_credentials::Store::File,
+                "STRIPE_TEST_KEY",
+                &link_dest,
+                &secret,
+            ),
             Err(error::Error::SymlinkRefused { .. })
         ));
     }

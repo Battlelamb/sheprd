@@ -124,6 +124,18 @@ public struct AgentMessage: Hashable, Sendable {
         parts.compactMap { if case let .cue(item) = $0 { item } else { nil } }
     }
 
+    /// All playable semantic cues in this message: explicit `::cue` lines plus
+    /// each interaction block's cue, in order of appearance.
+    public var allCues: [InteractionCue] {
+        parts.compactMap { part in
+            switch part {
+            case let .cue(item): item
+            case let .interaction(interaction): interaction.cue
+            case .markdown, .bubble: nil
+            }
+        }
+    }
+
     /// Bubbles per message; later ones show their Markdown without effect.
     public static let maxBubbles = 8
 

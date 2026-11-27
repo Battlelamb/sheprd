@@ -82,6 +82,13 @@ impl BlockDirective {
             Self::Progress | Self::Runbook | Self::Drop | Self::Spotlight => None,
         }
     }
+
+    /// Whether a newer chat entry automatically clears this interaction unless
+    /// overridden by `auto_clear:`. Progress trackers and shared runbooks
+    /// span multiple chat turns so they stay pinned until done or dismissed.
+    pub(crate) const fn default_auto_clear(self) -> bool {
+        !matches!(self, Self::Progress | Self::Runbook)
+    }
 }
 
 /// Typed payload parsed from an interaction directive block.
@@ -178,7 +185,7 @@ pub(crate) fn parse_block(
 ) -> ParsedInteraction {
     let mut scope = directive.default_scope();
     let mut cue = directive.default_cue();
-    let mut auto_clear = true;
+    let mut auto_clear = directive.default_auto_clear();
     let mut preset = None;
     let mut choices = Vec::new();
     let mut quick_reply = false;
@@ -406,10 +413,8 @@ fn parse_runbook_line(line: &str) -> Option<RunbookStep> {
         .or_else(|| rest.strip_prefix("[X] "))
     {
         (true, after)
-    } else if let Some(after) = rest.strip_prefix("[ ] ") {
-        (false, after)
     } else {
-        return None;
+        (false, rest.strip_prefix("[ ] ")?)
     };
     let (human, label) = if let Some(after) = rest.strip_prefix("you:") {
         (true, after.trim())

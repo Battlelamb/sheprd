@@ -305,12 +305,12 @@ impl GlobalHud {
                                     .child("Snooze 2m")
                                     .on_click(cx.listener(move |_, _, _, cx| {
                                         store_snooze.update(cx, |s, cx| {
-                                            s.snooze(
+                                            s.snooze_and_schedule(
                                                 &id_snooze,
                                                 Duration::from_secs(120),
                                                 Instant::now(),
+                                                cx,
                                             );
-                                            cx.notify();
                                         });
                                     })),
                             )

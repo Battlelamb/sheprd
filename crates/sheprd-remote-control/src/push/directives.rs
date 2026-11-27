@@ -152,3 +152,98 @@ pub(super) fn without_directives(text: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+/// Live Activity metadata extracted from interaction blocks in an agent reply.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct LiveInteraction {
+    pub(crate) progress_percent: Option<u8>,
+    pub(crate) progress_done: bool,
+    pub(crate) blocker_title: Option<String>,
+    pub(crate) blocker_kind: Option<String>,
+    pub(crate) blocker_auto_clear: bool,
+}
+
+/// Extracts `:::progress` and urgent blocker metadata (`:::urgent`, `:::otp`,
+/// `:::oauth`, `:::secret`, `:::countdown`) from an agent reply for Live
+/// Activity `ContentState` updates.
+pub(crate) fn extract_live_interaction(text: &str) -> LiveInteraction {
+    let mut out = LiveInteraction::default();
+    let lines: Vec<(&str, bool)> = prose(text).collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let (line, is_prose) = lines[i];
+        i += 1;
+        if !is_prose {
+            continue;
+        }
+        let Some(block) = line.trim().strip_prefix(":::") else {
+            continue;
+        };
+        if block.is_empty() {
+            continue;
+        }
+        let mut parts = block.splitn(2, char::is_whitespace);
+        let name = parts.next().unwrap_or("");
+        if !INTERACTION_BLOCKS.contains(&name) {
+            continue;
+        }
+        let title = parts.next().map(str::trim).unwrap_or("");
+        let mut headers = Vec::new();
+        while i < lines.len() {
+            let (inner, inner_prose) = lines[i];
+            i += 1;
+            if inner_prose && inner.trim() == ":::" {
+                break;
+            }
+            if let Some((k, v)) = inner.trim().split_once(':') {
+                let k = k.trim();
+                if !k.is_empty() && k.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') {
+                    headers.push((k, v.trim()));
+                }
+            }
+        }
+        if name == "progress" {
+            let mut percent = None;
+            let mut done = false;
+            for (k, v) in &headers {
+                match *k {
+                    "percent" => {
+                        if let Ok(p) = v.trim_end_matches('%').parse::<u8>() {
+                            percent = Some(p.min(100));
+                        }
+                    }
+                    "done" => done = matches!(*v, "true" | "1" | "yes"),
+                    _ => {}
+                }
+            }
+            out.progress_done = done;
+            out.progress_percent = if done { None } else { percent };
+        } else if URGENT_BLOCKS.contains(&name) {
+            let mut preset: Option<&str> = None;
+            let mut auto_clear = true;
+            for (k, v) in &headers {
+                match *k {
+                    "preset" if !v.is_empty() => preset = Some(*v),
+                    "auto_clear" => auto_clear = matches!(*v, "true" | "1" | "yes"),
+                    _ => {}
+                }
+            }
+            let default_title = match name {
+                "otp" => "Enter 2FA code",
+                "oauth" => "Complete sign-in",
+                "secret" => "Provide secret securely",
+                "countdown" => "Confirm scheduled action",
+                _ => "Action required",
+            };
+            let chosen_title = if title.is_empty() {
+                default_title
+            } else {
+                title
+            };
+            out.blocker_title = Some(chosen_title.chars().take(120).collect());
+            out.blocker_kind = Some(preset.unwrap_or(name).chars().take(32).collect());
+            out.blocker_auto_clear = auto_clear;
+        }
+    }
+    out
+}

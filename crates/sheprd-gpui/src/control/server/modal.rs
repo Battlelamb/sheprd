@@ -1,7 +1,8 @@
 //! Control server handler for `sheprd modal ...` requests.
 
 use crate::agent_interactions::{
-    BlockDirective, InteractionStore, ParsedInteraction, Payload, SourceKey, sync_hud_deferred,
+    BlockDirective, EscalationLevel, InteractionStore, ParsedInteraction, Payload, SourceKey,
+    UpsertInteraction, sync_hud_deferred,
 };
 use crate::control::protocol::{
     Call, ErrorCode, Response,
@@ -15,47 +16,50 @@ pub(super) fn serve(call: Call<ModalOp>, cx: &mut App) -> Response {
     let Call { caller, op } = call;
     let now = Instant::now();
     let store = InteractionStore::global(cx);
-    let target_window = MainWindow::all(cx)
-        .into_iter()
-        .find(|w| caller.window.is_none_or(|id| w.window_id().as_u64() == id));
-    let (window_id, volume, window_ok, global_ok, pill_ok) = target_window
-        .as_ref()
-        .and_then(|w| {
-            w.read(cx).ok().map(|view| {
-                (
-                    Some(w.window_id()),
-                    view.config.sound.volume,
-                    view.config.chat.agent_modals,
-                    view.config.chat.global_modals,
-                    view.config.chat.progress_pill,
-                )
-            })
-        })
-        .unwrap_or((None, 80, true, true, true));
-
-    let source = SourceKey {
-        window_id,
-        pane_id: caller.pane_id.clone().or(caller.terminal_id.clone()),
-    };
-    let workspace_label = caller
-        .workspace_id
-        .clone()
-        .unwrap_or_else(|| "workspace".to_owned());
 
     match op {
         ModalOp::List => {
+            if !super::valid_caller(&caller) {
+                return Response::error(
+                    ErrorCode::InvalidRequest,
+                    "Invalid workspace, pane, or daemon",
+                );
+            }
             let items = store.read(cx).summaries(now);
             Response::Modal {
                 reply: Reply::Listed { items },
             }
         }
-        ModalOp::Clear { all, id } => {
+        ModalOp::Clear { all: true, .. } => {
+            if !super::valid_caller(&caller) {
+                return Response::error(
+                    ErrorCode::InvalidRequest,
+                    "Invalid workspace, pane, or daemon",
+                );
+            }
             let count = store.update(cx, |s, cx| {
-                let removed = if all {
-                    s.clear_all()
-                } else if let Some(id) = id.as_deref() {
+                let removed = s.clear_all();
+                if removed > 0 {
+                    cx.notify();
+                }
+                removed
+            });
+            for win in MainWindow::all(cx) {
+                let _ = win.update(cx, |_, _, cx| cx.notify());
+            }
+            Response::Modal {
+                reply: Reply::Cleared { count },
+            }
+        }
+        ModalOp::Clear { all: false, id } => {
+            if let Err(response) = super::window_for(&caller, cx) {
+                return response;
+            }
+            let pane = caller.pane_id.as_deref().or(caller.terminal_id.as_deref());
+            let count = store.update(cx, |s, cx| {
+                let removed = if let Some(id) = id.as_deref() {
                     usize::from(s.dismiss(id))
-                } else if let Some(pane) = source.pane_id.as_deref() {
+                } else if let Some(pane) = pane {
                     s.clear_for_pane(pane)
                 } else {
                     s.clear_all()
@@ -65,18 +69,73 @@ pub(super) fn serve(call: Call<ModalOp>, cx: &mut App) -> Response {
                 }
                 removed
             });
+            for win in MainWindow::all(cx) {
+                let _ = win.update(cx, |_, _, cx| cx.notify());
+            }
             Response::Modal {
                 reply: Reply::Cleared { count },
             }
         }
         ModalOp::Cue { cue } => {
+            let target_window = match super::window_for(&caller, cx) {
+                Ok(win) => win,
+                Err(response) => return response,
+            };
+            let volume = target_window
+                .read(cx)
+                .map_or(80, |view| view.config.sound.volume);
             store.update(cx, |s, cx| {
                 s.trigger_cue(cue, now, volume);
                 cx.notify();
             });
+            let _ = target_window.update(cx, |_, _, cx| cx.notify());
             Response::done(format!("Played {} cue", cue.name()))
         }
         other => {
+            let target_window = match super::window_for(&caller, cx) {
+                Ok(win) => win,
+                Err(response) => return response,
+            };
+            let (window_id, volume, window_ok, global_ok, pill_ok, workspace_label, workspace_root) =
+                target_window
+                    .read(cx)
+                    .map(|view| {
+                        let pane_ref = caller.pane_id.as_deref().or(caller.terminal_id.as_deref());
+                        let (label, root) = if let Some(pane) = pane_ref {
+                            view.workspace_info_for_pane(pane)
+                        } else if let Some(ws_id) = caller.workspace_id.as_deref() {
+                            (ws_id.to_owned(), view.workspace_path_for_id(ws_id))
+                        } else {
+                            ("workspace".to_owned(), view.selected_workspace_path())
+                        };
+                        (
+                            Some(target_window.window_id()),
+                            view.config.sound.volume,
+                            view.config.chat.agent_modals,
+                            view.config.chat.global_modals,
+                            view.config.chat.progress_pill,
+                            label,
+                            root,
+                        )
+                    })
+                    .unwrap_or_else(|_| {
+                        (
+                            None,
+                            80,
+                            true,
+                            true,
+                            true,
+                            caller
+                                .workspace_id
+                                .clone()
+                                .unwrap_or_else(|| "workspace".to_owned()),
+                            None,
+                        )
+                    });
+            let source = SourceKey {
+                window_id,
+                pane_id: caller.pane_id.clone().or(caller.terminal_id.clone()),
+            };
             let parsed = match into_parsed(other) {
                 Ok(parsed) => parsed,
                 Err(msg) => return Response::error(ErrorCode::InvalidRequest, msg),
@@ -104,16 +163,25 @@ pub(super) fn serve(call: Call<ModalOp>, cx: &mut App) -> Response {
                 }
                 parsed.scope = ModalScope::Window;
             }
+            let display_level = if is_progress || parsed.scope == ModalScope::All {
+                EscalationLevel::GlobalHud
+            } else {
+                EscalationLevel::WindowModal
+            };
             let id = store.update(cx, |s, cx| {
-                let id = s.upsert(
+                let id = s.upsert(UpsertInteraction {
                     source,
-                    "Agent".to_owned(),
+                    agent_label: "Agent".to_owned(),
                     workspace_label,
-                    None,
+                    workspace_root,
+                    entry_id: None,
+                    directive_index: None,
                     parsed,
+                    display_level,
+                    manual_open: true,
                     now,
                     volume,
-                );
+                });
                 sync_hud_deferred(cx);
                 cx.notify();
                 id

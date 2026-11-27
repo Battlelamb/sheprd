@@ -15,11 +15,13 @@ mod tests;
 
 pub(crate) use parse::{BlockDirective, ParsedInteraction, Payload};
 
+use crate::window::main_window::MainWindow;
 use gpui::{App, AppContext, Context, Entity, Global, WindowId};
 use sheprd_chat_protocol::EntryId;
 use sheprd_control_protocol::protocol::modal::{CueKind, ModalScope, ModalSummary, RunbookStep};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -65,13 +67,7 @@ pub(crate) fn escalate(
     global_enabled: bool,
 ) -> EscalationLevel {
     match presence {
-        Presence::InChat => {
-            if scope == ModalScope::All {
-                EscalationLevel::InlineOnly
-            } else {
-                EscalationLevel::InlineOnly
-            }
-        }
+        Presence::InChat => EscalationLevel::InlineOnly,
         Presence::SameWindowOtherTab => EscalationLevel::WindowModal,
         Presence::OtherApp => {
             if global_enabled && (scope == ModalScope::All || unread_secs >= 10) {
@@ -99,6 +95,40 @@ pub(crate) struct SourceKey {
     pub(crate) pane_id: Option<String>,
 }
 
+/// Parameters for inserting or replacing an active interaction in [`InteractionStore`].
+pub(crate) struct UpsertInteraction {
+    pub(crate) source: SourceKey,
+    pub(crate) agent_label: String,
+    pub(crate) workspace_label: String,
+    pub(crate) workspace_root: Option<PathBuf>,
+    pub(crate) entry_id: Option<EntryId>,
+    pub(crate) directive_index: Option<usize>,
+    pub(crate) parsed: ParsedInteraction,
+    pub(crate) display_level: EscalationLevel,
+    pub(crate) manual_open: bool,
+    pub(crate) now: Instant,
+    pub(crate) volume: u8,
+}
+
+/// Parameters for syncing a single chat entry into [`InteractionStore`].
+pub(crate) struct ChatEntrySync<'a> {
+    pub(crate) window_id: WindowId,
+    pub(crate) pane_id: &'a str,
+    pub(crate) agent_label: &'a str,
+    pub(crate) workspace_label: &'a str,
+    pub(crate) workspace_root: Option<PathBuf>,
+    pub(crate) entry_id: EntryId,
+    pub(crate) history: bool,
+    pub(crate) presence: Presence,
+    pub(crate) interactions: &'a [ParsedInteraction],
+    pub(crate) cues: &'a [CueKind],
+    pub(crate) now: Instant,
+    pub(crate) volume: u8,
+    pub(crate) window_modals_enabled: bool,
+    pub(crate) global_modals_enabled: bool,
+    pub(crate) progress_pill_enabled: bool,
+}
+
 /// One live persistent interaction tracked by [`InteractionStore`].
 #[derive(Clone, Debug)]
 pub(crate) struct ActiveInteraction {
@@ -106,8 +136,17 @@ pub(crate) struct ActiveInteraction {
     pub(crate) source: SourceKey,
     pub(crate) agent_label: String,
     pub(crate) workspace_label: String,
+    /// Root directory of the originating workspace (for secret-safe `.env` writes).
+    pub(crate) workspace_root: Option<PathBuf>,
     pub(crate) entry_id: Option<EntryId>,
+    /// Ordinal index of the directive within `entry_id`, so streaming chunks
+    /// update the active card in-place without reopening dismissed cards.
+    pub(crate) directive_index: Option<usize>,
     pub(crate) parsed: ParsedInteraction,
+    /// Current surface chosen by the Smart Escalation Ladder (or manual open).
+    pub(crate) display_level: EscalationLevel,
+    /// Explicitly opened via CLI or user clicking "Show" on a chat chip.
+    pub(crate) manual_open: bool,
     pub(crate) created_at: Instant,
     pub(crate) snoozed_until: Option<Instant>,
     pub(crate) expires_at: Option<Instant>,
@@ -150,15 +189,26 @@ pub(crate) struct EdgeCue {
     pub(crate) until: Instant,
 }
 
+/// How many directives and standalone cues have already been triggered for a
+/// chat entry, so streaming chunks update in-place without replaying cues or
+/// reopening dismissed modals.
+#[derive(Clone, Copy, Debug, Default)]
+struct SeenEntry {
+    interactions: usize,
+    cues: usize,
+}
+
 /// App-global store of all active persistent modals, progress pills, runbooks,
 /// spotlights, and semantic cues across windows and the floating global HUD.
 #[derive(Default)]
 pub(crate) struct InteractionStore {
     next_id: u64,
     items: Vec<ActiveInteraction>,
-    /// Chat entries already ingested so history loads and re-renders never
-    /// re-open dismissed modals.
-    seen_entries: HashMap<String, HashSet<(EntryId, u64)>>,
+    /// Last observed `session.snapshots()` generation per pane so initial
+    /// transcript loads and snapshot reloads are always treated as history.
+    pane_snapshots: HashMap<String, u64>,
+    /// Directives and cues already ingested per `(pane_id, entry_id)`.
+    seen_entries: HashMap<String, HashMap<EntryId, SeenEntry>>,
     /// Currently selected card index inside the stacked deck.
     pub(crate) deck_index: usize,
     /// Whether the global Dynamic Progress Pill is expanded on hover/click.
@@ -190,46 +240,60 @@ impl InteractionStore {
         cx.try_global::<GlobalInteractions>().map(|g| g.0.clone())
     }
 
+    /// Records `snapshot_gen` for `pane_id`. Returns `true` when the pane is
+    /// newly observed or loaded a fresh transcript snapshot, meaning all
+    /// entries currently in the transcript must be marked as history without
+    /// firing modals or cues.
+    pub(crate) fn begin_pane_sync(&mut self, pane_id: &str, snapshot_gen: u64) -> bool {
+        let is_history = match self.pane_snapshots.get(pane_id) {
+            None => true,
+            Some(&prev) => prev != snapshot_gen,
+        };
+        if is_history {
+            self.pane_snapshots.insert(pane_id.to_owned(), snapshot_gen);
+            self.seen_entries
+                .entry(pane_id.to_owned())
+                .or_default()
+                .clear();
+        }
+        is_history
+    }
+
     /// Inserts or replaces the active interaction of the same category (modal
     /// vs progress pill) for `source`, returning its assigned ID.
-    pub(crate) fn upsert(
-        &mut self,
-        source: SourceKey,
-        agent_label: String,
-        workspace_label: String,
-        entry_id: Option<EntryId>,
-        parsed: ParsedInteraction,
-        now: Instant,
-        volume: u8,
-    ) -> String {
-        self.prune_expired(now);
-        let is_progress = matches!(parsed.payload, Payload::Progress { .. });
-        let done_flash = matches!(parsed.payload, Payload::Progress { done: true, .. });
+    pub(crate) fn upsert(&mut self, req: UpsertInteraction) -> String {
+        self.prune_expired(req.now);
+        let is_progress = matches!(req.parsed.payload, Payload::Progress { .. });
+        let done_flash = matches!(req.parsed.payload, Payload::Progress { done: true, .. });
         // At most one modal and one progress pill per source pane so agents
         // can update in place without flooding the user's screen.
-        if source.pane_id.is_some() {
+        if req.source.pane_id.is_some() {
             self.items.retain(|item| {
-                !(item.source.pane_id == source.pane_id && item.is_progress() == is_progress)
+                !(item.source.pane_id == req.source.pane_id && item.is_progress() == is_progress)
             });
         }
-        if let Some(cue) = parsed.cue {
-            self.trigger_cue(cue, now, volume);
+        if let Some(cue) = req.parsed.cue {
+            self.trigger_cue(cue, req.now, req.volume);
         }
         self.next_id += 1;
         let id = format!("m{}", self.next_id);
         let expires_at = if done_flash {
-            Some(now + DONE_FLASH)
+            Some(req.now + DONE_FLASH)
         } else {
             None
         };
         self.items.push(ActiveInteraction {
             id: id.clone(),
-            source,
-            agent_label,
-            workspace_label,
-            entry_id,
-            parsed,
-            created_at: now,
+            source: req.source,
+            agent_label: req.agent_label,
+            workspace_label: req.workspace_label,
+            workspace_root: req.workspace_root,
+            entry_id: req.entry_id,
+            directive_index: req.directive_index,
+            parsed: req.parsed,
+            display_level: req.display_level,
+            manual_open: req.manual_open,
+            created_at: req.now,
             snoozed_until: None,
             expires_at,
             feedback: None,
@@ -259,77 +323,175 @@ impl InteractionStore {
             .map(|edge| edge.cue)
     }
 
-    /// Ingests newly arrived chat interactions from `pane_id`. Historical
-    /// transcript loads are recorded as seen without popping modals; a newer
-    /// agent entry auto-clears prior `auto_clear` modals for that pane.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn sync_chat_entry(
-        &mut self,
-        window_id: WindowId,
-        pane_id: &str,
-        agent_label: &str,
-        workspace_label: &str,
-        entry_id: EntryId,
-        revision: u64,
-        history: bool,
-        interactions: &[ParsedInteraction],
-        cues: &[CueKind],
-        now: Instant,
-        volume: u8,
-        window_modals_enabled: bool,
-        global_modals_enabled: bool,
-        progress_pill_enabled: bool,
-    ) -> bool {
-        let seen = self.seen_entries.entry(pane_id.to_owned()).or_default();
-        if history {
-            seen.insert((entry_id, revision));
+    /// Ingests newly arrived chat interactions from `sync.pane_id`. Historical
+    /// transcript loads are recorded as seen without popping modals; streaming
+    /// chunks update active cards in-place without replaying cues or reopening
+    /// dismissed modals; a newer agent entry auto-clears prior `auto_clear`
+    /// modals for that pane.
+    pub(crate) fn sync_chat_entry(&mut self, sync: ChatEntrySync<'_>) -> bool {
+        let pane_seen = self
+            .seen_entries
+            .entry(sync.pane_id.to_owned())
+            .or_default();
+        if sync.history {
+            let entry = pane_seen.entry(sync.entry_id).or_default();
+            entry.interactions = entry.interactions.max(sync.interactions.len());
+            entry.cues = entry.cues.max(sync.cues.len());
             return false;
         }
-        if !seen.insert((entry_id, revision)) {
-            return false;
-        }
-        // A newer entry from the same chat auto-clears earlier auto_clear
-        // modals (e.g., git push succeeded after YubiKey touch).
-        let before = self.items.len();
-        self.items.retain(|item| {
-            !(item.source.pane_id.as_deref() == Some(pane_id)
-                && item.parsed.auto_clear
-                && item.entry_id.is_some_and(|prev| prev < entry_id))
-        });
-        let mut changed = self.items.len() != before;
+        let first_time = !pane_seen.contains_key(&sync.entry_id);
+        let prev_seen = pane_seen.get(&sync.entry_id).copied().unwrap_or_default();
+        let entry_slot = pane_seen.entry(sync.entry_id).or_default();
+        entry_slot.interactions = entry_slot.interactions.max(sync.interactions.len());
+        entry_slot.cues = entry_slot.cues.max(sync.cues.len());
 
-        for &cue in cues {
-            self.trigger_cue(cue, now, volume);
-            changed = true;
+        let mut changed = false;
+
+        // A brand-new entry from the same chat auto-clears earlier `auto_clear`
+        // modals (e.g., git push succeeded after YubiKey touch).
+        if first_time {
+            let before = self.items.len();
+            self.items.retain(|item| {
+                !(item.source.pane_id.as_deref() == Some(sync.pane_id)
+                    && item.parsed.auto_clear
+                    && item.entry_id.is_some_and(|prev| prev < sync.entry_id))
+            });
+            changed |= self.items.len() != before;
         }
-        for parsed in interactions {
-            let is_progress = matches!(parsed.payload, Payload::Progress { .. });
-            if is_progress && !progress_pill_enabled {
-                continue;
+
+        // Only play standalone `::cue` directives that were not already played
+        // in an earlier streamed revision of this entry.
+        if sync.cues.len() > prev_seen.cues {
+            for &cue in &sync.cues[prev_seen.cues..] {
+                self.trigger_cue(cue, sync.now, sync.volume);
+                changed = true;
             }
-            if !is_progress && parsed.scope == ModalScope::Window && !window_modals_enabled {
-                continue;
+        }
+
+        // Streamed updates to already-ingested directives update active items
+        // in-place (preserving created_at, snooze, and feedback) and never
+        // reopen dismissed ones or replay cues.
+        let update_limit = prev_seen.interactions.min(sync.interactions.len());
+        for (idx, parsed) in sync.interactions[..update_limit].iter().enumerate() {
+            if let Some(existing) = self.items.iter_mut().find(|item| {
+                item.source.pane_id.as_deref() == Some(sync.pane_id)
+                    && item.entry_id == Some(sync.entry_id)
+                    && item.directive_index == Some(idx)
+            }) {
+                let mut updated = parsed.clone();
+                if !matches!(updated.payload, Payload::Progress { .. })
+                    && updated.scope == ModalScope::All
+                    && !sync.global_modals_enabled
+                {
+                    updated.scope = ModalScope::Window;
+                }
+                if existing.parsed != updated {
+                    let was_done = matches!(
+                        existing.parsed.payload,
+                        Payload::Progress { done: true, .. }
+                    );
+                    let now_done = matches!(updated.payload, Payload::Progress { done: true, .. });
+                    existing.parsed = updated;
+                    if sync.workspace_root.is_some() {
+                        existing.workspace_root.clone_from(&sync.workspace_root);
+                    }
+                    if !was_done && now_done {
+                        existing.expires_at = Some(sync.now + DONE_FLASH);
+                        self.trigger_cue(CueKind::Done, sync.now, sync.volume);
+                    }
+                    changed = true;
+                }
             }
-            let mut parsed = parsed.clone();
-            if !is_progress && parsed.scope == ModalScope::All && !global_modals_enabled {
-                if !window_modals_enabled {
+        }
+
+        // Newly arrived interaction blocks in this entry.
+        if sync.interactions.len() > prev_seen.interactions {
+            for (offset, parsed) in sync.interactions[prev_seen.interactions..]
+                .iter()
+                .enumerate()
+            {
+                let idx = prev_seen.interactions + offset;
+                let is_progress = matches!(parsed.payload, Payload::Progress { .. });
+                if is_progress && !sync.progress_pill_enabled {
                     continue;
                 }
-                parsed.scope = ModalScope::Window;
+                if !is_progress && parsed.scope == ModalScope::Window && !sync.window_modals_enabled
+                {
+                    continue;
+                }
+                let mut parsed = parsed.clone();
+                if !is_progress && parsed.scope == ModalScope::All && !sync.global_modals_enabled {
+                    if !sync.window_modals_enabled {
+                        continue;
+                    }
+                    parsed.scope = ModalScope::Window;
+                }
+                let display_level = if is_progress {
+                    EscalationLevel::GlobalHud
+                } else {
+                    escalate(parsed.scope, sync.presence, 0, sync.global_modals_enabled)
+                };
+                self.upsert(UpsertInteraction {
+                    source: SourceKey {
+                        window_id: Some(sync.window_id),
+                        pane_id: Some(sync.pane_id.to_owned()),
+                    },
+                    agent_label: sync.agent_label.to_owned(),
+                    workspace_label: sync.workspace_label.to_owned(),
+                    workspace_root: sync.workspace_root.clone(),
+                    entry_id: Some(sync.entry_id),
+                    directive_index: Some(idx),
+                    parsed,
+                    display_level,
+                    manual_open: false,
+                    now: sync.now,
+                    volume: sync.volume,
+                });
+                changed = true;
             }
-            self.upsert(
-                SourceKey {
-                    window_id: Some(window_id),
-                    pane_id: Some(pane_id.to_owned()),
-                },
-                agent_label.to_owned(),
-                workspace_label.to_owned(),
-                Some(entry_id),
-                parsed,
-                now,
-                volume,
+        }
+        changed
+    }
+
+    /// Re-evaluates `display_level` for all active chat-originated items in
+    /// `window_id` from the user's current presence and elapsed unread time.
+    /// Returns `true` if any item's surface changed or expired.
+    pub(crate) fn refresh_presence(
+        &mut self,
+        window_id: WindowId,
+        active_window: bool,
+        focused_pane: Option<&str>,
+        global_modals_enabled: bool,
+        now: Instant,
+    ) -> bool {
+        let before_len = self.items.len();
+        self.prune_expired(now);
+        let mut changed = self.items.len() != before_len;
+        for item in &mut self.items {
+            if item.manual_open || item.is_progress() || item.source.window_id != Some(window_id) {
+                continue;
+            }
+            let presence = if active_window
+                && focused_pane.is_some()
+                && item.source.pane_id.as_deref() == focused_pane
+            {
+                Presence::InChat
+            } else if active_window {
+                Presence::SameWindowOtherTab
+            } else {
+                Presence::OtherApp
+            };
+            let unread_secs = now.saturating_duration_since(item.created_at).as_secs();
+            let next = escalate(
+                item.parsed.scope,
+                presence,
+                unread_secs,
+                global_modals_enabled,
             );
-            changed = true;
+            if item.display_level != next {
+                item.display_level = next;
+                changed = true;
+            }
         }
         changed
     }
@@ -349,6 +511,36 @@ impl InteractionStore {
             return true;
         }
         false
+    }
+
+    /// Snoozes `id` for `duration` and schedules a background timer to wake up
+    /// the global HUD and all Sheprd windows when the snooze expires.
+    pub(crate) fn snooze_and_schedule(
+        &mut self,
+        id: &str,
+        duration: Duration,
+        now: Instant,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.snooze(id, duration, now) {
+            return false;
+        }
+        let wake_after = duration.saturating_add(Duration::from_millis(50));
+        cx.spawn(async move |store, cx| {
+            cx.background_executor().timer(wake_after).await;
+            cx.update(|cx| {
+                if let Some(store) = store.upgrade() {
+                    store.update(cx, |_, cx| cx.notify());
+                    Self::ensure_hud(&store, cx);
+                }
+                for win in MainWindow::all(cx) {
+                    let _ = win.update(cx, |_, _, cx| cx.notify());
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+        true
     }
 
     pub(crate) fn toggle_runbook_step(&mut self, id: &str, index: usize) -> Option<RunbookStep> {
@@ -386,25 +578,37 @@ impl InteractionStore {
             .retain(|item| item.expires_at.is_none_or(|exp| now < exp));
     }
 
-    /// Visible items belonging to `window_id` (plus mirrored global items).
+    /// Visible items belonging to `window_id` (plus mirrored global items)
+    /// whose current escalation level is `WindowModal` or higher.
     pub(crate) fn for_window(&self, window_id: WindowId, now: Instant) -> Vec<&ActiveInteraction> {
         self.items
             .iter()
             .filter(|item| {
                 item.is_visible(now)
                     && !item.is_progress()
-                    && (item.parsed.scope == ModalScope::All
-                        || item.source.window_id == Some(window_id)
+                    && item.display_level != EscalationLevel::InlineOnly
+                    && (matches!(
+                        item.display_level,
+                        EscalationLevel::GlobalHud | EscalationLevel::PhoneEscalation
+                    ) || item.source.window_id == Some(window_id)
                         || item.source.window_id.is_none())
             })
             .collect()
     }
 
-    /// Visible global items (`ModalScope::All`) for the always-on-top HUD.
+    /// Visible items escalated to the always-on-top global HUD (or active
+    /// progress pills).
     pub(crate) fn global_hud_items(&self, now: Instant) -> Vec<&ActiveInteraction> {
         self.items
             .iter()
-            .filter(|item| item.is_visible(now) && item.parsed.scope == ModalScope::All)
+            .filter(|item| {
+                item.is_visible(now)
+                    && (item.is_progress()
+                        || matches!(
+                            item.display_level,
+                            EscalationLevel::GlobalHud | EscalationLevel::PhoneEscalation
+                        ))
+            })
             .collect()
     }
 

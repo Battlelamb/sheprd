@@ -52,6 +52,7 @@ final class AgentInteractionTests: XCTestCase {
         }
 
         if case let .runbook(steps) = msg.interactions[1].payload {
+            XCTAssertFalse(msg.interactions[1].autoClear)
             XCTAssertEqual(steps.count, 2)
             XCTAssertEqual(steps[0], RunbookStep(label: "Run just ci", human: false, done: true))
             XCTAssertEqual(steps[1], RunbookStep(label: "Tap YubiKey", human: true, done: false))
@@ -60,12 +61,32 @@ final class AgentInteractionTests: XCTestCase {
         }
 
         if case let .progress(percent, step, done) = msg.interactions[2].payload {
+            XCTAssertFalse(msg.interactions[2].autoClear)
             XCTAssertEqual(percent, 68)
             XCTAssertEqual(step, "chat::effects")
             XCTAssertFalse(done)
         } else {
             XCTFail("expected progress payload")
         }
+    }
+
+    func testChatEffectsPlaysInteractionCuesOnceAndSkipsHistory() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let entry = Entry(id: EntryId(1), kind: .agent(text: ":::urgent Tap YubiKey\nWaiting\n:::\n::cue done"))
+        var transcript = Transcript(agent: "Claude")
+        transcript.entries = [entry]
+
+        var historyEffects = ChatEffects()
+        historyEffects.history(transcript)
+        XCTAssertTrue(historyEffects.live(transcript, changed: [entry.id], now: now).isEmpty)
+
+        var liveEffects = ChatEffects()
+        let first = liveEffects.live(transcript, changed: [entry.id], now: now)
+        XCTAssertEqual(first, [.interactionCue(.yubikey), .interactionCue(.done)])
+
+        // Streaming update of the same entry does not replay already-played cues.
+        let second = liveEffects.live(transcript, changed: [entry.id], now: now.addingTimeInterval(1))
+        XCTAssertTrue(second.isEmpty)
     }
 
     func testIgnoresDirectivesInsideCodeFencesAndStripsRowLine() {

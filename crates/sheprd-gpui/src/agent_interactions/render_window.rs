@@ -128,19 +128,32 @@ impl SheprdWindow {
                             });
                         } else {
                             let win_id = window.window_handle().window_id();
+                            let (workspace_label, workspace_root) =
+                                this.workspace_info_for_pane(&pane_owned);
+                            let display_level = if parsed_reopen.scope == ModalScope::All
+                                && this.config.chat.global_modals
+                            {
+                                super::EscalationLevel::GlobalHud
+                            } else {
+                                super::EscalationLevel::WindowModal
+                            };
                             store.update(cx, |s, cx| {
-                                s.upsert(
-                                    super::SourceKey {
+                                s.upsert(super::UpsertInteraction {
+                                    source: super::SourceKey {
                                         window_id: Some(win_id),
                                         pane_id: Some(pane_owned.clone()),
                                     },
-                                    "Agent".to_owned(),
-                                    "chat".to_owned(),
-                                    Some(entry),
-                                    parsed_reopen.clone(),
+                                    agent_label: "Agent".to_owned(),
+                                    workspace_label,
+                                    workspace_root,
+                                    entry_id: Some(entry),
+                                    directive_index: None,
+                                    parsed: parsed_reopen.clone(),
+                                    display_level,
+                                    manual_open: true,
                                     now,
                                     volume,
-                                );
+                                });
                                 super::sync_hud_deferred(cx);
                                 cx.notify();
                             });
@@ -308,12 +321,12 @@ impl SheprdWindow {
                                     .child("Snooze 2m")
                                     .on_click(cx.listener(move |_, _, _, cx| {
                                         store_snooze.update(cx, |s, cx| {
-                                            s.snooze(
+                                            s.snooze_and_schedule(
                                                 &id_snooze,
                                                 Duration::from_secs(120),
                                                 Instant::now(),
+                                                cx,
                                             );
-                                            cx.notify();
                                         });
                                     })),
                             )
@@ -476,6 +489,7 @@ impl SheprdWindow {
                 let dest_owned = dest.clone();
                 let item_id = item.id.clone();
                 let pane = item.source.pane_id.clone();
+                let item_workspace_root = item.workspace_root.clone();
                 let store_paste = store.clone();
                 Some(
                     div()
@@ -518,9 +532,10 @@ impl SheprdWindow {
                                         });
                                         return;
                                     };
-                                    let root = this
-                                        .selected_workspace_path()
-                                        .unwrap_or_else(|| std::env::temp_dir());
+                                    let root = item_workspace_root.clone().or_else(|| {
+                                        pane.as_deref()
+                                            .and_then(|p| this.workspace_path_for_pane(p))
+                                    });
                                     let key = key_owned.clone();
                                     let dest = dest_owned.clone();
                                     let item_id = item_id.clone();
@@ -532,10 +547,15 @@ impl SheprdWindow {
                                             .spawn(async move {
                                                 let secret = vault::SecretValue::new(raw)?;
                                                 let parsed_dest = vault::parse_destination(&dest)?;
-                                                vault::inject(&root, &key, &parsed_dest, &secret)
+                                                vault::inject(
+                                                    root.as_deref(),
+                                                    &key,
+                                                    &parsed_dest,
+                                                    &secret,
+                                                )
                                             })
                                             .await;
-                                        let _ = cx.update(|cx| match result {
+                                        cx.update(|cx| match result {
                                             Ok(receipt) => {
                                                 if let Some(pane) = pane.as_deref() {
                                                     let _ = this.update(cx, |win, cx| {
@@ -621,21 +641,30 @@ impl SheprdWindow {
                 let store_r = store.clone();
                 let id_r = item_id.clone();
                 let pane_r = pane.clone();
+                let lines: Vec<&str> = diff.lines().collect();
+                let added = lines.iter().filter(|l| l.starts_with('+')).count();
+                let removed = lines.iter().filter(|l| l.starts_with('-')).count();
+                let meta = if file.is_empty() {
+                    format!("{} lines (+{added} / -{removed})", lines.len())
+                } else {
+                    format!("{file} · {} lines (+{added} / -{removed})", lines.len())
+                };
                 Some(
                     div()
                         .flex()
                         .flex_col()
                         .gap(px(8.))
-                        .when(!file.is_empty(), |col| {
-                            col.child(
-                                div()
-                                    .text_size(px(11.5))
-                                    .text_color(rgb(theme.muted))
-                                    .child(file.clone()),
-                            )
-                        })
                         .child(
                             div()
+                                .text_size(px(11.5))
+                                .text_color(rgb(theme.muted))
+                                .child(meta),
+                        )
+                        .child(
+                            div()
+                                .id("diff-lines-scroll")
+                                .max_h(px(220.))
+                                .overflow_y_scroll()
                                 .p(px(8.))
                                 .rounded(px(6.))
                                 .bg(rgb(theme.background))
@@ -643,7 +672,7 @@ impl SheprdWindow {
                                 .text_size(px(11.5))
                                 .flex()
                                 .flex_col()
-                                .children(diff.lines().take(12).map(|line| {
+                                .children(lines.into_iter().map(|line| {
                                     let color = if line.starts_with('+') {
                                         rgb(0x8ef0b0)
                                     } else if line.starts_with('-') {

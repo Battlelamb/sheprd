@@ -14,6 +14,10 @@ pub enum Error {
     SymlinkRefused { path: PathBuf },
     #[error("secret value cannot be empty")]
     EmptySecret,
+    #[error("secret value is too large (max {limit} bytes)")]
+    SecretTooLarge { limit: usize },
+    #[error("cannot determine the source workspace for this secret request")]
+    WorkspaceNotFound,
     #[error("failed to write secret to {path}")]
     Write {
         path: PathBuf,

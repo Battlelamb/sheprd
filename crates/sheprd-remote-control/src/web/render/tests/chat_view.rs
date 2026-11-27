@@ -68,6 +68,26 @@ fn a_question_is_a_sheet_with_allowing_first_and_always_apart() {
 }
 
 #[test]
+fn a_guest_prompt_shows_whole_in_a_sheet_that_scrolls() {
+    let words = "line one\n".repeat(2_000);
+    let mut permission = question(&format!("Bob via tma asks to send:\n{words}"));
+    permission.guest = Some(Box::new(sheprd_chat_protocol::GuestPrompt {
+        guest: sheprd_chat_protocol::Guest::new("Bob", "tma"),
+        text: words.clone(),
+    }));
+    let mut transcript = Transcript::new("Claude");
+    transcript.permissions = vec![permission];
+    let html = chat(&workspace(vec![]), &row("p1"), &view(transcript), 0).into_string();
+    let sheet = &html[html.find("chat-sheet").unwrap()..];
+    assert!(sheet.contains("Bob via tma asks to send"));
+    assert!(!sheet.contains("claude asks"));
+    let ask = &sheet[sheet.find("data-guest-ask").unwrap()..];
+    assert!(ask.contains("overflow-y:auto"));
+    assert!(ask.contains("whitespace-pre-wrap") || sheet.contains("whitespace-pre-wrap"));
+    assert_eq!(ask.matches("line one").count(), 2_000, "every word shows");
+}
+
+#[test]
 fn patches_cover_every_region_the_stream_replaces() {
     let patches = chat_patches(
         &workspace(vec![]),

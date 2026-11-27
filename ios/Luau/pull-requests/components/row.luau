@@ -92,17 +92,18 @@ local function whereLine(pull)
 		return iconText("No workspace on any computer", "icloud", { font = "caption2", color = "tertiary" })
 	end
 	local others = pull.computers - 1
-	local text = others == 0 and "Workspace on " .. first or "Workspace on " .. first .. " and " .. others .. " more"
+	local text = others == 0 and "Workspace on " .. first.computer
+		or "Workspace on " .. first.computer .. " and " .. others .. " more"
 	return iconText(text, "laptopcomputer", { font = "caption2", color = "secondary" })
 end
 
 local function menu(pull)
 	local items = {}
-	for index, computer in pull.places do
+	for _, place in pull.places do
 		table.insert(items, ui.button {
-			"Open Workspace on " .. computer,
+			"Open Workspace on " .. place.computer,
 			icon = "laptopcomputer",
-			msg = { workspace = pull.id, place = index },
+			msg = { device = place.device, workspace = place.workspace },
 		})
 	end
 	if pull.url then

@@ -51,10 +51,9 @@ final class LuauPullRequestsTests: XCTestCase {
 
         let relay = try XCTUnwrap(read.value["rows"]?[lists.mine[0].id])
         XCTAssertEqual(relay["review"]?.string, "approved")
-        XCTAssertEqual(relay["places"]?.array, [.string("Studio")])
+        XCTAssertEqual(relay["places"]?.array, [.fields(["computer": .string("Studio"), "device": .string("d1"), "workspace": .string("w1")])])
         XCTAssertEqual(relay["repository"]?.string, "sheprd-labs/sheprd #2")
         XCTAssertEqual(read.value["rows"]?[lists.mine[1].id]?["state"]?.string, "draft")
-        XCTAssertEqual(read.places[lists.mine[0].id], [WorkspacePlace(device: "d1", computer: "Studio", workspace: "w1")])
 
         // The same search as the SwiftUI tab: totals become what matched.
         let searched = snapshot(.read(lists), query: "teleport")
@@ -64,6 +63,16 @@ final class LuauPullRequestsTests: XCTestCase {
 
         // Status puts the draft last, as `PullRequestLists.sorted` does.
         XCTAssertEqual(ids(snapshot(.read(lists), sort: .status).value, "mine").last, lists.mine[1].id)
+    }
+
+    func testWorkspaceMenuOpensTheWorkspaceItNames() {
+        let provider = PullRequestsProvider(model: AppModel())
+        var opened: [WorkspaceKey] = []
+        provider.openWorkspace = { opened.append($0) }
+        // By its device and id, whatever the lists say now.
+        provider.receive(.fields(["device": .string("d2"), "workspace": .string("w9")]), from: "main")
+        provider.receive(.fields(["device": .string(""), "workspace": .string("w9")]), from: "main")
+        XCTAssertEqual(opened, [WorkspaceKey(device: "d2", workspace: "w9")])
     }
 
     func testBundledLuauDrawsEveryState() throws {

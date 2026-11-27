@@ -12,8 +12,8 @@ import UIKit
 ///
 /// Requests: `{ query = text }`, `{ sort = "updated" | "status" }`,
 /// `{ refresh = true }`, `{ github = true }` for Settings › GitHub,
-/// `{ workspace = id, place = n }` to open the n-th workspace carrying a
-/// pull request, and `{ web = id }` to open its page.
+/// `{ device = id, workspace = id }` to open a workspace carrying a pull
+/// request, and `{ web = id }` to open its page.
 @MainActor
 final class PullRequestsProvider: Provider {
     let name = "pulls"
@@ -53,10 +53,11 @@ final class PullRequestsProvider: Provider {
             refresh()
         } else if message["github"] != nil {
             openGitHubSettings()
-        } else if let id = message["workspace"]?.string, let place = message["place"]?.number,
-                  let found = last.places[id], place >= 1, Int(place) <= found.count {
-            let place = found[Int(place) - 1]
-            openWorkspace(WorkspaceKey(device: place.device, workspace: place.workspace))
+        } else if let device = message["device"]?.string, let workspace = message["workspace"]?.string,
+                  !device.isEmpty, !workspace.isEmpty {
+            // Named, not by position, so a list that changed while the menu
+            // was open still opens the workspace chosen.
+            openWorkspace(WorkspaceKey(device: device, workspace: workspace))
         } else if let id = message["web"]?.string, let url = last.pulls[id]?.url {
             openPage(url)
         }
@@ -107,11 +108,10 @@ final class PullRequestsProvider: Provider {
 }
 
 /// One publication of `app.pulls`: the lists as shown, searched and sorted,
-/// and the pull requests and places its rows name by id.
+/// and the pull requests its rows name by id.
 struct PullRequestsSnapshot {
     private(set) var value = LuauValue.emptyTable
     private(set) var pulls: [String: GitHubSearchPull] = [:]
-    private(set) var places: [String: [WorkspacePlace]] = [:]
 
     init() {}
 
@@ -125,7 +125,6 @@ struct PullRequestsSnapshot {
         for pull in requested + mine where pulls[pull.id] == nil {
             let found = ComputerWorkspaces.places(of: pull, in: computers)
             pulls[pull.id] = pull
-            places[pull.id] = found
             rows[pull.id] = Self.row(pull, places: found, now: now)
         }
         value = .fields([
@@ -165,7 +164,9 @@ struct PullRequestsSnapshot {
                 "pending": .number(Double(pull.checks.pending)),
                 "passed": .number(Double(pull.checks.passed)),
             ]),
-            "places": .table(array: places.map { .string($0.computer) }, fields: [:]),
+            "places": .table(array: places.map {
+                .fields(["computer": .string($0.computer), "device": .string($0.device), "workspace": .string($0.workspace)])
+            }, fields: [:]),
             "computers": .number(Double(Set(places.map(\.device)).count)),
         ]
         if let review = review(pull.reviewDecision) { fields["review"] = .string(review) }

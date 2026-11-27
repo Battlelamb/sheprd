@@ -23,9 +23,13 @@ struct LuauPullRequestsList: View {
         MoonCanvas()
             .environment(screen.workspace)
             .onAppear {
-                screen.provider.openWorkspace = { opened = $0 }
+                // Bindings and the action, not the view: the view holds the
+                // store, which holds the provider, so capturing it would
+                // keep a switched-away screen alive.
+                let (opened, showingGitHub, openURL) = ($opened, $showingGitHub, openURL)
+                screen.provider.openWorkspace = { opened.wrappedValue = $0 }
                 screen.provider.openPage = { openURL($0) }
-                screen.provider.openGitHubSettings = { showingGitHub = true }
+                screen.provider.openGitHubSettings = { showingGitHub.wrappedValue = true }
             }
             .navigationBarTitleDisplayMode(.inline)
             .gitHubRefresh(showsLists: true)

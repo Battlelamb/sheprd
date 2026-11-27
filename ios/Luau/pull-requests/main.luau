@@ -89,7 +89,7 @@ return mod {
 			return state, { { to = "provider:pulls", msg = { query = msg.value } } }
 		elseif type(msg) == "table" and msg.msg == "sort" then
 			return state, { { to = "provider:pulls", msg = { sort = msg.value } } }
-		elseif type(msg) == "table" and (msg.workspace or msg.web) then
+		elseif type(msg) == "table" and ((msg.device and msg.workspace) or msg.web) then
 			return state, { { to = "provider:pulls", msg = msg } }
 		end
 		return state

@@ -104,8 +104,16 @@ pub(crate) fn entry(entry: &Entry, width: usize) -> Vec<Line<'static>> {
     }
     let mut lines = Vec::new();
     match &entry.kind {
-        EntryKind::User { text, .. } => {
-            // The timeline's rail and header say who wrote it.
+        EntryKind::User { text, guest, .. } => {
+            // The timeline's rail and header say who wrote it; a guest is
+            // named, as the person did not.
+            if let Some(guest) = guest {
+                // The program took only names without control characters.
+                lines.push(Line::styled(
+                    format!("{} · guest", guest.label()),
+                    Style::default().fg(Color::Magenta),
+                ));
+            }
             for line in wrap(text, width) {
                 lines.push(Line::raw(line));
             }

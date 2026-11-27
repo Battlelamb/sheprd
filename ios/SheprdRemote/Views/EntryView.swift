@@ -23,7 +23,7 @@ struct EntryView: View {
         case let .tool(tool):
             ToolRow(tool: tool)
         case let .turn(summary):
-            Text(turnLine(summary)).font(.caption).foregroundStyle(.secondary)
+            Text(ChatTurns.turnLine(summary)).font(.caption).foregroundStyle(.secondary)
         case let .notice(notice):
             if let details = notice.details {
                 // Such as a compaction summary or a command's output: folded,
@@ -44,12 +44,6 @@ struct EntryView: View {
         Label(notice.text, systemImage: notice.level == .error ? "exclamationmark.octagon" : "info.circle")
             .font(.footnote)
             .foregroundStyle(notice.level == .info ? AnyShapeStyle(.secondary) : AnyShapeStyle(notice.level == .error ? .red : .orange))
-    }
-
-    private func turnLine(_ summary: TurnSummary) -> String {
-        let seconds = Int(summary.durationMs / 1000)
-        let time = seconds >= 60 ? "\(seconds / 60)m \(seconds % 60)s" : "\(seconds)s"
-        return summary.end == .done ? "Done in \(time)" : "Ended (\(summary.end.rawValue)) after \(time)"
     }
 }
 

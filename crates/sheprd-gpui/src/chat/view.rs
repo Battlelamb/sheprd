@@ -13,7 +13,7 @@ mod effects;
 mod embeds;
 mod entries;
 mod files;
-mod guest;
+pub(super) mod guest;
 mod jump;
 mod layout;
 mod loading;

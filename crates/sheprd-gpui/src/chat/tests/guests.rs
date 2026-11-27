@@ -87,3 +87,8 @@ fn a_guests_prompt_is_named_and_waits_in_full_for_the_person(cx: &mut TestAppCon
         }
     );
 }
+
+#[test]
+fn a_guest_prompts_tabs_show_as_spaces_on_its_card() {
+    assert_eq!(view::guest::guest_line("do\tnot"), "do    not");
+}

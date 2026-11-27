@@ -65,7 +65,7 @@ impl SheprdWindow {
             .text
             .lines()
             .map(|line| {
-                let line = safe_text(line, MAX_GUEST_PROMPT_SIZE);
+                let line = guest_line(line);
                 div().child(if line.is_empty() {
                     " ".to_owned()
                 } else {
@@ -106,4 +106,11 @@ impl SheprdWindow {
                     .children(lines),
             )
     }
+}
+
+/// A line of a guest's prompt as the approval card shows it. Tabs separate
+/// words the agent gets, so they show as spaces rather than being dropped
+/// with the control characters `safe_text` removes.
+pub(in crate::chat) fn guest_line(line: &str) -> String {
+    safe_text(&line.replace('\t', "    "), MAX_GUEST_PROMPT_SIZE * 4)
 }

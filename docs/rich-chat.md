@@ -722,6 +722,27 @@ differences:
 The phone web app draws neither, so `phone.md` does not mention them and only
 `phone-app.md`, which follows it for the iPhone and iPad app, does.
 
+In the iPhone and iPad app and the desktop chat, an agent's answer may also
+link a screen of its own computer, so the person opens a workspace, worktree,
+tab, or agent the agent just made with a tap or a click: `sheprd://workspace/WORKSPACE`,
+`sheprd://changes/WORKSPACE`, `sheprd://chat/PANE` (its terminal when the
+agent has no chat), or `sheprd://term/PANE`, with Herdr's ids
+(`ScreenLink.swift`). A link names no computer: the chat showing it opens it
+on that chat's computer, so one computer's text never reaches another's
+screens. A Herdr 2 pane goes by the id the desktop and `sheprd chat
+list` give it, `core:t7`; the phone matches it to its own `core:TAG-HEX`
+(`ScreenLink.pane(_:isNamed:)`), and the desktop opens its herdr-core tab.
+On an iPad, a link in a chat shown in a window of its own pushes onto that
+window's stack. It only shows a screen, as `sheprd phone open` does, without the
+banner or **Let agents open screens**, since the person tapped it. Every
+other non-web link in agent text stays plain text. `phone-app.md` and
+`desktop.md` tell the agent to write these links; the phone web app and
+`remote.md` places do not open them. On the desktop
+(`chat/screen_link.rs`), a click focuses the pane or workspace in the Herdr
+the window shows the chat from, as an agents-list row does, and a changes
+link goes to its workspace; links in an SSH chat stay inert, as its ids are
+its host's.
+
 The catalog is application-specific, not an A2UI implementation or MCP Apps
 host. Embedded HTML pages use the platform webview; see the
 [Linux browser plan](linux-browser-plan.md). Rich chat does not provide hosted

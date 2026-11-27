@@ -16,10 +16,12 @@ fn daemon(_: &Path, request: &Request) -> Result<Response, control::Error> {
                 code: "428913".into(),
                 app: Some("https://other.example:8443".into()),
                 ssh: false,
+                fleet: None,
             })
         }
         Request::Pairing { .. } => Response::Pairing(PairingState::Waiting {
             expires_in_ms: 60_000,
+            nearby_code: None,
         }),
         _ => Response::Done,
     })

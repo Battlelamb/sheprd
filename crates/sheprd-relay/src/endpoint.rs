@@ -286,6 +286,9 @@ impl<'de> Deserialize<'de> for Endpoint {
 /// saving it, and learn how to reach it over QUIC.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Info {
+    /// This relay serves the same-origin v0 browser guest.
+    #[serde(default)]
+    pub share_viewer: bool,
     /// Whether listeners must present the operator's token. Dialers never
     /// need one.
     pub listen_token: bool,
@@ -312,5 +315,23 @@ pub struct QuicInfo {
     pub port: u16,
 }
 
+/// Reads a QUIC certificate pin as `/v1/info` and the signed relay list
+/// write it: the SHA-256, base64url without padding (43 characters).
+#[must_use]
+pub fn decode_pin(text: &str) -> Option<[u8; 32]> {
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    URL_SAFE_NO_PAD.decode(text).ok()?.try_into().ok()
+}
+
+/// Writes a QUIC certificate pin as [`decode_pin`] reads it.
+#[must_use]
+pub fn encode_pin(pin: &[u8; 32]) -> String {
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    URL_SAFE_NO_PAD.encode(pin)
+}
+
 /// The relay protocol version this crate speaks.
 pub const PROTOCOL: u8 = 1;
+
+/// On HTTP 403, distinguishes an address ban from a proxy or origin policy.
+pub const BAN_HEADER: &str = "sheprd-relay-banned";

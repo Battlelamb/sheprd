@@ -15,7 +15,10 @@ use sheprd_remote_control::control::Request;
 use std::{sync::Arc, time::Duration};
 
 mod addresses;
+mod computer_fleet;
+mod fleet_line;
 mod hosts;
+mod link;
 mod share_github;
 
 /// What keeps this computer advertised for nearby pairing.
@@ -38,6 +41,13 @@ pub(crate) struct PairingDialog {
     pub(crate) pairing: Pairing,
     /// The other machines the phone may be allowed on too.
     pub(crate) hosts: Vec<hosts::Choice>,
+    /// Whether the phone, once approved, is admitted to this computer's
+    /// fleet when it asks to join (`fleet_line`). Ticked by default, as
+    /// the design has it; shown only while this computer is a member.
+    pub(crate) join_fleet: bool,
+    /// The fleet the phone joins once approved: set at Allow, only when
+    /// the switch was shown ticked, and spent once.
+    fleet_choice: Option<String>,
     addresses_scroll: ScrollHandle,
     other_addresses: crate::motion::Toggle,
     client: Option<Client>,
@@ -104,6 +114,8 @@ impl SheprdWindow {
         self.menu.remote_pairing = Some(PairingDialog {
             pairing: pairing.with_address(address),
             hosts: hosts::choices(Supervisor::hosts(cx)),
+            join_fleet: true,
+            fleet_choice: None,
             addresses_scroll: ScrollHandle::new(),
             other_addresses: crate::motion::Toggle::default(),
             client,
@@ -149,9 +161,12 @@ impl SheprdWindow {
                         &result,
                         Ok(sheprd_remote_control::control::Response::Offer(_))
                     );
-                    dialog
-                        .pairing
-                        .receive(&ticket, result, cx.background_executor().now());
+                    let now = cx.background_executor().now();
+                    dialog.pairing.receive(&ticket, result, now);
+                    // Copy link: on the clipboard once the daemon made it.
+                    if let Some(link) = dialog.pairing.take_link(now) {
+                        cx.write_to_clipboard(ClipboardItem::new_string(link));
+                    }
                     if new_offer {
                         dialog.reveal_selected_address();
                     }
@@ -165,7 +180,10 @@ impl SheprdWindow {
                         Phase::Showing { .. } | Phase::Claimed { .. } => {}
                         _ => dialog._nearby = None,
                     }
-                    if matches!(dialog.pairing.phase(), Phase::Approved { .. }) {
+                    if let Phase::Approved { device, .. } = dialog.pairing.phase() {
+                        if let Some(fleet) = dialog.fleet_choice.take() {
+                            crate::fleet::Fleet::expect(cx, device.clone(), fleet);
+                        }
                         Supervisor::refresh(cx);
                     }
                     cx.notify();
@@ -193,6 +211,17 @@ impl SheprdWindow {
     fn answer_pairing(&mut self, allow: bool, cx: &mut Context<Self>) {
         if let Some(dialog) = &mut self.menu.remote_pairing {
             let ticked = hosts::ticked(&dialog.hosts);
+            // A phone, with the switch shown: this computer is a member.
+            let phone = matches!(dialog.pairing.phase(), Phase::Claimed { ssh: false, .. });
+            dialog.fleet_choice = (allow && phone && dialog.join_fleet)
+                .then(|| crate::fleet::Fleet::member_of(cx))
+                .flatten();
+            // A computer's claim: the fleet its line agreed to, shown
+            // ticked, and nothing for a phone, which joins on its own.
+            let agreed = computer_fleet::line(dialog.pairing.phase(), cx)
+                .filter(|_| allow && dialog.join_fleet)
+                .and_then(|line| line.agrees().map(str::to_owned));
+            dialog.pairing.set_fleet(agreed);
             dialog.pairing.answer_with_hosts(allow, ticked);
             cx.notify();
         }
@@ -272,7 +301,13 @@ impl SheprdWindow {
     pub(crate) fn remote_dialog_open(&self) -> bool {
         matches!(
             self.menu.page,
-            Some(Page::RemoteControl | Page::RevokeDevice | Page::RemoteHostAsk)
+            Some(
+                Page::RemoteControl
+                    | Page::RevokeDevice
+                    | Page::RemoteHostAsk
+                    | Page::ShareSession
+                    | Page::BorrowMachine
+            )
         )
     }
 
@@ -282,6 +317,9 @@ impl SheprdWindow {
             Some(Page::RemoteControl) => Some(self.render_pairing(cx)),
             Some(Page::RevokeDevice) => Some(self.render_revoke(cx)),
             Some(Page::RemoteHostAsk) => Some(self.render_host_ask(cx)),
+            Some(Page::ShareSession) => Some(self.render_share_session(cx)),
+            // Another computer's virtual Mac, borrowed from here.
+            Some(Page::BorrowMachine) => Some(self.render_borrow_machine(cx)),
             _ => None,
         }
     }
@@ -303,6 +341,12 @@ impl SheprdWindow {
                 cx,
             ),
             Phase::Requesting => self.pairing_offer(None, cx),
+            // A nearby phone or computer already shows the code, and
+            // claims next: show it here too, so both screens match at once.
+            Phase::Showing {
+                nearby_code: Some(code),
+                ..
+            } => self.pairing_nearby_code(code),
             Phase::Showing { .. } => self.pairing_offer(Some(&dialog.pairing), cx),
             Phase::Claimed {
                 device_name,
@@ -312,7 +356,9 @@ impl SheprdWindow {
                 answer,
                 ..
             } => self.pairing_claim(device_name, code, app.as_deref(), *ssh, *answer, cx),
-            Phase::Approved { device_name, ssh } => self.pairing_message(
+            Phase::Approved {
+                device_name, ssh, ..
+            } => self.pairing_message(
                 &if *ssh {
                     fl!("remote-pair-approved-ssh", device = name(device_name))
                 } else {
@@ -439,6 +485,7 @@ impl SheprdWindow {
                         ))
                 }))
                 .children(self.nearby_hint(cx))
+                .children(self.pairing_link(cx))
                 .child(self.get_app_link()),
             None => div()
                 .text_color(rgb(theme.subtext()))
@@ -591,6 +638,11 @@ impl SheprdWindow {
                     .then(|| self.pairing_share_github(!waiting, cx))
                     .flatten(),
             )
+            .children((!ssh).then(|| self.pairing_fleet(!waiting, cx)).flatten())
+            .children(
+                ssh.then(|| self.pairing_computer_fleet(&device, !waiting, cx))
+                    .flatten(),
+            )
             .child(
                 div()
                     .flex()
@@ -630,6 +682,32 @@ impl SheprdWindow {
                             }))
                         }),
                     ),
+            )
+    }
+
+    /// The code a nearby phone or computer agreed on, before its claim
+    /// brings Allow.
+    fn pairing_nearby_code(&self, code: &str) -> Div {
+        let theme = &self.theme;
+        div()
+            .debug_selector(|| "remote-pair-nearby-code".into())
+            .flex()
+            .flex_col()
+            .gap(px(12.))
+            .child(fl!("remote-pair-nearby-code"))
+            .child(
+                div()
+                    .debug_selector(|| "remote-pair-code".into())
+                    .text_font(&self.config.terminal)
+                    .text_size(px(28.))
+                    .line_height(px(36.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(spaced(code)),
+            )
+            .child(
+                div()
+                    .text_color(rgb(theme.subtext()))
+                    .child(fl!("remote-pair-nearby-next")),
             )
     }
 
@@ -688,14 +766,14 @@ enum Action {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Tone {
+pub(crate) enum Tone {
     Plain,
     Primary,
     Danger,
 }
 
 /// A dialog button; the caller adds `.on_click` when it is enabled.
-pub(super) fn button(
+pub(crate) fn button(
     theme: &Theme,
     id: &'static str,
     label: impl Into<SharedString>,

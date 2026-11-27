@@ -16,9 +16,13 @@ use std::{
 };
 
 mod addresses;
+mod computer_fleet;
 mod en_xa;
+mod fleet;
 mod hosts;
 mod keyboard;
+mod link;
+mod nearby_code;
 mod networks;
 mod share_github;
 mod ssh;
@@ -132,10 +136,12 @@ fn pairing_daemon(_: &Path, request: &Request) -> Result<Response, control::Erro
                 code: "428913".into(),
                 app: Some("https://other.example:8443".into()),
                 ssh: false,
+                fleet: None,
             })
         }
         Request::Pairing { .. } => Response::Pairing(PairingState::Waiting {
             expires_in_ms: 60_000,
+            nearby_code: None,
         }),
         Request::Approve { allow: true, .. } => {
             APPROVED.store(true, Ordering::SeqCst);
@@ -193,6 +199,7 @@ fn a_phone_scans_claims_and_is_allowed(cx: &mut TestAppContext) {
         code: "428913".into(),
         hosts: Vec::new(),
         share_github: true,
+        fleet: None,
     }));
     // A finished pairing is not cancelled on close.
     cx.simulate_keystrokes("escape");
@@ -213,6 +220,7 @@ fn cancel_daemon(_: &Path, request: &Request) -> Result<Response, control::Error
         Request::Pair => Response::Offer(offer()),
         Request::Pairing { .. } => Response::Pairing(PairingState::Waiting {
             expires_in_ms: 60_000,
+            nearby_code: None,
         }),
         _ => Response::Done,
     })

@@ -15,7 +15,13 @@ Chats run through `sheprd-acp`, a program shipped beside the app. It talks to th
 
 `sheprd-acp` is the agent's only client, so the Herdr TUI, a plain terminal, and every Sheprd window see one conversation. Both views stay live: a prompt or an answer from either shows in both, and the first answer to a permission request wins. Closing Sheprd leaves the chat running in its pane.
 
-The built-in agents are Claude, Codex, Copilot, Gemini, OpenCode, and Pi. Each has to be installed: `claude`, `codex` and `pi` (which `sheprd-acp` drives without an ACP adapter), `copilot --acp`, `gemini --acp`, or `opencode acp`. Each agent signs in its own way; when it reports that it needs authentication, the chat says how.
+The built-in agents are Antigravity, Claude, Codex, Copilot, Gemini, Kimi Code, Muse Code, OpenCode, and Pi. Each has to be installed: `agy acp`, `claude`, `codex` and `pi` (which `sheprd-acp` drives without an ACP adapter), `copilot --acp`, `gemini --acp`, `kimi acp`, `muse acp`, or `opencode acp`. For Antigravity, verify `agy acp --help` shows ACP usage; an IDE launcher also named `agy` may not provide ACP. Sign in through the native ACP flow or `agy acp --login`. Use it as the interactive agent, not as another agent's backend or an automated outer loop. See Google's [ACP guide](https://antigravity.google/docs/ide/extensions/acp/) and [Terms](https://antigravity.google/terms/). The model picker shows the models Antigravity makes available to your account and plan, including Gemini 4 Neon when offered by your `agy` version and entitlement.
+
+For Muse Code, run `muse acp --help` on the chat host to verify that the installed build supports ACP, then sign in with `muse login`. Choose **Muse Code** in **New Chat** or run `sheprd chat new muse`. The chat uses the models, reasoning levels, and approval modes that Muse offers for the session. [Meta’s ACP guide](https://meta-models.github.io/muse-code-sdk/1.4/guides/editors-acp/)
+
+When Antigravity advertises ACP authentication methods, Sheprd asks it to run its native sign-in flow, defaulting to `oauth-personal`. Set `SHEPRD_ANTIGRAVITY_AUTH_METHOD` in the chat environment to choose another advertised method, such as `oauth-business`, `gemini-api-key`, or `agent-platform`. Without an override, `GEMINI_API_KEY` selects `gemini-api-key`, and `GOOGLE_CLOUD_PROJECT` plus `GOOGLE_CLOUD_LOCATION` selects `agent-platform`. Set API keys only in a private environment, never a committed file. The agent handles authentication; Sheprd does not read or store its OAuth tokens. See Google's [authentication methods](https://antigravity.google/docs/ide/extensions/acp/#authentication).
+
+Antigravity receives your prompts directly without Sheprd's prompt templates, memory notes, or device annotations. You can switch to or from Antigravity whenever the current agent is idle, and the agent taking over gets the conversation with your next prompt. If an Antigravity turn goes quiet after replying because a background command kept it open, Sheprd posts a hint after 10 minutes and cancels the turn after 1 hour without dropping queued prompts; set `SHEPRD_ANTIGRAVITY_IDLE_TURN_SECS` to change that ceiling, or `0` to disable auto-cancel.
 
 ## Turning chats on and configuring them
 
@@ -78,7 +84,7 @@ ANTHROPIC_BASE_URL = "https://llm.example.com"
 
 - **From a group's menu.** A group's **…** menu lists **New Chat** with one row per agent. A row opens a tab named after the agent in the focused workspace, in the focused pane's folder.
 - **With one click.** Each tab strip offers a button per installed agent that starts its chat in a new tab; **+** still opens a terminal tab. `[chat] launcher` places the buttons: `plus` (the default, sliding out from under **+**), `beside`, `leading`, `trailing`, `button` (one button for the agent last started), or `off`.
-- **From the command line.** `sheprd chat new AGENT` does the same from a pane, and `sheprd-acp claude` starts a chat by hand in any pane.
+- **From the command line.** `sheprd chat new AGENT` does the same from a pane, and `sheprd-acp claude` starts a chat by hand in any pane. Run by a chat's agent, `sheprd chat new` with no agent starts one like that chat: the same agent, model, thinking level, and permission mode. The chat tells its agent so, so asking it to start an agent in a new workspace gets a chat rather than a terminal agent.
 
 The rows and buttons show once the app has found `sheprd-acp`, first beside its own executable and then on the login shell's `PATH`.
 
@@ -107,6 +113,8 @@ For Herdr 1, Herdr must know the agent's session, which takes its integration: r
 
 Only an idle agent moves. The agent is stopped with Ctrl+C alone, so nothing in its input is submitted, but text in its input is lost and whatever it ran in the background stops with it. If it has not stopped after 30 seconds, the move gives up and the agent keeps running.
 
+The move continues the same session: nothing is sent to the agent as a new prompt. The chat opens at the agent's last prompt and reply, under a **Continued from …'s earlier session** line. On the desktop, **Show N earlier turns** above that prompt opens the rest of the conversation. A context compaction shows as **Context compacted**, with Claude's summary in its details, and slash commands typed in the terminal show as short notes.
+
 Limits:
 
 - Herdr 1 conversion supports this machine or an SSH host, not Windows. Herdr 2 conversion is local; remote native chat attachment is not supported.
@@ -127,7 +135,7 @@ Limits:
 
 ## Reading a chat
 
-The header shows how long the running turn has taken, how full the context window is (yellow past 75%, red past 90%), and what the session has cost when the agent reports it. It also stops a turn and switches back to the pane's terminal. Buttons under it pick the agent's model, thinking level, and mode; the gear lists the rest. In the prompt box, `/` completes the agent's commands and Up recalls earlier prompts. Prompts sent while the agent works are queued.
+The header shows how long the running turn has taken, how full the context window is (yellow past 75%, red past 90%), and what the session has cost when the agent reports it. It also stops a turn and switches back to the pane's terminal. Buttons under it pick the agent's model, thinking level, and mode; the gear lists the rest. In the prompt box, `/` completes the agent's commands and Up recalls earlier prompts. During a turn, Enter or Send queues your message for the next turn. To steer an agent that supports it, click the curved arrow on the queued message. Hover over the arrow to see what it does, or click × to withdraw the message.
 
 ### What the agent is doing
 
@@ -147,7 +155,7 @@ Claude (run directly), Codex, and Claude through its ACP adapter report these, t
 
 Messages render Markdown and TeX: headings, lists, links, tables, Mermaid, code with syntax colors, inline and display equations, and attached images. **Ctrl+-**, **Ctrl++** and **Ctrl+0** change text size on Linux and Windows; macOS uses Cmd.
 
-- **Selecting.** Drag across text to select across messages, code, and tables. Tables copy as tab-separated cells, and formulas copy their TeX.
+- **Selecting.** Drag across text to select across messages, code, and tables. Tables copy as tab-separated cells, and formulas copy their TeX. Releasing the drag copies the selection, as in terminals; with Herdr's `[ui] copy_on_select = false` it waits for Cmd-C or Ctrl-C instead.
 - **Pictures.** A local image the agent links or a tool wrote shows in the chat, on SSH hosts too. A web picture shows as a card and loads only when you press **Load**, since loading it tells that server your address.
 - **Code blocks.** Each has **Wrap** and **Copy code** buttons. Settings > Chat sets whether blocks start wrapped (`chat.wrap_code`), with line numbers (`chat.code_line_numbers`), or with alternating line colors (`chat.code_stripes`); a block's own **Wrap** button still changes that block alone.
 - **Pages.** An `html` code block, or an HTML file a tool wrote on this machine, gets a **Show page** button. On macOS and Windows the page runs inside the message; on Linux the button opens your browser. **HTML blocks** in Settings > Chat (`chat.render_html`) starts an agent's `html` block as this card (`default`), with its page already loaded (`always`, macOS and Windows), or as code (`never`). **Show code** and **Render webpage** switch each block either way.
@@ -164,6 +172,10 @@ Besides your words, a chat tells the agent two things it cannot see, in a note a
 - **Where you are typing.** The desktop app on the agent's machine or on another computer over SSH, the terminal pane's own chat view, or Sheprd's iPhone and iPad app or web app, along with how the phone reached the computer: the local network, Tailscale, or Sheprd's relay. The note goes again only when you switch devices, so moving from your desk to your phone and back mid-chat tells the agent each time, while a phone changing networks does not. Opening the same chat from the desktop app on another computer over SSH also counts, since paths are no longer yours to open.
 
 Where you cannot open files on the agent's machine, as on a phone, the agent is asked to put pictures in the chat instead of giving a path: it saves a screenshot or a mockup as an image and links it, which attaches the picture to the message. HTML mockups are rendered to screenshots first.
+
+### Seeing what the agent was told
+
+**As sent** in a chat's header shows the conversation as the agent received it: above each of your messages, the note that went with it, dimmed and in the terminal font, with **Copy** beside it. When the chat switched agents, the conversation handed to the new one shows there too. A message that went alone shows nothing more. Click **As sent** again to hide the notes. The agent's own system prompt, such as Claude Code's, stays inside the agent, so the chat cannot show it. A chat restored from an agent's log shows the notes the log kept.
 
 ### Changing what the agent is told
 

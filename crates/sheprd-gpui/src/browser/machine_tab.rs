@@ -1,0 +1,267 @@
+//! Opening and drawing a machine's tab, and the status bar item that says a
+//! machine is running whether or not a tab shows it.
+
+use super::Tab;
+#[cfg(target_os = "macos")]
+use super::{Location, Store, TabId};
+#[cfg(target_os = "macos")]
+use crate::machine::Name;
+use crate::{SheprdWindow, i18n::fl, window::Flash};
+use gpui::{AnyElement, Context, Div, IntoElement, ParentElement, Styled, Window, div, rgb};
+#[cfg(target_os = "macos")]
+use gpui::{
+    App, InteractiveElement, Stateful, StatefulInteractiveElement, WeakEntity,
+    prelude::FluentBuilder as _, px, svg,
+};
+
+impl SheprdWindow {
+    /// Shows machine `name` in a tab of the focused workspace, or brings back
+    /// the one already showing it there, and starts it if it is stopped.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn open_machine(&mut self, name: Name, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((scope, workspace)) = self.browser_key() else {
+            self.show_flash(Flash::warning(fl!("machine-no-workspace")), cx);
+            return;
+        };
+        // A virtual Mac runs on this computer: a workspace on another host
+        // does not show it.
+        if !scope.is_local() {
+            self.show_flash(Flash::warning(fl!("machine-other-host")), cx);
+            return;
+        }
+        let opened = Store::update(cx, |store| {
+            store.open_location(scope, &workspace, Location::Machine { name: name.clone() })
+        });
+        let Some(id) = opened else {
+            self.show_flash(Flash::warning(fl!("machine-too-many-tabs")), cx);
+            return;
+        };
+        self.dismiss_menu(window, cx);
+        self.show_browser_tab(id, window, cx);
+        crate::machine::start(&name, cx);
+        cx.notify();
+    }
+
+    /// Opens a virtual Mac from the palette or a menu: the only one, or the
+    /// only one running. With none, or a choice to make, Settings lists them
+    /// and offers to make one.
+    pub(crate) fn open_some_machine(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        #[cfg(target_os = "macos")]
+        {
+            let read = cx
+                .background_executor()
+                .spawn(async { crate::machine::list() });
+            cx.spawn_in(window, async move |this, cx| {
+                let names: Vec<Name> = read
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|listing| listing.name)
+                    .collect();
+                let _ = this.update_in(cx, |this, window, cx| {
+                    crate::machine::known::remember(names.clone(), cx);
+                    let running = crate::machine::running();
+                    let pick = match (names.as_slice(), running.as_slice()) {
+                        ([only], _) | (_, [only]) => Some(only.clone()),
+                        _ => None,
+                    };
+                    match pick {
+                        Some(name) => this.open_machine(name, window, cx),
+                        None => this.offer_new_machine(cx),
+                    }
+                });
+            })
+            .detach();
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = window;
+            self.show_flash(Flash::warning(fl!("error-machine-unsupported")), cx);
+        }
+    }
+
+    /// Settings > Virtual Macs, whose first row makes a machine.
+    pub(crate) fn offer_new_machine(&mut self, cx: &mut Context<Self>) {
+        #[cfg(target_os = "macos")]
+        crate::settings_window::open_machines(cx.entity().downgrade(), None, cx);
+        #[cfg(not(target_os = "macos"))]
+        self.show_flash(Flash::warning(fl!("error-machine-unsupported")), cx);
+    }
+
+    /// The machine's display, or what it is doing instead.
+    pub(crate) fn render_machine_tab(&self, tab: &Tab, cx: &mut Context<Self>) -> AnyElement {
+        let display = match self.machine_display(tab, cx) {
+            Ok(display) => display,
+            Err(notice) => notice,
+        };
+        #[cfg(target_os = "macos")]
+        if let Some(Location::Machine { name }) = &tab.location
+            && tab.scope.is_local()
+            && let Some(guide) = self.render_machine_guide(name, cx)
+        {
+            // The display shrinks to make room, and Apple's view follows it.
+            return div()
+                .size_full()
+                .flex()
+                .flex_row()
+                .child(div().flex_1().min_w_0().h_full().child(display))
+                .child(guide)
+                .into_any_element();
+        }
+        display
+    }
+
+    fn machine_notice(&self, message: String) -> Div {
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .items_center()
+            .justify_center()
+            .px_4()
+            .text_color(rgb(self.theme.muted))
+            .child(message)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn machine_display(&self, tab: &Tab, cx: &mut Context<Self>) -> Result<AnyElement, AnyElement> {
+        use crate::machine::{Status, status};
+        if let Some(message) = self.browser.failed.get(&tab.id) {
+            return Err(self.machine_notice(message.to_string()).into_any_element());
+        }
+        let Some(Location::Machine { name }) = &tab.location else {
+            return Err(div().into_any_element());
+        };
+        if !tab.scope.is_local() {
+            return Err(self
+                .machine_notice(fl!("machine-other-host"))
+                .into_any_element());
+        }
+        let (message, startable) = match status(name) {
+            Status::Running => {
+                return Ok(match self.browser.pages.element(tab.id) {
+                    Some(page) => page.into_any_element(),
+                    None => div().size_full().into_any_element(),
+                });
+            }
+            Status::Starting => (fl!("machine-starting", name = name.as_str()), false),
+            Status::Saving => (fl!("machine-saving", name = name.as_str()), false),
+            Status::Stopped => (fl!("machine-stopped", name = name.as_str()), true),
+            Status::Failed(message) => (message, true),
+        };
+        let name = name.clone();
+        Err(self
+            .machine_notice(message)
+            .when(startable, |notice| {
+                notice.child(
+                    div()
+                        .id("machine-start")
+                        .debug_selector(|| "machine-start".into())
+                        .px_3()
+                        .py_1()
+                        .rounded(px(6.))
+                        .border_1()
+                        .border_color(rgb(self.theme.active))
+                        .text_color(rgb(self.theme.foreground))
+                        .cursor_pointer()
+                        .hover(|style| style.bg(rgb(self.theme.active)))
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            crate::machine::start(&name, cx);
+                        }))
+                        .child(fl!("machine-start")),
+                )
+            })
+            .into_any_element())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn machine_display(&self, _: &Tab, _: &mut Context<Self>) -> Result<AnyElement, AnyElement> {
+        Err(self
+            .machine_notice(fl!("error-machine-unsupported"))
+            .into_any_element())
+    }
+
+    /// Whether tab `id` is a machine with no picture to show. Its view stays
+    /// out of the window, or it would take the clicks meant for the notice
+    /// drawn in its place.
+    #[cfg(target_os = "macos")]
+    pub(super) fn machine_is_dark(&self, id: TabId, cx: &App) -> bool {
+        cx.try_global::<Store>()
+            .and_then(|store| store.get(id))
+            .is_some_and(|tab| {
+                matches!(&tab.location, Some(Location::Machine { name })
+                    if !tab.scope.is_local()
+                        || crate::machine::status(name) != crate::machine::Status::Running)
+            })
+    }
+
+    /// Says which machines are running, tab or no tab: each takes memory and
+    /// CPU until it is suspended. Opens their settings.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn render_machines_status(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+        let running = crate::machine::running();
+        let capacity = crate::machine::capacity();
+        let label = match running.as_slice() {
+            [] if capacity.in_use > 0 => fl!("machine-status-installing"),
+            [] => return None,
+            [only] => fl!("machine-status-one", name = only.as_str()),
+            many => fl!("machine-status-many", count = many.len()),
+        };
+        let label = fl!(
+            "machine-status-capacity",
+            label = label,
+            in_use = capacity.in_use,
+            limit = capacity.limit
+        );
+        let source = cx.entity().downgrade();
+        Some(
+            div()
+                .id("status-machines")
+                .debug_selector(|| "status-machines".into())
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(5.))
+                .px_2()
+                .flex_none()
+                .cursor_pointer()
+                .hover(|style| style.bg(rgb(self.theme.active)))
+                .child(
+                    svg()
+                        .path("icons/computer.svg")
+                        .size(px(14.))
+                        .text_color(rgb(self.theme.primary())),
+                )
+                .child(label)
+                .on_click(move |_, _, cx| {
+                    crate::settings_window::open_machines(source.clone(), None, cx);
+                }),
+        )
+    }
+}
+
+/// Opens machine `name` in the window `source` names, from the Settings
+/// window, which has no tabs of its own.
+#[cfg(target_os = "macos")]
+pub(crate) fn open_in(source: &WeakEntity<SheprdWindow>, name: Name, cx: &mut App) {
+    let source = source.clone();
+    cx.defer(move |cx| {
+        let windows = cx.windows();
+        let window = windows
+            .iter()
+            .filter_map(|window| window.downcast::<SheprdWindow>())
+            .find(|window| {
+                window.read_with(cx, |_, _| ()).is_ok()
+                    && window
+                        .entity(cx)
+                        .is_ok_and(|entity| entity.downgrade() == source)
+            });
+        if let Some(window) = window {
+            let _ = window.update(cx, |view, window, cx| {
+                window.activate_window();
+                view.open_machine(name, window, cx);
+            });
+        }
+    });
+}

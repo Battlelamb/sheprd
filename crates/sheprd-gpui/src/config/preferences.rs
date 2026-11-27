@@ -5,12 +5,16 @@ use sheprd_client::protocol::ToastHerdrPosition;
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Preference {
     AgentsPlacement(AgentsPlacement),
+    /// `[chat] auto_convert`: whether new terminal agents move into chats.
+    ChatAutoConvert(bool),
     /// `[chat] code_line_numbers`: whether code blocks number their lines.
     ChatCodeLineNumbers(bool),
     /// `[chat] code_stripes`: whether code blocks alternate line backgrounds.
     ChatCodeStripes(bool),
     /// `[chat] glide`: whether chats scroll smoothly to new output.
     ChatGlide(bool),
+    /// Whether desktop chats show message effects.
+    ChatMessageEffects(bool),
     /// `[chat] launcher`: where tab strips offer one-click chats.
     ChatLauncher(ChatLauncher),
     /// `[chat] layout`: how chat views draw.
@@ -31,11 +35,13 @@ pub(crate) enum Preference {
     ShowNetworkQuality(bool),
     ShowGpuLoad(bool),
     ShowSidebarGpuLoad(bool),
+    /// `sidebar_load`: each host's load in the Moonframe sidebar, compact or detailed.
+    SidebarLoad(status_bar::Detail),
     AgentCheckpoints(bool),
     ShowListeningPorts(bool),
     ShowAgentsHeader(bool),
-    /// `herdr_2_terminals`: new tabs on this computer run in herdr-core.
-    Herdr2Terminals(bool),
+    /// The terminal backend used when creating a tab.
+    TerminalBackend(TerminalBackend),
     /// `herdr_2_scrollback`: lines each Herdr 2 terminal keeps.
     Herdr2Scrollback(u32),
     ShowSidebarSearch(bool),
@@ -50,6 +56,9 @@ pub(crate) enum Preference {
     TabLayout(TabLayoutMode),
     /// `[undo_close_tab] enabled`: closed tabs wait before Herdr closes them.
     UndoCloseTab(bool),
+    EdgeLightColor(Option<u32>),
+    EdgeLightWidth(u8),
+    EdgeLightTrail(u8),
     /// `edge_rail`: the bar on busy and finished rows.
     EdgeRail(bool),
     ShowDeviceIcons(bool),
@@ -140,11 +149,17 @@ impl Config {
                 Preference::AgentsPlacement(placement) => {
                     (None, "agents_placement", Some(placement.as_str().into()))
                 }
+                Preference::ChatAutoConvert(value) => {
+                    (Some("chat"), "auto_convert", Some(value.into()))
+                }
                 Preference::ChatCodeLineNumbers(value) => {
                     (Some("chat"), "code_line_numbers", Some(value.into()))
                 }
                 Preference::ChatCodeStripes(value) => {
                     (Some("chat"), "code_stripes", Some(value.into()))
+                }
+                Preference::ChatMessageEffects(value) => {
+                    (Some("chat"), "message_effects", Some(value.into()))
                 }
                 Preference::ChatGlide(value) => (Some("chat"), "glide", Some(value.into())),
                 Preference::ChatLauncher(launcher) => {
@@ -182,6 +197,9 @@ impl Config {
                 Preference::ShowSidebarGpuLoad(value) => {
                     (None, "show_sidebar_gpu_load", Some(value.into()))
                 }
+                Preference::SidebarLoad(detail) => {
+                    (None, "sidebar_load", Some(detail.name().into()))
+                }
                 Preference::AgentCheckpoints(value) => {
                     (None, "agent_checkpoints", Some(value.into()))
                 }
@@ -191,8 +209,8 @@ impl Config {
                 Preference::ShowAgentsHeader(value) => {
                     (None, "show_agents_header", Some(value.into()))
                 }
-                Preference::Herdr2Terminals(value) => {
-                    (None, "herdr_2_terminals", Some(value.into()))
+                Preference::TerminalBackend(value) => {
+                    (None, "terminal_backend", Some(value.name().into()))
                 }
                 Preference::Herdr2Scrollback(lines) => {
                     (None, "herdr_2_scrollback", Some(i64::from(lines).into()))
@@ -213,6 +231,17 @@ impl Config {
                 Preference::SmoothScroll(value) => (None, "smooth_scroll", Some(value.into())),
                 Preference::StatusIcons(value) => {
                     (None, "status_icons", Some(value.as_str().into()))
+                }
+                Preference::EdgeLightColor(color) => (
+                    Some("edge_light"),
+                    "color",
+                    color.map(|rgb| format!("#{rgb:06X}").into()),
+                ),
+                Preference::EdgeLightWidth(value) => {
+                    (Some("edge_light"), "width", Some(i64::from(value).into()))
+                }
+                Preference::EdgeLightTrail(value) => {
+                    (Some("edge_light"), "trail", Some(i64::from(value).into()))
                 }
                 Preference::EdgeRail(value) => (None, "edge_rail", Some(value.into())),
                 Preference::TabAgentTitle(value) => {

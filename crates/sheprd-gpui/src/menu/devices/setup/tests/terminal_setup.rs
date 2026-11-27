@@ -1,102 +1,183 @@
 use super::*;
-use std::{ffi::OsStr, path::Path};
+use std::ffi::OsStr;
 
-/// The words after the session helper, which the helper `exec`s.
 fn after_session(command: &Command) -> Vec<&OsStr> {
     let args: Vec<&OsStr> = command.get_args().collect();
     assert_eq!(args[0], crate::setup_relay::SESSION);
     args[1..].to_vec()
 }
 
-/// The setup runs as this app's child, through the session helper, and every
-/// argument stays its own word: no shell sees the target or the label.
 #[test]
-fn the_setup_runs_machine_add_as_the_apps_child() -> Result<()> {
+fn setup_prepares_path_then_runs_machine_add_without_interpolating_arguments() -> Result<()> {
     let request = Request::new("user@host", "Alice's $(printf INJECTED); device", "work")?;
     let command = setup_command(
-        OsStr::new("/Applications/Herdr.app/Contents/MacOS/Herdr"),
+        OsStr::new("/app/sheprd"),
         OsStr::new("/a path/herdr"),
         &request,
-        false,
     );
-    assert_eq!(
-        command.get_program(),
-        "/Applications/Herdr.app/Contents/MacOS/Herdr"
-    );
-    let expected: Vec<&OsStr> = std::iter::once("/a path/herdr")
-        .chain(request.arguments())
-        .map(OsStr::new)
-        .collect();
-    assert_eq!(after_session(&command), expected);
+    assert_eq!(command.get_program(), "/app/sheprd");
+    let words = after_session(&command);
+    assert_eq!(words[0], "/bin/sh");
+    assert_eq!(words[1], "-c");
+    assert_eq!(words[4], request.target());
+    assert_eq!(words[7], "/a path/herdr");
+    let arguments: Vec<_> = request.arguments().into_iter().map(OsStr::new).collect();
+    assert_eq!(&words[8..], arguments);
+    assert!(words[5].to_string_lossy().contains(".zshenv"));
     Ok(())
 }
 
-/// The user's own `ssh-copy-id`, and through it their own `ssh`, come from
-/// the login `PATH`; nothing puts the system's first. The save only runs
-/// once the key is installed, with its arguments untouched.
 #[test]
-fn key_setup_installs_the_key_with_the_users_ssh_then_saves() -> Result<()> {
+fn key_setup_runs_only_ssh_copy_id_without_herdr_1() -> Result<()> {
+    let request = Request::new("user@host", "Box", "")?;
+    let command = key_setup_command(OsStr::new("/app/sheprd"), &request);
+    assert_eq!(command.get_program(), "/app/sheprd");
+    let words = after_session(&command);
+    assert_eq!(
+        words,
+        [
+            OsStr::new("ssh-copy-id"),
+            OsStr::new("--"),
+            OsStr::new("user@host")
+        ]
+    );
+
+    let unverified = request.with_host_keys(HostKeys::Skip);
+    let command = key_setup_command(OsStr::new("/app/sheprd"), &unverified);
+    let words = after_session(&command);
+    assert_eq!(words[0], "ssh-copy-id");
+    assert!(words.contains(&OsStr::new("StrictHostKeyChecking=no")));
+    assert_eq!(
+        words[words.len() - 2..],
+        [OsStr::new("--"), OsStr::new("user@host")]
+    );
+    Ok(())
+}
+
+#[test]
+fn install_core_installs_configures_path_and_stores_without_herdr_1() -> Result<()> {
+    use std::cell::RefCell;
+    let request = Request::new("penso@box", "Box", "")?;
+    let claim = Claim::acquire(destination("core-install.test"), "default")?;
+    let cancelled = AtomicBool::new(false);
+    let steps = RefCell::new(Vec::new());
+    install_core_with(
+        &request,
+        &claim,
+        &cancelled,
+        |_, _| {
+            steps.borrow_mut().push("verify");
+            Ok(())
+        },
+        |_| {
+            steps.borrow_mut().push("keys");
+            Ok(())
+        },
+        |target, _| {
+            assert_eq!(target, "penso@box");
+            steps.borrow_mut().push("install");
+            Ok(())
+        },
+        |target, _| {
+            assert_eq!(target, "penso@box");
+            steps.borrow_mut().push("path");
+        },
+        |_, _| {
+            steps.borrow_mut().push("store");
+            Ok(())
+        },
+    )?;
+    assert_eq!(
+        *steps.borrow(),
+        ["verify", "keys", "install", "path", "store"]
+    );
+
+    // An install failure stops before configuring PATH or saving the host.
+    let failed_steps = RefCell::new(Vec::new());
+    let Err(error) = install_core_with(
+        &request,
+        &claim,
+        &cancelled,
+        |_, _| Ok(()),
+        |_| Ok(()),
+        |_, _| {
+            Err(crate::Error::Remote(
+                sheprd_remote::core_install::Error::NoCurl.into(),
+            ))
+        },
+        |_, _| failed_steps.borrow_mut().push("path"),
+        |_, _| {
+            failed_steps.borrow_mut().push("store");
+            Ok(())
+        },
+    ) else {
+        panic!("expected core install failure");
+    };
+    assert!(matches!(
+        error,
+        crate::Error::Remote(sheprd_remote::Error::CoreInstall(
+            sheprd_remote::core_install::Error::NoCurl
+        ))
+    ));
+    assert!(failed_steps.borrow().is_empty());
+
+    // Cancelling during PATH configuration must abort without saving the device.
+    let cancel_during_path = AtomicBool::new(false);
+    let stored = RefCell::new(false);
+    let Err(error) = install_core_with(
+        &request,
+        &claim,
+        &cancel_during_path,
+        |_, _| Ok(()),
+        |_| Ok(()),
+        |_, _| Ok(()),
+        |_, cancelled| cancelled.store(true, Ordering::Release),
+        |_, _| {
+            *stored.borrow_mut() = true;
+            Ok(())
+        },
+    ) else {
+        panic!("expected cancellation error");
+    };
+    assert!(matches!(
+        error,
+        crate::Error::Client(sheprd_client::Error::ScriptCancelled)
+    ));
+    assert!(!*stored.borrow());
+    Ok(())
+}
+
+#[test]
+fn path_prepare_must_succeed_before_the_device_is_saved() -> Result<()> {
     let root = tempfile::tempdir()?;
     let log = root.path().join("log");
-    let fake = |name: &str, script: &str| -> Result<()> {
+    for (name, script) in [
+        (
+            "ssh",
+            "#!/bin/sh\nprintf 'path\\n' >> \"$LOG\"\nexit \"$SSH_EXIT\"\n",
+        ),
+        ("herdr", "#!/bin/sh\nprintf 'save\\n' >> \"$LOG\"\n"),
+    ] {
         crate::test_executable::write(root.path().join(name), script, 0o755)?;
-        Ok(())
-    };
-    // Each fake records its arguments, one per line, then exits as told.
-    let record = "for a in \"$@\"; do printf '%s\\n' \"$a\"; done >> \"$LOG\"";
-    fake(
-        "ssh-copy-id",
-        &format!("#!/bin/sh\nprintf 'copy-id\\n' >> \"$LOG\"\n{record}\nexit \"$COPY_ID_EXIT\"\n"),
-    )?;
-    fake(
-        "herdr",
-        &format!("#!/bin/sh\nprintf 'herdr\\n' >> \"$LOG\"\n{record}\n"),
-    )?;
-    let request = Request::new("penso@m5mini.local", "Mini 'n $HOME", "")?;
-    let herdr = root.path().join("herdr");
-    let command = setup_command(OsStr::new("herdr-gpui"), herdr.as_os_str(), &request, true);
-    let words = after_session(&command);
-    assert!(
-        !words
-            .iter()
-            .any(|word| word.to_string_lossy().contains("/usr/bin:"))
+    }
+    let request = Request::new("penso@box", "Mini 'n $HOME", "")?;
+    let command = setup_command(
+        OsStr::new("sheprd"),
+        root.path().join("herdr").as_os_str(),
+        &request,
     );
-    assert!(command.get_envs().all(|(key, _)| key != "PATH"));
-    let run = |copy_id_exit: &str| -> Result<String> {
+    let words = after_session(&command);
+    for (ssh_exit, expected) in [("0", "path\nsave\n"), ("1", "path\n")] {
         let _ = std::fs::remove_file(&log);
         let status = Command::new(words[0])
             .args(&words[1..])
             .env("PATH", root.path())
             .env("LOG", &log)
-            .env("COPY_ID_EXIT", copy_id_exit)
+            .env("SSH_EXIT", ssh_exit)
             .status()?;
-        assert_eq!(status.success(), copy_id_exit == "0");
-        Ok(std::fs::read_to_string(&log)?)
-    };
-    let mut expected = String::from("copy-id\npenso@m5mini.local\nherdr\n");
-    for argument in request.arguments() {
-        expected.push_str(argument);
-        expected.push('\n');
+        assert_eq!(status.success(), ssh_exit == "0");
+        assert_eq!(std::fs::read_to_string(&log)?, expected);
     }
-    assert_eq!(run("0")?, expected);
-    // A key that was not installed saves nothing.
-    assert_eq!(run("1")?, "copy-id\npenso@m5mini.local\n");
-    Ok(())
-}
-
-/// The typed line holds only the two paths, so a long login `PATH` can never
-/// push it past what a shell in canonical mode accepts (issue #288).
-#[test]
-fn the_typed_line_only_names_the_relay() -> Result<()> {
-    let line = relay_line(
-        Path::new("/Applications/Her'dr.app/Contents/MacOS/Herdr"),
-        Path::new("/Users/me/.local/state/herdr/gpui/setup-0123456789abcdef.sock"),
-    )?;
-    assert_eq!(
-        line,
-        "'/Applications/Her'\\''dr.app/Contents/MacOS/Herdr' '__device-setup-attach' '/Users/me/.local/state/herdr/gpui/setup-0123456789abcdef.sock'"
-    );
-    assert!(line.len() < 1024);
     Ok(())
 }
 

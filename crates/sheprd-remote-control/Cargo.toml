@@ -14,6 +14,7 @@ workspace = true
 # The daemon itself. Sheprd depends on this crate without it, for the
 # control protocol and `app` alone, so Tokio never reaches the GUI.
 default = ["server"]
+tmux = ["dep:sheprd-tmux"]
 server = [
     "dep:aes-gcm",
     "dep:axum",
@@ -57,11 +58,15 @@ required-features = ["server"]
 secrecy.workspace              = true
 sheprd-apns                    = { optional = true, workspace = true }
 sheprd-chat-protocol.workspace = true
+sheprd-credentials.workspace = true
 sheprd-client.workspace        = true
 sheprd-github.workspace        = true
 # Relay addresses in `[remote] relays`; with `server`, listening on them
 # (`client`), so paired phones reach this computer from anywhere.
 sheprd-relay.workspace         = true
+# The fleet access file a plain host's agent takes, and the removal frames
+# daemons and agents share (`control::fleet`); no runtime.
+sheprd-relay-agent.workspace   = true
 # Checking the far computer's signed answer to a phone's relay keys
 # (`control::host_relay`), which Sheprd does too; already in its graph
 # through `sheprd-relay`.
@@ -109,6 +114,7 @@ sheprd-backend = { optional = true, workspace = true }
 sheprd-core-client.workspace = true
 sheprd-session = { optional = true, workspace = true }
 sheprd-terminal = { optional = true, workspace = true }
+sheprd-tmux = { optional = true, workspace = true }
 sheprd-tunnel  = { features = ["tokio"], optional = true, workspace = true }
 socket2        = { optional = true, workspace = true }
 # This computer's CPU and memory, shown above its workspaces on a phone.
@@ -129,6 +135,10 @@ x509-parser    = { optional = true, workspace = true }
 futures-util.workspace      = true
 # A real relay on loopback, for the daemon's relay tests.
 sheprd-relay                = { features = ["client", "server"], workspace = true }
+# A plain host's agent on loopback, taking removals from the daemon.
+sheprd-relay-agent          = { features = ["runtime"], workspace = true }
 roxmltree.workspace         = true
+# A paused clock, so tests bound the daemon's own waits and not load.
+tokio                       = { features = ["test-util"], workspace = true }
 tokio-tungstenite.workspace = true
 tower.workspace             = true

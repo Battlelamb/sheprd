@@ -57,6 +57,16 @@ impl SheprdWindow {
         voice: Voice,
         cx: &mut Context<Self>,
     ) -> Div {
+        if !self.config.chat.message_effects {
+            return self.render_chat_rich(
+                (pane_id, crate::chat::view::rich::links::Mode::Configured),
+                blocks,
+                visuals,
+                scope,
+                voice,
+                cx,
+            );
+        }
         let since = self
             .chats
             .pane(pane_id)
@@ -68,7 +78,14 @@ impl SheprdWindow {
             size: voice.size * pose.scale,
             ..voice
         };
-        let content = self.render_chat_rich(pane_id, blocks, visuals, scope, voice, cx);
+        let content = self.render_chat_rich(
+            (pane_id, crate::chat::view::rich::links::Mode::Configured),
+            blocks,
+            visuals,
+            scope,
+            voice,
+            cx,
+        );
         let moving = pose != Pose::REST;
         // The specks move a step at a time while they shimmer, then stay.
         let frame = t
@@ -188,6 +205,21 @@ impl SheprdWindow {
             )
             .child("↻")
             .child(fl!("chat-effects-replay", effect = label))
+    }
+
+    /// How far a wizz playing in the chat shakes it now, if one plays and
+    /// motion is not reduced.
+    pub(super) fn chat_wizz_shake(chat: &ChatPane, cx: &App) -> Option<(f32, f32)> {
+        if cx.reduce_motion() {
+            return None;
+        }
+        let now = motion::now();
+        let playing = chat.effects.playing(now)?;
+        if playing.effect != Screen::Wizz {
+            return None;
+        }
+        let t = playing.elapsed(now)?;
+        Some(scene::wizz_shake(t, playing.effect.length().as_secs_f32()))
     }
 
     /// The pane effect playing over the chat, if one is and motion is not

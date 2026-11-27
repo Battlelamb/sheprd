@@ -62,14 +62,33 @@
                   inherit (entry) url sha256;
                 };
               in
+              # The notices drop the page breaks fetch-herdr-core.py drops too.
               pkgs.runCommand "herdr-core" { } ''
-                mkdir -p $out/bin
-                tar -xzf ${tarball} -C $out/bin
+                mkdir -p $out/bin $out/share notices
+                tar -xzf ${tarball} -C $out/bin herdr-core
                 chmod 755 $out/bin/herdr-core
+                tar -xzf ${tarball} -C notices THIRD-PARTY-NOTICES
+                {
+                  printf 'herdr-core %s (THIRD-PARTY-NOTICES from its release archive)\n\n' '${herdrCoreData.version}'
+                  sed -E '/^\[[0-9]+ more lines in file\. Use offset=[0-9]+ to continue\.\]$/d' notices/THIRD-PARTY-NOTICES
+                } > $out/share/herdr-core-licenses.txt
               ''
             else
               null;
           nearby = pkgs.callPackage ./macos/sheprd-nearby/package.nix { };
+          # The Moonframe checkout Cargo.lock pins; its hash is the one Cargo's
+          # vendoring checks too.
+          moonframePackage = lib.findFirst (crate: crate.name == "moonframe") null (
+            lib.importTOML ./Cargo.lock
+          ).package;
+          moonframeRev = lib.last (lib.splitString "#" moonframePackage.source);
+          moonframeHash = "sha256-MF0ZAOKvEMjs/vEmQhjD/CxMMcKO/IZRIUCCqrVwjmE=";
+          moonframeSrc = pkgs.fetchgit {
+            url = "https://github.com/moonframehq/moonframe";
+            rev = moonframeRev;
+            hash = moonframeHash;
+            fetchSubmodules = true;
+          };
         in
         rustPlatform.buildRustPackage {
           pname = "sheprd";
@@ -89,15 +108,31 @@
               ./scripts/release/org.sheprd.Sheprd.desktop
               # The herdr-core release a remote install pins is compiled in.
               ./scripts/release/herdr-core.json
-              ./scripts/release/herdr-core-licenses.txt
+              # The Linux guest agent a virtual machine seed installs is compiled in.
+              ./linux/sheprd-machine-agent/agent.py
+              ./linux/sheprd-machine-agent/wayland.py
             ];
           };
           cargoLock = {
             lockFile = ./Cargo.lock;
             # All Moonframe crates share this pinned Git checkout, including
             # when the optional feature is off and Cargo only vendors it.
-            outputHashes."moonframe-0.3.1" = "sha256-DSroyTi58a5T15DKmZCs7v0vnYI6CtHxhaeMUw4xyYQ=";
+            outputHashes."moonframe-${moonframePackage.version}" = moonframeHash;
+            # Sheprd's AccessKit fork, pinned in Cargo.toml's [patch.crates-io].
+            outputHashes."accesskit_macos-0.26.3" = "sha256-aBhgu63Zq/jiEEW/Tu0iiQr3srZfTjLMnAgohTMqUUk=";
           };
+          # Moonframe's crates compile in files from the root of its repository
+          # (the Luau types, its app, assets, skills, toolchain file) by paths
+          # that climb out of the crate. Vendored one crate per folder, those
+          # paths land in the vendor folder's parent, so put the files there.
+          preBuild = ''
+            moonframeRoot="$(dirname "''${cargoDepsCopy:-$NIX_BUILD_TOP/cargo-vendor-dir}")"
+            for entry in .claude app assets examples patterns rust-toolchain.toml types wit; do
+              if [ -e "${moonframeSrc}/$entry" ]; then
+                cp -R --no-preserve=mode "${moonframeSrc}/$entry" "$moonframeRoot/$entry"
+              fi
+            done
+          '';
           # The app starts chats with the sheprd-acp beside its executable,
           # runs the sheprd-remote-control beside it as a user service, runs
           # automations in the sheprd-automate there, and starts sheprd-nearby
@@ -180,7 +215,9 @@
                 cp LICENSE NOTICE "$app/Contents/Resources/"
                 cp crates/sheprd-gpui/SOUND-NOTICE.md "$app/Contents/Resources/"
                 cp assets/icons/LICENSE-octicons "$app/Contents/Resources/"
-                cp scripts/release/herdr-core-licenses.txt "$app/Contents/Resources/HERDR-CORE-LICENSES.txt"
+                ${lib.optionalString (herdrCore != null) ''
+                  cp ${herdrCore}/share/herdr-core-licenses.txt "$app/Contents/Resources/HERDR-CORE-LICENSES.txt"
+                ''}
 
                 # Expose binaries on PATH via symlinks pointing into the bundle
                 mkdir -p $out/bin

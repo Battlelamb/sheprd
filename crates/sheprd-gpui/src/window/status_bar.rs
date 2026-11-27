@@ -28,18 +28,24 @@ impl SheprdWindow {
         (self.config.ui.size * 1.5 + 4.).max(22.)
     }
 
+    /// Whether the selected host's herdr-core answers, so it runs the
+    /// window's terminals whether or not the host has a Herdr 1.
+    fn selected_core_answers(&self) -> bool {
+        self.sessions(self.selected_endpoint).core_answers
+    }
+
+    /// The connection message the status bar shows, in the classic window
+    /// and in Moonframe's alike. A host with no Herdr 1 at all runs its
+    /// terminals in herdr-core, so its Herdr 1 is never connected and saying
+    /// so would ask the user to install one the window does not need.
+    pub(crate) fn connection_message(&self) -> Option<String> {
+        self.live
+            .connection_message(self.local_error.as_deref(), self.selected_core_answers())
+    }
+
     pub(crate) fn render_status_bar(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        // A host with no Herdr 1 at all runs its terminals in herdr-core, so
-        // its Herdr 1 is never connected and saying so would ask the user to
-        // install one the window does not need.
-        let reports = self
-            .live
-            .reports_herdr_1(self.sessions(self.selected_endpoint).core_answers);
-        let status = (reports
-            && (!matches!(self.live.status, ConnectionStatus::Connected)
-                || self.local_error.is_some()
-                || self.live.error.is_some()))
-        .then(|| self.live.status_text(self.local_error.as_deref()));
+        let reports = self.live.reports_herdr_1(self.selected_core_answers());
+        let status = self.connection_message();
         let items = self.config.status_bar;
         let height = px(self.status_bar_height());
         let usage = self.render_usage(cx);
@@ -62,12 +68,13 @@ impl SheprdWindow {
             .overflow_hidden()
             .items_center()
             .gap(px(6.))
-            .px_3()
+            .px(px(12.))
             .bg(self.fill().panel(self.theme.surface))
             .text_color(rgb(self.theme.foreground))
             .children(self.render_agent_model(cx))
             .children(usage)
             .children(self.render_device_tags_status(cx))
+            .children(self.render_tailscale_status())
             .when_some(
                 self.prefix_armed
                     .then(|| self.keymap().prefix_label())
@@ -127,6 +134,7 @@ impl SheprdWindow {
             .children(self.render_system_load())
             .children(self.render_gpu_load())
             .children(self.render_network_quality(cx))
+            .children(self.machines_status(cx))
             .children(self.caffeine_button(items.keep_awake, cx))
             .when(items.theme.shown(), |bar| {
                 bar.child(
@@ -230,6 +238,40 @@ impl SheprdWindow {
         )
     }
 
+    /// A Tailscale SSH check this connection is waiting on, wherever it came
+    /// from: adding the device, or connecting to one already saved. The bar has
+    /// no room for an address, so the item names what waits, carries the whole
+    /// address as its tooltip, and hands it to a browser when clicked, which is
+    /// the only way the check can be finished. The app never opens it by itself.
+    ///
+    /// Which check is pending is the endpoint's answer, the same one the prompt
+    /// and the dialog read: the transport reports `PermissionDenied`, so a
+    /// refusal usually reaches the window as a sentence rather than as a typed
+    /// failure, and a gate on the failure alone showed nothing for it.
+    fn render_tailscale_status(&self) -> Option<Stateful<Div>> {
+        let url = self.endpoints[self.selected_endpoint]
+            .tailscale_check()?
+            .url()?
+            .to_owned();
+        let theme = &self.theme;
+        Some(
+            div()
+                .id("status-tailscale")
+                .debug_selector(|| "status-tailscale".into())
+                .row()
+                .flex_none()
+                .items_center()
+                .gap(px(4.))
+                .cursor_pointer()
+                .hover(|item| item.underline())
+                .tooltip(self.hint(url.clone()))
+                .on_click(move |_, _, cx| crate::tailscale::open_and_copy(&url, cx))
+                .text_color(rgb(theme.ink(theme.palette[3])))
+                .child(glyph("icons/shield.svg", theme.ink(theme.palette[3])))
+                .child(fl!("status-bar-tailscale")),
+        )
+    }
+
     fn render_agent_model(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let agent = self.focused_agent()?;
         let label = model_label(agent)?;
@@ -325,20 +367,20 @@ impl SheprdWindow {
 
     /// Lets an `UntilAgentsFinish` hold go once no window's agents work.
     pub(crate) fn observe_agent_work(&self, window: &Window, cx: &mut Context<Self>) {
-        let work = crate::caffeine::Work::of(
-            self.endpoints
-                .iter()
-                .filter(|endpoint| endpoint.enabled)
-                .map(|endpoint| {
-                    endpoint
-                        .live
-                        .snapshot
-                        .as_deref()
-                        .filter(|_| endpoint.live.status.is_connected())
-                }),
-        );
+        let endpoints = self
+            .endpoints
+            .iter()
+            .filter(|endpoint| endpoint.enabled)
+            .map(|endpoint| {
+                let snapshot = endpoint
+                    .live
+                    .snapshot
+                    .as_deref()
+                    .filter(|_| endpoint.live.status.is_connected());
+                (endpoint.id.as_str(), crate::caffeine::Work::of(snapshot))
+            });
         let report = Self::caffeine_report(cx);
-        crate::caffeine::observe(window.window_handle().window_id(), work, cx, report);
+        crate::caffeine::observe(window.window_handle().window_id(), endpoints, cx, report);
     }
 
     /// Shows a keep-awake failure in this window, if it is still open.
@@ -348,6 +390,16 @@ impl SheprdWindow {
             let flash = super::Flash::warning(error.localize());
             let _ = view.update(cx, |this, cx| this.show_flash(flash, cx));
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn machines_status(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+        self.render_machines_status(cx)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn machines_status(&self, _: &mut Context<Self>) -> Option<Stateful<Div>> {
+        None
     }
 
     /// Hidden by `keep_awake = false` only while off: the cup is the one
@@ -386,7 +438,7 @@ impl SheprdWindow {
             .flex_none()
             .row()
             .items_center()
-            .px_2()
+            .px(px(8.))
             .h_full()
             .cursor_pointer()
             .hover(|s| s.bg(rgb(self.theme.active)))
@@ -485,7 +537,7 @@ impl SheprdWindow {
             .row()
             .items_center()
             .gap(px(5.))
-            .px_2()
+            .px(px(8.))
             .cursor_pointer()
             .hover(|s| s.bg(rgb(self.theme.active)))
             .child(icon);

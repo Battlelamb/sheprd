@@ -26,6 +26,7 @@ mod daemon;
 mod daytona;
 mod devices;
 mod diagnostic;
+mod edge_light;
 mod edit;
 mod error;
 pub(crate) mod favorite_themes;
@@ -37,6 +38,7 @@ mod github;
 mod herdr_2;
 mod keybindings;
 mod layout;
+mod machine;
 mod notifications;
 mod omarchy;
 mod opensandbox;
@@ -83,6 +85,7 @@ pub(crate) use daemon::daemon_config_path;
 use daemon::{Daemon, daemon_settings};
 use devices::MAX_DEVICES;
 pub(crate) use devices::{DeviceSettings, KeybindingSource};
+pub use edge_light::EdgeLight;
 pub(crate) use edit::{Layer, parse_value};
 pub(crate) use error::{Error, ThemeParseError};
 pub use features::{Feature, Features};
@@ -94,9 +97,10 @@ use fonts::FontSettings;
 pub use fonts::symbol_fallbacks;
 pub use fonts::{FONT_SIZE_RANGE, FONT_SIZE_STEP, FontConfig};
 pub(crate) use github::MAX_ACCOUNTS;
-pub use github::{GitHubAccount, GitHubConfig};
+pub use github::{EnterpriseAccount, GitHubAccount, GitHubConfig};
 pub(crate) use herdr_2::HERDR_2_SCROLLBACK;
 pub use layout::{Density, Layout, LayoutMode, Style};
+pub use machine::MachineConfig;
 pub(crate) use notifications::NotificationDelivery;
 pub use notifications::{
     BellConfig, ClipboardToast, ClipboardToastPosition, NotificationConfig, QuietHours, SoundConfig,
@@ -107,6 +111,7 @@ pub use padding::Padding;
 pub(crate) use padding::{Axis, MAX_PADDING, Side, Sides};
 pub use remote::RemoteConfig;
 use serde::Deserialize;
+pub use sheprd_backend::TerminalBackend;
 pub use sheprd_orchestrator::azure::Config as AzureDevOpsConfig;
 pub use sheprd_orchestrator::gitlab::Config as GitLabConfig;
 pub use sheprd_remote::config::AzureConfig;
@@ -205,6 +210,7 @@ pub struct Config {
     pub daytona: DaytonaConfig,
     /// Per saved device, by catalog profile ID.
     pub(crate) devices: BTreeMap<String, DeviceSettings>,
+    pub edge_light: EdgeLight,
     /// A bar on the leading edge of each working, blocked, or done row,
     /// whichever status icons are drawn.
     pub edge_rail: bool,
@@ -240,6 +246,8 @@ pub struct Config {
     pub layout: Layout,
     pub(crate) link_handlers: crate::link_handlers::Handlers,
     pub(crate) link_plugins: Vec<crate::link_handlers::Plugin>,
+    /// Lending virtual Macs to the user's other computers, and borrowing.
+    pub machine: MachineConfig,
     /// Configured families, sorted, that font resolution found no installed
     /// family for; `diagnostic` reports them.
     pub(crate) missing_fonts: Vec<String>,
@@ -297,6 +305,10 @@ pub struct Config {
     pub sidebar: FontConfig,
     /// Daemon sidebar rows, falling back to defaults when invalid.
     pub sidebar_layout: SidebarLayout,
+    /// How the Moonframe sidebar shows each host's load: shares beside its
+    /// name, or lines under it with the sparklines and meters. Compact by
+    /// default.
+    pub sidebar_load: status_bar::Detail,
     /// Spacing overrides, host colours, and selection marking for the sidebar.
     pub sidebar_style: SidebarStyle,
     /// Wheel scrollback draws panes between rows, following the OS deltas.
@@ -317,6 +329,7 @@ pub struct Config {
     pub tab_layout: TabLayoutMode,
     pub tabs: FontConfig,
     pub terminal: FontConfig,
+    pub terminal_backend: TerminalBackend,
     /// Blank space around every terminal's cells.
     pub terminal_padding: Padding,
     pub theme: String,
@@ -440,6 +453,7 @@ impl Default for Config {
             contrast: Contrast::default(),
             daytona: DaytonaConfig::default(),
             devices: BTreeMap::new(),
+            edge_light: EdgeLight::default(),
             edge_rail: false,
             editor_command: None,
             favorite_themes: Vec::new(),
@@ -457,6 +471,7 @@ impl Default for Config {
             layout: Layout::default(),
             link_handlers: crate::link_handlers::Handlers::default(),
             link_plugins: Vec::new(),
+            machine: MachineConfig::default(),
             missing_fonts: Vec::new(),
             missing_weight: None,
             mods: crate::mods::Config::default(),
@@ -485,6 +500,7 @@ impl Default for Config {
             show_window_controls: cfg!(target_os = "linux"),
             sidebar: font(monospace, 12.0),
             sidebar_layout: SidebarLayout::default(),
+            sidebar_load: status_bar::Detail::Compact,
             sidebar_style: SidebarStyle::default(),
             smooth_scroll: true,
             sound: SoundConfig::default(),
@@ -498,6 +514,7 @@ impl Default for Config {
             // sidebar and terminal use, as they do in the reference UI.
             tabs: font(monospace, 12.0),
             terminal: font(monospace, 14.0),
+            terminal_backend: TerminalBackend::Herdr,
             terminal_padding: Padding::default(),
             theme: "Default".into(), // i18n: data
             ui: font(ui, 12.0),
@@ -538,6 +555,7 @@ struct Settings {
     contrast: Contrast,
     daytona: DaytonaConfig,
     devices: BTreeMap<String, DeviceSettings>,
+    edge_light: EdgeLight,
     edge_rail: Option<bool>,
     editor_command: Option<crate::editor::EditorCommand>,
     favorite_themes: Vec<String>,
@@ -553,6 +571,7 @@ struct Settings {
     layout: Layout,
     link_handlers: Vec<crate::link_handlers::Handler>,
     link_plugins: Vec<crate::link_handlers::Plugin>,
+    machine: MachineConfig,
     mods: crate::mods::Config,
     notifications: NotificationSettings,
     open_files_in: FileTarget,
@@ -577,6 +596,7 @@ struct Settings {
     show_system_load: Option<bool>,
     show_window_controls: Option<bool>,
     sidebar: sidebar_style::SidebarSettings,
+    sidebar_load: Option<status_bar::Detail>,
     smooth_scroll: Option<bool>,
     sound: SoundConfig,
     sprites: SpritesConfig,
@@ -587,6 +607,7 @@ struct Settings {
     tab_layout: TabLayoutMode,
     tabs: FontSettings,
     terminal: FontSettings,
+    terminal_backend: Option<TerminalBackend>,
     theme: Option<String>,
     ui: FontSettings,
     undo_close_tab: undo_close::UndoCloseTabSettings,
@@ -912,6 +933,7 @@ impl Config {
         config.show_window_controls = settings
             .show_window_controls
             .unwrap_or(cfg!(target_os = "linux"));
+        config.sidebar_load = settings.sidebar_load.unwrap_or(status_bar::Detail::Compact);
         config.smooth_scroll = settings.smooth_scroll.unwrap_or(true);
         // keep-sorted end
         settings.mods.validate()?;
@@ -923,6 +945,7 @@ impl Config {
         config.ssh = settings.ssh;
         let (status_icons, legacy_rail) = status_icons::SavedIcons::resolve(settings.status_icons);
         config.status_icons = status_icons;
+        config.edge_light = settings.edge_light;
         config.edge_rail = settings.edge_rail.unwrap_or(legacy_rail);
         config.zen = settings.zen.try_into()?;
         config.undo_close_tab = settings.undo_close_tab.try_into()?;
@@ -939,6 +962,7 @@ impl Config {
         config.link_handlers = crate::link_handlers::Handlers::compile(settings.link_handlers)?;
         crate::link_handlers::validate_plugins(&settings.link_plugins)?;
         config.link_plugins = settings.link_plugins;
+        config.machine = settings.machine;
         config.code = settings.code;
         settings.px0.check()?;
         config.px0 = settings.px0;
@@ -947,7 +971,12 @@ impl Config {
         config.open_files_in = settings.open_files_in;
         config.editor_command = settings.editor_command;
         config.keep_selection_after_copy = settings.keep_selection_after_copy.unwrap_or(true);
-        config.herdr_2_terminals = settings.herdr_2_terminals.unwrap_or(false);
+        config.terminal_backend = TerminalBackend::selected(
+            settings.terminal_backend,
+            settings.herdr_2_terminals.unwrap_or(false),
+            cfg!(feature = "tmux"),
+        );
+        config.herdr_2_terminals = config.terminal_backend == TerminalBackend::Core;
         config.herdr_2_scrollback = herdr_2::scrollback(settings.herdr_2_scrollback);
         for (name, font, settings) in [
             ("sidebar", &mut config.sidebar, settings.sidebar.font),

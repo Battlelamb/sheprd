@@ -43,12 +43,12 @@ pub(super) enum Row {
 
 /// What one row paints. Both kinds share one shape so they cannot drift apart.
 pub(super) struct Spec {
-    label: SharedString,
-    detail: SharedString,
+    pub(in crate::menu) label: SharedString,
+    pub(in crate::menu) detail: SharedString,
     /// Running locally, or connected remotely.
-    online: bool,
-    checked: bool,
-    enabled: bool,
+    pub(in crate::menu) online: bool,
+    pub(in crate::menu) checked: bool,
+    pub(in crate::menu) enabled: bool,
 }
 
 impl Entry {
@@ -107,7 +107,26 @@ impl SheprdWindow {
         }
         // Anchor to the control, not the pointer: every click position leaves the
         // same clear gap above the button.
-        self.menu.anchor = anchor;
+        // A shortcut can arrive before the first footer paint or with only a rail.
+        // Give its list the available height even without a measured button.
+        self.menu.anchor = if anchor == Point::default() {
+            let size = window.viewport_size();
+            let inset = px(8.
+                + if self.activity_bar_leads() {
+                    crate::sidebar::BAR_WIDTH
+                } else {
+                    0.
+                });
+            let x = if crate::direction::is_rtl() {
+                size.width - inset
+            } else {
+                inset
+            };
+            let sizes = self.region_sizes(window);
+            point(x, size.height - px(sizes.build + sizes.devices))
+        } else {
+            anchor
+        };
         self.menu.page = Some(Page::Devices);
         self.unfold_device(self.selected_endpoint);
         // The keys start on the session this window is on, among the others

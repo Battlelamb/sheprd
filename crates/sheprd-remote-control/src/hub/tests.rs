@@ -84,13 +84,24 @@ fn herdr_errors_keep_a_bounded_message() {
 #[cfg(unix)]
 #[test]
 fn chat_lines_run_the_program_without_trusting_its_path_as_shell() {
+    use sheprd_client::agent_choice::AgentChoice;
+    let launcher = |program: &str, choice| Launcher {
+        program: PathBuf::from(program),
+        choice,
+    };
+    let fixed = launcher("/bin/herdr-acp", AgentChoice::Fixed);
     assert_eq!(
-        command_line(Agent::Claude),
+        command_line(&fixed, Agent::Claude),
         " sh -c 'exec \"$HERDR_ACP\" claude'"
     );
+    let open = launcher("/opt/it's/herdr-acp", AgentChoice::Open);
     assert_eq!(
-        direct_command_line(Path::new("/opt/it's/herdr-acp"), Agent::Codex),
-        " '/opt/it'\\''s/herdr-acp' codex"
+        command_line(&open, Agent::Claude),
+        " sh -c 'exec \"$HERDR_ACP\" --choose claude'"
+    );
+    assert_eq!(
+        direct_command_line(&open, Agent::Codex),
+        " '/opt/it'\\''s/herdr-acp' --choose codex"
     );
 }
 
@@ -100,4 +111,47 @@ fn tab_params_carry_the_program_in_the_environment() {
     assert_eq!(params["env"][PROGRAM_ENV], "/bin/herdr-acp");
     assert_eq!(params["focus"], false);
     assert_eq!(params["cwd"], "/code");
+}
+
+#[tokio::test]
+async fn chat_with_endpoint_resolves_desktop_core_pane_alias() {
+    let boot = "boot-42";
+    let key = crate::control::favorites::core_pane(boot, "t4t");
+    let endpoint = EndpointId::random();
+    let dir = tempfile::tempdir().unwrap();
+    let layout = Layout {
+        boot: format!("core:{boot}"),
+        connected: true,
+        working: 0,
+        workspaces: vec![Workspace {
+            id: "w1".into(),
+            label: "Home".into(),
+            cwd: "/tmp".into(),
+            branch: None,
+            worktree: None,
+            session: None,
+            terminals: Vec::new(),
+            chats: vec![ChatRow {
+                pane: key.clone(),
+                tab: "tab-1".into(),
+                title: "Codex".into(),
+                named: false,
+                agent: Some("Codex".into()),
+                status: sheprd_client::protocol::AgentStatus::Idle,
+                endpoint: endpoint.clone(),
+            }],
+        }],
+    };
+    let hub = Hub::offline_in(layout, Some(dir.path().to_path_buf()), None);
+    hub.reconcile(&hub.layout());
+    assert_eq!(
+        hub.chat_with_endpoint(&key).map(|(id, _)| id),
+        Some(endpoint.clone())
+    );
+    assert_eq!(
+        hub.chat_with_endpoint("core:t4t").map(|(id, _)| id),
+        Some(endpoint)
+    );
+    assert!(hub.chat_with_endpoint("core:").is_none());
+    assert!(hub.chat_with_endpoint("core:missing").is_none());
 }

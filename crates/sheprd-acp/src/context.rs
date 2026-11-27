@@ -1,6 +1,6 @@
 //! What the agent is told besides the person's words: the user's chat
 //! instructions, once per conversation, and where the person is typing
-//! whenever they switch devices, so the agent answers in a form they can
+//! with each prompt, so the agent answers in a form they can
 //! see. A phone cannot open a path on this computer, so there the agent is
 //! told to put pictures in the chat instead.
 //!
@@ -10,6 +10,14 @@
 //! here to use it; with each prompt after, the few entries that bear on
 //! what the person asked.
 //!
+//! With the memory guide it also says that the pull requests the agent
+//! works on show in the chat's rail, and how to list one it changed
+//! without `gh`, when the chat listens for the `sheprd` command to reach it.
+//!
+//! With the first prompt, and again when it changes, it tells the agent
+//! that it runs in a Sheprd chat, as which agent and with which settings,
+//! so another agent it starts is a chat like this one ([`launch`]).
+//!
 //! ACP has no system prompt every agent takes, so all of it goes as a text
 //! block ahead of the prompt's own. The transcript shows only the person's
 //! words. The texts are templates the user may replace ([`prompts`]); the
@@ -18,10 +26,12 @@
 use sheprd_chat_protocol::{Device, Origin, Via};
 use std::path::{Path, PathBuf};
 
-pub(crate) use note::{Place, Told, hide, split};
+pub(crate) use launch::Running;
+pub(crate) use note::{Place, Told, checksum, hide, split};
 pub(crate) use prompts::{Facts, Kind, Prompts};
 pub(crate) use recall::Recall;
 
+mod launch;
 mod note;
 mod prompts;
 mod recall;
@@ -44,12 +54,7 @@ pub(crate) fn sheprd_executable() -> Option<PathBuf> {
 
 /// How the agent keeps and searches the repository's memory with `sheprd`.
 pub(crate) fn memory_guide(sheprd: &Path) -> String {
-    let text = sheprd.display().to_string();
-    let sheprd = if text.contains(char::is_whitespace) {
-        format!("\"{text}\"")
-    } else {
-        text
-    };
+    let sheprd = quoted(sheprd);
     format!(
         "Sheprd keeps a memory for this Git repository, shared by every worktree, tab, and \
          chat of it on this computer, so what one agent learns the next one can find. \
@@ -73,10 +78,35 @@ pub(crate) fn memory_guide(sheprd: &Path) -> String {
     )
 }
 
+/// How the agent lists a pull request the chat could not see it work on.
+pub(crate) fn pull_requests_guide(sheprd: &Path) -> String {
+    format!(
+        "Pull requests you create, push to, comment on, review, merge, or close show in \
+         this chat's side rail. `gh pr` commands are picked up on their own; for one you \
+         changed another way, run `{} chat pr add URL`.\n",
+        quoted(sheprd)
+    )
+}
+
+/// `path` as a shell word, quoted when it holds whitespace.
+fn quoted(path: &Path) -> String {
+    let text = path.display().to_string();
+    if text.contains(char::is_whitespace) {
+        format!("\"{text}\"")
+    } else {
+        text
+    }
+}
+
 /// What the agent has been told in this conversation.
 #[derive(Debug, Default)]
 pub(crate) struct Context {
+    /// Antigravity receives each prompt directly, without Sheprd annotations.
+    direct: bool,
     facts: Facts,
+    /// The `sheprd` command the agent starts a chat like this one with;
+    /// `None` leaves what it runs as out of the note.
+    launch: Option<PathBuf>,
     /// Where the person last said they are, for the intro of a note sent
     /// for a client that does not say.
     last: Option<Origin>,
@@ -87,20 +117,44 @@ pub(crate) struct Context {
     /// How to use the repository's memory, escaped for the note; `None`
     /// without a `sheprd` command to use it with.
     memory: Option<String>,
+    /// How to list a pull request, told with the memory guide; `None`
+    /// without a `sheprd` command that reaches this chat.
+    pull_requests: Option<String>,
     /// The repository's memory, for the index and each prompt's recall.
     recall: Option<Recall>,
+    /// The chat's settings now, which the agent is told it runs with.
+    running: Running,
 }
 
 impl Context {
+    /// A chat that passes each prompt through without annotation.
+    #[cfg(test)]
+    pub(crate) fn direct() -> Self {
+        Self {
+            direct: true,
+            ..Self::default()
+        }
+    }
+
+    /// Toggles pass-through mode when switching to or from an agent (such as
+    /// Antigravity) that receives each prompt directly without Sheprd notes.
+    pub(crate) fn set_direct(&mut self, direct: bool) {
+        self.direct = direct;
+    }
+
     /// A conversation in which earlier notes told the agent `told`.
     pub(crate) fn new(prompts: Prompts, facts: Facts, told: Told) -> Self {
         Self {
+            direct: false,
             facts,
+            launch: None,
             last: None,
             prompts,
             told,
             memory: None,
+            pull_requests: None,
             recall: None,
+            running: Running::default(),
         }
     }
 
@@ -112,6 +166,25 @@ impl Context {
         self.memory = sheprd.map(|sheprd| note::escape(&memory_guide(sheprd)));
         self.recall = recall.filter(|_| self.memory.is_some());
         self
+    }
+
+    /// Tells the agent, with the memory guide, that its pull requests show
+    /// in the rail and how `sheprd` lists one; `None` leaves it out.
+    pub(crate) fn with_pull_requests(mut self, sheprd: Option<&Path>) -> Self {
+        self.pull_requests = sheprd.map(|sheprd| note::escape(&pull_requests_guide(sheprd)));
+        self
+    }
+
+    /// Tells the agent what it runs as, and that `sheprd chat new` starts
+    /// another like it, for a built-in agent; `None` leaves it out.
+    pub(crate) fn with_launch(mut self, sheprd: Option<&Path>) -> Self {
+        self.launch = sheprd.map(Path::to_owned);
+        self
+    }
+
+    /// The chat's settings now, which the next note names when they changed.
+    pub(crate) fn running(&mut self, running: Running) {
+        self.running = running;
     }
 
     /// Takes in a note the agent replayed from its saved conversation.
@@ -133,17 +206,33 @@ impl Context {
     /// The note to send ahead of `prompt` typed at `origin`: the
     /// instructions unless the agent last heard these very ones, how to use
     /// memory unless it heard that, the entries of memory that bear on
-    /// `prompt` and were not offered yet, and where the person is when that
-    /// changes what they can see. None when there is nothing new.
+    /// `prompt` and were not offered yet, and the current device on every
+    /// identified prompt. Only the new turn changes; cached history stays put.
     pub(crate) fn before_prompt(&mut self, origin: Option<Origin>, prompt: &str) -> Option<String> {
+        if self.direct {
+            return None;
+        }
+        // An older client cannot identify a phone. Clear a previous target
+        // rather than letting its next message inherit another device's id.
+        let origin = origin.or_else(|| {
+            self.told
+                .place
+                .filter(|place| place.device == Device::PhoneApp)
+                .map(|_| Origin::new(Device::Other, Via::Other))
+        });
         if origin.is_some() {
-            self.last = origin;
+            self.last = origin.clone();
         }
         let instructions = self
             .prompts
             .instructions(&self.facts)
             .map(|text| note::escape(&text))
             .filter(|text| self.told.instructions.as_ref() != Some(text));
+        let chat = self
+            .launch
+            .as_deref()
+            .map(|sheprd| note::escape(&launch::guide(sheprd, &self.facts.agent, &self.running)))
+            .filter(|text| self.told.chat.as_ref() != Some(text));
         let memory = self
             .memory
             .clone()
@@ -160,30 +249,53 @@ impl Context {
             .as_mut()
             .and_then(|recall| recall.recall(prompt))
             .map(|lines| note::escape(&lines));
-        let moved = origin.filter(|origin| self.told.place != Some(Place::from(*origin)));
-        if instructions.is_none() && memory.is_none() && recalled.is_none() && moved.is_none() {
+        let moved = origin
+            .as_ref()
+            .filter(|origin| self.told.place != Some(Place::from((*origin).clone())));
+        if instructions.is_none()
+            && chat.is_none()
+            && memory.is_none()
+            && recalled.is_none()
+            && origin.is_none()
+        {
             return None;
         }
-        let mut body = self.part(Kind::Intro, self.last);
+        let mut body = self.part(Kind::Intro, self.last.clone());
         if let Some(instructions) = instructions {
             body.push_str("\nThe person's instructions for every chat:\n");
             body.push_str(&note::instructions(&instructions));
             self.told.instructions = Some(instructions);
         }
+        if let Some(chat) = chat {
+            body.push('\n');
+            body.push_str(&note::chat(&chat));
+            self.told.chat = Some(chat);
+        }
         if let Some(memory) = memory {
             body.push('\n');
             body.push_str(&note::memory(&memory));
             self.told.memory = true;
+            if let Some(guide) = &self.pull_requests {
+                body.push('\n');
+                body.push_str(guide);
+            }
         }
         if let Some(recalled) = recalled {
             body.push('\n');
             body.push_str(&note::recalled(&recalled));
         }
-        let place = moved.map(Place::from);
+        let place = origin.clone().map(Place::from);
         if let Some(origin) = moved {
             self.told.place = place;
             body.push('\n');
-            body.push_str(&self.part(Kind::of(origin), Some(origin)));
+            body.push_str(&self.part(Kind::of(origin.clone()), Some(origin.clone())));
+            if let Some(kind) = Kind::after(origin.clone()) {
+                body.push_str(&self.part(kind, Some(origin.clone())));
+            }
+        }
+        if let Some(origin) = &origin {
+            body.push('\n');
+            body.push_str(&note::current_device(origin));
         }
         Some(note::wrap(place, &body))
     }
@@ -221,7 +333,7 @@ fn connection_name(via: Via) -> &'static str {
 
 /// What `{{ where }}` says: the device and how it reaches this computer,
 /// to follow "The person is typing".
-fn place_phrase(origin: Origin) -> String {
+fn place_phrase(origin: &Origin) -> String {
     let device = match origin.device {
         Device::Desktop => "in Sheprd's desktop app",
         Device::PhoneApp => "on their phone or tablet, in Sheprd's iPhone and iPad app",

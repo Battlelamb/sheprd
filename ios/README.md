@@ -12,9 +12,16 @@ The bundle-ID changes below are for an independently signed fork only.
 
 The native app for Sheprd's remote control (`docs/ios-app-plan.md`).
 - **What it shows:** the chats and terminal tabs running in Sheprd on every
-  paired computer, merged into one list, with what needs you first.
+  paired computer, merged into one list, with what needs you first. Agent and worktree labels appear together on each row. Agents manage them with `sheprd labels` on the host.
 - **What you can do:** answer questions in place, open a chat or a terminal,
   and send prompts.
+- **New project:** In Workspaces, open the computer’s ⋯ menu and choose **New Project**. Create an empty Git repository or clone one, select a parent folder on that computer, and open the first workspace there.
+- **Chat text:** an agent's replies are Markdown with the desktop's text sizes
+  (`:big[…]` and the other steps) and message effects (`:::slam` bubbles,
+  invisible ink revealed by a tap, and `::confetti` and the other screen
+  effects), which play once as a reply arrives and show at rest with a Replay
+  link afterwards (`docs/rich-chat.md`, Text size and effects). Reduce Motion
+  draws them at rest.
 - **Live Activities:** they put running chats on the lock screen and in the
   Dynamic Island.
 - **Launch:** it draws the last state from its cache at once, then catches up
@@ -24,6 +31,7 @@ The native app for Sheprd's remote control (`docs/ios-app-plan.md`).
 | --- | --- |
 | `project.yml` | XcodeGen spec for the `SheprdRemote` app and the `SheprdRemoteWidgets` extension: iOS 26, Swift 6 with complete concurrency checking, iPhone and iPad |
 | `SheprdRemoteCore/` | Swift package with no UIKit: the transcript model and its reducer, the v2 API's messages, `ComputerLink` (address racing, resubscription, backoff), pairing links, fingerprints, session signatures, sealed notifications |
+| `SheprdRemoteCore/Sources/SheprdFleetLog/` | The phone's own copy of the fleet log: replayed and checked by the Rust `sheprd-fleet-ffi` crate, linked as `SheprdFleetFFI` (`tools/build-fleet-ffi.sh` builds it, `just ios-test` and `just ios-build` run it first), drafts checked before Face ID, and sync with any computer of the fleet. Linked by the app alone |
 | `SheprdRemoteCore/Sources/SheprdGitHub/` | The phone's GitHub client, its own target over `SheprdRemoteCore` (never the reverse) and linked by the app alone: hosts, leased and signed-in tokens, the GraphQL and REST reads, pull requests, checks, and their logs |
 | `SheprdRemoteCore/Sources/SheprdNearby/` | Nearby pairing over Bluetooth: the offer exchange, framing, the short code, and the sightings the scan keeps; the radio is in `SheprdRemote/Nearby/`. Over `SheprdRemoteCore`, linked by the app alone |
 | `SheprdRemoteCore/Sources/SheprdRelay/` | Reaching a computer through Sheprd relays: dial proofs, sessions, the local proxy, racing, nearness, and the saved list. Over `SheprdRemoteCore` and `SheprdTunnel`, linked by the app alone; the saved `RelayRecord` itself stays in Core |
@@ -33,19 +41,26 @@ The native app for Sheprd's remote control (`docs/ios-app-plan.md`).
 | `SheprdRemote/` | The app: `Fleet` (one link per computer), `Cache`, the pinned HTTPS and WebSocket client, pairing, Keychain, and `Views/` |
 | `SheprdRemoteWidgets/` | The lock screen and Dynamic Island layouts |
 | `Shared/` | The Live Activity's attributes, compiled into both targets |
-| `Mockups/` | The SwiftUI mockups the screens were picked from (`just ios-mockups`) |
+| `Mockups/` | The SwiftUI mockups the screens were picked from (`just ios-mockups`); the `effects` round draws text sizes and message effects with the app's own `Views/Effects` |
 | `Spikes/` | Phase 0 spikes (`docs/ios-spikes.md`) |
 | `tools/` | The simulator loop's control client and the TestFlight upload scripts |
 
 ## Build and test
 
-Requires Xcode 26 or later and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+Requires Xcode 27 or later (App Store uploads need the iOS 27 SDK) and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+
+Building the app or the package needs the fleet log library from Rust
+first, with the pinned toolchain (`rust-toolchain.toml`); `just ios-test` and
+`just ios-build` build it.
 
 ```sh
+just ios-fleet-ffi # the fleet log library (ios/tools/build-fleet-ffi.sh)
 just ios-test      # Swift package tests on the Mac, no simulator
 just ios-build     # unsigned simulator build of the app and its extensions
 just ios-generate  # then open ios/SheprdRemote.xcodeproj
 python3 ios/tools/test_branding.py  # generated names and stable deployed identities
+python3 ios/tools/test_privacy.py   # every bundle's privacy manifest
+python3 ios/tools/test_app_store.py # the App Store listing's limits
 ```
 
 - **Fixtures:** the package tests decode the JSON fixtures that the
@@ -133,7 +148,14 @@ and nothing goes through your phone.
      which creates what the card shows. Run it
      against a sandboxed Herdr, not your own.
    - `-sampleChat YES` opens a made-up chat that needs no daemon, for
-     screenshots of the chat screen without real prompts.
+     screenshots of the chat screen without real prompts. `-sampleChat effects`
+     opens one with text sizes and message effects at rest; `-samplePlay NAME`
+     then asks for the screen effect NAME (`confetti`, `zap`, …) in its last
+     reply and plays it and every bubble a second after it opens.
+   - `-sampleChat activity` opens a made-up running chat with sub-agents,
+     shells, a monitor, a plan, and changed files. In any chat,
+     `-agentPanel YES` opens its activity panel (`-agentPanel large` at full
+     height), and `-agentPanelScroll plan|changed` scrolls it to a section.
    - With `-openLink`, `-session YES` opens the chat's session sheet and
      `-draft TEXT` types into its composer (`-draft /` lists the slash
      commands).
@@ -143,6 +165,14 @@ and nothing goes through your phone.
      (`xcrun simctl get_app_container DEVICE so.pen.herdr.remote group.so.pen.herdr.remote`).
    - Avoid `simctl openurl`: its confirmation alert needs a tap, and it
      keeps the app inactive until the simulator restarts.
+
+## Speaking voices and dictation
+
+In Settings > Voice, tap Change to open the provider sheet. The active provider is marked In use. Choose Apple on-device speech or connect a personal ElevenLabs, OpenAI, Deepgram or OpenRouter account. Preview uses a sample sentence and the provider bills your account. Cloud voices play as MP3 packets arrive. Stop preview cancels the download and clears queued audio. OpenRouter sign-in opens the browser, then asks for the authorization code using PKCE. ElevenLabs can load the first 100 account voices, or accept a voice ID. Use This Voice saves the active account.
+
+Direct pairing exchanges accounts over pinned TLS after approval and proof of the device key. If one side has a cloud voice, the other imports it. Two configured devices keep their own accounts. Disconnect forgets the key on that device. Revoke it at the provider to invalidate paired copies.
+
+For Wispr Flow, select Use Keyboard for Voice Commands, switch to the installed Flow keyboard, dictate, and tap Review Command. The ordinary chat composer accepts keyboard dictation too.
 
 ## Voice commands
 
@@ -166,6 +196,8 @@ Voice reads the plan aloud and takes a plain yes, for a new worktree only.
 | Plan | `VoicePlan.swift` | Fills in what was not said and labels it. Something named that does not exist becomes a question, never a substitute |
 | Confirm | `SheprdRemote/Views/Voice/VoiceSheet.swift` | The card is the request. Starting an agent, sending, stopping, and answering take a tap on Start |
 
+`SHEPRD_AUDIO_TEST=1 swift test --filter StreamingSpeechTests` exercises progressive playback and cancellation using a held response and muted audio output on macOS. The same test runs on the iOS simulator.
+
 `VOICE_EVAL=1 swift test --filter VoiceEvalTests` scores every sentence in
 `Fixtures/voice` against the real model, which needs Apple Intelligence on the
 Mac. Add new phrasing to `heldout2.json` only after checking it fails or
@@ -173,8 +205,12 @@ passes untouched: a set the rules were tuned on stops measuring anything.
 
 ## Sign with your own team
 
-Live Activities and pushes need APNs, which needs a paid Apple Developer
-account.
+Running the app on a device needs a paid Apple Developer account. Pushes
+are another matter: computers send them only through the Sheprd push relay,
+which holds the APNs key for the published app (`so.pen.herdr.remote`), so a
+copy signed by another team gets no pushes. The app has no Web Push
+subscription of its own: Web Push reaches only the browser app, installed
+and subscribed separately.
 
 1. Set `DEVELOPMENT_TEAM` in `project.yml` (or in Xcode, Signing &
    Capabilities, for both targets).
@@ -183,7 +219,6 @@ account.
    - Change both `so.pen.herdr.remote` and `so.pen.herdr.remote.widgets`;
      the extension's must start with the app's.
    - Change the App Group `group.so.pen.herdr.remote` too.
-   - Use the new identifier as `topic` below.
 3. Run on a device. Live Activities and the Secure Enclave do not work fully
    in the simulator; there the app uses a software device key.
 
@@ -209,9 +244,10 @@ app, once the repository's `testflight` environment holds these secrets:
   signs with the team's cloud-managed distribution certificate.
 - **What it uploads:** the export re-signs for distribution and uploads to
   App Store Connect.
-- **Build number:** one more than the highest build App Store Connect has
-  for the app, asked for with the same key (`ios/tools/next-build.py`), so
-  CI and local uploads count up together. Set `BUILD_NUMBER` to choose one.
+- **Build number:** the UTC timestamp `YYYYMMDDHHMM`, or one more than the
+  highest build App Store Connect already has when that is at or ahead of the
+  clock (`ios/tools/next-build.py`), so CI and local uploads stay strictly
+  increasing. Set `BUILD_NUMBER` to choose one.
 - **What to Test:** the commits that touched the app since the last build,
   grouped as the release notes are (`ios/tools/testflight_notes.py`). The
   text ends in a `Source:` line naming the commit, which is how the next
@@ -220,10 +256,35 @@ app, once the repository's `testflight` environment holds these secrets:
   before it; with none to go on, the notes list the latest 20 commits. The
   upload fails if the notes cannot be set within 30 minutes, though the
   build stays uploaded; the next build's notes then cover both.
+- **External groups:** after App Store Connect finishes processing a build,
+  the upload automatically adds it to every existing external beta group for
+  the app. Internal-only groups are left alone; create groups and invite
+  testers in App Store Connect as usual. Apple may still require Beta App
+  Review before external testers can install a build; this workflow does not
+  submit the build for review.
 - **Running it locally:** `just ios-testflight` does the same with the same
   variables. Any it does not find set come from `pass`: the issuer ID from
   `apple/app-store-connect-issuer-id` and the key from
   `herdr-gpui/apple-api-key-KEYID`.
+
+## App Store
+
+`AppStore/` holds what App Store Connect asks for, entered there by hand:
+the listing (`metadata.toml`, checked by `tools/test_app_store.py`), the notes
+for App Review, the App Privacy answers, and the export compliance inventory.
+The privacy policy and support pages are `website/site/privacy/` and
+`website/site/support/`. `tools/store_screenshots.sh` takes the screenshots
+from the demo.
+
+### The demo
+
+With no computer paired, Home offers Explore the Demo (`SheprdRemote/Demo/`):
+two made-up computers from `DemoData` in the package, with chats, a waiting
+question, and a terminal. `Fleet` starts no link for them and refuses every
+call with `FleetError.demo`, so nothing is sent; widgets, the badge, and
+Spotlight ignore them, and pairing a computer ends it. App Review uses it, as
+the app shows nothing without a computer. In the simulator, `-demo YES`
+starts it and `-demoChat PANE` opens one of its chats.
 
 ## Pair
 
@@ -255,63 +316,112 @@ there. The code comes from a commitment-based exchange
 (`docs/ios-app-plan.md`, "Nearby pairing, exactly"), so it also vouches
 for the CA fingerprint the claim then pins.
 
-## APNs key for the daemon
+## Push relay
 
-The daemon (`sheprd-remote-control`) sends Live Activity pushes with your own
-APNs token key. Without it everything else works, and the app's token upload
-is answered 503.
+The app has one publisher, so Apple takes pushes for it only with Sheprd's
+APNs key, and only the Sheprd push relay (`crates/sheprd-push-relay`,
+`docs/apns-relay-plan.md`) holds that key. It forwards pushes, sealed so it
+reads none of them. A computer's remote control daemon
+(`sheprd-remote-control`) never holds an APNs key and never contacts Apple:
+it pushes only through the push relay. The app turns the push relay on at
+launch, after a new install or a reinstall, unless the user turned it off in
+Settings > Push Relay, which also shows what the push relay sees. Computers
+are ready by default too (`push_relay` in `[remote]`, which a user may turn
+off per computer), so every paired computer pushes through it.
 
-1. **Create the key.** In the Apple Developer site, go to Certificates,
-   Identifiers & Profiles > Keys. Create a key with Apple Push Notifications
-   service (APNs) enabled, and download `AuthKey_KEYID.p8` (it downloads
-   once).
-2. **Install it.** Put it in the daemon's state directory as
-   `apns/AuthKey.p8`, readable only by you:
+How a computer delivers this phone's pushes:
 
-   ```sh
-   mkdir -p STATE_DIR/apns
-   cp AuthKey_KEYID.p8 STATE_DIR/apns/AuthKey.p8
-   chmod 600 STATE_DIR/apns/AuthKey.p8
-   ```
+| Mode | Computer | Phone sends | What travels |
+| --- | --- | --- | --- |
+| Off | `push_relay = false`, or the push relay off here | No tokens; with `push_relay` off the registration is answered 503 | Nothing through APNs: no alerts or Live Activities |
+| Push relay | `push_relay` on (the default) | Handles, with the push relay on here | Through push.sheprd.org. Alerts and Live Activities sealed |
 
-3. **Configure it.** Beside it, write `STATE_DIR/apns/config.json`:
+Web Push is separate: only the browser app, installed and subscribed on its
+own, receives it. A computer still accepts and keeps the plain tokens an app
+from before the push relay sends, so that app keeps registering without
+errors, but nothing is sent to them.
 
-   ```json
-   {
-     "team_id": "ABCDE12345",
-     "key_id": "KEYID12345",
-     "topic": "so.pen.herdr.remote",
-     "sandbox": true
-   }
-   ```
+Settings shows each computer's mode, as it answered the last
+registration (older computers do not say, or say `own_key`, a mode they no
+longer have, which shows as not reported).
 
-   - `team_id` is your ten-character team.
-   - `key_id` is the key's ID.
-   - `topic` is the app's bundle identifier. The daemon adds
-     `.push-type.liveactivity` itself.
-4. **Restart.** Restart remote control in Sheprd, so the daemon reads them at
-   start.
+- **Attesting.** On first use the app asks the push relay for a challenge,
+  attests a new App Attest key over the challenge's SHA-256, and gets a
+  credential for 30 days and the push relay's key (`PushRelayAccess`). The
+  credential is kept in the app's own keychain item, which the extensions
+  cannot read, and the app attests again a week before it runs out, the
+  next time it syncs. Renewal by assertion is not built yet.
+- **Handles.** Each token becomes a handle made on the phone: the token,
+  its kind, the credential, and a random id, sealed to the push relay's key
+  (`PushRelayCredential.handle`). Computers hold handles and never see a
+  token. While the push relay is on, no token is sent, and the notify key
+  goes to every computer, since Live Activity content is sealed to it.
+- **Live Activities.** The computer seals `attributes` and `content-state`.
+  The widget extension cannot read the keychain on a locked phone, so while
+  the push relay is on the app also keeps the notify keys in an App Group
+  file protected until first unlock, which the widget opens them with
+  (`docs/ios-spikes.md`). Attributes count only when opened by the key of
+  the computer they name. Anything that does not open, and any plain
+  content while the push relay is on, shows a fixed "Sheprd" activity with
+  no buttons (`SealedCover`). The debug sample activity is plain, so it
+  shows that cover while the push relay is on.
+- **Turning it off** revokes every handle the phone made, forgets the
+  credential, and removes the App Group key file. Each computer then gets
+  `APNsRegistration.pushRelayOff`: an explicit `null` push-to-start and
+  alert and no activities, which makes it drop the handles it held, so it
+  stops pushing even when the revocation failed or was refused (a computer
+  that is away drops them when the phone next reaches it). No token goes
+  out instead: native notifications stop until it is on again. Web Push is
+  separate and reaches only the browser app, installed and subscribed on
+  its own.
+- **Environments.** Xcode builds attest in App Attest's development
+  environment and use `push-sandbox.sheprd.org`; TestFlight and App Store
+  builds attest in production and use `push.sheprd.org`. The app tells them
+  apart by `aps-environment` in its embedded provisioning profile, which
+  distribution builds do not carry. Each push relay refuses the other's
+  builds. The simulator has no App Attest, so the push relay cannot be used
+  there.
 
-`STATE_DIR` is the remote control daemon's private state directory (its
-`--state-dir`).
+## Live Activity styles
 
-### Sandbox or production
+In Settings > Notifications > Live Activities, **Default grouping** applies to
+current and future hosts. **One per host** is the default and combines all
+worktrees on each computer. **One for all hosts** lets the push relay keep one
+card for overlapping work on computers using **Use default**, even while the
+phone is locked. A waiting question takes focus. Tap to open its pane or use
+the available answer buttons. **One per agent** gives each independent chat or
+terminal agent its own activity. Delegated workers contribute to their
+coordinator’s progress. To override the default for a host, select its name
+and choose a grouping. Choose **Use default** to make it follow the default
+again. Choices apply to new activities and sync when an offline host reconnects.
+Older computers continue using the grouping they support.
 
-The two must match, so switch both together.
+Settings > Notifications > Live Activities > Style picks how an activity
+looks on this phone (`LiveActivityStyle`, kept in the App Group so the widget
+draws with it), each previewed working, waiting, and finished:
 
-- **Xcode builds:** an app run from Xcode gets sandbox tokens. Set
-  `"sandbox": true`.
-- **TestFlight and App Store builds:** these get production tokens. Set
-  `"sandbox": false`.
-- **A mismatch:** a token sent to the wrong service is refused as
-  `BadDeviceToken`, and the daemon then forgets it.
+- **Private**: the agent and working, waiting, or done. Computers send it
+  generic, as below.
+- **Minimal**: the chat, its computer, and its status.
+- **Standard**, the default: the step in words (`activity`, with an `icon`
+  kind) and the answer buttons.
+- **Complete**: Standard with the steps before it in words, the plan, and the
+  turn's counts (`steps`, `files`).
+- **Geek**: the commands themselves, without their shell wrapper.
+
+The daemon says each step in words from the tool call's kind and, for a
+command, its first words (`apns/activity.rs`), and sends it beside the step,
+so every style is drawn from the same push; an older computer sends only the
+step, which the words fall back to. Changing the style redraws the activities
+showing. Start Test Activity, on the same page, plays a test in the chosen
+style.
 
 ## Live Activity detail
 
 Detailed, the default, shows the chat and its current step. Generic shows the
 agent and what it is doing in general. A computer chooses in Sheprd's Settings >
-Remote control (`live_activities` in `[remote]`), and a phone chooses with Keep
-Generic in its Settings. The stricter choice wins. Turning on Keep Generic ends
+Remote control (`live_activities` in `[remote]`), and a phone chooses with the
+Private style. The stricter choice wins. Turning on Private ends
 the activities showing, since a title set when one starts cannot change, and the
 app ends any naming a chat that a computer starts before it hears. A computer that is away
 hears at the next sync, and while the app is closed such an activity can show
@@ -328,8 +438,10 @@ update Sheprd first. Phones on the default are unaffected.
 
 ## Sealed alerts
 
-With the APNs key installed, questions, finished turns, and errors reach
-the phone as APNs alerts instead of Web Push. These alerts are sealed to
+With the push relay on, questions, finished turns, and errors reach the
+phone as APNs alerts. With it off the app gets none; Web Push reaches only
+the browser app, installed and subscribed on its own. These alerts are
+sealed to
 the phone: Apple sees only "Sheprd", "New activity", and ciphertext.
 
 1. **Registration.** The app asks to show alerts after the first pairing.
@@ -356,6 +468,73 @@ the phone: Apple sees only "Sheprd", "New activity", and ciphertext.
    push that removes the chat's notifications. Badges show the questions
    waiting.
 
+5. **Test push.** Settings > Notifications > Send Test Push from a computer
+   asks it (`POST /api/apns/test`) for one sealed alert carrying a random
+   id. The extension records the id in the App Group as it opens the alert
+   (`PushTestReceipts`), and Settings shows "Arrived in N s", or where it
+   stopped: the push relay off on the computer, no alert registration from
+   this phone yet, what the push relay refused, or nothing within 30
+   seconds. A tap on it only opens
+   the app.
+6. **Test push from this iPhone.** With the push relay on, Settings >
+   Notifications > Send Test Push from This iPhone needs no computer online.
+   The phone makes (or reuses) a push relay handle for its own alert token
+   and posts a test alert to `POST /v1/push` on this build's push relay
+   (`push-sandbox.sheprd.org` for Xcode builds, `push.sheprd.org`
+   otherwise), shaped like a computer's test push: the same cover,
+   `mutable-content`, and `sealed` field under the same seal.
+   - Its thread is always `test` and its collapse id `test-ID`. A
+     computer's carry the pairing's scope (`scope/test`), from the notify
+     key the phone gave that computer, so two computers' pushes never
+     group or replace each other. A self test has no computer and so no
+     scope, and a fixed thread is all it needs. Once the extension opens an
+     alert it sets the thread itself: a computer's test goes in that
+     computer's thread, and a self test in `test`. The Swift tests compare
+     the self test with the daemon's test push on everything except these
+     two ids.
+   - It is sealed to a key of the phone's own (`NotifyKey.own`), kept in
+     its own keychain item and never given to a computer, and names
+     `this-phone` as its computer, which is no fingerprint.
+   - The extension tries the computers' keys first. Only an alert none of
+     them opens is tried with the phone's own key, and it shows only if it
+     is exactly a self test (`SelfTestPush.open`): a test id, no badge,
+     permission, wizz, or clear. It records the id and shows the text with
+     no computer, chat, or actions.
+   - Settings then waits for the receipt as above. A push relay answer
+     other than `delivered` says where it stopped: an expired credential or
+     a refused handle (the next try attests again), a stale token (`gone`),
+     `limited`, or `unavailable`.
+   - With the push relay off, the row says the phone cannot push itself
+     without it, as no computer can either.
+   - A phone that never paired was never asked to show alerts, so it has
+     no alert token: the test asks then, as pairing does, and waits up to
+     10 seconds for iOS to hand the token over.
+7. **Test Live Activity.** With the push relay on, Settings >
+   Notifications > Live Activities > Start Test Activity starts a Live
+   Activity on this phone the way a computer does, with no computer
+   online. The phone makes a push relay handle for its push-to-start
+   token (kind `push_to_start`) and posts a `liveactivity` start
+   (`SelfTestActivity`) shaped like the daemon's relayed start: the cover
+   alert ActivityKit requires, and `attributes` and `content-state` each
+   one `sealed` field under `SealedChatActivity.info`.
+   - Both are sealed to the phone's own key and name `this-phone` as the
+     computer, with pane `test-ID`. The widget tries the computers' keys
+     first; only content none of them opens is tried with the own key,
+     and it shows only as a test (`SelfTestActivity.open`): no question or
+     answer buttons. Its token goes to no computer and its link opens no
+     chat. While the push relay is on, the own key is also kept in its own
+     App Group file (`notify-own-key`), as the widget cannot read the
+     keychain on a device.
+   - Settings waits up to 30 seconds for ActivityKit to start an activity
+     with that pane, then says "Started in N s". It runs for 20 seconds,
+     so it can be seen on the Lock Screen and in the Dynamic Island, and
+     ends showing that it worked. A test left running, such as when iOS
+     gave the app no background time, ends when the next test starts.
+   - It says where it stopped otherwise: Live Activities off for Sheprd,
+     no push-to-start token from iOS yet, a push relay answer other than
+     `delivered`, or no activity within 30 seconds, which is also what
+     iOS's limit on push-started activities looks like.
+
 A Live Activity in the question phase also offers up to three answers
 (never the "always" ones) as buttons that answer from the lock screen.
 Any computer can start an activity that names another computer's chat.
@@ -369,6 +548,38 @@ extension. For the simulator loop:
   App Group, where a script can seal a payload to it.
 - `-dumpNotifications YES` writes what was delivered, and opens each
   alert in the app as the extension would.
+
+### Notification filtering
+
+Each sealed alert carries the daemon's `event` id for the decision it
+copies. The extension keeps the ids it showed (`SeenAlerts`, App Group) and
+orders copies it handles at once (`AlertGate`), so a copy that arrives
+again, from a retry, a failover, or a second sender, shows once:
+
+- Without Apple's notification filtering entitlement, which is the case
+  today, a copy is silent. While the first still shows, the copy takes its
+  place: they share the APNs collapse id, which iOS uses as the
+  notification's identifier. When the person already dismissed or opened
+  the first, the copy is noted (`RetractedAlerts`) and taken back
+  (`AlertSweep`): by the extension a moment after showing it, or at its
+  next run, and by the app at launch, whenever it becomes active (any
+  window), and on a background push. The list is a file in the App Group,
+  changed only under `NSFileCoordinator`, so the app and the extension
+  never overwrite each other. A sweep reads what is shown, checks, and
+  removes while holding it, and the extension forgets a delivered copy's
+  identifier under the same hold before showing another alert there, so a
+  newer alert for the same chat, under the same identifier, is never taken
+  back. A copy counts as replaced only once the extension marked it
+  delivered: until then another event under its identifier proves nothing,
+  as the copy may still land on top of it.
+- With the entitlement, the copy is dropped. The account holder requests
+  `com.apple.developer.usernotifications.filtering` for
+  `so.pen.herdr.remote.notifications` at
+  https://developer.apple.com/contact/request/notification-service . Once
+  Apple grants it, add the entitlement to the extension in `project.yml`
+  and set `SHEPRD_FILTERS_REPEATS` to `YES` there, in one change: a
+  provisioning profile without it fails signing, and the flag without it
+  would drop nothing.
 
 ## Around the system
 

@@ -25,6 +25,10 @@ pub(super) enum Availability {
     FollowingSystemTheme,
     /// Only on Windows, which has the only platform code for it.
     Windows,
+    /// Only while a cloud provider is turned on; Settings > Cloud devices
+    /// shows nothing else otherwise.
+    #[cfg(feature = "cloud")]
+    CloudProviders,
 }
 
 impl Entry {
@@ -203,6 +207,12 @@ pub(super) const CATALOG: &[Entry] = &[
     ),
     entry(
         Section::Sidebar,
+        "sidebar-load",
+        "settings-sidebar-load",
+        "settings-sidebar-load-description",
+    ),
+    entry(
+        Section::Sidebar,
         "sidebar-indent",
         "settings-sidebar-indent",
         "settings-sidebar-indent-description",
@@ -236,6 +246,24 @@ pub(super) const CATALOG: &[Entry] = &[
         "indicators-edge-rail",
         "settings-indicators-edge-rail",
         "settings-indicators-edge-rail-description",
+    ),
+    entry(
+        Section::Indicators,
+        "indicators-edge-light-color",
+        "settings-indicators-edge-light-color",
+        "settings-indicators-edge-light-color-description",
+    ),
+    entry(
+        Section::Indicators,
+        "indicators-edge-light-width",
+        "settings-indicators-edge-light-width",
+        "settings-indicators-edge-light-width-description",
+    ),
+    entry(
+        Section::Indicators,
+        "indicators-edge-light-trail",
+        "settings-indicators-edge-light-trail",
+        "settings-indicators-edge-light-trail-description",
     ),
     entry(
         Section::Indicators,
@@ -338,9 +366,41 @@ pub(super) const CATALOG: &[Entry] = &[
     // One per `[features]` flag; a test checks none is missing.
     // keep-sorted start
     feature(Feature::AcpChats),
+    #[cfg(feature = "azure")]
+    feature(Feature::CloudAzure),
+    #[cfg(feature = "boat")]
+    feature(Feature::CloudBoat),
+    #[cfg(feature = "boxd")]
+    feature(Feature::CloudBoxd),
+    #[cfg(feature = "coder")]
+    feature(Feature::CloudCoder),
+    #[cfg(feature = "container")]
+    feature(Feature::CloudContainer),
+    #[cfg(feature = "daytona")]
+    feature(Feature::CloudDaytona),
+    #[cfg(feature = "opensandbox")]
+    feature(Feature::CloudOpenSandbox),
+    #[cfg(feature = "cloud")]
+    feature(Feature::CloudProviders),
+    #[cfg(feature = "railway")]
+    feature(Feature::CloudRailway),
+    #[cfg(feature = "sprites")]
+    feature(Feature::CloudSprites),
+    #[cfg(feature = "mcp")]
+    feature(Feature::Mcp),
+    feature(Feature::MoonframeTools),
+    feature(Feature::MoonframeWindow),
     feature(Feature::QaMenu),
     feature(Feature::SidebarHoverMenu),
     // keep-sorted end
+    // Under the flags; its button works while the MCP server is on.
+    #[cfg(feature = "mcp")]
+    entry(
+        Section::General,
+        "general-mcp-config",
+        "mcp-settings-copy",
+        "mcp-settings-copy-description",
+    ),
     entry(
         Section::General,
         "general-copy-on-select",
@@ -471,9 +531,21 @@ pub(super) const CATALOG: &[Entry] = &[
     ),
     entry(
         Section::Chat,
+        "chat-auto-convert",
+        "settings-chat-auto-convert",
+        "settings-chat-auto-convert-description",
+    ),
+    entry(
+        Section::Chat,
         "chat-glide",
         "settings-chat-glide",
         "settings-chat-glide-description",
+    ),
+    entry(
+        Section::Chat,
+        "chat-message-effects",
+        "settings-chat-message-effects",
+        "settings-chat-message-effects-description",
     ),
     entry(
         Section::Chat,
@@ -554,6 +626,12 @@ pub(super) const CATALOG: &[Entry] = &[
         "settings-notif-volume-description",
     ),
     entry(
+        Section::Voice,
+        "voice-provider",
+        "settings-voice-provider",
+        "settings-voice-lead",
+    ),
+    entry(
         Section::TextShortcuts,
         "text-shortcuts-add",
         "settings-text-shortcuts-add",
@@ -584,7 +662,8 @@ pub(super) const CATALOG: &[Entry] = &[
         "cloud-setup",
         "settings-cloud-setup",
         "settings-cloud-setup-description",
-    ),
+    )
+    .only(Availability::CloudProviders),
     entry(
         Section::RemoteControl,
         "remote-enabled",
@@ -629,6 +708,12 @@ pub(super) const CATALOG: &[Entry] = &[
     ),
     entry(
         Section::RemoteControl,
+        "remote-push-relay",
+        "settings-push-relay-title",
+        "settings-push-relay-description",
+    ),
+    entry(
+        Section::RemoteControl,
         "remote-idle",
         "settings-remote-idle",
         "settings-remote-idle-description",
@@ -644,6 +729,12 @@ pub(super) const CATALOG: &[Entry] = &[
         "remote-devices",
         "settings-remote-devices",
         "settings-remote-devices-description",
+    ),
+    entry(
+        Section::Fleet,
+        "fleet-create-row",
+        "settings-fleet-none",
+        "settings-fleet-none-description",
     ),
     entry(
         Section::Configuration,

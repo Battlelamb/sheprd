@@ -222,8 +222,11 @@ impl Document {
             .map(|entry| (entry.id, entry))
             .collect();
         self.positions.clear();
-        for (entry, &(id, revision)) in transcript.entries.iter().zip(keys) {
-            if entry.id != id {
+        // Rows a continued conversation's fold hides hold no text: a
+        // selection in them ends with the fold, and Select All skips them.
+        let fold = crate::chat::earlier::earlier(transcript, &self.expanded);
+        for (index, (entry, &(id, revision))) in transcript.entries.iter().zip(keys).enumerate() {
+            if entry.id != id || fold.is_some_and(|fold| fold.hides(index)) {
                 continue;
             }
             let expanded = self.expanded.contains(&id);
@@ -265,6 +268,12 @@ fn project(
     };
     match body {
         Some(Body::Message(parts)) => builder.parts(parts),
+        Some(Body::UserTextFile(file)) => {
+            builder.plain(Region::Body(0), Cell::default(), file.preview.clone());
+            if !file.attachments.is_empty() {
+                builder.plain(Region::Body(1), Cell::default(), file.attachments.clone());
+            }
+        }
         Some(Body::Answers { parts, .. }) => {
             if let EntryKind::Notice { text, .. } = &entry.kind {
                 builder.plain(Region::Label, Cell::default(), notice_label(text));
@@ -326,6 +335,11 @@ fn project(
                 Region::Body(0),
                 Cell::default(),
                 crate::chat::text::turn(turn),
+            ),
+            EntryKind::Handoff(handoff) => builder.plain(
+                Region::Body(0),
+                Cell::default(),
+                crate::chat::text::handoff(handoff),
             ),
             EntryKind::Tool(_) | EntryKind::Image { .. } => {}
         },
@@ -407,7 +421,9 @@ impl Builder {
             let region = Region::Body(index);
             let first = self.segments.len();
             match content {
-                Part::Rich(blocks) | Part::Bubble(_, blocks) => self.blocks(region, blocks),
+                Part::Rich(blocks) | Part::Bubble(_, blocks) | Part::File { blocks, .. } => {
+                    self.blocks(region, blocks)
+                }
                 Part::Text(lines) => self.lines(region, lines),
                 // Source owned by a preview/card is not visible transcript
                 // text. A range across it must never reveal the hidden payload.

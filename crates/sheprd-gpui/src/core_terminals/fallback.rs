@@ -4,15 +4,26 @@
 //! to the same one instead of starting another. Only when herdr-core is
 //! unavailable too does the window ask the user to install Herdr.
 
-use super::{CoreTerminalView, Host, Start, State, worker};
+use super::{CoreTerminalView, Host, Start, State, provider::Provider};
 use crate::SheprdWindow;
 use gpui::{prelude::*, *};
 use sheprd_backend::{Backend as _, Role, Size, Spawn, TerminalId, TerminalInfo};
 use sheprd_core_client::CoreBackend;
 use std::sync::mpsc;
 
+/// The stand-in shell: named, so a later launch finds it again, and in the
+/// user's home, as a new Terminal window opens. The core's own folder is `/`
+/// when the app was opened from the Finder or the Dock.
+pub(super) fn shell_spawn() -> Spawn {
+    Spawn {
+        cwd: sheprd_client::local_path::home_dir(),
+        name: Some(SHELL.to_owned()),
+        ..Spawn::default()
+    }
+}
+
 /// The name of the shell the window shows in place of Herdr 1.
-const SHELL: &str = "herdr-ui";
+const SHELL: &str = sheprd_session::STAND_IN_SHELL;
 
 /// The id of a shell the core refused as already running, so the window shows
 /// the one an earlier launch left: its address, as the core lists it.
@@ -44,18 +55,19 @@ pub(crate) enum Fallback {
     #[default]
     Off,
     /// The shell starting, or found by name.
-    Starting(mpsc::Receiver<Result<TerminalId, sheprd_core_client::Error>>),
-    Shown(Entity<CoreTerminalView>),
+    Starting(mpsc::Receiver<Result<TerminalId, super::Error>>),
+    Retry(std::time::Instant),
+    Shown(TerminalId, Entity<CoreTerminalView>),
 }
 
 impl super::CoreTerminals {
     /// The address of the shell shown in place of Herdr 1, such as `t3`,
     /// once herdr-core has listed it.
-    pub(super) fn fallback_terminal(&self) -> Option<&TerminalId> {
-        matches!(self.fallback, Fallback::Shown(_))
-            .then(|| self.infos.by_name(SHELL))
-            .flatten()
-            .map(|info| &info.id)
+    pub(crate) fn fallback_terminal(&self) -> Option<&TerminalId> {
+        match &self.fallback {
+            Fallback::Shown(id, _) => Some(self.infos.named(id).map_or(id, |info| &info.id)),
+            _ => None,
+        }
     }
 
     /// What in this window holds herdr-core `terminal`, for control
@@ -96,14 +108,24 @@ impl SheprdWindow {
             }
             return;
         }
-        self.core_terminals.hub.connect(Start::IfMissing);
+        if self.config.terminal_backend != crate::config::TerminalBackend::Tmux
+            && matches!(
+                self.core_terminals.fallback,
+                Fallback::Off | Fallback::Retry(_)
+            )
+        {
+            self.core_terminals.hub.connect(Start::IfMissing);
+        }
         // The shell belongs to the default workspace: once the user closes
         // it, the shell ends with it and none starts again until the app
         // keeps that workspace anew.
         let kept = self.default_workspace_kept(cx);
         match &self.core_terminals.fallback {
             Fallback::Off if kept => self.start_fallback_shell(),
-            Fallback::Off => {}
+            Fallback::Retry(when) if when.elapsed() >= std::time::Duration::from_secs(10) => {
+                self.core_terminals.fallback = Fallback::Off
+            }
+            Fallback::Retry(_) | Fallback::Off => {}
             Fallback::Starting(found) => match found.try_recv() {
                 Ok(Ok(terminal)) if !kept => {
                     self.end_core_terminal(&Host::Local, terminal);
@@ -111,42 +133,57 @@ impl SheprdWindow {
                 }
                 Ok(Ok(terminal)) => self.show_fallback_shell(terminal, cx),
                 Ok(Err(error)) => {
-                    tracing::warn!(%error, "Could not start the herdr-core shell");
-                    self.core_terminals.fallback = Fallback::Off;
+                    self.show_flash(
+                        crate::window::Flash::warning(crate::i18n::fl!(
+                            "core-terminals-start-failed",
+                            reason = error.to_string()
+                        )),
+                        cx,
+                    );
+                    self.core_terminals.fallback = Fallback::Retry(std::time::Instant::now());
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.core_terminals.fallback = Fallback::Off
                 }
             },
-            Fallback::Shown(view) if !kept => {
+            Fallback::Shown(_, view) if !kept => {
                 self.end_core_terminal(&Host::Local, view.read(cx).terminal().clone());
                 self.core_terminals.fallback = Fallback::Off;
                 cx.notify();
             }
-            Fallback::Shown(_) => {}
+            Fallback::Shown(..) => {}
         }
     }
 
     fn start_fallback_shell(&mut self) {
-        let Some(backend) = self.core_terminals.hub.backend().cloned() else {
+        let Some(backend) = self.core_terminals.provider(
+            &Host::Local,
+            self.config.terminal_backend,
+            self.config.herdr_2_scrollback,
+        ) else {
             return;
         };
         let (send, receive) = mpsc::sync_channel(1);
-        let spawn = Spawn {
-            name: Some(SHELL.to_owned()),
-            ..Spawn::default()
-        };
+        let spawn = shell_spawn();
         let spawned = std::thread::Builder::new()
             .name("herdr-core-shell".into())
             .spawn(move || {
-                let found = match backend.spawn(&spawn) {
-                    Ok(info) => Ok(info.id),
+                let found = match (&backend, backend.spawn(&spawn)) {
+                    (_, Ok(info)) => Ok(info.id),
                     // An earlier launch's shell still runs: show it again.
-                    Err(sheprd_core_client::Error::Refused {
-                        kind: Some(kind), ..
-                    }) if kind == "name_taken" => reused(&backend),
-                    Err(error) => Err(error),
+                    (
+                        Provider::Core(core),
+                        Err(super::Error::Core(sheprd_core_client::Error::Refused {
+                            kind: Some(kind),
+                            ..
+                        })),
+                    ) if kind == "name_taken" => reused(core).map_err(Into::into),
+                    #[cfg(feature = "tmux")]
+                    (_, Err(super::Error::Tmux(sheprd_tmux::Error::NameTaken))) => {
+                        sheprd_tmux::Tmux::named_id(SHELL).map_err(Into::into)
+                    }
+                    (_, Err(error)) => Err(error),
                 };
                 let _ = send.send(found);
             });
@@ -157,13 +194,14 @@ impl SheprdWindow {
 
     fn show_fallback_shell(&mut self, terminal: TerminalId, cx: &mut Context<Self>) {
         let (Some(backend), Ok(size)) = (
-            self.core_terminals.hub.backend().cloned(),
+            self.core_terminals
+                .owner(&Host::Local, &terminal, self.config.herdr_2_scrollback),
             Size::new(80, 24),
         ) else {
             self.core_terminals.fallback = Fallback::Off;
             return;
         };
-        let link = match worker::spawn(backend, terminal.clone(), size, Role::Active) {
+        let link = match backend.link(terminal.clone(), size, Role::Active) {
             Ok(link) => link,
             Err(error) => {
                 tracing::warn!(%error, "Could not start a herdr-core terminal worker");
@@ -175,9 +213,10 @@ impl SheprdWindow {
         let to_window =
             super::asks::window_call(cx, Host::Local, Some(sheprd_client::ConnectTarget::Local));
         let view = cx.new(|cx| {
-            CoreTerminalView::new(terminal, link, look, painter, false, cx).with_window(to_window)
+            CoreTerminalView::new(terminal.clone(), link, look, painter, false, cx)
+                .with_window(to_window)
         });
-        self.core_terminals.fallback = Fallback::Shown(view);
+        self.core_terminals.fallback = Fallback::Shown(terminal, view);
         cx.notify();
     }
 
@@ -189,7 +228,7 @@ impl SheprdWindow {
 
     pub(crate) fn core_fallback_view(&self) -> Option<Entity<CoreTerminalView>> {
         match &self.core_terminals.fallback {
-            Fallback::Shown(view) => Some(view.clone()),
+            Fallback::Shown(_, view) => Some(view.clone()),
             _ => None,
         }
     }
@@ -205,6 +244,7 @@ impl SheprdWindow {
     /// Whether the window should still ask the user to install Herdr: only
     /// once herdr-core is known to be unavailable as well.
     pub(crate) fn needs_herdr_install(&self) -> bool {
-        matches!(self.core_terminals.hub.state(), State::Unavailable(_))
+        self.config.terminal_backend != crate::config::TerminalBackend::Tmux
+            && matches!(self.core_terminals.hub.state(), State::Unavailable(_))
     }
 }

@@ -4,19 +4,22 @@
 //! in plain terminals have no transcript: their settled status changes,
 //! read from the layout every tick, alert instead. A
 //! device the native app registered for alerts gets them sealed through
-//! APNs; any other gets Web Push, which is blocking HTTPS on the blocking
-//! pool. A push service that says a token or subscription is gone drops it
-//! from the device. While Sheprd marks a device near (presence), its
-//! alerts are held and go out when the owner leaves.
+//! the push relay; any other, or one whose push failed, gets Web Push where
+//! it subscribed (the native app never does), which is blocking HTTPS on
+//! the blocking pool. A push service that says a token, handle, or subscription
+//! is gone drops it from the device. While Sheprd marks a device near
+//! (presence), its alerts are held and go out when the owner leaves. A
+//! terminal agent's finish says what the agent did, read off its screen
+//! away from this loop ([`recap`]).
 
 use crate::{
-    apns::{self, Registration, alert::Sealed},
+    apns::{self, Recipient, Registration, Sent, alert::Sealed},
     control::DeviceId,
     hub::Event,
     hub::Layout,
     push::{
-        Chat, Delivery, Hold, Notification, Outcome, SeenAgent, Subscription, TerminalAgents,
-        Throttle, decide, decide_terminal,
+        Chat, Delivery, Hold, Kind, Notification, Outcome, Privacy, SeenAgent, Subscription,
+        TerminalAgents, Throttle, TurnPull, decide, decide_terminal,
     },
     web::{State, now_ms},
 };
@@ -32,7 +35,7 @@ use tokio::sync::{broadcast::error::RecvError, mpsc};
 const TICK: Duration = Duration::from_secs(1);
 
 pub(super) async fn run(state: Arc<State>) {
-    if state.push.is_none() && state.apns.is_none() {
+    if state.push.is_none() && state.apns.is_off() {
         return;
     }
     let mut live = super::live::LiveActivities::default();
@@ -43,14 +46,22 @@ pub(super) async fn run(state: Arc<State>) {
     let mut holds: HashMap<DeviceId, Hold> = HashMap::new();
     let mut needing = BTreeSet::new();
     let mut terminals = TerminalAgents::default();
+    let (told, mut finishes) = mpsc::unbounded_channel::<Notification>();
     let mut ticker = tokio::time::interval(TICK);
     loop {
         tokio::select! {
             event = events.recv() => match event {
                 Ok((pane, Event::Reset { transcript, cursor })) => {
+                    live.snapshot(&state, &pane, &transcript);
+                    // A fresh copy of the same chat: its turn may go on.
+                    let pull = transcripts
+                        .remove(&pane)
+                        .map(|base| base.pull.carried(&base.transcript, &transcript))
+                        .unwrap_or_default();
                     transcripts.insert(pane, Base {
                         transcript: Transcript::clone(&transcript),
                         cursor: Some(cursor),
+                        pull,
                     });
                 }
                 Ok((pane, Event::Change { change, cursor })) => {
@@ -59,7 +70,8 @@ pub(super) async fn run(state: Arc<State>) {
                             continue;
                         };
                         let (transcript, cursor) = link.base();
-                        transcripts.insert(pane.clone(), Base { transcript, cursor });
+                        live.snapshot(&state, &pane, &transcript);
+                        transcripts.insert(pane.clone(), Base { transcript, cursor, pull: TurnPull::default() });
                     }
                     let Some(base) = transcripts.get_mut(&pane) else {
                         continue;
@@ -68,8 +80,10 @@ pub(super) async fn run(state: Arc<State>) {
                     if base.includes(cursor) {
                         continue;
                     }
+                    let pr = base.pull.step(&change);
                     let before = &mut base.transcript;
-                    let notification = notification(&state, &pane, before, &change);
+                    let notification =
+                        notification(&state, &pane, before, &change).map(|n| n.with_pr(pr));
                     live.change(&state, &pane, before, &change);
                     if before.apply(&change).is_err() {
                         // Rebuilt from the next Reset or change.
@@ -85,11 +99,20 @@ pub(super) async fn run(state: Arc<State>) {
                 Err(RecvError::Lagged(_)) => transcripts.clear(),
                 Err(RecvError::Closed) => return,
             },
+            Some(finished) = finishes.recv() => {
+                // Opened on a phone while Git was read: seen already.
+                if state.attention().contains(&finished.pane) {
+                    offer(&state, &mut throttles, &mut holds, &mut outbox, finished);
+                }
+            }
             _ = ticker.tick() => {
                 live.tick(&state);
                 let now = now_ms();
-                for notification in terminal_changes(&state, &mut terminals, &mut live, now) {
-                    offer(&state, &mut throttles, &mut holds, &mut outbox, notification);
+                for (notification, task) in terminal_changes(&state, &mut terminals, &mut live, now) {
+                    match task {
+                        Some(task) => recap::tell(&state, notification, task, told.clone()),
+                        None => offer(&state, &mut throttles, &mut holds, &mut outbox, notification),
+                    }
                 }
                 let due: Vec<(DeviceId, Notification)> = throttles
                     .iter_mut()
@@ -118,6 +141,8 @@ pub(super) async fn run(state: Arc<State>) {
 struct Base {
     transcript: Transcript,
     cursor: Option<Cursor>,
+    /// The pull request the chat's running turn created or pushed to.
+    pull: TurnPull,
 }
 
 impl Base {
@@ -155,13 +180,15 @@ fn notification(
 }
 
 /// Steps every terminal agent's status, starting, updating, or ending its
-/// Live Activity, and returns the alerts the settled changes call for.
+/// Live Activity, and returns the alerts the settled changes call for,
+/// with the task of each finish whose screen may say what the agent did
+/// (`Some(None)` for one without a task).
 fn terminal_changes(
     state: &Arc<State>,
     agents: &mut TerminalAgents,
     live: &mut super::live::LiveActivities,
     now: u64,
-) -> Vec<Notification> {
+) -> Vec<(Notification, Option<Option<String>>)> {
     let layout = state.hub.layout();
     let names = agent_names(&layout);
     let seen = terminal_agents(&layout, &names);
@@ -180,14 +207,16 @@ fn terminal_changes(
             continue;
         }
         if let Some(alert) = agent.and_then(|agent| decide_terminal(agent, &moved, state.privacy)) {
-            alerts.push(alert);
+            let recap = alert.kind == Kind::TerminalDone && state.privacy == Privacy::Excerpt;
+            let task = recap.then(|| agent.and_then(|agent| agent.task).map(str::to_owned));
+            alerts.push((alert, task));
         }
     }
     alerts
 }
 
 /// Each terminal agent's display name, as `claude` shows as `Claude`.
-fn agent_names(layout: &Layout) -> HashMap<&str, String> {
+pub(super) fn agent_names(layout: &Layout) -> HashMap<&str, String> {
     layout
         .workspaces
         .iter()
@@ -365,15 +394,20 @@ impl Outbox {
     }
 }
 
-/// Devices that get sealed alerts through APNs: those that registered an
-/// alert token and a notify key, while the user's APNs key is set up.
+/// Devices that get sealed alerts through APNs: those that registered a
+/// notify key and an alert token, or handle, that this daemon's delivery
+/// reaches.
 fn alert_devices(state: &State) -> Vec<DeviceId> {
-    if state.apns.is_none() {
+    if state.apns.is_off() {
         return Vec::new();
     }
     super::live::registrations(state)
         .into_iter()
-        .filter(|(_, registration)| registration.alerts().is_some())
+        .filter(|(_, registration)| {
+            registration
+                .alerts()
+                .is_some_and(|(recipient, _)| state.apns.reaches(recipient))
+        })
         .map(|(device, _)| device)
         .collect()
 }
@@ -395,11 +429,13 @@ fn deliver(state: Arc<State>, device: DeviceId) -> mpsc::Sender<Notification> {
 }
 
 /// Sends `notification` sealed through APNs when `device` registered for
-/// alerts; `false` when it did not, so Web Push carries it instead.
+/// alerts; `false` when it did not or the push failed, so Web Push carries
+/// it instead where the device subscribed. During a relay outage that is at
+/// once, so the device's queue does not wait on the relay.
 async fn send_alert(state: &Arc<State>, device: &DeviceId, notification: &Notification) -> bool {
-    let Some(sender) = &state.apns else {
+    if state.apns.is_off() {
         return false;
-    };
+    }
     let registration = Registration::from_stored(
         state
             .auth()
@@ -407,31 +443,34 @@ async fn send_alert(state: &Arc<State>, device: &DeviceId, notification: &Notifi
             .get(device)
             .and_then(|record| record.apns.as_ref()),
     );
-    let Some((token, key)) = registration.alerts() else {
+    let Some((recipient, key)) = registration
+        .alerts()
+        .filter(|(recipient, _)| state.apns.reaches(recipient))
+    else {
         return false;
     };
-    let (token, key) = (token.clone(), *key);
+    let (recipient, key) = (recipient.clone(), *key);
     let sealed = Sealed::new(
         notification,
         apns::computer_id(&state.fingerprint),
         waiting(state),
     );
-    let Ok(push) = apns::alert::push(sealed, &notification.tag, |plaintext| {
-        Ok(apns::seal::seal(&key, plaintext, apns::seal::INFO)?)
-    }) else {
-        return true;
-    };
-    if let Ok(apns::Outcome::Gone) = sender.post(&token, &push, now_ms() / 1000).await {
+    let sent = state
+        .apns
+        .alert(&recipient, &key, sealed, &notification.tag, now_ms())
+        .await;
+    state.pushes.record(apns::Kind::Alert, &sent, now_ms());
+    if sent == Sent::Gone {
         let state = state.clone();
         let device = device.clone();
-        let _ = tokio::task::spawn_blocking(move || forget(&state, &device, &token)).await;
+        let _ = tokio::task::spawn_blocking(move || forget(&state, &device, &recipient)).await;
     }
-    true
+    sent == Sent::Delivered
 }
 
-/// Drops `token` from `device`'s registration after APNs refused it.
-/// Blocking.
-fn forget(state: &State, device: &DeviceId, token: &apns::DeviceToken) {
+/// Drops `token` from `device`'s registration after APNs or the relay
+/// called it gone. Blocking.
+pub(crate) fn forget(state: &State, device: &DeviceId, token: &Recipient) {
     let mut auth = state.auth();
     let devices = auth.devices_mut();
     let mut registration =
@@ -458,11 +497,13 @@ fn send(state: &State, device: &DeviceId, notification: &Notification) {
         return;
     };
     let message = notification.message(waiting(state));
-    let delivery = Delivery::for_notification(notification);
+    let delivery = Delivery::for_notification(notification, &apns::computer_id(&state.fingerprint));
     if let Ok(Outcome::Gone) = sender.send(&subscription, &message, &delivery) {
         let _ = state.auth().devices_mut().set_push(device, None);
     }
 }
+
+mod recap;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]

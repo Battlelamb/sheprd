@@ -7,11 +7,19 @@ use crate::browser::TabId;
 fn restored(
     cx: &mut gpui::TestAppContext,
 ) -> (Entity<SheprdWindow>, &mut VisualTestContext, TabId) {
+    restored_at(cx, url("https://a.test/"))
+}
+
+/// As `restored`, with the tab at `location`.
+fn restored_at(
+    cx: &mut gpui::TestAppContext,
+    location: Location,
+) -> (Entity<SheprdWindow>, &mut VisualTestContext, TabId) {
     let (view, cx) = window(cx);
     let tab_scope = view.read_with(cx, |view, _| scope(&view.endpoints[0]));
     let id = cx.update(|_, cx| {
         Store::update(cx, |store| {
-            store.open(tab_scope, "w0", Some(url("https://a.test/")), None)
+            store.open(tab_scope, "w0", Some(location), None)
         })
         .unwrap()
     });
@@ -75,5 +83,48 @@ fn a_page_that_could_not_be_made_is_not_retried_every_tick(cx: &mut gpui::TestAp
             view.browser.failed.get(&id).map(|message| message.as_ref()),
             Some("no web view")
         );
+    });
+}
+
+/// A machine's tab a restored layout shows gets its display as a web page
+/// does, rather than staying blank once the machine runs.
+#[cfg(target_os = "macos")]
+#[gpui::test]
+fn a_machine_a_restored_layout_shows_gets_its_display_on_the_next_tick(
+    cx: &mut gpui::TestAppContext,
+) {
+    let name = crate::machine::Name::try_from("restored-test".to_owned()).unwrap();
+    let (view, cx, id) = restored_at(cx, Location::Machine { name });
+    assert!(!made(&view, cx, id), "drawing makes no display");
+    tick(&view, cx);
+    assert!(made(&view, cx, id));
+}
+
+/// A virtual Mac runs on this computer: a machine's tab saved in another
+/// host's workspace gets no display, and its tab says why.
+#[cfg(target_os = "macos")]
+#[gpui::test]
+fn a_machine_tab_of_another_hosts_workspace_never_shows_the_machine(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = window(cx);
+    let name = crate::machine::Name::try_from("remote-scope-test".to_owned()).unwrap();
+    let id = cx.update(|_, cx| {
+        let location = Some(Location::Machine { name });
+        Store::update(cx, |store| {
+            store.open(
+                crate::browser::Scope::endpoint("ssh-host"),
+                "w0",
+                location,
+                None,
+            )
+        })
+        .unwrap()
+    });
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            let tab = cx.global::<Store>().get(id).unwrap().clone();
+            view.browser.pages.ensure(&tab, window, cx).unwrap();
+            assert!(!view.browser.pages.contains(id));
+            assert!(view.machine_is_dark(id, cx));
+        })
     });
 }

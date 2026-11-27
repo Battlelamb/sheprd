@@ -54,6 +54,12 @@ pub(crate) fn spawn(
     command
         .args(args)
         .envs(env.iter().copied())
+        // Meant for this program alone: a chat the agent starts gets its own.
+        .env_remove(sheprd_chat_protocol::SETTINGS_ENV)
+        .env_remove(sheprd_chat_protocol::brief::Delegation::ENV)
+        // The terminal's resume token is this chat's: an agent reporting its
+        // own resume would replace the chat with its terminal interface.
+        .env_remove(crate::resume::TOKEN_ENV)
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

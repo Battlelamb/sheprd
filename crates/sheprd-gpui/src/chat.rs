@@ -15,12 +15,16 @@
 //! be reached shows its terminal cells as before.
 // i18n: migrated
 
+mod auto_convert;
+pub(crate) mod brief;
 mod chats;
 pub(crate) mod code_block;
 mod code_choices;
 mod convert;
 pub(crate) mod core_pane;
 mod discovery;
+pub(crate) mod drafts;
+mod earlier;
 pub(crate) mod effects;
 mod existing;
 mod glide;
@@ -34,11 +38,13 @@ mod pick;
 mod prepared;
 #[cfg(feature = "integration-test")]
 pub(crate) mod preview;
+pub(crate) mod pull_requests;
 mod rail_folds;
 mod reader;
 mod remote_route;
 mod restore;
 mod rich;
+pub(crate) mod screen_link;
 mod selection;
 mod session;
 mod shortcuts;
@@ -46,12 +52,15 @@ mod start;
 mod summary;
 mod terminal;
 mod text;
+pub(crate) mod turns;
 mod upload;
+mod user_text_file;
 mod view;
 pub(crate) mod visual;
 pub(crate) mod widgets;
 mod window;
 
+pub(crate) use auto_convert::Typed;
 pub(crate) use chats::{ChatInput, Chats, LauncherDeck, Toward};
 
 /// The wall clock in milliseconds since the Unix epoch, which the program
@@ -65,13 +74,20 @@ pub(super) fn now_ms() -> u64 {
 }
 pub(crate) use convert::Error as ConvertError;
 pub(crate) use pick::short_text;
-pub(crate) use start::{Error as StartError, PROGRAM_ENV, Program};
+pub(crate) use start::{
+    Error as StartError, PROGRAM_ENV, Program, locate as start_program, takes_briefs,
+};
 
 use sheprd_chat_protocol::{ByeReason, EndpointId};
 use std::io;
 
 /// Chat panes attached at once; more are left to their terminal views.
 const MAX_CHATS: usize = 16;
+/// Chat panes attached at once on an SSH host: as many as the host's shared
+/// stream connections carry (`sheprd_client::SshLane::Stream`, two of 8).
+/// Past it each chat would log in on its own, and through a relay, which
+/// holds each device's key to a few sessions, those are refused.
+const MAX_SSH_CHATS: usize = 16;
 /// Commands waiting for their acknowledgement, per pane.
 const MAX_PENDING: usize = 32;
 /// Messages a worker holds for the window before it gives the connection up
@@ -148,9 +164,11 @@ impl Error {
     }
 
     /// Whether the client's copy no longer fits the program's stream, so the
-    /// next connection asks for a whole snapshot.
+    /// next connection asks for a whole snapshot. A view that fell behind,
+    /// as one left in the background does, also starts over from one: a
+    /// replay of every chunk it missed would scroll through them all.
     fn desynced(&self) -> bool {
-        matches!(self, Self::Stream { .. } | Self::Apply(_))
+        matches!(self, Self::Stream { .. } | Self::Apply(_) | Self::Overflow)
     }
 }
 
@@ -229,6 +247,14 @@ const REMOTE_PROGRAM_DIRS: &[&str] = &[
 ];
 
 impl Route {
+    /// How many chats attach at once over this route.
+    pub(crate) fn max_chats(&self) -> usize {
+        match self {
+            Self::Ssh(_) => MAX_SSH_CHATS,
+            Self::Local | Self::Remote(_) => MAX_CHATS,
+        }
+    }
+
     pub(super) fn remote_name(&self) -> Option<&str> {
         match self {
             Self::Local => None,

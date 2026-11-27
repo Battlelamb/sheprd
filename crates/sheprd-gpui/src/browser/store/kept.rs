@@ -40,6 +40,16 @@ impl Store {
             .find(|workspace| workspace.scope == scope.as_str() && workspace.id == id)
     }
 
+    /// Whether `scope` holds a tab of a workspace only Herdr 1 lists: one the
+    /// app neither keeps nor gathers a window's tabs in without Herdr 1. The
+    /// window shows such a tab only while Herdr 1 runs there.
+    pub(crate) fn holds_herdr_tabs(&self, scope: &Scope) -> bool {
+        self.in_scope(scope).any(|tab| {
+            tab.workspace_id != sheprd_session::DEFAULT_WORKSPACE
+                && self.kept_workspace(scope, &tab.workspace_id).is_none()
+        })
+    }
+
     /// How many more workspaces the app can keep, across every host.
     pub(crate) fn kept_room(&self) -> usize {
         MAX_WORKSPACES.saturating_sub(self.workspaces.len())
@@ -55,21 +65,10 @@ impl Store {
         cwd: &str,
         custom: bool,
     ) -> Option<String> {
-        // Past every ID kept or handed out before, so a closed workspace's
-        // ID is never given to another while a late answer may still name it.
-        let next = self
-            .workspaces
-            .iter()
-            .filter_map(|workspace| workspace.id.strip_prefix(PREFIX)?.parse::<u64>().ok())
-            .chain(std::iter::once(self.last_kept))
-            .max()
-            .unwrap_or(0)
-            + 1;
-        let id = format!("{PREFIX}{next}");
+        // Random, so two clients of one core never hand out the same ID,
+        // and a closed workspace's ID is never given to another.
+        let id = super::spaces::new_id(PREFIX);
         let kept = self.keep_as(scope, &id, label, cwd, custom);
-        if kept {
-            self.last_kept = next;
-        }
         kept.then_some(id)
     }
 
@@ -94,6 +93,47 @@ impl Store {
             return false;
         }
         self.workspaces.push(workspace);
+        self.save();
+        true
+    }
+
+    /// Saves the driving terminal's last folder without replacing a user name.
+    pub(crate) fn follow_kept_folder(&mut self, scope: &Scope, id: &str, cwd: &str) -> bool {
+        if cwd.is_empty() || cwd.len() > MAX_CWD_BYTES || cwd.contains('\0') {
+            return false;
+        }
+        let Some(workspace) = self
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.scope == scope.as_str() && workspace.id == id)
+        else {
+            return false;
+        };
+        if workspace.cwd == cwd {
+            return false;
+        }
+        workspace.cwd = cwd.to_owned();
+        // Automatic labels are projected from the checkout root, not this
+        // potentially nested folder. Keep the saved name for linked worktrees.
+        self.save();
+        true
+    }
+
+    /// Saves the name a workspace the user has not named shows, which its
+    /// folder gives it, so other clients can show it too; whether it changed.
+    pub(crate) fn follow_kept_label(&mut self, scope: &Scope, id: &str, label: &str) -> bool {
+        let label = clean_label(label);
+        let Some(workspace) = self
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.scope == scope.as_str() && workspace.id == id)
+        else {
+            return false;
+        };
+        if workspace.custom || label.is_empty() || workspace.label == label {
+            return false;
+        }
+        workspace.label = label;
         self.save();
         true
     }

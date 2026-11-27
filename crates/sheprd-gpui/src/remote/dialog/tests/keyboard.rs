@@ -11,6 +11,7 @@ fn daemon(_: &Path, request: &Request) -> Result<Response, control::Error> {
         }
         Request::Pairing { .. } => Response::Pairing(PairingState::Waiting {
             expires_in_ms: 60_000,
+            nearby_code: None,
         }),
         _ => Response::Done,
     })
@@ -98,6 +99,7 @@ fn address_keys_do_not_act_on_a_claimed_pairing(cx: &mut TestAppContext) {
                 code: "123456".into(),
                 app: None,
                 ssh: false,
+                fleet: None,
             })),
             now,
         );

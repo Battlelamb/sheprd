@@ -58,11 +58,12 @@ pub(super) fn label(panel: ActivityPanel) -> SharedString {
         ActivityPanel::Automations => fl!("sidebar-activity-automations"),
         ActivityPanel::Ports => fl!("sidebar-activity-ports"),
         ActivityPanel::Usage => fl!("sidebar-activity-usage"),
+        ActivityPanel::Traces => fl!("sidebar-activity-traces"),
     }
     .into()
 }
 
-fn icon(panel: ActivityPanel) -> &'static str {
+pub(super) fn icon(panel: ActivityPanel) -> &'static str {
     match panel {
         ActivityPanel::Overview => "icons/pulse.svg",
         ActivityPanel::Workspaces => "icons/terminal.svg",
@@ -73,6 +74,7 @@ fn icon(panel: ActivityPanel) -> &'static str {
         ActivityPanel::Automations => "icons/automations.svg",
         ActivityPanel::Ports => "icons/plug.svg",
         ActivityPanel::Usage => "icons/chart.svg",
+        ActivityPanel::Traces => "icons/sessions.svg",
     }
 }
 
@@ -316,7 +318,8 @@ impl SheprdWindow {
                 | ActivityPanel::Security
                 | ActivityPanel::Automations
                 | ActivityPanel::Ports
-                | ActivityPanel::Usage,
+                | ActivityPanel::Usage
+                | ActivityPanel::Traces,
             ) => {
                 let focus = self
                     .activity
@@ -347,6 +350,7 @@ impl SheprdWindow {
             ActivityPanel::Automations => self.render_automations_section(cx),
             ActivityPanel::Ports => self.render_local_ports_section(cx),
             ActivityPanel::Usage => self.render_usage_section(cx),
+            ActivityPanel::Traces => self.render_traces_section(cx),
             ActivityPanel::PullRequests | ActivityPanel::Issues | ActivityPanel::Tasks => {
                 return self.render_orchestrator_section();
             }
@@ -415,6 +419,14 @@ impl SheprdWindow {
     }
 
     pub(crate) fn render_activity_bar(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        self.activity_bar_with_slot(false, cx)
+    }
+
+    pub(crate) fn activity_bar_with_slot(
+        &self,
+        editor_slot: bool,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let theme = &self.theme;
         let counts = self.activity_counts(cx);
         let bar = div()
@@ -487,6 +499,9 @@ impl SheprdWindow {
             tabs = tabs.child(button);
         }
         bar.child(tabs.children(self.mod_activity_buttons(cx)))
+            .when(editor_slot, |bar| {
+                bar.child(div().flex_none().h(px(BUTTON)))
+            })
             .child(
                 self.bar_button(
                     "activity-settings",
@@ -733,5 +748,6 @@ fn panel_selector(panel: ActivityPanel) -> &'static str {
         ActivityPanel::Automations => "activity-automations",
         ActivityPanel::Ports => "activity-ports",
         ActivityPanel::Usage => "activity-usage",
+        ActivityPanel::Traces => "activity-traces",
     }
 }

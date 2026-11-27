@@ -48,16 +48,25 @@ public struct Cursor: Codable, Hashable, Sendable {
 }
 
 public struct Transcript: Codable, Hashable, Sendable {
+    /// Sub-agents, background shells, and monitors, running or ended,
+    /// oldest first.
+    public var activities: [AgentActivity] = []
     public var agent: String
     public var autoAccept = false
+    /// Prompts another agent wrote, oldest first.
+    public var briefs: [Brief] = []
     public var clients: UInt32 = 0
     public var commands: [SlashCommand] = []
     public var entries: [Entry] = []
+    /// The agents the chat may still switch to.
+    public var harnesses: Harnesses?
     public var modes: Modes?
     public var options: [ConfigOption] = []
     /// Waiting for an answer, oldest first.
     public var permissions: [Permission] = []
     public var plan: [PlanEntry] = []
+    /// Pull requests the agent worked on, in the order first seen.
+    public var pullRequests: [ChatPullRequest] = []
     public var queued: [Queued] = []
     public var readOnly = false
     public var session: SessionInfo?
@@ -69,23 +78,28 @@ public struct Transcript: Codable, Hashable, Sendable {
     public init(agent: String) { self.agent = agent }
 
     enum CodingKeys: String, CodingKey {
-        case agent, clients, commands, entries, modes, options, permissions, plan, queued, session, status
-        case truncated, turn, usage
+        case activities, agent, clients, commands, entries, harnesses, modes, options, permissions, plan, queued, session, status
+        case truncated, turn, usage, briefs
         case autoAccept = "auto_accept"
+        case pullRequests = "pull_requests"
         case readOnly = "read_only"
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        activities = try c.decodeIfPresent([AgentActivity].self, forKey: .activities) ?? []
         agent = try c.decode(String.self, forKey: .agent)
         autoAccept = try c.decodeIfPresent(Bool.self, forKey: .autoAccept) ?? false
+        briefs = try c.decodeIfPresent([Brief].self, forKey: .briefs) ?? []
         clients = try c.decodeIfPresent(UInt32.self, forKey: .clients) ?? 0
         commands = try c.decodeIfPresent([SlashCommand].self, forKey: .commands) ?? []
         entries = try c.decodeIfPresent([Entry].self, forKey: .entries) ?? []
+        harnesses = try c.decodeIfPresent(Harnesses.self, forKey: .harnesses)
         modes = try c.decodeIfPresent(Modes.self, forKey: .modes)
         options = try c.decodeIfPresent([ConfigOption].self, forKey: .options) ?? []
         permissions = try c.decodeIfPresent([Permission].self, forKey: .permissions) ?? []
         plan = try c.decodeIfPresent([PlanEntry].self, forKey: .plan) ?? []
+        pullRequests = try c.decodeIfPresent([ChatPullRequest].self, forKey: .pullRequests) ?? []
         queued = try c.decodeIfPresent([Queued].self, forKey: .queued) ?? []
         readOnly = try c.decodeIfPresent(Bool.self, forKey: .readOnly) ?? false
         session = try c.decodeIfPresent(SessionInfo.self, forKey: .session)
@@ -94,6 +108,10 @@ public struct Transcript: Codable, Hashable, Sendable {
         turn = try c.decodeIfPresent(Turn.self, forKey: .turn)
         usage = try c.decodeIfPresent(Usage.self, forKey: .usage)
     }
+
+    /// Whether the agent is answering: the daemon then refuses to switch
+    /// agents (`Rejection::AgentFixed`) until the turn ends.
+    public var answering: Bool { status == .working || turn != nil }
 
     public func entry(_ id: EntryId) -> Entry? { position(of: id).map { entries[$0] } }
 
@@ -194,15 +212,22 @@ public struct SlashCommand: Codable, Hashable, Sendable {
 
 public struct Queued: Codable, Hashable, Sendable {
     public var attachments: [Attachment]
+    /// Kept when the turn was stopped: it waits until sent now or withdrawn.
+    public var held: Bool
     public var id: UUID
+    /// Already sent into the running turn, waiting for the agent's next
+    /// step; it can no longer be withdrawn.
+    public var steered: Bool
     public var text: String
 
-    enum CodingKeys: String, CodingKey { case attachments, id, text }
+    enum CodingKeys: String, CodingKey { case attachments, held, id, steered, text }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         attachments = try c.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
+        held = try c.decodeIfPresent(Bool.self, forKey: .held) ?? false
         id = try c.decode(UUID.self, forKey: .id)
+        steered = try c.decodeIfPresent(Bool.self, forKey: .steered) ?? false
         text = try c.decode(String.self, forKey: .text)
     }
 }

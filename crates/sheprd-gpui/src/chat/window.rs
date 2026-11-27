@@ -61,11 +61,41 @@ impl SheprdWindow {
                         connection: endpoint.generation,
                     })
             });
+        // The focused pane on screen (a core tab's, else the daemon's) comes
+        // first wherever a bound applies, then the other panes on screen,
+        // then those holding files for an unsent prompt.
+        let on_screen = self.on_screen_chat_panes(cx);
+        let focused = self
+            .focused_core_key(window, cx)
+            .or_else(|| self.live.snapshot.as_ref()?.focused_pane_id.clone())
+            .filter(|pane| on_screen.contains(pane));
+        let holding: Vec<String> = self
+            .chats
+            .panes()
+            .filter(|pane| pane.holds_unsent_files())
+            .map(|pane| pane.target.pane_id.clone())
+            .collect();
+        let rank = |pane: &str| {
+            if focused.as_deref() == Some(pane) {
+                0
+            } else if on_screen.iter().any(|shown| shown == pane) {
+                1
+            } else if holding.iter().any(|held| held == pane) {
+                2
+            } else {
+                3
+            }
+        };
         let agents = self
             .live
             .snapshot
             .as_deref()
             .map(super::existing::candidates)
+            .map(|agents| {
+                discovery::bound_by(agents, super::existing::MAX_OBSERVED, |agent| {
+                    rank(&agent.pane_id).min(2)
+                })
+            })
             .unwrap_or_default();
         let candidates: Vec<_> = agents.iter().map(|agent| agent.pane_id.clone()).collect();
         // A new conversation usually moves its pane's reported state, so the
@@ -102,7 +132,8 @@ impl SheprdWindow {
             })
             .unwrap_or_default();
         let core = enabled.then(|| self.core_chat_targets());
-        let targets = super::core_pane::with_core(targets, core.unwrap_or_default());
+        let known = super::core_pane::with_core(targets, core.unwrap_or_default());
+        let targets = discovery::bounded(known.clone(), rank);
         if enabled {
             self.locate_chat_program(cx);
             self.probe_chat_agents(cx);
@@ -110,13 +141,27 @@ impl SheprdWindow {
         self.poll_chat_restore(enabled, route.as_ref());
         self.poll_chat_start(cx);
         self.poll_chat_convert(cx);
-        let mut changed = self.chats.reconcile(targets, now, connect) || discovered;
+        self.poll_chat_auto_convert(now);
+        let mut changed = self.chats.reconcile_within(targets, &known, now, connect) || discovered;
         // A layout saved from Settings or the command line arrives here.
         changed |= self.chats.relayout(self.config.chat.layout);
         changed |= self.chats.rewidth(self.config.chat.max_width);
         changed |= self.chats.recode(&self.config.chat);
         changed |= self.chats.relocale(crate::i18n::shown_locale());
+        for pane in self.chats.panes_mut() {
+            if pane.effects.set_enabled(self.config.chat.message_effects) {
+                pane.list.remeasure();
+                changed = true;
+            }
+        }
         changed |= self.chats.poll(now);
+        self.chats.log_focused_attachment(
+            &known,
+            self.live.snapshot.as_deref(),
+            self.selected_endpoint,
+            enabled,
+            route.as_ref(),
+        );
         self.settle_chat_modes(cx);
         changed |= self.chats.auto_accept(self.config.chat.auto_accept);
         // Observed panes, whether a discovered agent or a `[chat.mirrors]`
@@ -134,6 +179,19 @@ impl SheprdWindow {
         let font = self.chat_font();
         let theme = self.theme.clone();
         let shortcuts = crate::text_shortcuts::Store::current(cx);
+        // What a composer about to be made starts with: the draft its chat
+        // kept, read before the panes are borrowed.
+        let drafts: Vec<(String, (String, u64))> = self
+            .chats
+            .panes()
+            .filter(|pane| {
+                pane.available() && pane.composer.is_none() && pane.input() == ChatInput::Composer
+            })
+            .filter_map(|pane| {
+                let pane_id = &pane.target.pane_id;
+                Some((pane_id.clone(), self.restored_chat_draft(pane_id, cx)?))
+            })
+            .collect();
         for pane in self.chats.panes_mut() {
             if !pane.available() {
                 continue;
@@ -159,13 +217,30 @@ impl SheprdWindow {
                     continue;
                 }
             }
-            let composer = pane
-                .composer
-                .get_or_insert_with(|| {
+            let composer = match &pane.composer {
+                Some(composer) => composer.clone(),
+                None => {
                     changed = true;
-                    cx.new(MultilineInput::new)
-                })
-                .clone();
+                    let composer = cx.new(MultilineInput::new);
+                    let pane_id = pane.target.pane_id.clone();
+                    pane.draft_seen = None;
+                    if let Some((_, (text, version))) = drafts.iter().find(|(id, _)| *id == pane_id)
+                    {
+                        composer.update(cx, |input, cx| input.set_text_at(text, text.len(), cx));
+                        pane.draft_seen = Some(*version);
+                    }
+                    pane.composer_typed = Some(cx.subscribe_in(
+                        &composer,
+                        window,
+                        move |this, _, _: &crate::multiline_input::Changed, window, cx| {
+                            this.save_chat_draft(&pane_id, cx);
+                            this.close_chat_menu_on_typing(&pane_id, window, cx);
+                        },
+                    ));
+                    pane.composer = Some(composer.clone());
+                    composer
+                }
+            };
             let accepts = pane.session.transcript().status.accepts_prompts();
             // The selected command shows as ghost text after the typed name.
             let text = composer.read(cx).text().to_owned();
@@ -240,8 +315,8 @@ impl SheprdWindow {
         if let Some(focus) = pane.viewer.as_ref().and_then(|viewer| viewer.open_focus()) {
             return Some(focus.clone());
         }
-        if pane.reading(window) {
-            return pane.text_focus.clone();
+        if let Some(focus) = pane.reader_focus(window, cx) {
+            return Some(focus);
         }
         pane.input_focus(cx)
     }
@@ -256,10 +331,7 @@ impl SheprdWindow {
             .chats
             .panes()
             .filter(|pane| pane.target.surface == super::Surface::Herdr)
-            .find_map(|pane| {
-                pane.focus_handles(cx)
-                    .find(|focus| focus.is_focused(window))
-            });
+            .find_map(|pane| pane.focused_handle(window, cx));
         match (holding, target) {
             (Some(holding), target) if target.as_ref() != Some(&holding) => {
                 let focus = target.unwrap_or_else(|| self.focus.clone());
@@ -280,7 +352,7 @@ impl SheprdWindow {
     /// on a keystroke bubbling out of the overlay or one of its fields.
     pub(crate) fn chat_focused(&self, window: &Window, cx: &App) -> bool {
         self.chats.panes().any(|pane| {
-            pane.focus_handles(cx).any(|focus| focus.is_focused(window))
+            pane.focused_handle(window, cx).is_some()
                 || pane
                     .menu_search
                     .as_ref()
@@ -420,6 +492,23 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if Self::message_tab(event)
+            && self.chats.pane(pane_id).is_some_and(|pane| {
+                pane.menu.is_none()
+                    && pane
+                        .input_focus(cx)
+                        .is_some_and(|focus| focus.is_focused(window))
+                    && !pane
+                        .composer
+                        .as_ref()
+                        .is_some_and(|input| input.read(cx).is_composing())
+            })
+            && self.step_message_file(pane_id, None, event.keystroke.modifiers.shift, window, cx)
+        {
+            cx.stop_propagation();
+            window.prevent_default();
+            return;
+        }
         if self.chat_reader_key(pane_id, event, window, cx) {
             return;
         }
@@ -488,8 +577,15 @@ impl SheprdWindow {
         // A picture shown large takes the keyboard: Escape closes it, and
         // nothing typed reaches the composer hidden behind it.
         if self.chat_viewer_open(pane_id) {
-            if event.keystroke.key == "escape" && !event.keystroke.modifiers.modified() {
-                self.close_chat_viewer(pane_id, window, cx);
+            if !event.keystroke.modifiers.modified() {
+                match event.keystroke.key.as_str() {
+                    "escape" => {
+                        self.close_chat_viewer(pane_id, window, cx);
+                    }
+                    "left" => self.step_chat_viewer(pane_id, false, cx),
+                    "right" => self.step_chat_viewer(pane_id, true, cx),
+                    _ => {}
+                }
             }
             cx.stop_propagation();
             window.prevent_default();
@@ -529,6 +625,9 @@ impl SheprdWindow {
             return;
         };
         if input.read(cx).is_composing() {
+            return;
+        }
+        if !input.read(cx).focus.is_focused(window) {
             return;
         }
         let text = input.read(cx).text().to_owned();
@@ -582,8 +681,8 @@ impl SheprdWindow {
     }
 
     /// Pastes the clipboard's text into the composer when it holds several
-    /// lines, which the field takes as several lines. Whether it took
-    /// the paste.
+    /// lines, which the field takes as several lines, or attaches it as a
+    /// `.txt` file when it is long. Whether it took the paste.
     pub(super) fn chat_paste(
         &mut self,
         pane_id: &str,
@@ -642,6 +741,12 @@ impl SheprdWindow {
             self.attach_chat_image(pane_id, image, window, cx);
             return true;
         };
+        // Long text, such as a log, attaches as a file rather than flood the
+        // composer, where the chat's host can take files from here.
+        if super::pasted::is_long_text(&text) && self.chat_takes_pasted_files(pane_id) {
+            self.attach_chat_text(pane_id, text, window, cx);
+            return true;
+        }
         if !text.contains(['\n', '\r']) {
             return false;
         }
@@ -652,6 +757,22 @@ impl SheprdWindow {
         self.redraw_terminal(cx);
         cx.notify();
         true
+    }
+
+    /// Whether a paste saved to a file here can reach the program of the
+    /// chat over `pane_id`; where it cannot, long text pastes as text.
+    fn chat_takes_pasted_files(&self, pane_id: &str) -> bool {
+        match self.chats.pane(pane_id).map(|pane| &pane.target.route) {
+            Some(super::Route::Local) => true,
+            Some(super::Route::Remote(target)) => crate::core_terminals::files::can_upload(target),
+            Some(super::Route::Ssh(host)) => {
+                crate::core_terminals::files::can_upload(&sheprd_client::ConnectTarget::Ssh {
+                    target: host.clone(),
+                    session: String::new(),
+                })
+            }
+            None => false,
+        }
     }
 
     /// Puts `text` in the composer, replacing it; `text` may hold several lines.

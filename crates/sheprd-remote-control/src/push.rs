@@ -9,19 +9,26 @@
 //! refuses endpoints outside the known push services, so a paired device
 //! cannot make the daemon post to an arbitrary host.
 
+mod directives;
 mod encrypt;
+mod event;
+mod finish;
+mod plain;
 mod presence;
 mod send;
 mod subscription;
 mod terminals;
 mod throttle;
 mod triggers;
+mod turn_pull;
 mod vapid;
 
 use serde::{Deserialize, Serialize};
 use std::{io, path::PathBuf};
 
 pub(crate) use encrypt::{MAX_PAYLOAD, encrypt};
+pub(crate) use event::EventId;
+pub(crate) use finish::recapped;
 pub(crate) use presence::{Hold, Near};
 #[cfg(test)]
 pub(crate) use presence::{MAX_HELD, NEAR_TTL_MS};
@@ -35,6 +42,7 @@ pub(crate) use terminals::{
 pub(crate) use throttle::Throttle;
 pub use triggers::Privacy;
 pub(crate) use triggers::{Chat, Kind, Notification, decide, excerpt};
+pub(crate) use turn_pull::TurnPull;
 pub(crate) use vapid::Vapid;
 
 #[derive(Debug, thiserror::Error)]

@@ -34,14 +34,19 @@ impl SheprdWindow {
         if let Some(index) = self.core_host() {
             let scope = scope(&self.endpoints[index]);
             self.keep_default_workspace(self.live_at(index).missing_installation, &scope, cx);
+            self.keep_core_workspace_folders(&scope, cx);
             let mut folders: Vec<String> =
                 cx.try_global::<Store>().map_or_else(Vec::new, |store| {
                     store
                         .kept_workspaces(&scope)
-                        .filter(|workspace| !workspace.cwd.is_empty())
-                        .map(|workspace| workspace.cwd.clone())
+                        .filter_map(|workspace| {
+                            self.core_workspace_cwd(store, &scope, &workspace.id)
+                                .map(str::to_owned)
+                        })
                         .collect()
                 });
+            folders.sort();
+            folders.dedup();
             // The shown pane's checkout, for the Git and pull request chips.
             if let Some(folder) = self.shown_core_folder()
                 && self
@@ -77,14 +82,18 @@ impl SheprdWindow {
             let host = super::Host::of(&scope);
             // A first shell that failed leaves no workspace behind, so it is
             // tried again, once that host's core may be dialled again.
+            let tmux = self.config.terminal_backend == crate::config::TerminalBackend::Tmux;
             let missing = self.live_at(index).herdr_1_unavailable()
-                && !self.core_terminals.lacks_core(&host)
-                && !self
-                    .core_terminals
-                    .hub_of(&host)
-                    .is_some_and(super::Hub::cooling);
+                && (tmux
+                    || !self.core_terminals.lacks_core(&host)
+                        && !self
+                            .core_terminals
+                            .hub_of(&host)
+                            .is_some_and(super::Hub::cooling));
             if self.keep_default_workspace(missing, &scope, cx) {
                 let purpose = super::Purpose::Tab {
+                    focus: true,
+                    group: None,
                     scope,
                     workspace: super::WORKSPACE.to_owned(),
                 };
@@ -92,7 +101,10 @@ impl SheprdWindow {
             }
         }
         if let Some(store) = cx.try_global::<Store>() {
-            for scope in self.remote_core_scopes(store) {
+            let scopes = self.remote_core_scopes(store);
+            for scope in scopes {
+                self.keep_core_workspace_folders(&scope, cx);
+                let store = cx.global::<Store>();
                 let shown_folder = self
                     .core_terminals
                     .shown
@@ -101,17 +113,21 @@ impl SheprdWindow {
                         self.core_terminals.host_of(*tab) == super::Host::Remote(scope.clone())
                     })
                     .and_then(|_| self.shown_core_folder());
+                let mut folders: Vec<_> = store
+                    .kept_workspaces(&scope)
+                    .filter_map(|workspace| {
+                        self.core_workspace_cwd(store, &scope, &workspace.id)
+                            .map(str::to_owned)
+                    })
+                    .collect();
+                folders.sort();
+                folders.dedup();
+                if let Some(folder) = shown_folder
+                    && !folders.contains(&folder)
+                {
+                    folders.push(folder);
+                }
                 if let Some(remote) = self.core_terminals.remote.get_mut(&scope) {
-                    let mut folders: Vec<_> = store
-                        .kept_workspaces(&scope)
-                        .filter(|workspace| !workspace.cwd.is_empty())
-                        .map(|workspace| workspace.cwd.clone())
-                        .collect();
-                    if let Some(folder) = shown_folder
-                        && !folders.contains(&folder)
-                    {
-                        folders.push(folder);
-                    }
                     checkouts_changed |= remote.checkouts.poll_on(
                         folders,
                         std::time::Instant::now(),
@@ -122,6 +138,7 @@ impl SheprdWindow {
                 built.push((scope, Arc::new(session)));
             }
         }
+        self.keep_core_workspace_names(&built, cx);
         let unchanged = self.core_terminals.sessions == built;
         if !unchanged {
             let recency = &mut self.core_terminals.recency;
@@ -156,7 +173,7 @@ impl SheprdWindow {
             .collect()
     }
 
-    pub(super) fn live_at(&self, index: usize) -> &crate::state::LiveState {
+    pub(crate) fn live_at(&self, index: usize) -> &crate::state::LiveState {
         if index == self.selected_endpoint {
             &self.live
         } else {
@@ -185,7 +202,10 @@ impl SheprdWindow {
         let host = super::Host::of(scope);
         let workspaces = store.kept_workspaces(scope).map(|saved| {
             let mut workspace = CoreWorkspace::from(saved);
-            if let Some(checkout) = checkouts.and_then(|checkouts| checkouts.get(&saved.cwd)) {
+            if let Some(cwd) = self.core_workspace_cwd(store, scope, &saved.id) {
+                workspace.cwd = cwd;
+            }
+            if let Some(checkout) = checkouts.and_then(|checkouts| checkouts.get(workspace.cwd)) {
                 workspace.branch = checkout.branch.as_deref();
                 workspace.worktree = Some(Worktree {
                     key: checkout.key.clone(),
@@ -230,6 +250,25 @@ impl SheprdWindow {
         let mut session = Session::core(workspaces, tabs, focused, |terminal| {
             self.core_terminals.reported(&host, terminal)
         });
+        let home = if local.is_some() {
+            sheprd_client::local_path::home_dir().map(|home| home.to_string_lossy().into_owned())
+        } else {
+            checkouts.and_then(|known| known.home()).map(str::to_owned)
+        };
+        crate::core_terminals::names::apply(
+            &mut session,
+            checkouts,
+            home.as_deref().unwrap_or_default(),
+            if local.is_some() && cfg!(windows) {
+                sheprd_session::FolderStyle::Windows
+            } else {
+                sheprd_session::FolderStyle::Posix
+            },
+        );
+        for workspace in &mut session.workspaces {
+            workspace.ahead_behind =
+                checkouts.and_then(|checkouts| checkouts.upstream(&workspace.cwd));
+        }
         // Which agent each is, and what to call it, by the policy the
         // Overview and the attention service name agents with.
         for agent in &mut session.agents {
@@ -328,11 +367,16 @@ impl SheprdWindow {
             .filter(|(tab, _)| self.core_terminals.host_of(*tab) == host)
             .map(|(_, terminal)| terminal.as_str());
         let snapshot = self.live_at(index).snapshot.as_deref();
+        let core = self
+            .core_terminals
+            .backend_of(&host)
+            .map(|backend| backend.core().hello().core.id.as_str());
         let agents = session
             .agents
             .iter()
             .map(|agent| crate::sidebar::CoreAgent {
                 agent,
+                core,
                 session,
                 snapshot,
                 info: TerminalId::new(agent.pane.as_str())
@@ -343,7 +387,7 @@ impl SheprdWindow {
             .collect();
         Some(crate::sidebar::CoreAgents {
             index,
-            answers: self.core_terminals.backend_of(&host).is_some(),
+            answers: self.core_terminals.answers(&host),
             agents,
             recency: self.core_terminals.recency.get(&scope),
         })
@@ -359,10 +403,7 @@ impl SheprdWindow {
         };
         let scope = scope(&self.endpoints[index]);
         let core = self.core_terminals.session_of(&scope).cloned();
-        let core_answers = self
-            .core_terminals
-            .backend_of(&super::Host::of(&scope))
-            .is_some();
+        let core_answers = self.core_terminals.answers(&super::Host::of(&scope));
         Sessions {
             core,
             core_answers,

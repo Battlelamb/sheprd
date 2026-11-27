@@ -6,7 +6,7 @@ import SheprdRemoteCore
 /// A question the agent asked with choices shows each option's
 /// description, takes several picks when the agent allows them, and takes
 /// the person's own words; other requests keep their plain options, the
-/// "always" ones set apart.
+/// "always" ones set apart (`PermissionRequest`).
 struct QuestionSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -17,27 +17,29 @@ struct QuestionSheet: View {
     @FocusState private var typing: Bool
 
     var body: some View {
+        if let question = permission.question {
+            questionBody(question)
+        } else {
+            PermissionRequest(permission: permission, answer: answer)
+        }
+    }
+
+    private func questionBody(_ question: AskedQuestion) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                if let header = permission.question?.header {
+                if let header = question.header {
                     Text(header.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 }
-                Text(permission.question?.text ?? permission.title)
+                Text(question.text)
                     .font(.title3.weight(.semibold))
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
-                if let question = permission.question {
-                    choices(question)
-                } else {
-                    options
-                }
+                choices(question)
             }
             .padding(24)
         }
         .scrollDismissesKeyboard(.interactively)
-        .safeAreaInset(edge: .bottom) {
-            if let question = permission.question { sendBar(question) }
-        }
+        .safeAreaInset(edge: .bottom) { sendBar(question) }
         .presentationDetents([.medium, .large])
         .presentationContentInteraction(.resizes)
         .presentationDragIndicator(.visible)
@@ -105,6 +107,7 @@ struct QuestionSheet: View {
     /// One choice replaces the other, and the typed answer, when the
     /// question takes only one.
     private func pick(_ label: String, in question: AskedQuestion) {
+        Feedback.shared.touch(.select)
         if question.multiple {
             if chosen.remove(label) == nil { chosen.insert(label) }
         } else {
@@ -117,30 +120,9 @@ struct QuestionSheet: View {
     private func send(_ answers: [String]) {
         let fleet = model.fleet
         let command = ChatCommand.answerQuestion(permission: permission.id, answers: answers)
+        Feedback.shared.touch(.send)
         Task { _ = await fleet.send(command, to: key) }
         dismiss()
-    }
-
-    // MARK: Plain options
-
-    @ViewBuilder
-    private var options: some View {
-        let always = permission.options.filter { $0.kind == .allowAlways || $0.kind == .rejectAlways }
-        ForEach(permission.options.filter { !always.contains($0) }) { option in
-            if option.kind == .allowOnce {
-                Button { answer(option) } label: { Text(option.name).frame(maxWidth: .infinity) }
-                    .buttonStyle(.glassProminent).controlSize(.large).tint(Home.AgentStatus.blocked.color)
-            } else {
-                Button { answer(option) } label: { Text(option.name).frame(maxWidth: .infinity) }
-                    .buttonStyle(.glass).controlSize(.large)
-            }
-        }
-        if !always.isEmpty {
-            Divider()
-            ForEach(always) { option in
-                Button(option.name) { answer(option) }.font(.subheadline)
-            }
-        }
     }
 
     /// The sheet leaves once the answer is allowed; a refused answer
@@ -148,6 +130,7 @@ struct QuestionSheet: View {
     private func answer(_ option: PermissionOption) {
         Task {
             guard await OwnerCheck.allows(option) else { return }
+            Feedback.shared.touch(.send)
             let fleet = model.fleet
             Task { _ = await fleet.send(.answer(permission: permission.id, option: option.id), to: key) }
             dismiss()

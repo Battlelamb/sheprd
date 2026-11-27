@@ -5,7 +5,7 @@
 devices-nearby-intro = For a computer nearby that is on another network. On it, open Remote control > Pair device; it then shows up here, and Sheprd reaches it through its relays.
 devices-nearby-looking = Looking for computers showing Pair device…
 devices-nearby-pair = Pair
-devices-nearby-macos-only = Finding computers over Bluetooth needs macOS for now.
+devices-nearby-platform-unsupported = Finding computers over Bluetooth needs macOS, Linux, or Windows.
 devices-nearby-bluetooth-off = Turn on Bluetooth to find computers nearby.
 devices-nearby-bluetooth-allow = To find computers nearby, allow Sheprd in System Settings > Privacy & Security > Bluetooth.
 devices-nearby-bluetooth-unsupported = This computer has no Bluetooth to find computers nearby with.
@@ -23,3 +23,9 @@ devices-nearby-lost = Lost { $computer } over Bluetooth before the codes were sh
 devices-nearby-no-herdr = { $computer } was paired, but Herdr does not answer there. Open Sheprd on it, then pair again.
 devices-nearby-no-answer = { $computer } was paired, but could not be reached through its relays. Check that Remote Login is on there and that its relays are listening.
 devices-nearby-save-failed = { $computer } was paired, but could not be saved: { $error }
+
+## A pairing link, for a computer on another network out of Bluetooth range.
+
+devices-nearby-link-intro = Out of Bluetooth range? On the other computer, open Remote control > Pair device, click Copy link, and paste the link here.
+devices-nearby-link-placeholder = Pairing link
+devices-nearby-link-pair = Pair

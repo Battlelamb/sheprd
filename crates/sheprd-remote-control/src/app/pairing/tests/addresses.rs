@@ -35,6 +35,7 @@ fn changing_address_preserves_token_deadline_and_in_flight_poll() {
         &poll,
         Ok(Response::Pairing(PairingState::Waiting {
             expires_in_ms: 20_000,
+            nearby_code: None,
         })),
         now + POLL,
     );
@@ -102,6 +103,7 @@ fn selection_is_refused_after_claim_and_missing_cli_address_can_be_retried() {
             code: "123456".into(),
             app: None,
             ssh: false,
+            fleet: None,
         })),
     );
     let before = pairing.phase().clone();

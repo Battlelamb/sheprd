@@ -8,11 +8,14 @@ import UIKit
 /// paired computers named are already here, and any other is typed.
 struct RelaysView: View {
     @Environment(AppModel.self) private var model
+    @AppStorage("relayDiagnosticHistory") private var historyData = Data()
     @State private var address = ""
     @State private var problem: String?
     /// Whether each relay answered, for as long as the screen shows.
-    @State private var reach: [RelayEndpoint: RelayReach] = [:]
+    @State private var reach: [RelayEndpoint: RelayDiagnostic] = [:]
     @FocusState private var typing: Bool
+    /// A relay computers named, waiting for the user to confirm removing it.
+    @State private var removing: RelayEndpoint?
 
     var body: some View {
         let relays = model.savedRelays.relays
@@ -27,20 +30,37 @@ struct RelaysView: View {
                     let naming = model.computers(naming: relay)
                     // What a computer naming it calls it, in `[remote] relays`.
                     let label = naming.lazy.compactMap { $0.relay?.label(for: relay) }.first
-                    RelayRow(relay: relay, label: label, reach: reach[relay], naming: naming.map(model.displayName))
-                        // A relay a computer names comes back with it, so
-                        // removing one only stops trying it for the others,
-                        // which only one you added is.
-                        .deleteDisabled(!naming.isEmpty && !model.savedRelays.typed.contains(relay))
+                    RelayRow(relay: relay, label: label, diagnostic: reach[relay], naming: naming.map(model.displayName))
                 }
                 .onDelete { offsets in
-                    for relay in offsets.map({ relays[$0] }) { model.removeRelay(relay) }
+                    for relay in offsets.map({ relays[$0] }) {
+                        // One a computer named is how that computer is
+                        // reached away from home: asked first.
+                        if model.computers(naming: relay).isEmpty {
+                            model.removeRelay(relay)
+                        } else {
+                            removing = relay
+                        }
+                    }
                 }
             } header: {
                 Text("Relays")
             } footer: {
                 if !relays.isEmpty {
-                    Text("Each computer is tried on the relays it named, then on the ones you added. A relay sees only encrypted traffic.")
+                    Text("Each computer is tried on the relays it named, then on the ones you added. A relay sees only encrypted traffic. A relay you remove is not tried again until you add it back.")
+                }
+            }
+            Section("Diagnostics") {
+                Text("Checks are saved on this phone, including failures. Pull to refresh. Relay info reachability does not test a connection to a computer.")
+                    .font(.footnote)
+                if !history.entries.isEmpty {
+                    ShareLink("Share relay diagnostics", item: history.report)
+                    DisclosureGroup("Recent checks") {
+                        ForEach(Array(history.entries.reversed().enumerated()), id: \.offset) { _, entry in
+                            Text(entry.report).font(.caption).textSelection(.enabled)
+                        }
+                    }
+                    Button("Clear diagnostics", role: .destructive) { historyData = Data() }
                 }
             }
             Section {
@@ -66,14 +86,28 @@ struct RelaysView: View {
                 Text("Type the address of a relay a paired computer listens on, to reach that computer through it. A computer not paired yet is still paired nearby or on its network first.")
             }
         }
+        // An alert, not a confirmation dialog: on iPhone that one floats over
+        // the bottom of the list, away from the row swiped.
+        .alert(
+            "Remove this relay?",
+            isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+            presenting: removing
+        ) { relay in
+            Button("Remove", role: .destructive) { model.removeRelay(relay) }
+            Button("Cancel", role: .cancel) {}
+        } message: { relay in
+            let names = model.computers(naming: relay).map(model.displayName).formatted(.list(type: .and))
+            Text("\(names) will no longer be reached through it, until you add it back.")
+        }
         .navigationTitle("Relays")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if !relays.isEmpty { EditButton() }
-        }
         .refreshable { await check(relays, again: true) }
         // Again whenever the list changes: a relay just added is checked.
         .task(id: relays) { await check(relays, again: false) }
+    }
+
+    private var history: RelayDiagnosticHistory {
+        (try? JSONDecoder().decode(RelayDiagnosticHistory.self, from: historyData)) ?? RelayDiagnosticHistory()
     }
 
     private func add() {
@@ -95,11 +129,17 @@ struct RelaysView: View {
     /// Asks every relay whether it answers, all at once.
     private func check(_ relays: [RelayEndpoint], again: Bool) async {
         if again { reach = [:] }
-        await withTaskGroup(of: (RelayEndpoint, RelayReach).self) { group in
+        await withTaskGroup(of: (RelayEndpoint, RelayDiagnostic).self) { group in
             for relay in relays where reach[relay] == nil {
-                group.addTask { (relay, await RelayReach.probe(relay)) }
+                group.addTask { (relay, await RelayReach.diagnose(relay)) }
             }
-            for await (relay, answer) in group { reach[relay] = answer }
+            for await (relay, answer) in group {
+                guard !Task.isCancelled else { continue }
+                reach[relay] = answer
+                var saved = history
+                saved.append(answer)
+                if let data = try? JSONEncoder().encode(saved) { historyData = data }
+            }
         }
     }
 }
@@ -110,7 +150,8 @@ struct RelaysView: View {
 private struct RelayRow: View {
     var relay: RelayEndpoint
     var label: RelayLabel?
-    var reach: RelayReach?
+    var diagnostic: RelayDiagnostic?
+    private var reach: RelayReach? { diagnostic?.reach }
     var naming: [String]
 
     var body: some View {
@@ -127,7 +168,7 @@ private struct RelayRow: View {
     private var color: Color {
         switch reach {
         case .reachable: .green
-        case .noWebSocket, .notARelay, .unreachable: .red
+        case .noWebSocket, .notARelay, .unreachable, .banned: .red
         case nil: Color(.tertiaryLabel)
         }
     }
@@ -136,8 +177,8 @@ private struct RelayRow: View {
         switch reach {
         case .reachable: "Reachable"
         case .noWebSocket: "No WebSocket, which this \(UIDevice.current.model) needs"
-        case .notARelay: "Not a relay"
-        case .unreachable: "No answer"
+        case .notARelay: diagnostic?.detail ?? "Invalid relay response"
+        case .banned, .unreachable: diagnostic?.detail ?? "Check failed"
         case nil: "Checking…"
         }
     }

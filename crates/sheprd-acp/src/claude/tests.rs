@@ -26,6 +26,7 @@ fn claude_runs_in_its_streaming_mode_for_one_session() {
         "-p",
         "--verbose",
         "--include-partial-messages",
+        "--replay-user-messages",
         "--allow-dangerously-skip-permissions",
     ] {
         assert!(new.iter().any(|arg| arg == flag), "{flag}");
@@ -104,18 +105,25 @@ fn a_whole_turn_reaches_the_transcript_through_the_bridge() {
         output: stdout_writer,
     };
     let config = Config {
+        antigravity_auth_method: None,
         agent: "Claude".to_owned(),
         choices: None,
         cwd: PathBuf::from("/work"),
         exit_with_agent: false,
+        gemini_auth_method: None,
+        given: crate::thread_mcp::Given::Not,
         harness: Some(crate::agents::Agent::Claude),
         history: None,
+        known: Default::default(),
+        listens: false,
         load: None,
         login_hint: None,
         pane: None,
         prompts: Default::default(),
         require_load: false,
+        settings: None,
         sheprd: None,
+        thread: None,
     };
     let mut session = Session::new(config, outbox, |_| {});
     session.start();

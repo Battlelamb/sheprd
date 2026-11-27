@@ -4,6 +4,7 @@
 
 mod error;
 pub(crate) mod identity;
+mod process;
 #[cfg(test)]
 mod tests;
 
@@ -129,6 +130,8 @@ impl Observer {
             .context("the running agent's transcript is unavailable")?;
         identity.check()?;
         let session = SessionInfo {
+            can_steer: false,
+            continued: None,
             id: options.session,
             cwd: identity.cwd.clone(),
             title: None,

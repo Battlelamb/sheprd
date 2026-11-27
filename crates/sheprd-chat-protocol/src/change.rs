@@ -3,9 +3,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Activity, ConfigOption, Entry, EntryId, EntryKind, Error, Harnesses, MAX_ACTIVITIES, Modes,
-    Permission, PermissionId, PlanEntry, Queued, Result, SessionInfo, SlashCommand, Status,
-    Transcript, Turn, Usage, valid_question_answers,
+    Activity, ConfigOption, Entry, EntryId, EntryKind, Error, Harnesses, MAX_ACTIVITIES,
+    MAX_PULL_REQUESTS, Modes, Permission, PermissionId, PlanEntry, PullRequest, Queued, Result,
+    SessionInfo, SlashCommand, Status, Transcript, Turn, Usage, valid_question_answers,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -82,6 +82,20 @@ pub enum Change {
     Harnesses {
         harnesses: Option<Harnesses>,
     },
+    /// The agent worked on a pull request: it is added, or what it did is
+    /// added to the one with the same repository and number.
+    PullRequest {
+        pull_request: PullRequest,
+    },
+    /// A user entry already pushed turns out to be another agent's brief.
+    Brief {
+        brief: crate::Brief,
+    },
+    /// The thread's segments changed: an agent took over, or its session
+    /// or model is now known.
+    Thread {
+        thread: crate::thread::Thread,
+    },
 }
 
 impl Transcript {
@@ -100,6 +114,12 @@ impl Transcript {
                     && entry.id <= last
                 {
                     return Err(Error::EntryOrder { id: entry.id, last });
+                }
+                if matches!(entry.kind, EntryKind::User { .. })
+                    && let Some(task) = self.delegation.as_mut()
+                    && std::mem::replace(&mut task.prompted, true)
+                {
+                    self.delegation = None;
                 }
                 self.entries.push(entry.clone());
             }
@@ -123,6 +143,7 @@ impl Transcript {
                     self.entries.drain(..keep);
                     self.truncated = true;
                 }
+                self.drop_briefs_before(*before);
             }
             Change::Status { status } => self.status = status.clone(),
             Change::PermissionAsked { permission } => {
@@ -162,7 +183,29 @@ impl Transcript {
             Change::AutoAccept { on } => self.auto_accept = *on,
             Change::Activity { activity } => self.record(activity)?,
             Change::Harnesses { harnesses } => self.harnesses.clone_from(harnesses),
+            Change::PullRequest { pull_request } => self.add_pull_request(pull_request)?,
+            Change::Brief { brief } => self.add_brief(*brief)?,
+            Change::Thread { thread } => {
+                thread.validate()?;
+                self.thread = Some(thread.clone());
+            }
         }
+        Ok(())
+    }
+
+    /// Adds `pull`, or its actions to the one already kept.
+    fn add_pull_request(&mut self, pull: &PullRequest) -> Result<()> {
+        if !pull.fits() {
+            return Err(Error::PullRequest);
+        }
+        if let Some(known) = self.pull_requests.iter_mut().find(|known| known.is(pull)) {
+            known.record(&pull.actions);
+            return Ok(());
+        }
+        if self.pull_requests.len() >= MAX_PULL_REQUESTS {
+            return Err(Error::PullRequestLimit);
+        }
+        self.pull_requests.push(pull.clone());
         Ok(())
     }
 

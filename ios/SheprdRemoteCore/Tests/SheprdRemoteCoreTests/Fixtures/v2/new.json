@@ -1,6 +1,10 @@
 {
   "agents": [
     {
+      "id": "antigravity",
+      "name": "Antigravity"
+    },
+    {
       "id": "claude",
       "name": "Claude"
     },
@@ -15,6 +19,14 @@
     {
       "id": "gemini",
       "name": "Gemini"
+    },
+    {
+      "id": "kimi",
+      "name": "Kimi Code"
+    },
+    {
+      "id": "muse",
+      "name": "Muse Code"
     },
     {
       "id": "opencode",

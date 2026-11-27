@@ -255,9 +255,13 @@ fn extras(row: &ChatRow, transcript: &Transcript) -> Markup {
             }
             @for queued in &transcript.queued {
                 div class="flex items-center gap-2 card text-sm" {
-                    span class="text-muted" { "Queued" }
+                    span class="text-muted" { (if queued.steered { "Steering" } else if queued.held { "Held" } else { "Queued" }) }
                     span class="flex-1 truncate" { (queued.text) }
-                    button type="button" class="text-accent" data-command={ r#"{"command":"unqueue","id":""# (queued.id.0) r#""}"# } data-pane=(row.pane) { "Remove" }
+                    // A steered prompt is already with the agent.
+                    @if !queued.steered {
+                        button type="button" class="text-accent" data-command={ r#"{"command":"send_now","id":""# (queued.id.0) r#""}"# } data-pane=(row.pane) { "Send now" }
+                        button type="button" class="text-accent" data-command={ r#"{"command":"unqueue","id":""# (queued.id.0) r#""}"# } data-pane=(row.pane) { "Remove" }
+                    }
                 }
             }
             @match &transcript.status {
@@ -289,15 +293,23 @@ fn entry_view(entry: &Entry, focus: bool) -> Markup {
                 div class="prose mt-1" { (markdown(text)) }
             }
         },
-        EntryKind::Image { author, image } => html! {
+        EntryKind::Image {
+            author,
+            image,
+            caption,
+        } => html! {
             img class={ "rounded-xl max-h-80 " @if *author == Author::User { "self-end" } }
-                src={ "data:" (image.kind.mime()) ";base64," (image.data) } alt="Picture";
+                src={ "data:" (image.kind.mime()) ";base64," (image.data) }
+                alt=(caption.as_deref().unwrap_or("Picture"));
         },
         // A sub-agent's own steps stay inside its call.
         EntryKind::Tool(tool) if tool.parent.is_some() => html! {},
         EntryKind::Tool(tool) => tool_view(tool),
         EntryKind::Turn(summary) => html! {
             div class="text-[11px] text-faint text-center border-t border-dashed border-line pt-1.5" { (summary.describe()) }
+        },
+        EntryKind::Handoff(handoff) => html! {
+            div class="text-sm text-muted" { (handoff.notice_text()) }
         },
         EntryKind::Notice { level, text, .. } => html! {
             div class={ "text-sm " (match level { NoticeLevel::Error => "text-red", NoticeLevel::Warning => "text-amber", NoticeLevel::Info => "text-muted" }) } { (text) }

@@ -3,14 +3,19 @@
 use super::*;
 use base64::Engine as _;
 
+mod directives;
 mod encrypt;
+mod finish;
 mod notices;
+mod per_host;
+mod plain;
 mod presence;
 mod send;
 mod subscription;
 mod terminals;
 mod throttle;
 mod triggers;
+mod turn_pull;
 mod vapid;
 
 /// RFC 8291 section 5's receiver keys, which the fixtures subscribe with.

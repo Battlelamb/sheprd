@@ -73,6 +73,8 @@ pub(crate) struct MenuState {
     /// The saved distribution the removal confirmation names.
     pub(super) wsl_remove: Option<String>,
     pub(super) session_edit: Option<super::sessions::Edit>,
+    /// A Luau mod opened the picker and owns its sheet until the menu resets.
+    pub(crate) hosted_picker: bool,
     /// The device whose sessions the picker shows under it, by endpoint id so
     /// a catalog change cannot unfold another one.
     pub(crate) unfolded_device: Option<String>,
@@ -113,6 +115,13 @@ pub(crate) struct MenuState {
     pub(crate) remote_revoke: Option<crate::remote::Revoke>,
     /// A phone's request for another machine, waiting for the user.
     pub(crate) remote_host_ask: Option<crate::remote::links::ask::HostAsk>,
+    /// The open read-only session sharing dialog.
+    pub(crate) remote_share: Option<crate::remote::ShareDialog>,
+    /// Whether to borrow another computer's virtual Mac. Dropping it
+    /// unanswered declines.
+    pub(crate) machine_borrow: Option<crate::machine::borrow::Ask>,
+    #[cfg(target_os = "macos")]
+    pub(crate) machine_settings_request: Option<crate::machine::settings_request::Request>,
     pub(super) devices_scroll: ScrollHandle,
     /// The picker line to scroll into view once the list has been laid out:
     /// on the frame it first appears, GPUI drops a scroll request unapplied.
@@ -127,10 +136,19 @@ pub(crate) struct MenuState {
     pub(super) selected: Option<usize>,
     pub(super) workspace_selected: Option<WorkspaceMenuAction>,
     pub(super) git_selected: Option<git::Row>,
+    pub(super) git_create_target: Option<git::CreateTarget>,
     /// The merge dialog's method, and the pull request (with its head) it
     /// was opened for: a branch that moved since must be reviewed again.
     pub(super) merge_method: Option<crate::pull_request::MergeMethod>,
     pub(super) merge_target: Option<crate::pr_actions::Target>,
+    /// What the merge queue confirmation adds or takes out.
+    pub(super) queue_change: Option<sheprd_control_protocol::protocol::hosts::QueueOp>,
+    /// A command opened the Git popup or merge/queue dialog, which confirms only
+    /// by a click: an Enter typed for a terminal must not land on it.
+    pub(super) asked_by_command: bool,
+    /// The checkout and restack the restack dialog was opened for: a focus
+    /// or lookup that moved since must be reviewed again.
+    pub(super) restack: Option<(crate::pull_request::Input, super::git_restack::Restack)>,
     pub(super) target: Option<WorkspaceTarget>,
     pub input: Option<DialogInput>,
     pub(crate) error: Option<String>,
@@ -142,6 +160,8 @@ pub(crate) struct MenuState {
     /// The name a new tab or workspace dialog proposed. Submitting it
     /// unchanged, or nothing, leaves naming to the daemon, as Herdr does.
     pub(super) suggested_name: Option<String>,
+    /// The agent naming a rename dialog offers, and its request under way.
+    pub(crate) naming: Option<crate::naming::Naming>,
     pub(super) worktree_open: Option<super::worktree_open::Picker>,
     pub(super) keybinds_scroll: ScrollHandle,
     pub(crate) keybinds_search: Option<Entity<crate::search_input::SearchInput>>,
@@ -185,9 +205,11 @@ pub(crate) struct MenuState {
     /// the device's own account.
     pub(super) github_account: Option<String>,
     /// An account whose config entry is being written, shown once it loads.
-    pub(super) github_adding: Option<String>,
+    pub(super) github_adding: Option<github::Adding>,
     /// The pasted-token field, while the GitHub page shows it.
     pub(super) github_token: Option<Entity<crate::search_input::SearchInput>>,
+    /// The form of the GitHub Enterprise Server account being added.
+    pub(super) github_server: Option<github::EnterpriseForm>,
     /// Logins this window already toasted as waiting on GitHub App approval.
     pub(super) github_toasted: std::collections::HashSet<String>,
     /// The GitLab page's instances, fields, and work under way.
@@ -198,6 +220,8 @@ pub(crate) struct MenuState {
     /// success until the catalog drops the device, so its header pulses
     /// until it disappears; the confirmation closes as soon as it starts.
     pub(crate) removing_devices: std::collections::HashSet<String>,
+    /// Saved devices' pause requests not yet shown by the catalog.
+    pub(crate) pauses: super::devices::Pauses,
     pub(super) github_selected: Option<github::Action>,
     pub(super) github_scroll: ScrollHandle,
     pub(super) pr_connection: Option<std::sync::Weak<std::sync::Mutex<crate::state::LiveState>>>,
@@ -249,6 +273,8 @@ pub(crate) struct Removal {
     pub(super) pending: Option<String>,
     /// Set once the daemon refused the checkout as dirty.
     pub(super) force: bool,
+    /// When the request was queued, for the dialog's elapsed time.
+    pub(super) started: std::time::Instant,
 }
 
 impl Removal {
@@ -256,6 +282,11 @@ impl Removal {
     /// its force confirmation.
     pub(crate) fn waiting(&self) -> bool {
         self.pending.is_some()
+    }
+
+    /// How long the request has been waiting on the daemon.
+    pub(crate) fn elapsed(&self) -> std::time::Duration {
+        self.started.elapsed()
     }
 
     pub(crate) fn pending_for(&self, endpoint: (u64, u64), boot_id: &str, workspace: &str) -> bool {
@@ -375,6 +406,7 @@ impl MenuState {
             nearby_setup: None,
             wsl_remove: None,
             session_edit: None,
+            hosted_picker: false,
             unfolded_device: None,
             unfolded_height: Default::default(),
             unfolded_rows: Default::default(),
@@ -393,6 +425,10 @@ impl MenuState {
             remote_pairing: None,
             remote_revoke: None,
             remote_host_ask: None,
+            remote_share: None,
+            machine_borrow: None,
+            #[cfg(target_os = "macos")]
+            machine_settings_request: None,
             devices_scroll: ScrollHandle::new(),
             devices_reveal: std::cell::Cell::new(None),
             usage_scroll: ScrollHandle::new(),
@@ -403,8 +439,12 @@ impl MenuState {
             selected: None,
             workspace_selected: None,
             git_selected: None,
+            git_create_target: None,
             merge_method: None,
             merge_target: None,
+            queue_change: None,
+            asked_by_command: false,
+            restack: None,
             target: None,
             input: None,
             error: None,
@@ -412,6 +452,7 @@ impl MenuState {
             close_check: None,
             creation: None,
             suggested_name: None,
+            naming: None,
             worktree_open: None,
             keybinds_scroll: ScrollHandle::new(),
             keybinds_search: None,
@@ -439,10 +480,12 @@ impl MenuState {
             github_account: None,
             github_adding: None,
             github_token: None,
+            github_server: None,
             github_toasted: Default::default(),
             gitlab: Default::default(),
             azure: Default::default(),
             removing_devices: Default::default(),
+            pauses: Default::default(),
             github_selected: None,
             github_scroll: ScrollHandle::new(),
             pr_connection: None,
@@ -458,6 +501,11 @@ impl MenuState {
         }
     }
 
+    /// The workspace the open workspace menu or dialog is about.
+    pub(crate) fn workspace_target(&self) -> Option<&WorkspaceTarget> {
+        self.target.as_ref()
+    }
+
     pub fn reset(&mut self) {
         self.application = None;
         #[cfg(any(windows, test, feature = "integration-test"))]
@@ -467,6 +515,7 @@ impl MenuState {
         self.nearby_setup = None;
         self.wsl_remove = None;
         self.session_edit = None;
+        self.hosted_picker = false;
         self.unfolded_device = None;
         self.folding = None;
         self.open_checkout = None;
@@ -484,6 +533,11 @@ impl MenuState {
         self.remote_pairing = None;
         self.remote_revoke = None;
         self.remote_host_ask = None;
+        self.remote_share = None;
+        // Closing the borrow dialog declines it. Other menus leave the pending notice alone.
+        if self.page == Some(Page::BorrowMachine) {
+            self.machine_borrow = None;
+        }
         self.devices_scroll.set_offset(Point::default());
         self.devices_reveal.set(None);
         self.usage_scroll.set_offset(Point::default());
@@ -506,6 +560,7 @@ impl MenuState {
         self.github_account = None;
         self.github_adding = None;
         self.github_token = None;
+        self.github_server = None;
         // Closing the menu stops a GitLab connection, as it does GitHub's.
         self.gitlab.connecting = None;
         self.gitlab.form = false;
@@ -520,8 +575,12 @@ impl MenuState {
         self.selected = None;
         self.workspace_selected = None;
         self.git_selected = None;
+        self.git_create_target = None;
         self.merge_method = None;
         self.merge_target = None;
+        self.queue_change = None;
+        self.asked_by_command = false;
+        self.restack = None;
         self.target = None;
         self.input = None;
         self.error = None;
@@ -530,6 +589,7 @@ impl MenuState {
         self.close_check = None;
         self.creation = None;
         self.suggested_name = None;
+        self.naming = None;
         self.worktree_open = None;
         self.close = None;
         self.worktree = None;

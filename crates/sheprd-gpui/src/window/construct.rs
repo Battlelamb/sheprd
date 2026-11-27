@@ -18,6 +18,26 @@ use std::sync::Arc;
 use std::time::Duration;
 
 impl SheprdWindow {
+    /// Runs [`Self::tick`] about once per frame, for as long as the view lives.
+    pub(super) fn tick_every_frame(window: &mut Window, cx: &mut Context<Self>) -> Task<()> {
+        let timer = cx.background_executor().clone();
+        cx.spawn_in(window, async move |this, cx| {
+            loop {
+                timer.timer(Duration::from_millis(16)).await;
+                // An update also fails while the window or app is busy, as in
+                // a nested run loop: skip that tick, and stop only once the
+                // view is gone.
+                if this
+                    .update_in(cx, |this, window, cx| this.tick(window, cx))
+                    .is_err()
+                    && this.upgrade().is_none()
+                {
+                    break;
+                }
+            }
+        })
+    }
+
     pub(crate) fn new(
         target: ConnectTarget,
         window: &mut Window,
@@ -60,18 +80,7 @@ impl SheprdWindow {
         let sidebar_view = cx.new(|_| sidebar::SidebarView::new(weak, indicators));
         let hosts = vec![cx.entity_id(), sidebar_view.entity_id()];
         let mark_layer = cx.new(|cx| crate::mark_layer::MarkLayer::new(window, hosts, cx));
-        let timer = cx.background_executor().clone();
-        let poll = cx.spawn_in(window, async move |this, cx| {
-            loop {
-                timer.timer(Duration::from_millis(16)).await;
-                if this
-                    .update_in(cx, |this, window, cx| this.tick(window, cx))
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
+        let poll = Self::tick_every_frame(window, cx);
         let appearance = cx
             .try_global::<crate::app::InitialAppearance>()
             .cloned()
@@ -100,6 +109,12 @@ impl SheprdWindow {
         let core_terminals = crate::core_terminals::CoreTerminals::shared(cx);
         // Another window, or an agent, may open or close a tab.
         let browser_tabs = cx.observe_global::<crate::browser::Store>(|_, cx| cx.notify());
+        let agent_favorites = crate::agent_favorites::AgentFavorites::current(cx);
+        let agent_favorites_changed = Self::observe_agent_favorites(cx);
+        let agent_read = crate::agent_read::AgentRead::current(cx);
+        let agent_read_changed = Self::observe_agent_read(cx);
+        let chat_drafts = crate::chat::drafts::Drafts::current(cx);
+        let chat_drafts_changed = Self::observe_chat_drafts(cx);
         let device_tags = crate::device_tags::DeviceTags::current(cx);
         let device_tags_changed = Self::observe_device_tags(cx);
         let worktree_notes = Self::observe_worktree_notes(window, cx);
@@ -131,11 +146,17 @@ impl SheprdWindow {
         });
         let window_closed = Self::give_back_torn_tabs(cx);
         let terminal_focus = Self::leave_region_with_terminal(&focus, window, cx);
+        let agent_guidance = cx.new(|_| crate::agent_guidance::State::default());
+        let agent_guidance_changed = cx.observe(&agent_guidance, |_, _, cx| cx.notify());
         let mut this = Self {
             // keep-sorted start
             _activation: activation,
+            _agent_favorites: agent_favorites_changed,
+            _agent_guidance: agent_guidance_changed,
+            _agent_read: agent_read_changed,
             _appearance: appearance_change,
             _browser_tabs: browser_tabs,
+            _chat_drafts: chat_drafts_changed,
             _device_tags: device_tags_changed,
             _host_theme: host_theme,
             _notification_mutes: notification_mutes,
@@ -148,7 +169,10 @@ impl SheprdWindow {
             activation_deadline: None,
             active: window.is_window_active(),
             activity: Default::default(),
+            agent_favorites,
             agent_group: None,
+            agent_guidance,
+            agent_read,
             agent_sort: preferences::AgentSort::default(),
             agent_sort_modified: false,
             app_update_notes: Default::default(),
@@ -162,7 +186,9 @@ impl SheprdWindow {
             browser,
             catalog,
             cell_width: 9.,
+            chat_drafts,
             chat_rail_width: crate::panel_resize::CHAT_RAIL,
+            chat_turns: Default::default(),
             chats: Default::default(),
             checkpoints: Default::default(),
             chrome_region: None,
@@ -182,6 +208,7 @@ impl SheprdWindow {
             core_terminals,
             daemon_text: Default::default(),
             deliveries: Default::default(),
+            details_visible: false,
             device_drag: None,
             device_filter: Default::default(),
             device_order: Vec::new(),
@@ -209,11 +236,13 @@ impl SheprdWindow {
             flash: None,
             flash_motion: Default::default(),
             focus,
+            front_watch: Default::default(),
             git: git::Git::default(),
             git_anchor: Default::default(),
             gui_config_diagnostic,
             held_keys: Default::default(),
             hosted: false,
+            hosted_full_header: None,
             hover: None,
             hover_menu: None,
             hovered_terminal_link: false,
@@ -230,6 +259,7 @@ impl SheprdWindow {
             last_input: None,
             last_pointer: None,
             last_queued_options: None,
+            last_typed: None,
             link_complaint: None,
             links: Default::default(),
             listening_ports: Default::default(),
@@ -326,8 +356,10 @@ impl SheprdWindow {
             theme,
             theme_light: crate::app::light_appearance(cx),
             title: WINDOW_TITLE.to_owned(),
+            titlebar_width: 0.,
             toast_motion: Default::default(),
             toasts_hidden: false,
+            traces: Default::default(),
             tunnels: Default::default(),
             update_preview: None,
             updater: updater::Updater::default(),

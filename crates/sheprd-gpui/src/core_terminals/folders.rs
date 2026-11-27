@@ -97,6 +97,66 @@ impl CoreTerminals {
 }
 
 impl SheprdWindow {
+    /// Keeps the last observed folder through terminal closure and app restart.
+    pub(crate) fn keep_core_workspace_folders(&self, scope: &Scope, cx: &mut App) {
+        let changes: Vec<_> = cx
+            .try_global::<crate::browser::Store>()
+            .into_iter()
+            .flat_map(|store| {
+                store.kept_workspaces(scope).filter_map(|workspace| {
+                    let cwd = self.core_workspace_cwd(store, scope, &workspace.id)?;
+                    (cwd != workspace.cwd).then(|| (workspace.id.clone(), cwd.to_owned()))
+                })
+            })
+            .collect();
+        if !changes.is_empty() {
+            crate::browser::Store::update(cx, |store| {
+                for (id, cwd) in changes {
+                    store.follow_kept_folder(scope, &id, &cwd);
+                }
+            });
+        }
+    }
+
+    /// A workspace follows its oldest driving tab's first pane, independent
+    /// of focus and split groups. The saved folder covers tabs not yet read.
+    pub(super) fn core_workspace_cwd<'a>(
+        &'a self,
+        store: &'a crate::browser::Store,
+        scope: &Scope,
+        workspace: &str,
+    ) -> Option<&'a str> {
+        let host = super::Host::of(scope);
+        let terminal = store
+            .in_workspace(scope, workspace)
+            .filter_map(|tab| match &tab.location {
+                Some(crate::browser::Location::CoreTerminal {
+                    panes,
+                    observe: false,
+                    ..
+                }) => Some((tab.id, panes.first())),
+                _ => None,
+            })
+            .min_by_key(|(id, _)| *id)
+            .map(|(_, terminal)| terminal)
+            .or_else(|| {
+                (host == super::Host::Local && workspace == super::WORKSPACE)
+                    .then(|| self.core_terminals.fallback_terminal())
+                    .flatten()
+            });
+        terminal
+            .and_then(|terminal| self.core_terminals.listed(&host, terminal))
+            .and_then(|info| info.cwd.as_deref())
+            .and_then(std::path::Path::to_str)
+            .filter(|cwd| !cwd.is_empty())
+            .or_else(|| {
+                store
+                    .kept_workspace(scope, workspace)
+                    .map(|saved| saved.cwd.as_str())
+            })
+            .filter(|cwd| !cwd.is_empty())
+    }
+
     /// The folder of the pane the user works in: the herdr-core pane the
     /// active group shows, else Herdr's focused pane, where its program is
     /// rather than where its shell started.
@@ -116,8 +176,16 @@ impl SheprdWindow {
     /// last tick, once Git named its branch. `None` when no herdr-core tab
     /// is shown, or its pane is in no checkout or on a detached head.
     pub(crate) fn core_git_input(&self) -> Option<crate::pull_request::Input> {
-        let (tab, _) = self.core_terminals.shown.as_ref()?;
-        let host = self.core_terminals.host_of(*tab);
+        let (tab, terminal) = self.core_terminals.shown.as_ref()?;
+        self.core_pane_git_input(*tab, terminal)
+    }
+
+    pub(crate) fn core_pane_git_input(
+        &self,
+        tab: crate::browser::TabId,
+        terminal: &sheprd_backend::TerminalId,
+    ) -> Option<crate::pull_request::Input> {
+        let host = self.core_terminals.host_of(tab);
         if host
             != super::Host::of(&crate::browser::scope(
                 &self.endpoints[self.selected_endpoint],
@@ -125,7 +193,13 @@ impl SheprdWindow {
         {
             return None;
         }
-        let checkout = self.shown_core_folder()?;
+        let checkout = self
+            .core_terminals
+            .info(tab, terminal)?
+            .cwd
+            .as_ref()?
+            .to_str()?
+            .to_owned();
         let checkouts = match &host {
             super::Host::Local => &self.core_terminals.checkouts,
             super::Host::Remote(scope) => {
@@ -162,15 +236,51 @@ impl SheprdWindow {
     pub(crate) fn shows_core_tab(&self) -> bool {
         self.core_terminals.shown.is_some()
     }
+}
 
-    /// The folder the focused workspace's herdr-core tabs started in, for a
-    /// workspace with no Herdr pane to name one.
-    pub(crate) fn core_launch_root(&self) -> Option<String> {
-        let (scope, workspace) = self.browser_key()?;
-        self.core_terminals
-            .launch_root(&scope, &workspace)?
-            .into_os_string()
-            .into_string()
-            .ok()
+impl SheprdWindow {
+    /// Saves the name each workspace the user has not named shows in
+    /// `sessions`, which its folder gives it, so the shared document carries
+    /// it to other clients. Only once Git answered for that folder: a linked
+    /// worktree keeps its saved name, which a name read before would replace
+    /// for good. The store changes only when a name did.
+    pub(super) fn keep_core_workspace_names(
+        &self,
+        sessions: &[(Scope, std::sync::Arc<sheprd_session::Session>)],
+        cx: &mut App,
+    ) {
+        let changes: Vec<(&Scope, &str, &str)> = cx
+            .try_global::<crate::browser::Store>()
+            .into_iter()
+            .flat_map(|store| {
+                sessions.iter().flat_map(move |(scope, session)| {
+                    let checkouts = match super::Host::of(scope) {
+                        super::Host::Local => Some(&self.core_terminals.checkouts),
+                        super::Host::Remote(scope) => self
+                            .core_terminals
+                            .remote
+                            .get(&scope)
+                            .map(|remote| &remote.checkouts),
+                    };
+                    session.workspaces.iter().filter_map(move |workspace| {
+                        let kept = store.kept_workspace(scope, &workspace.id)?;
+                        let answered =
+                            checkouts.is_some_and(|known| known.answered(&workspace.cwd));
+                        (answered
+                            && !workspace.custom_label
+                            && !kept.custom
+                            && kept.label != workspace.label)
+                            .then_some((scope, workspace.id.as_str(), workspace.label.as_str()))
+                    })
+                })
+            })
+            .collect();
+        if !changes.is_empty() {
+            crate::browser::Store::update(cx, |store| {
+                for (scope, id, label) in changes {
+                    store.follow_kept_label(scope, id, label);
+                }
+            });
+        }
     }
 }

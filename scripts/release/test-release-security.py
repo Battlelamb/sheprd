@@ -36,7 +36,11 @@ class ReleaseTargets(unittest.TestCase):
             self.assertNotIn(flag, command)
         for flag in ("--source-digest", "--signer-digest"):
             self.assertIn(f'{flag} "$sha"', command)
-        self.assertIn('--source-ref refs/heads/main', command)
+        self.assertIn('--source-ref "$source_ref"', command)
+        # Only main (earlier releases) or the tag commit's own release branch.
+        self.assertIn('source_ref=refs/heads/release/$sha ;;', verifier)
+        self.assertIn('source_ref=refs/heads/main ;;', verifier)
+        self.assertIn('*) echo "Unexpected release signer: $san" >&2; exit 1 ;;', verifier)
         self.assertIn('--deny-self-hosted-runners', command)
 
     def test_ci_platform_checks_keep_required_gate(self):
@@ -47,7 +51,7 @@ class ReleaseTargets(unittest.TestCase):
             self.assertIn("github.repository == 'sheprd-labs/sheprd'", job)
         # Keeps every main cache inside the repository's 10 GB cache budget.
         self.assertIn("\nenv:\n  CARGO_PROFILE_DEV_DEBUG: '0'\n\njobs:\n", workflow)
-        self.assertIn("    needs: [checks, windows, windows-native, windows-package, build-macos, commits, website, zizmor]\n",
+        self.assertIn("    needs: [checks, windows, windows-native, windows-package, build-macos, relay-agent, commits, website, zizmor]\n",
                       jobs["checks-passed"])
         # The workflow audit runs beside the other jobs, so the gate requires it.
         self.assertIn('test "$COMMITS" = success && test "$ZIZMOR" = success || exit 1',
@@ -64,13 +68,18 @@ class ReleaseTargets(unittest.TestCase):
         self.assertIn("python3 scripts/ci-scope.py >> \"$GITHUB_OUTPUT\"", jobs["commits"])
         self.assertIn("python3 scripts/test_ci_scope.py", jobs["commits"])
         self.assertIn("FULL: ${{ needs.commits.outputs.full }}", jobs["checks-passed"])
-        self.assertIn('if [ "$EVENT" != pull_request ]; then\n            test "$FULL" = true || exit 1\n',
+        self.assertIn('if [ "$EVENT" != pull_request ]; then\n'
+                      '            test "$FULL" = true && test "$WINDOWS_SCOPE" = true || exit 1\n',
                       jobs["checks-passed"])
-        self.assertIn('if [ "$FULL" = true ]; then\n              test "$WINDOWS" = success || exit 1\n',
+        self.assertIn('if [ "$WINDOWS_SCOPE" = true ]; then\n              test "$WINDOWS" = success || exit 1\n',
                       jobs["checks-passed"])
-        self.assertIn('test "$FULL" = false && test "$WINDOWS" = skipped', jobs["checks-passed"])
-        for name in ("windows", "windows-native", "build-macos"):
-            self.assertIn("needs.commits.outputs.full == 'true'", jobs[name])
+        self.assertIn('test "$WINDOWS_SCOPE" = false && test "$WINDOWS" = skipped', jobs["checks-passed"])
+        self.assertIn("WINDOWS_SCOPE: ${{ needs.commits.outputs.windows }}", jobs["checks-passed"])
+        self.assertIn("windows: ${{ steps.scope.outputs.windows }}", jobs["commits"])
+        # Windows runs for what a Windows build reads (scripts/ci-scope.py).
+        for name in ("windows", "windows-native", "windows-package"):
+            self.assertIn("needs.commits.outputs.windows == 'true'", jobs[name])
+        self.assertIn("needs.commits.outputs.full == 'true'", jobs["build-macos"])
         for name in ("checks", "windows", "windows-native", "checks-passed"):
             self.assertIn("github.event_name == 'merge_group'", jobs[name])
         self.assertIn("needs.commits.outputs.macos_release == 'true'", jobs["build-macos"])
@@ -81,16 +90,13 @@ class ReleaseTargets(unittest.TestCase):
         self.assertIn("          fetch-depth: 0\n", jobs["commits"])
         self.assertIn("python3 scripts/release/check-commit-messages.py range", jobs["commits"])
         self.assertIn("runner: [macos-15, ubuntu-24.04, ubuntu-24.04-arm]\n", jobs["checks"])
-        # Pull requests drop the other runners unless they need every platform.
-        self.assertIn("        exclude: ${{ fromJSON(needs.commits.outputs.full != 'true' && "
-                      "'[{\"runner\":\"macos-15\"},{\"runner\":\"ubuntu-24.04-arm\"}]' || "
-                      "github.event_name == 'pull_request' && "
-                      "'[{\"runner\":\"macos-15\",\"features\":\"all\"}]' || '[]') }}\n",
-                      jobs["checks"])
+        # Which legs each pull request runs: test_ci_macos_runners.py.
+        self.assertIn("        exclude: ${{ fromJSON(github.event_name != 'pull_request' && '[]' || ", jobs["checks"])
         self.assertIn("    name: Format, lint, and test\n", jobs["checks-passed"])
         self.assertIn("always()", jobs["checks-passed"])
         self.assertIn('test "$RESULT" = success', jobs["checks-passed"])
-        self.assertIn("github.ref == 'refs/heads/main'", jobs["build"])
+        self.assertIn("(github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))",
+                      jobs["build"])
         self.assertNotIn("github.event_name == 'pull_request'", jobs["build"])
         self.assertNotIn("apple-darwin", jobs["build"])
         # The macOS release builds hold no runner on main, where the release
@@ -143,10 +149,10 @@ class ReleaseTargets(unittest.TestCase):
             self.assertEqual(jobs["checks"].count(command), 1, command)
         self.assertNotIn("--release", windows)
         self.assertNotIn("cargo build", windows)
-        # The installer check runs only for its inputs, and the gate requires
-        # it then, and its absence otherwise.
+        # The installer check runs only for its inputs and with every
+        # platform, and the gate requires it then, and its absence otherwise.
         package = jobs["windows-package"]
-        self.assertIn("needs.commits.outputs.windows_package == 'true'", package)
+        self.assertIn("needs.commits.outputs.windows_package == 'true' && needs.commits.outputs.windows == 'true'", package)
         self.assertIn("    needs: commits\n", package)
         self.assertNotIn("secrets.", package)
         # Bash, so "$TARGET" and friends expand on the Windows runner.
@@ -172,10 +178,12 @@ class ReleaseTargets(unittest.TestCase):
             self.assertIn(command, native)
         self.assertIn("NATIVE: ${{ needs.windows-native.result }}", jobs["checks-passed"])
         self.assertIn('test "$NATIVE" = success', jobs["checks-passed"])
-        self.assertIn('{ [ "$NATIVE_INPUTS" = false ] || [ "$FULL" = false ]; } && test "$NATIVE" = skipped', jobs["checks-passed"])
+        self.assertIn('{ [ "$NATIVE_INPUTS" = false ] || [ "$WINDOWS_SCOPE" = false ]; } && test "$NATIVE" = skipped', jobs["checks-passed"])
         self.assertIn("PACKAGE: ${{ needs.windows-package.result }}", jobs["checks-passed"])
         self.assertIn('test "$PACKAGE" = success', jobs["checks-passed"])
-        self.assertIn('test "$PACKAGE_INPUTS" = false && test "$PACKAGE" = skipped', jobs["checks-passed"])
+        self.assertIn('{ [ "$PACKAGE_INPUTS" = false ] || [ "$WINDOWS_SCOPE" = false ]; } && test "$PACKAGE" = skipped', jobs["checks-passed"])
+        # The optimized performance build waits for the merge queue and main.
+        self.assertIn("      - name: Release-mode performance budget\n        if: github.event_name != 'pull_request'\n", native)
 
     def test_workflow_and_metadata_contract(self):
         # Keep this offline and dependency-free; actionlint validates YAML syntax.
@@ -312,9 +320,14 @@ class ReleaseTargets(unittest.TestCase):
             if "    uses: ./" not in job:
                 self.assertIn("persist-credentials: false", job)
         for name in ("audit", "validate", "ci-gate", "nix", "sign", "windows-sign", "attest", "publish", "homebrew", "winget"):
-            for condition in ("github.repository == 'sheprd-labs/sheprd'", "github.ref == 'refs/heads/main'",
+            for condition in ("github.repository == 'sheprd-labs/sheprd'",
+                              "startsWith(github.ref, 'refs/heads/release/')",
                               "github.actor == 'penso'", "github.triggering_actor == 'penso'"):
                 self.assertIn(condition, jobs[name])
+            self.assertNotIn("refs/heads/main", jobs[name])
+        validate = jobs["validate"]
+        self.assertIn('[[ "$GITHUB_REF" == "refs/heads/release/$EXPECTED_SHA" ]]', validate)
+        self.assertIn('compare/$EXPECTED_SHA...main" --jq .status)" =~ ^(identical|ahead)$ ]]', validate)
         for name in ("sign", "windows-sign", "attest", "publish"):
             self.assertIn("    environment: release\n", jobs[name])
         self.assertIn("    environment: homebrew\n", jobs["homebrew"])
@@ -385,11 +398,16 @@ class ReleaseTargets(unittest.TestCase):
         self.assertIn("needs.validate.outputs.channel == 'stable'", jobs["winget"])
         self.assertEqual(promotion["winget"].replace("    needs: [validate, promote]\n", ""),
                          jobs["winget"].replace(" &&\n      needs.validate.outputs.channel == 'stable'", "")
-                         .replace("    needs: [validate, publish]\n", ""))
+                         .replace("    needs: [validate, publish]\n", "")
+                         # Promotion runs on main; a release on its release/<sha> branch.
+                         .replace("startsWith(github.ref, 'refs/heads/release/')",
+                                  "github.ref == 'refs/heads/main'"))
         # One tap update policy: the promoted job is the release job minus its channel gate.
         self.assertEqual(promotion["homebrew"].replace("    needs: [validate, promote]\n", ""),
                          jobs["homebrew"].replace(" &&\n      needs.validate.outputs.channel == 'stable'", "")
-                         .replace("    needs: [validate, publish]\n", ""))
+                         .replace("    needs: [validate, publish]\n", "")
+                         .replace("startsWith(github.ref, 'refs/heads/release/')",
+                                  "github.ref == 'refs/heads/main'"))
 
     def test_updater_signing_boundary(self):
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
@@ -658,7 +676,8 @@ class ReleaseSecurity(unittest.TestCase):
             *(f"sheprd-remote-control-20260920.1-{target}"
               for target in ("x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl")),
             "host-manifest.json", "host-manifest.sig",
-            "sheprd-acp-20260920.1-linux-musl.tar.gz"})
+            "sheprd-acp-20260920.1-linux-musl.tar.gz",
+            "sheprd-relay-agent-20260920.1.tar.gz"})
         # Five files per base asset; SHA256SUMS lists all but itself.
         assets = len(MANIFEST.base_names(VERSION)) * 5 + len(MANIFEST.package_aliases(VERSION))
         self.assertEqual(len((self.path / "SHA256SUMS").read_text().splitlines()), assets)
@@ -762,10 +781,10 @@ if [[ $1 == api ]]; then
     printf '%040d\\n' 1
 elif [[ $1 == attestation && $2 == verify ]]; then
     printf '%s\\n' "${3##*/}" >> "$ATTEST_LOG"
-    [[ "$*" == *"--source-ref refs/heads/main"* ]]
+    [[ "$*" == *"--source-ref $TEST_REF"* ]]
     [[ "$*" == *"--source-digest 0000000000000000000000000000000000000001"* ]]
     [[ "$*" == *"--signer-digest 0000000000000000000000000000000000000001"* ]]
-    [[ "$*" == *"--cert-identity https://github.com/sheprd-labs/sheprd/.github/workflows/release.yml@refs/heads/main"* ]]
+    [[ "$*" == *"--cert-identity https://github.com/sheprd-labs/sheprd/.github/workflows/release.yml@$TEST_REF"* ]]
     if [[ ${FAIL_ARM_ATTEST:-0} == 1 && $3 == *aarch64-unknown-linux-gnu.tar.gz ]]; then exit 1; fi
     exit "${FAIL_ATTEST:-0}"
 else
@@ -776,11 +795,26 @@ fi
 set -eu
 [[ $1 == verify-blob ]]
 printf '%s\\n' "${!#}" >> "$COSIGN_LOG"
-[[ "$*" == *"--certificate-identity https://github.com/sheprd-labs/sheprd/.github/workflows/release.yml@refs/heads/main"* ]]
+[[ "$*" == *"--certificate-identity https://github.com/sheprd-labs/sheprd/.github/workflows/release.yml@$TEST_REF"* ]]
+[[ "$*" == *"--certificate-github-workflow-ref $TEST_REF"* ]]
 [[ "$*" == *"--certificate-oidc-issuer https://token.actions.githubusercontent.com"* ]]
 [[ "$*" == *"--certificate-github-workflow-sha 0000000000000000000000000000000000000001"* ]]
 if [[ ${FAIL_ARM_COSIGN:-0} == 1 && ${!#} == *aarch64-unknown-linux-gnu.tar.gz ]]; then exit 1; fi
 exit "${FAIL_COSIGN:-0}"
+''')
+            # The first certificate's subject names the release's ref.
+            (tools / "openssl").write_text('''#!/usr/bin/env bash
+set -eu
+if [[ $1 == base64 ]]; then
+    printf 'certificate'
+elif [[ $1 == x509 ]]; then
+    # Read the certificate as openssl does, or the writer piping it in may
+    # meet a closed pipe and fail the verifier's pipefail at random.
+    cat >/dev/null
+    printf 'X509v3 Subject Alternative Name: critical\\n    URI:https://github.com/sheprd-labs/sheprd/.github/workflows/release.yml@%s\\n' "$TEST_SAN_REF"
+else
+    exit 99
+fi
 ''')
             (tools / "gpg").write_text('''#!/usr/bin/env bash
 set -eu
@@ -795,7 +829,9 @@ fi
                 tool.chmod(0o755)
             env = dict(os.environ, PATH=f"{tools}:{os.environ['PATH']}",
                        ATTEST_LOG=str(tools / "attest.log"), COSIGN_LOG=str(tools / "cosign.log"),
-                       GPG_LOG=str(tools / "gpg.log"))
+                       GPG_LOG=str(tools / "gpg.log"), TEST_REF="refs/heads/main",
+                       TEST_SAN_REF="refs/heads/main")
+            release_ref = "refs/heads/release/" + "0" * 39 + "1"
             command = ["bash", str(ROOT / "scripts/verify-release.sh"),
                        "--version", "v20260920.1", "--directory", str(self.path)]
             for extra, updates, success in (
@@ -805,7 +841,12 @@ fi
                 ([], {"FAIL_ATTEST": "1"}, False),
                 ([], {"FAIL_ARM_COSIGN": "1"}, False),
                 ([], {"FAIL_ARM_ATTEST": "1"}, False),
+                ([], {"TEST_REF": release_ref, "TEST_SAN_REF": release_ref}, True),
+                ([], {"TEST_SAN_REF": "refs/heads/release/" + "2" * 40}, False),
+                ([], {"TEST_SAN_REF": "refs/heads/topic"}, False),
             ):
+                for log in ("cosign.log", "attest.log"):
+                    (tools / log).unlink(missing_ok=True)
                 result = subprocess.run(command + extra, env=dict(env, **updates), capture_output=True)
                 self.assertEqual(result.returncode == 0, success, result.stderr.decode())
                 if success:

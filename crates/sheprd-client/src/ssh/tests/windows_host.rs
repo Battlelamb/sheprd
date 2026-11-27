@@ -166,3 +166,41 @@ fn a_windows_host_with_herdr_core_alone_is_its_own_setup() {
         Some(HostProbe::Running)
     );
 }
+
+#[test]
+fn a_powershell_script_connects_on_its_own_and_rejects_option_targets() {
+    let script = "[Console]::In.ReadLine(); 'it''s' | Out-Host";
+    assert_eq!(decoded(&powershell::encoded_command(script)), script);
+    let command = powershell_command("me@box", script).unwrap();
+    let args = command
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    // Never a shared master, whose `sshd` would outlive this child (#1560).
+    assert!(
+        args.windows(2)
+            .any(|pair| pair == ["-o", "ControlPath=none"])
+    );
+    assert!(!args.iter().any(|arg| arg.starts_with("-S")));
+    assert_eq!(decoded(args.last().unwrap()), script);
+    assert!(matches!(
+        powershell_command("-oProxyCommand=bad", script),
+        Err(crate::Error::Ssh(Error::InvalidTarget))
+    ));
+}
+
+/// A real Windows SSH host, named by `SHEPRD_TEST_WINDOWS_SSH`: the discovery
+/// probe's whole answer arrives, up to its done marker (#1563).
+#[test]
+#[ignore = "needs a Windows SSH host named in SHEPRD_TEST_WINDOWS_SSH"]
+fn a_windows_host_answers_the_whole_probe() {
+    let target = std::env::var("SHEPRD_TEST_WINDOWS_SSH").unwrap();
+    let mut probe = command(&target, &powershell::probe_command("default"));
+    probe.stderr(Stdio::piped());
+    let (_, output, _) = run_with_stderr(&mut probe, PROBE_TIMEOUT, || false).unwrap();
+    assert!(
+        lines(&output).any(|line| line == PROBE_DONE.as_bytes()),
+        "{}",
+        String::from_utf8_lossy(&output)
+    );
+}

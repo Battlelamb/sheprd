@@ -11,6 +11,8 @@
 //! Nothing here holds a key or decides anything: the child and the other
 //! computer's daemon do.
 
+mod fleet;
+pub(super) mod link;
 mod render;
 
 use super::Page;
@@ -19,7 +21,10 @@ use crate::i18n::fl;
 use crate::remote::nearby::{self, Event, Radio, Scanner, Station, desktop::Pairing};
 use gpui::{prelude::*, *};
 use sheprd_client::{HostProbe, SavedHost};
-use sheprd_remote_control::control::desktop::{PairOutput, frame_bytes};
+use sheprd_remote_control::control::{
+    desktop::{PairOutput, frame_bytes},
+    fleet::bluetooth::ApprovedFleet,
+};
 use std::time::Duration;
 
 /// How often the page reads what the helper and the child said.
@@ -44,6 +49,8 @@ pub(in crate::menu) struct NearbySetup {
     radio: Option<Radio>,
     /// Keeps the helper scanning while the page lives.
     scanner: Option<Scanner>,
+    /// Where a pairing link is pasted, for a computer on any network.
+    link: Entity<crate::search_input::SearchInput>,
     step: Step,
     /// Reads the helper and the child until the page goes.
     _poll: Option<Task<()>>,
@@ -51,9 +58,17 @@ pub(in crate::menu) struct NearbySetup {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Found {
-    /// Core Bluetooth's id for it.
+    /// Core Bluetooth's id for it; empty for a computer named by a pairing
+    /// link, which no radio carries.
     peripheral: String,
     name: String,
+}
+
+impl Found {
+    /// The peripheral to talk to over Bluetooth, unless a link named it.
+    fn bluetooth(&self) -> Option<&str> {
+        Some(self.peripheral.as_str()).filter(|peripheral| !peripheral.is_empty())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,7 +79,8 @@ enum Step {
     /// The code exchange is under way.
     Exchanging(Found),
     /// Both screens show `code`; `claimed` once the other computer asks
-    /// its user.
+    /// its user. A pairing link's `code` is empty until the claim brings
+    /// it.
     Code {
         computer: Found,
         code: String,
@@ -76,7 +92,7 @@ enum Step {
 
 /// A number no attempt in this process had before: windows and reopened
 /// pages share it.
-fn next_attempt() -> u64 {
+pub(super) fn next_attempt() -> u64 {
     static ATTEMPTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
@@ -109,6 +125,7 @@ impl SheprdWindow {
     /// Shows the page and starts scanning.
     pub(super) fn open_add_nearby(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let scanner = Station::scan(cx);
+        let link = link::input(self, cx);
         let poll = cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL).await;
@@ -125,6 +142,7 @@ impl SheprdWindow {
             pairing: None,
             radio: None,
             scanner,
+            link,
             step: Step::Looking,
             _poll: Some(poll),
         });
@@ -185,35 +203,7 @@ impl SheprdWindow {
                     return;
                 }
                 let found = found.clone();
-                let attempt = setup.attempt;
-                setup.step = Step::Exchanging(found.clone());
-                let name = nearby::host_name();
-                let started = cx
-                    .background_executor()
-                    .spawn(async move { Pairing::spawn(&name) });
-                cx.spawn(async move |this, cx| {
-                    let started = started.await;
-                    let _ = this.update(cx, |this, cx| {
-                        let Some(setup) = &mut this.menu.nearby_setup else {
-                            return;
-                        };
-                        if setup.attempt != attempt || setup.step != Step::Exchanging(found) {
-                            return;
-                        }
-                        match started {
-                            Ok(pairing) => setup.pairing = Some(pairing),
-                            Err(error) => {
-                                setup.error = Some(fl!(
-                                    "devices-nearby-failed",
-                                    error = crate::i18n::errors::Localize::localize(&error)
-                                ));
-                                this.stop_nearby_pairing(cx);
-                            }
-                        }
-                        cx.notify();
-                    });
-                })
-                .detach();
+                self.start_nearby_pairing(found, None, cx);
             }
             Event::PeripheralFrame { peripheral, data } => {
                 let ours = setup
@@ -246,18 +236,84 @@ impl SheprdWindow {
         }
     }
 
+    /// Starts `desktop-pair` for `found`, over Bluetooth or from `link`,
+    /// and keeps it for the attempt under way.
+    fn start_nearby_pairing(&mut self, found: Found, link: Option<String>, cx: &mut Context<Self>) {
+        let Some(setup) = &mut self.menu.nearby_setup else {
+            return;
+        };
+        let attempt = setup.attempt;
+        setup.step = Step::Exchanging(found.clone());
+        let name = nearby::host_name();
+        let started = cx
+            .background_executor()
+            .spawn(async move { Pairing::spawn(&name, link.as_deref()) });
+        cx.spawn(async move |this, cx| {
+            let started = started.await;
+            let _ = this.update(cx, |this, cx| {
+                let Some(setup) = &mut this.menu.nearby_setup else {
+                    return;
+                };
+                if setup.attempt != attempt || setup.step != Step::Exchanging(found) {
+                    return;
+                }
+                match started {
+                    Ok(pairing) => setup.pairing = Some(pairing),
+                    Err(error) => {
+                        setup.error = Some(fl!(
+                            "devices-nearby-failed",
+                            error = crate::i18n::errors::Localize::localize(&error)
+                        ));
+                        this.stop_nearby_pairing(cx);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn nearby_output(&mut self, output: PairOutput, window: &mut Window, cx: &mut Context<Self>) {
         let Some(setup) = &mut self.menu.nearby_setup else {
             return;
         };
         match output {
             PairOutput::Frame { data } => {
-                let (Some(found), Some(data)) = (setup.step.computer(), frame_bytes(&data)) else {
+                let (Some(peripheral), Some(data)) = (
+                    setup.step.computer().and_then(Found::bluetooth),
+                    frame_bytes(&data),
+                ) else {
                     return;
                 };
-                Station::send(cx, nearby::peripheral_frame(&found.peripheral, &data));
+                Station::send(cx, nearby::peripheral_frame(peripheral, &data));
             }
-            PairOutput::Code { code, computer } => {
+            // A link's: the code comes with the claim.
+            PairOutput::Linked {
+                computer,
+                fleet,
+                pairing,
+            } => {
+                self.nearby_output(
+                    PairOutput::Code {
+                        code: String::new(),
+                        computer,
+                        fleet,
+                        pairing,
+                    },
+                    window,
+                    cx,
+                );
+            }
+            // The claim goes at once, so the other computer shows Allow
+            // while this one shows the code, and brings the two into one
+            // fleet when one of them is in one: that computer's Allow
+            // says so.
+            PairOutput::Code {
+                code,
+                computer,
+                fleet,
+                pairing,
+            } => {
                 let Some(found) = setup.step.computer().cloned() else {
                     return;
                 };
@@ -269,20 +325,33 @@ impl SheprdWindow {
                     code,
                     claimed: false,
                 };
+                self.nearby_claim(fleet.as_ref(), pairing, cx);
             }
-            PairOutput::Claimed => {
-                if let Step::Code { claimed, .. } = &mut setup.step {
+            PairOutput::Claimed { code: claimed_code } => {
+                if let Step::Code { claimed, code, .. } = &mut setup.step {
                     *claimed = true;
+                    // A link's code, which only the claim's answer brings.
+                    if let Some(claimed_code) = claimed_code
+                        && code.is_empty()
+                        && claimed_code.len() == 6
+                        && claimed_code.bytes().all(|byte| byte.is_ascii_digit())
+                    {
+                        *code = claimed_code;
+                    }
                 }
             }
-            PairOutput::Paired { target, label } => {
+            PairOutput::Paired {
+                target,
+                label,
+                fleet,
+            } => {
                 let label = crate::notifications::safe_text(&label, 64);
-                if let Some(found) = setup.step.computer() {
-                    Station::send(cx, nearby::disconnect(&found.peripheral));
+                if let Some(peripheral) = setup.step.computer().and_then(Found::bluetooth) {
+                    Station::send(cx, nearby::disconnect(peripheral));
                 }
                 setup.pairing = None;
                 setup.step = Step::Saving(label.clone());
-                self.save_nearby(target, label, window, cx);
+                self.save_nearby(target, label, fleet, window, cx);
             }
             PairOutput::Failed { message } => {
                 setup.error = Some(fl!(
@@ -323,13 +392,17 @@ impl SheprdWindow {
         let Some(setup) = &mut self.menu.nearby_setup else {
             return;
         };
-        if let Some(found) = setup.step.computer() {
-            Station::send(cx, nearby::disconnect(&found.peripheral));
+        if let Some(peripheral) = setup.step.computer().and_then(Found::bluetooth) {
+            Station::send(cx, nearby::disconnect(peripheral));
         }
         // Dropping the child closes its input, which cancels. A save under
         // way still finishes, as the other computer already allowed it, but
-        // its answer no longer moves this page.
+        // its answer no longer moves this page. A claim cancelled before its
+        // Allow leaves the fleet free again.
         setup.pairing = None;
+        if matches!(setup.step, Step::Code { .. } | Step::Exchanging(_)) {
+            crate::fleet::Fleet::release_pairing(cx, setup.attempt);
+        }
         setup.attempt = next_attempt();
         setup.step = Step::Looking;
         cx.notify();
@@ -340,6 +413,7 @@ impl SheprdWindow {
         &mut self,
         target: String,
         label: String,
+        fleet: Option<ApprovedFleet>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -348,12 +422,22 @@ impl SheprdWindow {
             .nearby_setup
             .as_ref()
             .map_or(0, |setup| setup.attempt);
+        let tmux = self.config.terminal_backend == crate::config::TerminalBackend::Tmux;
+        let saving = target.clone();
         let saved = cx
             .background_executor()
-            .spawn(async move { save(&target, &label) });
+            .spawn(async move { save(&saving, &label, tmux) });
         cx.spawn_in(window, async move |this, cx| {
             let outcome = saved.await;
             let _ = this.update_in(cx, |this, window, cx| {
+                // Paired: the fleet finishes over the SSH the pairing opened,
+                // whatever this page does next. The other computer already
+                // acted on its Allow, so a Herdr check or a device save that
+                // failed here never drops it; `paired` retries its own SSH.
+                match fleet {
+                    Some(fleet) => crate::fleet::bluetooth::paired(cx, target, fleet, attempt),
+                    None => crate::fleet::Fleet::release_pairing(cx, attempt),
+                }
                 let Some(setup) = &mut this.menu.nearby_setup else {
                     return;
                 };
@@ -383,7 +467,16 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let composing = self
+            .menu
+            .nearby_setup
+            .as_ref()
+            .is_some_and(|setup| setup.link.read(cx).is_composing());
+        if composing {
+            return;
+        }
         match event.keystroke.key.as_str() {
+            "enter" => self.pair_from_link(cx),
             "escape" => {
                 let pairing = self
                     .menu
@@ -407,9 +500,14 @@ impl SheprdWindow {
 /// a compatible copy, or herdr-core, answers. A stopped server is fine: the
 /// bridge starts it on the first connection. The same machine paired again
 /// keeps its device. Blocking: runs on the background executor.
-fn save(target: &str, label: &str) -> Outcome {
-    match sheprd_client::probe_host(target, SESSION) {
-        Ok(HostProbe::Core | HostProbe::Running | HostProbe::Stopped) => {
+fn save(target: &str, label: &str, tmux: bool) -> Outcome {
+    match sheprd_client::ssh::probe_terminals(
+        target,
+        SESSION,
+        sheprd_client::HostKeys::of(target),
+        tmux,
+    ) {
+        Ok(HostProbe::Tmux | HostProbe::Core | HostProbe::Running | HostProbe::Stopped) => {
             let host = SavedHost {
                 id: uuid::Uuid::new_v4().simple().to_string(),
                 label: label.to_owned(),

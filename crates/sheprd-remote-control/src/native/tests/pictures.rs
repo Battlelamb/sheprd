@@ -27,6 +27,7 @@ fn user(seq: u64) -> Step {
         EntryKind::User {
             text: "look".into(),
             files: 1,
+            note: None,
         },
     )
 }
@@ -40,6 +41,7 @@ fn picture(seq: u64) -> Step {
                 data: "/9j/".into(),
                 kind: ImageType::Jpeg,
             },
+            caption: None,
         },
     )
 }

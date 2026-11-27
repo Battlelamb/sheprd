@@ -6,7 +6,8 @@ import Testing
 @Suite struct CreateTests {
     @Test func newOptionsListAgentsAndOfferedFolders() throws {
         let options = try JSONDecoder().decode(NewOptions.self, from: WireTests.fixture("new"))
-        #expect(options.agents.first == AgentChoice(id: "claude", name: "Claude"))
+        #expect(options.agents.first == AgentChoice(id: "antigravity", name: "Antigravity"))
+        #expect(options.agents.contains(AgentChoice(id: "muse", name: "Muse Code")))
         #expect(options.roots.first?.path == "/Users/me/code")
         // Recent first, and a folder both lists hold appears once.
         #expect(options.folders == ["/Users/me/code/herdr-gpui", "/Users/me/code/moltis"])
@@ -32,6 +33,9 @@ import Testing
         let inSession = try JSONEncoder().encode(NewWorkspaceRequest(cwd: "/a", agent: "codex", session: "pilots"))
         let named = try #require(JSONSerialization.jsonObject(with: inSession) as? [String: String])
         #expect(named["session"] == "pilots")
+        let titled = try JSONEncoder().encode(NewWorkspaceRequest(cwd: "/a", branch: "fix", agent: "codex", title: "Review"))
+        let withTitle = try #require(JSONSerialization.jsonObject(with: titled) as? [String: String])
+        #expect(withTitle["title"] == "Review")
     }
 
     /// The values `generated_branches_are_namespaced_and_reproducible`

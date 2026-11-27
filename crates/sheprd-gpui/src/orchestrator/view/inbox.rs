@@ -57,18 +57,6 @@ impl OrchestratorView {
                     .child(self.render_list(cx))
                     .children(pane),
             )
-            .when(self.menu == Some(Menu::Sort), |el| {
-                el.child(self.render_sort_menu(cx))
-            })
-            .when(self.menu == Some(Menu::State), |el| {
-                el.child(self.render_state_menu(cx))
-            })
-            .when(self.menu == Some(Menu::Projects), |el| {
-                el.child(self.render_projects_menu(cx))
-            })
-            .when(self.menu == Some(Menu::Repos), |el| {
-                el.child(self.render_project_filter_menu(cx))
-            })
             .into_any_element()
     }
 
@@ -596,6 +584,7 @@ impl OrchestratorView {
         let row = row.children(project_filter).child(
             div()
                 .id("orchestrator-sort")
+                .debug_selector(|| "orchestrator-sort".into())
                 .flex_none()
                 .flex()
                 .items_center()
@@ -603,12 +592,17 @@ impl OrchestratorView {
                 .cursor_pointer()
                 .text_size(look.small())
                 .text_color(rgb(theme.subtext()))
+                .relative()
+                .child(self.measure_room(Menu::Sort))
                 .child(self.sort.label())
                 .child(look.icon("icons/chevron-down.svg", 10., theme.muted))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_menu(Menu::Sort);
                     cx.notify();
-                })),
+                }))
+                .when(self.menu == Some(Menu::Sort), |el| {
+                    el.child(self.render_sort_menu(cx))
+                }),
         );
         match beside {
             // Too narrow for both: the field keeps a line, the controls wrap.
@@ -651,53 +645,47 @@ impl OrchestratorView {
     }
 
     fn render_sort_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let look = &self.look;
-        let theme = &look.theme;
-        deferred(crate::motion::pop_in(
-            div()
-                .absolute()
-                .top(px(120. + self.search_line()))
-                .right(px(16.))
-                .w(px(200.))
-                .p_1()
-                .flex()
-                .flex_col()
-                .rounded(px(corners::CONTROL))
-                .bg(rgb(theme.surface))
-                .border_1()
-                .border_color(rgb(theme.active))
-                .shadow_lg()
-                .children(Sort::ALL.into_iter().map(|sort| {
-                    let on = sort == self.sort;
-                    let hover = theme.active;
-                    div()
-                        .id(SharedString::from(format!(
-                            "orchestrator-sort-{}",
-                            sort.label()
-                        )))
-                        .px_2()
-                        .h(px(28.))
-                        .flex()
-                        .items_center()
-                        .rounded(px(corners::SMALL))
-                        .cursor_pointer()
-                        .hover(move |style| style.bg(rgb(hover)))
-                        .when(on, |el| el.bg(rgb(theme.primary_wash())))
-                        .child(sort.label())
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.sort = sort;
-                            this.menu = None;
-                            this.refresh_rows();
-                            cx.notify();
-                        }))
-                })),
-            "orchestrator-sort-menu",
-        ))
+        let theme = &self.look.theme;
+        self.drop_down(
+            Menu::Sort,
+            crate::motion::pop_in(
+                self.menu_frame(200.)
+                    .children(Sort::ALL.into_iter().map(|sort| {
+                        let on = sort == self.sort;
+                        let hover = theme.active;
+                        div()
+                            .id(SharedString::from(format!(
+                                "orchestrator-sort-{}",
+                                sort.label()
+                            )))
+                            .px_2()
+                            .h(px(28.))
+                            .flex()
+                            .items_center()
+                            .rounded(px(corners::SMALL))
+                            .cursor_pointer()
+                            .hover(move |style| style.bg(rgb(hover)))
+                            .when(on, |el| el.bg(rgb(theme.primary_wash())))
+                            .child(sort.label())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.sort = sort;
+                                this.menu = None;
+                                this.refresh_rows();
+                                cx.notify();
+                            }))
+                    })),
+                "orchestrator-sort-menu",
+            ),
+            cx,
+        )
     }
 
-    fn render_banners(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn render_banners(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let look = &self.look;
         let mut banners = Vec::new();
+        // Worktrees of one repository each read the same sources, so one
+        // failure would otherwise repeat once per checkout listed.
+        let mut seen = std::collections::HashSet::new();
         let named = self.projects_named().count() > 1;
         for repo in self.projects_named() {
             // With several projects listed, each says whose trouble it is.
@@ -725,7 +713,10 @@ impl OrchestratorView {
                 ));
             }
             if let Some(error) = &snapshot.error {
-                banners.push((banner(look, RED, "icons/x.svg", of(error.localize())), None));
+                let text = of(error.localize());
+                if seen.insert((None, text.clone())) {
+                    banners.push((banner(look, RED, "icons/error.svg", text), None));
+                }
             }
             for status in &snapshot.sources {
                 // Azure DevOps has no sign-in of its own in the title bar
@@ -737,6 +728,9 @@ impl OrchestratorView {
                         "azure-devops-menu-connect-banner",
                         repository = status.key.repository.as_str()
                     );
+                    if !seen.insert((Some(status.key.clone()), text.clone())) {
+                        continue;
+                    }
                     banners.push((
                         banner(look, YELLOW, "icons/azure-devops.svg", of(text)),
                         Some(Provider::Azure),
@@ -752,6 +746,9 @@ impl OrchestratorView {
                     ),
                     _ => continue,
                 };
+                if !seen.insert((Some(status.key.clone()), text.clone())) {
+                    continue;
+                }
                 let hue = if matches!(status.state, SyncState::Capped { .. }) {
                     YELLOW
                 } else {

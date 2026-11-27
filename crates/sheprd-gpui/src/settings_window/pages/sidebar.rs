@@ -5,7 +5,7 @@ use super::{SettingsWindow, on_value, ui};
 use crate::{
     config::{
         AgentsPlacement, ChangeCounts, Config, DeviceFooter, LayoutMode, SelectMode,
-        SidebarOverrides, preferences::Preference,
+        SidebarOverrides, preferences::Preference, status_bar::Detail,
     },
     i18n::{self, fl},
     settings_window::{
@@ -417,6 +417,23 @@ impl SettingsWindow {
                         cx,
                     )),
             )
+            .child(
+                ui::row(theme, "sidebar-load", fl!("settings-sidebar-load"))
+                    .description(fl!("settings-sidebar-load-description"))
+                    .control(ui::segmented(
+                        theme,
+                        "sidebar-load-detail",
+                        &[
+                            (Detail::Compact, fl!("settings-status-bar-compact")),
+                            (Detail::Detailed, fl!("settings-status-bar-detailed")),
+                        ],
+                        Some(self.config.sidebar_load),
+                        true,
+                        on_value(cx, |this, detail, _, cx| {
+                            this.save_preference(Preference::SidebarLoad(detail), cx)
+                        }),
+                    )),
+            )
             .child(ui::section(
                 theme,
                 &fl!("settings-sidebar-section-spacing"),
@@ -460,7 +477,7 @@ impl SettingsWindow {
             let hex = self
                 .hex_edit
                 .as_ref()
-                .filter(|edit| edit.host == host)
+                .filter(|edit| matches!(&edit.target, super::super::sidebar::HexTarget::Host(label) if label == &host))
                 .map(|edit| (edit.input.clone(), edit.invalid));
             let (changed, editing) = (host.clone(), host.clone());
             page = page.child(ui::swatch_row(

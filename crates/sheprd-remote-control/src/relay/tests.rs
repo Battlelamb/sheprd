@@ -24,13 +24,26 @@ use tokio::{
     net::TcpListener,
 };
 
+mod dial_keys;
 mod labels;
 mod nearest;
 mod shared;
+mod tokens;
 
 /// A relay serving QUIC and HTTP on loopback ports: its HTTP address, and
 /// its QUIC address and pin.
 pub(crate) async fn relay() -> (SocketAddr, SocketAddr, sheprd_relay::pin::Pin) {
+    relay_with(RelayOptions {
+        metrics: None,
+        ..RelayOptions::default()
+    })
+    .await
+}
+
+/// [`relay`], started with `options`.
+pub(crate) async fn relay_with(
+    options: RelayOptions,
+) -> (SocketAddr, SocketAddr, sheprd_relay::pin::Pin) {
     let (endpoint, info) =
         sheprd_relay::bind_quic("127.0.0.1:0".parse().unwrap(), None, None).unwrap();
     let quic = endpoint.local_addr().unwrap();
@@ -39,10 +52,6 @@ pub(crate) async fn relay() -> (SocketAddr, SocketAddr, sheprd_relay::pin::Pin) 
         .unwrap()
         .try_into()
         .unwrap();
-    let options = RelayOptions {
-        metrics: None,
-        ..RelayOptions::default()
-    };
     let (router, hub) = sheprd_relay::app(&options, Some(info)).unwrap();
     tokio::spawn(sheprd_relay::quic::run(endpoint, hub));
     let tcp = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -188,6 +197,32 @@ async fn a_paired_phone_reaches_the_api_through_a_relay_end_to_end() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn desktop_status_names_an_address_ban_from_the_relay() {
+    let (http, _, _) = relay_with(RelayOptions {
+        bans: sheprd_relay::guard::parse_list("127.0.0.1").0,
+        ..RelayOptions::default()
+    })
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let endpoint = Endpoint::parse(&format!("http://{http}")).unwrap();
+    let address = endpoint.to_string();
+    let relays = Arc::new(Relays::load(dir.path(), vec![endpoint.into()]).unwrap());
+    let (_stop, stopped) = watch::channel(false);
+    relays.start(served(dir.path(), &state(dir.path())).0, stopped);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Status::Failed { error } = &relays.status()[&address].state {
+                assert!(error.contains("banned your network address"), "{error}");
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_dial_key_no_device_sent_is_refused_at_the_relay() {
     let (http, quic, pin) = relay().await;
     let dir = tempfile::tempdir().unwrap();
@@ -300,6 +335,7 @@ fn a_nearby_offer_names_the_relays_and_hands_its_token_to_them_once() {
         token: "t".into(),
         origins: &[],
         relay: Some(&info),
+        fleet: None,
     })
     .unwrap();
     assert_eq!(offer["relay"]["route"], info.route);
@@ -307,6 +343,7 @@ fn a_nearby_offer_names_the_relays_and_hands_its_token_to_them_once() {
         token: "t".into(),
         origins: &[],
         relay: None,
+        fleet: None,
     })
     .unwrap();
     assert!(without.get("relay").is_none());

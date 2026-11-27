@@ -5,10 +5,19 @@
 //! have one order and a client's catch-up can never interleave with a change.
 
 mod agent;
+mod briefs;
+mod carry;
+mod checkpoint;
 mod commands;
 mod harness;
+mod keep;
+mod known;
+mod picks;
 mod pictures;
+mod pull_requests;
+mod steer;
 mod thread;
+mod watchdog;
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -25,11 +34,18 @@ use uuid::Uuid;
 
 use crate::{context::Context, project::Projector, rpc};
 
+pub(crate) use keep::Start as ThreadStart;
+
 /// Changes kept for clients that reconnect with a cursor.
 const LOG: usize = 8192;
 /// Bytes of logged changes kept, so a run of pictures cannot pin the log's
 /// memory; a client older than the log gets a snapshot.
 const LOG_BYTES: usize = 32 * 1024 * 1024;
+/// The most logged changes replayed to a reconnecting client. One further
+/// behind, as a window left in the background is, gets a snapshot instead:
+/// it shows the transcript as it is now in one step, rather than scrolling
+/// through every chunk that streamed while it was away.
+const CATCH_UP: u64 = 256;
 /// Commands remembered so a resent one is not run twice.
 const HANDLED: usize = 256;
 /// The most entries a transcript keeps.
@@ -119,9 +135,14 @@ pub(crate) enum Update {
     /// A prompt just sent to the agent, as the transcript shows it, which
     /// names the pane and its tab.
     Prompt(String),
+    /// A new session of this built-in agent offered these settings, which
+    /// differ from those known for it: kept for its next start, or, when
+    /// empty, what was known forgotten.
+    Settings(Agent, crate::known::Settings),
 }
 
 pub(crate) struct Config {
+    pub antigravity_auth_method: Option<String>,
     pub agent: String,
     /// The agents a client may switch to while the agent is idle, as
     /// `--choose` asks; `None` keeps the agent the chat started with.
@@ -129,11 +150,20 @@ pub(crate) struct Config {
     pub cwd: PathBuf,
     /// Exit when the agent does, rather than leave its last words on screen.
     pub exit_with_agent: bool,
+    /// The ACP auth method Gemini tries when `session/new` asks for sign-in.
+    pub gemini_auth_method: Option<String>,
+    /// How the agent running gets the server that reads the chat's thread.
+    pub given: crate::thread_mcp::Given,
     /// The built-in agent running, or `None` for a custom command.
     pub harness: Option<Agent>,
     /// The conversation so far, for a continued session whose agent does
     /// not replay it.
     pub history: Option<Transcript>,
+    /// The settings each built-in agent offered last, shown while it starts.
+    pub known: crate::known::Known,
+    /// Clients can attach, and the agent was told where: its
+    /// `sheprd chat pr add` reaches this chat.
+    pub listens: bool,
     pub load: Option<String>,
     pub login_hint: Option<String>,
     pub pane: Option<String>,
@@ -143,19 +173,31 @@ pub(crate) struct Config {
     /// Fail rather than start a new session when the agent cannot continue
     /// `load`.
     pub require_load: bool,
+    /// What the chat that asked for this one ran with, applied once the
+    /// agent's new session opens; never to a continued one.
+    pub settings: Option<sheprd_chat_protocol::Settings>,
     /// The `sheprd` command the first note tells the agent to keep the
     /// repository's memory with; `None` leaves memory out of it.
     pub sheprd: Option<PathBuf>,
+    /// The thread the chat keeps; `None` keeps none, as for a custom
+    /// command, which no segment can name.
+    pub thread: Option<keep::Start>,
 }
 
 #[derive(Debug)]
 enum Pending {
+    Authenticate {
+        load_session: bool,
+    },
     Initialize,
     NewSession,
     LoadSession,
     Prompt,
     SetMode(String),
+    SetModel(String),
     SetOption,
+    /// A prompt steered into the running turn.
+    Steer(CommandId),
 }
 
 struct Subscriber {
@@ -175,15 +217,40 @@ pub(crate) struct Session<R: FnMut(Update)> {
     acp_session: Option<wire::SessionId>,
     activity: Option<Activity>,
     asked: HashMap<PermissionId, Asked>,
+    /// Whether this harness already sent ACP `authenticate`.
+    auth_attempted: bool,
+    /// ACP authentication methods advertised in `initialize`.
+    auth_methods: Vec<wire::AuthMethod>,
+    briefs: briefs::Briefs,
+    /// Whether this harness advertised `loadSession` in `initialize`.
+    can_load_session: bool,
+    /// Whether this harness takes prompts into a running turn.
+    can_steer: bool,
+    /// The whole commands of shell calls, which their titles cut short.
+    commands: pull_requests::Commands,
+    checkpoint: Option<checkpoint::Checkpoint>,
     config: Config,
     /// What the agent has been told besides the person's words.
     context: Context,
+    /// Settings picked while the agent started, sent once its session opens.
+    deferred: Vec<known::Deferred>,
+    /// The notice under the conversation this chat continued, decided when
+    /// its first session opens and kept for the chat's life, whichever
+    /// agent it switches to; `None` until then.
+    divider: Option<Option<sheprd_chat_protocol::EntryId>>,
     epoch: Uuid,
     handled: VecDeque<(CommandId, Option<Rejection>)>,
     /// The agent process heard now.
     harness: HarnessId,
+    /// The thread kept on disk, while it can be.
+    keep: Option<keep::Keep>,
+    /// Why the thread stopped being kept, until the chat says so.
+    keep_failure: Option<String>,
     /// An agent to start once the input that chose it is handled.
     launch: Option<Agent>,
+    /// Whether the `model` config option came from legacy `models` and uses
+    /// `session/set_model` rather than `session/set_config_option`.
+    legacy_model_option: bool,
     log: VecDeque<(u64, Change)>,
     /// What the logged changes weigh, by [`change_size`].
     log_bytes: usize,
@@ -191,18 +258,28 @@ pub(crate) struct Session<R: FnMut(Update)> {
     next_request: i64,
     outbox: rpc::Outbox,
     pending: HashMap<i64, Pending>,
+    picks: picks::Picks,
     pictures: pictures::Pictures,
     projector: Projector,
     /// Where each queued prompt was typed, by its command; the transcript's
     /// queue does not carry it, as no client needs it.
     queued_origins: HashMap<CommandId, Origin>,
     ready: bool,
+    /// The note a replayed message from the person held and the entry
+    /// for their words that comes next takes.
+    replayed_note: Option<String>,
     report: R,
     seq: u64,
+    /// Prompts steered into the running turn, as sent, until the agent
+    /// takes them or they go as the next prompt.
+    steering: HashMap<CommandId, commands::Outgoing>,
     subscribers: Vec<Subscriber>,
     thread: thread::Thread,
     transcript: Transcript,
     turn: Option<i64>,
+    /// The pull requests the running turn created or pushed to.
+    turn_pulls: pull_requests::TurnPulls,
+    watchdog: watchdog::Watchdog,
 }
 
 impl<R: FnMut(Update)> Session<R> {
@@ -213,6 +290,13 @@ impl<R: FnMut(Update)> Session<R> {
         let mut told = crate::context::Told::default();
         if let Some(mut history) = config.history.take() {
             told = crate::context::hide(&mut history);
+            for entry in &mut history.entries {
+                if let sheprd_chat_protocol::EntryKind::User { text, files: 0, .. } =
+                    &mut entry.kind
+                {
+                    *text = crate::project::shown(text).to_owned();
+                }
+            }
             transcript.entries = history.entries;
             transcript.truncated = history.truncated;
             transcript.usage = history.usage;
@@ -221,50 +305,103 @@ impl<R: FnMut(Update)> Session<R> {
             available,
             current: config.harness,
         });
+        known::seed(&config.known, config.harness, &mut transcript);
         let thread = thread::Thread::new(config.harness, &transcript.entries);
-        let projector = transcript
-            .entries
-            .last()
-            .map_or_else(Projector::default, |entry| Projector::after(entry.id));
+        let opened = config
+            .thread
+            .take()
+            .zip(config.harness)
+            .map(|(start, agent)| {
+                keep::Keep::open(
+                    start,
+                    agent,
+                    config.load.as_deref(),
+                    &mut transcript.entries,
+                    config.cwd.clone(),
+                )
+            });
+        let mut last = transcript.last_entry_id();
+        let keep = opened.map(|opened| {
+            transcript.thread = Some(opened.thread);
+            // The thread's file goes on from its newest entry, so ids never
+            // repeat in it.
+            last = last.max(opened.last);
+            opened.keep
+        });
+        let projector = last.map_or_else(Projector::default, Projector::after);
         let facts = crate::context::Facts {
             agent: config.agent.clone(),
             cwd: config.cwd.display().to_string(),
         };
         // Memory opens here, on the session's thread, which also runs the
-        // prompts that recall from it.
-        let recall = config
-            .sheprd
-            .as_ref()
-            .and_then(|_| crate::context::Recall::open(&config.cwd));
-        let context = Context::new(std::mem::take(&mut config.prompts), facts, told)
-            .with_memory(config.sheprd.as_deref(), recall);
+        // prompts that recall from it. A fixed Antigravity chat never sends
+        // Sheprd notes, so it skips opening memory; a `--choose` chat keeps
+        // context ready in case it switches to another agent, while bypassing
+        // notes whenever Antigravity is active.
+        let direct = config.harness == Some(Agent::Antigravity);
+        let may_annotate = !direct || config.choices.is_some();
+        let recall = if may_annotate {
+            config
+                .sheprd
+                .as_ref()
+                .and_then(|_| crate::context::Recall::open(&config.cwd))
+        } else {
+            None
+        };
+        let mut context = Context::new(std::mem::take(&mut config.prompts), facts, told)
+            .with_memory(config.sheprd.as_deref(), recall)
+            .with_pull_requests(config.sheprd.as_deref().filter(|_| config.listens))
+            .with_launch(
+                config
+                    .sheprd
+                    .as_deref()
+                    .filter(|_| config.harness.is_some()),
+            );
+        context.set_direct(direct);
         Self {
             accepts: crate::files::Accepts::default(),
             acp_session: None,
+            checkpoint: None,
             activity: None,
             asked: HashMap::new(),
+            auth_attempted: false,
+            auth_methods: Vec::new(),
+            briefs: briefs::Briefs::default(),
+            can_load_session: false,
+            can_steer: false,
+            commands: pull_requests::Commands::default(),
             config,
             context,
+            deferred: Vec::new(),
+            divider: None,
             epoch: Uuid::new_v4(),
             handled: VecDeque::new(),
             harness: HarnessId::default(),
+            keep,
+            keep_failure: None,
             launch: None,
+            legacy_model_option: false,
             log: VecDeque::new(),
             log_bytes: 0,
             next_permission: 0,
             next_request: 0,
             outbox,
             pending: HashMap::new(),
+            picks: picks::Picks::default(),
             pictures: pictures::Pictures::default(),
             projector,
             queued_origins: HashMap::new(),
             ready: false,
+            replayed_note: None,
             report,
             seq: 0,
+            steering: HashMap::new(),
             subscribers: Vec::new(),
             thread,
             transcript,
             turn: None,
+            turn_pulls: pull_requests::TurnPulls::default(),
+            watchdog: watchdog::Watchdog::default(),
         }
     }
 
@@ -282,7 +419,7 @@ impl<R: FnMut(Update)> Session<R> {
     /// Opens the ACP connection.
     pub(crate) fn start(&mut self) {
         let mut request = wire::InitializeRequest::new(acp::ProtocolVersion::V1).client_info(
-            wire::Implementation::new("herdr-acp", env!("CARGO_PKG_VERSION")),
+            wire::Implementation::new("sheprd", env!("CARGO_PKG_VERSION")),
         );
         request.client_capabilities.meta = Some(wire::Meta::from_iter([(
             crate::project::opencode::CAPABILITY.to_owned(),
@@ -293,6 +430,7 @@ impl<R: FnMut(Update)> Session<R> {
     }
 
     pub(crate) fn handle(&mut self, input: Input) -> Flow {
+        let turning = self.turn.is_some();
         match input {
             Input::Agent(harness, inbound) if harness == self.harness => self.agent(inbound),
             Input::AgentExited {
@@ -302,6 +440,7 @@ impl<R: FnMut(Update)> Session<R> {
             } if harness == self.harness => {
                 self.exited(code, &stderr);
                 if self.config.exit_with_agent {
+                    self.keep_entries();
                     self.bye(ByeReason::Exiting);
                     return Flow::Exit;
                 }
@@ -315,10 +454,13 @@ impl<R: FnMut(Update)> Session<R> {
                 self.ack(conn, id, Some(Rejection::Unsupported));
             }
             Input::Shutdown => {
+                self.save_history(true);
+                self.keep_entries();
                 self.bye(ByeReason::Exiting);
                 return Flow::Exit;
             }
         }
+        self.save_history(turning != self.turn.is_some());
         match self.launch.take() {
             Some(agent) => Flow::Launch {
                 agent,
@@ -327,6 +469,92 @@ impl<R: FnMut(Update)> Session<R> {
             },
             None => Flow::Continue,
         }
+    }
+
+    /// The next time the session thread should call [`Self::tick`], if any.
+    pub(crate) fn next_tick(&self) -> Option<std::time::Instant> {
+        self.watchdog
+            .next_deadline(self.antigravity_quiet_after_reply())
+    }
+
+    /// Runs periodic session checks (such as the Antigravity silent-turn
+    /// watchdog) as of `now`.
+    pub(crate) fn tick(&mut self, now: std::time::Instant) {
+        let eligible = self.antigravity_quiet_after_reply();
+        match self.watchdog.poll(now, eligible) {
+            Some(watchdog::Action::Warn(after)) => {
+                let after = watchdog::describe_duration(after);
+                let notice = self.projector.notice(
+                    sheprd_chat_protocol::NoticeLevel::Info,
+                    format!(
+                        "{} has been quiet for {after} since its last reply; a background task \
+                         may be holding this turn open. Press Esc or Stop to cancel it, or wait \
+                         for it to finish.",
+                        self.config.agent
+                    ),
+                );
+                self.emit(notice);
+            }
+            Some(watchdog::Action::Cancel(after)) => {
+                let after = watchdog::describe_duration(after);
+                let notice = self.projector.notice(
+                    sheprd_chat_protocol::NoticeLevel::Warning,
+                    format!(
+                        "{} sent no updates for {after} after its last reply; cancelling the turn \
+                         to release any lingering background task.",
+                        self.config.agent
+                    ),
+                );
+                self.emit(notice);
+                // Cancel the stuck turn without dropping any follow-up prompts
+                // the person queued behind it.
+                if let Some(session) = self.acp_session.clone()
+                    && let Err(error) = self
+                        .outbox
+                        .notify("session/cancel", &wire::CancelNotification::new(session))
+                {
+                    self.fail(&error.to_string());
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// Whether an Antigravity turn has already streamed a reply and has no
+    /// pending permission or in-progress foreground tool call.
+    fn antigravity_quiet_after_reply(&self) -> bool {
+        if self.config.harness != Some(Agent::Antigravity)
+            || self.turn.is_none()
+            || !self.asked.is_empty()
+        {
+            return false;
+        }
+        let mut last_reply = false;
+        for entry in self.transcript.entries.iter().rev() {
+            match &entry.kind {
+                sheprd_chat_protocol::EntryKind::User { .. }
+                | sheprd_chat_protocol::EntryKind::Turn(_) => break,
+                sheprd_chat_protocol::EntryKind::Notice { .. } => continue,
+                sheprd_chat_protocol::EntryKind::Tool(tool)
+                    if matches!(
+                        tool.status,
+                        sheprd_chat_protocol::ToolStatus::Pending
+                            | sheprd_chat_protocol::ToolStatus::InProgress
+                    ) =>
+                {
+                    return false;
+                }
+                sheprd_chat_protocol::EntryKind::Agent { .. } if !last_reply => {
+                    last_reply = true;
+                }
+                _ => {
+                    if !last_reply {
+                        return false;
+                    }
+                }
+            }
+        }
+        last_reply
     }
 
     pub(crate) fn cursor(&self) -> Cursor {
@@ -339,6 +567,9 @@ impl<R: FnMut(Update)> Session<R> {
     /// Applies a change and sends it to every client.
     fn emit(&mut self, change: Change) {
         let change = self.pictures_before(change);
+        if let Change::Truncate { before } = &change {
+            self.keep_before_truncate(*before);
+        }
         if self.transcript.apply(&change).is_err() {
             // The session only emits changes made from its own transcript, so
             // one that does not fit is a bug; dropping it keeps every client
@@ -348,6 +579,10 @@ impl<R: FnMut(Update)> Session<R> {
         if let Change::Truncate { before } = &change {
             self.projector.forget_before(*before);
         }
+        if let Some(checkpoint) = &mut self.checkpoint {
+            checkpoint.changed(&change);
+        }
+        self.keep_mark(&change);
         self.seq += 1;
         let size = change_size(&change);
         while self.log.len() == LOG || (self.log_bytes + size > LOG_BYTES && !self.log.is_empty()) {
@@ -383,6 +618,9 @@ impl<R: FnMut(Update)> Session<R> {
         }
         self.report_activity();
         self.pictures_after(&change);
+        self.find_pull_requests(&change);
+        self.keep_after(&change);
+        self.find_brief(&change);
     }
 
     fn emit_all(&mut self, changes: impl IntoIterator<Item = Change>) {
@@ -428,6 +666,10 @@ impl<R: FnMut(Update)> Session<R> {
     fn queue_changed(&mut self, queued: Vec<Queued>) {
         self.queued_origins
             .retain(|id, _| queued.iter().any(|waiting| waiting.id == *id));
+        // A prompt that left the queue, withdrawn or dropped, keeps nothing
+        // it was prepared with.
+        self.steering
+            .retain(|id, _| queued.iter().any(|waiting| waiting.id == *id));
         self.emit(Change::Queue { queued });
     }
 
@@ -448,7 +690,10 @@ impl<R: FnMut(Update)> Session<R> {
         }
         let first = self.log.front().map_or(self.seq + 1, |(seq, _)| *seq);
         let catch_up = since.filter(|since| {
-            since.epoch == self.epoch && since.seq <= self.seq && since.seq + 1 >= first
+            since.epoch == self.epoch
+                && since.seq <= self.seq
+                && since.seq + 1 >= first
+                && self.seq - since.seq <= CATCH_UP
         });
         let sent = match catch_up {
             Some(since) => {
@@ -550,6 +795,7 @@ impl<R: FnMut(Update)> Session<R> {
     }
 
     fn clear_queue(&mut self) {
+        self.steering.clear();
         if !self.transcript.queued.is_empty() {
             self.queue_changed(Vec::new());
         }
@@ -616,6 +862,8 @@ pub(crate) fn entry_size(entry: &sheprd_chat_protocol::Entry) -> usize {
                     .sum::<usize>()
         }
         EntryKind::Turn(_) => 32,
+        // What went ahead of the person's words travels with them.
+        EntryKind::User { text, note, .. } => text.len() + note.as_ref().map_or(0, String::len),
         kind => kind.text().map_or(0, str::len),
     }
 }

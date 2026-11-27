@@ -1,21 +1,33 @@
-//! The Add Device dialog: its form, the host check and save that run off the
-//! UI thread, and the local workspace that carries a setup needing prompts.
+//! The Add Device form and background host checks and saves.
 
 use super::{Page, discover::Discovery, setup};
 
 mod offer;
+mod progress;
 
 use crate::i18n::fl;
 use crate::{
-    NavigationTarget, SheprdWindow,
+    SheprdWindow,
     search_input::{Changed, SearchInput},
 };
 use gpui::{prelude::*, *};
 pub(super) use offer::Offer;
-use sheprd_client::{
-    HostKeys, HostProbe, Method, NewHostKey, SshFailure,
-    protocol::{ClientKeyCode, ClientKeyKind, ClientPaneInputEvent},
-};
+use sheprd_client::protocol::{ClientKeyCode, ClientKeyKind, ClientPaneInputEvent};
+use sheprd_client::{HostKeys, HostProbe, NewHostKey, SshFailure, TailscaleCheck};
+
+pub(crate) fn enter() -> ClientPaneInputEvent {
+    ClientPaneInputEvent::Key {
+        code: ClientKeyCode::Enter,
+        modifiers: 0,
+        kind: ClientKeyKind::Press,
+        repeat_count: 1,
+        shifted_codepoint: None,
+        generated_text: None,
+        tracks_release: false,
+        physical_key_id: None,
+        windows_record: None,
+    }
+}
 
 pub(in crate::menu) struct Setup {
     pub(super) fields: [Entity<SearchInput>; 3],
@@ -37,11 +49,88 @@ pub(in crate::menu) struct Setup {
     /// anything else drops it.
     pub(super) highlight: Option<(String, Vec<String>)>,
     /// Why the last check or save failed. Each source of Add Device keeps
-    /// its own, so a job finishing while another source shows stays here.
-    pub(super) error: Option<String>,
+    /// its own, so a job finishing while another source shows stays here. Read
+    /// through [`Self::error`] and written through [`Self::fail`], so it never
+    /// drifts from `ssh_failure`.
+    error: Option<String>,
+    /// The SSH failure behind `error`, when the failure was one. Written and
+    /// cleared with it: a Tailscale address offered beside a message that no
+    /// longer names it would be a link to a check nobody ran.
+    ssh_failure: Option<SshFailure>,
     pub(super) suggestion_scroll: ScrollHandle,
     /// Whether the host's key is checked; see `host_key_choice`.
     pub(super) host_keys: HostKeys,
+}
+
+/// Cancels a background `herdr-core` install if the dialog leaves `Step::Installing`.
+pub(super) struct CancelFlag(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl CancelFlag {
+    pub(super) fn new() -> Self {
+        Self(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+            false,
+        )))
+    }
+
+    pub(super) fn flag(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        self.0.clone()
+    }
+}
+
+impl Drop for CancelFlag {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
+impl Setup {
+    /// The message the dialog shows, when the last check or save failed.
+    pub(super) fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
+    /// The SSH failure behind that message, when it came from one: an address
+    /// is offered beside a refusal only when the refusal carried it.
+    pub(super) fn failure(&self) -> Option<&SshFailure> {
+        self.ssh_failure.as_ref()
+    }
+
+    /// Record the message and the failure behind it together, which is the only
+    /// way either is written. A message that came from no failure passes `None`,
+    /// which drops the failure behind the last one: an address kept past its
+    /// message would be a link to a check nobody ran.
+    pub(super) fn record(&mut self, error: Option<String>, failure: Option<SshFailure>) {
+        self.error = error;
+        self.ssh_failure = failure;
+    }
+
+    /// Forget why the last attempt failed, and with it the address it named: a
+    /// Tailscale check belongs to the attempt that printed it, so an address
+    /// kept past its message would outlive the thing it was a link to.
+    pub(super) fn clear_failure(&mut self) {
+        self.record(None, None);
+    }
+}
+
+#[cfg(test)]
+impl Setup {
+    /// A dialog holding nothing but the step under test, for the device tests.
+    pub(super) fn fixture(step: Step, cx: &mut Context<SheprdWindow>) -> Self {
+        Self {
+            fields: std::array::from_fn(|_| cx.new(SearchInput::new)),
+            step,
+            claim: None,
+            task: None,
+            discovery: None,
+            suggested_label: None,
+            _edits: Vec::new(),
+            highlight: None,
+            suggestion_scroll: ScrollHandle::new(),
+            error: None,
+            ssh_failure: None,
+            host_keys: HostKeys::Verify,
+        }
+    }
 }
 
 /// Where adding a device stands. Each step after `Form` belongs to the request
@@ -52,9 +141,15 @@ pub(super) enum Step {
     /// macOS refused the host check the local network; waiting for the user
     /// to allow Herdr, then checking again (see `local_network`).
     AwaitingLocalNetwork(setup::Request),
-    /// Herdr is present, so the CLI saves the device without a terminal. A
-    /// stopped server is started by that same command.
+    /// Herdr or herdr-core is present, so the device is saved without a
+    /// terminal. A stopped Herdr 1 server is started by that same command.
     Saving(setup::Request, HostProbe),
+    /// Installing pinned herdr-core over SSH, then saving the device directly.
+    Installing {
+        request: setup::Request,
+        offer: Offer,
+        _cancel: CancelFlag,
+    },
     /// Saved; the next frame closes the dialog (see `poll_device_setup`).
     Saved,
     /// Already saved; keep the recovery advice readable until dismissed.
@@ -63,33 +158,38 @@ pub(super) enum Step {
     FetchingKey(setup::Request),
     /// The user compares the host key's fingerprint before trusting it.
     TrustKey(setup::Request, NewHostKey),
-    /// Setup needs prompts, so the user decides whether to run it locally.
+    /// Setup needs approval or prompts before continuing.
     Confirm(setup::Request, Offer),
-    /// Checking the catalog on disk again before opening the setup workspace
-    /// for the offer the user accepted.
+    // Only interactive setup verifies, and Windows cannot host it yet.
+    #[cfg(unix)]
     Verifying(setup::Request, Offer),
-    /// Waiting for the window to show this computer's Herdr, whose surface
-    /// must be active before it creates a workspace (see `create_setup_space`).
-    Activating(setup::Request, setup::TerminalSetup, Offer),
-    /// Waiting for the local daemon to create the setup workspace.
-    Opening(setup::Request, LocalSpace),
-}
-
-/// The local workspace request whose root pane will run the setup command.
-pub(super) struct LocalSpace {
-    pub(super) request: String,
-    pub(super) boot: String,
-    /// The relay command the workspace's shell runs, and the setup it shows.
-    pub(super) setup: setup::TerminalSetup,
-    /// What the user accepted, so a retry after a failure runs it again.
-    pub(super) offer: Offer,
+    #[cfg(unix)]
+    Running(setup::Request, progress::Progress),
 }
 
 impl SheprdWindow {
     /// Set the SSH form's error, which stays with that form.
     pub(super) fn set_device_error(&mut self, error: Option<String>) {
+        self.set_device_failure(error, None);
+    }
+
+    /// As `set_device_error`, for a failure the dialog can say something useful
+    /// about. Both halves are written together, so an address is never shown
+    /// for a message that does not name it.
+    fn set_device_failure(&mut self, error: Option<String>, failure: Option<SshFailure>) {
         if let Some(setup) = &mut self.menu.device_setup {
-            setup.error = error;
+            setup.record(error, failure);
+        }
+    }
+
+    /// The SSH failure behind an error, when the error is one: an address is
+    /// offered beside a refusal only when the refusal itself carried it.
+    fn refused_failure(error: &crate::Error) -> Option<SshFailure> {
+        match error {
+            crate::Error::Client(sheprd_client::Error::Ssh(
+                sheprd_client::ssh::Error::Refused(failure),
+            )) => Some(failure.clone()),
+            _ => None,
         }
     }
 
@@ -125,7 +225,7 @@ impl SheprdWindow {
             {
                 setup.step = Step::Form;
                 setup.claim = None;
-                setup.error = None;
+                setup.clear_failure();
             }
             cx.notify();
         });
@@ -140,6 +240,7 @@ impl SheprdWindow {
             highlight: None,
             suggestion_scroll: ScrollHandle::new(),
             error: None,
+            ssh_failure: None,
             host_keys: HostKeys::Verify,
         });
         self.menu.page = Some(Page::AddDevice);
@@ -157,6 +258,18 @@ impl SheprdWindow {
         let Some(form) = &self.menu.device_setup else {
             return false;
         };
+        #[cfg(unix)]
+        if let Step::Running(_, progress) = &form.step {
+            if progress.response.read(cx).is_composing() {
+                return false;
+            }
+            match event.keystroke.key.as_str() {
+                "escape" => self.dismiss_menu(window, cx),
+                "enter" => self.respond_to_device_setup(None, cx),
+                _ => return false,
+            }
+            return true;
+        }
         if matches!(form.step, Step::SavedWarning(_)) {
             if matches!(event.keystroke.key.as_str(), "enter" | "escape") {
                 self.dismiss_menu(window, cx);
@@ -216,6 +329,10 @@ impl SheprdWindow {
         let Some(setup) = &self.menu.device_setup else {
             return frame(div(), cx);
         };
+        #[cfg(unix)]
+        if let Step::Running(request, progress) = &setup.step {
+            return frame(self.render_device_progress(request, progress, cx), cx);
+        }
         if let Step::SavedWarning(warning) = setup.step {
             return frame(self.render_device_saved_warning(warning, cx), cx);
         }
@@ -270,12 +387,35 @@ impl SheprdWindow {
             }
         }
         body = body.child(self.render_host_key_choice(setup, cx));
-        if let Some(error) = &setup.error {
+        if let Some(error) = setup.error() {
+            // A check Tailscale refused says so in its own words, and comes with
+            // the address that answers it. That check died with the connection
+            // which asked for it, so nothing is held open: opening the address
+            // is what lets the next check through, and the app never opens it.
+            let address = crate::tailscale::pending(setup.failure()).and_then(TailscaleCheck::url);
+            let shown = if address.is_some() {
+                // The dialog is already the form for this host, so the sentence
+                // does not name it again: it names what to open instead.
+                fl!("add-device-tailscale-refused")
+            } else {
+                error.to_owned()
+            };
             body = body.child(
                 div()
+                    .debug_selector(|| "device-setup-error".into())
                     .flex_none()
-                    .text_color(crate::menu::danger(theme))
-                    .child(error.clone()),
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(crate::menu::danger(theme))
+                            .child(shown),
+                    )
+                    .when_some(address, |row, url| {
+                        row.child(crate::tailscale::address_row(theme, url))
+                    }),
             );
         }
         let status = match &setup.step {
@@ -288,6 +428,9 @@ impl SheprdWindow {
                 Some(fl!("add-device-starting", target = request.target()))
             }
             Step::Saving(request, _) => Some(fl!("add-device-saving", target = request.target())),
+            Step::Installing { request, .. } => {
+                Some(fl!("add-device-installing-core", target = request.target()))
+            }
             Step::Saved | Step::SavedWarning(_) => None,
             Step::FetchingKey(request) => {
                 Some(fl!("add-device-fetching-key", target = request.target()))
@@ -300,10 +443,12 @@ impl SheprdWindow {
                 request.target(),
                 setup.claim.as_ref().map(setup::Claim::user),
             )),
+            #[cfg(unix)]
             Step::Verifying(request, _) => {
                 Some(fl!("add-device-verifying", target = request.target()))
             }
-            Step::Activating(..) | Step::Opening(..) => Some(fl!("add-device-opening")),
+            #[cfg(unix)]
+            Step::Running(..) => None,
         };
         if let Some(status) = status {
             body = body.child(
@@ -341,11 +486,14 @@ impl SheprdWindow {
         let cancel = button("device-setup-cancel", fl!("add-device-cancel").into(), true)
             .on_click(cx.listener(|this, _, _, cx| this.cancel_device_step(cx)));
         footer = match &setup.step {
-            Step::Confirm(..) if cfg!(windows) => footer.child(cancel),
+            Step::Confirm(_, offer) if cfg!(windows) && !offer.installs_core() => {
+                footer.child(cancel)
+            }
             Step::Confirm(_, offer) => footer.child(cancel).child(
                 button("device-setup-submit", offer.action().into(), true)
-                    .on_click(cx.listener(|this, _, _, cx| this.open_setup_space(cx))),
+                    .on_click(cx.listener(|this, _, _, cx| this.start_device_setup(cx))),
             ),
+            Step::Installing { .. } => footer.child(cancel),
             Step::AwaitingLocalNetwork(_) => footer
                 .children(self.local_network_settings_button("device-setup-settings", cx))
                 .child(cancel),
@@ -409,8 +557,8 @@ impl SheprdWindow {
         match &form.step {
             Step::Form => {}
             // Windows offers no terminal setup; the question says what to run.
-            Step::Confirm(..) if cfg!(windows) => return,
-            Step::Confirm(..) => return self.open_setup_space(cx),
+            Step::Confirm(_, offer) if cfg!(windows) && !offer.installs_core() => return,
+            Step::Confirm(..) => return self.start_device_setup(cx),
             _ => return,
         }
         let request = setup::Request::new(
@@ -418,7 +566,10 @@ impl SheprdWindow {
             form.fields[1].read(cx).text(),
             form.fields[2].read(cx).text(),
         )
-        .map(|request| request.with_host_keys(form.host_keys));
+        .map(|mut request| {
+            request.tmux = self.config.terminal_backend == crate::config::TerminalBackend::Tmux;
+            request.with_host_keys(form.host_keys)
+        });
         let request = match request.and_then(|request| {
             self.ensure_new_device(&request)?;
             Ok(request)
@@ -431,16 +582,29 @@ impl SheprdWindow {
                 return;
             }
         };
+        self.check_device_with_claim(request, None, cx);
+    }
+
+    pub(super) fn check_device_with_claim(
+        &mut self,
+        request: setup::Request,
+        claim: Option<setup::Claim>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(form) = &mut self.menu.device_setup else {
             return;
         };
         tracing::info!(category = "device_setup", "Checking device");
         form.step = Step::Checking(request.clone());
-        form.error = None;
+        form.claim = None;
+        form.clear_failure();
         // Claim before probing: a second add of this host, from any window of
         // this process, is refused from here on rather than after a slow probe.
         let background = cx.background_executor().spawn(async move {
-            let claim = setup::claim(&request)?;
+            let claim = match claim {
+                Some(claim) => setup::verify_unsaved(&request, &claim).map(|()| claim)?,
+                None => setup::claim(&request)?,
+            };
             Ok::<_, crate::Error>((claim, request.probe()))
         });
         form.task = Some(cx.spawn(async move |this, cx| {
@@ -530,7 +694,7 @@ impl SheprdWindow {
             return;
         }
         let offer = match probe {
-            Ok(probe) => match Offer::for_probe(probe) {
+            Ok(probe) => match Offer::for_probe(&probe) {
                 None => return self.save_device(request, probe, claim, cx),
                 Some(offer) => {
                     // Say what SSH refused, since the terminal may not need to.
@@ -539,11 +703,18 @@ impl SheprdWindow {
                     if let HostProbe::SshFailed(failure) = probe
                         && offer != Offer::InstallKey
                     {
-                        self.set_device_error(Some(fl!(
+                        let message = fl!(
                             "add-device-ssh-failed",
                             target = request.target(),
                             error = failure.to_string(),
-                        )));
+                        );
+                        // The failure travels with its message, because the
+                        // address a Tailscale check names is rendered beside it
+                        // as the one thing the user can act on. Storing the
+                        // message alone leaves that row with nothing to read:
+                        // the text has the address in it, but as prose, and
+                        // prose is not something a person can click.
+                        self.set_device_failure(Some(message), Some(failure));
                     }
                     offer
                 }
@@ -574,7 +745,7 @@ impl SheprdWindow {
         let Some(form) = &mut self.menu.device_setup else {
             return;
         };
-        form.step = Step::Saving(request.clone(), probe);
+        form.step = Step::Saving(request.clone(), probe.clone());
         // The claim travels with the save and comes back, so a failure that
         // offers a terminal still holds the host.
         let background = cx.background_executor().spawn(async move {
@@ -606,7 +777,8 @@ impl SheprdWindow {
                 if this.refuse_duplicate(&error, cx) {
                     return;
                 }
-                this.set_device_error(Some(error.to_string()));
+                let refused = Self::refused_failure(&error);
+                this.set_device_failure(Some(error.to_string()), refused);
                 let offer = match error {
                     crate::Error::Devices(super::Error::ServerRestart) => Offer::Restart,
                     _ => Offer::Terminal,
@@ -629,298 +801,16 @@ impl SheprdWindow {
             setup.claim = None;
             // Ends a wait for Local Network permission, which holds a claim.
             setup.task = None;
-            setup.error = None;
+            setup.clear_failure();
             cx.notify();
         }
     }
 
-    /// Check the catalog on disk once more, then ask the local daemon for a
-    /// workspace whose root pane runs the setup (see `poll_device_setup`).
-    fn open_setup_space(&mut self, cx: &mut Context<Self>) {
-        let Some(form) = &mut self.menu.device_setup else {
-            return;
-        };
-        let Step::Confirm(request, offer) = &form.step else {
-            return;
-        };
-        let (request, offer) = (request.clone(), *offer);
-        let claim = form.claim.take();
-        form.step = Step::Verifying(request.clone(), offer);
-        form.error = None;
-        let background = cx.background_executor().spawn(async move {
-            // A failed probe left no claim; take one now.
-            let claim = match claim {
-                Some(claim) => setup::verify_unsaved(&request, &claim).map(|()| claim),
-                None => setup::claim(&request),
-            }?;
-            // The setup runs here, with the user's login environment, which
-            // can block the first time it is read.
-            let terminal = setup::terminal_setup(&request, offer == Offer::InstallKey);
-            Ok::<_, crate::Error>((claim, terminal))
-        });
-        form.task = Some(cx.spawn(async move |this, cx| {
-            let result = background.await;
-            let _ = this.update(cx, |this, cx| this.setup_space_verified(result, cx));
-        }));
-        cx.notify();
-    }
-
-    pub(super) fn setup_space_verified(
-        &mut self,
-        result: crate::Result<(setup::Claim, crate::Result<setup::TerminalSetup>)>,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(Setup {
-            step: Step::Verifying(request, offer),
-            ..
-        }) = &self.menu.device_setup
-        else {
-            return;
-        };
-        let (request, offer) = (request.clone(), *offer);
-        let (claim, terminal) = match result {
-            Ok(verified) => verified,
-            Err(error) => {
-                tracing::warn!(
-                    category = "device_setup",
-                    "Device setup verification failed"
-                );
-                if !self.refuse_duplicate(&error, cx) {
-                    self.set_device_error(Some(fl!(
-                        "add-device-open-failed",
-                        error = error.to_string()
-                    )));
-                    if let Some(form) = &mut self.menu.device_setup {
-                        form.step = Step::Confirm(request, offer);
-                    }
-                    cx.notify();
-                }
-                return;
-            }
-        };
-        let Some(form) = &mut self.menu.device_setup else {
-            return;
-        };
-        form.claim = Some(claim);
-        let setup = match terminal {
-            Ok(setup) => setup,
-            Err(error) => return self.fail_setup_space(request, offer, &error, cx),
-        };
-        // Herdr refuses commands from a connection whose surface is inactive,
-        // as Local's is while the window shows another device, so the window
-        // moves to Local first; it ends there anyway once the setup opens.
-        // Switching closes every dialog, so this one is put back over Local.
-        let (page, form) = (self.menu.page, self.menu.device_setup.take());
-        let selected = self.select_endpoint(crate::endpoint::LOCAL, cx);
-        (self.menu.page, self.menu.device_setup) = (page, form);
-        if !selected {
-            return self.fail_setup_space(request, offer, &crate::Error::NotConnected, cx);
-        }
-        if let Some(form) = &mut self.menu.device_setup {
-            form.step = Step::Activating(request, setup, offer);
-        }
-        self.create_setup_space(cx);
-    }
-
-    /// Asks the local daemon for the setup workspace once the window has
-    /// queued Local's surface activation. The request follows it on the same
-    /// ordered connection, so Herdr handles it with the surface active.
-    pub(super) fn create_setup_space(&mut self, cx: &mut Context<Self>) {
-        let Some(Setup {
-            step: Step::Activating(..),
-            ..
-        }) = &self.menu.device_setup
-        else {
-            return;
-        };
-        let local = &self.endpoints[0];
-        let connected = local.live.status.is_connected();
-        if self.selected_endpoint == 0 && connected && !local.surface_requested() {
-            // The next poll activates the surface.
-            return;
-        }
-        let result = (|| {
-            if self.selected_endpoint != 0 {
-                return Err(crate::Error::StaleConnection);
-            }
-            let boot = local
-                .live
-                .snapshot
-                .as_ref()
-                .filter(|_| connected)
-                .map(|snapshot| snapshot.boot_id.clone())
-                .ok_or(crate::Error::NotConnected)?;
-            let Some(Setup {
-                step: Step::Activating(request, ..),
-                ..
-            }) = &self.menu.device_setup
-            else {
-                return Err(crate::Error::StaleConnection);
-            };
-            local
-                .connection
-                .request_dialog(
-                    &boot,
-                    Method::WorkspaceCreate,
-                    serde_json::json!({
-                        "focus": true,
-                        // Written into the daemon, which every client
-                        // shows, so it is not in this window's language.
-                        "label": format!("Set up {}", request.label()), // i18n: data
-                    }),
-                )
-                .map(|id| (id, boot))
-        })();
-        let Some(form) = &mut self.menu.device_setup else {
-            return;
-        };
-        let Step::Activating(request, setup, offer) = std::mem::replace(&mut form.step, Step::Form)
-        else {
-            return;
-        };
-        match result {
-            Ok((id, boot)) => {
-                form.step = Step::Opening(
-                    request,
-                    LocalSpace {
-                        request: id,
-                        boot,
-                        setup,
-                        offer,
-                    },
-                );
-                cx.notify();
-            }
-            Err(error) => self.fail_setup_space(request, offer, &error, cx),
-        }
-    }
-
-    /// Back to the question, keeping the claim for a retry.
-    fn fail_setup_space(
-        &mut self,
-        request: setup::Request,
-        offer: Offer,
-        error: &crate::Error,
-        cx: &mut Context<Self>,
-    ) {
-        tracing::warn!(category = "device_setup", "Setup workspace failed");
-        if let Some(form) = &mut self.menu.device_setup {
-            form.step = Step::Confirm(request, offer);
-        }
-        self.set_device_error(Some(fl!(
-            "add-device-open-failed",
-            error = error.to_string()
-        )));
-        cx.notify();
-    }
-
-    /// Runs the setup command in the workspace the local daemon created, then
-    /// shows it. The command is typed into the pane's shell: the endpoint API
-    /// has no method that starts a command in a pane.
     pub(crate) fn poll_device_setup(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.poll_saved_device(window, cx) {
-            return;
+        // Windows has no interactive setup to poll once nothing was saved.
+        if !self.poll_saved_device(window, cx) {
+            #[cfg(unix)]
+            self.poll_device_progress(window, cx);
         }
-        self.create_setup_space(cx);
-        let Some(Setup {
-            step: Step::Opening(_, space),
-            ..
-        }) = &self.menu.device_setup
-        else {
-            return;
-        };
-        let local = &self.endpoints[0];
-        let fail = |this: &mut Self, error: String, cx: &mut Context<Self>| {
-            tracing::warn!(category = "device_setup", "Setup workspace failed");
-            if let Some(form) = &mut this.menu.device_setup
-                && let Step::Opening(request, space) = &form.step
-            {
-                form.step = Step::Confirm(request.clone(), space.offer);
-            }
-            this.set_device_error(Some(fl!("add-device-open-failed", error = error)));
-            cx.notify();
-        };
-        let current = local.live.status.is_connected()
-            && local
-                .live
-                .snapshot
-                .as_ref()
-                .is_some_and(|snapshot| snapshot.boot_id == space.boot);
-        if !current {
-            return fail(self, crate::Error::StaleConnection.to_string(), cx);
-        }
-        let Some((id, Some(result))) = &local.live.dialog_response else {
-            return;
-        };
-        if id != &space.request {
-            return;
-        }
-        let response = match result {
-            Ok(response) => response,
-            Err(error) => return fail(self, error.to_string(), cx),
-        };
-        if let Some(error) = response.get("error") {
-            let (code, message) = crate::menu::endpoint_error(error);
-            return fail(self, format!("{code}: {message}"), cx);
-        }
-        let result = &response["result"];
-        let created = (result["type"] == "workspace_created")
-            .then(|| {
-                Some((
-                    result["workspace"]["workspace_id"].as_str()?,
-                    result["root_pane"]["pane_id"].as_str()?,
-                ))
-            })
-            .flatten()
-            .filter(|(workspace, pane)| !workspace.is_empty() && !pane.is_empty());
-        let Some((workspace, pane)) = created else {
-            return fail(self, fl!("add-device-unexpected-response"), cx);
-        };
-        let (workspace, pane) = (workspace.to_owned(), pane.to_owned());
-        let sent = local
-            .connection
-            .handle
-            .as_ref()
-            .ok_or(crate::Error::NotConnected)
-            .and_then(|handle| {
-                Ok(handle.send_input(
-                    &space.boot,
-                    &pane,
-                    [
-                        ClientPaneInputEvent::TextCommit(space.setup.command.clone()),
-                        enter(),
-                    ],
-                )?)
-            });
-        if let Err(error) = sent {
-            return fail(self, error.to_string(), cx);
-        }
-        // The setup outlives this dialog: its relay keeps waiting, and keeps
-        // the host claimed until the setup ends, however it ends, so this
-        // process cannot start a second add meanwhile, nor stay locked out.
-        if let Some(form) = self.menu.device_setup.as_mut()
-            && let Step::Opening(_, space) = &mut form.step
-            && let Some(claim) = form.claim.take()
-        {
-            space.setup.relay.keep(claim);
-        }
-        let local = local.id.clone();
-        self.dismiss_menu(window, cx);
-        self.navigate_endpoint(&local, NavigationTarget::Workspace(&workspace), cx);
-    }
-}
-
-/// The Enter key, which submits a line typed into a pane's shell.
-pub(crate) fn enter() -> ClientPaneInputEvent {
-    ClientPaneInputEvent::Key {
-        code: ClientKeyCode::Enter,
-        modifiers: 0,
-        kind: ClientKeyKind::Press,
-        repeat_count: 1,
-        shifted_codepoint: None,
-        generated_text: None,
-        tracks_release: false,
-        physical_key_id: None,
-        windows_record: None,
     }
 }

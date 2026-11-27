@@ -16,6 +16,8 @@ pub mod core_target;
 pub mod desktop;
 mod error;
 #[cfg(feature = "server")]
+pub mod fleet;
+#[cfg(feature = "server")]
 mod hub;
 #[cfg(feature = "server")]
 mod load;
@@ -28,6 +30,8 @@ mod relay;
 pub mod relay_label;
 #[cfg(feature = "server")]
 pub mod server;
+#[cfg(feature = "server")]
+pub mod sharing;
 #[cfg(feature = "server")]
 mod ssh_access;
 #[cfg(feature = "server")]

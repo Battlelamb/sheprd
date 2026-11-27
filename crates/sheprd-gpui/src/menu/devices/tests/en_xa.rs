@@ -69,12 +69,24 @@ fn the_ssh_form_shows_only_messages_at_each_step_under_en_xa() {
         assert_translated("Add Device", &recorder.take(), &data);
 
         let request = || setup::Request::new("dev@box", "", "").unwrap();
-        for (name, step) in [
+        let mut steps = vec![
             ("checking", Step::Checking(request())),
             ("starting", Step::Saving(request(), HostProbe::Stopped)),
             ("saving", Step::Saving(request(), HostProbe::Running)),
+            (
+                "installing herdr-core",
+                Step::Installing {
+                    request: request(),
+                    offer: Offer::Install,
+                    _cancel: super::super::add_device::CancelFlag::new(),
+                },
+            ),
             ("fetching the key", Step::FetchingKey(request())),
-            ("verifying", Step::Verifying(request(), Offer::Install)),
+        ];
+        // Only interactive setup verifies; Windows has none yet.
+        #[cfg(unix)]
+        steps.push(("verifying", Step::Verifying(request(), Offer::Install)));
+        steps.extend([
             ("waiting on macOS", Step::AwaitingLocalNetwork(request())),
             ("install", Step::Confirm(request(), Offer::Install)),
             ("update", Step::Confirm(request(), Offer::Update)),
@@ -85,7 +97,8 @@ fn the_ssh_form_shows_only_messages_at_each_step_under_en_xa() {
                 "saved with a warning",
                 Step::SavedWarning(setup::SaveOutcome::ExistingServer.warning().unwrap()),
             ),
-        ] {
+        ]);
+        for (name, step) in steps {
             show(&view, cx, step);
             assert_translated(&format!("Add Device ({name})"), &recorder.take(), &[]);
         }

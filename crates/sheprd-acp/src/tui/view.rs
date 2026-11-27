@@ -3,17 +3,15 @@
 
 use std::collections::HashMap;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind};
 use ratatui::text::Line;
 use sheprd_chat_protocol::{
-    Attachment, Change, Command, Cursor, Device, EntryId, MAX_ATTACHMENTS, Origin, Rejection,
-    ServerMessage, Status, Transcript, Via,
+    Attachment, ByeReason, Change, Command, Cursor, Device, EntryId, MAX_ATTACHMENTS, Origin,
+    Rejection, ServerMessage, Status, Transcript, Via,
 };
 use unicode_width::UnicodeWidthChar;
 
 use sheprd_chat_protocol::assist::{self, History};
-
-use super::lines;
 
 /// Where a prompt typed in this view comes from: the terminal of the
 /// machine the agent runs on.
@@ -23,7 +21,25 @@ const TYPED_HERE: Origin = Origin::new(Device::Terminal, Via::Local);
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Out {
     Command(Command),
-    Quit,
+    Quit(Quit),
+}
+
+/// The key that closed the view, said in the pane once it closes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Quit {
+    /// Ctrl+C pressed twice with nothing to clear or cancel.
+    CtrlC,
+    /// Ctrl+D on an empty prompt.
+    CtrlD,
+}
+
+impl std::fmt::Display for Quit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::CtrlC => "Ctrl+C was pressed twice",
+            Self::CtrlD => "Ctrl+D was pressed on an empty prompt",
+        })
+    }
 }
 
 /// What a message from the session meant for the view.
@@ -32,8 +48,8 @@ pub(crate) enum Received {
     Applied,
     /// The view lost track and must attach again for a snapshot.
     Resync,
-    /// The session ended.
-    Closed,
+    /// The session ended, saying why.
+    Closed(ByeReason),
 }
 
 #[derive(Default)]
@@ -153,6 +169,16 @@ pub(crate) struct View {
 }
 
 impl View {
+    /// Scroll the transcript with the wheel without changing prompt history.
+    pub(crate) fn mouse(&mut self, kind: MouseEventKind) {
+        const WHEEL_LINES: usize = 3;
+        match kind {
+            MouseEventKind::ScrollUp => self.scroll = self.scroll.saturating_add(WHEEL_LINES),
+            MouseEventKind::ScrollDown => self.scroll = self.scroll.saturating_sub(WHEEL_LINES),
+            _ => {}
+        }
+    }
+
     pub(crate) fn cursor(&self) -> Option<Cursor> {
         self.cursor
     }
@@ -179,7 +205,7 @@ impl View {
             ServerMessage::Ack { rejected, .. } => {
                 self.flash = rejected.map(|rejected: Rejection| rejected.to_string());
             }
-            ServerMessage::Bye { .. } => return Received::Closed,
+            ServerMessage::Bye { reason } => return Received::Closed(reason),
         }
         if self.choice >= self.options() {
             self.choice = 0;
@@ -213,7 +239,8 @@ impl View {
             .map_or(0, |permission| permission.options.len())
     }
 
-    /// Every transcript line at `width` columns, from cached entries.
+    /// Every transcript line at `width` columns, as a timeline of cached
+    /// entries.
     pub(crate) fn lines(&mut self, width: usize) -> Vec<Line<'static>> {
         if width != self.cache_width {
             self.cache.clear();
@@ -226,13 +253,13 @@ impl View {
                 ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
             ));
         }
-        for entry in &self.transcript.entries {
-            let lines = self
-                .cache
-                .entry(entry.id)
-                .or_insert_with(|| lines::entry(entry, width));
-            out.extend(lines.iter().cloned());
-        }
+        out.extend(super::timeline::lines(
+            &self.transcript.entries,
+            self.transcript.thread.as_ref(),
+            &self.transcript.agent,
+            width,
+            &mut self.cache,
+        ));
         out
     }
 
@@ -353,7 +380,7 @@ impl View {
         }
         match key.code {
             KeyCode::Char('c') if ctrl => return self.interrupt(),
-            KeyCode::Char('d') if ctrl && empty => return Some(Out::Quit),
+            KeyCode::Char('d') if ctrl && empty => return Some(Out::Quit(Quit::CtrlD)),
             KeyCode::Char('j') if ctrl => self.composer.insert("\n"),
             KeyCode::Enter if alt || shift => self.composer.insert("\n"),
             KeyCode::Enter if asking && empty => return self.answer(self.choice),
@@ -432,7 +459,7 @@ impl View {
             return self.cancel();
         }
         if self.quit_armed {
-            return Some(Out::Quit);
+            return Some(Out::Quit(Quit::CtrlC));
         }
         self.quit_armed = true;
         self.flash = Some("Press Ctrl+C again to quit".to_owned());

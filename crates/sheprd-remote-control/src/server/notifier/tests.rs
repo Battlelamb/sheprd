@@ -3,7 +3,10 @@ use uuid::Uuid;
 
 mod alerts;
 mod badge;
+mod own_session;
 mod presence;
+mod relay;
+mod relay_off;
 mod terminals;
 
 #[test]
@@ -13,6 +16,7 @@ fn a_copy_skips_the_changes_it_already_holds() {
     let base = Base {
         transcript: Transcript::default(),
         cursor: Some(at(5)),
+        pull: TurnPull::default(),
     };
     assert!(base.includes(at(4)));
     assert!(base.includes(at(5)));
@@ -25,6 +29,7 @@ fn a_copy_skips_the_changes_it_already_holds() {
     let unknown = Base {
         transcript: Transcript::default(),
         cursor: None,
+        pull: TurnPull::default(),
     };
     assert!(!unknown.includes(at(1)));
 }

@@ -207,7 +207,10 @@ fn new_window(
     outbox: &Outbox,
 ) -> wry::NewWindowResponse {
     #[cfg(target_os = "macos")]
-    if let (Some(mtm), Ok(address)) = (objc2::MainThreadMarker::new(), WebUrl::try_from(&*url)) {
+    if let (Some(mtm), Ok(address)) = (objc2::MainThreadMarker::new(), WebUrl::try_from(&*url))
+        && !features.opener.webview.isHiddenOrHasHiddenAncestor()
+        && objc2_app_kit::NSApplication::sharedApplication(mtm).isActive()
+    {
         let key = NEXT_POPUP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let source = Source::Popup(key);
         let builder = with_handlers(wry::WebViewBuilder::new(), source, outbox);
@@ -280,12 +283,6 @@ impl Pages {
         self.drawn.clone()
     }
 
-    /// Where tab `id`'s page drew last, if it is laid out.
-    #[cfg(target_os = "macos")]
-    pub(crate) fn drawn_at(&self, id: TabId) -> Option<gpui::Bounds<gpui::Pixels>> {
-        self.drawn.borrow().get(&id).copied()
-    }
-
     /// Starts the next frame's record of where pages draw. The window calls
     /// it as it presents the pages, before they lay out.
     pub(crate) fn next_frame(&self) {
@@ -314,6 +311,20 @@ impl Pages {
         window: &mut Window,
         cx: &mut Context<SheprdWindow>,
     ) -> crate::Result<()> {
+        // A machine's display takes a page's place, without a web view. The
+        // machine runs on this computer, so a tab of another host's
+        // workspace never gets it.
+        #[cfg(target_os = "macos")]
+        if let Some(Location::Machine { name }) = &tab.location {
+            if !tab.scope.is_local() || self.pages.contains_key(&tab.id) {
+                return Ok(());
+            }
+            let view = crate::machine::view(name, cx)?;
+            super::page_keys::install();
+            self.pages
+                .insert(tab.id, Rc::new(Page::machine(view, window)?));
+            return Ok(());
+        }
         // A review tab is drawn by the app; only pages get a web view.
         let Some(location) = tab
             .location
@@ -343,7 +354,9 @@ impl Pages {
             | Location::Code { .. }
             | Location::Orchestrator { .. }
             | Location::Devices
-            | Location::CoreTerminal { .. } => None,
+            | Location::CoreTerminal { .. }
+            | Location::Machine { .. }
+            | Location::RemoteMachine { .. } => None,
         };
         // Only a local page, which the agent wrote, gets `herdr.send`.
         let bridge = if root.is_some() {
@@ -352,6 +365,8 @@ impl Pages {
             ""
         };
         let builder = with_handlers(wry::WebViewBuilder::new(), Source::Tab(id), &self.outbox)
+            .with_focused(false)
+            .with_visible(false)
             .with_initialization_script(bridge)
             .with_url(location.page_url())
             .with_asynchronous_custom_protocol(
@@ -450,7 +465,7 @@ impl Pages {
         #[cfg(target_os = "macos")]
         self.parked
             .entry(id)
-            .or_insert_with(|| super::parking::park(page.raw()));
+            .or_insert_with(|| super::parking::park(&page.native()));
     }
 
     /// Shows tab `id`'s page, back where it was.
@@ -460,7 +475,7 @@ impl Pages {
         };
         #[cfg(target_os = "macos")]
         if let Some(place) = self.parked.remove(&id) {
-            super::parking::unpark(page.raw(), place);
+            super::parking::unpark(&page.native(), place);
         }
         page.show();
     }
@@ -552,7 +567,8 @@ impl Pages {
         }
         let url = location.page_url();
         if let Some(page) = self.pages.get(&id)
-            && let Err(error) = page.raw().load_url(&url)
+            && let Some(view) = page.web()
+            && let Err(error) = view.load_url(&url)
         {
             tracing::debug!(%error, "Browser navigation failed");
         }
@@ -562,7 +578,8 @@ impl Pages {
     /// text: data goes in as JSON.
     pub(crate) fn script(&self, id: TabId, script: &str) {
         if let Some(page) = self.pages.get(&id)
-            && let Err(error) = page.raw().evaluate_script(script)
+            && let Some(view) = page.web()
+            && let Err(error) = view.evaluate_script(script)
         {
             tracing::debug!(%error, "Browser script failed");
         }
@@ -578,7 +595,8 @@ impl Pages {
 
     pub(crate) fn reload(&self, id: TabId) {
         if let Some(page) = self.pages.get(&id)
-            && let Err(error) = page.raw().reload()
+            && let Some(view) = page.web()
+            && let Err(error) = view.reload()
         {
             tracing::debug!(%error, "Browser reload failed");
         }
@@ -594,7 +612,10 @@ impl Pages {
             // The picker measures `rect` in CSS pixels, which a zoomed page
             // draws larger in the view.
             let rect = page.drawn_zoom().view_rect(rect);
-            super::snapshot::capture(page.raw(), rect, move |tiff| {
+            let Some(view) = page.web() else {
+                return false;
+            };
+            super::snapshot::capture(view, rect, true, move |tiff| {
                 report(&sender, Event::Captured(Source::Tab(id), capture, tiff));
             });
             return true;

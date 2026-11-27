@@ -8,13 +8,22 @@ mod checkouts;
 mod convert;
 mod create;
 pub(super) use create::Place;
+#[cfg(feature = "tmux")]
+pub(super) use create::place_labels;
+pub(crate) use saved::TabRef;
 mod error;
 mod hold;
 mod job;
+mod kept;
+#[cfg(feature = "tmux")]
+pub(super) use kept::tmux_placements;
 mod lines;
+mod new_workspace;
 mod own;
 mod poller;
 mod projection;
+#[cfg(feature = "tmux")]
+pub(super) use projection::read as read_tabs;
 mod saved;
 mod screen;
 mod spaces;
@@ -52,6 +61,24 @@ const NEW_WORKSPACE: &str = "core:new:";
 const PREFIX: &str = "core:";
 /// Where terminals nothing else lists go, new ones from a phone included.
 pub(super) const UNLISTED: &str = "core:terminals";
+
+/// What a core whose desktop document is `spaces` and whose terminals are
+/// `terminals` lists, for other modules' tests.
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+pub(crate) fn project_spaces(boot: &str, spaces: Value, terminals: &[Terminal]) -> Layout {
+    let mut poller = poller::Poller::default();
+    poller
+        .read_spaces(
+            boot,
+            Ok(sheprd_core_client::wire::Doc {
+                value: spaces,
+                version: 1,
+            }),
+        )
+        .expect("spaces read");
+    poller.project(boot, terminals, None, None)
+}
 
 /// The workspace a phone's new workspace in `cwd` is listed as until
 /// Sheprd keeps one for it: named for its folder, so it keeps its id
@@ -119,13 +146,14 @@ impl Source {
         target: &sheprd_client::ConnectTarget,
         endpoint: crate::core_target::CoreTarget,
         state_dir: &std::path::Path,
+        sessions: Arc<super::sessions::Sessions>,
     ) -> std::io::Result<Arc<Self>> {
         let source = Arc::new(Self {
             connected: AtomicBool::new(false),
             endpoint,
             holds: AtomicU64::new(0),
             own: Mutex::new(own::Store::load(state_dir)),
-            poller: Mutex::default(),
+            poller: Mutex::new(poller::Poller::following(sessions)),
             scope: target
                 .socket_path()
                 .ok()
@@ -142,6 +170,14 @@ impl Source {
 
     pub(super) fn connected(&self) -> bool {
         self.connected.load(Ordering::Acquire)
+    }
+
+    /// Maps a desktop herdr-core terminal address (e.g. `t4t` from `core:t4t`)
+    /// to the boot-scoped pane key (`control::favorites::core_pane`) that the
+    /// hub's chat table uses.
+    pub(super) fn pane_id_for_address(&self, address: &str) -> Option<String> {
+        let core = lock(&self.state).core.clone()?;
+        Some(pane_id(&core.hello().core.id, address))
     }
 
     /// The connection, made again when it was lost.
@@ -177,6 +213,7 @@ impl Source {
         let next = {
             let mut poller = lock(&self.poller);
             poller.read_spaces(&boot, core.doc_get("herdr-app"))?;
+            poller.read_shared(core.doc_get(sheprd_session::spaces::DOC))?;
             let mut next = poller.project(
                 &boot,
                 &terminals,
@@ -193,6 +230,9 @@ impl Source {
             own.layouts.apply(&mut next, &boot, &terminals);
             drop(own);
             chats::lift(&mut next, &boot, &terminals);
+            poller
+                .times
+                .stamp_statuses(&boot, &mut next, crate::web::now_ms());
             next
         };
         let tabs = create::tab_panes(&next);
@@ -234,6 +274,16 @@ impl Source {
         screen.call(&core, method, params)
     }
 
+    /// Turns the wheel for the program `pane` runs; false when it reads
+    /// none. Blocking.
+    pub(super) fn wheel(&self, pane: &str, lines: i32) -> Result<bool> {
+        let (core, terminal) = self.terminal(pane)?;
+        let screen = self.screen(&core, &terminal)?;
+        let mut screen = lock(&screen);
+        screen.follow_size(&terminal)?;
+        screen.send_wheel(&core, lines)
+    }
+
     /// The connection and the terminal `pane` names, as the last poll saw.
     fn terminal(&self, pane: &str) -> Result<(Arc<Core>, Terminal)> {
         let state = lock(&self.state);
@@ -246,6 +296,14 @@ impl Source {
             .cloned()
             .ok_or(HubError::Response)?;
         Ok((core, terminal))
+    }
+
+    /// `pane`'s screen as text, which the core reads itself: no shared
+    /// screen is opened, so this never holds one a phone needs to open
+    /// another terminal. Blocking.
+    pub(super) fn screen_text(&self, pane: &str) -> Result<String> {
+        let (core, terminal) = self.terminal(pane)?;
+        Ok(core.read(&terminal.address)?.text)
     }
 
     /// The shared screen of `terminal`, opened outside the state lock.
@@ -379,14 +437,9 @@ fn id(address: &str) -> String {
     id
 }
 
-/// A pane's id. Addresses survive a core restart but start over when its
-/// state is wiped, which also gives the core a new id: naming the core
-/// keeps an open phone view from landing on an unrelated new terminal.
+/// A pane's id, which favorites share (`control::favorites::core_pane`).
 fn pane_id(boot: &str, address: &str) -> String {
-    let tag = boot.bytes().fold(0x811c_9dc5_u32, |hash, byte| {
-        (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
-    });
-    format!("{PREFIX}{tag:08x}-{}", &id(address)[PREFIX.len()..])
+    crate::control::favorites::core_pane(boot, address)
 }
 
 pub(super) fn owns(params: &Value) -> bool {
@@ -404,20 +457,24 @@ fn merge(daemon: &Layout, core: &Layout) -> Layout {
     if !daemon.connected {
         merged.boot = core.boot.clone();
     }
+    let mut room = super::layout::MAX_CHATS.saturating_sub(merged.chats().count());
     for workspace in &core.workspaces {
         // An empty stand-in shows only when nothing else is listed (below).
         if empty_unlisted(workspace) {
             continue;
         }
+        let mut workspace = workspace.clone();
+        workspace.chats.truncate(room);
+        room -= workspace.chats.len();
         if let Some(existing) = merged
             .workspaces
             .iter_mut()
             .find(|row| row.id == workspace.id)
         {
-            existing.chats.extend(workspace.chats.clone());
-            existing.terminals.extend(workspace.terminals.clone());
+            existing.chats.extend(workspace.chats);
+            existing.terminals.extend(workspace.terminals);
         } else {
-            merged.workspaces.push(workspace.clone());
+            merged.workspaces.push(workspace);
         }
     }
     // A core with nothing in it, as one just started after a reboot, still
@@ -493,7 +550,7 @@ pub(super) fn tests_support_source(
     }
 }
 
-fn tabs_path(state_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+pub(super) fn tabs_path(state_dir: &std::path::Path) -> Option<std::path::PathBuf> {
     state_dir.parent().map(|dir| dir.join("browser-tabs.json"))
 }
 

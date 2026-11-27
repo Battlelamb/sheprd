@@ -95,7 +95,13 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) -> Option<Stateful<Div>> {
         let theme = &self.theme;
-        let queued = &chat.session.transcript().queued;
+        let transcript = chat.session.transcript();
+        let queued = &transcript.queued;
+        let steer = transcript.turn.is_some()
+            && transcript
+                .session
+                .as_ref()
+                .is_some_and(|session| session.can_steer);
         if queued.is_empty() {
             return None;
         }
@@ -105,6 +111,85 @@ impl SheprdWindow {
             .map(|(index, queued)| {
                 let pane_id = chat.target.pane_id.clone();
                 let id = queued.id;
+                // A steered prompt is already with the agent, waiting for
+                // its next step, so it cannot be withdrawn or sent again.
+                // One held by a stop waits until sent now.
+                let label = if queued.steered {
+                    fl!("chat-steering")
+                } else if queued.held {
+                    fl!("chat-held")
+                } else {
+                    fl!("chat-queued")
+                };
+                let send_pane = pane_id.clone();
+                let send_now = (!queued.steered).then(|| {
+                    let action = if steer { "chat-steer" } else { "chat-send-now" };
+                    div()
+                        .id((action, index))
+                        .debug_selector(move || format!("{action}-{index}"))
+                        .role(Role::Button)
+                        .flex_none()
+                        .rounded(px(corners::SMALL))
+                        .cursor_pointer()
+                        .text_color(rgb(theme.primary()))
+                        .hover(|button| button.bg(rgb(theme.active)))
+                        .when(steer, |button| {
+                            let (foreground, surface) = (theme.foreground, theme.surface);
+                            let hint = SharedString::from(fl!("chat-steer-hint"));
+                            button
+                                .aria_label(hint.clone())
+                                .size(px(24.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    svg()
+                                        .path("icons/steer.svg")
+                                        .size(px(15.))
+                                        .text_color(rgb(theme.primary())),
+                                )
+                                .tooltip(move |_, cx| {
+                                    cx.new(|_| crate::menu::SettingsHint {
+                                        text: hint.clone(),
+                                        foreground,
+                                        surface,
+                                    })
+                                    .into()
+                                })
+                        })
+                        .when(!steer, |button| {
+                            button.px(px(6.)).child(fl!("chat-send-now"))
+                        })
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            cx.stop_propagation();
+                            this.chat_send(&send_pane, Command::SendNow { id }, cx);
+                        }))
+                });
+                let withdraw = (!queued.steered).then(|| {
+                    div()
+                        .id(("chat-unqueue", index))
+                        .debug_selector(move || format!("chat-unqueue-{index}"))
+                        .flex_none()
+                        .size(px(18.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(corners::SMALL))
+                        .cursor_pointer()
+                        .hover(|button| button.bg(rgb(theme.active)))
+                        .child(
+                            svg()
+                                .path("icons/close.svg")
+                                .size(px(10.))
+                                .text_color(rgb(theme.foreground)),
+                        )
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            cx.stop_propagation();
+                            this.chat_send(&pane_id, Command::Unqueue { id }, cx);
+                        }))
+                });
                 div()
                     .flex_none()
                     .flex()
@@ -116,12 +201,7 @@ impl SheprdWindow {
                     .py(px(2.))
                     .rounded(px(corners::SMALL))
                     .bg(rgb(theme.surface))
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_color(rgb(theme.muted))
-                            .child(fl!("chat-queued")),
-                    )
+                    .child(div().flex_none().text_color(rgb(theme.muted)).child(label))
                     .child(
                         div()
                             .flex_1()
@@ -129,30 +209,8 @@ impl SheprdWindow {
                             .truncate()
                             .child(safe_text(&queued.text, QUEUED)),
                     )
-                    .child(
-                        div()
-                            .id(("chat-unqueue", index))
-                            .debug_selector(move || format!("chat-unqueue-{index}"))
-                            .flex_none()
-                            .size(px(18.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(corners::SMALL))
-                            .cursor_pointer()
-                            .hover(|button| button.bg(rgb(theme.active)))
-                            .child(
-                                svg()
-                                    .path("icons/close.svg")
-                                    .size(px(10.))
-                                    .text_color(rgb(theme.foreground)),
-                            )
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                                cx.stop_propagation();
-                                this.chat_send(&pane_id, Command::Unqueue { id }, cx);
-                            })),
-                    )
+                    .children(send_now)
+                    .children(withdraw)
             })
             .collect();
         // A height-limited list that scrolls, so a long queue keeps every

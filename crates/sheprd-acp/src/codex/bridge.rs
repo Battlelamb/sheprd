@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 
 use super::{approval, background, background::Background, items, settings::Settings};
 use crate::{
-    harness::{Out, Translator, out},
+    harness::{Out, Translator, out, steer},
     project::{STOP_METHOD, Tag},
     rpc::Inbound,
 };
@@ -27,6 +27,11 @@ enum Pending {
     Thread(wire::RequestId),
     /// `turn/start`, answering nothing itself: the turn ends the prompt.
     Turn,
+    /// `turn/steer`, answering the session's steered prompt `prompt`.
+    Steer {
+        acp: wire::RequestId,
+        prompt: uuid::Uuid,
+    },
     Interrupt,
     /// `turn/interrupt` of a sub-agent's turn, which says when it fails.
     StopActivity,
@@ -149,6 +154,7 @@ impl Bridge {
                 self.open()
             }
             "session/prompt" => self.prompt(id, &params),
+            steer::METHOD => self.steer(id, params),
             "session/set_mode" => {
                 let mode = field("modeId").unwrap_or_default();
                 let result = if self.settings.set_mode(&mode) {
@@ -215,6 +221,37 @@ impl Bridge {
         turn.insert("threadId".to_owned(), json!(thread));
         turn.insert("input".to_owned(), Value::Array(input));
         vec![self.call("turn/start", Value::Object(turn), Pending::Turn)]
+    }
+
+    /// Adds a prompt to the running turn, which Codex reads at its next
+    /// step; one that comes after the turn ended is refused.
+    fn steer(&mut self, id: wire::RequestId, params: Value) -> Vec<Out> {
+        let Ok(request) = serde_json::from_value::<steer::Steer>(params) else {
+            return vec![out::reply(id, Err(wire::Error::invalid_params()))];
+        };
+        let (Some(thread), Some(turn), Some(_), false) = (
+            self.thread.clone(),
+            self.turn.clone(),
+            self.prompt.as_ref(),
+            self.interrupting,
+        ) else {
+            return vec![out::reply(id, Err(out::failure("No turn is running.")))];
+        };
+        let input: Vec<Value> = request.prompt.iter().filter_map(input).collect();
+        let params = json!({
+            "threadId": thread,
+            "expectedTurnId": turn,
+            "input": input,
+            "clientUserMessageId": request.id.to_string(),
+        });
+        vec![self.call(
+            "turn/steer",
+            params,
+            Pending::Steer {
+                acp: id,
+                prompt: request.id,
+            },
+        )]
     }
 
     fn cancel(&mut self) -> Vec<Out> {
@@ -307,6 +344,15 @@ impl Bridge {
                         .into_iter()
                         .collect()
                 }
+            },
+            // Codex took the prompt into the turn's input, read at its next
+            // step.
+            Pending::Steer { acp, prompt } => match result {
+                Ok(_) => vec![
+                    steer::steered(self.session(), prompt),
+                    out::reply(acp, Ok(json!({}))),
+                ],
+                Err(message) => vec![out::reply(acp, Err(out::failure(message)))],
             },
             Pending::Interrupt => Vec::new(),
             Pending::StopActivity => result
@@ -597,8 +643,8 @@ impl Bridge {
     }
 }
 
-/// One block of an ACP prompt as Codex's input. A file sent as a link is a
-/// mention, which Codex reads itself.
+/// One block of an ACP prompt as Codex's input. Resource links must be text:
+/// Codex mentions select apps/plugins and do not put file paths in model input.
 fn input(block: &wire::ContentBlock) -> Option<Value> {
     let text = |text: String| Some(json!({"type": "text", "text": text, "text_elements": []}));
     match block {
@@ -613,11 +659,11 @@ fn input(block: &wire::ContentBlock) -> Option<Value> {
             }
             _ => None,
         },
-        wire::ContentBlock::ResourceLink(link) => Some(json!({
-            "type": "mention",
-            "name": link.name,
-            "path": out::file_path(&link.uri),
-        })),
+        wire::ContentBlock::ResourceLink(link) => text(format!(
+            "Attached file: {}\nLocation: {}\nThe file contents were not embedded. Use available tools to inspect this attachment.",
+            json!(link.name),
+            json!(out::file_path(&link.uri)),
+        )),
         _ => None,
     }
 }

@@ -2,7 +2,7 @@
 //! `automation`.
 mod batch;
 mod cloud;
-mod exec;
+pub(super) mod exec;
 mod text;
 
 pub(super) use text::bytes;
@@ -36,7 +36,10 @@ pub(super) fn pr(command: PrCommand, context: &Context) -> crate::Result<Output>
         PrCommand::Status | PrCommand::Checks => HostOp::Pr,
         PrCommand::Comments => HostOp::PrComments,
         PrCommand::Open => HostOp::PrOpen,
+        PrCommand::Create => HostOp::PrCreate {},
         PrCommand::Quota => HostOp::PrQuota,
+        PrCommand::Merge => HostOp::PrMerge,
+        PrCommand::Queue(change) => HostOp::PrQueue { change },
     };
     match context.call(Request::Host, op)? {
         Response::Host {
@@ -71,6 +74,7 @@ pub(super) fn host(command: HostCommand, context: &Context) -> crate::Result<Out
         HostCommand::List => HostOp::List,
         HostCommand::Select(id) => HostOp::Select { id },
         HostCommand::Mute { host, muted } => HostOp::Mute { host, muted },
+        HostCommand::Pause { host, paused } => HostOp::Pause { host, paused },
         HostCommand::Tag { id, tags } => HostOp::Tag { id, tags },
         HostCommand::Update(host) => HostOp::Update { host },
     };

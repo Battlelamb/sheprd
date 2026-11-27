@@ -8,7 +8,8 @@
 # IOS_SIGNING_P12_PASSWORD, the certificate the archive signs with
 # (tools/signing.sh says why). Distribution needs no certificate here: the
 # export signs with the team's cloud-managed one. BUILD_NUMBER defaults to
-# one more than the highest build App Store Connect has for the app
+# the UTC timestamp YYYYMMDDHHMM, or one more than the highest build App
+# Store Connect already has if that is at or ahead of the clock
 # (next-build.py). The build's "What to Test" lists the commits since the
 # last build (testflight_notes.py), so this needs the checkout's full
 # history. Without the key it says so and exits 0, so CI passes before the
@@ -76,4 +77,7 @@ PATH=/usr/bin:/bin:/usr/sbin:/sbin xcodebuild -exportArchive -archivePath "$work
     $auth -quiet
 echo "Uploaded build $build. Setting its notes once App Store Connect has it (up to 30 minutes)…"
 python3 tools/testflight_notes.py publish "$bundle_id" "$build" "$work/notes.txt"
-echo "Build $build has its notes. App Store Connect may still be processing it before TestFlight offers it."
+echo "Adding build $build to every external TestFlight group…"
+python3 tools/testflight_distribution.py "$bundle_id" "$build"
+echo "Build $build has its notes and is assigned to the external groups."
+echo "Apple review may still be required before testers can install it."

@@ -11,7 +11,8 @@
 //! notifications = "generic"    # or "excerpt": a short excerpt in each push
 //! live_activities = "detailed" # or "generic": no chat names or steps
 //! device_idle_days = 30         # 0 never forgets a device
-//! presence = false             # hold phone alerts while its owner is at this Mac
+//! presence = true              # hold phone alerts while its owner is at this computer
+//! push_relay = true            # iPhone pushes through push.sheprd.org, the only way they go
 //! relays = ["https://relay.example.org"]  # reach this computer from any network
 //! github_hosts = ["ghe.example.com"]       # Enterprise Server hosts besides gh's
 //! ```
@@ -25,6 +26,16 @@
 //!   { endpoint = "https://fra3.example.org", name = "fra3",
 //!     description = "not for public use", tags = ["eu", "private"] },
 //! ]
+//! ```
+//!
+//! One of Sheprd's own relays, added from its signed list, also keeps that
+//! list's `pin` for its QUIC certificate, so the daemon trusts only that
+//! certificate, whatever the relay's `/v1/info` reports:
+//!
+//! ```toml
+//! [remote]
+//! relays = [{ endpoint = "https://fra1.relay.sheprd.org", name = "Frankfurt",
+//!             pin = "base64url SHA-256 of its QUIC certificate" }]
 //! ```
 //!
 //! Secrets and device keys never go here: the daemon keeps them in its own
@@ -62,9 +73,19 @@ pub struct RemoteConfig {
     pub live_activities: ActivityDetail,
     pub notifications: Privacy,
     pub port: u16,
-    /// Whether paired iPhones near this Mac over Bluetooth hold their
-    /// alerts while the desktop is in use (`herdr-nearby`, macOS only).
+    /// Whether paired iPhones near this computer over Bluetooth hold their
+    /// alerts while the desktop is in use (`sheprd-nearby`), here and on
+    /// the hosts this app pairs them with. On by default: a phone is
+    /// for when its owner is away.
     pub presence: bool,
+    /// Whether iPhone alerts and Live Activities go through the Sheprd push
+    /// relay, sealed (`docs/apns-relay-plan.md`, Opt-in). It is the only way
+    /// they leave this computer: off, the iPhone app gets no notifications
+    /// from it, and only a subscribed browser app gets Web Push. On by
+    /// default: nothing reaches the push relay until a phone opts in and
+    /// gives this computer handles, so every linked computer pushes without
+    /// a setting each.
+    pub push_relay: bool,
     /// Relays the daemon listens on, so paired phones reach this computer
     /// from any network (`docs/relay-plan.md`); none by default.
     pub relays: Vec<Relay>,
@@ -85,7 +106,8 @@ impl Default for RemoteConfig {
             live_activities: ActivityDetail::default(),
             notifications: Privacy::default(),
             port: DEFAULT_PORT,
-            presence: false,
+            presence: true,
+            push_relay: true,
             relays: Vec::new(),
             // keep-sorted end
         }
@@ -129,18 +151,23 @@ impl RemoteConfig {
     }
 }
 
-/// One relay in `[remote] relays`: its address, and what the user calls it.
+/// One relay in `[remote] relays`: its address, what the user calls it,
+/// and, for one of Sheprd's relays, the QUIC certificate pin its signed
+/// list carries.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Relay {
     pub endpoint: String,
     pub label: RelayLabel,
+    /// The SHA-256 of the relay's QUIC certificate, the only one the
+    /// daemon then trusts on it.
+    pub pin: Option<[u8; 32]>,
 }
 
 impl From<String> for Relay {
     fn from(endpoint: String) -> Self {
         Self {
             endpoint,
-            label: RelayLabel::default(),
+            ..Self::default()
         }
     }
 }
@@ -152,7 +179,8 @@ impl From<&str> for Relay {
 }
 
 impl<'de> Deserialize<'de> for Relay {
-    /// `"ENDPOINT"`, or `{ endpoint = "ENDPOINT", name, description, tags }`.
+    /// `"ENDPOINT"`, or `{ endpoint = "ENDPOINT", name, description, tags,
+    /// pin }`. A pin that is not 32 bytes in base64url is an error.
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -164,13 +192,15 @@ impl<'de> Deserialize<'de> for Relay {
             description: Option<String>,
             #[serde(default)]
             tags: Vec<String>,
+            #[serde(default)]
+            pin: Option<String>,
         }
         struct Visitor;
         impl<'de> serde::de::Visitor<'de> for Visitor {
             type Value = Relay;
 
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a relay address, or { endpoint, name, description, tags }")
+                f.write_str("a relay address, or { endpoint, name, description, tags, pin }")
             }
 
             fn visit_str<E: serde::de::Error>(self, endpoint: &str) -> Result<Relay, E> {
@@ -183,7 +213,18 @@ impl<'de> Deserialize<'de> for Relay {
                     name,
                     description,
                     tags,
+                    pin,
                 } = Labeled::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
+                let pin = pin
+                    .map(|text| {
+                        sheprd_relay::endpoint::decode_pin(&text).ok_or_else(|| {
+                            serde::de::Error::invalid_value(
+                                serde::de::Unexpected::Str(&text),
+                                &"a QUIC certificate pin: 32 bytes in base64url",
+                            )
+                        })
+                    })
+                    .transpose()?;
                 Ok(Relay {
                     endpoint,
                     label: RelayLabel {
@@ -191,6 +232,7 @@ impl<'de> Deserialize<'de> for Relay {
                         name,
                         tags,
                     },
+                    pin,
                 })
             }
         }
@@ -336,6 +378,9 @@ pub enum Edit {
     Notifications(Privacy),
     Port(u16),
     Presence(bool),
+    /// Whether iPhone pushes go through the push relay
+    /// (`push.sheprd.org`), the only way they leave a computer.
+    PushRelay(bool),
     /// The whole list, as Settings shows it after adding or removing one;
     /// each keeps its label.
     Relays(Vec<Relay>),
@@ -372,28 +417,42 @@ impl Edit {
             Self::Port(0) => return Err(Error::Port),
             Self::Port(port) => ("port", i64::from(port).into()),
             Self::Presence(on) => ("presence", on.into()),
+            Self::PushRelay(on) => ("push_relay", on.into()),
             Self::Relays(relays) => {
                 // Written as the daemon names them, each once, so the
                 // list matches the relays its status reports.
                 // A relay named twice keeps its first place and the label
                 // the daemon goes by: the last one given.
-                let mut merged: Vec<(String, RelayLabel)> = Vec::new();
-                for Relay { endpoint, label } in relays {
+                // A pin given for either is kept, the last one winning.
+                let mut merged: Vec<Relay> = Vec::new();
+                for Relay {
+                    endpoint,
+                    label,
+                    pin,
+                } in relays
+                {
                     let address = relay_address(&endpoint)?;
                     label.check().map_err(|source| Error::RelayLabel {
                         relay: address.clone(),
                         source,
                     })?;
-                    match merged.iter_mut().find(|(listed, _)| *listed == address) {
-                        Some((_, kept)) if !label.is_empty() => *kept = label,
-                        Some(_) => {}
-                        None => merged.push((address, label)),
+                    match merged.iter_mut().find(|kept| kept.endpoint == address) {
+                        Some(kept) => {
+                            if !label.is_empty() {
+                                kept.label = label;
+                            }
+                            if pin.is_some() {
+                                kept.pin = pin;
+                            }
+                        }
+                        None => merged.push(Relay {
+                            endpoint: address,
+                            label,
+                            pin,
+                        }),
                     }
                 }
-                let listed = merged
-                    .into_iter()
-                    .map(|(address, label)| relay_value(&address, label))
-                    .collect();
+                let listed = merged.into_iter().map(relay_value).collect();
                 ("relays", toml_edit::Value::Array(listed))
             }
         })
@@ -401,13 +460,19 @@ impl Edit {
 }
 
 /// A relay as the config file writes it: its address alone, or a table
-/// with its label.
-fn relay_value(address: &str, label: RelayLabel) -> toml_edit::Value {
-    if label.is_empty() {
-        return address.into();
+/// with its label and pin.
+fn relay_value(
+    Relay {
+        endpoint,
+        label,
+        pin,
+    }: Relay,
+) -> toml_edit::Value {
+    if label.is_empty() && pin.is_none() {
+        return endpoint.into();
     }
     let mut table = toml_edit::InlineTable::new();
-    table.insert("endpoint", address.into());
+    table.insert("endpoint", endpoint.into());
     if let Some(name) = label.name {
         table.insert("name", name.into());
     }
@@ -419,6 +484,9 @@ fn relay_value(address: &str, label: RelayLabel) -> toml_edit::Value {
             "tags",
             label.tags.iter().collect::<toml_edit::Array>().into(),
         );
+    }
+    if let Some(pin) = pin {
+        table.insert("pin", sheprd_relay::endpoint::encode_pin(&pin).into());
     }
     toml_edit::Value::InlineTable(table)
 }

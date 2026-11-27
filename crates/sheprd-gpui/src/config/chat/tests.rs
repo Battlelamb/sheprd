@@ -246,3 +246,43 @@ fn chats_jump_to_new_output_unless_glide_is_on() {
 mod auto_accept;
 mod code;
 mod launcher;
+
+#[test]
+fn new_agents_stay_in_their_terminals_unless_auto_convert_is_on() {
+    assert!(!crate::config::Config::parse("").unwrap().chat.auto_convert);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config-gpui.local.toml");
+    std::fs::write(&path, "[chat]\nlayout = \"imessage\"\n").unwrap();
+    for auto_convert in [true, false] {
+        crate::config::Config::save_preference_path(
+            crate::config::preferences::Preference::ChatAutoConvert(auto_convert),
+            &path,
+        )
+        .unwrap();
+        let config =
+            crate::config::Config::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(config.chat.auto_convert, auto_convert);
+        assert_eq!(config.chat.layout, ChatLayoutMode::IMessage);
+    }
+}
+
+#[test]
+fn message_effects_default_on_and_the_switch_persists() {
+    use crate::config::{Config, preferences::Preference};
+    assert!(Config::parse("").unwrap().chat.message_effects);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config-gpui.local.toml");
+    for enabled in [false, true] {
+        Config::save_preference_path(Preference::ChatMessageEffects(enabled), &path).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(Config::parse(&saved).unwrap().chat.message_effects, enabled);
+    }
+    let daemon = dir.path().join("daemon.toml");
+    let key = "chat.message_effects";
+    Config::edit_key_at(&path, &daemon, key, Some(false.into())).unwrap();
+    let saved = std::fs::read_to_string(&path).unwrap();
+    assert!(!Config::parse(&saved).unwrap().chat.message_effects);
+    Config::edit_key_at(&path, &daemon, key, None).unwrap();
+    let saved = std::fs::read_to_string(&path).unwrap();
+    assert!(Config::parse(&saved).unwrap().chat.message_effects);
+}

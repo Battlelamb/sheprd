@@ -44,7 +44,9 @@ impl SheprdWindow {
                     .child(fl!("devices-nearby-intro")),
             );
         body = match &setup.step {
-            Step::Looking => body.child(self.nearby_list(setup, cx)),
+            Step::Looking => body
+                .child(self.nearby_list(setup, cx))
+                .child(self.nearby_link(setup, cx)),
             Step::Connecting(found) | Step::Exchanging(found) => body.child(
                 div()
                     .debug_selector(|| "nearby-setup-status".into())
@@ -58,7 +60,7 @@ impl SheprdWindow {
                 computer,
                 code,
                 claimed,
-            } => body.child(self.nearby_code(computer, code, *claimed)),
+            } => body.child(self.nearby_code(computer, code, nearby_status(computer, *claimed))),
             Step::Saving(name) => body.child(
                 div()
                     .debug_selector(|| "nearby-setup-status".into())
@@ -117,8 +119,8 @@ impl SheprdWindow {
             .flex_col()
             .gap(px(2.));
         let note = |text: String| div().text_color(rgb(theme.muted)).child(text);
-        if !cfg!(target_os = "macos") {
-            return list.child(note(fl!("devices-nearby-macos-only")));
+        if !crate::remote::nearby::SCANS {
+            return list.child(note(fl!("devices-nearby-platform-unsupported")));
         }
         match setup.radio {
             Some(Radio::Off) => return list.child(note(fl!("devices-nearby-bluetooth-off"))),
@@ -169,9 +171,16 @@ impl SheprdWindow {
         list
     }
 
-    /// The code both screens show, and what to do on the other computer.
-    fn nearby_code(&self, computer: &Found, code: &str, claimed: bool) -> Div {
+    /// The code both screens show, and `status`, what happens next.
+    fn nearby_code(&self, computer: &Found, code: &str, status: String) -> Div {
         let theme = &self.theme;
+        // A link's code comes with the claim's answer.
+        if code.is_empty() {
+            return div()
+                .debug_selector(|| "nearby-setup-code".into())
+                .text_color(rgb(theme.muted))
+                .child(status);
+        }
         let spaced = match code.split_at_checked(3) {
             Some((first, second)) => format!("{first} {second}"),
             None => code.to_owned(),
@@ -194,10 +203,17 @@ impl SheprdWindow {
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(spaced),
             )
-            .child(div().text_color(rgb(theme.muted)).child(if claimed {
-                fl!("devices-nearby-waiting", computer = computer.name.as_str())
-            } else {
-                fl!("devices-nearby-claiming", computer = computer.name.as_str())
-            }))
+            .child(div().text_color(rgb(theme.muted)).child(status))
+    }
+}
+
+/// What happens next once the code shows: the claim going through the
+/// relays, or the other computer's answer once it was asked (`claimed`).
+fn nearby_status(computer: &Found, claimed: bool) -> String {
+    let computer = computer.name.as_str();
+    if claimed {
+        fl!("devices-nearby-waiting", computer = computer)
+    } else {
+        fl!("devices-nearby-claiming", computer = computer)
     }
 }

@@ -25,10 +25,16 @@
 //! does not let an app choose. `question`, `permission`, and `options` (the
 //! answer buttons, `{id, kind, name}`) appear in the question phase,
 //! `summary` in the finished one, and `previous` (the steps before `step`)
-//! once there are some; every optional key may be absent.
+//! once there are some. For the phone's styles, `activity` says the step in
+//! words with an `icon` kind, `previousActivities` the steps before it, and
+//! `steps` and `files` count the turn's tool calls and edited files; every
+//! optional key may be absent.
 
-use super::{Error, Priority, Push, PushType, Result};
+use super::Priority;
+#[cfg(test)]
+use super::{Error, Result};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use serde_json::{Map, Value, json};
 use sheprd_chat_protocol::PermissionOption;
 
@@ -51,6 +57,65 @@ pub(crate) enum Phase {
     Question,
     Working,
     // keep-sorted end
+}
+
+/// What kind of step the activity shows, so the phone can draw an icon
+/// for it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Icon {
+    // keep-sorted start
+    Agent,
+    Build,
+    Edit,
+    Git,
+    Github,
+    Plan,
+    Read,
+    Run,
+    Search,
+    Test,
+    Think,
+    Web,
+    // keep-sorted end
+}
+
+/// Progress of the agents delegated by one turn.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub(crate) struct AgentProgress {
+    pub(crate) done: usize,
+    pub(crate) total: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) latest: Option<String>,
+}
+
+/// The step told for the phone's styles (`apns::activity`): an older app
+/// ignores these keys and shows `step`.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Detail {
+    /// Internal host-card metadata, outside the sealed content on shared reports.
+    #[serde(skip)]
+    pub(crate) question_revision: Option<u64>,
+    /// The pane currently shown by a combined host activity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) focus: Option<Attributes>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) agents: Option<AgentProgress>,
+    /// `step` in plain words, such as `Checking pull request #1548`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) activity: Option<String>,
+    /// Files the turn's edits touched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) files: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) icon: Option<Icon>,
+    /// `previous` in plain words, in the same order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) previous_activities: Vec<String>,
+    /// Tool calls the turn made so far.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) steps: Option<u32>,
 }
 
 /// The activity's fixed part, set when it starts.
@@ -78,6 +143,8 @@ pub(crate) struct Attributes {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ContentState {
+    #[serde(flatten)]
+    pub(crate) detail: Detail,
     /// The waiting permission's first [`MAX_BUTTONS`] options, in the
     /// question phase, for the lock screen's answer buttons.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -99,7 +166,7 @@ pub(crate) struct ContentState {
     pub(crate) question: Option<String>,
     /// When the turn started, in seconds since the Unix epoch.
     pub(crate) started_at: u64,
-    /// The current tool call or plan step.
+    /// The current tool call, with a shell wrapper taken off, or plan step.
     pub(crate) step: String,
     /// How the turn ended, in the finished and failed phases.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -165,22 +232,19 @@ impl Live {
         self.state.phase == Phase::Question
     }
 
-    /// The push for this change at `now_s` (seconds since the Unix epoch).
-    pub(crate) fn push(&self, now_s: u64) -> Result<Push> {
-        Ok(Push {
-            body: self.payload(now_s)?,
-            collapse_id: None,
-            priority: if self.urgent() {
-                Priority::High
-            } else {
-                Priority::Low
-            },
-            push_type: PushType::LiveActivity,
-        })
+    pub(crate) fn priority(&self) -> Priority {
+        if self.urgent() {
+            Priority::High
+        } else {
+            Priority::Low
+        }
     }
 
-    /// The JSON payload, sent at `timestamp_s` (seconds since the Unix
-    /// epoch), which ActivityKit uses to drop out-of-order updates.
+    /// The payload in the clear, at `timestamp_s` (seconds since the Unix
+    /// epoch). Nothing sends it: pushes go through the relay sealed
+    /// (`relayed`), and the phone opens them to this `content-state` and
+    /// `attributes`, which the Swift fixtures check it against.
+    #[cfg(test)]
     pub(crate) fn payload(&self, timestamp_s: u64) -> Result<Vec<u8>> {
         let mut aps = Map::new();
         aps.insert("timestamp".into(), json!(timestamp_s));

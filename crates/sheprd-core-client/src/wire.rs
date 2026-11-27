@@ -97,6 +97,10 @@ pub const BLOCKED: &str = "blocked";
 /// The refusal kind of a send whose `if` status no longer holds.
 pub const STATUS_MISMATCH: &str = "status_mismatch";
 
+/// The refusal kind of an attach to a kept terminal whose program was lost
+/// and whose new shell the core has not started yet.
+pub const UNAVAILABLE: &str = "unavailable";
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct List {
     #[serde(default)]
@@ -211,6 +215,12 @@ pub struct Sent {
     pub status: Option<String>,
     /// The turn when the text went in.
     pub turn: u64,
+}
+
+/// What `terminal.read` answered: the screen as text.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Read {
+    pub text: String,
 }
 
 /// What `terminal.wait` saw: the program stopped working or ended, or the

@@ -23,24 +23,32 @@ public struct TermSize: Codable, Hashable, Sendable {
 public enum LiveRequest: Encodable, Hashable, Sendable {
     /// `since` is the cursor of a cached transcript, so an unchanged chat
     /// answers `chat_resumed` instead of a snapshot; `size` asks for a
-    /// terminal at the phone's size.
-    case subscribe(LiveView, since: Cursor? = nil, size: TermSize? = nil)
+    /// terminal at the phone's size. A `background` chat is followed while
+    /// no screen shows it: the computer neither marks its answers seen nor
+    /// lets it keep a view on screen from starting.
+    case subscribe(LiveView, since: Cursor? = nil, size: TermSize? = nil, background: Bool = false)
     case unsubscribe(LiveView)
     /// Scrolls a terminal held at the phone's size, as a mouse wheel
     /// would: `lines` above zero go back into its history.
     case termScroll(pane: String, lines: Int)
+    /// Whether agents on the computer may drive this app (`drive`), as
+    /// its person set for that computer.
+    case agentControl(allowed: Bool)
+    /// What the app did with the `drive` numbered `id`.
+    case driven(id: UInt64, outcome: AgentOutcome)
 
-    enum CodingKeys: String, CodingKey { case type, view, pane, since, size, lines }
+    enum CodingKeys: String, CodingKey { case type, view, pane, since, size, lines, background, allowed, id, outcome, state, reason }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         let view: LiveView
         switch self {
-        case let .subscribe(subscribed, since, size):
+        case let .subscribe(subscribed, since, size, background):
             try c.encode("subscribe", forKey: .type)
             view = subscribed
             try c.encodeIfPresent(since, forKey: .since)
             try c.encodeIfPresent(size, forKey: .size)
+            if background { try c.encode(true, forKey: .background) }
         case let .unsubscribe(unsubscribed):
             try c.encode("unsubscribe", forKey: .type)
             view = unsubscribed
@@ -48,6 +56,22 @@ public enum LiveRequest: Encodable, Hashable, Sendable {
             try c.encode("term_scroll", forKey: .type)
             try c.encode(pane, forKey: .pane)
             try c.encode(lines, forKey: .lines)
+            return
+        case let .agentControl(allowed):
+            try c.encode("agent_control", forKey: .type)
+            try c.encode(allowed, forKey: .allowed)
+            return
+        case let .driven(id, outcome):
+            try c.encode("driven", forKey: .type)
+            try c.encode(id, forKey: .id)
+            switch outcome {
+            case let .done(state):
+                try c.encode("done", forKey: .outcome)
+                try c.encode(state, forKey: .state)
+            case let .refused(reason):
+                try c.encode("refused", forKey: .outcome)
+                try c.encode(reason, forKey: .reason)
+            }
             return
         }
         switch view {
@@ -95,9 +119,12 @@ public enum LiveEvent: Decodable, Hashable, Sendable {
     case refused(LiveView, message: String)
     /// The session expired (`expired`) or the device was revoked (`revoked`).
     case bye(reason: String)
+    /// An agent on the computer asks the app to do `command`; it answers
+    /// with `LiveRequest.driven` and the same `id`.
+    case drive(id: UInt64, command: AgentCommand)
 
     enum CodingKeys: String, CodingKey {
-        case type, home, pane, cursor, connected, changes, view, message, reason
+        case type, home, pane, cursor, connected, changes, view, message, reason, id
     }
 
     public init(from decoder: Decoder) throws {
@@ -127,6 +154,7 @@ public enum LiveEvent: Decodable, Hashable, Sendable {
                 self = .error(message)
             }
         case "bye": self = .bye(reason: try c.decode(String.self, forKey: .reason))
+        case "drive": self = .drive(id: try c.decode(UInt64.self, forKey: .id), command: try AgentCommand(from: decoder))
         case let other:
             throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "unknown live message \(other)")
         }

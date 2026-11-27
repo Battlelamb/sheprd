@@ -52,6 +52,7 @@ fn every_catalog_id_is_unique_and_belongs_to_its_section() {
             Section::Tabs => "tabs-",
             Section::Chat => "chat-",
             Section::Notifications => "notif-",
+            Section::Voice => "voice-",
             Section::TextShortcuts => "text-shortcuts-",
             Section::StatusBar => "status-",
             Section::Code => "code-",
@@ -59,7 +60,10 @@ fn every_catalog_id_is_unique_and_belongs_to_its_section() {
             Section::Plugins => "plugins-",
             #[cfg(feature = "cloud")]
             Section::CloudDevices => "cloud-",
+            #[cfg(target_os = "macos")]
+            Section::Machines => "machine-",
             Section::RemoteControl => "remote-",
+            Section::Fleet => "fleet-",
             Section::Configuration => "config-",
         };
         assert!(entry.id.starts_with(prefix), "{}", entry.id);

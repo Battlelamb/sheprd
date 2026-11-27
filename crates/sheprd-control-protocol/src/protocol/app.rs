@@ -1,6 +1,9 @@
 //! The app, its windows, and their chrome.
 use serde::{Deserialize, Serialize};
 
+mod traces;
+pub use traces::{TaggedHost, TraceFilter, TracePeer, TraceSyncState};
+
 /// What the window shows, picked on the bar. The bar lists them in
 /// declaration order, so this order is what users see.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -16,6 +19,7 @@ pub enum ActivityPanel {
     Automations,
     Ports,
     Usage,
+    Traces,
 }
 
 impl ActivityPanel {
@@ -29,6 +33,7 @@ impl ActivityPanel {
         Self::Automations,
         Self::Ports,
         Self::Usage,
+        Self::Traces,
     ];
 
     /// The name the CLI and the preferences file use.
@@ -43,6 +48,7 @@ impl ActivityPanel {
             Self::Automations => "automations",
             Self::Ports => "ports",
             Self::Usage => "usage",
+            Self::Traces => "traces",
         }
     }
 
@@ -137,6 +143,20 @@ pub enum FontSize {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum UiOp {
+    /// Settings pages and row IDs, or navigation to one page.
+    Settings {
+        page: Option<String>,
+    },
+    /// Update persistent guidance; both absent clears it. A row ID opens its page.
+    Guide {
+        text: Option<String>,
+        highlight: Option<String>,
+    },
+    /// Read the app's prepared trace-replication status without starting I/O.
+    Traces {},
+    TracesFilter {
+        filter: TraceFilter,
+    },
     Sidebar {
         switch: Switch,
     },
@@ -232,6 +252,17 @@ pub struct AlertInfo {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Reply {
+    SettingsTargets {
+        pages: Vec<String>,
+        rows: Vec<SettingsTarget>,
+    },
+    Traces {
+        peers: Vec<TracePeer>,
+        #[serde(default)]
+        filter: TraceFilter,
+        #[serde(default)]
+        hosts: Vec<TaggedHost>,
+    },
     Windows {
         windows: Vec<WindowInfo>,
     },
@@ -253,3 +284,11 @@ pub enum Reply {
 
 #[cfg(test)]
 mod tests;
+
+/// A stable, discoverable Settings row an agent may point at, without changing it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SettingsTarget {
+    pub id: String,
+    pub page: String,
+    pub title: String,
+}

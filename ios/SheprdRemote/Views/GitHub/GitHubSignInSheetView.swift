@@ -29,6 +29,8 @@ struct GitHubSignInSheetView: View {
                 .navigationTitle(signedIn ? "Signed In" : "Sign In to GitHub")
                 .navigationBarTitleDisplayMode(.inline)
         }
+        // A sheet: links open from here, not from under it.
+        .browsesLinks(othersToSystem: true)
         .presentationDetents([.large])
         .task { await run() }
         .task(id: sheet.step.code?.userCode) { await countDown() }
@@ -36,7 +38,7 @@ struct GitHubSignInSheetView: View {
             page.close()
             if !signedIn, !sample { Task { await GitHubReads.reader.signIn?.cancel() } }
         }
-        .sensoryFeedback(.success, trigger: copied)
+        .haptic(.success, trigger: copied)
     }
 
     private var signedIn: Bool {

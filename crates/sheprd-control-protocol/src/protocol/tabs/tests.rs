@@ -2,6 +2,10 @@
 use super::*;
 use crate::protocol::{Call, Caller, Request, Response};
 
+mod machine_agent;
+mod machine_capabilities;
+mod machine_capacity;
+
 fn round_trip(op: TabOp) {
     let request = Request::Tab(Call {
         caller: Caller::default(),

@@ -16,7 +16,7 @@ public struct Home: Codable, Hashable, Sendable {
     public var github: Bool?
     /// Whether the computer's Herdr daemon is reachable.
     public var connected: Bool
-    /// Permission requests waiting across its chats: the badge.
+    /// Agents waiting for an answer or with a reply no one read: the badge.
     public var waiting: Int
     /// The computer's CPU and memory; absent until it first read them, and
     /// from older computers.
@@ -95,6 +95,7 @@ public struct Home: Codable, Hashable, Sendable {
     }
 
     public struct Workspace: Codable, Hashable, Sendable, Identifiable {
+        public var labels: [String]? = nil
         public var id: String
         public var label: String
         public var branch: String?
@@ -108,6 +109,9 @@ public struct Home: Codable, Hashable, Sendable {
         /// Commits on its branch that no pull request carries yet; older
         /// computers leave it out.
         public var unopenedCommits: Int?
+        /// Its checkout has uncommitted changes, untracked files included,
+        /// as the desktop marks it with a pencil; older computers leave it out.
+        public var uncommitted: Bool? = nil
         public var chats: [ChatRow]
         public var terminals: [TerminalRow]
         /// The GitHub repository and branch its pull request would be on,
@@ -115,13 +119,20 @@ public struct Home: Codable, Hashable, Sendable {
         /// computers, and checkouts of other hosts, leave it out.
         public var github: GitHubRepository? = nil
 
+        /// Agent-specific labels first, followed by labels shared by the checkout.
+        public func rowLabels(agent: [String]?) -> [String] {
+            var seen = Set<String>()
+            return ((agent ?? []) + (labels ?? [])).filter { seen.insert($0.lowercased()).inserted }
+        }
+
         /// Its pull request is merged, so the work here is done.
         public var merged: Bool { pullRequest?.tone == .merged }
 
         enum CodingKeys: String, CodingKey {
-            case id, label, branch, cwd, worktree, session, chats, terminals, github
+            case id, label, labels, branch, cwd, worktree, session, chats, terminals, github
             case pullRequest = "pull_request"
             case unopenedCommits = "unopened_commits"
+            case uncommitted
         }
     }
 
@@ -153,7 +164,7 @@ public struct Home: Codable, Hashable, Sendable {
 
         /// What the badge says, before a theme colors it.
         public enum Tone: String, Codable, Hashable, Sendable {
-            case attention, held, merged, ready, waiting, other
+            case attention, held, merged, queued, ready, waiting, other
 
             public init(from decoder: Decoder) throws {
                 self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .other
@@ -162,12 +173,19 @@ public struct Home: Codable, Hashable, Sendable {
     }
 
     public struct ChatRow: Codable, Hashable, Sendable, Identifiable {
+        public var labels: [String]? = nil
         public var pane: String
         public var tab: String
         public var title: String
         /// Herdr's name for the agent, such as `claude`.
         public var agent: String?
         public var status: AgentStatus
+        /// Starred on some device; lists show it first. Older computers
+        /// leave it out, and so does an unstarred chat.
+        public var favorite: Bool? = nil
+        /// It replied since anyone last read it, on any device. Older
+        /// computers leave it out, and so does a chat read.
+        public var unread: Bool? = nil
         /// Absent until the daemon has linked the chat.
         public var summary: Summary?
 
@@ -291,6 +309,7 @@ public struct Home: Codable, Hashable, Sendable {
         }
 
         public struct DetectedAgent: Codable, Hashable, Sendable {
+            public var labels: [String]? = nil
             public var name: String?
             public var status: AgentStatus
             /// The pane it runs in; older computers leave it out.
@@ -300,11 +319,27 @@ public struct Home: Codable, Hashable, Sendable {
             /// When the computer saw it last change state; unknown until
             /// it does, and from older computers.
             public var changedMs: UInt64?
+            /// What it last said, read off its screen: its latest
+            /// paragraph, one item to a line. Absent until read, and from
+            /// older computers.
+            public var preview: String?
+            /// Whether its conversation opens as a read-only chat on its
+            /// pane, beside the terminal; older computers leave it out.
+            public var transcript: Bool?
+            /// Its pane was starred on some device; absent when not, and
+            /// from older computers.
+            public var favorite: Bool? = nil
+            /// It finished since anyone last looked at it, on any device;
+            /// absent when not, and from older computers.
+            public var unread: Bool? = nil
 
             enum CodingKeys: String, CodingKey {
-                case name, status, pane, title
+                case name, status, pane, title, labels, preview, transcript, favorite, unread
                 case changedMs = "changed_ms"
             }
+
+            /// Whether the computer shows its conversation as a chat.
+            public var opensAsChat: Bool { transcript == true && pane != nil }
         }
 
         /// The pane a phone opens for the tab's agent: its own, else the

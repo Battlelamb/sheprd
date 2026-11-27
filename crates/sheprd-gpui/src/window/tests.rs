@@ -21,6 +21,7 @@ mod padding;
 mod report_issue;
 mod rtl;
 mod sound_volume;
+mod tick_loop;
 
 fn main_windows(cx: &mut gpui::App) -> Vec<gpui::WindowHandle<SheprdWindow>> {
     cx.windows()
@@ -234,9 +235,9 @@ fn host_theme_reaches_each_connection_and_follows_theme_changes(cx: &mut gpui::T
     assert_eq!(
         theme.palette[1],
         ClientHostColor {
-            r: 0x80,
-            g: 0,
-            b: 0
+            r: 0xef,
+            g: 0x7a,
+            b: 0x85
         }
     );
     let first = theme_updates(&mut server, 4);

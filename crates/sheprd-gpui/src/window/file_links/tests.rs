@@ -13,6 +13,20 @@ use std::sync::Arc;
 mod wrapped;
 
 #[test]
+fn reveal_selects_the_real_file_and_reports_a_missing_one() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("clip.mp4");
+    std::fs::write(&file, b"clip").unwrap();
+    // Compared as files: Windows keeps 8.3 short names such as `RUNNER~1`
+    // that `canonicalize` expands, and adds a `\\?\` prefix.
+    let real = std::fs::canonicalize(&file).unwrap();
+    let shown = revealed(&file).unwrap().unwrap();
+    assert_eq!(std::fs::canonicalize(shown).unwrap(), real);
+    let missing = directory.path().join("gone.mp4");
+    assert_eq!(revealed(&missing), Some(Err(missing.clone())));
+}
+
+#[test]
 fn paths_resolve_under_home_or_the_pane_directory() {
     let home = Path::new("home");
     let root = std::env::temp_dir();
@@ -55,7 +69,16 @@ fn only_documents_and_plain_folders_open_themselves() {
         std::fs::write(&path, "x").unwrap();
         path
     };
-    for name in ["notes.txt", "README.MD", "Makefile"] {
+    for name in [
+        "notes.txt",
+        "README.MD",
+        "Makefile",
+        "clip.mp4",
+        "clip.MOV",
+        "report.pdf",
+        "book.xlsx",
+        "archive.zip",
+    ] {
         assert_eq!(opened(&file(name)), Some(real.join(name)), "{name}");
     }
     for name in [

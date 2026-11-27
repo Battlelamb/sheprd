@@ -6,12 +6,9 @@
 use super::*;
 use crate::remote::links::{self, Job, Known};
 use sheprd_client::ConnectTarget;
-use sheprd_remote_control::{
-    app::enroll::Apns,
-    control::{
-        host_relay,
-        hosts::{Host, HostId, HostOutcome, HostPairing, HostRevoke},
-    },
+use sheprd_remote_control::control::{
+    host_relay,
+    hosts::{Host, HostId, HostOutcome, HostPairing, HostRevoke},
 };
 use std::{
     collections::HashSet,
@@ -63,6 +60,11 @@ pub(super) struct Incoming {
 }
 
 impl Links {
+    /// The hosts this app connects to, as windows last said.
+    pub(super) fn known(&self) -> &[Known] {
+        &self.known
+    }
+
     pub(super) fn outgoing(&self) -> Outgoing {
         let hosts: Vec<Host> = self.known.iter().map(|known| known.host.clone()).collect();
         let due = self
@@ -139,6 +141,11 @@ impl Supervisor {
         }
     }
 
+    /// How to reach `host`, while a window still connects to it.
+    pub(crate) fn host_target(cx: &App, host: &HostId) -> Option<ConnectTarget> {
+        cx.try_global::<Self>()?.links.target(host)
+    }
+
     /// The hosts a phone may be paired with, for the pairing dialog.
     pub(crate) fn hosts(cx: &App) -> Vec<Host> {
         cx.try_global::<Self>()
@@ -213,7 +220,6 @@ impl Supervisor {
                 target: links.target(&pairing.host),
                 pairing,
                 via: via.clone(),
-                apns: None,
             };
             if job.pairing.confirm {
                 links.asks.push(job);
@@ -291,7 +297,7 @@ impl Supervisor {
         .detach();
     }
 
-    fn run_host_job(cx: &mut App, mut job: Job) {
+    fn run_host_job(cx: &mut App, job: Job) {
         let key = (job.pairing.device.clone(), job.pairing.host.clone());
         let Some(client) = Self::client(cx) else {
             cx.global_mut::<Self>().links.running.remove(&key);
@@ -299,14 +305,9 @@ impl Supervisor {
         };
         cx.global_mut::<Self>().links.running.insert(key.clone());
         let public_key = job.pairing.public_key.clone();
-        let task = cx.background_executor().spawn(async move {
-            // The host gets this daemon's APNs key, to notify the phone
-            // itself while this computer sleeps.
-            job.apns = crate::remote::state_dir()
-                .ok()
-                .and_then(|dir| Apns::read(&dir));
-            links::pair(&job, &AtomicBool::new(false))
-        });
+        let task = cx
+            .background_executor()
+            .spawn(async move { links::pair(&job, &AtomicBool::new(false)) });
         let executor = cx.background_executor().clone();
         cx.spawn(async move |cx| {
             let outcome = task.await;

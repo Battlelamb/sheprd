@@ -119,6 +119,7 @@ fn entries() -> Vector {
                 EntryKind::User {
                     text: "Look at this\n\u{1f4ce} shot.png".into(),
                     files: 1,
+                    note: None,
                 },
             ),
         },
@@ -141,6 +142,7 @@ fn entries() -> Vector {
                         data: "R0lGODlhAQABAAAAACw=".into(),
                         kind: ImageType::Gif,
                     },
+                    caption: None,
                 },
             ),
         },
@@ -292,12 +294,16 @@ fn session() -> Vector {
                     path: "/tmp/shot.png".into(),
                 }],
                 id: sheprd_chat_protocol::CommandId(uuid::Uuid::from_u128(7)),
+                held: false,
+                steered: false,
                 text: "and the docs".into(),
             }],
         },
         Change::Clients { count: 2 },
         Change::Session {
             session: Some(SessionInfo {
+                can_steer: false,
+                continued: None,
                 cwd: Some("/work".into()),
                 id: "s1".into(),
                 title: Some("Equalize".into()),

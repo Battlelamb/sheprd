@@ -1,8 +1,8 @@
 import SheprdRemoteCore
 import SwiftUI
 
-/// One paired computer's page: where the phone reaches it, its alerts and
-/// certificate, and pairing again or forgetting it. Settings' rows and the
+/// One paired computer's page: where the phone reaches it, its alerts, push
+/// delivery and test push, its certificate, and pairing again or forgetting it. Settings' rows and the
 /// Workspaces header menu open it.
 struct ComputerScreen: View {
     @Environment(AppModel.self) private var model
@@ -10,9 +10,10 @@ struct ComputerScreen: View {
     @Environment(\.dismiss) private var dismiss
     let device: String
     @State private var forgetting: Computer?
+    @AppStorage(PushRelaySetting.key, store: PushRelaySetting.store) private var pushRelay = true
 
     var body: some View {
-        if let computer = model.computers.first(where: { $0.device == device }) {
+        if let computer = model.shownComputers.first(where: { $0.device == device }) {
             page(computer)
         } else {
             ContentUnavailableView("Forgotten", systemImage: "laptopcomputer.slash",
@@ -22,7 +23,8 @@ struct ComputerScreen: View {
 
     private func page(_ computer: Computer) -> some View {
         let name = model.displayName(computer)
-        let status = model.fleet.machines.first { $0.id == device }?.status
+        let machine = model.fleet.machines.first { $0.id == device }
+        let status = machine?.status
         let addresses = Self.addresses(computer)
         let connected: String? = if case let .online(origin) = status, addresses.contains(where: { $0.origin == origin }) { origin } else { nil }
         let relayed = model.fleet.throughRelay(device)
@@ -32,7 +34,7 @@ struct ComputerScreen: View {
                     Image(systemName: computer.via == nil ? "laptopcomputer" : "server.rack")
                         .font(.system(size: 44, weight: .thin)).foregroundStyle(.tint)
                     Text(name).font(.title2.bold())
-                    if let status { ComputerStatusLine(status: status).font(.subheadline) }
+                    if let shown = machine?.presentedStatus { ComputerStatusLine(status: shown).font(.subheadline) }
                 }
                 .frame(maxWidth: .infinity)
                 .listRowBackground(Color.clear)
@@ -88,12 +90,36 @@ struct ComputerScreen: View {
                 }
             }
             Section {
-                Toggle("Hold alerts at the desk", isOn: Binding(
+                Toggle("Hold Alerts at the Desk", isOn: Binding(
                     get: { computer.presence },
                     set: { model.setPresence($0, for: computer) }
                 ))
+                ActivityGroupingPicker(computer: computer, label: "Live Activities")
+                LabeledContent("Push", value: PushRelaySection.label(
+                    model.tokens.delivery[computer.fingerprint],
+                    reached: !model.tokens.unreached.contains(computer.fingerprint),
+                    pushRelay: pushRelay
+                ))
+                VStack(alignment: .leading, spacing: 4) {
+                    Button("Send Test Push") {
+                        Task { await model.pushTests.send(to: computer) }
+                    }
+                    if let status = model.pushTests.status[computer.fingerprint] {
+                        Text(PushTests.text(status)).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("Notifications")
             } footer: {
                 Text("Over Bluetooth, \(name) knows when you are near it and holds phone alerts while you use it.")
+            }
+            Section {
+                Toggle("Let agents open screens", isOn: Binding(
+                    get: { model.agents.allows(computer) },
+                    set: { model.agents.set($0, for: computer, fleet: model.fleet) }
+                ))
+            } footer: {
+                Text("Agents on \(name) can open chats, terminals, and other screens in this app, say which one is in front, and show you notes, while the app is open and unlocked. Nothing else.")
             }
             ComputerUpdateSection(device: device, name: name)
             Section("Certificate") {
@@ -141,6 +167,7 @@ struct ComputerStatusLine: View {
         switch status {
         case .online: Label("Connected", systemImage: "circle.fill").foregroundStyle(.green)
         case .connecting: Label("Connecting…", systemImage: "circle.dotted").foregroundStyle(.secondary)
+        case let .relayBanned(relay): Label("\(relay.host) banned your network address", systemImage: "nosign").foregroundStyle(.red)
         case .offline: Label("Offline", systemImage: "wifi.slash").foregroundStyle(.secondary)
         case .revoked: Label("Unpaired this \(UIDevice.current.model)", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
         case .outdated: Label("Needs a newer Sheprd", systemImage: "arrow.up.circle").foregroundStyle(.orange)

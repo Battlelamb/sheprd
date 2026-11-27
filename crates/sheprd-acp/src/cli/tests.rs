@@ -2,12 +2,14 @@
 
 use super::*;
 
+mod briefs;
 mod choose;
 mod connect;
 mod mirror;
 mod restore;
 mod session_helpers;
 mod t3;
+mod traces;
 mod transcripts;
 
 fn args(list: &[&str]) -> Vec<OsString> {
@@ -114,6 +116,34 @@ fn non_utf8_paths_are_accepted_where_paths_go() {
     assert_eq!(
         parse(vec![OsString::from("--load"), odd]),
         Err(Error::NotUtf8("--load"))
+    );
+}
+
+#[test]
+fn thread_keeps_a_continued_session_in_its_thread() {
+    let id = sheprd_chat_protocol::thread::ThreadId::random();
+    let options = run(&["--resume", "abc", "--thread", &id.to_string(), "claude"]);
+    assert_eq!(options.thread, Some(id));
+    assert_eq!(run(&["claude"]).thread, None);
+    assert_eq!(
+        parse(args(&["--resume", "abc", "--thread", "nope", "claude"])),
+        Err(Error::InvalidThread("nope".to_owned()))
+    );
+    // Until a thread can be continued without its session, it takes one.
+    assert_eq!(
+        parse(args(&["--thread", &id.to_string(), "claude"])),
+        Err(Error::ThreadWithoutLoad)
+    );
+    assert_eq!(
+        parse(args(&[
+            "--resume",
+            "abc",
+            "--thread",
+            &id.to_string(),
+            "--",
+            "my-agent"
+        ])),
+        Err(Error::ThreadWithoutLoad)
     );
 }
 

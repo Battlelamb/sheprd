@@ -1,14 +1,16 @@
 //! `tab`, `code`, `devices`, `orchestrator`, and `review`.
 mod items;
+mod lend;
+mod machine_agent;
 
 use super::{Context, Output, unexpected};
 use crate::{
-    cli::control::{CodeCommand, FileAt, OrchestratorCommand, TabCommand},
+    cli::control::{CodeCommand, FileAt, MachineCommand, OrchestratorCommand, TabCommand},
     control::{
         ErrorCode,
         protocol::{
             Request, Response,
-            tabs::{Reply, TabInfo, TabOp},
+            tabs::{MachineImageInfo, MachineInfo, Reply, TabInfo, TabOp},
         },
     },
 };
@@ -145,6 +147,179 @@ pub(super) fn code(command: CodeCommand, context: &Context) -> crate::Result<Out
 pub(super) fn devices(context: &Context) -> crate::Result<Output> {
     let response = context.call(Request::Tab, TabOp::Devices)?;
     opened("the Devices overview", response)
+}
+
+pub(super) fn machine(command: MachineCommand, context: &Context) -> crate::Result<Output> {
+    let (host, command) = match command {
+        MachineCommand::On { host, command } => (Some(host), *command),
+        command => (None, command),
+    };
+    let on = Machines { context, host };
+    match command {
+        // Parsing never nests one.
+        MachineCommand::On { .. } => {
+            Err(rejected(ErrorCode::InvalidRequest, "--host is given once"))
+        }
+        MachineCommand::Lend => lend::serve(context),
+        MachineCommand::Start { name } => on.act(TabOp::MachineStart { name }),
+        MachineCommand::Claim { name, wait } => machine_agent::claim(name, wait, &on),
+        MachineCommand::Release { name } => on.act(TabOp::MachineRelease { name }),
+        MachineCommand::Open { name } => opened("the machine", on.call(TabOp::Machine { name })?),
+        MachineCommand::Setup { name } => {
+            let response = on.call(TabOp::MachineSetup { name })?;
+            opened("the machine and its setup guide", response)
+        }
+        MachineCommand::List => machines(on.call(TabOp::MachineList)?),
+        MachineCommand::Set {
+            name,
+            cpus,
+            memory_gib,
+            display,
+        } => on.act(TabOp::MachineSet {
+            name,
+            cpus,
+            memory_gib,
+            display,
+        }),
+        MachineCommand::Suspend { name } => on.act(TabOp::MachineSuspend { name }),
+        MachineCommand::Delete { name } => on.act(TabOp::MachineDelete { name }),
+        MachineCommand::New { name, image } => on.act(TabOp::MachineNew { name, image }),
+        MachineCommand::ImageList => machine_images(on.call(TabOp::MachineImageList)?),
+        MachineCommand::ImageSave { machine, image } => {
+            on.act(TabOp::MachineImageSave { machine, image })
+        }
+        MachineCommand::ImageDelete { name } => on.act(TabOp::MachineImageDelete { name }),
+        MachineCommand::Agent { name } => machine_agent::agent(name, &on),
+        MachineCommand::Exec(command) => machine_agent::exec(command, &on),
+        MachineCommand::Screenshot { name, path } => machine_agent::screenshot(name, &path, &on),
+        MachineCommand::Click {
+            name,
+            x,
+            y,
+            button,
+            count,
+        } => on.act(TabOp::MachineClick {
+            name,
+            x,
+            y,
+            button,
+            count,
+        }),
+        MachineCommand::Type { name, text } => on.act(TabOp::MachineType { name, text }),
+        MachineCommand::Key {
+            name,
+            key,
+            modifiers,
+        } => on.act(TabOp::MachineKey {
+            name,
+            key,
+            modifiers,
+        }),
+    }
+}
+
+/// Machine requests for this computer, or with `--host` for the Sheprd on
+/// another one, which this app forwards them to.
+pub(super) struct Machines<'a> {
+    context: &'a Context,
+    host: Option<String>,
+}
+
+impl Machines<'_> {
+    fn op(&self, op: TabOp) -> TabOp {
+        match &self.host {
+            Some(host) => TabOp::MachineOn {
+                host: host.clone(),
+                request: Box::new(op),
+            },
+            None => op,
+        }
+    }
+
+    pub(super) fn call(&self, op: TabOp) -> crate::Result<Response> {
+        self.context.call(Request::Tab, self.op(op))
+    }
+
+    pub(super) fn act(&self, op: TabOp) -> crate::Result<Output> {
+        self.context.act(Request::Tab, self.op(op))
+    }
+}
+
+fn machines(response: Response) -> crate::Result<Output> {
+    let Response::Tab {
+        reply:
+            Reply::Machines {
+                machines,
+                capacity,
+                lending,
+            },
+    } = response
+    else {
+        return Err(unexpected(response));
+    };
+    let json =
+        serde_json::json!({ "machines": machines, "capacity": capacity, "lending": lending });
+    let mut lines = Vec::new();
+    if let Some(capacity) = capacity {
+        lines.push(format!(
+            "VM slots: {} of {} in use, {} available{}",
+            capacity.in_use,
+            capacity.limit,
+            capacity.available,
+            if capacity.available == 0 {
+                ". No VM slots available; wait or reuse an unreserved running VM."
+            } else {
+                ""
+            }
+        ));
+        if capacity.others > 0 {
+            lines.push(format!(
+                "Of those, {} run by other programs such as Tart",
+                capacity.others
+            )); // i18n: data
+        }
+    }
+    if let Some(reason) = lending.and_then(|lending| lending.reason()) {
+        lines.push(format!("Does not lend its virtual Macs: {reason}")); // i18n: data
+    }
+    if machines.is_empty() {
+        lines.push("No virtual Macs".into());
+        return Ok(Output::data(lines.join("\n"), &json)?.nothing());
+    }
+    lines.extend(machines.iter().map(machine_line));
+    Output::data(lines.join("\n"), &json)
+}
+
+fn machine_images(response: Response) -> crate::Result<Output> {
+    let Response::Tab {
+        reply: Reply::MachineImages { images },
+    } = response
+    else {
+        return Err(unexpected(response));
+    };
+    let json = serde_json::json!({ "images": images });
+    if images.is_empty() {
+        return Ok(Output::data("No images", &json)?.nothing());
+    }
+    let lines: Vec<String> = images.iter().map(image_line).collect();
+    Output::data(lines.join("\n"), &json)
+}
+
+fn image_line(image: &MachineImageInfo) -> String {
+    format!("{}\t{:.1} GB", image.name, image.disk_bytes as f64 / 1e9) // i18n: data
+}
+
+fn machine_line(machine: &MachineInfo) -> String {
+    format!(
+        "{}\t{}\t{} CPUs\t{} GB\t{}\t{:.1} GB on disk\t{}",
+        machine.name,
+        machine.state.name(),
+        machine.cpus,
+        machine.memory_gib,
+        machine.display,
+        machine.disk_bytes as f64 / 1e9,
+        machine.reservation.as_deref().unwrap_or("unreserved"),
+    )
 }
 
 pub(super) fn px0(context: &Context) -> crate::Result<Output> {

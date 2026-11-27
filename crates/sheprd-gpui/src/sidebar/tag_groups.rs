@@ -71,12 +71,38 @@ impl SheprdWindow {
         })
     }
 
-    /// Tells the tags and the text shortcuts which devices this window can
-    /// reach now: this computer, and the machines connected, so no exchange
-    /// waits on one that is away.
+    /// Tells the tags, shortcuts, relay sharing, and fleet which devices this
+    /// window can reach now: this computer, and every remote host connected
+    /// through Herdr 1 or herdr-core, so no exchange waits on one that is away.
     pub(crate) fn reach_device_tags(&self, cx: &mut Context<Self>) {
-        let reachable = self
+        let reachable = self.reachable_daemons(|host| self.core_terminals.is_connected(host));
+        // The same computers keep the text shortcuts.
+        crate::text_shortcuts::Store::reach(cx, &reachable);
+        // And their favorite agents.
+        crate::agent_favorites::AgentFavorites::reach(cx, &reachable);
+        // And what was read of them.
+        crate::agent_read::AgentRead::reach(cx, &reachable);
+        // And hear which relays this computer listens on.
+        let window = cx.entity_id();
+        crate::relay_sharing::RelaySharing::reach(cx, window, &reachable);
+        // And carry the fleet's log to those in it.
+        // By the names Devices shows: a computer paired nearby is reached
+        // through a relay address nobody would recognise.
+        let names = self
             .endpoints
+            .iter()
+            .filter(|endpoint| reachable.contains_key(&endpoint.id))
+            .map(|endpoint| (endpoint.id.clone(), endpoint.label.clone()))
+            .collect();
+        crate::fleet::Fleet::reach(cx, window, &reachable, &names);
+        DeviceTags::reach(cx, reachable);
+    }
+
+    pub(super) fn reachable_daemons(
+        &self,
+        core_connected: impl Fn(&crate::core_terminals::Host) -> bool,
+    ) -> std::collections::BTreeMap<String, Daemon> {
+        self.endpoints
             .iter()
             .enumerate()
             .filter_map(|(index, endpoint)| {
@@ -91,16 +117,12 @@ impl SheprdWindow {
                 let target = &endpoint.connection.target;
                 let remote = crate::automations::Machine::of(target)
                     .is_some_and(|machine| !machine.is_local());
-                (endpoint.enabled && live.status.is_connected() && remote)
+                let core = crate::core_terminals::Host::Remote(crate::browser::scope(endpoint));
+                let connected = live.status.is_connected() || core_connected(&core);
+                (endpoint.enabled && connected && remote)
                     .then(|| (endpoint.id.clone(), Daemon::Remote(target.clone())))
             })
-            .collect();
-        // The same computers keep the text shortcuts.
-        crate::text_shortcuts::Store::reach(cx, &reachable);
-        // And hear which relays this computer listens on.
-        let window = cx.entity_id();
-        crate::relay_sharing::RelaySharing::reach(cx, window, &reachable);
-        DeviceTags::reach(cx, reachable);
+            .collect()
     }
 
     /// Lists only `tag`'s devices, from the top, as a device scope does.

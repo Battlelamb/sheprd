@@ -8,6 +8,7 @@
 mod automation;
 mod local_ports;
 mod mute;
+mod pause;
 mod ports;
 mod pr;
 mod security;
@@ -49,6 +50,9 @@ pub(super) fn serve(
         HostOp::Select { id } => in_free_window(caller, cx, |view, _, cx| {
             select(view, &id, |view, id| view.select_endpoint(id, cx))
         }),
+        HostOp::Pause { host, paused } => {
+            return pause::run(call.caller, &host, paused, incoming, watches, cx);
+        }
         HostOp::Tag { id, tags } => in_window(caller, cx, |view, _, cx| tag(view, &id, tags, cx)),
         HostOp::Update { host } => in_window(caller, cx, |view, window, cx| {
             update::ask(view, caller, host.as_deref(), window, cx)
@@ -58,6 +62,21 @@ pub(super) fn serve(
         HostOp::PrComments => return pr::comments(call.caller, incoming, watches, cx),
         HostOp::PrOpen => in_window(caller, cx, |view, window, cx| {
             pr::open(view, caller, window, cx)
+        }),
+        HostOp::PrCreate {} => in_free_window(caller, cx, |view, window, cx| {
+            pr::create(view, caller, window, cx)
+        }),
+        HostOp::PrMerge => in_window(caller, cx, |view, window, cx| {
+            pr::ask(view, caller, crate::menu::PrChange::Merge, window, cx)
+        }),
+        HostOp::PrQueue { change } => in_window(caller, cx, |view, window, cx| {
+            pr::ask(
+                view,
+                caller,
+                crate::menu::PrChange::Queue(change),
+                window,
+                cx,
+            )
         }),
         HostOp::Ports => in_window(caller, cx, |view, _, _| ports::list(view, caller)),
         HostOp::Forward { port } => in_window(caller, cx, |view, _, cx| {
@@ -161,7 +180,7 @@ impl Place {
 }
 
 /// The host named by ID, else by label.
-fn named<'a>(
+pub(super) fn named<'a>(
     view: &'a SheprdWindow,
     name: &str,
 ) -> Result<&'a crate::endpoint::Endpoint, Response> {

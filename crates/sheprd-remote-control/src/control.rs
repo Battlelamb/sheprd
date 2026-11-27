@@ -4,23 +4,31 @@
 //! only this user reaches it. No Tokio: Sheprd calls [`request`] from a
 //! background thread.
 //!
-//! Secrets never cross it except a pairing offer's URL, whose token is
-//! valid for one minute and one claim. Device keys and session tokens stay
-//! in the daemon.
+//! Pairing offers, borrowed GitHub tokens and approved voice accounts are
+//! sensitive. Device keys and session tokens stay in the daemon.
 
 use sheprd_chat_protocol::{read_frame, write_frame};
 pub mod app_update;
 pub mod changes;
 pub mod desktop;
 pub mod edited;
+pub mod favorites;
+pub mod fleet;
 pub mod github;
 pub mod host_relay;
 pub mod hosts;
+pub mod labels;
 pub mod layout;
+pub mod pairing_link;
+pub mod phone;
 pub mod pull_requests;
+pub mod push;
+pub mod read;
 pub mod relays;
+pub mod sharing;
 pub mod shortcuts;
 pub mod tags;
+pub mod voice;
 use serde::{Deserialize, Serialize};
 use std::{
     io::{BufReader, BufWriter, Write},
@@ -66,6 +74,13 @@ pub fn address(state_dir: &Path) -> PathBuf {
 /// Removes what a daemon's listener left in `state_dir`.
 pub fn release(state_dir: &Path) {
     sheprd_client::private_endpoint::release(&address(state_dir));
+}
+
+/// Whether a daemon accepts connections at `address` within `limit`. Sends
+/// nothing, so a daemon that is exiting cannot hold the caller for a reply.
+/// Blocking.
+pub fn answers(address: &Path, limit: Duration) -> bool {
+    sheprd_client::private_endpoint::Connection::connect(address, limit).is_ok()
 }
 
 /// Sends one request and waits for its response. Blocking.
@@ -125,6 +140,19 @@ pub enum Request {
         /// says otherwise, as an older Sheprd's never does.
         #[serde(default = "yes", skip_serializing_if = "is_yes")]
         share_github: bool,
+        /// The fleet the dialog's fleet line agreed to, hex, when it was
+        /// shown ticked: a computer that claimed joins it, or this computer
+        /// joins the claimant's. One the fleet no longer matches is refused.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fleet: Option<String>,
+    },
+    /// A pairing link for the open, unclaimed pairing `id`
+    /// (`pairing_link`): a second token, claimable for two minutes through
+    /// this computer's relays, which the dialog copies so another Sheprd
+    /// can pair from any network. Refused while no relay listens. A new
+    /// link replaces the previous one.
+    PairLink {
+        id: PairingId,
     },
     /// Closes the dialog's pairing; its token stops working.
     CancelPairing {
@@ -217,6 +245,24 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         offer: Option<tags::ComputerTags>,
     },
+    Labels {
+        target: labels::Target,
+        worktree: bool,
+        edit: labels::Edit,
+    },
+    /// This computer's favorite agents: stars or unstars one pane, if
+    /// `change` says so, and answers with the favorites that stand
+    /// (`favorites`).
+    Favorites {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        change: Option<favorites::Change>,
+    },
+    /// Which agents' replies were read here: marks panes read or unread,
+    /// if `change` says so, and answers with the panes unread now (`read`).
+    Read {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        change: Option<read::Change>,
+    },
     /// This computer's text shortcuts: offers Sheprd's copy, if any, and
     /// answers with the ones that stand (`shortcuts`).
     Shortcuts {
@@ -228,10 +274,18 @@ pub enum Request {
     /// relay the daemon listens on now. Sheprd never sends it to its own
     /// daemon, which follows `[remote] relays`.
     ShareRelays(relays::Offer),
+    /// This computer's listen tokens changed (`app::relay_tokens`): read
+    /// them again and reconnect the relays whose token changed. Answered
+    /// with [`Response::Done`].
+    RelayTokens,
     /// On a host: adds a phone another computer's user allowed, as
     /// `herdr-remote-control enroll` asks. Sheprd never sends it to its
     /// own daemon.
     Enroll(hosts::Enroll),
+    /// The fleet (`fleet::sync::Ask`): its state, founding it, admitting
+    /// and removing members, sharing hosts, and operations carried from
+    /// another member.
+    Fleet(Box<fleet::sync::Ask>),
     /// Where the app's updater stands, sent with each poll while a window
     /// runs it. Answered with whether a phone asked to update. `instance`
     /// names this run of the app: a request is only for the run a phone saw.
@@ -239,8 +293,13 @@ pub enum Request {
         instance: u32,
         update: app_update::AppUpdate,
     },
-    /// Takes the phones' questions about workspaces, waiting up to
-    /// [`ASK_WAIT`] for one. Sheprd sends it while a phone is connected.
+    /// Takes pending exchanges during approved voice account pairings.
+    VoiceAsks,
+    VoiceAnswer {
+        id: changes::AskId,
+        answer: Option<voice::Answer>,
+    },
+    /// Takes phones' workspace questions, waiting up to [`ASK_WAIT`].
     ChangeAsks,
     /// What Sheprd found for an [`changes::Ask`].
     ChangeAnswer {
@@ -283,6 +342,59 @@ pub enum Request {
         id: changes::AskId,
         answer: github::LeaseAnswer,
     },
+    /// How iPhone pushes leave this computer and how the last of each kind
+    /// went (`push`). Read-only, and it names no token, handle, or device.
+    /// An older daemon closes without answering.
+    PushStatus,
+    /// Reserve a delegated chat on its coordinating Live Activity before its
+    /// tab opens. An absent label withdraws a launch that failed.
+    DelegatedLaunch {
+        owner: sheprd_chat_protocol::brief::Delegation,
+        child: sheprd_chat_protocol::EndpointId,
+        label: Option<String>,
+    },
+    /// Sends each phone registered for alerts one sealed test alert now,
+    /// through the push relay, as the phone's own Send Test Push does, and
+    /// answers what came of each, within [`ASK_WAIT`]. An older daemon
+    /// closes without answering.
+    TestPush,
+    /// Agents driving a paired phone's app (`phone`): the phones that let
+    /// them, or a drive, answered once the phone says what it did or
+    /// [`ASK_WAIT`] passes. An older daemon closes without answering.
+    Phone(phone::Ask),
+    /// Active read-only session shares on this host, without any secrets.
+    ShareList,
+    /// Runs the exact host-side allowlist projection for `pane` under the
+    /// chosen history/tool policy, without creating a share or grant.
+    SharePreview {
+        pane: String,
+        #[serde(default)]
+        history: sharing::ShareHistory,
+        #[serde(default)]
+        include_tools: bool,
+    },
+    /// Owner-confirmed creation of a read-only share for `pane` and its first
+    /// single-relay HTTPS invitation link.
+    ShareCreate {
+        pane: String,
+        #[serde(default)]
+        history: sharing::ShareHistory,
+        #[serde(default)]
+        include_tools: bool,
+        lifetime_secs: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        relay: Option<String>,
+    },
+    /// Revokes one grant on `share`, or stops the whole share when `grant` is
+    /// omitted.
+    ShareRevoke {
+        share: uuid::Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        grant: Option<uuid::Uuid>,
+    },
+    /// Owner kill switch: stops every active share and closes guest streams
+    /// without touching agents or paired phones.
+    ShareStopAll,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -291,6 +403,11 @@ pub enum Response {
     Status(Status),
     Offer(Offer),
     Pairing(PairingState),
+    /// A pairing link, and how long it may be claimed.
+    PairLink {
+        link: String,
+        expires_in_ms: u64,
+    },
     Devices {
         devices: Vec<Device>,
     },
@@ -325,7 +442,13 @@ pub enum Response {
         revokes: Vec<hosts::HostRevoke>,
     },
     Enrolled(hosts::Enrolled),
+    Fleet(Box<fleet::sync::Answer>),
     Tags(tags::ComputerTags),
+    Labels {
+        tags: Vec<String>,
+    },
+    Favorites(favorites::Favorites),
+    Read(read::Unread),
     Shortcuts(shortcuts::TextShortcuts),
     /// The relays the daemon listens on, its own and those shared with it.
     Relays {
@@ -334,6 +457,9 @@ pub enum Response {
     AppUpdate {
         /// A phone asked to update since the last report. Taken by reading.
         requested: bool,
+    },
+    VoiceAsks {
+        asks: Vec<voice::Ask>,
     },
     ChangeAsks {
         asks: Vec<changes::Ask>,
@@ -350,6 +476,14 @@ pub enum Response {
     GitHubLeaseAsks {
         asks: Vec<github::LeaseAsk>,
     },
+    PushStatus(push::PushStatus),
+    TestPushed(push::TestPushes),
+    Phone(phone::Answer),
+    Shares {
+        shares: Vec<sharing::ShareSummary>,
+    },
+    SharePreview(sharing::SharePreview),
+    ShareCreated(sharing::ShareCreated),
 }
 
 /// The daemon's answer to a nearby phone's first step, the same JSON over
@@ -390,9 +524,15 @@ pub enum ErrorCode {
     Unsupported,
     /// Nearby pairing needs the pairing dialog open on the computer.
     NoPairing,
+    /// A pairing link needs this computer to listen on a relay.
+    NoRelays,
     /// The daemon could not write its state; nothing changed, and the
     /// same request may succeed later.
     Unsaved,
+    /// No such chat pane is attached on this daemon.
+    UnknownChat,
+    /// No such active share or grant.
+    UnknownShare,
     #[serde(other)]
     Other,
 }
@@ -426,6 +566,8 @@ pub struct Status {
     /// (`Request::GitHubLeaseAsks`); an older daemon has none.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub github_asks: usize,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub voice_asks: usize,
     /// Each relay this computer listens on, by endpoint; absent when it
     /// listens on none, or the daemon is older.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -440,6 +582,10 @@ pub struct RelayStatus {
     pub label: crate::relay_label::RelayLabel,
     #[serde(flatten)]
     pub state: RelayState,
+    /// Whether the daemon listens there with a listen token, its own or
+    /// one shared with it. An older daemon leaves it out.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub token: bool,
 }
 
 impl From<RelayState> for RelayStatus {
@@ -447,6 +593,7 @@ impl From<RelayState> for RelayStatus {
         Self {
             label: crate::relay_label::RelayLabel::default(),
             state,
+            token: false,
         }
     }
 }
@@ -523,6 +670,11 @@ pub enum PairingState {
     /// No phone has claimed the token yet.
     Waiting {
         expires_in_ms: u64,
+        /// The code a nearby phone or computer agreed on over Bluetooth and
+        /// shows already, before it claims: the dialog shows it too, so
+        /// both screens show it at once. The claim brings it again.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        nearby_code: Option<String>,
     },
     /// A phone claimed it: the dialog shows its name and the matching code
     /// and asks the user.
@@ -539,6 +691,11 @@ pub enum PairingState {
         /// `~/.ssh/authorized_keys`, so the dialog says so.
         #[serde(default, skip_serializing_if = "is_no")]
         ssh: bool,
+        /// What that computer asked of the fleet beside pairing: to join
+        /// this computer's, or to bring this computer into its own
+        /// (`fleet::bluetooth`). The dialog says so, with a line to agree.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fleet: Option<fleet::bluetooth::Asked>,
     },
     Approved {
         device: DeviceId,

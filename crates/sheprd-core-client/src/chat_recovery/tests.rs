@@ -2,8 +2,10 @@ use super::*;
 use crate::tests::{connected, terminal};
 use serde_json::json;
 
+mod doc_name;
 mod races;
 mod switch;
+mod thread;
 
 const ID: &str = "0123456789abcdef0123456789abcdef";
 
@@ -80,6 +82,7 @@ pub(super) fn record() -> Record {
         session: "exact-session".into(),
         state: State::Live,
         terminal: "t1".into(),
+        thread: None,
         version: 1,
     }
 }

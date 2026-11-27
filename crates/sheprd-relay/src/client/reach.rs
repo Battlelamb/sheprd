@@ -23,10 +23,42 @@ const ATTEMPT: Duration = Duration::from_secs(5);
 const MAX_ADDRESSES: usize = 8;
 
 /// Connects to the relay at `endpoint` over QUIC, at the first of its
-/// addresses that answers.
+/// addresses that answers, trusting the certificate `/v1/info` names.
 pub async fn reach(endpoint: &Endpoint) -> Result<Connection> {
-    let (addresses, pin) = quic(endpoint).await?;
+    reach_pinned(endpoint, None).await
+}
+
+/// [`reach`], but when `expected` holds a pin, such as the one Sheprd's
+/// signed relay list carries, only a certificate with that pin is
+/// trusted: a `/v1/info` naming another, which a TLS-inspecting proxy or a
+/// mis-issued certificate could forge, fails with [`Error::PinMismatch`]
+/// and nothing is dialed.
+pub async fn reach_pinned(endpoint: &Endpoint, expected: Option<Pin>) -> Result<Connection> {
+    connect_endpoint(endpoint, expected, false).await
+}
+
+/// Connect an owner only when the selected HTTPS relay also hosts the browser guest.
+pub async fn reach_share(endpoint: &Endpoint, expected: Option<Pin>) -> Result<Connection> {
+    connect_endpoint(endpoint, expected, true).await
+}
+
+async fn connect_endpoint(
+    endpoint: &Endpoint,
+    expected: Option<Pin>,
+    require_viewer: bool,
+) -> Result<Connection> {
+    let (addresses, reported) = quic(endpoint, require_viewer).await?;
+    let pin = trusted(reported, expected)?;
     first_reachable(&addresses, ATTEMPT, |address| connect(address, pin)).await
+}
+
+/// The pin to dial with: the one expected when there is one, which the
+/// relay must also report.
+fn trusted(reported: Pin, expected: Option<Pin>) -> Result<Pin> {
+    match expected {
+        Some(expected) if expected != reported => Err(Error::PinMismatch),
+        _ => Ok(reported),
+    }
 }
 
 /// Connects to the first of `addresses` that answers, in the resolver's
@@ -55,11 +87,14 @@ where
 
 /// Where the relay's QUIC listens (every address its name resolves to, up
 /// to [`MAX_ADDRESSES`]), and its certificate's pin, from its `/v1/info`.
-async fn quic(endpoint: &Endpoint) -> Result<(Vec<SocketAddr>, Pin)> {
+async fn quic(endpoint: &Endpoint, require_viewer: bool) -> Result<(Vec<SocketAddr>, Pin)> {
     let url = endpoint.info().to_string();
     let info = tokio::task::spawn_blocking(move || info(&url))
         .await
         .map_err(|_| Error::InfoFormat)??;
+    if require_viewer && !(info.websocket && info.share_viewer) {
+        return Err(Error::NoShareViewer);
+    }
     let quic = info.quic.ok_or(Error::NoQuic)?;
     let pin = pin(&quic)?;
     let host = endpoint.hostname();
@@ -76,9 +111,33 @@ fn info(url: &str) -> Result<Info> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(INFO_TIMEOUT))
         .max_redirects(0)
+        .http_status_as_error(false)
         .build()
         .into();
     let mut response = agent.get(url).call().map_err(Box::new)?;
+    let status = response.status();
+    let headers = response.headers();
+    if status.as_u16() == 403
+        && headers
+            .get(crate::endpoint::BAN_HEADER)
+            .is_some_and(|value| value == "1")
+    {
+        let header = |name| {
+            headers
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+        };
+        return Err(Error::Banned(crate::ban::Ban::from_parts(
+            header(crate::ban::REASON_HEADER),
+            header(crate::ban::SECONDS_HEADER),
+        )));
+    }
+    if !status.is_success() {
+        return Err(Error::Info(Box::new(ureq::Error::StatusCode(
+            status.as_u16(),
+        ))));
+    }
     let body = response
         .body_mut()
         .with_config()
@@ -89,12 +148,7 @@ fn info(url: &str) -> Result<Info> {
 }
 
 fn pin(quic: &QuicInfo) -> Result<Pin> {
-    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-    URL_SAFE_NO_PAD
-        .decode(&quic.pin)
-        .ok()
-        .and_then(|pin| pin.try_into().ok())
-        .ok_or(Error::InfoFormat)
+    crate::endpoint::decode_pin(&quic.pin).ok_or(Error::InfoFormat)
 }
 
 #[cfg(test)]

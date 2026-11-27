@@ -3,7 +3,7 @@ use crate::{CoreBackend, frame::Kind};
 use serde_json::{Value, json};
 use sheprd_backend::{
     AgentStatus, Backend, Change, Changes, ClientPaneInputEvent, Exit, KeyReporting, Role,
-    RunState, Size, SurfaceUpdate, Terminal as _, TerminalId,
+    RunState, Size, SurfaceUpdate, Terminal as _, TerminalId, WatchBackend,
 };
 use std::{thread, time::Duration};
 
@@ -180,6 +180,33 @@ fn attached(backend: &CoreBackend, mock: &mut MockCore, role: Role) -> crate::Co
 }
 
 #[test]
+fn an_attach_waits_while_the_core_restarts_a_lost_shell() {
+    let (backend, mut mock) = backend();
+    let attached = thread::scope(|scope| {
+        let attach = scope.spawn(|| {
+            backend.attach(
+                &TerminalId::new("t1").unwrap(),
+                Size::new(20, 4).unwrap(),
+                Role::Active,
+            )
+        });
+        // The core came back and has not started the kept shell yet.
+        let refused = mock.request();
+        let message = json!({"jsonrpc": "2.0", "id": refused["id"],
+            "error": {"code": -32000, "message": "t1 is lost, waiting for its new shell",
+                "data": {"kind": "unavailable", "hint": "retry after the restarted event"}}});
+        mock.send(0, Kind::Data, &serde_json::to_vec(&message).unwrap());
+        let retried = mock.request();
+        assert_eq!(retried["method"], "terminal.attach");
+        let mut t1 = terminal("t1");
+        (t1["cols"], t1["rows"]) = (json!(20), json!(4));
+        mock.answer(&retried, json!({"channel": 5, "terminal": t1}));
+        attach.join().unwrap()
+    });
+    assert!(attached.is_ok());
+}
+
+#[test]
 fn an_attached_terminal_paints_cells_and_ends() {
     let (backend, mut mock) = backend();
     let mut terminal = attached(&backend, &mut mock, Role::Active);
@@ -292,7 +319,7 @@ fn a_connection_lost_inside_a_synchronized_update_shows_what_it_held() {
     let mut terminal = attached(&backend, &mut mock, Role::Active);
     let _ = terminal.next(Duration::from_millis(20)).unwrap();
     mock.send(5, Kind::Data, b"\x1b[?2026hheld");
-    drop(mock);
+    mock.close();
     let mut text = String::new();
     let start = std::time::Instant::now();
     while let Ok(updates) = terminal.next(Duration::from_millis(50)) {

@@ -24,10 +24,10 @@ struct ConnectionToast: View {
 
     var body: some View {
         let machines = model.fleet.machines
-        let connecting = machines.filter { $0.status == .connecting }.map(\.id)
+        let connecting = machines.filter { $0.presentedStatus == .connecting }.map(\.id)
         let online = Set(machines.filter { if case .online = $0.status { true } else { false } }.map(\.id))
         let notice = keyboard || (window?.typing ?? 0) > 0 ? nil : LinkNotice.worst(
-            machines.map { ($0.id, $0.status) },
+            machines.map { ($0.id, $0.presentedStatus) },
             patient: patient,
             dismissed: model.dismissedNotices,
             // Home's cards ask about unpaired computers instead.
@@ -64,10 +64,18 @@ struct ConnectionToast: View {
                 ProgressView().controlSize(.small)
                 Text("Connecting to \(Self.list(names))").font(.subheadline.weight(.medium)).lineLimit(1)
             }
+        case .relayBanned:
+            capsule(close: close) {
+                Image(systemName: "nosign").foregroundStyle(.red)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Relay banned your network address").font(.subheadline.weight(.medium))
+                    Text(Self.list(names)).font(.caption).foregroundStyle(.secondary)
+                }
+            }
         case .offline:
             // The oldest view still shown is the one worth dating.
             let since = named.compactMap(\.updated).min()
-            let reason = named.lazy.compactMap { if case let .offline(reason) = $0.status { reason } else { nil } }.first ?? ""
+            let reason = named.lazy.compactMap { if case let .offline(reason) = $0.presentedStatus { reason } else { nil } }.first ?? ""
             capsule(close: close) {
                 Image(systemName: "wifi.slash").foregroundStyle(.orange)
                 VStack(alignment: .leading, spacing: 0) {
@@ -128,17 +136,52 @@ struct ConnectionToast: View {
     }
 }
 
+extension EnvironmentValues {
+    /// How tall the connection toast over this screen is, 0 when none shows.
+    @Entry var connectionToastHeight: CGFloat = 0
+}
+
 extension View {
     /// Says at the bottom which computers are not live, on this view and
-    /// on every screen a navigation stack it wraps pushes.
+    /// on every screen a navigation stack it wraps pushes. Those screens
+    /// make room for it with `makesRoomForConnectionToast`.
     func connectionToast(pairing: Binding<Bool>) -> some View {
-        safeAreaInset(edge: .bottom) { ConnectionToast(pairing: pairing) }
+        modifier(ConnectionToastHost(pairing: pairing))
+    }
+
+    /// Lets this screen scroll its last rows above the connection toast.
+    /// A `safeAreaInset` around a navigation stack never reaches the lists
+    /// of the screens inside it, so each screen insets itself.
+    func makesRoomForConnectionToast() -> some View {
+        modifier(ConnectionToastRoom())
     }
 
     /// For a screen with its own input at the bottom: its window's
     /// connection toast stays away while it shows.
     func hidesConnectionToast() -> some View {
         modifier(HidesConnectionToast())
+    }
+}
+
+private struct ConnectionToastHost: ViewModifier {
+    @Binding var pairing: Bool
+    @State private var height: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.connectionToastHeight, height)
+            .overlay(alignment: .bottom) {
+                ConnectionToast(pairing: $pairing)
+                    .onGeometryChange(for: CGFloat.self, of: \.size.height) { height = $0 }
+            }
+    }
+}
+
+private struct ConnectionToastRoom: ViewModifier {
+    @Environment(\.connectionToastHeight) private var height
+
+    func body(content: Content) -> some View {
+        content.safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: height) }
     }
 }
 

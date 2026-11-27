@@ -2,7 +2,7 @@
 //! chats, and push subscriptions. Auth calls that write to disk run on the
 //! blocking pool.
 
-use super::{
+use crate::web::{
     ApiError, Device, Peer, Shared, TypedFrom,
     fragments::folders,
     render::{now_ms, urlencode},
@@ -57,6 +57,10 @@ pub(super) struct ClaimRequest {
     /// through the relays (`crate::ssh_access`): its `ssh-ed25519` key.
     #[serde(default)]
     ssh: Option<SshRequest>,
+    /// That desktop asking to join this computer's fleet, or inviting this
+    /// computer into its own (`crate::fleet::bluetooth`).
+    #[serde(default)]
+    fleet: Option<crate::control::fleet::bluetooth::ClaimFleet>,
 }
 
 #[derive(Deserialize)]
@@ -89,6 +93,7 @@ pub(super) async fn claim(
         .map(|origin| app_origin(origin).ok_or(ApiError::Invalid("the app's origin is not valid")))
         .transpose()?;
     let ssh = desktop_key(&state, request.ssh.as_ref(), request.relay.as_ref()).await?;
+    let fleet = claimed_fleet(&state, &request, ssh.as_ref()).await?;
     let claim = with_auth(&state, move |auth| {
         if ssh.is_some() {
             auth.ssh_access()?;
@@ -105,6 +110,9 @@ pub(super) async fn claim(
         }
         if let Some(key) = ssh {
             auth.claimed_ssh(&claim.id, key);
+        }
+        if let Some(fleet) = fleet {
+            auth.pairings().claimed_fleet(&claim.id, fleet);
         }
         if let Some(relay) = request.relay {
             let keys = crate::auth::devices::RelayKeys {
@@ -160,6 +168,43 @@ async fn desktop_key(
     Ok(Some(key))
 }
 
+/// What a desktop's claim asks of the fleet, checked before its token is
+/// spent: only a desktop, which sends its SSH and relay keys, asks, and a
+/// join must carry those very keys, bound to this claim's token.
+async fn claimed_fleet(
+    state: &Shared,
+    request: &ClaimRequest,
+    ssh: Option<&crate::ssh_access::SshKey>,
+) -> Result<Option<crate::fleet::bluetooth::Claimed>, ApiError> {
+    let (Some(asked), Some(fleet)) = (request.fleet.clone(), state.fleet.clone()) else {
+        return Ok(None);
+    };
+    let (Some(ssh), Some(relay)) = (ssh.cloned(), request.relay.as_ref()) else {
+        return Err(ApiError::Invalid("only a desktop asks to join a fleet"));
+    };
+    let token: [u8; 32] = crate::auth::decode_fixed(request.token.expose_secret())
+        .map_err(|_| crate::auth::Error::InvalidToken)?;
+    // Nothing the fleet part carries is read for a peer without the token.
+    let holds = with_auth(state, move |auth| {
+        Ok(auth.pairings().holds(&token, now_ms()))
+    })
+    .await?;
+    if !holds {
+        return Err(crate::auth::Error::InvalidToken.into());
+    }
+    let relay = crate::auth::devices::RelayKeys {
+        dial: relay.dial.clone(),
+        tunnel: relay.tunnel.clone(),
+    };
+    tokio::task::spawn_blocking(move || {
+        crate::fleet::bluetooth::check_claim(&fleet, asked, &token, &relay, &ssh)
+    })
+    .await
+    .map_err(|_| ApiError::Invalid("the request was interrupted"))?
+    .map(Some)
+    .map_err(ApiError::from)
+}
+
 /// `origin` when it is an `https://` origin as a browser sends it: a host
 /// and an optional port, nothing more, at most 255 bytes.
 pub(super) fn app_origin(origin: &str) -> Option<String> {
@@ -176,21 +221,36 @@ pub(super) async fn claim_status(
     State(state): State<Shared>,
     Path(claim): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    let (pairing, login) = with_auth(&state, move |auth| {
+    let (pairing, login, fleet) = with_auth(&state, move |auth| {
         let pairing = auth.claim_status(&ClaimId(claim), now_ms())?;
         // A desktop learns who to log in as, and which host keys to pin,
         // only once allowed.
-        let login = match &pairing {
-            PairingState::Approved { device } => auth.desktop_login(device)?,
-            _ => None,
+        // A desktop learns it was approved only once the fleet acted on
+        // the approval, with what came of it.
+        let pairing = match pairing {
+            PairingState::Approved { device } if auth.pairings().fleet_settling(&device) => {
+                PairingState::Waiting {
+                    expires_in_ms: 0,
+                    nearby_code: None,
+                }
+            }
+            pairing => pairing,
         };
-        Ok((pairing, login))
+        let (login, fleet) = match &pairing {
+            PairingState::Approved { device } => (
+                auth.desktop_login(device)?,
+                auth.pairings().fleet_for(device),
+            ),
+            _ => (None, None),
+        };
+        Ok((pairing, login, fleet))
     })
     .await?;
     Ok(Json(match pairing {
         PairingState::Approved { device } => {
             let mut approved = json!({
                 "state": "approved",
+                "voice_exchange": true,
                 "device": device.0,
                 "origins": state.origins(),
                 "fingerprint": state.fingerprint,
@@ -198,6 +258,9 @@ pub(super) async fn claim_status(
             });
             if let Some(login) = login {
                 approved["ssh"] = json!(login);
+            }
+            if let Some(fleet) = fleet {
+                approved["fleet"] = json!(fleet);
             }
             approved
         }
@@ -305,7 +368,7 @@ pub(super) async fn origins(State(state): State<Shared>, _device: Device) -> Jso
 
 pub(super) async fn command(
     State(state): State<Shared>,
-    _device: Device,
+    device: Device,
     TypedFrom(origin): TypedFrom,
     Path(pane): Path<String>,
     Json(command): Json<Command>,
@@ -318,7 +381,7 @@ pub(super) async fn command(
         } => Command::Prompt {
             text,
             attachments: state.uploads.resolve(&attachments, now_ms())?,
-            origin: Some(origin),
+            origin: Some(TypedFrom::authenticated(origin, &device.0)),
         },
         command => command,
     };
@@ -360,7 +423,13 @@ pub(super) async fn create_workspace(
         check_new_workspace(&state, &request.cwd, &request.branch, &request.agent).await?;
     state
         .hub
-        .create_workspace(&request.cwd, branch.as_deref(), agent, None)
+        .create_workspace(crate::hub::NewWorkspace {
+            agent,
+            branch: branch.as_deref(),
+            cwd: &request.cwd,
+            session: None,
+            title: None,
+        })
         .await?;
     Ok(Json(json!({ "location": "/" })))
 }
@@ -381,10 +450,12 @@ pub(crate) async fn check_new_workspace(
 ) -> Result<(Agent, Option<String>), ApiError> {
     let agent = parse_agent(agent)?;
     let layout = state.hub.layout();
-    let offered = tokio::task::spawn_blocking(move || folders(&layout))
+    let wanted = cwd.to_owned();
+    // `offers` may look at the disk too.
+    let offered = tokio::task::spawn_blocking(move || folders(&layout).offers(&wanted))
         .await
         .map_err(|_| ApiError::Folder)?;
-    if !offered.offers(cwd) {
+    if !offered {
         return Err(ApiError::Folder);
     }
     let branch = branch.trim();
@@ -431,31 +502,50 @@ pub(super) async fn start_chat(
     Ok(Json(json!({ "location": location })))
 }
 
-/// The iOS companion's Live Activity tokens: the push-to-start token when
-/// it changed, and every activity it still shows.
+/// Older phones register per-pane cards. A phone that supports host cards
+/// opts in without changing the registration body accepted by older hosts.
+#[derive(Deserialize)]
+pub(super) struct ActivityMode {
+    #[serde(default)]
+    single: bool,
+    epoch: Option<uuid::Uuid>,
+}
+
+/// The iOS companion's Live Activity tokens or push relay handles: the
+/// push-to-start token when it changed, and every activity it still shows.
+/// The answer names the delivery, `push_relay`, the only one there is.
 pub(super) async fn register_apns(
+    axum::extract::Query(mode): axum::extract::Query<ActivityMode>,
     State(state): State<Shared>,
     Device(device): Device,
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, ApiError> {
-    if state.apns.is_none() {
+    if state.apns.is_off() {
         return Err(ApiError::NoPush);
     }
-    let update = crate::apns::Registration::parse(&body)
+    // An explicit `null` alert or push-to-start clears it: the phone sends
+    // that when its push relay goes off (`apns::Update`).
+    let update = crate::apns::Update::parse(&body)
         .map_err(|_| ApiError::Invalid("that registration is not valid"))?;
     with_auth(&state, move |auth| {
         let devices = auth.devices_mut();
         let mut stored = crate::apns::Registration::from_stored(
             devices.get(&device).and_then(|record| record.apns.as_ref()),
         );
-        stored.merge(update);
+        stored.apply(update);
+        stored.single_activity = mode.single;
+        stored.activity_epoch = mode.epoch;
         let value = stored
             .to_stored()
             .map_err(|_| ApiError::Invalid("that registration cannot be stored"))?;
         Ok(devices.set_apns(&device, value)?)
     })
     .await?;
-    Ok(Json(json!({ "ok": true })))
+    // Which way this computer's pushes leave it, for the phone's Settings;
+    // older phones ignore it.
+    Ok(Json(
+        json!({ "ok": true, "delivery": state.apns.wire_name() }),
+    ))
 }
 
 pub(super) async fn push_key(
@@ -493,4 +583,55 @@ pub(super) async fn unsubscribe_push(
     })
     .await?;
     Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub(super) struct VoiceExchange {
+    claim: String,
+    #[serde(flatten)]
+    offer: crate::control::voice::Offer,
+}
+
+/// The approved claim alone is public polling information. A fresh, matching
+/// device session proves possession of the device key before any secret moves.
+pub(super) async fn pair_voice(
+    State(state): State<Shared>,
+    Device(device): Device,
+    headers: HeaderMap,
+    Json(request): Json<VoiceExchange>,
+) -> Result<impl axum::response::IntoResponse, ApiError> {
+    if headers.contains_key(header::ORIGIN) || request.claim.len() > 128 {
+        return Err(ApiError::Unauthorized);
+    }
+    let now = now_ms();
+    {
+        let mut auth = state.auth();
+        let approved = auth.claim_status(&ClaimId(request.claim), now)?;
+        if !matches!(approved, PairingState::Approved { device: paired } if paired == device)
+            || !auth.devices().get(&device).is_some_and(|record| {
+                record.via.is_none()
+                    && record.app.is_none()
+                    && record.ssh.is_none()
+                    && now.saturating_sub(record.created_ms) < 120_000
+            })
+        {
+            return Err(ApiError::Unauthorized);
+        }
+    }
+    if !request.offer.valid() {
+        return Err(ApiError::Invalid("invalid voice account"));
+    }
+    let mut pending = state.changes.ask_voice(request.offer)?;
+    let answer = tokio::time::timeout(Duration::from_secs(15), pending.answer())
+        .await
+        .ok()
+        .flatten()
+        .flatten()
+        .ok_or(ApiError::Invalid(
+            "The desktop could not access its voice account.",
+        ))?;
+    if state.auth().devices().get(&device).is_none() {
+        return Err(ApiError::Unauthorized);
+    }
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(answer)))
 }

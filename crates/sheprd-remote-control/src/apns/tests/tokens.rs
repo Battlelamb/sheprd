@@ -55,6 +55,8 @@ fn merge_keeps_push_to_start_and_replaces_activities() {
             token: token(1),
         }],
         activity_detail: Default::default(),
+        single_activity: false,
+        activity_epoch: None,
         alert: None,
         notify_key: None,
         push_to_start: Some(token(2)),
@@ -71,6 +73,8 @@ fn merge_keeps_push_to_start_and_replaces_activities() {
             },
         ],
         activity_detail: Default::default(),
+        single_activity: false,
+        activity_epoch: None,
         alert: None,
         notify_key: None,
         push_to_start: None,
@@ -87,6 +91,8 @@ fn merge_keeps_push_to_start_and_replaces_activities() {
     stored.merge(Registration {
         activities: Vec::new(),
         activity_detail: Default::default(),
+        single_activity: false,
+        activity_epoch: None,
         alert: None,
         notify_key: None,
         push_to_start: Some(token(5)),
@@ -108,6 +114,8 @@ fn forgets_invalid_tokens_and_ended_activities() {
             },
         ],
         activity_detail: Default::default(),
+        single_activity: false,
+        activity_epoch: None,
         alert: None,
         notify_key: None,
         push_to_start: Some(token(3)),
@@ -129,6 +137,8 @@ fn round_trips_through_the_device_store_slot() {
             token: token(1),
         }],
         activity_detail: Default::default(),
+        single_activity: false,
+        activity_epoch: None,
         alert: None,
         notify_key: None,
         push_to_start: Some(token(2)),
@@ -151,7 +161,7 @@ fn a_phone_keeps_its_activities_generic_until_it_says_otherwise() {
     assert_eq!(generic.activity_detail, ActivityDetail::Generic);
 
     let mut stored = Registration {
-        push_to_start: Some(DeviceToken::parse(&"ab".repeat(32)).unwrap()),
+        push_to_start: Some(token(0xab)),
         ..Registration::default()
     };
     stored.merge(generic);
@@ -179,8 +189,8 @@ fn a_detail_choice_alone_registers_nothing() {
 fn printing_a_registration_shows_no_token() {
     let hex = "ab".repeat(32);
     let registration = Registration {
-        alert: Some(DeviceToken::parse(&hex).unwrap()),
-        push_to_start: Some(DeviceToken::parse(&hex).unwrap()),
+        alert: Some(token(0xab)),
+        push_to_start: Some(token(0xab)),
         ..Registration::default()
     };
     let printed = format!("{registration:?}");

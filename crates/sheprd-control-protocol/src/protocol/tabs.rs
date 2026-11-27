@@ -1,5 +1,10 @@
 //! The app's own tabs: pages, code, reviews, the orchestrator, and the
 //! Devices overview, which Herdr does not know about.
+mod machine;
+
+pub use machine::{AgentCapabilities, GuestArch, GuestOs, MachineCapabilities};
+
+use super::cloud::ExecInfo;
 use serde::{Deserialize, Serialize};
 
 /// How long a page may take to hand back its text or picture.
@@ -7,6 +12,26 @@ pub const PAGE_WAIT_SECONDS: u64 = 15;
 /// How long the window may take to switch to the caller's workspace before
 /// opening a tab there.
 pub const ARRIVE_WAIT_SECONDS: u64 = 5;
+/// The most text `machine type` posts at once.
+pub const MAX_MACHINE_TYPE_CHARS: usize = 4096;
+/// The pause Sheprd Agent takes after each character it types, so apps see
+/// them in order.
+pub const MACHINE_TYPE_GAP_MS: u64 = 8;
+/// How long the longest `machine type` takes in the guest.
+pub const MACHINE_TYPE_SECONDS: u64 =
+    (MAX_MACHINE_TYPE_CHARS as u64 * MACHINE_TYPE_GAP_MS).div_ceil(1000);
+/// How long Sheprd Agent inside a virtual Mac may take to take a picture or
+/// post input. Input waits for any typing already under way, as the agent
+/// posts one request's input at a time.
+pub const MACHINE_AGENT_WAIT_SECONDS: u64 = 30 + MACHINE_TYPE_SECONDS;
+/// What reaching another computer adds to a request run there: the SSH
+/// connection, and its Sheprd's command line starting.
+pub const MACHINE_REMOTE_SECONDS: u64 = 30;
+/// How long the user may take to answer whether to borrow another
+/// computer's virtual Mac.
+pub const MACHINE_BORROW_ASK_SECONDS: u64 = 120;
+/// The longest host name `machine --host` takes.
+pub const MAX_MACHINE_HOST: usize = 256;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
@@ -60,6 +85,130 @@ pub enum TabOp {
         line: Option<u32>,
     },
     Devices,
+    /// The virtual Mac called `name`, in a tab of the caller's workspace.
+    Machine {
+        name: String,
+    },
+    /// Ask in Settings to delete the virtual Mac called `name`. The user
+    /// confirms there.
+    MachineDelete {
+        name: String,
+    },
+    /// What Sheprd Agent inside the virtual Mac called `name` reports: its
+    /// screen, and the permissions macOS gave it.
+    MachineAgent {
+        name: String,
+    },
+    /// Click at a point of the screen of the virtual Mac called `name`, in
+    /// its screenshot's pixels.
+    MachineClick {
+        name: String,
+        x: u32,
+        y: u32,
+        #[serde(default)]
+        button: MachineButton,
+        /// 2 for a double click.
+        count: u8,
+    },
+    /// Run `command` (a program and its arguments) as the logged-in user of
+    /// the virtual Mac called `name`, in `cwd` when given, for at most
+    /// `wait_seconds`.
+    MachineExec {
+        name: String,
+        command: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cwd: Option<String>,
+        wait_seconds: u64,
+    },
+    /// Ask in Settings to delete the image called `name`. The user confirms
+    /// there.
+    MachineImageDelete {
+        name: String,
+    },
+    MachineImageList,
+    /// Keep the shut down virtual Mac called `machine` as image `image`.
+    MachineImageSave {
+        machine: String,
+        image: String,
+    },
+    /// Press `key` in the virtual Mac called `name`, with `modifiers` held.
+    MachineKey {
+        name: String,
+        key: String,
+        #[serde(default)]
+        modifiers: Vec<MachineModifier>,
+    },
+    MachineList,
+    /// A PNG of the screen of the virtual Mac called `name`, written to
+    /// `path`, for someone watching it: unlike a screenshot it needs no
+    /// claim, as it changes nothing, so a machine an agent holds can still
+    /// be watched.
+    MachinePeek {
+        name: String,
+        path: String,
+    },
+    /// `request`, a virtual Mac request, run by the Sheprd on `host`, a
+    /// connected host's ID or label: borrowing a virtual Mac there. A
+    /// screenshot's path is this computer's, and an opened machine shows
+    /// in a tab here drawn from its frames.
+    MachineOn {
+        host: String,
+        request: Box<TabOp>,
+    },
+    /// Reserve a virtual Mac for this pane, or renew its reservation.
+    MachineClaim {
+        name: String,
+    },
+    /// Release only this pane's reservation.
+    MachineRelease {
+        name: String,
+    },
+    /// Make the virtual Mac called `name` from image `image`. Without an
+    /// image, open Settings > Virtual Macs, where the user confirms making
+    /// one from Apple's macOS (named `name`, if given).
+    MachineNew {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        image: Option<String>,
+    },
+    /// Show the virtual Mac called `name` with its setup guide beside it:
+    /// the steps that make it ready for agents, which Sheprd checks.
+    MachineSetup {
+        name: String,
+    },
+    /// What the virtual Mac called `name` boots with next. Fields left out
+    /// keep their value; `display` is `fit` or a size such as `1920x1200`.
+    MachineSet {
+        name: String,
+        #[serde(default)]
+        cpus: Option<u16>,
+        #[serde(default)]
+        memory_gib: Option<u16>,
+        #[serde(default)]
+        display: Option<String>,
+    },
+    /// A PNG of the screen of the virtual Mac called `name`, written to
+    /// `path`.
+    MachineScreenshot {
+        name: String,
+        path: String,
+    },
+    /// Start the virtual Mac called `name` without a tab, resuming it if it
+    /// was saved: what a borrowed machine does, as nobody is at its screen.
+    MachineStart {
+        name: String,
+    },
+    /// Save the virtual Mac called `name` and stop it. It resumes when next
+    /// shown.
+    MachineSuspend {
+        name: String,
+    },
+    /// Type `text` in the virtual Mac called `name`, as from a keyboard.
+    MachineType {
+        name: String,
+        text: String,
+    },
     /// The orchestrator of the caller's workspace, or of the checkout at
     /// `repo`.
     Orchestrator {
@@ -81,12 +230,80 @@ pub enum OrchestratorRun {
 }
 
 impl TabOp {
+    /// Whether another computer may ask for it through `machine lend`:
+    /// virtual Mac requests that touch nothing but the machine, never ones
+    /// that open a tab, a dialog, or delete.
+    pub fn lendable(&self) -> bool {
+        matches!(
+            self,
+            Self::MachineAgent { .. }
+                | Self::MachineClaim { .. }
+                | Self::MachineClick { .. }
+                | Self::MachineExec { .. }
+                | Self::MachineKey { .. }
+                | Self::MachineList
+                | Self::MachinePeek { .. }
+                | Self::MachineRelease { .. }
+                | Self::MachineScreenshot { .. }
+                | Self::MachineStart { .. }
+                | Self::MachineSuspend { .. }
+                | Self::MachineType { .. }
+        )
+    }
+
+    /// Whether `machine --host` may forward it: what the other computer
+    /// lends, and opening a machine, which starts it there and shows it here.
+    /// A watcher's peek is not: its path is the lending computer's.
+    pub fn forwardable(&self) -> bool {
+        (self.lendable() && !matches!(self, Self::MachinePeek { .. }))
+            || matches!(self, Self::Machine { .. })
+    }
+
+    /// Whether it may take one of a computer's VM slots, which borrowing
+    /// asks the user about first.
+    pub fn takes_slot(&self) -> bool {
+        matches!(
+            self,
+            Self::Machine { .. } | Self::MachineClaim { .. } | Self::MachineStart { .. }
+        )
+    }
+
     pub fn wait_seconds(&self) -> u64 {
         match self {
             Self::Text { .. } | Self::Screenshot { .. } => PAGE_WAIT_SECONDS,
+            Self::MachineExec { wait_seconds, .. } => {
+                wait_seconds.saturating_add(MACHINE_AGENT_WAIT_SECONDS)
+            }
+            Self::MachineAgent { .. }
+            | Self::MachineClick { .. }
+            | Self::MachineKey { .. }
+            | Self::MachinePeek { .. }
+            | Self::MachineScreenshot { .. } => MACHINE_AGENT_WAIT_SECONDS,
+            Self::MachineType { .. } => MACHINE_AGENT_WAIT_SECONDS + MACHINE_TYPE_SECONDS,
+            Self::MachineOn { request, .. } => request
+                .wait_seconds()
+                .max(ARRIVE_WAIT_SECONDS)
+                .saturating_add(MACHINE_REMOTE_SECONDS)
+                .saturating_add(if request.takes_slot() {
+                    MACHINE_BORROW_ASK_SECONDS
+                } else {
+                    0
+                }),
             Self::Code { .. }
             | Self::Edit { .. }
             | Self::Devices
+            | Self::Machine { .. }
+            | Self::MachineDelete { .. }
+            | Self::MachineImageDelete { .. }
+            | Self::MachineImageList
+            | Self::MachineImageSave { .. }
+            | Self::MachineClaim { .. }
+            | Self::MachineRelease { .. }
+            | Self::MachineList
+            | Self::MachineNew { .. }
+            | Self::MachineSet { .. }
+            | Self::MachineSetup { .. }
+            | Self::MachineStart { .. }
             | Self::Orchestrator { .. }
             | Self::Review
             | Self::Px0 => ARRIVE_WAIT_SECONDS,
@@ -96,8 +313,45 @@ impl TabOp {
             | Self::Navigate { .. }
             | Self::Back { .. }
             | Self::Forward { .. }
+            | Self::MachineSuspend { .. }
             | Self::Zoom { .. } => 0,
         }
+    }
+}
+
+/// Which mouse button a click in a virtual Mac presses.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MachineButton {
+    #[default]
+    Left,
+    Right,
+}
+
+/// A key held while `machine key` presses another.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MachineModifier {
+    // keep-sorted start
+    Cmd,
+    Control,
+    Fn,
+    Option,
+    Shift,
+    // keep-sorted end
+}
+
+impl MachineModifier {
+    /// The modifier as a key combination spells it: `cmd` in `cmd+q`.
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "cmd" | "command" => Self::Cmd,
+            "control" | "ctrl" => Self::Control,
+            "fn" => Self::Fn,
+            "option" | "alt" | "opt" => Self::Option,
+            "shift" => Self::Shift,
+            _ => return None,
+        })
     }
 }
 
@@ -123,6 +377,7 @@ impl TabKind {
             Self::Orchestrator => "orchestrator",
             Self::Devices => "devices",
             Self::CoreTerminal => "core_terminal",
+            Self::Machine => "machine",
             Self::Editor => "editor",
         }
     }
@@ -147,6 +402,8 @@ pub enum TabKind {
     CoreTerminal,
     /// The workspace's VS Code tab.
     Editor,
+    /// A virtual Mac.
+    Machine,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -181,6 +438,192 @@ pub enum Reply {
         id: u64,
         percent: u16,
     },
+    Machines {
+        machines: Vec<MachineInfo>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        capacity: Option<MachineCapacity>,
+        /// Whether this computer lends its virtual Macs to others, and why
+        /// not; absent from apps that predate lending.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lending: Option<Lending>,
+    },
+    MachineImages {
+        images: Vec<MachineImageInfo>,
+    },
+    MachineAgent(MachineAgentInfo),
+    /// How a command in a virtual Mac ended; `device` is the machine's name.
+    MachineExec(Box<ExecInfo>),
+    /// A screenshot written to `path`, `width` by `height` pixels.
+    MachineScreenshot {
+        path: String,
+        width: u32,
+        height: u32,
+    },
+}
+
+/// What Sheprd Agent inside a virtual machine reports.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineAgentInfo {
+    pub version: u32,
+    /// The screen in pixels, the unit `machine click` takes.
+    pub width: u32,
+    pub height: u32,
+    /// Pixels per point.
+    pub scale: u8,
+    /// Whether macOS lets it post input, and take screenshots. Kept for
+    /// backwards compatibility with existing macOS agents and callers.
+    pub accessibility: bool,
+    pub screen_recording: bool,
+    /// OS-neutral agent capabilities; absent from older macOS agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<AgentCapabilities>,
+}
+
+impl MachineAgentInfo {
+    /// Common capabilities reported by the agent, falling back to the legacy
+    /// macOS permission flags when talking to an older agent.
+    pub fn effective_capabilities(&self) -> AgentCapabilities {
+        self.capabilities.unwrap_or_else(|| {
+            AgentCapabilities::from_macos_permissions(self.accessibility, self.screen_recording)
+        })
+    }
+}
+
+/// What a virtual Mac is doing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MachineState {
+    Stopped,
+    /// Stopped with its state saved: it resumes where it was.
+    Suspended,
+    Starting,
+    Running,
+    Saving,
+    Failed,
+}
+
+impl MachineState {
+    /// The state as `--json` spells it, for the text listing.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Stopped => "stopped",
+            Self::Suspended => "suspended",
+            Self::Starting => "starting",
+            Self::Running => "running",
+            Self::Saving => "saving",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// Sheprd's simultaneous macOS VM limit on this computer.
+pub const MAX_ACTIVE_MACHINES: u32 = 2;
+
+/// Slots occupied on this computer: Sheprd's VMs, including starting and
+/// saving machines, and `others`, the VMs other programs such as Tart run,
+/// which macOS counts against the same limit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineCapacity {
+    pub in_use: u32,
+    pub limit: u32,
+    pub available: u32,
+    /// Of `in_use`, the VMs of other programs; 0 from apps that predate
+    /// counting them.
+    #[serde(default)]
+    pub others: u32,
+}
+
+impl MachineCapacity {
+    pub fn new(in_use: u32) -> Self {
+        Self {
+            in_use,
+            limit: MAX_ACTIVE_MACHINES,
+            available: MAX_ACTIVE_MACHINES.saturating_sub(in_use),
+            others: 0,
+        }
+    }
+
+    /// `sheprd` slots of Sheprd's own and `others` of other programs.
+    pub fn with_others(sheprd: u32, others: u32) -> Self {
+        Self {
+            others,
+            ..Self::new(sheprd.saturating_add(others))
+        }
+    }
+}
+
+/// Whether a computer lends its virtual Macs to the user's other computers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum Lending {
+    Lends,
+    /// `[machine] lend = false`.
+    Off,
+    /// Tart keeps VMs here, which a CI runner may start at any time.
+    Tart,
+    /// Other programs run `count` VMs here, sharing its slots.
+    OtherVms {
+        count: u32,
+    },
+}
+
+impl Lending {
+    /// Why it does not lend, for the listing and refusals; `None` when it
+    /// lends.
+    pub fn reason(self) -> Option<String> {
+        match self {
+            Self::Lends => None,
+            Self::Off => Some("`[machine] lend` is off in its config".to_owned()),
+            Self::Tart => Some("it keeps Tart VMs, which share its two slots".to_owned()),
+            Self::OtherVms { count } => Some(format!(
+                "other programs run {count} VM(s) there, which share its two slots"
+            )),
+        }
+    }
+}
+
+/// A virtual machine installed on this computer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineInfo {
+    /// Active reservation, absent when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reservation: Option<String>,
+    pub name: String,
+    pub state: MachineState,
+    /// Guest operating system; defaults to `macos` for older hosts.
+    #[serde(default)]
+    pub os: GuestOs,
+    /// Guest CPU architecture; defaults to `arm64` for older hosts.
+    #[serde(default)]
+    pub arch: GuestArch,
+    /// Image identity/version this machine was created from, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    /// Supported lifecycle and display capabilities; defaults to macOS
+    /// capabilities for older hosts.
+    #[serde(default)]
+    pub capabilities: MachineCapabilities,
+    /// What it boots with next.
+    pub cpus: u16,
+    pub memory_gib: u16,
+    /// `fit` or a size such as `1920x1200`.
+    pub display: String,
+    /// What it really takes on disk.
+    pub disk_bytes: u64,
+}
+
+/// An image new virtual machines start from.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineImageInfo {
+    pub name: String,
+    /// Guest operating system; defaults to `macos` for older hosts.
+    #[serde(default)]
+    pub os: GuestOs,
+    /// Guest CPU architecture; defaults to `arm64` for older hosts.
+    #[serde(default)]
+    pub arch: GuestArch,
+    /// What its files add up to, shared with the machines made from it.
+    pub disk_bytes: u64,
 }
 
 #[cfg(test)]

@@ -4,19 +4,32 @@ use control::BrowserCommand;
 mod automation;
 mod browser_zoom;
 mod chat;
+mod chat_brief;
+mod chat_pull_requests;
 mod chat_shortcuts;
+mod chat_unread;
+mod classic;
 mod cloud_batch;
 mod cloud_exec;
 mod cloud_images;
 mod cloud_setup;
 mod control_commands;
+mod fleet;
 mod language;
 mod links;
 mod local_ports;
+mod machine;
+mod machine_agent;
+mod machine_remote;
+#[cfg(feature = "mcp")]
+mod mcp;
 mod memory;
 mod menu_bar;
 mod mods;
 mod open_command;
+mod phone;
+mod pr_create;
+mod pr_merge;
 mod px0;
 mod quota;
 mod remote;
@@ -24,8 +37,28 @@ mod remote_update;
 mod security;
 mod ui_agent_group;
 mod ui_panel;
+mod ui_traces;
 mod usage_pick;
 mod worktrees;
+
+#[test]
+fn labels_reach_control_with_the_requested_scope() {
+    use sheprd_remote_control::control::labels::{Command, Edit, Target};
+    let parsed =
+        LaunchOptions::parse(["labels", "add", "Release", "--workspace", "w1", "--json"]).unwrap();
+    let LaunchMode::Control(invocation) = parsed.mode else {
+        panic!("expected control")
+    };
+    assert!(invocation.json);
+    assert_eq!(
+        invocation.command,
+        control::ControlCommand::Labels(Command {
+            target: Some(Target::Workspace("w1".into())),
+            worktree: true,
+            edit: Edit::Add("Release".into()),
+        })
+    );
+}
 
 #[test]
 fn build_info_is_an_informational_mode() {
@@ -65,17 +98,31 @@ fn browser_commands_never_start_the_gui() {
         browser(BrowserCommand::Open {
             target: "localhost:3000".into(),
             workspace: None,
-            focus: true,
-            placement: None,
+            focus: false,
+            placement: control::Placement::Tab,
         })
     );
+    for (args, focus) in [
+        (vec!["browser", "open", "demo.html"], false),
+        (vec!["browser", "open", "--focus", "demo.html"], true),
+    ] {
+        assert_eq!(
+            mode(&args).unwrap(),
+            browser(BrowserCommand::Open {
+                target: "demo.html".into(),
+                workspace: None,
+                placement: control::Placement::Tab,
+                focus,
+            })
+        );
+    }
     assert_eq!(
         mode(&["browser", "open", "--beside", "demo.html"]).unwrap(),
         browser(BrowserCommand::Open {
             target: "demo.html".into(),
             workspace: None,
-            focus: true,
-            placement: Some(control::Placement::Beside),
+            focus: false,
+            placement: control::Placement::Beside,
         })
     );
     assert_eq!(
@@ -83,8 +130,8 @@ fn browser_commands_never_start_the_gui() {
         browser(BrowserCommand::Open {
             target: "demo.html".into(),
             workspace: None,
-            focus: true,
-            placement: Some(control::Placement::Tab),
+            focus: false,
+            placement: control::Placement::Tab,
         })
     );
     assert_eq!(
@@ -101,7 +148,7 @@ fn browser_commands_never_start_the_gui() {
             target: "https://a.test".into(),
             workspace: Some("w_2".into()),
             focus: false,
-            placement: None,
+            placement: control::Placement::Tab,
         })
     );
     assert_eq!(

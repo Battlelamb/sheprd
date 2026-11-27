@@ -87,12 +87,15 @@ deploy/relay/create-droplet.sh nyc3 fra1 sgp1
 Each region gets a `s-1vcpu-1gb` droplet tagged `sheprd-relay`, with only
 ports 22, 80, and 443 open. A few minutes later the relay answers at
 `https://IP-WITH-DASHES.sslip.io` (for example `203-0-113-7.sslip.io`), with a
-Let's Encrypt certificate. The dashboard's access token is in
+Let's Encrypt certificate. The script ends by printing each relay's
+address, its listen token, and its `sheprd://relay?…` link (see "Who may use
+it"). The dashboard's access token and the listen token are in
 `/root/sheprd-relay-login.txt` on the droplet.
 
 To use your own names, set `RELAY_DOMAIN_SUFFIX=relay.example.org`, then point
 `nyc3.relay.example.org` and the rest at the droplets. Set `RELAY_SSH_KEYS` to
-your key ids from `doctl compute ssh-key list` to reach them over SSH.
+your key ids from `doctl compute ssh-key list` to reach them over SSH. Set
+`RELAY_OPEN=1` for relays any computer may listen on.
 
 ### What a droplet runs
 
@@ -214,7 +217,7 @@ lists every one.
 | `RELAY_TOTAL_BANDWIDTH` | 0 (unlimited) |
 | `RELAY_IDLE_TIMEOUT` | 5m |
 | `RELAY_MAX_SESSION_DURATION` | 24h |
-| `RELAY_LISTEN_TOKEN` | unset: any computer may listen |
+| `RELAY_LISTEN_TOKEN` | unset: any computer may listen; droplets from `create-droplet.sh` or sheprd.org/relay get their own |
 
 ## Who may use it
 
@@ -223,9 +226,18 @@ paired devices may dial it, and only while it is connected; everyone else
 hears "offline". When a computer disconnects, its keys go with it, and the
 relay keeps nothing on disk.
 
-To keep a relay to your own computers, you may set `RELAY_LISTEN_TOKEN`
-(16+ characters) and give it to them. It is off by default, and dialers
-never need it. To give each person or machine its own, so one can be
+To keep a relay to your own computers, set `RELAY_LISTEN_TOKEN` (16+
+characters) and give it to them; dialers never need it. The relay itself
+is open unless one is set, but droplets deployed through Sheprd are
+private by default: `create-droplet.sh` and sheprd.org/relay make a token
+for each droplet (32 random bytes, base64url), fill it into
+`cloud-init.yml`'s `__RELAY_LISTEN_TOKEN__`, and the droplet writes it to
+`/opt/sheprd-relay/.env` and `/root/sheprd-relay-login.txt`. To open one
+instead, set `RELAY_OPEN=1` for the script, check "Open relay" on the page,
+or fill the placeholder with `open`. On a running droplet, edit `.env` and
+run `start.sh` again.
+
+To give each person or machine its own, so one can be
 revoked alone, put them in a file instead, one per line, and point
 `RELAY_LISTEN_TOKEN_FILE` at it:
 
@@ -305,7 +317,11 @@ Any of `relay.example.org`, `https://relay.example.org:8443`, or
 `wss://example.org/relay` (behind a proxy that strips `/relay`) works. Plain
 `http://` is accepted only for a relay on this computer or a private network.
 Sheprd checks `https://DOMAIN/v1/info` first and asks for the listen token if
-the relay requires one. Paired phones learn the relay from the computer.
+the relay requires one: paste it there. Or open the relay's
+`sheprd://relay?endpoint=…&token=…` link, which `create-droplet.sh` and
+sheprd.org/relay print, to open Settings with both filled in, then choose
+Add. From a script, `sheprd remote relays token ENDPOINT` saves the token,
+read from standard input. Paired phones learn the relay from the computer.
 
 ## Monitoring
 
@@ -317,8 +333,40 @@ the relay requires one. Paired phones learn the relay from the computer.
   refusals, live and read-only, when `RELAY_DASHBOARD_TOKEN` is set. Sign in
   with the token; three wrong tries block that address for 15 minutes.
 - `https://DOMAIN/healthz` answers `ok` for an uptime check.
+- Which build runs: `sheprd_relay_build_info` in `/metrics` names the commit
+  the image was built from (`curl -s 127.0.0.1:9090/metrics | grep
+  build_info` on the droplet), as do the dashboard's title and the
+  relay's first log line. `/v1/info` names only the major and minor
+  version, as anyone may read it.
 
 Logs hold no addresses, routes, or payloads.
+
+### Investigating a temporary outage
+
+On the phone, open Settings > Relays and pull to refresh. Diagnostics keeps
+its last 64 checks locally across app launches, including failed checks after
+recovery. Expand Recent checks or use Share relay diagnostics while offline.
+The report includes the relay address, timestamp, elapsed time, HTTP status,
+and failure category (DNS, TLS, timeout, invalid relay info, or protocol
+version). It excludes response bodies, headers, and credentials. Clear
+diagnostics removes the saved history. Checks run when this screen opens or
+is refreshed; a successful `/v1/info` check does not test WebSocket dialing,
+the end-to-end tunnel, or whether a computer is listening.
+
+For the server side, collect both the relay and Caddy logs. A 502/503 can
+come from the reverse proxy even when the relay address is correct. On the
+droplet:
+
+```sh
+cd /opt/sheprd-relay
+docker compose --env-file compose.env ps
+docker compose --env-file compose.env logs --no-color --timestamps --since 48h --tail 1000 relay caddy
+```
+
+Use the timestamps from the phone report to select the incident window.
+These commands only read state; do not restart the service before collecting
+it. Phone diagnostics do not download operator logs or require the dashboard
+token. Sharing the report reveals the relay addresses it checked.
 
 ## Updating
 

@@ -1,6 +1,6 @@
 //! `pr`, `host`, `cloud`, `ports`, `security`, and `automation`.
 use super::{Args, BatchCommand, CliError, ExecCommand, batch, exec, unknown};
-use sheprd_control_protocol::protocol::hosts::PortAction;
+use sheprd_control_protocol::protocol::hosts::{PortAction, QueueOp};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrCommand {
@@ -8,7 +8,12 @@ pub enum PrCommand {
     Checks,
     Comments,
     Open,
+    Create,
     Quota,
+    /// Open the merge dialog, which the user confirms.
+    Merge,
+    /// Open the merge queue confirmation.
+    Queue(QueueOp),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -19,6 +24,11 @@ pub enum HostCommand {
     Mute {
         host: Option<String>,
         muted: bool,
+    },
+    /// Pause or resume a saved device by ID or label.
+    Pause {
+        host: String,
+        paused: bool,
     },
     /// Replace a host's tags; none clears them.
     Tag {
@@ -92,7 +102,22 @@ pub(super) fn pr(args: &mut Args) -> Result<PrCommand, CliError> {
         Some("checks") => PrCommand::Checks,
         Some("comments") => PrCommand::Comments,
         Some("open") => PrCommand::Open,
+        Some("create") => PrCommand::Create,
         Some("quota") => PrCommand::Quota,
+        Some("merge") => PrCommand::Merge,
+        Some("queue") => {
+            let Some(change) = args.verb() else {
+                return Err(CliError::MissingArgument {
+                    command: "pr queue",
+                    what: "add|remove",
+                });
+            };
+            PrCommand::Queue(match change.to_str() {
+                Some("add") => QueueOp::Add,
+                Some("remove") => QueueOp::Remove,
+                _ => return Err(unknown("pr queue", change)),
+            })
+        }
         _ => return Err(unknown("pr", verb)),
     })
 }
@@ -107,6 +132,10 @@ pub(super) fn host(args: &mut Args) -> Result<HostCommand, CliError> {
         Some(verb @ ("mute" | "unmute")) => HostCommand::Mute {
             host: args.optional_text()?,
             muted: verb == "mute",
+        },
+        Some(verb @ ("pause" | "resume")) => HostCommand::Pause {
+            host: args.required_text("HOST")?,
+            paused: verb == "pause",
         },
         Some("tag") => HostCommand::Tag {
             id: args.required_text("HOST")?,

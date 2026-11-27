@@ -3,18 +3,20 @@
 //! transcript with the protocol's own reducer, and broadcasts each step; it
 //! reconnects from its cursor when the connection drops, until the pane
 //! leaves the layout. Phones read the transcript and subscribe; nothing on
-//! the async side touches the socket.
+//! the async side touches the socket. An observed terminal agent's chat is
+//! the same, read from a `sheprd-acp observe` child instead (`observed`).
 
 use super::{Error, Result};
 use sheprd_chat_protocol::{
-    ClientKind, ClientMessage, Command, CommandId, Cursor, REVISION, ServerMessage, Transcript,
-    VERSION, read_frame, write_frame,
+    ClientKind, ClientMessage, Command, CommandId, Cursor, ServerMessage, Transcript, VERSION,
+    read_frame, write_frame,
 };
 use sheprd_client::private_endpoint::{Closer, Connection};
 use std::{
     collections::HashMap,
     io::{BufReader, BufWriter, Read, Write},
     path::{Path, PathBuf},
+    process::{self, Child, Stdio},
     sync::{
         Arc, Mutex, MutexGuard, PoisonError,
         atomic::{AtomicBool, Ordering},
@@ -24,6 +26,11 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{broadcast, oneshot};
+
+/// The attach revision the daemon reads. Phones decode entries strictly,
+/// so the threads revision (5: handoff entries) waits until they draw them;
+/// until then the chat program sends its handoffs as notices.
+const PHONE_REVISION: u32 = 4;
 
 /// How long connecting waits for a free pipe instance on Windows.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -115,15 +122,7 @@ pub(crate) fn first_prompt(transcript: &Transcript) -> Option<String> {
 }
 
 /// The first `limit` characters of `text` on one line.
-pub(crate) fn excerpt(text: &str, limit: usize) -> String {
-    let line: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if line.chars().count() <= limit {
-        return line;
-    }
-    let mut cut: String = line.chars().take(limit.saturating_sub(1)).collect();
-    cut.push('…');
-    cut
-}
+pub(crate) use sheprd_chat_protocol::excerpt::one_line as excerpt;
 
 #[derive(Default)]
 struct State {
@@ -139,10 +138,36 @@ pub(crate) struct Chat {
     writer: Mutex<Option<SyncSender<ClientMessage>>>,
     acks: Mutex<HashMap<CommandId, oneshot::Sender<Option<sheprd_chat_protocol::Rejection>>>>,
     closed: AtomicBool,
-    closer: Mutex<Option<Closer>>,
+    closer: Mutex<Option<Link>>,
     /// Every chat's steps, for lists to redraw when the summary changes.
     all: broadcast::Sender<(String, Event)>,
     row_summary: Mutex<Option<super::RowSummary>>,
+}
+
+/// What ends a connection, from any thread: a socket's, or the observer
+/// child that is the other end of one.
+enum Link {
+    Socket(Closer),
+    Child(Arc<Mutex<Child>>),
+}
+
+impl Link {
+    fn close(&self) {
+        match self {
+            Self::Socket(closer) => closer.close(),
+            // Only a signal; the reader reaps the child.
+            Self::Child(child) => {
+                let _ = lock(child).kill();
+            }
+        }
+    }
+
+    fn try_clone(&self) -> std::io::Result<Self> {
+        Ok(match self {
+            Self::Socket(closer) => Self::Socket(closer.try_clone()?),
+            Self::Child(child) => Self::Child(child.clone()),
+        })
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -157,8 +182,63 @@ impl Chat {
         address: PathBuf,
         all: broadcast::Sender<(String, Event)>,
     ) -> std::io::Result<Arc<Self>> {
+        let chat = Self::new(pane, all.clone());
+        let reader = chat.clone();
+        thread::Builder::new()
+            .name("herdr-remote-chat".into())
+            .spawn(move || reader.run(&address, &all))?;
+        Ok(chat)
+    }
+
+    /// Starts `observer`, a `sheprd-acp observe` command, and reads the
+    /// terminal agent's conversation from it once: it is not restarted, and
+    /// the chat closes when it ends. Its steps reach only its own
+    /// subscribers, never notifications: the agent's terminal has its own.
+    pub(crate) fn observe(
+        pane: String,
+        mut observer: process::Command,
+    ) -> std::io::Result<Arc<Self>> {
+        let mut child = observer
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let (Some(writer), Some(reader)) = (child.stdin.take(), child.stdout.take()) else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::ErrorKind::BrokenPipe.into());
+        };
+        // Its own channel, so its steps reach no notifications.
+        let (all, _) = broadcast::channel(1);
+        let chat = Self::new(pane, all.clone());
+        let child = Arc::new(Mutex::new(child));
+        let observed = chat.clone();
+        let spawned = thread::Builder::new()
+            .name("herdr-remote-observer".into())
+            .spawn({
+                let child = child.clone();
+                move || {
+                    observed.connected(reader, writer, Link::Child(child.clone()), None, &all);
+                    observed.closed.store(true, Ordering::SeqCst);
+                    // Said even when it never connected, so whoever waits
+                    // for its first transcript learns at once.
+                    lock(&observed.state).connected = false;
+                    observed.publish(Event::Connection, &all);
+                    let _ = lock(&child).wait();
+                }
+            });
+        if let Err(error) = spawned {
+            let mut child = lock(&child);
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+        Ok(chat)
+    }
+
+    fn new(pane: String, all: broadcast::Sender<(String, Event)>) -> Arc<Self> {
         let (events, _) = broadcast::channel(SUBSCRIBERS_QUEUE);
-        let chat = Arc::new(Self {
+        Arc::new(Self {
             pane,
             state: Mutex::new(State::default()),
             events,
@@ -166,14 +246,44 @@ impl Chat {
             acks: Mutex::new(HashMap::new()),
             closed: AtomicBool::new(false),
             closer: Mutex::new(None),
-            all: all.clone(),
+            all,
             row_summary: Mutex::new(None),
-        });
-        let reader = chat.clone();
-        thread::Builder::new()
-            .name("herdr-remote-chat".into())
-            .spawn(move || reader.run(&address, &all))?;
-        Ok(chat)
+        })
+    }
+
+    /// Whether it ended for good: closed, or an observer that finished.
+    pub(crate) fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
+    }
+
+    /// Whether the first transcript arrives within `within`: false when
+    /// the connection ends first, as an observer that cannot read the
+    /// conversation does, or nothing comes in time.
+    pub(crate) async fn opened(&self, within: Duration) -> bool {
+        let mut events = self.events.subscribe();
+        let deadline = tokio::time::sleep(within);
+        tokio::pin!(deadline);
+        loop {
+            if lock(&self.state).cursor.is_some() {
+                return true;
+            }
+            if self.is_closed() {
+                return false;
+            }
+            tokio::select! {
+                () = &mut deadline => return false,
+                event = events.recv() => {
+                    if matches!(event, Err(broadcast::error::RecvError::Closed)) {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+
+    /// How many phones follow it now.
+    pub(crate) fn followers(&self) -> usize {
+        self.events.receiver_count()
     }
 
     /// The transcript now and a subscription to every step after it. The
@@ -182,6 +292,15 @@ impl Chat {
     pub(crate) fn subscribe(&self) -> (View, broadcast::Receiver<Event>) {
         let receiver = self.events.subscribe();
         (self.view(), receiver)
+    }
+
+    /// The new-chat workflow may send its first prompt after the private
+    /// transport is connected and the provider has answered session/open.
+    pub(super) fn ready_to_open(&self) -> bool {
+        let state = lock(&self.state);
+        state.connected
+            && state.cursor.is_some()
+            && state.transcript.status != sheprd_chat_protocol::Status::Starting
     }
 
     pub(crate) fn view(&self) -> View {
@@ -281,7 +400,7 @@ impl Chat {
                 && let Ok((reader, writer, closer)) = connection.split()
             {
                 retry = Duration::from_millis(500);
-                self.connected(reader, writer, closer, since, all);
+                self.connected(reader, writer, Link::Socket(closer), since, all);
             }
             self.set_connected(false, all);
             thread::sleep(retry);
@@ -293,7 +412,7 @@ impl Chat {
         &self,
         reader: impl Read,
         writer: impl Write + Send + 'static,
-        closer: Closer,
+        closer: Link,
         since: Option<Cursor>,
         all: &broadcast::Sender<(String, Event)>,
     ) {
@@ -311,7 +430,7 @@ impl Chat {
         let (sender, queued) = mpsc::sync_channel(MAX_COMMANDS);
         let hello = ClientMessage::Hello {
             client: ClientKind::Remote,
-            revision: REVISION,
+            revision: PHONE_REVISION,
             since,
             version: VERSION,
         };
@@ -415,7 +534,7 @@ impl Chat {
 /// until the connection ends or a write fails.
 fn write(
     writer: impl Write,
-    closer: &Closer,
+    closer: &Link,
     hello: ClientMessage,
     queued: &Receiver<ClientMessage>,
 ) {

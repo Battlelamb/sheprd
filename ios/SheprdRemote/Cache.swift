@@ -18,6 +18,8 @@ struct Cache: Sendable {
     struct CachedChat: Codable, Sendable {
         var cursor: Cursor?
         var transcript: Transcript
+        /// How far its effects were shown (`ChatEffects.Mark`).
+        var effects: ChatEffects.Mark?
     }
 
     /// A chat's unsent words and pictures, as the composer prepared them.
@@ -50,6 +52,32 @@ struct Cache: Sendable {
     func homeDate(_ device: String) -> Date? {
         let file = computerFolder(device).appending(path: "home.json")
         return try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+    }
+
+    /// When this phone last heard from `device`: prefers the lightweight
+    /// `last-seen.json` timestamp (updated even across load-only heartbeats)
+    /// and falls back to `home.json`'s modification time for older caches.
+    func lastSeen(_ device: String) -> Date? {
+        let saved = read(Date.self, at: computerFolder(device).appending(path: "last-seen.json"))
+        let home = homeDate(device)
+        switch (saved, home) {
+        case let (saved?, home?): return max(saved, home)
+        case let (saved?, nil): return saved
+        case let (nil, home?): return home
+        case (nil, nil): return nil
+        }
+    }
+
+    func save(lastSeen date: Date, for device: String) {
+        write(date, to: computerFolder(device).appending(path: "last-seen.json"))
+    }
+
+    func lastLinkStatus(_ device: String) -> LinkStatus? {
+        read(LinkStatus.self, at: computerFolder(device).appending(path: "link-status.json"))
+    }
+
+    func save(linkStatus: LinkStatus, for device: String) {
+        write(linkStatus, to: computerFolder(device).appending(path: "link-status.json"))
     }
 
     func save(home: Home, device: String) {
@@ -89,7 +117,7 @@ struct Cache: Sendable {
         read(CachedChat.self, at: chatFile(device, pane))
     }
 
-    func save(chat transcript: Transcript, cursor: Cursor?, device: String, pane: String) {
+    func save(chat transcript: Transcript, cursor: Cursor?, effects: ChatEffects.Mark?, device: String, pane: String) {
         var kept = transcript
         if kept.entries.count > Self.entriesKept {
             kept.entries.removeFirst(kept.entries.count - Self.entriesKept)
@@ -98,7 +126,7 @@ struct Cache: Sendable {
         let file = chatFile(device, pane)
         let chats = computerFolder(device).appending(path: "chats", directoryHint: .isDirectory)
         Task.detached(priority: .utility) {
-            Self.store(CachedChat(cursor: cursor, transcript: kept), to: file)
+            Self.store(CachedChat(cursor: cursor, transcript: kept, effects: effects), to: file)
             Self.evict(in: chats, keeping: Self.chatsKept)
             // All of it, so search finds more than the cache keeps.
             try? await MessageIndex.shared.save(transcript, device: device, pane: pane)

@@ -15,6 +15,8 @@ public struct SealedAlert: Codable, Hashable, Sendable {
         case terminalAsking = "terminal_asking"
         case terminalDone = "terminal_done"
         case error
+        /// A test push the user sent from Settings (`PushTestReceipts`).
+        case test
         case other
 
         public init(from decoder: Decoder) throws {
@@ -37,11 +39,24 @@ public struct SealedAlert: Codable, Hashable, Sendable {
     public var computer: String
     public var pane: String
     public var title: String
+    /// Where the chat is, `workspace · title`, shown under the title.
+    /// Older computers leave it out and put the place in `body`.
+    public var subtitle: String
     public var body: String
     public var badge: Int?
     public var permission: Permission?
+    /// The agent asked for attention with `::wizz`: the alert buzzes.
+    public var wizz: Bool
+    /// A test push's id, which the extension records on arrival.
+    public var test: String?
+    /// The computer's notification decision this is a copy of, the same in
+    /// every copy (`SeenAlerts`); older computers leave it out.
+    public var event: String?
+    /// The pull request a finished turn created or pushed to, as the
+    /// computer wrote it; `pullRequest` is it once checked.
+    public var pr: String?
 
-    enum CodingKeys: String, CodingKey { case kind, clear, computer, pane, title, body, badge, permission }
+    enum CodingKeys: String, CodingKey { case kind, clear, computer, pane, title, subtitle, body, badge, permission, wizz, test, event, pr }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -50,9 +65,21 @@ public struct SealedAlert: Codable, Hashable, Sendable {
         computer = try c.decode(String.self, forKey: .computer)
         pane = try c.decode(String.self, forKey: .pane)
         title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        subtitle = try c.decodeIfPresent(String.self, forKey: .subtitle) ?? ""
         body = try c.decodeIfPresent(String.self, forKey: .body) ?? ""
         badge = try c.decodeIfPresent(Int.self, forKey: .badge)
         permission = try c.decodeIfPresent(Permission.self, forKey: .permission)
+        wizz = try c.decodeIfPresent(Bool.self, forKey: .wizz) ?? false
+        test = try c.decodeIfPresent(String.self, forKey: .test)
+        event = try c.decodeIfPresent(String.self, forKey: .event)
+        pr = try c.decodeIfPresent(String.self, forKey: .pr)
+    }
+
+    /// The pull request a finished turn offers to open, when `pr` is a
+    /// GitHub pull request's page.
+    public var pullRequest: AlertPullRequest? {
+        guard kind == .turnEnded else { return nil }
+        return pr.flatMap(AlertPullRequest.init)
     }
 
     /// Opens an APNs payload's `sealed` field with the device's key.
@@ -84,11 +111,15 @@ public struct AlertPresentation: Hashable, Sendable {
             case authenticated
             /// A text field; its text becomes the next prompt.
             case textInput(placeholder: String)
+            /// Brings the app to the front, unlocking the phone first.
+            case foreground
         }
 
         public var id: String
         public var title: String
         public var style: Style
+        /// An SF Symbol shown beside the title.
+        public var icon: String?
     }
 
     public var category: String?
@@ -98,13 +129,18 @@ public struct AlertPresentation: Hashable, Sendable {
     public static let maxAnswers = 4
     static let answerPrefix = "answer:"
     static let replyAction = "reply"
+    /// Opens the pull request a finished turn created or pushed to.
+    public static let openPullRequestAction = "open-pr"
     public static let finishedCategory = "finished"
+    /// What a finished turn's category starts with when it offers a pull
+    /// request: the action's title names its number, so each number gets
+    /// its own category.
+    public static let pullRequestCategoryPrefix = "finished.pr."
+
+    static let reply = Action(id: replyAction, title: "Reply", style: .textInput(placeholder: "Next prompt"), icon: "arrowshape.turn.up.left")
 
     /// A finished turn's Reply, which the app registers at launch.
-    public static let finished = AlertPresentation(
-        category: finishedCategory,
-        actions: [Action(id: replyAction, title: "Reply", style: .textInput(placeholder: "Next prompt"))]
-    )
+    public static let finished = AlertPresentation(category: finishedCategory, actions: [reply])
 
     init(category: String?, actions: [Action]) {
         self.category = category
@@ -131,8 +167,16 @@ public struct AlertPresentation: Hashable, Sendable {
             let digest = SHA256.hash(data: Data(options.map { "\($0.id)\u{1f}\($0.name)\u{1f}\($0.kind.rawValue)" }.joined(separator: "\u{1e}").utf8))
             category = "question." + digest.prefix(8).map { String(format: "%02x", $0) }.joined()
         case .turnEnded:
-            self = Self.finished
-        case .terminalAsking, .terminalDone, .error, .other:
+            guard let pull = alert.pullRequest else {
+                self = Self.finished
+                return
+            }
+            category = Self.pullRequestCategoryPrefix + String(pull.number)
+            actions = [
+                Self.reply,
+                Action(id: Self.openPullRequestAction, title: "Open PR #\(pull.number)", style: .foreground, icon: "arrow.triangle.pull"),
+            ]
+        case .terminalAsking, .terminalDone, .error, .test, .other:
             category = nil
             actions = []
         }

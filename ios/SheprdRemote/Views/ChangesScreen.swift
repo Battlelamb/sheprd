@@ -122,6 +122,9 @@ struct ChangesScreen: View {
         .navigationTitle("Changes")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
+        // Check links open over this screen, which the iPad may show in a
+        // sheet that the app's own link browsing cannot open over.
+        .browsesLinks(othersToSystem: true)
         .refreshable { await reload() }
         .task(id: Reading(scope: scope, status: machine?.status)) { await loadFiles() }
         .task(id: ChecksReading(status: machine?.status, number: workspace?.pullRequest?.number,
@@ -141,7 +144,7 @@ struct ChangesScreen: View {
         .onAppear { GitHubDirect.shared.watchSignIn() }
         .sheet(item: $sending) { check in SendLogSheet(key: key, check: check) }
         #if DEBUG
-        .navigationDestination(item: $debugFile) { FileDiffScreen(key: key, scope: scope, file: $0) }
+        .navigationDestination(item: $debugFile) { FileDiffScreen(key: key, scope: scope, file: $0).makesRoomForConnectionToast() }
         .onChange(of: debugFiles) { _, files in
             debugFile = files.first { $0.path == UserDefaults.standard.string(forKey: "openDiff") }
         }
@@ -247,7 +250,7 @@ struct ChangesScreen: View {
             Section {
                 ForEach(list.files) { file in
                     NavigationLink {
-                        FileDiffScreen(key: key, scope: scope, file: file)
+                        FileDiffScreen(key: key, scope: scope, file: file).makesRoomForConnectionToast()
                     } label: {
                         FileRow(file: file)
                     }

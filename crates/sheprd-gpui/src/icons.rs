@@ -21,6 +21,7 @@ macro_rules! agent_icons {
 
             pub(crate) fn from_identity(identity: Option<&str>) -> Self {
                 match identity {
+                    Some("antigravity") => Self::Antigravity,
                     $(Some($label) => Self::$variant,)+
                     _ => Self::Generic,
                 }
@@ -342,6 +343,7 @@ embedded_icons! {
     "sessions.svg",
     "settings.svg",
     "shield.svg",
+    "sparkles.svg",
     "split.svg",
     "star-full.svg",
     "star.svg",
@@ -349,6 +351,7 @@ embedded_icons! {
     "status-orbit.svg",
     "status-orca-blocked.svg",
     "status-orca-working.svg",
+    "steer.svg",
     "tabs.svg",
     "teleport-back.svg",
     "teleport.svg",
@@ -392,6 +395,8 @@ impl AssetSource for Icons {
             .collect())
     }
 }
+
+pub(crate) mod hosted;
 
 #[cfg(test)]
 mod tests {
@@ -487,12 +492,15 @@ mod tests {
             Some("future-agent"),
             Some("Claude Code"),
             Some("kiro-cli"),
-            Some("antigravity"),
             Some(""),
             None,
         ] {
             assert_eq!(AgentIcon::from_identity(identity), AgentIcon::Generic);
         }
+        assert_eq!(
+            AgentIcon::from_identity(Some("antigravity")),
+            AgentIcon::Antigravity
+        );
         assert!(Icons.load(AgentIcon::Generic.path()).unwrap().is_some());
     }
 }

@@ -32,6 +32,8 @@ pub(crate) enum Page {
     Automation,
     /// The account menu's Azure DevOps tokens, beside GitHub's and GitLab's.
     AzureDevOps,
+    /// Confirming a virtual Mac on another computer may be borrowed.
+    BorrowMachine,
     /// Reviewing, then following, a move of the pane menu's pane to another
     /// device.
     CarryPane,
@@ -66,6 +68,8 @@ pub(crate) enum Page {
     GitHub,
     /// The account menu's GitLab tokens, beside GitHub's sign-in.
     GitLab,
+    /// Confirming a restack of the focused branch onto its stack's base.
+    GitRestack,
     /// A group's "…" menu: opening tabs other than a terminal, closing
     /// tabs, and splitting.
     Group,
@@ -96,6 +100,8 @@ pub(crate) enum Page {
     PrComment,
     /// Choosing a merge method, and confirming it.
     PrMerge,
+    /// Confirming the open pull request joins or leaves the merge queue.
+    PrQueue,
     /// The open pull request's checks and review conversation.
     PrReview,
     /// Pairing a phone for remote control: the QR, then the approval.
@@ -108,6 +114,8 @@ pub(crate) enum Page {
     /// Confirming Sheprd on another machine should update itself.
     RemoteUpdate,
     RemoveDevice,
+    /// Confirming every merged worktree should be removed.
+    RemoveMerged,
     /// Confirming a saved WSL distribution should be forgotten.
     RemoveWsl,
     /// Naming a herdr-core tab or pane from its menu.
@@ -117,6 +125,8 @@ pub(crate) enum Page {
     RenameTab,
     /// Confirming a paired remote control device should be revoked.
     RevokeDevice,
+    /// Read-only session sharing dialog for a local chat pane.
+    ShareSession,
     Tab,
     /// Moving a linked worktree to another host.
     Teleport,
@@ -212,10 +222,12 @@ impl Page {
                 | Self::RemoveWsl
                 | Self::Git
                 | Self::GitCommit
+                | Self::GitRestack
                 | Self::RemoteDevices
                 | Self::PrReview
                 | Self::PrComment
                 | Self::PrMerge
+                | Self::PrQueue
                 | Self::CoreMenu
                 | Self::CoreMove
                 | Self::RenameCore
@@ -253,9 +265,11 @@ impl Page {
             self,
             Self::Git
                 | Self::GitCommit
+                | Self::GitRestack
                 | Self::PrReview
                 | Self::PrComment
                 | Self::PrMerge
+                | Self::PrQueue
                 | Self::OverviewReply
         )
     }
@@ -298,7 +312,7 @@ impl WorkspaceMenuAction {
             Self::Expand => "icons/chevron-down.svg",
             Self::Teleport | Self::GoToTeleported => "icons/teleport.svg",
             Self::TeleportBack => "icons/teleport-back.svg",
-            Self::ClearTeleported => "icons/x.svg",
+            Self::ClearTeleported => "icons/close.svg",
             Self::Checkpoints => "icons/refresh.svg",
             Self::FanOut => "icons/fan-out.svg",
             Self::Orchestrator => "icons/github.svg",

@@ -118,10 +118,11 @@ impl SheprdWindow {
         let profile =
             host.and_then(|auth| auth.profile.as_ref())
                 .or(self.menu.github.profile.as_ref());
-        match profile {
-            Some(profile) => (Some(self.tokens_over(profile)), Some(profile.login.clone())),
-            None => (None, None),
-        }
+        let tokens = self.tokens_over(profile);
+        (
+            (!tokens.is_empty()).then_some(tokens),
+            profile.map(|profile| profile.login.clone()),
+        )
     }
 
     /// The sections' view, made if the window has none yet.
@@ -436,7 +437,7 @@ impl SheprdWindow {
                         // Only a page tab shows behind the section; the system
                         // browser, or a page that did not open, leaves it be.
                         let opened =
-                            self.open_workspace_page(&endpoint, &workspace, url, window, cx);
+                            self.open_workspace_page(&endpoint, &workspace, url, true, window, cx);
                         if opened == crate::browser::PageOpened::Tab {
                             self.leave_activity_section(id, cx);
                         }

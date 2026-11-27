@@ -86,7 +86,7 @@ Workspace headers show their pull request's number and status color, as on the d
 
 ## Notifications
 
-The installed app gets Web Push notifications when an agent asks a question or a permission, when a turn ends, and when an agent stops on an error. An agent in a plain terminal tab, Herdr 1 or Herdr 2, notifies too when it starts waiting for you and when it finishes what it was doing, once that status has held for two seconds; tapping it opens the terminal. On iOS 16.4 and later, push reaches only an installed app (added to the Home Screen); on Android it works installed or not.
+The installed app gets Web Push notifications when an agent asks a question or a permission, when a turn ends, and when an agent stops on an error. An agent in a plain terminal tab, Herdr 1 or Herdr 2, notifies too when it starts waiting for you and when it finishes what it was doing, once that status has held for two seconds; tapping it opens the terminal. A finished notice is titled with the workspace (or the tab, when the workspace's name was generated), shows what you asked beneath it, and says what the agent reports it did, read from the last paragraph on its screen; it shows only your request when the screen says nothing or cannot be read within two seconds. With generic notifications it says only where and "Done". On iOS 16.4 and later, push reaches only an installed app (added to the Home Screen); on Android it works installed or not.
 
 By default a notification includes a short excerpt of the message, which can show on your phone's lock screen. To say only which chat needs you, without its text, choose **Generic** under **Notifications** in Settings, or set `notifications = "generic"` under `[remote]`. Notifications are encrypted end to end, so the push services relay them without reading them.
 
@@ -110,7 +110,7 @@ The app shows which agent needs you, lets you answer it, read its chat, and open
 2. Open [sheprd.org/testflight](https://sheprd.org/testflight/) on the device, tap **Join the TestFlight beta**, then **Accept** and **Install** in TestFlight.
 3. In Sheprd on your computer, turn on remote control and open pairing. Scan the QR code with the app, or keep the phone nearby to pair over Bluetooth.
 
-On macOS, pairing over Bluetooth needs Sheprd allowed in System Settings > Privacy & Security > Bluetooth. **Hold phone alerts while I'm here** in Settings > Remote control keeps a paired iPhone's alerts while it is near this computer over Bluetooth, until you step away. Nearby pairing and Live Activities are experimental.
+On macOS, pairing over Bluetooth needs Sheprd allowed in System Settings > Privacy & Security > Bluetooth. **Hold phone alerts while I'm here** in Settings > Remote control, on unless you turn it off, keeps a paired iPhone's alerts while it is near this computer over Bluetooth and you are using it, until you step away. The SSH and cloud machines this computer paired the phone with hold theirs too. Nearby pairing and Live Activities are experimental.
 
 ## Command line
 
@@ -119,6 +119,7 @@ On macOS, pairing over Bluetooth needs Sheprd allowed in System Settings > Priva
 | `sheprd remote` | Whether remote control is on and running: port, version, addresses, certificate authority fingerprint, and paired devices |
 | `sheprd remote devices` | Paired devices with their IDs, last seen, notifications, and the other machines each was paired with |
 | `sheprd remote pair [--address HTTPS_ORIGIN]` | Open the pairing dialog; you approve the phone there |
+| `sheprd remote add-link` | Open **Add Device > Nearby Sheprd** with another computer's pairing link, read from standard input (see [SSH hosts](ssh-hosts.md#another-computer-running-sheprd-on-another-network)); you choose **Pair** there |
 | `sheprd remote restart` | Restart the daemon from the binary beside the app |
 | `sheprd remote revoke DEVICE` | Ask in the window to revoke a device; you confirm there |
 

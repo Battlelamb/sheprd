@@ -65,6 +65,20 @@ impl SettingsWindow {
                     )),
             )
             .child(
+                ui::row(
+                    theme,
+                    "chat-auto-convert",
+                    fl!("settings-chat-auto-convert"),
+                )
+                .description(fl!("settings-chat-auto-convert-description"))
+                .switch(self.preference_toggle(
+                    "chat-auto-convert-toggle",
+                    chat.auto_convert,
+                    Preference::ChatAutoConvert(!chat.auto_convert),
+                    cx,
+                )),
+            )
+            .child(
                 ui::row(theme, "chat-glide", fl!("settings-chat-glide"))
                     .description(fl!("settings-chat-glide-description"))
                     .switch(self.preference_toggle(
@@ -73,6 +87,20 @@ impl SettingsWindow {
                         Preference::ChatGlide(!chat.glide),
                         cx,
                     )),
+            )
+            .child(
+                ui::row(
+                    theme,
+                    "chat-message-effects",
+                    fl!("settings-chat-message-effects"),
+                )
+                .description(fl!("settings-chat-message-effects-description"))
+                .switch(self.preference_toggle(
+                    "chat-message-effects-toggle",
+                    chat.message_effects,
+                    Preference::ChatMessageEffects(!chat.message_effects),
+                    cx,
+                )),
             )
             .child(ui::section(theme, &fl!("settings-chat-section-code"), None))
             .child(

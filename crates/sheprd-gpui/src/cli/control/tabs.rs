@@ -37,6 +37,89 @@ impl From<OsString> for FileAt {
     }
 }
 
+/// `machine`: a virtual Mac on this computer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MachineCommand {
+    /// `command` run by the Sheprd on another computer, `--host HOST`.
+    On {
+        host: String,
+        command: Box<MachineCommand>,
+    },
+    /// Hidden: another computer's Sheprd borrowing a machine here, one
+    /// request as JSON on standard input.
+    Lend,
+    Start {
+        name: String,
+    },
+    Claim {
+        name: String,
+        wait: u64,
+    },
+    Release {
+        name: String,
+    },
+    Open {
+        name: String,
+    },
+    /// Open it with its setup guide beside it.
+    Setup {
+        name: String,
+    },
+    List,
+    Set {
+        name: String,
+        cpus: Option<u16>,
+        memory_gib: Option<u16>,
+        display: Option<String>,
+    },
+    Suspend {
+        name: String,
+    },
+    Delete {
+        name: String,
+    },
+    /// From an image, or without one from Apple's macOS, which the user
+    /// confirms in Settings.
+    New {
+        name: Option<String>,
+        image: Option<String>,
+    },
+    ImageList,
+    ImageSave {
+        machine: String,
+        image: String,
+    },
+    ImageDelete {
+        name: String,
+    },
+    /// What Sheprd Agent inside it reports.
+    Agent {
+        name: String,
+    },
+    /// A command inside it; `device` is its name.
+    Exec(super::ExecCommand),
+    Screenshot {
+        name: String,
+        path: PathBuf,
+    },
+    Click {
+        name: String,
+        x: u32,
+        y: u32,
+        button: super::MachineButton,
+        count: u8,
+    },
+    Type {
+        name: String,
+        text: String,
+    },
+    Key {
+        name: String,
+        key: String,
+        modifiers: Vec<super::MachineModifier>,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CodeCommand {
     /// A read-only code tab beside the terminals.
@@ -112,6 +195,117 @@ pub(super) fn open_only(args: &mut Args) -> Result<(), CliError> {
         Some(verb) if verb == "open" => Ok(()),
         Some(verb) => Err(unknown(args.name(), verb)),
     }
+}
+
+pub(super) fn machine(args: &mut Args) -> Result<MachineCommand, CliError> {
+    let host = args.text_option("--host")?;
+    let command = machine_here(args)?;
+    let Some(host) = host else {
+        return Ok(command);
+    };
+    if !command.forwardable() {
+        return Err(CliError::InvalidValue("--host"));
+    }
+    Ok(MachineCommand::On {
+        host,
+        command: Box::new(command),
+    })
+}
+
+impl MachineCommand {
+    /// Whether `--host` takes it: work on a machine there, never making,
+    /// deleting, or changing one, which its own Sheprd asks about.
+    fn forwardable(&self) -> bool {
+        matches!(
+            self,
+            Self::Agent { .. }
+                | Self::Claim { .. }
+                | Self::Click { .. }
+                | Self::Exec(_)
+                | Self::Key { .. }
+                | Self::List
+                | Self::Open { .. }
+                | Self::Release { .. }
+                | Self::Screenshot { .. }
+                | Self::Start { .. }
+                | Self::Suspend { .. }
+                | Self::Type { .. }
+        )
+    }
+}
+
+fn machine_here(args: &mut Args) -> Result<MachineCommand, CliError> {
+    let Some(verb) = args.verb() else {
+        return Ok(MachineCommand::Open {
+            name: "default".to_owned(),
+        });
+    };
+    Ok(match verb.to_str() {
+        Some("open") => MachineCommand::Open {
+            name: args
+                .optional_text()?
+                .unwrap_or_else(|| "default".to_owned()),
+        },
+        Some("setup") => MachineCommand::Setup {
+            name: args
+                .optional_text()?
+                .unwrap_or_else(|| "default".to_owned()),
+        },
+        Some("list") => MachineCommand::List,
+        Some("lend") => MachineCommand::Lend,
+        Some("start") => MachineCommand::Start {
+            name: args.required_text("NAME")?,
+        },
+        Some("claim") => MachineCommand::Claim {
+            wait: args.number("--wait", 1..=600_u64)?.unwrap_or(0),
+            name: args.required_text("NAME")?,
+        },
+        Some("release") => MachineCommand::Release {
+            name: args.required_text("NAME")?,
+        },
+        Some("set") => MachineCommand::Set {
+            cpus: args.number("--cpus", 1..=u16::MAX)?,
+            memory_gib: args.number("--memory", 1..=u16::MAX)?,
+            display: args.text_option("--display")?,
+            name: args.required_text("NAME")?,
+        },
+        Some("suspend") => MachineCommand::Suspend {
+            name: args.required_text("NAME")?,
+        },
+        Some("delete") => MachineCommand::Delete {
+            name: args.required_text("NAME")?,
+        },
+        Some("new") => {
+            let image = args.text_option("--from")?;
+            let name = match image {
+                Some(_) => Some(args.required_text("NAME")?),
+                None => args.optional_text()?,
+            };
+            MachineCommand::New { name, image }
+        }
+        Some("image") => machine_image(args)?,
+        Some(verb @ ("agent" | "exec" | "screenshot" | "click" | "type" | "key")) => {
+            super::machine_agent::parse(verb, args)?
+        }
+        _ => return Err(unknown("machine", verb)),
+    })
+}
+
+fn machine_image(args: &mut Args) -> Result<MachineCommand, CliError> {
+    let Some(verb) = args.verb() else {
+        return Ok(MachineCommand::ImageList);
+    };
+    Ok(match verb.to_str() {
+        Some("list") => MachineCommand::ImageList,
+        Some("save") => MachineCommand::ImageSave {
+            machine: args.required_text("MACHINE")?,
+            image: args.required_text("IMAGE")?,
+        },
+        Some("delete") => MachineCommand::ImageDelete {
+            name: args.required_text("IMAGE")?,
+        },
+        _ => return Err(unknown("machine image", verb)),
+    })
 }
 
 pub(super) fn orchestrator(args: &mut Args) -> Result<OrchestratorCommand, CliError> {

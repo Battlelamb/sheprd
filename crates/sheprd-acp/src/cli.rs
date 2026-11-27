@@ -9,6 +9,7 @@ use std::{
 use crate::{agents::Agent, mirror::transcript::TranscriptAgent};
 
 mod session_helpers;
+mod traces;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum Error {
@@ -36,10 +37,18 @@ pub enum Error {
     ChooseCommand,
     #[error("`--choose` starts a new conversation and cannot continue one")]
     ChooseLoad,
+    #[error("`{0}` is not a thread id")]
+    InvalidThread(String),
+    #[error("`--thread` continues a built-in agent's session named by `--load` or `--resume`")]
+    ThreadWithoutLoad,
     #[error("terminal must be a nonempty local identifier without routing or whitespace")]
     InvalidTerminal,
     #[error("unknown session agent `{0}`")]
     SessionAgent(String),
+    #[error(transparent)]
+    T3Mode(#[from] sheprd_t3::launch::UnknownMode),
+    #[error("`--branch` needs `--base`")]
+    BranchWithoutBase,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -53,11 +62,15 @@ pub(crate) enum Parsed {
     Mirror(MirrorOptions),
     /// Project one verified running CLI process over standard streams.
     Observe(ObserveOptions),
-    /// Follow a T3 Code thread, read-only, without starting any agent.
+    /// Follow and steer a T3 Code thread, without starting any agent.
     T3(T3Options),
     /// List the agents installed here, one name per line.
     Agents,
     Session(crate::session_helpers::Command),
+    /// This host's index of agent sessions.
+    Traces(crate::traces::Command),
+    /// Serve a thread's transcript file to its agent over MCP on stdio.
+    ThreadMcp(sheprd_chat_protocol::thread::ThreadId),
     Help,
     Version,
 }
@@ -70,6 +83,11 @@ pub(crate) struct Options {
     pub agent: AgentChoice,
     /// Listen for Sheprd and other clients.
     pub attach: bool,
+    /// A file holding the first prompt, another agent's brief, which this
+    /// program reads, removes, and sends once the session opens.
+    pub brief_file: Option<PathBuf>,
+    /// The agent that wrote the brief.
+    pub brief_from: Option<Agent>,
     /// Let a client switch to another installed agent until the first
     /// prompt reaches this one.
     pub choose: bool,
@@ -83,6 +101,9 @@ pub(crate) struct Options {
     /// Stop rather than start a new session when the agent cannot continue
     /// `load`, as `--resume` asks.
     pub require_load: bool,
+    /// The thread the continued session belongs to, kept on as that thread
+    /// rather than a new one.
+    pub thread: Option<sheprd_chat_protocol::thread::ThreadId>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -111,9 +132,18 @@ pub(crate) struct T3Options {
     pub pane: Option<String>,
     /// The server's address; by default the one running on this computer.
     pub server: Option<String>,
-    pub thread: String,
+    pub thread: T3Thread,
     /// The access token `sheprd-t3 pair` kept.
     pub token_file: PathBuf,
+}
+
+/// The thread `sheprd-acp t3` follows.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum T3Thread {
+    /// One that exists, by id.
+    Existing(String),
+    /// One it starts first.
+    New(sheprd_t3::launch::Request),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -148,23 +178,51 @@ Usage:
   sheprd-acp observe codex|claude SESSION_ID PID START_TICKS [--pane ID]
                         Render the existing Linux agent over stdin/stdout.
                         Starts no agent; input stays in its original terminal.
+  sheprd-acp traces index [--json]
+                        Index this host's Claude Code, Codex, Pi and omp sessions,
+                        reading only what changed; secrets are redacted.
+  sheprd-acp traces watch [--json]
+                        Index, then keep indexing as agents write; print each
+                        changed session (JSON lines with --json) until stopped.
+  sheprd-acp traces list [--agent AGENT] [--limit N] [--json]
+                        The most recently updated indexed sessions.
+  sheprd-acp traces overlap [--days N] [--agent NAME] [--host ID] [--at UNIX_MS] [--json]
+                        Recent count and daily peaks, or active sessions at an instant.
+  sheprd-acp traces activity [--days N] [--json]
+                        Sessions and messages per day and agent.
+  sheprd-acp traces peers [--json]
+                        Last acknowledged replication progress for each host route.
+  sheprd-acp traces exchange
+                        One bounded replication request on stdin and reply on stdout;
+                        used by connected Sheprd hosts over authenticated transport.
+  sheprd-acp thread-mcp --thread ID
+                        Serve thread ID's conversation to its agent over MCP
+                        on stdin/stdout, read-only (chats start it themselves).
   sheprd-acp mirror codex|claude FILE [--pane ID] [--endpoint ID]
                         Watch an existing JSONL transcript, read-only; starts
                         no agent and changes no Herdr pane metadata. Prints
                         its endpoint ID once ready. Stop with Ctrl+C.
-  sheprd-acp t3 THREAD --token-file FILE [--server URL] [--pane ID]
+  sheprd-acp t3 THREAD|--new --token-file FILE [--server URL] [--pane ID]
                 [--endpoint ID]
-                        Follow a T3 Code thread live, read-only, with the token
-                        `sheprd-t3 pair` kept in FILE; starts no agent. Prints
-                        its endpoint ID once ready. Stop with Ctrl+C.
+                        Follow a T3 Code thread live and pass on its chat's
+                        prompts, answers, stops, and model changes, with the
+                        token `sheprd-t3 pair` kept in FILE; starts no agent.
+                        Prints its endpoint ID once ready. Stop with Ctrl+C.
+                        With --new, first start a thread in a checkout, as
+                        `sheprd-t3 new` does: [--cwd PATH] [--prompt TEXT]
+                        [--title TEXT] [--provider ID] [--model SLUG]
+                        [--mode MODE] [--plan] [--base REF [--branch NAME]].
 
 Agents:
+  antigravity agy acp
   claude     claude itself, or with --acp claude-agent-acp
              (or npx @agentclientprotocol/claude-agent-acp)
   codex      codex app-server, or with --acp codex-acp
              (or npx @agentclientprotocol/codex-acp)
   copilot    copilot --acp
   gemini     gemini --acp
+  kimi       kimi acp
+  muse       muse acp
   opencode   opencode acp
   pi         pi --mode rpc, or with --acp pi-acp (or npx pi-acp)
 
@@ -172,13 +230,20 @@ Options:
   --acp          Use the agent's ACP adapter, not the agent itself
                  (also HERDR_ACP_ADAPTER=1)
   --choose       Let clients switch to another installed agent whenever
-                 the agent is idle (Ctrl+O here); the new agent is handed
-                 the conversation; not with --load
+                 the agent is idle (Ctrl+O here); the new agent gets the
+                 conversation; not with --load
   --cwd DIR      Run the session in DIR instead of the current directory
   --load ID      Continue the agent's session ID instead of starting a new one
   --resume ID    Continue session ID, and stop rather than start a new one
                  when the agent cannot (Sheprd restores chats with it)
+  --thread ID    Keep the continued session in thread ID, its transcript
+                 and agents, rather than a new thread
   --name NAME    The name to show for a custom command
+  --brief-file FILE
+                 Send FILE's text as the first prompt, marked as another
+                 agent's brief, then remove FILE (sheprd chat new --prompt)
+  --brief-from AGENT
+                 The agent that wrote the brief
   --headless     Draw nothing; clients such as Sheprd drive the session
   --no-attach    Do not listen for Sheprd
   -h, --help     Show this help
@@ -193,7 +258,7 @@ Keys:
   Shift+Tab      Next session mode
   Ctrl+O         Settings: agent (with --choose), model, thinking level,
                  mode (Left/Right change)
-  PgUp/PgDn      Scroll
+  PgUp/PgDn, mouse wheel  Scroll the transcript
   Ctrl+D         Quit when the prompt is empty
 ";
 
@@ -236,6 +301,14 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Parsed, 
             args.next();
             return mirror(args);
         }
+        Some("traces") => {
+            args.next();
+            return traces::parse(args);
+        }
+        Some(crate::thread_mcp::COMMAND) => {
+            args.next();
+            return crate::thread_mcp::parse(args).map(Parsed::ThreadMcp);
+        }
         Some("observe") => {
             args.next();
             return observe(args);
@@ -249,12 +322,15 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Parsed, 
             args: Vec::new(),
         },
         attach: true,
+        brief_file: None,
+        brief_from: None,
         choose: false,
         cwd: None,
         headless: false,
         load: None,
         name: None,
         require_load: false,
+        thread: None,
     };
     let mut agent = None;
     while let Some(arg) = args.next() {
@@ -274,6 +350,21 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Parsed, 
                 options.require_load = true;
             }
             Some("--name") => options.name = Some(utf8(args.next(), "--name")?),
+            Some("--thread") => {
+                let id = utf8(args.next(), "--thread")?;
+                options.thread = Some(id.parse().map_err(|_| Error::InvalidThread(id))?);
+            }
+            Some("--brief-file") => {
+                options.brief_file = Some(
+                    args.next()
+                        .ok_or(Error::MissingValue("--brief-file"))?
+                        .into(),
+                );
+            }
+            Some("--brief-from") => {
+                let name = utf8(args.next(), "--brief-from")?;
+                options.brief_from = Some(name.parse().map_err(|_| Error::UnknownAgent(name))?);
+            }
             Some("--") => {
                 let rest: Vec<OsString> = args.by_ref().collect();
                 options.agent = match agent {
@@ -310,6 +401,11 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Parsed, 
 /// from a command or extra arguments only one agent takes, or away from a
 /// conversation the agent already holds.
 fn choosable(options: Options) -> Result<Parsed, Error> {
+    if options.thread.is_some()
+        && (options.load.is_none() || matches!(options.agent, AgentChoice::Command { .. }))
+    {
+        return Err(Error::ThreadWithoutLoad);
+    }
     if options.choose {
         let AgentChoice::Builtin { args, .. } = &options.agent else {
             return Err(Error::ChooseCommand);
@@ -370,12 +466,59 @@ fn t3(args: impl Iterator<Item = OsString>) -> Result<Parsed, Error> {
     let Some(mut args) = unless_help(args) else {
         return Ok(Parsed::Help);
     };
-    let thread = utf8(args.next(), "t3 THREAD")?;
+    let first = utf8(args.next(), "t3 THREAD")?;
+    let mut new = (first == "--new").then(|| sheprd_t3::launch::Request {
+        cwd: PathBuf::from("."),
+        ..sheprd_t3::launch::Request::default()
+    });
+    let mut base = None;
+    let mut branch = None;
     let mut endpoint = None;
     let mut pane = None;
     let mut server = None;
     let mut token_file = None;
     while let Some(arg) = args.next() {
+        if let Some(new) = &mut new {
+            match arg.to_str() {
+                Some("--cwd") => {
+                    new.cwd = PathBuf::from(args.next().ok_or(Error::MissingValue("--cwd"))?);
+                    continue;
+                }
+                Some("--prompt") => {
+                    new.prompt = Some(utf8(args.next(), "--prompt")?);
+                    continue;
+                }
+                Some("--provider") => {
+                    new.provider = Some(utf8(args.next(), "--provider")?);
+                    continue;
+                }
+                Some("--model") => {
+                    new.model = Some(utf8(args.next(), "--model")?);
+                    continue;
+                }
+                Some("--title") => {
+                    new.title = Some(utf8(args.next(), "--title")?);
+                    continue;
+                }
+                Some("--mode") => {
+                    new.runtime_mode = utf8(args.next(), "--mode")?.parse()?;
+                    continue;
+                }
+                Some("--plan") => {
+                    new.interaction_mode = sheprd_t3::launch::InteractionMode::Plan;
+                    continue;
+                }
+                Some("--base") => {
+                    base = Some(utf8(args.next(), "--base")?);
+                    continue;
+                }
+                Some("--branch") => {
+                    branch = Some(utf8(args.next(), "--branch")?);
+                    continue;
+                }
+                _ => {}
+            }
+        }
         match arg.to_str() {
             Some("--pane") => pane = Some(utf8(args.next(), "--pane")?),
             Some("--server") => server = Some(utf8(args.next(), "--server")?),
@@ -391,6 +534,17 @@ fn t3(args: impl Iterator<Item = OsString>) -> Result<Parsed, Error> {
             _ => return Err(Error::UnknownOption(arg)),
         }
     }
+    let thread = match new {
+        Some(mut new) => {
+            new.worktree = match (base, branch) {
+                (Some(base), branch) => Some(sheprd_t3::launch::NewWorktree { base, branch }),
+                (None, Some(_)) => return Err(Error::BranchWithoutBase),
+                (None, None) => None,
+            };
+            T3Thread::New(new)
+        }
+        None => T3Thread::Existing(first),
+    };
     Ok(Parsed::T3(T3Options {
         endpoint,
         pane,

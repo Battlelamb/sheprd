@@ -9,32 +9,41 @@ struct EntryView: View {
     var body: some View {
         switch entry.kind {
         case let .user(text, _):
-            Text(text).padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            SizedPlain(text: PastedEnvelope.unwrap(text)).padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 .background(.tint.opacity(0.1), in: .rect(cornerRadius: 16))
                 .textSelection(.enabled)
         case let .agent(text):
-            MarkdownView(text: text)
+            AgentMessageView(id: entry.id, text: text)
         case let .thought(text):
             Text(text).font(.callout.italic()).foregroundStyle(.secondary).lineLimit(4)
-        case let .image(author, image):
+        case let .image(author, image, caption):
             if let data = Data(base64Encoded: image.data), let picture = UIImage(data: data) {
-                ChatPicture(picture: GalleryPicture(TranscriptPicture(id: entry.id, author: author, image: image)), image: picture)
+                ChatPicture(picture: GalleryPicture(TranscriptPicture(id: entry.id, author: author, image: image, caption: caption)), image: picture)
             }
         case let .tool(tool):
             ToolRow(tool: tool)
         case let .turn(summary):
-            Text(turnLine(summary)).font(.caption).foregroundStyle(.secondary)
+            Text(ChatTurns.turnLine(summary)).font(.caption).foregroundStyle(.secondary)
         case let .notice(notice):
-            Label(notice.text, systemImage: notice.level == .error ? "exclamationmark.octagon" : "info.circle")
-                .font(.footnote)
-                .foregroundStyle(notice.level == .info ? AnyShapeStyle(.secondary) : AnyShapeStyle(notice.level == .error ? .red : .orange))
+            if let details = notice.details {
+                // Such as a compaction summary or a command's output: folded,
+                // inert source text the person may open and copy.
+                DisclosureGroup {
+                    Text(details).font(.caption.monospaced()).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } label: {
+                    noticeLabel(notice)
+                }
+            } else {
+                noticeLabel(notice)
+            }
         }
     }
 
-    private func turnLine(_ summary: TurnSummary) -> String {
-        let seconds = Int(summary.durationMs / 1000)
-        let time = seconds >= 60 ? "\(seconds / 60)m \(seconds % 60)s" : "\(seconds)s"
-        return summary.end == .done ? "Done in \(time)" : "Ended (\(summary.end.rawValue)) after \(time)"
+    private func noticeLabel(_ notice: Notice) -> some View {
+        Label(notice.text, systemImage: notice.level == .error ? "exclamationmark.octagon" : "info.circle")
+            .font(.footnote)
+            .foregroundStyle(notice.level == .info ? AnyShapeStyle(.secondary) : AnyShapeStyle(notice.level == .error ? .red : .orange))
     }
 }
 

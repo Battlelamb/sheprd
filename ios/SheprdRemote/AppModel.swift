@@ -50,7 +50,7 @@ final class AppModel {
     /// and those typed in Settings. Kept on this phone across launches.
     private(set) var savedRelays = AppModel.loadRelays() {
         didSet {
-            fleet.savedRelays = savedRelays.forEveryComputer
+            fleet.savedRelays = savedRelays.dialing
             if let data = try? JSONEncoder().encode(savedRelays) {
                 UserDefaults.standard.set(data, forKey: Self.relaysKey)
             }
@@ -90,6 +90,9 @@ final class AppModel {
     var creating: Creating?
     /// A spoken command under way, shown as a sheet over every tab.
     var voice: VoiceSession?
+    /// A pull request a notification's Open PR asked for, shown as a
+    /// sheet over every tab (`openPullRequest`).
+    var pendingPullRequest: PullRequestRoute?
     /// A command asked for while the app was locked; the unlock runs it.
     struct PendingTalk { var words: String? }
     @ObservationIgnored var pendingTalk: PendingTalk?
@@ -101,6 +104,9 @@ final class AppModel {
     /// A tab to switch to, from a Control or an intent; the root view
     /// shows it and clears it.
     var pendingTab: RootTab?
+    /// Whether `pendingTab` opens at its root, as an agent's open does:
+    /// the pages on top of it close. Cleared with `pendingTab`.
+    var pendingTabRoot = false
     /// Something to tell the person once, such as a first prompt that
     /// did not go; the root view shows it and clears it.
     var notice: String?
@@ -232,14 +238,22 @@ final class AppModel {
     }
     let sessions: Sessions
     let tokens: ActivityTokens
+    /// Settings' "Send test push", per computer.
+    let pushTests: PushTests
+    /// Settings' "Start Test Activity".
+    let activityTest: ActivityTest
     let fleet: Fleet
     /// Pairing with the hosts each computer's Sheprd knows.
     let hostLinks: HostLinks
+    /// This phone as a member of the person's fleet.
+    let fleetMembership: FleetMembership
     let nearby = NearbyBrowser()
     let collapsed = CollapsedStore()
     let tagFilter = TagFilterStore()
     let agentScopeStore = AgentScopeStore()
     let shortcuts = ShortcutStore()
+    /// Agents on paired computers driving the app, where each is allowed.
+    let agents: AgentControl
     let termKeys = TermKeyStore()
     let bluetooth = NearbyBluetooth()
     /// Bluetooth presence with the computers that have it on.
@@ -256,8 +270,12 @@ final class AppModel {
         let sessions = Sessions()
         self.sessions = sessions
         tokens = ActivityTokens(sessions: sessions)
+        pushTests = PushTests(sessions: sessions, tokens: tokens)
+        activityTest = ActivityTest(tokens: tokens)
         fleet = Fleet(sessions: sessions)
+        agents = AgentControl()
         hostLinks = HostLinks(sessions: sessions)
+        fleetMembership = FleetMembership(sessions: sessions)
         var loaded = false
         do {
             computers = try ComputerStore.load()
@@ -268,6 +286,7 @@ final class AppModel {
         }
         // Property observers do not run during `init`.
         tokens.computers = computers
+        fleet.agentsAllowed = { [agents] in agents.allows($0) }
         fleet.sync(computers)
         // Every relay a paired computer named is kept, so it is there to
         // pick from, and to dial, when that computer cannot be asked.
@@ -275,11 +294,14 @@ final class AppModel {
         let named = computers.compactMap(\.relay).flatMap(\.relays)
         // Which old relays were typed is decided only against the paired
         // computers: read wrong, every relay would look typed.
-        if loaded { relays.settle(named: Set(named)) }
+        if loaded {
+            relays.settle(named: Set(named))
+            relays.keepRemoved(named: Set(named))
+        }
         relays.learn(named)
         keep(relays)
         // Unchanged, the property's observer did not run.
-        fleet.savedRelays = savedRelays.forEveryComputer
+        fleet.savedRelays = savedRelays.dialing
         presence.onAddresses = { [weak self] fingerprint, origins in self?.update(fingerprint, origins: origins) }
         fleet.onRelay = { [weak self] device, record in self?.setRelay(device, record) }
         // Back in range after iOS relaunched the app: tokens may be stale.
@@ -290,8 +312,20 @@ final class AppModel {
         presence.computers = computers
         hostLinks.computers = { [weak self] in self?.computers ?? [] }
         hostLinks.onPaired = { [weak self] in self?.add($0) }
-        fleet.onOnline = { [weak self] in self?.hostLinks.check($0) }
+        fleetMembership.computers = { [weak self] in self?.computers ?? [] }
+        fleetMembership.links = fleet
+        fleetMembership.onLinked = { [weak self] in self?.add($0) ?? false }
+        tokens.relayOrigin = { [weak fleet] device in fleet?.relayOrigin(device) }
+        fleet.onOnline = { [weak self] computer in
+            self?.tokens.online(computer)
+            self?.hostLinks.check(computer)
+            self?.fleetMembership.online(computer)
+        }
         fleet.onTags = { [weak self] in self?.tagsArrived($0, for: $1) }
+        fleet.onDrive = { [weak self] id, command, computer in
+            guard let self else { return }
+            agents.perform(id, command, from: computer, model: self)
+        }
         fleet.onTagsAnswer = { [weak self] in self?.tagsAnswered($0, for: $1) }
         shortcuts.perform = { [weak fleet] actions in
             for action in actions {
@@ -319,18 +353,43 @@ final class AppModel {
         paths.start(queue: .main)
     }
 
-    func add(_ computer: Computer) {
+    /// The computers the lists show: the paired ones, or the demo's while
+    /// it runs. Settings and pairing still read `computers`.
+    var shownComputers: [Computer] { fleet.demo ? DemoFleet.computers : computers }
+
+    /// Whether there is anything to list: a paired computer or the demo.
+    /// Until then the app shows only its offer to install, pair, or explore
+    /// the demo, with no search, buttons, or tabs leading nowhere.
+    var hasComputers: Bool { !shownComputers.isEmpty }
+
+    /// Shows the demo's made-up computers until one is paired (`DemoFleet`).
+    func startDemo() {
+        guard computers.isEmpty else { return }
+        fleet.startDemo()
+    }
+
+    func endDemo() {
+        fleet.endDemo()
+        fleet.sync(computers)
+    }
+
+    /// Keeps `computer`; whether it was saved.
+    @discardableResult
+    func add(_ computer: Computer) -> Bool {
         var computer = computer
         computer.carryTags(from: computers)
         // A computer is its CA: pairing the same CA (or the same device id)
         // again replaces the old record. Names are display only.
         computers.removeAll { $0.fingerprint == computer.fingerprint || $0.device == computer.device }
         computers.append(computer)
-        save()
+        let saved = save()
         learnRelays(of: computer.relay)
         Task { await AppDelegate.enableAlerts() }
         Task { await tokens.sync(only: computer.fingerprint) }
         hostLinks.check(computer, force: true)
+        // A computer in a fleet offers joining it.
+        if computer.via == nil { Task { await fleetMembership.check(computer) } }
+        return saved
     }
 
     /// Turns Bluetooth presence on or off for one computer.
@@ -376,7 +435,9 @@ final class AppModel {
         guard let index = computers.firstIndex(where: { $0.device == device }),
               computers[index].relay != record
         else { return }
-        computers[index].relay = record
+        // The highest fleet record checked for it stays, so a lagging
+        // computer cannot roll it back to an older one.
+        computers[index].relay = record?.keepingSignedRev(of: computers[index].relay)
         save()
         learnRelays(of: record)
     }
@@ -409,14 +470,15 @@ final class AppModel {
         return added
     }
 
-    /// Forgets a relay no paired computer names any more. One a computer
-    /// names stays for it, and is only no longer tried for the others.
+    /// Forgets a relay. One a paired computer names is remembered as
+    /// removed, so it is neither learned again nor dialed for that
+    /// computer until the user types it back.
     func removeRelay(_ relay: RelayEndpoint) {
         var relays = savedRelays
         if computers(naming: relay).isEmpty {
             relays.remove(relay)
         } else {
-            relays.unshare(relay)
+            relays.drop(relay)
         }
         keep(relays)
     }
@@ -440,6 +502,9 @@ final class AppModel {
         computers.removeAll { $0.device == computer.device }
         save()
         try? NotifyKey.forget(computer.fingerprint)
+        if ActivityGrouping.shared(for: computer.fingerprint) {
+            Task { await tokens.groupingChanged(sharedChanged: true) }
+        }
         hostLinks.forget(computer)
         collapsed.computers.forget(computer.device)
         shortcuts.offline(computer.device)
@@ -447,18 +512,24 @@ final class AppModel {
         Task { await GitHubReads.reader.tokens.forget(lender: computer.device) }
     }
 
-    private func save() {
+    /// Saves the paired computers; whether that landed.
+    @discardableResult
+    private func save() -> Bool {
         do {
             try ComputerStore.save(computers)
+            return true
         } catch {
             log.error("Could not save the paired computers: \(error.localizedDescription, privacy: .public)")
             message = error.localizedDescription
+            return false
         }
     }
 
     /// Opens a Live Activity's or notification's link in the app.
     func open(_ url: URL) {
         guard let link = ChatLink(url: url) else { return }
+        // The test activity this phone started on itself opens no chat.
+        guard link.computerId != SelfTestPush.sender else { return }
         guard let fingerprint = link.fingerprint,
               let computer = computers.first(where: { $0.fingerprint == fingerprint })
         else {
@@ -469,6 +540,11 @@ final class AppModel {
         // An agent in a plain terminal alerts too, and opens its terminal,
         // even before this phone has heard of a new one.
         let terminal = fleet.terminalItems.first { $0.computer.device == computer.device && $0.terminal.panes.contains { $0.pane == link.pane } }
+        // Its conversation, when the computer shows the agent's as a chat.
+        if !link.terminal, let terminal, terminal.agent?.pane == link.pane, case let .chat(key, title)? = terminal.route {
+            pendingRoute = .chat(key, title: title)
+            return
+        }
         if link.terminal || terminal != nil {
             pendingRoute = .term(key, title: terminal?.terminal.label ?? "Terminal")
             return
@@ -498,9 +574,7 @@ final class AppModel {
     /// The name to show for `computer`: its own, plus the start of its
     /// fingerprint when another paired computer has the same name.
     func displayName(_ computer: Computer) -> String {
-        let twins = computers.filter { $0.name == computer.name }.count
-        guard twins > 1 else { return computer.name }
-        return "\(computer.name) (\(computer.fingerprint.hex.prefix(8)))"
+        shownComputers.displayName(of: computer)
     }
 
     /// The paired computer that vouched for `computer`, for one paired
@@ -523,7 +597,8 @@ final class AppModel {
 
     /// Starts a local activity with sample content and plays it through a
     /// few steps to done, to check the layouts and updates on a device
-    /// without an APNs key.
+    /// without any push. Its content is plain, so it shows the sealed
+    /// cover while the push relay is on.
     func startSample() {
         let facts = ChatActivityFacts(
             computer: computers.first?.name ?? "studio",
@@ -546,7 +621,7 @@ final class AppModel {
         do {
             id = try Activity.request(
                 attributes: ChatActivityAttributes(facts: facts),
-                content: .init(state: state, staleDate: nil)
+                content: .init(state: .plain(state), staleDate: nil)
             ).id
         } catch {
             sampleStatus = "Could not start: \(error.localizedDescription)"
@@ -570,14 +645,14 @@ final class AppModel {
             try? await Task.sleep(for: .seconds(5))
             state.step = step
             state.planDone = min(3 + index, 4)
-            await Activity<ChatActivityAttributes>.activities.first { $0.id == id }?.update(.init(state: state, staleDate: nil))
+            await Activity<ChatActivityAttributes>.activities.first { $0.id == id }?.update(.init(state: .plain(state), staleDate: nil))
         }
         try? await Task.sleep(for: .seconds(5))
         state.phase = .finished
         state.summary = "Split the tests into four files; just ci passes."
         state.working = 1
         await Activity<ChatActivityAttributes>.activities.first { $0.id == id }?
-            .end(.init(state: state, staleDate: nil), dismissalPolicy: .after(.now + 60))
+            .end(.init(state: .plain(state), staleDate: nil), dismissalPolicy: .after(.now + 60))
     }
     #endif
 }

@@ -8,18 +8,22 @@ mod activity;
 mod composer;
 mod copy;
 mod disclosure;
+mod earlier;
 mod effects;
 mod embeds;
 mod entries;
+mod files;
 mod jump;
 mod layout;
 mod loading;
+mod pane_menu;
 mod panels;
 mod pinned;
 mod rail;
 mod rich;
 pub(crate) mod running;
 pub(crate) mod selection;
+mod sent;
 mod settings;
 mod shortcuts;
 mod summary;
@@ -32,7 +36,7 @@ mod working;
 pub(super) use settings::matching;
 mod visuals;
 
-use super::chats::{ChatInput, ChatPane};
+use crate::chat::chats::{ChatInput, ChatPane};
 use crate::i18n::fl;
 use crate::{
     SheprdWindow,
@@ -299,7 +303,9 @@ impl SheprdWindow {
         let pane_id = chat.target.pane_id.clone();
         chat.text_geometry.begin_frame();
         chat.prepared.visuals.begin_frame();
-        let entries = {
+        let entries = if chat.session.synced() && chat.session.transcript().entries.is_empty() {
+            self.render_chat_empty(chat).into_any_element()
+        } else {
             let pane_id = pane_id.clone();
             list(
                 chat.list.clone(),
@@ -314,6 +320,7 @@ impl SheprdWindow {
             // Margins rather than padding: the list leaves its padding out
             // of the end it reports, which would stop the glide short.
             .my(px(8.))
+            .into_any_element()
         };
         let focus_pane = pane_id.clone();
         let key_pane = pane_id.clone();
@@ -388,14 +395,14 @@ impl SheprdWindow {
             }))
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(move |this, _, _, _| {
-                    this.release_chat_text(&release_pane);
+                cx.listener(move |this, _, _, cx| {
+                    this.release_chat_text(&release_pane, cx);
                 }),
             )
             .on_mouse_up_out(
                 MouseButton::Left,
-                cx.listener(move |this, _, _, _| {
-                    this.release_chat_text(&release_out_pane);
+                cx.listener(move |this, _, _, cx| {
+                    this.release_chat_text(&release_out_pane, cx);
                 }),
             )
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
@@ -432,6 +439,9 @@ impl SheprdWindow {
                     .flex_1()
                     .min_h_0()
                     .flex()
+                    .when_some(Self::chat_wizz_shake(chat, cx), |view, (dx, dy)| {
+                        view.relative().left(px(dx)).top(px(dy))
+                    })
                     .child(
                         div()
                             .flex_1()
@@ -448,6 +458,7 @@ impl SheprdWindow {
                                         view.track_focus(focus)
                                     })
                                     .child(entries)
+                                    .children(self.chat_turns_probe(chat, cx))
                                     .children(self.render_chat_pinned(chat, cx))
                                     .children(self.render_chat_jump(chat, cx)),
                             )
@@ -492,6 +503,71 @@ impl SheprdWindow {
             .into_any_element()
     }
 
+    /// What to do while a connected chat has no transcript entries yet.
+    fn render_chat_empty(&self, chat: &ChatPane) -> Div {
+        let theme = &self.theme;
+        let transcript = chat.session.transcript();
+        let (title, detail) = match &transcript.status {
+            Status::Starting => (
+                fl!("chat-empty-starting-title"),
+                fl!("chat-empty-starting-hint"),
+            ),
+            Status::Working => (
+                fl!("chat-empty-working-title"),
+                fl!("chat-empty-working-hint"),
+            ),
+            Status::Failed { .. } | Status::Exited { .. } => {
+                (fl!("chat-empty-ended-title"), fl!("chat-empty-ended-hint"))
+            }
+            _ => {
+                let detail = match chat.input() {
+                    ChatInput::Composer => fl!("chat-empty-prompt-hint"),
+                    ChatInput::Terminal => fl!("chat-empty-terminal-hint"),
+                    ChatInput::ReadOnly => fl!("chat-empty-read-only-hint"),
+                };
+                (fl!("chat-empty-title"), detail)
+            }
+        };
+
+        div()
+            .debug_selector(|| "chat-empty".into())
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .px(px(24.))
+            .child(
+                div()
+                    .max_w(px(360.))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(
+                        svg()
+                            .path(agent_icon(chat.session.agent()))
+                            .size(px(40.))
+                            .text_color(rgb(theme.foreground)),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.chat_text_size() + 4.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(rgb(theme.foreground))
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .text_size(self.chat_small_text())
+                            .text_color(rgb(theme.subtext()))
+                            .text_center()
+                            .child(detail),
+                    ),
+            )
+    }
+
     /// The layout's sign that the agent is working on a turn, with what it
     /// left running said after it.
     fn render_chat_working(
@@ -502,15 +578,19 @@ impl SheprdWindow {
     ) -> Option<Div> {
         let open = chat.steps.is_open();
         let needs_input = self.chat_needs_input(chat);
-        let working = working::Working::of(chat.session.transcript(), super::now_ms())
-            .map(|working| working::Working { open, ..working })
-            .map(|working| {
-                if needs_input {
-                    working.waiting(chat.input())
-                } else {
-                    working
-                }
-            });
+        let working = working::Working::of_at(
+            chat.session.transcript(),
+            super::now_ms(),
+            chat.session.last_activity_ms(),
+        )
+        .map(|working| working::Working { open, ..working })
+        .map(|working| {
+            if needs_input {
+                working.waiting(chat.input())
+            } else {
+                working
+            }
+        });
         let row = layout::layout_for(self.config.chat.layout)
             .working(working.as_ref(), &self.chat_look())
             .map(|row| {
@@ -615,6 +695,27 @@ impl SheprdWindow {
         }
     }
 
+    pub(super) fn chat_pane_name(&self, chat: &ChatPane, cx: &App) -> Option<String> {
+        match &chat.target.surface {
+            crate::chat::Surface::Herdr => {
+                let snapshot = self.live.snapshot.as_ref()?;
+                let agent = snapshot
+                    .agents
+                    .iter()
+                    .find(|agent| agent.pane_id == chat.target.pane_id)?;
+                crate::sidebar::pane_name(agent, snapshot, chat.session.agent())
+            }
+            crate::chat::Surface::Core(terminal)
+            | crate::chat::Surface::RemoteCore { terminal, .. } => {
+                let tab = self.core_chat_tab(&chat.target.pane_id)?;
+                let (name, _) = self.core_pane_label(tab, terminal, cx);
+                let name = crate::notifications::safe_text(&name, 160);
+                let name = name.trim();
+                (!name.is_empty() && name != chat.session.agent().trim()).then(|| name.to_owned())
+            }
+        }
+    }
+
     /// The agent and its status, Stop while a turn runs, and the buttons
     /// for the layout, the rail, and the terminal. `rail_fits` says whether the pane is
     /// wide enough to show the rail at all.
@@ -625,6 +726,7 @@ impl SheprdWindow {
         let status = &transcript.status;
         let state = activity::State::of(transcript, self.chat_needs_input(chat));
         let pane_id = chat.target.pane_id.clone();
+        let menu_pane = pane_id.clone();
         let button = |id: &'static str| {
             div()
                 .id(id)
@@ -651,6 +753,34 @@ impl SheprdWindow {
                 .flex_none()
                 .text_color(rgb(hues.yellow))
                 .child(fl!("chat-reconnecting"))
+        });
+        let share = (self.selected_endpoint == 0 && chat.attached()).then(|| {
+            let pane_id = pane_id.clone();
+            let agent = chat.session.agent().to_owned();
+            let sharing = crate::remote::Supervisor::is_pane_shared(&pane_id, cx);
+            let ink = if sharing {
+                crate::menu::accent(theme)
+            } else {
+                rgb(theme.subtext())
+            };
+            button("chat-share")
+                .when(sharing, |btn| btn.bg(rgb(theme.active)))
+                .text_color(ink)
+                .child(
+                    svg()
+                        .path("icons/external.svg")
+                        .size(px(12.))
+                        .text_color(ink),
+                )
+                .child(if sharing {
+                    fl!("chat-sharing")
+                } else {
+                    fl!("chat-share")
+                })
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.open_share_session(pane_id.clone(), agent.clone(), window, cx);
+                }))
         });
         let layout = {
             let current = self.config.chat.layout;
@@ -691,6 +821,14 @@ impl SheprdWindow {
         // The chat container sets the prose size, so the header pins its
         // own chrome: the tabs' mono face at the interface size.
         div()
+            .debug_selector(|| "chat-header".into())
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.open_chat_pane_menu(&menu_pane, event.position, window, cx);
+                }),
+            )
             .flex_none()
             .flex()
             .flex_col()
@@ -720,6 +858,14 @@ impl SheprdWindow {
                             .font_weight(FontWeight::MEDIUM)
                             .child(crate::notifications::safe_text(chat.session.agent(), 80)),
                     )
+                    .children(self.chat_pane_name(chat, cx).map(|name| {
+                        div()
+                            .debug_selector(|| "chat-pane-name".into())
+                            .min_w_0()
+                            .truncate()
+                            .text_color(rgb(theme.subtext()))
+                            .child(name)
+                    }))
                     .child(state.mark(theme))
                     .child(
                         div()
@@ -732,10 +878,13 @@ impl SheprdWindow {
                     .children(reconnecting)
                     .children(watching)
                     .children(usage)
+                    .children(share)
+                    .child(self.render_chat_sent_toggle(chat, cx))
                     .child(layout)
                     .children(rail)
                     .child(terminal),
             )
+            .children(self.render_chat_sent_banner(chat))
             .children(message.map(|message| {
                 div()
                     .px(px(10.))

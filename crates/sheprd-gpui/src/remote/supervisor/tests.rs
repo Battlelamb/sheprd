@@ -17,6 +17,7 @@ pub(super) fn status(connected: usize) -> Status {
         connected,
         relays: Default::default(),
         github_asks: 0,
+        voice_asks: 0,
     }
 }
 
@@ -222,5 +223,7 @@ fn a_failed_change_waits_for_retry(cx: &mut TestAppContext) {
 mod changes;
 mod firewall;
 mod github;
+mod host_push;
 mod indicators;
+mod push_status;
 mod restart;

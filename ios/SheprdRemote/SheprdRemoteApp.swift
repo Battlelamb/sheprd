@@ -17,8 +17,8 @@ struct SheprdRemoteApp: App {
                 .environment(model)
                 .modifier(AppLock())
                 .modifier(Appearance())
+                .browsesLinks(othersToSystem: true)
                 .onOpenURL { model.open($0) }
-                .task { model.tokens.start() }
                 .onChange(of: model.fleet.waiting, initial: true) { _, _ in
                     // While the app is in front, the badge follows the live
                     // counts; pushes set it otherwise, from the same counts.
@@ -27,6 +27,7 @@ struct SheprdRemoteApp: App {
                 .onChange(of: phase, initial: true) { _, phase in
                     switch phase {
                     case .active:
+                        model.tokens.refreshSharedTokens()
                         model.fleet.activate()
                         model.nearby.start()
                         // Registering is idempotent: a computer that lost
@@ -41,18 +42,36 @@ struct SheprdRemoteApp: App {
         }
         // A chat or terminal in a window of its own (iPad, Stage Manager).
         WindowGroup("Chat", for: Route.self) { $route in
-            NavigationStack {
-                switch route {
-                case let .chat(key, title)?: ChatScreen(key: key, title: title).withRoutes()
-                case let .term(key, title)?: TerminalScreen(key: key, title: title)
-                case let .workspace(key)?: WorkspaceScreen(key: key).withRoutes()
-                case let .changes(key)?: ChangesScreen(key: key).withRoutes()
-                case nil: ContentUnavailableView("Nothing to show", systemImage: "questionmark.bubble")
-                }
-            }
+            RouteWindow(route: route)
             .environment(model)
             .modifier(AppLock())
             .modifier(Appearance())
+            .browsesLinks(othersToSystem: true)
         }
+    }
+}
+
+/// A chat, terminal, workspace, or changes in a window of its own. What
+/// opens from it, such as a `ScreenLink` tapped in its chat, pushes onto its
+/// own stack (`windowRoutes`), as no root view there reads the app's
+/// pending routes.
+private struct RouteWindow: View {
+    let route: Route?
+    @State private var path: [Route] = []
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            Group {
+                switch route {
+                case let .chat(key, title)?: ChatScreen(key: key, title: title)
+                case let .term(key, title)?: TerminalScreen(key: key, title: title)
+                case let .workspace(key)?: WorkspaceScreen(key: key)
+                case let .changes(key)?: ChangesScreen(key: key)
+                case nil: ContentUnavailableView("Nothing to show", systemImage: "questionmark.bubble")
+                }
+            }
+            .withRoutes()
+        }
+        .environment(\.windowRoutes, WindowRoutes { path.append($0) })
     }
 }

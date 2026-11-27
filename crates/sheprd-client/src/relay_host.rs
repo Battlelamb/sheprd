@@ -123,11 +123,23 @@ fn proxy_options(proxy: &RelayProxy) -> Option<Vec<String>> {
             format!("ProxyCommand={program} relay-connect --state-dir {state_dir} %h"),
             format!("IdentityFile={identity}"),
             "IdentitiesOnly=yes".to_owned(),
+            // The pairing key is a file of Sheprd's own: never offered to,
+            // nor added to, the user's agent, which `AddKeysToAgent yes`
+            // would do, and an agent such as gpg-agent asks a passphrase
+            // to keep it.
+            "IdentityAgent=none".to_owned(),
+            "AddKeysToAgent=no".to_owned(),
             format!("UserKnownHostsFile={known_hosts}"),
             "GlobalKnownHostsFile=/dev/null".to_owned(),
             "StrictHostKeyChecking=yes".to_owned(),
             "CheckHostIP=no".to_owned(),
             "ProxyJump=none".to_owned(),
+            // With a `ControlPath` and `ControlPersist` from the user's
+            // config, OpenSSH sends the proxy's stderr to /dev/null, which
+            // loses the relay's ban line (`sheprd_relay::ban::LINE_PREFIX`).
+            // The app never starts a master (`ControlMaster=no`), so this
+            // changes nothing else; an existing master is still used.
+            "ControlPersist=no".to_owned(),
         ]
         .into_iter()
         .flat_map(|option| ["-o".to_owned(), option])

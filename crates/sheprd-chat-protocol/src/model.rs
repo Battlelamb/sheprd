@@ -8,11 +8,13 @@ use serde::{Deserialize, Serialize};
 use crate::{Author, CommandId, Image};
 
 mod activity;
+mod pull_request;
 mod question;
 mod question_answers;
 pub use activity::{
     Activity, ActivityKind, ActivityState, MAX_ACTIVITIES, MAX_ACTIVITY_TEXT, Running,
 };
+pub use pull_request::{MAX_PULL_REQUESTS, PullRequest, PullRequestAction};
 pub use question::{MAX_ANSWER_TEXT, MAX_QUESTION_CHOICES, Question, QuestionOption};
 pub use question_answers::{MAX_QUESTION_ANSWERS, MAX_QUESTION_TEXT, valid_question_answers};
 
@@ -38,6 +40,12 @@ pub struct Transcript {
     /// come, without asking.
     #[serde(default)]
     pub auto_accept: bool,
+    /// Prompts another agent wrote, oldest first (revision 4).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub briefs: Vec<crate::Brief>,
+    /// Parent turn for the initial agent-authored brief.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation: Option<crate::brief::DelegatedTask>,
     /// How many attached clients watch, not counting the program's own view.
     #[serde(default)]
     pub clients: u32,
@@ -63,6 +71,9 @@ pub struct Transcript {
     pub permissions: Vec<Permission>,
     #[serde(default)]
     pub plan: Vec<PlanEntry>,
+    /// Pull requests the agent worked on in this chat, oldest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pull_requests: Vec<PullRequest>,
     /// Prompts waiting for the current turn to end, oldest first.
     #[serde(default)]
     pub queued: Vec<Queued>,
@@ -77,6 +88,10 @@ pub struct Transcript {
     /// Older entries were dropped to keep the transcript bounded.
     #[serde(default)]
     pub truncated: bool,
+    /// The thread this conversation is, and where each agent began; `None`
+    /// for a chat that keeps no thread, and from programs before threads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<crate::thread::Thread>,
     /// The prompt turn running now.
     #[serde(default)]
     pub turn: Option<Turn>,
@@ -137,6 +152,11 @@ impl Transcript {
             .find(|activity| activity.call_id == call_id)
     }
 
+    /// The pull request kept for the same repository and number as `pull`.
+    pub fn pull_request(&self, pull: &PullRequest) -> Option<&PullRequest> {
+        self.pull_requests.iter().find(|known| known.is(pull))
+    }
+
     pub(crate) fn position(&self, id: EntryId) -> Option<usize> {
         self.entries
             .binary_search_by_key(&id, |entry| entry.id)
@@ -183,6 +203,12 @@ pub enum EntryKind {
         /// carried, each starting with [`ATTACHED`]; the user typed the rest.
         #[serde(default, skip_serializing_if = "is_zero")]
         files: usize,
+        /// What the chat program sent the agent ahead of `text` and leaves
+        /// out of it: Sheprd's note, and on a live prompt the conversation
+        /// a newly chosen agent is handed. Clients show it only when asked,
+        /// to see what the agent was told; ones that predate it skip it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
     },
     /// The agent's answer, streamed in chunks.
     Agent {
@@ -196,10 +222,17 @@ pub enum EntryKind {
     Image {
         author: Author,
         image: Image,
+        /// What the picture shows, in at most [`crate::MAX_CAPTION`]
+        /// characters: a title line, then any detail on the lines after it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        caption: Option<String>,
     },
     Tool(Tool),
     /// How a prompt turn ended: how long it took and what it used.
     Turn(TurnSummary),
+    /// Another agent took over the conversation, and what it was handed.
+    /// Clients before protocol revision 5 get a [`Self::Notice`] instead.
+    Handoff(HandedOver),
     /// Something the program says about the session, or an imported system event.
     Notice {
         /// Historical questions and answers, never actionable permission requests.
@@ -231,7 +264,7 @@ impl EntryKind {
             | Self::Agent { text }
             | Self::Thought { text }
             | Self::Notice { text, .. } => Some(text),
-            Self::Image { .. } | Self::Tool(_) | Self::Turn(_) => None,
+            Self::Image { .. } | Self::Tool(_) | Self::Turn(_) | Self::Handoff(_) => None,
         }
     }
 
@@ -241,7 +274,59 @@ impl EntryKind {
             | Self::Agent { text }
             | Self::Thought { text }
             | Self::Notice { text, .. } => Some(text),
-            Self::Image { .. } | Self::Tool(_) | Self::Turn(_) => None,
+            Self::Image { .. } | Self::Tool(_) | Self::Turn(_) | Self::Handoff(_) => None,
+        }
+    }
+}
+
+/// An agent taking over the conversation: the divider clients draw where
+/// it began.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct HandedOver {
+    /// The agent that held the conversation before, when one did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<crate::Agent>,
+    /// Entries handed over, in full or cut.
+    pub kept: usize,
+    /// Entries left out of the handoff for length.
+    pub omitted: usize,
+    /// It continued its own earlier session and was handed only what
+    /// happened since it last took part.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub resumed: bool,
+    pub to: crate::Agent,
+}
+
+impl HandedOver {
+    /// What a client before revision 5 shows instead, as a notice.
+    pub fn notice_text(&self) -> String {
+        let what = if self.resumed {
+            "what happened since it last took part"
+        } else {
+            "the conversation so far"
+        };
+        let mut text = format!(
+            "{} continues this conversation and gets {what} with your next prompt",
+            self.to.display_name()
+        );
+        if self.omitted > 0 {
+            text.push_str(&format!(
+                ": {} entries, {} more left out for length.",
+                self.kept, self.omitted
+            ));
+        } else {
+            text.push('.');
+        }
+        text
+    }
+
+    /// The entry as a client before revision 5 reads it.
+    pub fn as_notice(&self) -> EntryKind {
+        EntryKind::Notice {
+            answers: Vec::new(),
+            details: None,
+            level: NoticeLevel::Info,
+            text: self.notice_text(),
         }
     }
 }
@@ -440,13 +525,25 @@ pub struct Mode {
 pub struct Queued {
     #[serde(default)]
     pub attachments: Vec<Attachment>,
+    /// Kept when the turn was stopped: it waits until sent now or
+    /// withdrawn, and no later turn's end sends it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub held: bool,
     pub id: CommandId,
+    /// Already sent into the running turn, waiting for the agent to take it
+    /// at its next step; it can no longer be withdrawn.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub steered: bool,
     pub text: String,
 }
 
 /// Starts each line the transcript adds after a prompt's text, one per file
 /// the prompt carried.
 pub const ATTACHED: &str = "\u{1f4ce} ";
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
 
 fn is_zero(count: &usize) -> bool {
     *count == 0
@@ -474,6 +571,14 @@ impl Attachment {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SessionInfo {
+    /// The agent accepts a queued message inside its running turn.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub can_steer: bool,
+    /// The notice that closes the conversation a continued session brought
+    /// with it, such as a terminal agent's moved into this chat: entries up
+    /// to it came before this chat, and a client may fold them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continued: Option<EntryId>,
     #[serde(default)]
     pub cwd: Option<String>,
     pub id: String,

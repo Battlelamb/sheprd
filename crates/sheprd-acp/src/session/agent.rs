@@ -1,17 +1,25 @@
 //! What the agent sends: responses to the session's requests, session updates,
 //! and its own requests (permission questions).
 
-use std::fmt::Write as _;
-
 use acp::v1 as wire;
 use serde_json::Value;
 use sheprd_chat_protocol::{
-    Change, NoticeLevel, Permission, PermissionId, PermissionKind, PermissionOption, Question,
-    Status, TurnEnd, TurnSummary,
+    Agent, Change, NoticeLevel, OptionCategory, OptionKind, Permission, PermissionId,
+    PermissionKind, PermissionOption, Question, Status, TurnEnd, TurnSummary,
 };
 
 use super::{Asked, Pending, Session, Update, now_ms};
-use crate::{project, rpc::Inbound};
+use crate::{harness::steer, project, rpc::Inbound};
+
+/// A configured ACP auth method. Never read or copy the agent's credential store.
+fn auth_method(methods: &[wire::AuthMethod], requested: &str) -> Option<wire::AuthMethodId> {
+    methods.iter().find_map(|method| match method {
+        wire::AuthMethod::Agent(method) if method.id.0.as_ref() == requested => {
+            Some(method.id.clone())
+        }
+        _ => None,
+    })
+}
 
 impl<R: FnMut(Update)> Session<R> {
     pub(super) fn agent(&mut self, inbound: Inbound) {
@@ -27,21 +35,23 @@ impl<R: FnMut(Update)> Session<R> {
             // A resumed session replays history the transcript already
             // shows.
             Inbound::Notification { .. } if self.thread.replaying() => {}
-            Inbound::Notification { method, params } => {
-                if method == "session/update" {
-                    self.session_update(params);
-                } else if method == project::opencode::METHOD
-                    && let Some(session) = &self.acp_session
-                {
-                    let changes = self.projector.opencode_child(
-                        &self.transcript,
-                        &session.0,
-                        params,
-                        now_ms(),
-                    );
-                    self.emit_all(changes);
+            Inbound::Notification { method, params } => match method.as_str() {
+                "session/update" => self.session_update(params),
+                steer::STEERED => self.steer_notified(true, params),
+                steer::UNSTEERED => self.steer_notified(false, params),
+                project::opencode::METHOD => {
+                    if let Some(session) = &self.acp_session {
+                        let changes = self.projector.opencode_child(
+                            &self.transcript,
+                            &session.0,
+                            params,
+                            now_ms(),
+                        );
+                        self.emit_all(changes);
+                    }
                 }
-            }
+                _ => {}
+            },
             Inbound::Request { id, method, params } => self.agent_request(id, &method, params),
             Inbound::Closed(Some(error)) => self.fail(&error.to_string()),
             Inbound::Closed(None) => {}
@@ -50,36 +60,104 @@ impl<R: FnMut(Update)> Session<R> {
 
     fn response(&mut self, id: i64, pending: Pending, result: Result<Value, wire::Error>) {
         match pending {
+            Pending::Authenticate { load_session } => self.authenticated(load_session, result),
             Pending::Initialize => self.initialized(result),
             Pending::NewSession | Pending::LoadSession => {
                 self.session_opened(matches!(pending, Pending::LoadSession), result);
             }
             Pending::Prompt => self.turn_ended(id, result),
-            Pending::SetOption => match result {
-                Ok(value) => {
-                    if let Some(options) = value.get("configOptions") {
-                        let options = project::options(Some(options));
-                        self.emit(Change::Options { options });
-                    }
+            Pending::Steer(prompt) => self.steer_answered(prompt, &result),
+            Pending::SetOption => {
+                self.option_set(result);
+                self.carry_next();
+            }
+            Pending::SetMode(mode) => {
+                self.mode_set(mode, result);
+                self.carry_next();
+            }
+            Pending::SetModel(model) => {
+                self.model_set(model, result);
+                self.carry_next();
+            }
+        }
+    }
+
+    fn option_set(&mut self, result: Result<Value, wire::Error>) {
+        match result {
+            Ok(value) => {
+                if let Some(options) = value.get("configOptions") {
+                    let options = project::options(Some(options));
+                    self.emit(Change::Options { options });
+                    self.remember_picks();
                 }
-                Err(error) => {
-                    let notice = self.projector.notice(
-                        NoticeLevel::Warning,
-                        format!("Could not change the setting: {}", error.message),
-                    );
-                    self.emit(notice);
+            }
+            Err(error) => {
+                let notice = self.projector.notice(
+                    NoticeLevel::Warning,
+                    format!("Could not change the setting: {}", error.message),
+                );
+                self.emit(notice);
+            }
+        }
+    }
+
+    fn mode_set(&mut self, mode: String, result: Result<Value, wire::Error>) {
+        match result {
+            Ok(_) => self.emit(Change::CurrentMode { id: mode }),
+            Err(error) => {
+                let notice = self.projector.notice(
+                    NoticeLevel::Warning,
+                    format!("Could not change mode: {}", error.message),
+                );
+                self.emit(notice);
+            }
+        }
+    }
+
+    fn model_set(&mut self, model: String, result: Result<Value, wire::Error>) {
+        match result {
+            Ok(_) => {
+                let mut options = self.transcript.options.clone();
+                if let Some(option) = options
+                    .iter_mut()
+                    .find(|option| option.id == project::models::OPTION_ID)
+                    && let OptionKind::Select { current, .. } = &mut option.kind
+                {
+                    *current = model;
+                    self.emit(Change::Options { options });
+                    self.remember_picks();
                 }
-            },
-            Pending::SetMode(mode) => match result {
-                Ok(_) => self.emit(Change::CurrentMode { id: mode }),
-                Err(error) => {
-                    let notice = self.projector.notice(
-                        NoticeLevel::Warning,
-                        format!("Could not change mode: {}", error.message),
-                    );
-                    self.emit(notice);
-                }
-            },
+            }
+            Err(error) => {
+                let notice = self.projector.notice(
+                    NoticeLevel::Warning,
+                    format!("Could not change the setting: {}", error.message),
+                );
+                self.emit(notice);
+            }
+        }
+    }
+
+    fn auth_method_for(&self, agent: Agent) -> Option<wire::AuthMethodId> {
+        let requested = match agent {
+            Agent::Antigravity => self.config.antigravity_auth_method.as_deref(),
+            Agent::Gemini => self.config.gemini_auth_method.as_deref(),
+            _ => None,
+        }?;
+        auth_method(&self.auth_methods, requested)
+    }
+
+    fn auth_failed_message(&self, error: &wire::Error) -> String {
+        let base = match &self.config.login_hint {
+            Some(hint) => format!("{} needs you to sign in: {hint}", self.config.agent),
+            None => format!("{} needs you to sign in first.", self.config.agent),
+        };
+        let detail = error.message.trim();
+        let plain = detail.trim_end_matches('.');
+        if plain.is_empty() || plain.eq_ignore_ascii_case("Authentication required") {
+            base
+        } else {
+            format!("{base} ({detail})")
         }
     }
 
@@ -105,18 +183,57 @@ impl<R: FnMut(Update)> Session<R> {
                 .is_some_and(|meta| {
                     meta.get(project::opencode::CAPABILITY) == Some(&Value::Bool(true))
                 });
+        self.can_steer = response
+            .agent_capabilities
+            .meta
+            .as_ref()
+            .is_some_and(|meta| meta.get(steer::CAPABILITY) == Some(&Value::Bool(true)));
         self.accepts = crate::files::Accepts {
             embedded: prompts.embedded_context,
             image: prompts.image,
         };
+        self.auth_methods = response.auth_methods;
+        let load_session = response.agent_capabilities.load_session;
+        self.can_load_session = load_session;
+        if self.config.harness == Some(Agent::Antigravity)
+            && let Some(method_id) = self.auth_method_for(Agent::Antigravity)
+        {
+            self.auth_attempted = true;
+            self.request(
+                "authenticate",
+                &wire::AuthenticateRequest::new(method_id),
+                Pending::Authenticate { load_session },
+            );
+        } else {
+            self.open_session(load_session);
+        }
+    }
+
+    fn authenticated(&mut self, load_session: bool, result: Result<Value, wire::Error>) {
+        match result {
+            Ok(value) => match serde_json::from_value::<wire::AuthenticateResponse>(value) {
+                Ok(_) => self.open_session(load_session),
+                Err(error) => self.fail(&format!(
+                    "{} returned an invalid authentication response: {error}",
+                    self.config.agent
+                )),
+            },
+            Err(error) => {
+                let message = self.auth_failed_message(&error);
+                self.fail(&message);
+            }
+        }
+    }
+
+    fn open_session(&mut self, can_load: bool) {
         let cwd = self.config.cwd.clone();
         match self.config.load.clone() {
-            Some(id) if response.agent_capabilities.load_session => {
+            Some(id) if can_load => {
                 let id = wire::SessionId::new(id);
                 self.acp_session = Some(id.clone());
                 self.request(
                     "session/load",
-                    &wire::LoadSessionRequest::new(id, cwd),
+                    &wire::LoadSessionRequest::new(id, cwd).mcp_servers(self.mcp_servers()),
                     Pending::LoadSession,
                 );
             }
@@ -137,10 +254,24 @@ impl<R: FnMut(Update)> Session<R> {
                 }
                 self.request(
                     "session/new",
-                    &wire::NewSessionRequest::new(cwd),
+                    &wire::NewSessionRequest::new(cwd).mcp_servers(self.mcp_servers()),
                     Pending::NewSession,
                 );
             }
+        }
+    }
+
+    /// The MCP servers an ACP agent's session gets: the one reading the
+    /// chat's thread, when the agent takes it in its session.
+    fn mcp_servers(&self) -> Vec<wire::McpServer> {
+        match &self.config.given {
+            crate::thread_mcp::Given::InSession(server) => {
+                vec![wire::McpServer::Stdio(
+                    wire::McpServerStdio::new(crate::thread_mcp::NAME, &server.program)
+                        .args(server.args.clone()),
+                )]
+            }
+            _ => Vec::new(),
         }
     }
 
@@ -163,21 +294,34 @@ impl<R: FnMut(Update)> Session<R> {
                 let cwd = self.config.cwd.clone();
                 self.request(
                     "session/new",
-                    &wire::NewSessionRequest::new(cwd),
+                    &wire::NewSessionRequest::new(cwd).mcp_servers(self.mcp_servers()),
                     Pending::NewSession,
                 );
                 return;
             }
             Err(error) => {
-                let message = if error.code == wire::Error::auth_required().code {
-                    match &self.config.login_hint {
-                        Some(hint) => format!("{} needs you to sign in: {hint}", self.config.agent),
-                        None => format!("{} needs you to sign in first.", self.config.agent),
+                if error.code == wire::Error::auth_required().code {
+                    if !self.auth_attempted
+                        && let Some(method_id) = self
+                            .config
+                            .harness
+                            .and_then(|agent| self.auth_method_for(agent))
+                    {
+                        self.auth_attempted = true;
+                        self.acp_session = None;
+                        self.request(
+                            "authenticate",
+                            &wire::AuthenticateRequest::new(method_id),
+                            Pending::Authenticate {
+                                load_session: self.can_load_session,
+                            },
+                        );
+                        return;
                     }
-                } else {
-                    format!("Could not start the session: {}", error.message)
-                };
-                return self.fail(&message);
+                    let message = self.auth_failed_message(&error);
+                    return self.fail(&message);
+                }
+                return self.fail(&format!("Could not start the session: {}", error.message));
             }
         };
         // Read apart from the rest, so a setting of a kind this program does
@@ -185,7 +329,19 @@ impl<R: FnMut(Update)> Session<R> {
         let options = value
             .as_object_mut()
             .and_then(|object| object.remove("configOptions"));
-        let options = project::options(options.as_ref());
+        let models = value
+            .as_object_mut()
+            .and_then(|object| object.remove("models"));
+        let mut options = project::options(options.as_ref());
+        self.legacy_model_option = false;
+        if !options
+            .iter()
+            .any(|option| option.category == OptionCategory::Model)
+            && let Some(model) = project::models::option(models.as_ref())
+        {
+            options.push(model);
+            self.legacy_model_option = true;
+        }
         let modes = if loaded {
             serde_json::from_value::<wire::LoadSessionResponse>(value)
                 .map(|response| response.modes)
@@ -204,23 +360,79 @@ impl<R: FnMut(Update)> Session<R> {
         let Some(id) = self.acp_session.clone() else {
             return;
         };
+        self.open_history(&id.0, loaded);
         self.ready = true;
         (self.report)(Update::Opened(id.0.to_string()));
+        self.keep_opened(id.0.as_ref());
+        let continued = self.continued(loaded);
         self.emit(Change::Session {
-            session: Some(project::session(&id, &self.config.cwd)),
+            session: Some(sheprd_chat_protocol::SessionInfo {
+                can_steer: self.can_steer,
+                continued,
+                cwd: Some(self.config.cwd.display().to_string()),
+                id: id.0.to_string(),
+                title: None,
+            }),
         });
-        if let Some(modes) = modes {
-            self.emit(Change::Modes {
-                modes: Some(project::modes(modes)),
-            });
+        // The session's answer replaces whatever the chat showed while it
+        // started, the agent's known settings included, even when it
+        // offers none.
+        let modes = modes.map(project::modes);
+        if self.transcript.modes != modes {
+            self.emit(Change::Modes { modes });
         }
-        if !options.is_empty() {
+        if self.transcript.options != options {
             self.emit(Change::Options { options });
         }
+        self.learn(loaded);
         self.projector.close();
         self.hand_over(loaded);
         self.status(Status::Idle);
+        if loaded {
+            // A continued session keeps its own settings.
+            self.config.settings = None;
+        }
+        self.carry_picks(loaded);
+        self.carry_deferred();
+        self.note_carried();
+        self.carry_next();
         self.next_queued();
+    }
+
+    /// The notice under the conversation a continued session brought with
+    /// it, which the chat's first session places as it opens and every
+    /// later one, after a switch of agent too, keeps. A chat whose first
+    /// session is new, or brought nothing, has none.
+    fn continued(&mut self, loaded: bool) -> Option<sheprd_chat_protocol::EntryId> {
+        if let Some(divider) = self.divider {
+            return divider;
+        }
+        let divider = self.place_divider(loaded);
+        self.divider = Some(divider);
+        divider
+    }
+
+    fn place_divider(&mut self, loaded: bool) -> Option<sheprd_chat_protocol::EntryId> {
+        let brought = self.transcript.entries.iter().any(|entry| {
+            matches!(
+                entry.kind,
+                sheprd_chat_protocol::EntryKind::User { .. }
+                    | sheprd_chat_protocol::EntryKind::Agent { .. }
+            )
+        });
+        if !loaded || !brought {
+            return None;
+        }
+        let notice = self.projector.notice(
+            NoticeLevel::Info,
+            format!("Continued from {}'s earlier session", self.config.agent),
+        );
+        let Change::Push { entry } = &notice else {
+            return None;
+        };
+        let id = entry.id;
+        self.emit(notice);
+        Some(id)
     }
 
     /// The agent that took over opened its session: prepare what it is
@@ -229,32 +441,31 @@ impl<R: FnMut(Update)> Session<R> {
         let Some(agent) = self.config.harness else {
             return;
         };
-        let Some((joining, handoff)) = self.thread.opened(agent, loaded, &self.transcript.entries)
+        // The thread's file holds the whole conversation, which the
+        // transcript's window may not.
+        let kept = self.kept_conversation();
+        let tool = kept.is_some() && self.config.given.reads();
+        let (entries, trimmed) = match &kept {
+            Some(contents) => (contents.entries.as_slice(), contents.trimmed.as_slice()),
+            None => (self.transcript.entries.as_slice(), &[][..]),
+        };
+        let Some((joining, handoff)) = self.thread.opened(agent, loaded, entries, tool, trimmed)
         else {
             return;
         };
-        let what = match joining {
-            super::thread::Joining::Fresh => "the conversation so far",
-            super::thread::Joining::Resume { .. } => "what happened since it last took part",
-        };
-        let mut text = format!(
-            "{} continues this conversation and gets {what} with your next prompt",
-            self.config.agent
-        );
-        if handoff.omitted > 0 {
-            let _ = write!(
-                text,
-                ": {} entries, {} more left out for length.",
-                handoff.kept, handoff.omitted
-            );
-        } else {
-            text.push('.');
-        }
-        let notice = self.projector.notice(NoticeLevel::Info, text);
-        self.emit(notice);
+        let from = self.thread.before();
+        let handoff = self.projector.handoff(sheprd_chat_protocol::HandedOver {
+            from,
+            kept: handoff.kept,
+            omitted: handoff.omitted,
+            resumed: matches!(joining, super::thread::Joining::Resume { .. }),
+            to: agent,
+        });
+        self.emit(handoff);
     }
 
     fn session_update(&mut self, params: Value) {
+        self.watchdog.touch(std::time::Instant::now());
         let ours = params
             .get("sessionId")
             .and_then(Value::as_str)
@@ -284,16 +495,29 @@ impl<R: FnMut(Update)> Session<R> {
             && let Some((note, rest)) = crate::context::split(&content.text)
         {
             self.context.heard(note);
+            self.replayed_note = Some(note.to_owned());
             if rest.is_empty() {
                 return;
             }
             content.text = rest.to_owned();
         }
-        let changes = self.projector.update(&self.transcript, update, now_ms());
+        self.commands.keep(&update);
+        let mut changes = self.projector.update(&self.transcript, update, now_ms());
+        // The note goes with the words that follow it, and with nothing
+        // after something else began.
+        for change in &mut changes {
+            if let Change::Push { entry } = change {
+                let note = self.replayed_note.take();
+                if let sheprd_chat_protocol::EntryKind::User { note: kept, .. } = &mut entry.kind {
+                    *kept = note.map(project::bounded);
+                }
+            }
+        }
         self.emit_all(changes);
     }
 
     fn agent_request(&mut self, id: wire::RequestId, method: &str, params: Value) {
+        self.watchdog.touch(std::time::Instant::now());
         if method != "session/request_permission" {
             // The session advertises no file system, terminal, or elicitation
             // support, so the agent has nothing else to ask for.
@@ -402,6 +626,7 @@ impl<R: FnMut(Update)> Session<R> {
         let Some(asked) = self.asked.remove(&permission) else {
             return;
         };
+        self.watchdog.touch(std::time::Instant::now());
         let response = wire::RequestPermissionResponse::new(outcome);
         let result = serde_json::to_value(response).map_err(|_| wire::Error::internal_error());
         if let Err(error) = self.outbox.respond(&asked.request, result) {
@@ -423,6 +648,7 @@ impl<R: FnMut(Update)> Session<R> {
             return;
         }
         self.turn = None;
+        self.watchdog.clear();
         self.resolve_all();
         self.projector.close();
         let ended = self.projector.direct_turn_ended(&self.transcript, now_ms());
@@ -468,11 +694,16 @@ impl<R: FnMut(Update)> Session<R> {
         if matches!(self.transcript.status, Status::Working) {
             self.status(Status::Idle);
         }
+        self.keep_entries();
+        self.turn_ended_steering();
         self.next_queued();
     }
 
     pub(super) fn exited(&mut self, code: Option<i32>, stderr: &[String]) {
         let summary = match code {
+            Some(5) if self.config.harness == Some(Agent::Muse) && self.acp_session.is_none() => {
+                "Muse Code could not start ACP. Check `muse acp --help` on this host and verify ACP is enabled for your build.".to_owned()
+            }
             Some(0) => format!("{} exited.", self.config.agent),
             Some(code) => format!("{} exited with status {code}.", self.config.agent),
             None => format!("{} was stopped.", self.config.agent),
@@ -488,6 +719,7 @@ impl<R: FnMut(Update)> Session<R> {
             self.emit(Change::PermissionResolved { id });
         }
         self.turn = None;
+        self.watchdog.clear();
         self.ready = false;
         if self.transcript.turn.is_some() {
             self.emit(Change::Turn { turn: None });
@@ -503,5 +735,6 @@ impl<R: FnMut(Update)> Session<R> {
         let notice = self.projector.notice(level, message);
         self.emit(notice);
         self.status(Status::Exited { message: summary });
+        self.keep_entries();
     }
 }

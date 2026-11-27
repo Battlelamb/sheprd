@@ -45,6 +45,10 @@ struct Record {
     session: String,
     state: State,
     terminal: String,
+    /// The thread the chat keeps, which its relaunch continues with
+    /// `--thread`; none from programs before threads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    thread: Option<String>,
     version: u32,
 }
 
@@ -67,10 +71,14 @@ pub struct Session {
     pub env: BTreeMap<String, String>,
     pub program: String,
     pub session: String,
+    /// The thread the chat keeps (`sheprd_chat_protocol::thread::ThreadId`).
+    pub thread: Option<String>,
 }
 
+/// herdr-core accepts doc names of at most 32 characters, so the record is
+/// keyed by the endpoint's first 20 digits; 76 random bits keep chats apart.
 fn document(endpoint: &EndpointId) -> String {
-    format!("sheprd-chat-recovery-{endpoint}")
+    format!("sheprd-chat-{}", &endpoint.as_str()[..20])
 }
 
 fn read(core: &Core, endpoint: &EndpointId) -> Result<(Option<Record>, u64)> {
@@ -222,6 +230,11 @@ pub fn opened(core: &Core, endpoint: &EndpointId, terminal: &str, session: Sessi
         session: session.session,
         state: State::Live,
         terminal: terminal.to_owned(),
+        thread: session.thread.filter(|thread| {
+            thread
+                .parse::<sheprd_chat_protocol::thread::ThreadId>()
+                .is_ok()
+        }),
         version: 1,
     };
     write(core, endpoint, &record, version)
@@ -367,6 +380,7 @@ fn close_once(core: &Core, endpoint: &EndpointId) -> Result<()> {
         session: String::new(),
         state: State::Live,
         terminal: String::new(),
+        thread: None,
         version: 1,
     });
     if record.state == State::Closed {

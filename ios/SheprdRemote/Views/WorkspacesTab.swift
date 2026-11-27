@@ -9,10 +9,20 @@ struct WorkspaceKey: Codable, Hashable, Identifiable {
     var id: Self { self }
 }
 
+/// How a chat screen's Space pill opens its workspace.
+enum WorkspaceDestination: Sendable {
+    /// Separate window or stack with `.withRoutes()`: push the workspace route
+    /// onto the current `NavigationStack`.
+    case push
+    /// Main window (Home tab or iPad split): route through `model.pendingWorkspace`.
+    case pending
+    /// Already pushed directly from `WorkspaceScreen`: dismissing returns there.
+    case dismiss
+}
+
 extension EnvironmentValues {
-    /// Whether a tab offers a button to its workspace: on Home, whose
-    /// lists open tabs straight away, so nothing behind them leads there.
-    @Entry var offersWorkspace = false
+    /// How a tab's Space pill navigates to its workspace.
+    @Entry var workspaceDestination = WorkspaceDestination.push
 }
 
 /// The Workspaces tab, laid out like Sheprd's sidebar: every computer
@@ -48,14 +58,14 @@ struct WorkspacesTab: View {
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Workspaces, chats, terminals")
         // No title, as Home and Settings have none; the search names it.
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(for: WorkspaceKey.self) { WorkspaceScreen(key: $0) }
-        .navigationDestination(item: $details) { ComputerScreen(device: $0) }
+        .navigationDestination(for: WorkspaceKey.self) { WorkspaceScreen(key: $0).makesRoomForConnectionToast() }
+        .navigationDestination(item: $details) { ComputerScreen(device: $0).makesRoomForConnectionToast() }
         .forgetConfirmation($forgetting)
         #if DEBUG
         .task { if UserDefaults.standard.bool(forKey: "openComputer") { details = model.computers.first?.device } }
         #endif
         .toolbar {
-            if query.isEmpty, !ComputerTags.all(in: model.computers).isEmpty || model.computers.count > 1 {
+            if query.isEmpty, !ComputerTags.all(in: model.shownComputers).isEmpty || model.shownComputers.count > 1 {
                 ToolbarItem(placement: .topBarLeading) { TagFilterMenu() }
             }
             if query.isEmpty, machines.count > 1 {
@@ -103,7 +113,7 @@ struct WorkspacesTab: View {
                         Section {
                             ForEach(repository.workspaces) { workspace in
                                 NavigationLink(value: WorkspaceKey(device: machine.id, workspace: workspace.id)) {
-                                    WorkspaceRow(workspace: workspace, repository: repository)
+                                    WorkspaceRow(workspace: workspace, repositoryLabel: repository.label)
                                 }
                             }
                         } header: {
@@ -122,16 +132,16 @@ struct WorkspacesTab: View {
         .refreshable { model.fleet.networkChanged() }
         .nearbyBanner()
         .overlay {
-            if model.computers.isEmpty {
+            if model.shownComputers.isEmpty {
                 ContentUnavailableView("No computers yet", systemImage: "desktopcomputer",
-                                       description: Text("Pair one in Settings to see its workspaces here."))
+                                       description: Text("Install Sheprd on your computer from [sheprd.org](https://sheprd.org), then pair it from Home to see its workspaces here."))
             }
         }
     }
 
     /// The computers the filter leaves.
     private var machines: [Fleet.Machine] {
-        let shown = model.tagFilter.shown(among: model.computers)
+        let shown = model.tagFilter.shown(among: model.shownComputers)
         return model.fleet.machines.filter { shown.contains($0.computer.device) }
     }
 
@@ -234,7 +244,7 @@ struct MachineStatus: View {
     var machine: Fleet.Machine
 
     var body: some View {
-        switch machine.status {
+        switch machine.presentedStatus {
         case .online:
             HStack(spacing: 6) {
                 if let waiting = machine.home?.waiting, waiting > 0 {
@@ -248,6 +258,8 @@ struct MachineStatus: View {
             }
         case .connecting:
             ProgressView().controlSize(.small)
+        case .relayBanned:
+            Label("Relay ban", systemImage: "nosign").font(.caption).foregroundStyle(.red)
         case .offline:
             Image(systemName: "wifi.slash").foregroundStyle(.secondary).accessibilityLabel("Offline")
         case .revoked:
@@ -259,7 +271,7 @@ struct MachineStatus: View {
 }
 
 /// A share of the computer in use, as Sheprd's host rows draw it.
-private struct LoadGauge: View {
+struct LoadGauge: View {
     var label: String
     var percent: Int
 
@@ -331,9 +343,9 @@ struct RepositoryAvatar: View {
 
 /// A workspace in its repository's section: the checkout's branch, or the
 /// worktree's name, its agents, and its pull request.
-private struct WorkspaceRow: View {
+struct WorkspaceRow: View {
     var workspace: Home.Workspace
-    var repository: Repository
+    var repositoryLabel: String
 
     var body: some View {
         HStack(spacing: 10) {
@@ -347,6 +359,7 @@ private struct WorkspaceRow: View {
                 if let counts { Text(counts).font(.caption).foregroundStyle(.secondary) }
             }
             Spacer(minLength: 4)
+            if workspace.uncommitted == true { UncommittedMark() }
             WorkspacePullRequestBadge(workspace: workspace)
         }
     }
@@ -354,7 +367,7 @@ private struct WorkspaceRow: View {
     /// A repository's own checkout named after it shows its branch, as the
     /// desktop shows `main` under the repository.
     private var ownBranch: String? {
-        guard workspace.worktree?.linked != true, workspace.label == repository.label else { return nil }
+        guard workspace.worktree?.linked != true, workspace.label == repositoryLabel else { return nil }
         return workspace.branch
     }
 
@@ -430,6 +443,21 @@ struct UnopenedPill: View {
     }
 }
 
+/// Uncommitted changes in a checkout: the pencil in a yellow square that
+/// Sheprd's sidebar draws.
+struct UncommittedMark: View {
+    var size: CGFloat = 20
+
+    var body: some View {
+        Image(systemName: "pencil").font(.system(size: size * 0.55, weight: .semibold))
+            .foregroundStyle(.yellow)
+            .frame(width: size, height: size)
+            .background(Color.yellow.opacity(0.15), in: .rect(cornerRadius: size * 0.28))
+            .overlay(RoundedRectangle(cornerRadius: size * 0.28).strokeBorder(Color.yellow.opacity(0.55), lineWidth: 1))
+            .accessibilityLabel("Uncommitted changes")
+    }
+}
+
 /// A pull request's number, colored as Sheprd colors its state.
 struct PullRequestPill: View {
     var pullRequest: Home.PullRequest
@@ -451,6 +479,7 @@ extension Home.PullRequest.Tone {
         case .attention: .red
         case .held: .orange
         case .merged: .purple
+        case .queued: .brown
         case .ready: .green
         case .waiting: .yellow
         case .other: .secondary
@@ -463,6 +492,7 @@ extension Home.PullRequest.Tone {
         case .attention: "xmark.circle.fill"
         case .held: "exclamationmark.triangle.fill"
         case .merged: "arrow.triangle.merge"
+        case .queued: "hourglass.circle.fill"
         case .ready: "checkmark.circle.fill"
         case .waiting: "clock.fill"
         case .other: "pencil.circle.fill"
@@ -474,6 +504,7 @@ extension Home.PullRequest.Tone {
         case .attention: "needs attention"
         case .held: "blocked or behind"
         case .merged: "merged"
+        case .queued: "queued to merge"
         case .ready: "ready to merge"
         case .waiting: "checks or review pending"
         case .other: "draft"
@@ -491,6 +522,11 @@ private struct MachineActions: View {
 
     var body: some View {
         let computer = machine.computer
+        if case .online = machine.status {
+            Button("New Project…", systemImage: "folder.badge.plus") {
+                model.creating = .project(device: machine.id)
+            }
+        }
         Toggle("Hold Alerts at the Desk", systemImage: "bell.badge", isOn: Binding(
             get: { computer.presence },
             set: { model.setPresence($0, for: computer) }

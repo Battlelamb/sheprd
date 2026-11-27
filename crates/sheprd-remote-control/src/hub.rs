@@ -11,21 +11,32 @@ pub(crate) mod chat_title;
 mod convert;
 mod core;
 mod daemon;
+mod launcher;
 mod layout;
+mod new_workspace;
+mod observed;
 mod recency;
 pub(crate) mod row_summary;
 mod sessions;
+#[cfg(feature = "tmux")]
+mod tmux;
 mod wake;
 
 pub(crate) use api::ApiMethod;
 pub(crate) use attach::TermHold;
 pub(crate) use chat::{Chat, Event, Summary, View};
 pub(crate) use convert::Error as ConvertError;
-pub(crate) use core::{Keeper, arrangeable};
 #[cfg(test)]
-pub(crate) use layout::TerminalAgent;
-pub(crate) use layout::{Chat as ChatRow, Job, Layout, Terminal, TerminalPane, Workspace};
+pub(crate) use core::project_spaces;
+pub(crate) use core::{Keeper, TabRef, arrangeable};
+pub(crate) use launcher::Launcher;
+pub(crate) use layout::{
+    Chat as ChatRow, Job, Layout, Terminal, TerminalAgent, TerminalPane, Workspace,
+};
+pub(crate) use new_workspace::NewWorkspace;
+pub(crate) use observed::observable;
 pub(crate) use row_summary::RowSummary;
+pub(crate) use sessions::wsl_distribution;
 
 use serde_json::{Value, json};
 use sheprd_chat_protocol::{Agent, Command, EndpointId, Rejection};
@@ -62,6 +73,8 @@ pub enum Error {
     Daemon(String),
     #[error("Herdr is not running on this computer")]
     NotConnected,
+    #[error(transparent)]
+    Observed(#[from] observed::Error),
     #[error("sheprd-acp was not found beside sheprd-remote-control or on PATH")]
     ProgramMissing,
     #[error(transparent)]
@@ -74,6 +87,12 @@ pub enum Error {
     SessionOnHerdr2,
     #[error("Herdr did not answer in time")]
     Timeout,
+    #[cfg(feature = "tmux")]
+    #[error(transparent)]
+    Tmux(#[from] sheprd_tmux::Error),
+    #[cfg(feature = "tmux")]
+    #[error("This action requires a terminal view on the tmux host")]
+    TmuxAction,
     #[error("no such chat")]
     UnknownChat,
     #[error("no such workspace")]
@@ -96,6 +115,8 @@ pub(crate) struct Hub {
     _daemon: daemon::Daemon,
     all: broadcast::Sender<(String, Event)>,
     api: api::Api,
+    /// Whether the chat program lets chats switch agents, as last asked.
+    asked: launcher::Asked,
     /// Where chat sockets live; `None` resolves from the environment.
     chat_dir: Option<PathBuf>,
     chats: Mutex<HashMap<String, (EndpointId, Arc<Chat>)>>,
@@ -106,6 +127,8 @@ pub(crate) struct Hub {
     layout: watch::Receiver<Arc<Layout>>,
     /// Terminal agents moving into chats now.
     moving: convert::Moving,
+    /// Terminal agents' conversations phones read as chats now.
+    observed: observed::Observed,
     /// The primary session's own layout, to tell whether it answers.
     primary: watch::Receiver<Arc<Layout>>,
     program: Option<PathBuf>,
@@ -146,14 +169,22 @@ impl Hub {
             primary_socket.as_deref().and_then(sessions::session_name),
         )?;
         let (core_sender, core_layout) = watch::channel(Arc::new(Layout::default()));
-        let core = core::Source::start(core_sender, &target, core_endpoint, state_dir)?;
+        let sessions = sessions::Sessions::start(primary_socket, wsl_catalog);
+        let core = core::Source::start(
+            core_sender,
+            &target,
+            core_endpoint,
+            state_dir,
+            sessions.clone(),
+        )?;
         let (base_sender, base_layout) = watch::channel(Arc::new(Layout::default()));
         tokio::spawn(core::merge_sources(
             base_sender,
             daemon_layout.clone(),
             core_layout,
         ));
-        let sessions = sessions::Sessions::start(primary_socket, wsl_catalog);
+        #[cfg(feature = "tmux")]
+        let base_layout = tmux::with_chats(base_layout, &target, state_dir, sessions.clone());
         tokio::spawn(sessions::merge_sources(
             sender,
             base_layout,
@@ -164,12 +195,14 @@ impl Hub {
             _daemon: daemon,
             all,
             api,
+            asked: launcher::Asked::default(),
             chat_dir,
             chats: Mutex::new(HashMap::new()),
             core: Some(core),
             home: None,
             layout,
             moving: convert::Moving::default(),
+            observed: observed::Observed::default(),
             primary: daemon_layout,
             program: locate_program(),
             search_program: true,
@@ -185,6 +218,7 @@ impl Hub {
         }
         let follower = hub.clone();
         tokio::spawn(async move { follower.follow().await });
+        tokio::spawn(hub.clone().follow_observed_sessions());
         Ok(hub)
     }
 
@@ -253,11 +287,13 @@ impl Hub {
             api: api::Api::new(Some(
                 client_socket.unwrap_or_else(|| PathBuf::from("/nonexistent/herdr-client.sock")),
             )),
+            asked: launcher::Asked::default(),
             chat_dir,
             chats: Mutex::new(HashMap::new()),
             core: None,
             home: None,
             moving: convert::Moving::default(),
+            observed: observed::Observed::default(),
             primary: receiver.clone(),
             layout: receiver,
             program: None,
@@ -285,6 +321,11 @@ impl Hub {
         self.layout.clone()
     }
 
+    /// The primary Herdr 1 session's own layout, whose boot favorites follow.
+    pub(crate) fn watch_primary(&self) -> watch::Receiver<Arc<Layout>> {
+        self.primary.clone()
+    }
+
     /// Every step of every chat, tagged with its pane.
     pub(crate) fn subscribe_all(&self) -> broadcast::Receiver<(String, Event)> {
         self.all.subscribe()
@@ -296,6 +337,30 @@ impl Hub {
             .unwrap_or_else(PoisonError::into_inner)
             .get(pane)
             .map(|(_, chat)| chat.clone())
+    }
+
+    pub(crate) fn chat_with_endpoint(&self, pane: &str) -> Option<(EndpointId, Arc<Chat>)> {
+        let chats = self.chats.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((endpoint, chat)) = chats.get(pane) {
+            return Some((endpoint.clone(), chat.clone()));
+        }
+        let address = pane.strip_prefix("core:")?;
+        if address.is_empty() {
+            return None;
+        }
+        let core_key = self
+            .core
+            .as_deref()
+            .and_then(|core| core.pane_id_for_address(address))
+            .or_else(|| {
+                self.layout()
+                    .boot
+                    .strip_prefix("core:")
+                    .map(|boot| crate::control::favorites::core_pane(boot, address))
+            })?;
+        chats
+            .get(&core_key)
+            .map(|(endpoint, chat)| (endpoint.clone(), chat.clone()))
     }
 
     pub(crate) async fn command(&self, pane: &str, command: Command) -> Result<Option<Rejection>> {
@@ -317,31 +382,41 @@ impl Hub {
         if sessions::in_wsl(workspace) {
             return Err(Error::WslChat);
         }
-        let program = self.program().ok_or(Error::ProgramMissing)?;
-        let program = program.as_path();
+        let launcher = self.launcher().await?;
         let layout = self.layout();
         let folder = layout
             .workspace(workspace)
             .ok_or(Error::UnknownWorkspace)?
             .cwd
             .clone();
+        #[cfg(feature = "tmux")]
+        if self.wants_tmux_chat(workspace).await {
+            let cwd = cwd.unwrap_or(&folder).to_owned();
+            let workspace = workspace.to_owned();
+            return tokio::task::spawn_blocking(move || {
+                tmux::open_chat(agent, &launcher, &workspace, &cwd, &folder)
+            })
+            .await
+            .map_err(|_| Error::NotConnected)?;
+        }
         if let Some(core) = self.core_for_work().await? {
-            let (cwd, program) = (cwd.unwrap_or(&folder).to_owned(), program.to_owned());
+            let cwd = cwd.unwrap_or(&folder).to_owned();
             // Labelled for its workspace, so Sheprd puts it in a tab there.
             let workspace = workspace.to_owned();
             return on_core(move || {
-                core.open_chat(agent, &program, &cwd, Some(place(&workspace, &folder)))
+                core.open_chat(agent, &launcher, &cwd, Some(place(&workspace, &folder)))
             })
             .await;
         }
         let response = self
             .call(
                 ApiMethod::TabCreate,
-                tab_params(workspace, cwd.unwrap_or(&folder), agent, program),
+                tab_params(workspace, cwd.unwrap_or(&folder), agent, &launcher.program),
             )
             .await?;
         let (_, pane) = created_tab(&response).ok_or(Error::Response)?;
-        self.run_line(&pane, &command_line(agent)).await?;
+        self.run_line(&pane, &command_line(&launcher, agent))
+            .await?;
         Ok(pane)
     }
 
@@ -351,100 +426,12 @@ impl Hub {
         let mut layout = self.layout.clone();
         tokio::time::timeout(
             limit,
-            chat_listed_and_linked(&mut layout, pane, || self.chat(pane).is_some()),
+            chat_listed_and_linked(&mut layout, pane, || {
+                self.chat(pane).is_some_and(|chat| chat.ready_to_open())
+            }),
         )
         .await
         .is_ok()
-    }
-
-    /// A new workspace in `cwd`, on a new worktree when `branch` is given,
-    /// with a chat running `agent` in it, in the Herdr 1 `session` this
-    /// daemon follows by that name (the primary otherwise). While a core answers the chat
-    /// starts there, in its unlisted group: the core has no workspaces or
-    /// worktrees, so a branch's checkout is made here, never by Herdr 1.
-    pub(crate) async fn create_workspace(
-        &self,
-        cwd: &str,
-        branch: Option<&str>,
-        agent: Agent,
-        session: Option<&str>,
-    ) -> Result<CreatedWorkspace> {
-        // As in [`Hub::start_chat`]: the program here cannot run in a
-        // distribution, and a core would open the chat on this computer.
-        if session.is_some_and(sessions::is_wsl) {
-            return Err(Error::WslChat);
-        }
-        let program = self.program().ok_or(Error::ProgramMissing)?;
-        let program = program.as_path();
-        if let Some(core) = self.core_for_work().await? {
-            // Herdr 2 keeps no Herdr 1 session: asked for a named one, the
-            // workspace could not be where it was asked for.
-            if session.is_some_and(|name| self.sessions.get(name).is_some()) {
-                return Err(Error::SessionOnHerdr2);
-            }
-            let (cwd, program) = (cwd.to_owned(), program.to_owned());
-            let (branch, root) = (branch.map(str::to_owned), self.worktrees.clone());
-            let (pane, folder) = on_core(move || match branch {
-                Some(branch) => {
-                    core.open_worktree_chat(agent, &program, &cwd, &branch, root.as_deref())
-                }
-                // Sheprd keeps a workspace for it, in this folder.
-                None => core
-                    .open_chat(agent, &program, &cwd, Some(core::Place::New(&cwd)))
-                    .map(|pane| (pane, cwd)),
-            })
-            .await?;
-            // Listed apart until Sheprd keeps its workspace.
-            return Ok(CreatedWorkspace {
-                workspace: core::new_workspace_id(&folder),
-                pane,
-            });
-        }
-        let opened = self
-            .call_in(
-                session,
-                ApiMethod::WorkspaceCreate,
-                json!({"cwd": cwd, "focus": false}),
-            )
-            .await?;
-        let workspace = opened["workspace"]["workspace_id"]
-            .as_str()
-            .filter(|id| !id.is_empty())
-            .ok_or(Error::Response)?
-            .to_owned();
-        let Some(branch) = branch else {
-            let response = self
-                .call(
-                    ApiMethod::TabCreate,
-                    tab_params(&workspace, cwd, agent, program),
-                )
-                .await?;
-            let (_, pane) = created_tab(&response).ok_or(Error::Response)?;
-            self.run_line(&pane, &command_line(agent)).await?;
-            return Ok(CreatedWorkspace { workspace, pane });
-        };
-        let created = self
-            .call(
-                ApiMethod::WorktreeCreate,
-                json!({"workspace_id": workspace, "branch": branch, "focus": false}),
-            )
-            .await?;
-        let pane = created["root_pane"]["pane_id"]
-            .as_str()
-            .ok_or(Error::Response)?
-            .to_owned();
-        let worktree = created["workspace"]["workspace_id"]
-            .as_str()
-            .ok_or(Error::Response)?
-            .to_owned();
-        // The worktree's first pane is a shell in its folder; the program
-        // path rides in this line because the pane was not made with it.
-        self.run_line(&pane, &direct_command_line(program, agent))
-            .await?;
-        Ok(CreatedWorkspace {
-            workspace: worktree,
-            pane,
-        })
     }
 
     /// Types `line` and Enter into `pane`, as Sheprd starts a chat.
@@ -508,6 +495,14 @@ impl Hub {
 
     /// Calls Herdr's public API, for the terminal views.
     pub(crate) async fn call(&self, method: ApiMethod, params: Value) -> Result<Value> {
+        #[cfg(feature = "tmux")]
+        if sessions::ID_KEYS.iter().any(|key| {
+            params[key]
+                .as_str()
+                .is_some_and(|id| id.starts_with("tmux:"))
+        }) {
+            return Err(Error::TmuxAction);
+        }
         if core::owns(&params) {
             if !self.layout().connected {
                 return Err(Error::NotConnected);
@@ -528,6 +523,28 @@ impl Hub {
             }
             result => result,
         }
+    }
+
+    /// A terminal pane's visible screen as text, for its row's preview. A
+    /// Herdr 2 pane is read by its core, so these reads never hold a screen
+    /// a phone needs to open a terminal; any other goes to `pane.read`.
+    pub(crate) async fn screen_text(&self, pane: &str) -> Result<String> {
+        let params = json!({"pane_id": pane, "source": "visible", "format": "ansi"});
+        if core::owns(&params) {
+            if !self.layout().connected {
+                return Err(Error::NotConnected);
+            }
+            let core = self.core.clone().ok_or(core::Error::Disconnected)?;
+            let pane = pane.to_owned();
+            return tokio::task::spawn_blocking(move || core.screen_text(&pane))
+                .await
+                .map_err(|_| core::Error::Disconnected)?;
+        }
+        let answer = self.call(ApiMethod::PaneRead, params).await?;
+        Ok(answer["read"]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned())
     }
 
     /// [`Hub::call`] for a request whose ids do not say where it goes, such
@@ -605,6 +622,7 @@ impl Hub {
     }
 
     fn reconcile(&self, layout: &Layout) {
+        self.observed.retain(|pane| self.observable(pane));
         let mut chats = self.chats.lock().unwrap_or_else(PoisonError::into_inner);
         chats.retain(|pane, (endpoint, chat)| {
             let keep = layout
@@ -713,7 +731,10 @@ fn program_dirs(
 /// work there joins the workspace Sheprd keeps for it.
 fn place<'a>(workspace: &'a str, folder: &'a str) -> core::Place<'a> {
     if core::is_new_workspace(workspace) {
-        return core::Place::New(folder);
+        return core::Place::New {
+            cwd: folder,
+            title: None,
+        };
     }
     let (session, id) = sessions::split_id(workspace);
     core::Place::Workspace(sheprd_session::Labelled { id, session })
@@ -777,21 +798,23 @@ async fn chat_listed_and_linked(
 /// The line typed into a new chat tab, the same as Sheprd types: the
 /// program comes from the tab's environment, so nothing typed depends on
 /// where it is installed.
-fn command_line(agent: Agent) -> String {
+fn command_line(launcher: &Launcher, agent: Agent) -> String {
+    let args = launcher.args(agent).join(" ");
     if cfg!(windows) {
-        format!("& $env:{PROGRAM_ENV} {agent}")
+        format!("& $env:{PROGRAM_ENV} {args}")
     } else {
-        format!(" sh -c 'exec \"${PROGRAM_ENV}\" {agent}'")
+        format!(" sh -c 'exec \"${PROGRAM_ENV}\" {args}'")
     }
 }
 
 /// The line for a pane made without the program in its environment.
-fn direct_command_line(program: &Path, agent: Agent) -> String {
-    let program = program.to_string_lossy();
+fn direct_command_line(launcher: &Launcher, agent: Agent) -> String {
+    let program = launcher.program.to_string_lossy();
+    let args = launcher.args(agent).join(" ");
     if cfg!(windows) {
-        format!("& '{}' {agent}", program.replace('\'', "''"))
+        format!("& '{}' {args}", program.replace('\'', "''"))
     } else {
-        format!(" {} {agent}", sheprd_client::shell_quote(&program))
+        format!(" {} {args}", sheprd_client::shell_quote(&program))
     }
 }
 

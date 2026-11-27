@@ -10,14 +10,14 @@
 //! owning host, through that saved host's authenticated transport.
 
 use super::view::Place;
-use super::{MAX_CHATS, Route, Surface, Target};
+use super::{Route, Surface, Target};
 use crate::{
     SheprdWindow,
     browser::TabId,
     core_terminals::{CoreTerminalView, Purpose},
 };
 use sheprd_backend::{Spawn, TerminalId, TerminalInfo};
-use sheprd_chat_protocol::{Agent, ENDPOINT_ENV, EndpointId, TOKEN};
+use sheprd_chat_protocol::{Agent, ENDPOINT_ENV, EndpointId, Settings, TOKEN};
 use std::{
     collections::{BTreeMap, HashSet},
     path::Path,
@@ -50,8 +50,7 @@ pub(crate) fn terminal_of(key: &str) -> Option<TerminalId> {
     TerminalId::new(key.strip_prefix("core:")?).ok()
 }
 
-/// The chats among `terminals`, in their order, one per terminal and at
-/// most [`MAX_CHATS`]. A terminal on another machine this core added
+/// The chats among `terminals`, in their order, one per terminal. A terminal on another machine this core added
 /// (`box/t7`) runs its program there, out of reach.
 #[cfg(test)]
 pub(super) fn targets<'a>(terminals: impl IntoIterator<Item = &'a TerminalInfo>) -> Vec<Target> {
@@ -80,7 +79,6 @@ fn bounded_targets(targets: impl IntoIterator<Item = Target>) -> Vec<Target> {
     targets
         .into_iter()
         .filter(|target| seen.insert(target.pane_id.clone()))
-        .take(MAX_CHATS)
         .collect()
 }
 
@@ -107,13 +105,10 @@ fn target_on(
     })
 }
 
-/// `herdr` followed by as many of `core` as fit under [`MAX_CHATS`], each
-/// whose key no Herdr chat already holds.
+/// `herdr` followed by each of `core` whose key no Herdr chat already
+/// holds. [`super::discovery::bounded`] then picks the ones that attach.
 pub(super) fn with_core(mut herdr: Vec<Target>, core: Vec<Target>) -> Vec<Target> {
     for target in core {
-        if herdr.len() >= MAX_CHATS {
-            break;
-        }
         if !herdr.iter().any(|known| known.pane_id == target.pane_id) {
             herdr.push(target);
         }
@@ -200,19 +195,52 @@ impl SheprdWindow {
         key_on(&self.core_terminals.host_of(tab), terminal)
     }
 
-    /// Splits `tab`'s pane in use with a chat running `agent`, beside it in
-    /// its folder.
+    /// Starts a background chat tab in the current pane's workspace and folder.
     pub(crate) fn start_core_chat(
         &mut self,
         agent: Agent,
         tab: TabId,
+        carry: Option<&Settings>,
         cx: &gpui::App,
     ) -> Result<(), super::StartError> {
         let at = self
             .core_terminals
             .chat_split_at(tab)
             .ok_or(super::StartError::NoWorkspace)?;
-        self.start_core_chat_at(agent, tab, at, cx)
+        self.start_core_chat_at(agent, tab, at, carry, cx)
+    }
+
+    /// A launcher opens a chat tab in the terminal's workspace and folder.
+    pub(crate) fn start_core_chat_in_tab(
+        &mut self,
+        agent: Agent,
+        tab: TabId,
+        group: Option<crate::browser::GroupId>,
+        cx: &gpui::App,
+    ) -> Result<(), super::StartError> {
+        let store = cx
+            .try_global::<crate::browser::Store>()
+            .ok_or(super::StartError::NoWorkspace)?;
+        let saved = store.get(tab).ok_or(super::StartError::NoWorkspace)?;
+        let scope = saved.scope.clone();
+        let workspace = saved.workspace_id.clone();
+        let cwd = self
+            .core_terminals
+            .chat_split_at(tab)
+            .and_then(|terminal| self.core_terminals.info(tab, &terminal))
+            .and_then(|info| info.cwd.clone());
+        self.start_core_chat_tab(
+            agent,
+            Purpose::Tab {
+                focus: true,
+                scope,
+                workspace,
+                group,
+            },
+            cwd,
+            None,
+            cx,
+        )
     }
 
     /// Explicit CLI pane keys resolve against the owning core, including
@@ -221,8 +249,37 @@ impl SheprdWindow {
         &mut self,
         agent: Agent,
         key: &str,
+        carry: Option<&Settings>,
         cx: &gpui::App,
     ) -> Result<(), super::StartError> {
+        // The stand-in shell has a terminal address but no tab to split.
+        // A chat launched from it gets a tab in its own kept workspace.
+        let local = crate::core_terminals::Host::Local;
+        if let Some(id) = self.core_terminals.fallback_terminal()
+            && key_on(&local, id) == key
+        {
+            let scope = crate::browser::scope(&self.endpoints[self.selected_endpoint]);
+            let purpose = Purpose::Tab {
+                focus: false,
+                scope,
+                workspace: crate::core_terminals::WORKSPACE.to_owned(),
+                group: None,
+            };
+            if self.purpose_host(&purpose) != local {
+                return Err(super::StartError::NoWorkspace);
+            }
+            let backend = crate::config::TerminalBackend::owner(id);
+            let mut spawn = self.prepare_core_chat(agent, &local, carry)?;
+            spawn.cwd = self
+                .core_terminals
+                .reported(&local, id)
+                .and_then(|info| info.cwd.clone());
+            if !self.start_on_provider(purpose, spawn, None, Some(backend), cx) {
+                return Err(super::StartError::SlotBusy);
+            }
+            self.chats.last_started = Some(agent);
+            return Ok(());
+        }
         let (host, info) = self
             .core_terminals
             .routed_chat_terminals()
@@ -233,7 +290,7 @@ impl SheprdWindow {
             .chat_tab_on(host, &info.id)
             .ok_or(super::StartError::NoWorkspace)?;
         let at = info.id.clone();
-        self.start_core_chat_at(agent, tab, at, cx)
+        self.start_core_chat_at(agent, tab, at, carry, cx)
     }
 
     fn start_core_chat_at(
@@ -241,23 +298,33 @@ impl SheprdWindow {
         agent: Agent,
         tab: TabId,
         at: TerminalId,
+        carry: Option<&Settings>,
         cx: &gpui::App,
     ) -> Result<(), super::StartError> {
         if at.as_str().contains('/') {
             return Err(super::StartError::NotLocal);
         }
-        let spawn = self.prepare_core_chat(agent, &self.core_terminals.host_of(tab))?;
-        self.chats.last_started = Some(agent);
-        self.start_core_program(
-            Purpose::Split {
-                tab,
-                at,
-                axis: crate::core_terminals::panes::Axis::Row,
+        let (scope, workspace) = self
+            .core_terminals
+            .tab_workspace(tab)
+            .cloned()
+            .ok_or(super::StartError::NoWorkspace)?;
+        let cwd = self
+            .core_terminals
+            .info(tab, &at)
+            .and_then(|info| info.cwd.clone());
+        self.start_core_chat_tab(
+            agent,
+            Purpose::Tab {
+                scope,
+                workspace,
+                group: None,
+                focus: false,
             },
-            spawn,
+            cwd,
+            carry,
             cx,
-        );
-        Ok(())
+        )
     }
 
     /// A kept workspace with no driven tab still starts its chat on its own
@@ -265,28 +332,42 @@ impl SheprdWindow {
     pub(crate) fn start_kept_core_chat(
         &mut self,
         agent: Agent,
+        carry: Option<&Settings>,
+        group: Option<crate::browser::GroupId>,
+        focus: bool,
         cx: &gpui::App,
     ) -> Result<(), super::StartError> {
         self.kept_in_front().ok_or(super::StartError::NoWorkspace)?;
         let (scope, workspace) = self.browser_key().ok_or(super::StartError::NoWorkspace)?;
         let cwd = self.front_workspace_cwd();
-        self.start_core_chat_tab(agent, scope, workspace, cwd, cx)
+        self.start_core_chat_tab(
+            agent,
+            Purpose::Tab {
+                focus,
+                scope,
+                workspace,
+                group,
+            },
+            cwd,
+            carry,
+            cx,
+        )
     }
 
-    /// Opens a tab of kept workspace `workspace` in `scope` running a chat
-    /// with `agent` in `cwd`.
+    /// Starts a chat for the captured workspace and group in `purpose`.
     pub(crate) fn start_core_chat_tab(
         &mut self,
         agent: Agent,
-        scope: crate::browser::Scope,
-        workspace: String,
+        purpose: Purpose,
         cwd: Option<std::path::PathBuf>,
+        carry: Option<&Settings>,
         cx: &gpui::App,
     ) -> Result<(), super::StartError> {
-        let mut spawn = self.prepare_core_chat(agent, &crate::core_terminals::Host::of(&scope))?;
+        let host = self.purpose_host(&purpose);
+        let mut spawn = self.prepare_core_chat(agent, &host, carry)?;
         spawn.cwd = cwd;
         self.chats.last_started = Some(agent);
-        self.start_core_program(Purpose::Tab { scope, workspace }, spawn, cx);
+        self.start_core_program(purpose, spawn, cx);
         Ok(())
     }
 
@@ -294,6 +375,7 @@ impl SheprdWindow {
         &self,
         agent: Agent,
         host: &crate::core_terminals::Host,
+        carry: Option<&Settings>,
     ) -> Result<Spawn, super::StartError> {
         if !self.config.features.acp_chats {
             return Err(super::StartError::Disabled);
@@ -314,19 +396,24 @@ impl SheprdWindow {
             .ok_or(super::StartError::NotLocal)?;
         let program = if route == Route::Local {
             Some(self.chats.program.found()?.to_owned())
+        } else if self.chats.brief.is_some() {
+            return Err(super::StartError::BriefRemote);
         } else {
             None
         };
-        let endpoint = EndpointId::random();
-        let spawn = match program.as_deref() {
-            Some(program) => spawn(
-                (agent, self.chats.program_choice),
-                program,
-                &endpoint,
-                &self.config.chat.env,
-            ),
-            None => remote_spawn(agent, &endpoint, &self.config.chat.env),
+        let endpoint = self
+            .chats
+            .brief
+            .as_ref()
+            .map_or_else(EndpointId::random, |brief| brief.endpoint.clone());
+        let env = self.chat_env(carry);
+        let mut spawn = match program.as_deref() {
+            Some(program) => spawn((agent, self.chats.program_choice), program, &endpoint, &env),
+            None => remote_spawn(agent, &endpoint, &env),
         };
+        if let Some(brief) = &self.chats.brief {
+            brief.insert_into(&mut spawn.argv);
+        }
         Ok(spawn)
     }
 
@@ -439,8 +526,8 @@ impl SheprdWindow {
         if let Some(focus) = pane.viewer.as_ref().and_then(|viewer| viewer.open_focus()) {
             return Some(focus.clone());
         }
-        if pane.reading(window) {
-            return pane.text_focus.clone();
+        if let Some(focus) = pane.reader_focus(window, cx) {
+            return Some(focus);
         }
         pane.input_focus(cx)
     }
@@ -488,8 +575,8 @@ impl SheprdWindow {
                 }
                 Surface::Herdr => return None,
             };
-            pane.focus_handles(cx)
-                .any(|focus| focus.is_focused(window))
+            pane.focused_handle(window, cx)
+                .is_some()
                 .then(|| (tab, terminal.clone()))
         })
     }

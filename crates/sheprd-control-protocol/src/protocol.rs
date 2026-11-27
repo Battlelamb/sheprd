@@ -6,8 +6,11 @@ pub mod app;
 pub mod chat;
 pub mod cloud;
 pub mod events;
+pub mod fleet;
 pub mod hosts;
+pub mod lend;
 pub mod mods;
+pub mod phone;
 pub mod remote;
 pub mod settings;
 pub mod tabs;
@@ -30,8 +33,15 @@ pub enum Placement {
 /// an outdated app from a refused request. 3: `browser.open` placement.
 /// 4: `link`. 5: the `tab` family's `zoom`. 6: the `cloud` family. 7: `chat`.
 /// 8: `host` `automation_approve`. 9: `remote`. 10: `settings` `language`.
-/// 11: `mod`. 12: `window` `alerts`. 13: `chat` `shortcuts`.
-pub const PROTOCOL_VERSION: u32 = 13;
+/// 11: `mod`. 12: `window` `alerts`. 13: `chat` `shortcuts`. 14: the `tab`
+/// family's `machine` requests, and the `machine` kind in `tab list`.
+/// 15: `machine` `agent`, `exec`, `screenshot`, `click`, `type`, and `key`.
+/// 16: `via` on the caller and on feedback, for requests `sheprd mcp` relays.
+/// 17: `chat` `favorite`.
+/// 18: `fleet`. 19: `chat` `new` `prompt`. 20: `phone`. 21: Settings navigation and agent guidance.
+/// 22: `machine` `start` and `on` (a virtual Mac on another computer),
+/// `via` `lend`, and `lending`.
+pub const PROTOCOL_VERSION: u32 = 22;
 
 /// Older apps and clients know only tabs, so a tab is left off the wire.
 fn is_tab(placement: &Placement) -> bool {
@@ -43,6 +53,35 @@ fn is_tab(placement: &Placement) -> bool {
 pub const MAX_MESSAGE: usize = 256 * 1024;
 /// The longest `browser feedback --wait`, in seconds.
 pub const MAX_WAIT_SECONDS: u64 = 600;
+
+/// The `via` field of a request, borrowed as `&` or `&mut`: every family
+/// is listed once, for both [`Request::via`] and [`Request::set_via`].
+macro_rules! relay {
+    ($request:expr, $($borrow:tt)+) => {
+        match $request {
+            Request::Feedback(request) => $($borrow)+ request.via,
+            Request::Open(open) => $($borrow)+ open.caller.via,
+            Request::Reload(caller) | Request::Status(caller) => $($borrow)+ caller.via,
+            Request::Notes(notes) => $($borrow)+ notes.caller.via,
+            Request::App(call) => $($borrow)+ call.caller.via,
+            Request::Window(call) => $($borrow)+ call.caller.via,
+            Request::Ui(call) => $($borrow)+ call.caller.via,
+            Request::Command(call) => $($borrow)+ call.caller.via,
+            Request::Tab(call) => $($borrow)+ call.caller.via,
+            Request::Work(call) => $($borrow)+ call.caller.via,
+            Request::Host(call) => $($borrow)+ call.caller.via,
+            Request::Settings(call) => $($borrow)+ call.caller.via,
+            Request::Events(call) => $($borrow)+ call.caller.via,
+            Request::Link(call) => $($borrow)+ call.caller.via,
+            Request::Chat(call) => $($borrow)+ call.caller.via,
+            Request::Cloud(call) => $($borrow)+ call.caller.via,
+            Request::Remote(call) => $($borrow)+ call.caller.via,
+            Request::Fleet(call) => $($borrow)+ call.caller.via,
+            Request::Phone(call) => $($borrow)+ call.caller.via,
+            Request::Mod(call) => $($borrow)+ call.caller.via,
+        }
+    };
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", deny_unknown_fields)]
@@ -85,6 +124,10 @@ pub enum Request {
     Remote(Call<remote::RemoteOp>),
     #[serde(rename = "mod")]
     Mod(Call<mods::ModOp>),
+    #[serde(rename = "fleet")]
+    Fleet(Call<fleet::FleetOp>),
+    #[serde(rename = "phone")]
+    Phone(Call<phone::Ask>),
 }
 
 /// A `herdr-gpui://` link the shell started a second copy of the app with.
@@ -115,9 +158,21 @@ impl Request {
             Self::Settings(call) => call.op.wait_seconds(),
             Self::Cloud(call) => call.op.wait_seconds(),
             Self::Remote(call) => call.op.wait_seconds(),
+            Self::Fleet(call) => call.op.wait_seconds(),
+            Self::Phone(_) => phone::WAIT_SECONDS,
             _ => 0,
         };
         wait.min(MAX_WAIT_SECONDS)
+    }
+
+    /// What relayed the request, from its caller or, for feedback, itself.
+    pub fn via(&self) -> Option<&Via> {
+        relay!(self, &).as_ref()
+    }
+
+    /// Marks the request as relayed by `via`, or as direct.
+    pub fn set_via(&mut self, via: Option<Via>) {
+        *relay!(self, &mut) = via;
     }
 }
 
@@ -154,6 +209,62 @@ pub struct Caller {
     /// in the workspace of the tab that holds it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_id: Option<String>,
+    /// What relayed the request, absent when a person or script ran
+    /// `sheprd` directly. Any local process can claim or omit it, so it
+    /// decides what the app shows and which switch applies, never who may
+    /// ask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<Via>,
+}
+
+/// A relay between whoever asks and the app.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum Via {
+    /// `sheprd mcp`, on behalf of an MCP client. The app refuses it while
+    /// `[features] mcp` is off.
+    Mcp {
+        /// The name the client gave, printable and at most
+        /// [`MAX_CLIENT_NAME`] bytes, for dialogs to say who asks.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client: Option<String>,
+    },
+    /// `sheprd machine lend`, run over SSH by another computer's Sheprd
+    /// that borrows a virtual Mac here. `borrower` names that computer and
+    /// `owner` the pane or terminal there that asked; together they hold a
+    /// reservation, which never equals a local pane's. The app refuses
+    /// everything but virtual Mac requests from it, and those too while it
+    /// does not lend.
+    Lend { borrower: String, owner: String },
+}
+
+/// The longest MCP client name a request carries.
+pub const MAX_CLIENT_NAME: usize = 64;
+/// The longest borrower or owner name a lent request carries.
+pub const MAX_LEND_NAME: usize = 128;
+
+impl Via {
+    /// The borrowing computer and its owner, for a lent request.
+    pub fn lend(&self) -> Option<(&str, &str)> {
+        match self {
+            Self::Lend { borrower, owner } => Some((borrower, owner)),
+            Self::Mcp { .. } => None,
+        }
+    }
+
+    /// Whether the relay respects the bounds above.
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Self::Mcp { client } => client.as_deref().is_none_or(|name| {
+                name.len() <= MAX_CLIENT_NAME && !name.chars().any(char::is_control)
+            }),
+            Self::Lend { borrower, owner } => [borrower, owner].iter().all(|name| {
+                !name.is_empty()
+                    && name.len() <= MAX_LEND_NAME
+                    && !name.chars().any(char::is_control)
+            }),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,6 +288,9 @@ pub struct FeedbackRequest {
     /// How long to wait for notes when none are waiting, at most
     /// `MAX_WAIT_SECONDS`.
     pub wait_seconds: u64,
+    /// As [`Caller::via`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<Via>,
 }
 
 /// Notes the user wrote outside a window, such as in a UI mockup, for the
@@ -283,6 +397,12 @@ pub enum Response {
     Mod {
         reply: mods::Reply,
     },
+    Fleet {
+        reply: fleet::Reply,
+    },
+    Phone {
+        answer: phone::Answer,
+    },
     Error {
         code: ErrorCode,
         message: String,
@@ -309,6 +429,8 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
 
+    mod via;
+
     #[test]
     fn requests_have_a_stable_wire_form() {
         let request = Request::Open(BrowserOpen {
@@ -319,6 +441,7 @@ mod tests {
                 daemon_socket: None,
                 window: None,
                 terminal_id: None,
+                via: None,
             },
             focus: true,
             placement: Placement::Tab,
@@ -361,7 +484,8 @@ mod tests {
             Request::Feedback(FeedbackRequest {
                 daemon_socket: None,
                 pane_id: "w_1:p1".into(),
-                wait_seconds: 30
+                wait_seconds: 30,
+                via: None,
             })
         );
         let notes: Request = serde_json::from_str(

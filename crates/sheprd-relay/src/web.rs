@@ -28,12 +28,13 @@ use axum::{
         ConnectInfo, FromRequestParts, Path, Request, State,
         ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
     },
-    http::{HeaderMap, HeaderValue, StatusCode},
+    http::{HeaderMap, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     routing::get,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+pub use sheprd_dashboard::same_origin;
 use std::{
     net::{IpAddr, SocketAddr},
     sync::Arc,
@@ -73,6 +74,7 @@ pub struct Shared {
     /// relay's challenge through could claim its own name in it. `None`
     /// turns the WebSocket fallback off.
     pub public_host: Option<Arc<str>>,
+    pub share_viewer: bool,
     /// What `/v1/info` says about QUIC, when it runs.
     pub quic: Option<crate::endpoint::QuicInfo>,
     pub source: Source,
@@ -126,33 +128,9 @@ async fn refuse_cross_site(request: Request, next: Next) -> Response {
     next.run(request).await
 }
 
-/// Whether a request comes from the relay's own pages, or from no page at
-/// all. Browsers send `Sec-Fetch-Site`, or at least `Origin`, on every
-/// cross-site form post and WebSocket; a client that sends neither, such
-/// as `curl` or Sheprd, is not a browser being used against its owner.
-#[must_use]
-pub fn same_origin(headers: &HeaderMap) -> bool {
-    let text = |name| {
-        headers
-            .get(name)
-            .and_then(|value: &HeaderValue| value.to_str().ok())
-    };
-    if let Some(site) = text("sec-fetch-site") {
-        return matches!(site, "same-origin" | "none");
-    }
-    let Some(origin) = text("origin") else {
-        return true;
-    };
-    let host = text("host").unwrap_or_default();
-    let origin_host = origin
-        .strip_prefix("https://")
-        .or_else(|| origin.strip_prefix("http://"));
-    origin_host
-        .is_some_and(|origin_host| !host.is_empty() && origin_host.eq_ignore_ascii_case(host))
-}
-
 async fn info(State(shared): State<Shared>) -> Json<Info> {
     Json(Info {
+        share_viewer: shared.share_viewer,
         listen_token: shared.hub.access.requires_token(),
         protocol: PROTOCOL,
         quic: shared.quic.clone(),
@@ -183,46 +161,99 @@ pub async fn refuse_banned(State(shared): State<Shared>, request: Request, next:
         .map(|info| info.0);
     let request = Request::from_parts(parts, body);
     let accepting = request.uri().path().starts_with("/v1/accept/");
-    let banned = peer.is_some_and(|peer| {
-        let address = shared.address(peer, request.headers());
-        if accepting {
-            shared.hub.is_evicted(address)
-        } else {
-            shared.hub.is_banned(address)
-        }
-    });
-    if request.uri().path() != "/healthz" && banned {
+    let banned = peer
+        .map(|peer| shared.address(peer, request.headers()))
+        .filter(|address| {
+            if accepting {
+                shared.hub.is_evicted(*address)
+            } else {
+                shared.hub.is_banned(*address)
+            }
+        });
+    if let Some(address) = banned
+        && request.uri().path() != "/healthz"
+    {
         shared.hub.metrics.refuse(Refused::Banned);
-        return refused(Refused::Banned);
+        return refused(&shared.hub, address, Refused::Banned);
     }
     next.run(request).await
 }
 
-fn refused(reason: Refused) -> Response {
+/// The answer for `address` refused for `reason`. A ban also says why and
+/// for how long ([`crate::ban`]), so the client can tell its user.
+fn refused(hub: &Hub, address: IpAddr, reason: Refused) -> Response {
     match reason {
-        Refused::Banned => StatusCode::FORBIDDEN.into_response(),
+        Refused::Banned => {
+            let mut response = (
+                StatusCode::FORBIDDEN,
+                [
+                    (crate::endpoint::BAN_HEADER, "1"),
+                    ("cache-control", "no-store"),
+                ],
+            )
+                .into_response();
+            if let Some(ban) = hub.ban(address) {
+                let headers = response.headers_mut();
+                if let Some(reason) = ban.reason {
+                    headers.insert(
+                        crate::ban::REASON_HEADER,
+                        axum::http::HeaderValue::from_static(reason.label()),
+                    );
+                }
+                if let Some(remaining) = ban.remaining {
+                    headers.insert(crate::ban::SECONDS_HEADER, remaining.as_secs().into());
+                }
+            }
+            response
+        }
         Refused::PerAddress => StatusCode::TOO_MANY_REQUESTS.into_response(),
         Refused::Total => StatusCode::SERVICE_UNAVAILABLE.into_response(),
     }
 }
 
-/// Sends a challenge and reads the peer's proof: the nonce it signed over,
-/// and its hello. `None` when the peer does not answer in time or sends
-/// something else.
-async fn challenge(socket: &mut WebSocket) -> Option<([u8; NONCE_LEN], Hello)> {
+/// Only invalid application data earns a strike. A cancelled relay race,
+/// lost cellular connection, or handshake deadline is not evidence of abuse.
+async fn challenge(
+    socket: &mut WebSocket,
+    hub: &Arc<Hub>,
+    address: IpAddr,
+) -> Option<([u8; NONCE_LEN], Hello)> {
     let mut nonce = [0; NONCE_LEN];
     getrandom::fill(&mut nonce).ok()?;
-    let challenge = ToPeer::Challenge {
-        nonce: URL_SAFE_NO_PAD.encode(nonce),
-        version: PROTOCOL,
+    let exchange = async {
+        let challenge = ToPeer::Challenge {
+            nonce: URL_SAFE_NO_PAD.encode(nonce),
+            version: PROTOCOL,
+        };
+        if !send(socket, &challenge).await {
+            return None;
+        }
+        loop {
+            match socket.recv().await {
+                Some(Ok(Message::Text(text))) => {
+                    let hello = serde_json::from_str(&text).ok();
+                    if hello.is_none() {
+                        hub.offend(address, Offense::Malformed);
+                    }
+                    return hello;
+                }
+                Some(Ok(Message::Binary(_))) => {
+                    hub.offend(address, Offense::Malformed);
+                    return None;
+                }
+                // Axum automatically responds to pings; control frames do
+                // not replace the hello or extend its absolute deadline.
+                Some(Ok(Message::Ping(_) | Message::Pong(_))) => {}
+                Some(Ok(Message::Close(_)) | Err(_)) | None => return None,
+            }
+        }
     };
-    if !send(socket, &challenge).await {
-        return None;
-    }
-    match timeout(HELLO_TIMEOUT, socket.recv()).await {
-        Ok(Some(Ok(Message::Text(text)))) => Some((nonce, serde_json::from_str(&text).ok()?)),
-        _ => None,
-    }
+    // Bound the send as well as the receive, including a stream of pings.
+    timeout(HELLO_TIMEOUT, exchange)
+        .await
+        .ok()
+        .flatten()
+        .map(|hello| (nonce, hello))
 }
 
 async fn listen(
@@ -237,7 +268,7 @@ async fn listen(
     let address = shared.address(peer, &headers);
     let permit = match shared.hub.admit(address, Kind::Listen) {
         Ok(permit) => permit,
-        Err(reason) => return refused(reason),
+        Err(reason) => return refused(&shared.hub, address, reason),
     };
     let hub = Arc::clone(&shared.hub);
     upgrade
@@ -250,9 +281,8 @@ async fn listen(
 }
 
 async fn serve_listener(mut socket: WebSocket, hub: Arc<Hub>, address: IpAddr, host: Arc<str>) {
-    let Some((nonce, hello)) = challenge(&mut socket).await else {
-        hub.offend(address, Offense::Malformed);
-        return close(socket, code::PROTOCOL).await;
+    let Some((nonce, hello)) = challenge(&mut socket, &hub, address).await else {
+        return close_within(socket, code::PROTOCOL, HELLO_TIMEOUT).await;
     };
     let token = hello.token.as_deref().unwrap_or_default().as_bytes();
     let Some((key, signature)) = hello.decode() else {
@@ -349,7 +379,7 @@ async fn dial(
     };
     let permit = match hub.admit(address, Kind::Dial) {
         Ok(permit) => permit,
-        Err(reason) => return refused(reason),
+        Err(reason) => return refused(&shared.hub, address, reason),
     };
     let hub = Arc::clone(hub);
     // The hello is a few hundred bytes, under the smallest frame allowed.
@@ -370,9 +400,8 @@ async fn serve_dialer(
     host: Arc<str>,
     route: RouteId,
 ) {
-    let Some((nonce, hello)) = challenge(&mut socket).await else {
-        hub.offend(address, Offense::Malformed);
-        return close(socket, code::PROTOCOL).await;
+    let Some((nonce, hello)) = challenge(&mut socket, &hub, address).await else {
+        return close_within(socket, code::PROTOCOL, HELLO_TIMEOUT).await;
     };
     let Some((key, signature)) = hello.decode() else {
         hub.offend(address, Offense::Malformed);
@@ -412,7 +441,7 @@ async fn accept(
     let address = shared.address(peer, &headers);
     let permit = match hub.admit(address, Kind::Accept) {
         Ok(permit) => permit,
-        Err(reason) => return refused(reason),
+        Err(reason) => return refused(hub, address, reason),
     };
     let Some(session) = SessionId::parse(&session) else {
         // Not even an id: probing. A real listener's late accept, after

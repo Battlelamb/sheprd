@@ -71,7 +71,7 @@ short: when its plan has hit a limit, is 80% used, or is half used and on
 pace to run out before it resets, the button starts the installed agent with
 the most room instead, and its tooltip says why. Usage comes from the status
 bar's last reading of the selected host, matched by name (Claude, Codex,
-Copilot, Gemini, OpenCode, Pi); every window counts, so a weekly limit
+Copilot, Gemini, Kimi Code, Muse Code, OpenCode, Pi); every window counts, so a weekly limit
 running out matters even when a session window is fuller. An agent without
 a reading, or whose limits have reset since, counts as having room, and one
 tight plan never replaces another. With usage turned off
@@ -105,9 +105,11 @@ button per agent in the strip instead, and those chats can switch too.
 ## Chats in Herdr 2 panes
 
 In a Herdr 2 (herdr-core) tab, starting a chat from the tab strip's launcher
-or the group menu splits the pane in use and runs the chat beside it. A tab
-can hold several chats side by side, each in its own pane, along with plain
-terminals. The window picks the chat's endpoint before `sheprd-acp` starts:
+or the group menu opens a new chat tab in that group, using the terminal's
+current folder. The requested group stays with the start while the agent
+launches, even if you switch to the editor meanwhile. This leaves room for an editor in another group without
+adding a terminal beside the chat. `sheprd chat new --pane` starts a background tab in that
+pane's workspace and folder; a tab can hold several chats and plain terminals. The window picks the chat's endpoint before `sheprd-acp` starts:
 it passes the id in `HERDR_ACP_ENDPOINT` and labels the terminal `acp=<id>`
 in herdr-core. Because herdr-core keeps the label, the chat view comes back
 after a restart and appears in every window that shows the pane.
@@ -184,7 +186,69 @@ Limitations:
 - If `sheprd-acp` cannot continue the session, the pane keeps its error, and
   the agent's own command (such as `claude --resume ID`) still can.
 
+### Opening new agents as chats
+
+Turn on **Open new agents as chats** in Settings > Chat, or run
+`sheprd config set chat.auto_convert true`, and each agent that starts in a
+terminal afterwards moves into a chat on its own, as `chat convert` would.
+It does not matter what started it: typing `claude` at a prompt, `herdr agent
+start`, or another agent or tool driving Herdr. The calling tool needs no
+change. It is off by default.
+
+- Only agents that start after the window connected to their daemon move.
+  Turning it on, restarting Sheprd, or reconnecting leaves what already runs
+  in its terminal.
+- An agent moves once it has been idle for 10 seconds with no change Herdr
+  reports. A tool that prompts the agent as soon as it is ready makes it work,
+  which starts the wait again, so the move comes after that turn rather than
+  in the middle of the tool's handshake. An agent that turns busy just as it
+  was to move is watched again, up to twice.
+- Each pane is tried once. A refusal, such as a missing Herdr integration, is
+  logged and leaves the terminal; a chat moved back to its terminal stays
+  there.
+- Typing, composing, or pasting into the agent's pane from this window keeps
+  its terminal, since a move would clear what is typed. That holds while the
+  move is still checking the agent too: it stops before pressing Ctrl+C, or,
+  for an agent you quit meanwhile, before typing its line. Once Ctrl+C is
+  pressed, the move finishes, since the agent is on its way out and only its
+  chat can continue the conversation.
+  Typing into another pane, then clicking the agent's, does not count, nor
+  does moving the pointer, scrolling, or clicking. Text typed from another
+  client, such as the Herdr TUI, is not seen: that is what the wait is for.
+- Several Sheprd windows on one daemon move each agent once: a window claims
+  the pane before it stops the agent, and the others leave it alone. The same
+  claim keeps **Move Agent into Chat** in one window from racing a move
+  another window started. Two separate Sheprd processes do not see each
+  other's claims.
+- A tool that must keep an agent in its terminal can mark the pane:
+  `herdr pane report-metadata PANE --source ID --token sheprd_terminal=keep`.
+- Agents move one at a time, so ten started together move one after another.
+- The moved agent runs as a chat, which Herdr reports as an `acp` agent with
+  the original agent's display name. A tool that later finds the pane's agent
+  by its kind, such as `claude`, no longer finds it there.
+- Herdr 1 panes only, with the limitations above; Herdr 2 panes stay as they
+  are.
+
 ## Chats after a reboot
+
+On a tmux-enabled build, opening a saved driving pane after its host reboots
+restarts the chat helper under the original terminal ID and endpoint. The
+helper asks the provider to load the exact recorded conversation. Native
+Codex and Claude read history from their session logs. ACP adapters can replay
+history through `session/load`. A provider that cannot load the saved session
+reports the failure. Closing a chat clears its continuation record. If the tmux-enabled remote service starts before the desktop, it resumes the recorded chats so paired clients can reconnect. Other shells wait for an owning desktop view.
+
+For managed chats, Sheprd also keeps a private conversation checkpoint in
+`conversations` beside the restore directory. When a provider successfully
+loads the exact session but returns no conversation, Sheprd can display its
+own saved entries. It also restores the chat’s pull-request references.
+Permissions and queued commands are live state and require a new request.
+Checkpoints keep the same bounded history as the chat view. The host retains
+up to 64 recent session checkpoints.
+
+On herdr-core, its kept terminal and the recovery document identify the
+conversation. When Sheprd reconnects to that core, it resumes the chat and
+maps the replacement terminal to its saved pane.
 
 When Herdr restores its panes after a reboot or a server restart, a pane that
 ran a chat comes back as a shell in the chat's folder: Herdr keeps neither the
@@ -258,7 +322,7 @@ Limitations:
   folder could be handed the old chat.
 - A chat whose shell folder differs from the chat's own (started with
   `--cwd`) is not continued.
-- Only the built-in agents (`claude`, `codex`, `copilot`, `gemini`,
+- Only the built-in agents (`antigravity`, `claude`, `codex`, `copilot`, `gemini`, `kimi`, `muse`,
   `opencode`, `pi`) started without extra agent arguments. Custom commands
   are not continued.
 - `[chat.env]` variables are not set again: typing their values into a shell
@@ -436,9 +500,15 @@ the **Plan** section; an assistant's Markdown checklist does not. Child tasks
 remain separate from the parent's plan. Sheprd does not enable agent tools
 or change OpenCode configuration automatically.
 
-Every rail section folds to one line. While anything runs, **Plan** and
-**Changed** fold on their own to leave room, showing the current step and the
-change totals; once nothing runs they open again. Clicking a section's header
+**Pull requests** lists each pull request the agent created, pushed to,
+commented on, reviewed, merged, or closed in this chat, newest first; a click
+opens it in Sheprd's Pull requests section when that lists it, else on GitHub.
+See [Pull requests in a chat's rail](cli.md#pull-requests-in-a-chats-rail)
+for what is picked up and `sheprd chat pr add` for the rest.
+
+Every rail section folds to one line. While anything runs, **Plan**,
+**Changed**, and **Pull requests** fold on their own to leave room, showing
+the current step and the change totals; once nothing runs they open again. Clicking a section's header
 overrides that for as long as the chat is open.
 
 Drag the rail's left edge to resize it, up to half the chat's width; a
@@ -456,6 +526,14 @@ until the shell ends, even though the call itself is done. Which agents report
 this, and how, is in the [`sheprd-acp` README](../crates/sheprd-acp/README.md#behaviour).
 
 ## Messages and controls
+
+In the desktop conversation, a user message with at least 12 lines or 2,048
+characters shows a first-line preview and a **Message.txt** button. Click the
+button to open the full text in your default text editor. Tab or Shift-Tab
+reaches the file buttons. Enter or Space opens a file, and Escape returns to
+the chat input. This applies to
+existing conversations too. In the desktop composer, a new paste of at least
+800 characters or more than 10 lines becomes a separate text attachment.
 
 Write normal Markdown and TeX in user and agent messages. Rich chat supports
 headings, lists, links, aligned tables with horizontal scrolling, Mermaid,
@@ -536,6 +614,21 @@ computer's and every connected SSH host's that has the program, keeps the
 latest edit, and offers it to the others, so an edit made anywhere reaches all
 of them. A host without the program is skipped.
 
+During a turn, Enter or Send queues the message for the next turn. Queued
+messages appear above the composer in send order. Click × to withdraw one.
+
+When the agent supports steering, each queued row has a curved arrow. Hover
+over it for **Steer the current turn with this message**. Click it to send
+that message into the running turn. The row shows **Steering** until the
+agent takes it, then the message appears in the conversation. If the turn
+ends first, the message goes as a follow-up.
+
+On other agents, **Send now** stops the running turn and sends the selected
+message first. With the agent idle, **Send now** starts a turn.
+**Stop** keeps what you typed: queued prompts, and those still marked
+**Steering**, wait marked **Held**, and no later turn sends them on its own.
+Send one now, or withdraw it with ×; a new prompt goes at once meanwhile.
+
 ACP chats retain their native composer, permissions, tools, plans, context
 information and file attachments. Tool and thinking cards start collapsed and
 expand to show retained text and diffs.
@@ -557,8 +650,9 @@ prompt or answer a permission request. Existing CLI sessions and read-only mirro
 ### Text size and effects
 
 An agent can set words larger or smaller within a line, and play an effect as
-a phone's messages do. Markdown directives keep the source readable where it is
-not drawn, such as terminal views and the phone:
+a phone's messages do, in the desktop chat and in the iPhone and iPad app.
+Markdown directives keep the source readable where they are not drawn, such
+as terminal views and the phone web app:
 
 ```markdown
 Tests pass and :huge[the PR is merged]. :small[CI took 4 min.]
@@ -586,14 +680,70 @@ All 214 tests pass.
   down, each bursting into pixels. Effects stay in the chat's pane, never over
   the terminals, tabs, or sidebar, and never take the pointer. A message plays its first; another
   arriving while one plays is dropped, not queued.
+- A line `::wizz` asks for the person's attention, as MSN Messenger's nudge
+  did: the chat shakes for a second and, on a phone, buzzes. A turn whose
+  last reply holds it sends a time-sensitive push that plays the same buzz,
+  whatever the push privacy, so a locked phone buzzes too. The excerpt a
+  push shows leaves every directive line out and reads as plain text,
+  without size marks or Markdown.
 
-Only an agent's replies play effects; a user's message shows its directives as
-text. Each effect plays once, as its message arrives: a transcript loaded,
-reopened, or received again after reconnecting shows each message at rest,
-with a **Replay** link under it. With the system's reduce motion setting on,
-nothing moves, and invisible ink still hides until hovered. The agent learns
-the syntax from the note Sheprd sends with the first prompt on a desktop
-(`desktop.md` and `remote.md` in `crates/sheprd-acp/prompts`).
+Only an agent's replies play effects; a user's message shows its effect
+directives as text, though its size spans still apply. Each effect plays once,
+as its message arrives: a transcript loaded, reopened, or received again after
+reconnecting shows each message at rest, with a **Replay** link under it. With
+the system's reduce motion setting on, nothing moves, and invisible ink still
+hides until hovered. The agent learns the syntax from the note Sheprd sends
+with the first prompt on a desktop (`desktop.md` and `remote.md` in
+`crates/sheprd-acp/prompts`) and in the iPhone and iPad app (`phone-app.md`).
+
+On desktop, turn off **Settings > Chat > Message effects** to stop bubble and
+screen effects, including wizz. Invisible ink becomes readable and replay links
+disappear, including in existing messages.
+
+The iPhone and iPad app draws the same sizes and effects
+(`ios/SheprdRemoteCore/Sources/SheprdRemoteCore/Chat/TextSize.swift` and
+`Chat/Effects`, ported from the desktop's with the same tests), with these
+differences:
+
+- Invisible ink hides its text until tapped, and a second tap hides it again.
+- Screen effects play over the chat screen above the composer, never over
+  the composer, the navigation bar, or other screens, and take no touches.
+- A transcript from the phone's cache or a snapshot is history; only the
+  entries a live change pushes, appends to, or replaces play, wherever they
+  are in the transcript. The system's Reduce Motion setting draws everything
+  at rest.
+- A list row strips the directives from the computer's one-line excerpt of
+  the latest reply.
+- Each effect also has a sound and, on an iPhone, haptic taps timed to its
+  animation (`Chat/Effects/Cue.swift`): a slam's landing, each firework's
+  burst, each letter zap shoots down. The sounds are synthesized
+  (`Synth.swift`), not shipped as files. They play in the ambient category,
+  so the Ring/Silent switch mutes them, and never while dictation or voice
+  holds the audio session. Settings > Sounds & Haptics turns each off.
+
+The phone web app draws neither, so `phone.md` does not mention them and only
+`phone-app.md`, which follows it for the iPhone and iPad app, does.
+
+In the iPhone and iPad app and the desktop chat, an agent's answer may also
+link a screen of its own computer, so the person opens a workspace, worktree,
+tab, or agent the agent just made with a tap or a click: `sheprd://workspace/WORKSPACE`,
+`sheprd://changes/WORKSPACE`, `sheprd://chat/PANE` (its terminal when the
+agent has no chat), or `sheprd://term/PANE`, with Herdr's ids
+(`ScreenLink.swift`). A link names no computer: the chat showing it opens it
+on that chat's computer, so one computer's text never reaches another's
+screens. A Herdr 2 pane goes by the id the desktop and `sheprd chat
+list` give it, `core:t7`; the phone matches it to its own `core:TAG-HEX`
+(`ScreenLink.pane(_:isNamed:)`), and the desktop opens its herdr-core tab.
+On an iPad, a link in a chat shown in a window of its own pushes onto that
+window's stack. It only shows a screen, as `sheprd phone open` does, without the
+banner or **Let agents open screens**, since the person tapped it. Every
+other non-web link in agent text stays plain text. `phone-app.md` and
+`desktop.md` tell the agent to write these links; the phone web app and
+`remote.md` places do not open them. On the desktop
+(`chat/screen_link.rs`), a click focuses the pane or workspace in the Herdr
+the window shows the chat from, as an agents-list row does, and a changes
+link goes to its workspace; links in an SSH chat stay inert, as its ids are
+its host's.
 
 The catalog is application-specific, not an A2UI implementation or MCP Apps
 host. Embedded HTML pages use the platform webview; see the
@@ -626,13 +776,27 @@ again only when they differ from the last ones sent, and the origin only on
 another device or a change between this machine and SSH. Where the person cannot open paths on the
 agent's machine, the note asks the agent to link pictures as Markdown images,
 which [linked pictures](#messages-and-controls) attach to the chat, and to
-render HTML mockups to screenshots. The transcript shows only the person's
-words. An older program ignores the field, and an older client sends none.
+render HTML mockups to screenshots. It also says the person cannot touch
+the agent's computer, so a hardware key, Touch ID, or an on-screen prompt
+is out of their reach: the agent pushes and fetches over HTTPS with the
+GitHub CLI's credentials rather than SSH, and stops rather than turning
+off signing when a commit needs a key (`phone.md` and `remote.md`; the
+iPhone and iPad app's `phone-app.md` follows `phone.md`, so says it once
+through it). An older program ignores the origin field, and an older client sends none.
+Antigravity receives direct prompts without these annotations or Sheprd's
+prompt templates and memory notes.
+The transcript shows only the person's words, and keeps what went ahead of
+them in the user entry's optional `note`: the note and, on a live prompt, a
+handed-over conversation; on a replay or a restored log, the note alone. The
+desktop chat's **As sent** header switch (`chat/view/sent.rs`) draws it above
+each prompt. Clients that predate `note` skip it, as serde ignores the
+unknown field, so no revision gates it.
 
 The note's texts are templates (`context/prompts.rs`): the built-in ones in
 `crates/sheprd-acp/prompts`, compiled in, each replaced by a non-empty file
 of the same name in `herdr/chat-prompts/`. One template per place
-(`desktop`, `terminal`, `remote`, `phone`, chosen by `Kind::of`) avoids
+(`desktop`, `terminal`, `remote`, `phone`, chosen by `Kind::of`), followed for
+the iPhone and iPad app alone by `phone-app.md` (`Kind::after`), avoids
 conditionals: `{{ name }}` substitution (`context/template.rs`) is one pass
 over known names, a value is never read as a template, and an unknown name
 stays as written, as Moltis fills its webhook templates. Files are read once
@@ -641,6 +805,72 @@ large, not UTF-8, or names an unknown placeholder becomes a warning notice in
 the chat. The `<sheprd>` wrapper, its checksum, and the `<instructions>`
 block stay Sheprd's, so a replaced template cannot break hiding notes or
 deciding what to tell again. Templates are escaped like instructions, opening `<instructions>` tags included. Instructions are kept as written and filled in when sent, so a switch of agent (`Context::switched`) changes `{{ agent }}` and sends them again; the intro is filled in with the prompt's origin, or the last one a client gave. Files are read through a capped reader. Only a missing `instructions.md` falls back to the older file.
+
+### Starting a chat like this one
+
+For a built-in agent, when a `sheprd` command is beside the program, the
+note also says in a `<chat>` block what the agent runs as: which agent, in
+a Sheprd chat rather than its own terminal interface, with the model,
+thinking level, and permission mode the chat shows (`context/launch.rs`).
+It goes with the first prompt and again whenever any of it changes, as when
+the person picks another model, the chat switches agent, or a terminal
+agent moved into the chat ([Moving a terminal agent into a
+chat](#moving-a-terminal-agent-into-a-chat)): its earlier messages were
+written in a terminal, and the block tells it that it now runs in a chat. A
+restored chat learns from the notes it replays what the agent last heard.
+
+The block asks the agent, when the person wants another agent started, in
+a new workspace, tab, or worktree, to start a chat like this one with
+`sheprd chat new --pane PANE`, not the agent's terminal command. Run from a
+chat, with no agent named, the app starts the caller's own agent, and when
+the agent is the caller's own it copies the chat's settings
+(`sheprd_chat_protocol::Settings`: the model, its settings, the thinking level,
+the mode, and auto-accepting) into the new tab's environment as
+`SHEPRD_CHAT_SETTINGS`, at most 4 KiB of JSON. The new program applies them
+once its agent opens a new session, never a continued one, and only for
+the agent they were read from: one setting at a time, each after the agent
+answered the one before, so a thinking level is checked against the model
+just chosen. A setting the agent does not offer, or already has, is
+skipped, and a refused one leaves a warning in the chat while the rest
+still go. The program keeps the variable from its agent, so a chat that
+agent starts carries its own. A program on an SSH host older than this
+ignores the variable and starts with the agent's defaults.
+
+### Starting a chat with a brief
+
+An agent that hands another a task starts it with the task:
+`sheprd chat new [AGENT] --prompt TEXT` or `--prompt-file PATH` (`-` reads
+standard input), at most 96 KB of UTF-8 (control protocol 19). The CLI reads
+the file; the app writes the text, off the UI thread, to a new private
+(`0600`) file in the temporary folder and starts `sheprd-acp` with
+`--brief-file PATH`, plus `--brief-from AGENT` when the caller is a chat
+(its own agent, whichever agent the new chat runs). A Herdr tab's typed
+line reads the path from `SHEPRD_BRIEF_FILE` in the tab's environment, as
+it reads the program's own path, so the line never holds the file's name;
+a Herdr 2 terminal gets the options in its argv. `sheprd-acp` sends the
+brief as the chat's first prompt and marks it as the agent's, which clients
+show as a brief rather than the person's words, and deletes the file. A
+start that fails deletes it too.
+
+On iOS, a chat and its delegated workers share a progress count. By default
+all concurrent work on a computer shares one Live Activity. In Settings >
+Notifications > Live Activities, choose **One per host** to combine work
+across that host’s worktrees, **One for all hosts** to combine work across
+paired computers through the push relay, or **One per agent** to show each independent
+chat or terminal agent on its own card. You can set a phone-wide default
+and override it for individual hosts.
+It counts native subagents and local chats started with a brief, including
+chats in another Herdr space and the native subagents they start. A chat
+counts as soon as its launch is registered. Its coordinator can finish
+first and the activity stays open for the workers. The count advances when a task finishes,
+fails, or stops. The latest outcome names the task when notification
+privacy permits. Give each brief a distinct task name on its first line.
+Tapping the card opens the chat or terminal it shows. A pending question
+takes priority on a shared card.
+
+A brief is not yet sent to a chat on an SSH host or another machine's
+Herdr 2: the file is on this machine, so `chat new` refuses with exit 8
+rather than starting the chat without it.
 
 ## Existing CLI sessions
 
@@ -675,7 +905,11 @@ terminal. Goal status stays in the original CLI interface; it is not inferred
 from conversation text.
 
 Observation requires a Linux agent host, its Herdr CLI metadata API, and a
-matching `sheprd-acp` helper. Local helpers are paired with the GUI; SSH observers
+matching `sheprd-acp` helper. The observer itself also runs on macOS, where the
+iPhone app uses it (`docs/ios-app-plan.md`): it reads the process's birth from
+the kernel and finds the log by its exact name, and since macOS shows no other
+process's environment, it reads the default config directory, never a
+`CLAUDE_CONFIG_DIR` or `CODEX_HOME` override. Local helpers are paired with the GUI; SSH observers
 run on the agent's host through the existing encrypted connection. Remote helper
 installation is explicit. Observation creates no listening port or persistent
 service. Closing the GUI stops its observer children and leaves agents running.

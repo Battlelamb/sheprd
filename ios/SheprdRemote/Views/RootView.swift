@@ -18,6 +18,7 @@ struct RootView: View {
     @State private var windowWidth: CGFloat = 0
     @State private var window = WindowState()
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
     /// The width from which a window gets the split view. An unfolded
@@ -38,6 +39,8 @@ struct RootView: View {
                 tabs
             }
         }
+        .padding(.top, model.agents.guide == nil ? 0 : model.agents.guideHeight)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: model.agents.guide == nil)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
         #if DEBUG
         // The simulator loop's made-up pull request (`-githubDemo`).
@@ -46,6 +49,10 @@ struct RootView: View {
         .environment(window)
         // Along the top edge on every screen; sheets carry their own.
         .overlay(alignment: .top) { SyncBar().ignoresSafeArea(edges: .top) }
+        // The split view reports its own.
+        .onChange(of: wide ? nil : compactFront, initial: true) { _, front in
+            if let front { model.agents.front = front }
+        }
         // Folding or unfolding keeps the open chat or terminal open.
         .onChange(of: wide) { _, nowWide in
             if nowWide {
@@ -69,6 +76,9 @@ struct RootView: View {
         }
         .sheet(item: Bindable(model).voice, onDismiss: nil) { session in
             VoiceSheet(session: session)
+        }
+        .sheet(item: Bindable(model).pendingPullRequest) { route in
+            PullRequestSheet(route: route)
         }
         // A panel's sheet draws it instead, as here it would be behind it.
         .nearbyCard(window, when: !window.panelOpen)
@@ -97,15 +107,29 @@ struct RootView: View {
         #endif
         // The microphone never stays open behind the app, or its lock.
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background { model.voice = nil }
+            if phase == .background { model.voice = nil; model.agents.clearGuide() }
         }
         .onChange(of: LockState.shared.locked) { _, locked in
+            if locked { model.agents.clearGuide() }
             guard !locked, let talk = model.pendingTalk else { return }
             model.pendingTalk = nil
             model.talk(saying: talk.words)
         }
+        // Forgetting the last computer leaves only Home, which offers pairing.
+        .onChange(of: model.hasComputers) { _, has in
+            if !has { tab = .home }
+        }
         .onChange(of: model.pendingTab) { _, wanted in
-            guard let wanted else { return }
+            // The split view picks its sidebar's tab itself.
+            guard let wanted, !wide else { return }
+            if model.pendingTabRoot {
+                switch wanted {
+                case .home: homePath = []
+                case .workspaces: workspacesPath = NavigationPath()
+                case .pullRequests, .settings: break
+                }
+                model.pendingTabRoot = false
+            }
             tab = wanted
             model.pendingTab = nil
         }
@@ -135,6 +159,18 @@ struct RootView: View {
         }
     }
 
+    /// What the tabs show, for agents asking (`AgentControl`): the
+    /// Workspaces tab's stack holds pages no screen names.
+    private var compactFront: AgentControl.Front {
+        AgentControl.Front(
+            tab: tab,
+            route: tab == .home ? homePath.last : nil,
+            // Pairing and the nearby card cover the tab.
+            unnamed: (tab == .workspaces && !workspacesPath.isEmpty) || window.pairing || window.nearby != nil,
+            settingsPage: model.agents.settingsPath.last
+        )
+    }
+
     /// Goes back to the workspace when it is in the stack, else makes it
     /// the whole stack, so Back from it returns to Home whatever was open.
     private func showWorkspace(_ key: WorkspaceKey) {
@@ -159,24 +195,25 @@ struct RootView: View {
         TabView(selection: $tab) {
             Tab("Home", systemImage: "house", value: RootTab.home) {
                 NavigationStack(path: $homePath) {
-                    HomeTab(pairing: $window.pairing).withRoutes()
+                    HomeTab(pairing: $window.pairing).makesRoomForConnectionToast().withRoutes()
                 }
-                .environment(\.offersWorkspace, true)
-                .slidesTabBar(hidden: !homePath.isEmpty)
+                .environment(\.workspaceDestination, .pending)
+                // No tabs until there is something to show in them.
+                .slidesTabBar(hidden: !homePath.isEmpty || !model.hasComputers)
                 .connectionToast(pairing: $window.pairing)
             }
             .badge(model.fleet.waiting)
             Tab("Workspaces", systemImage: "square.stack.3d.up", value: RootTab.workspaces) {
-                NavigationStack(path: $workspacesPath) { WorkspacesTab(query: $workspacesQuery).withRoutes() }
+                NavigationStack(path: $workspacesPath) { WorkspacesTab(query: $workspacesQuery).makesRoomForConnectionToast().withRoutes() }
                     .slidesTabBar(hidden: !workspacesPath.isEmpty)
                     .connectionToast(pairing: $window.pairing)
             }
-            Tab("Pull Requests", systemImage: "arrow.triangle.pull", value: RootTab.pullRequests) {
-                NavigationStack { PullRequestsList() }
+            Tab("PRs", systemImage: "arrow.triangle.pull", value: RootTab.pullRequests) {
+                NavigationStack { PullRequestsList().makesRoomForConnectionToast() }
                     .connectionToast(pairing: $window.pairing)
             }
             Tab("Settings", systemImage: "gearshape", value: RootTab.settings) {
-                NavigationStack { SettingsView() }
+                NavigationStack(path: Bindable(model.agents).settingsPath) { SettingsView().makesRoomForConnectionToast() }
                     .connectionToast(pairing: $window.pairing)
             }
         }
@@ -193,15 +230,25 @@ extension RootView {
     /// that tab, `-openWorkspace ID` opens that workspace in the Workspaces
     /// tab, `-newWorkspace YES` opens the new workspace form,
     /// `-openComputer YES` opens the first computer's page from Workspaces,
-    /// `-editComputers YES` puts Settings' computers in Edit, and
-    /// `-openRelays YES` opens Settings' relays. In a
+    /// `-editComputers YES` opens Settings > Computers in Edit, and
+    /// `-openRelays YES` opens Settings' relays, and `-openNotifications YES`
+    /// Settings > Notifications. In a
     /// chat, `-session YES` opens its session sheet and `-draft TEXT`
     /// types into the composer. `-voiceSay TEXT` runs a spoken command as
     /// if it were heard, as the simulator has no microphone, and
     /// `-voiceThen TEXT` follows it with another. `-sampleChat YES` opens a
-    /// made-up chat, for screenshots without anyone's real prompts.
+    /// made-up chat, for screenshots without anyone's real prompts, and
+    /// `-sampleChat effects` one with text sizes and message effects, and
+    /// `-sampleChat activity` one running sub-agents, shells, and a plan.
     func followLaunchArguments() async {
         let defaults = UserDefaults.standard
+        // `-demo YES` explores the demo, as its button does, and
+        // `-demoChat PANE` then opens one of its chats (`DemoData`).
+        if defaults.bool(forKey: "demo") { model.startDemo() }
+        if let pane = defaults.string(forKey: "demoChat"),
+           let item = model.fleet.chatItems.first(where: { $0.key.pane == pane && DemoFleet.owns($0.key.device) }) {
+            model.pendingRoute = .chat(item.key, title: item.chat.title)
+        }
         if let link = defaults.string(forKey: "pairLink"),
            !model.computers.contains(where: { (try? PairingLink(link))?.fingerprint == $0.fingerprint }) {
             let pairing = PairingModel()
@@ -248,7 +295,11 @@ extension RootView {
                 workspacesPath.append(WorkspaceKey(device: machine.id, workspace: workspace))
             }
         }
-        if defaults.bool(forKey: "sampleChat") {
+        if defaults.string(forKey: "sampleChat") == "activity" {
+            model.pendingRoute = .chat(.activitySample, title: "Rail on iOS")
+        } else if defaults.string(forKey: "sampleChat") == "effects" {
+            model.pendingRoute = .chat(.effectsSample, title: "Release checks")
+        } else if defaults.bool(forKey: "sampleChat") {
             model.pendingRoute = .chat(.sample, title: "Weather widget")
         }
         if let pane = defaults.string(forKey: "openTerm") {
@@ -267,6 +318,7 @@ struct CreatingSheet: View {
 
     var body: some View {
         switch creating {
+        case let .project(device): NewProjectSheet(device: device)
         case let .workspace(device, folder, session): NewWorkspaceSheet(device: device, folder: folder, session: session)
         case let .chat(device, workspace, label, agent): NewChatSheet(device: device, workspace: workspace, label: label, agent: agent)
         }
@@ -275,7 +327,7 @@ struct CreatingSheet: View {
 
 extension View {
     func withRoutes() -> some View {
-        navigationDestination(for: Route.self) { $0.screen }
+        navigationDestination(for: Route.self) { $0.screen.makesRoomForConnectionToast() }
     }
 
     /// Slides a tab's bar in and out with its stack. The screens pushed on

@@ -153,6 +153,14 @@ impl Browser {
         }
     }
 
+    /// Returns native keyboard ownership to GPUI before its click is handled.
+    #[cfg(any(target_os = "macos", windows))]
+    pub(crate) fn blur_page_keyboard(&self) {
+        if let Some(id) = self.pages.keyboard_page() {
+            self.pages.blur(id);
+        }
+    }
+
     /// Where each page drew in the frame being drawn, which the window's
     /// backgrounds leave unpainted.
     #[cfg(target_os = "macos")]
@@ -302,10 +310,11 @@ impl SheprdWindow {
         endpoint: &str,
         workspace: &str,
         url: WebUrl,
+        focus: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> PageOpened {
-        if !super::EMBEDDED {
+        if focus && !super::EMBEDDED {
             cx.open_url(url.as_str());
             return PageOpened::SystemBrowser;
         }
@@ -314,17 +323,15 @@ impl SheprdWindow {
         };
         let scope = scope(&self.endpoints[index]);
         let location = Location::Web { url };
-        let before =
-            store(cx).and_then(|store| store.opened_before(&scope, workspace, None, &location));
-        let opened = before.or_else(|| {
-            Store::update(cx, |store| {
-                store.open(scope, workspace, Some(location), None)
-            })
-        });
+        let opened = Store::update(cx, |store| store.open_location(scope, workspace, location));
         let Some(id) = opened else {
             self.show_flash(Flash::warning(fl!("browser-too-many-tabs")), cx);
             return PageOpened::Full;
         };
+        if !focus {
+            cx.notify();
+            return PageOpened::Tab;
+        }
         if !self.navigate_endpoint(endpoint, NavigationTarget::Workspace(workspace), cx) {
             return PageOpened::Unreachable;
         }
@@ -473,9 +480,9 @@ impl SheprdWindow {
                 Event::Captured(id, capture, tiff) => self.page_captured(id, capture, tiff, cx),
                 Event::NewWindow(id, url) => {
                     if let Ok(url) = WebUrl::try_from(url.as_str())
-                        && let Some(opened) = self.open_beside(id, url, cx)
+                        && let Some((Some(group), opened)) = self.open_beside(id, url, cx)
                     {
-                        self.show_browser_tab_in(opened.0, opened.1, window, cx);
+                        self.show_browser_tab_in(Some(group), opened, window, cx);
                     }
                 }
                 #[cfg(target_os = "macos")]
@@ -490,7 +497,9 @@ impl SheprdWindow {
                                 .failed
                                 .insert(opened, crate::i18n::Localize::localize(&error).into());
                         }
-                        self.show_browser_tab_in(group, opened, window, cx);
+                        if let Some(group) = group {
+                            self.show_browser_tab_in(Some(group), opened, window, cx);
+                        }
                     }
                 }
                 #[cfg(target_os = "macos")]

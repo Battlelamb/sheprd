@@ -1,5 +1,7 @@
 use super::*;
 
+mod mouse;
+
 #[test]
 fn a_terminal_read_failure_is_an_error_not_a_quit() {
     let failed = terminal_event(Ok(Err(std::io::Error::other("tty gone"))));
@@ -21,4 +23,24 @@ fn a_terminal_event_passes_through() {
         terminal_event(Ok(Ok(Event::FocusGained))),
         Ok(Event::FocusGained)
     ));
+}
+
+#[test]
+fn frame_interval_slows_down_while_a_native_client_is_attached() {
+    assert_eq!(frame_interval("idle", 0), None);
+    assert_eq!(frame_interval("idle", 1), None);
+    assert_eq!(frame_interval("working", 0), Some(FRAME));
+    assert_eq!(frame_interval("working", 1), Some(ATTACHED_FRAME));
+}
+
+#[test]
+fn the_closing_line_says_why_and_how_soon() {
+    assert_eq!(
+        closing_line(&Ended::Key(Quit::CtrlD), Duration::from_millis(420)),
+        "sheprd-acp: the chat closed after 0.4s: Ctrl+D was pressed on an empty prompt"
+    );
+    assert_eq!(
+        closing_line(&Ended::Session(ByeReason::Exiting), Duration::from_secs(3)),
+        "sheprd-acp: the chat closed after 3.0s: the session is exiting"
+    );
 }

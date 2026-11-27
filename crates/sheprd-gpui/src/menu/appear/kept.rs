@@ -15,10 +15,13 @@ pub(in crate::menu) fn leaves(page: Page) -> bool {
         page,
         Page::Devices
             | Page::Git
+            | Page::GitRestack
             | Page::PrReview
             | Page::PrComment
             | Page::PrMerge
+            | Page::PrQueue
             | Page::RemoteControl
+            | Page::ShareSession
     )
 }
 
@@ -30,7 +33,13 @@ pub(in crate::menu) struct Kept {
     input: Option<DialogInput>,
     merge_method: Option<crate::pull_request::MergeMethod>,
     merge_target: Option<crate::pr_actions::Target>,
+    queue_change: Option<sheprd_control_protocol::protocol::hosts::QueueOp>,
+    restack: Option<(
+        crate::pull_request::Input,
+        super::super::git_restack::Restack,
+    )>,
     remote_pairing: Option<crate::remote::PairingDialog>,
+    remote_share: Option<crate::remote::ShareDialog>,
     /// The device All Devices showed unfolded, so it leaves as it was.
     unfolded_device: Option<String>,
 }
@@ -43,6 +52,9 @@ impl Kept {
         if let Some(pairing) = &mut kept.remote_pairing {
             pairing.close();
         }
+        if let Some(share) = &mut kept.remote_share {
+            share.close();
+        }
         kept
     }
 
@@ -54,7 +66,10 @@ impl Kept {
         std::mem::swap(&mut self.input, &mut menu.input);
         std::mem::swap(&mut self.merge_method, &mut menu.merge_method);
         std::mem::swap(&mut self.merge_target, &mut menu.merge_target);
+        std::mem::swap(&mut self.queue_change, &mut menu.queue_change);
+        std::mem::swap(&mut self.restack, &mut menu.restack);
         std::mem::swap(&mut self.remote_pairing, &mut menu.remote_pairing);
+        std::mem::swap(&mut self.remote_share, &mut menu.remote_share);
         std::mem::swap(&mut self.unfolded_device, &mut menu.unfolded_device);
     }
 }

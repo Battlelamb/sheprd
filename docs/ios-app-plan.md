@@ -157,7 +157,8 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
     "terminals": [{
       "tab": "t2", "label": "zsh", "cwd": "/Users/me/code/sheprd", "zoomed": false,
       "panes": [{"pane": "p2", "label": null, "cwd": "/Users/me/code/sheprd", "focused": true}],
-      "agent": {"name": "claude", "status": "done", "pane": "p2", "title": "Fix the build"},
+      "agent": {"name": "claude", "status": "done", "pane": "p2", "title": "Fix the build",
+                "transcript": true, "preview": "Fixed the build.\nPushed it."},
       "convert": {"agent": "claude", "pane": "p2"}
     }]
   }]
@@ -171,7 +172,54 @@ mirrored. Bearer auth as today (`Authorization: Bearer TOKEN`).
 - A terminal's `agent` is the agent Herdr detects in the tab, such as
   `claude` run in a shell: `pane` is the pane it runs in and `title` its
   terminal title, both absent from older daemons. Home lists these tabs
-  with the chats, by status, and opens the agent's pane.
+  with the chats, by status, and opens the agent's pane, marking each row
+  with a terminal glyph so it reads apart from a chat.
+- A terminal agent's `preview` is what it last said, read off its visible
+  screen (`native/previews`): the last paragraph above the agent's own
+  input box, prompt, status, and footer, one list item to a line, at most
+  280 characters. When it waits on a numbered menu (a question, a
+  permission, an approval), it is what the menu asks, as
+  `sheprd_client::herdr::prompt` reads it, never the choices. The daemon reads only while a phone is connected: when
+  an agent first shows up, when it changes state, every 10 seconds while
+  it works, and 10 seconds after a failed read, at most 8 screens a pass;
+  a phone that comes back after none was connected has every screen read
+  again. A Herdr 2 screen is read by its core (`terminal.read`), so these
+  reads never take a screen a phone opens a terminal with. Skipping the agent's interface
+  is a best guess at Claude Code, Codex, and OpenCode's screens. It is
+  absent until read, when the screen shows nothing else, and from older
+  daemons.
+- `agent.transcript` is `true` when the agent's own conversation can be
+  read as a chat: Claude Code or Codex in a Herdr 1 pane, as
+  `sheprd_client::herdr::observe` lists them. The phone then opens it
+  with `{"type": "subscribe", "view": "chat", "pane": PANE}` on the
+  agent's pane, as it opens a chat, and `GET /api/v2/chat/{pane}` answers
+  the same. The daemon starts `sheprd-acp observe` for it then, on the
+  pane's host, with the session Herdr reports and the process's birth read
+  there; the transcript is `read_only`, its steps reach no notifications,
+  and no terminal is attached, so the pane keeps its size. At most eight
+  observers run; past that the oldest no phone follows ends. Where it
+  cannot be read (a Windows host, a session Herdr does not name, a Codex
+  launched to resume another session, a `CLAUDE_CONFIG_DIR` or
+  `CODEX_HOME` on macOS) the subscription answers `error`, and the
+  phone offers the terminal. Replies go to the terminal through
+  `/api/term/{pane}/paste` and Enter. Absent (false) from older daemons.
+- `GET /api/term/{pane}/prompt` answers `{"prompt": PROMPT}`, or `null`
+  when nothing waits: the numbered menu at the bottom of the pane's
+  screen, as `sheprd_client::herdr::prompt` reads it (Claude Code's
+  questions and permission prompts, Codex's approvals). It is a menu only
+  when exactly one choice carries the highlight (`❯` or `›`), so a numbered
+  list in an answer never is. `question` is its lines top to bottom,
+  `choices` each `{number, label, detail?, text?}` (`text: true` takes
+  typed words), and `selected` the highlighted index. Reading uses
+  `pane.read`, which neither attaches nor resizes.
+- `POST /api/term/{pane}/prompt` with `{"question", "number", "label",
+  "text"?}` takes that choice: the daemon reads the screen again, refuses
+  with 400 unless the question's lines are the ones the phone showed and
+  the choice is still there under that number and label (so a late answer
+  never approves another command with the same choices), then presses
+  Up or Down to it and Enter, typing `text` into a choice that takes
+  words first. A set of questions goes one at a time, ending on the
+  agent's own review, as at the desk.
 - A chat's `summary.first_prompt` is the start of its first prompt, which
   names a chat its agent has not titled; absent before one is sent and
   from older daemons.
@@ -233,6 +281,14 @@ The phone sends:
 
 `since` is optional: the cursor of the transcript the phone has cached.
 
+`background` is optional and only read for `chat`: `true` follows a chat
+no screen shows, so it opens current. It does not count as opening the
+chat, so its answers stay unseen and its badge stays. A socket follows
+at most eight views; when it is full, a view a screen shows takes a
+background chat's place, which ends with `error` "this chat gave way to
+a view on screen", and a background chat never takes another view's
+place. The phone follows at most three in the background per computer.
+
 `size` is optional and only read for `term`: the columns and rows the
 phone draws. While the view runs, the daemon holds a direct terminal
 attach to Herdr at that size (without taking the terminal from another
@@ -254,7 +310,11 @@ daemon sends it over the held attach as one mouse wheel scroll at the
 middle of the terminal, so Herdr hands it to an app that reports the
 mouse (`less`, `vim`, an agent's TUI) or scrolls the terminal's own
 history otherwise, and reads the screen again at once and shortly after,
-as after typing. `lines` of 0 answers `error` "scroll out of range"; more
+as after typing. A Herdr 2 terminal routes it the same way: one wheel
+notch at the middle of the terminal goes to an app that reports the mouse,
+or as an arrow key to a full-screen app under alternate scroll mode
+(DECSET 1007); otherwise the view scrolls through the history the daemon
+keeps. `lines` of 0 answers `error` "scroll out of range"; more
 than 50 either way moves 50. A terminal the view follows without an
 attach (no `size`, or Herdr refused it) answers `error` "this terminal
 cannot scroll from the phone" once per subscription and ignores later
@@ -315,10 +375,14 @@ app learns the pane it should open:
   this computer (all of them if it finds none or cannot run); `id` is
   what a request names.
 - `POST /api/v2/workspaces` takes `{"cwd", "agent", "branch"?, "prompt"?,
-  "start"?, "session"?}` and answers `{"workspace": "w3", "pane": "p7", "prompted":
+  "start"?, "session"?, "title"?}` and answers `{"workspace": "w3", "pane": "p7", "prompted":
   true, "started": true}`. The
   folder must be one `new` offers, and `branch`, when not blank, opens a
-  worktree. `session`, as home names it, opens it in that Herdr 1
+  worktree. A worktree of a folder that is a Herdr 1 repository workspace
+  is made by Herdr 1 from that workspace, so it joins the repository's
+  group, with its chat on herdr-core while one answers. `title`, when not
+  blank, names the new workspace (at most 200 characters, no control
+  characters). `session`, as home names it, opens it in that Herdr 1
   session; absent, or naming none the daemon follows, it opens where new
   workspaces go.
 - `POST /api/v2/workspaces/{workspace}/chats` takes `{"agent", "prompt"?,
@@ -587,17 +651,24 @@ stored value when present and keeps it when absent.
 
 `notify_key` is base64url without padding of the 65-byte uncompressed P-256
 point the app opens alerts with. Anything else is refused. A device with
-both, on a daemon with the user's APNs key, gets every chat notification
-through APNs and none through Web Push. APNs refusing the token
-(`BadDeviceToken`, `Unregistered`) drops `alert`.
+both, on a daemon with the push relay on, gets every chat notification
+through APNs and none through Web Push. Since computers push only through the
+push relay (`docs/apns-relay-plan.md`), `alert` is a relay handle; a plain
+token like the one above, from an older app, is kept but never sent to. A
+`gone` reply drops `alert`.
 
 **A shown alert** is push type `alert`, topic the bundle id,
-`apns-collapse-id` the chat's tag (at most 64 bytes), and priority 10 for a
-question, 5 otherwise:
+`apns-collapse-id` the pairing's scope and the chat's tag (at most 64
+bytes, digested when longer), and priority 10 for a question, 5 otherwise.
+Pane ids are unique only on one computer, so the collapse id and the thread
+start with the scope: 16 hex digits of a digest of the notify key the phone
+gave that computer, which tells the phone's computers apart without naming
+any to APNs or the push relay. The extension sets the shown thread from the
+sealed `computer` and `pane`.
 
 ```json
 { "aps": { "alert": { "title": "Sheprd", "body": "New activity" },
-           "mutable-content": 1, "thread-id": "w1:p2",
+           "mutable-content": 1, "thread-id": "SCOPE/w1:p2",
            "interruption-level": "time-sensitive", "sound": "default" },
   "sealed": "BASE64URL" }
 ```
@@ -624,8 +695,20 @@ field order:
   keeps the last count from each computer and sets the badge to their sum.
 - `permission` appears only for a permission request, with at most four
   options in the agent's order.
+- `event` is the daemon's id for the notification decision (32 hex digits),
+  the same in every copy of it. The extension keeps the ids it showed in the
+  last two days (at most 128, `SeenAlerts`, in the App Group), and a copy
+  that arrives again replaces the first silently, so the phone shows and
+  buzzes once. Older daemons leave it out.
+- `pr` appears only on a `turn_ended` whose turn created or pushed to a
+  pull request (the last one), as `https://github.com/OWNER/REPO/pull/N`.
+  The notification then offers Open PR #N beside Reply, in a category
+  `finished.pr.N`; it opens the app's pull request screen, or Safari when
+  the app cannot name the host. The chat program lists such a pull request
+  once in every turn that touches it, so the daemon sees each turn's.
 - The privacy setting decides what `body` quotes.
-- `body` is shortened, ending in `…`, until the whole payload fits 4 KB.
+- `body` is shortened, ending in `…`, until the whole payload fits 4 KB;
+  `pr` is dropped before the push fails to fit.
 
 **A clear** (the last question was answered from any client) is push type
 `background`, priority 5:
@@ -635,7 +718,7 @@ field order:
 ```
 
 Its plaintext has `"clear": true`, and the app removes the chat's
-notifications (`thread-id` = `pane`).
+notifications (those whose `computer` and `pane` match).
 
 **Live Activity buttons.** `content-state` also carries:
 - in the question phase, `permission` (the waiting permission's id) and
@@ -643,7 +726,8 @@ notifications (`thread-id` = `pane`).
 - `previous`, the two steps before `step`, oldest first, for the step stack.
 
 The shared fixtures are `Fixtures/notify/alert.json` (device key, plaintext,
-whole payload) and `Fixtures/update.json`.
+whole payload), `Fixtures/notify/finished-pr.json` (a finished turn with its
+pull request), and `Fixtures/update.json`.
 
 ### Bluetooth on the desktop
 
@@ -701,9 +785,10 @@ connections).
     devices, and encrypted current addresses.
   - `l2cap` (read): the PSM of the fallback channel, when it is on.
 - Advertising runs only while the pairing dialog is open, or while presence
-  is on (opt-in) for at least one paired device. The advertisement carries
-  only the service UUID, which iOS background scanning needs. The
-  computer's name and identity never appear unauthenticated.
+  is on (on by default; can be turned off) for at least one paired device.
+  The advertisement carries only the service UUID, which iOS background
+  scanning needs. The computer's name and identity never appear
+  unauthenticated.
 
 ### Flow on the phone
 
@@ -716,8 +801,11 @@ connections).
 
 ## Bluetooth after pairing
 
-All of this is opt-in per device, under Settings > Remote control on both
-sides.
+Presence is on by default on both sides: per computer on the phone
+(Settings > Notifications > Hold Alerts at the Desk, and on each
+computer's page) and on the desktop (Settings > Remote control, "Hold
+phone alerts while I'm here", `[remote] presence`). Saved choices are
+preserved when turned off.
 
 - **Presence: notifications follow you.**
   - The phone keeps a background Bluetooth connection to each paired
@@ -750,8 +838,12 @@ sides.
 
 ### Presence, exactly
 
-Opt-in on the desktop with `[remote] presence = true` (Settings > Remote
-control, "Hold phone alerts while I'm here"); macOS only for now.
+On by default for newly paired computers on the phone and for older phone
+records without a saved presence setting. Saved choices are preserved; the
+phone switch is Settings > Notifications > Hold Alerts at the Desk.
+On by default on the desktop, `[remote] presence` (Settings > Remote
+control, "Hold phone alerts while I'm here"), which `presence = false`
+turns off.
 
 - **Advertising.** While remote control runs with presence on, Sheprd
   keeps `sheprd-nearby` running and sends it
@@ -825,6 +917,16 @@ control, "Hold phone alerts while I'm here"); macOS only for now.
     wins, and they go in order once the mark is lifted or lapses.
   - A clear drops the held alert for its chat and still goes.
   - Live Activity pushes are never held.
+- **Linked hosts.** The SSH and cloud machines this computer paired the
+  phone with hold its alerts too, as the phone's owner is at this
+  computer whichever host an agent runs on.
+  - Each change and renewal of a device's mark also goes to every host
+    the device is paired with (`devices` lists the phone's id on each),
+    by running `sheprd-remote-control presence --device ID --near|--away`
+    there over the app's shared SSH connection.
+  - One run per host at a time; the newest mark per device wins while
+    one runs. A failed run is retried after 30 s, and a host that cannot
+    be reached lets a near mark lapse after 120 s, as here.
 - **Fixture.** `Fixtures/presence/prove.json` holds both sides from fixed
   values.
   - **The hello:** `device_id`, `hint_day`, and `hint`.
@@ -1037,7 +1139,7 @@ A `ios-testflight` job in `.github/workflows/ios.yml` builds and uploads on
 every push to `main` that touches `ios/**` or the v2 fixtures, and on each
 release tag; pull requests run only `ios-test` and the unsigned build.
 
-- `macos-26` runner with Xcode 26 (or later) selected explicitly.
+- `xcode-27` runner (macOS 27, Xcode 27): App Store Connect requires the iOS 27 SDK from April 2027, and the workflow fails on an older one.
 - `xcodegen`, then `xcodebuild archive` with automatic signing through an
   App Store Connect API key (`-allowProvisioningUpdates
   -authenticationKeyPath ... -authenticationKeyID ... -authenticationKeyIssuerID ...`),
@@ -1128,8 +1230,9 @@ That fallback waits for its throughput spike to run on a device.
   phone, under their own info.
 - **Wake:** state restoration relaunches the app when a computer comes
   back in range.
-- **Settings:** off by default on both sides, a switch per computer on
-  the phone and `[remote] presence` on the desktop.
+- **Settings:** on by default on both sides (preserved if turned off), a
+  switch per computer on the phone (Settings > Notifications > Hold Alerts
+  at the Desk) and `[remote] presence` on the desktop.
 - **Checked:** against shared fixtures (the signed bytes, the signature
   encoding, the sealed addresses) and unit tests on each side.
 - **Needs a device:** the Bluetooth path itself.

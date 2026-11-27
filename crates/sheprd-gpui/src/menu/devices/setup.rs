@@ -1,14 +1,14 @@
-//! Delegate provisioning to the installed Herdr CLI. A host that already runs
-//! a compatible Herdr is saved without a terminal; anything that needs SSH or
-//! installation prompts runs in this app on a terminal that a local workspace
-//! shows (see `setup_relay`), so no remote installer policy is duplicated here.
+//! Device provisioning through Herdr's CLI, with prompts hosted by Add Device.
 use super::Error;
 use crate::Result;
 use sheprd_client::{Destination, HostKeys, HostProbe, SavedHost};
 use std::{
     io::Read,
     process::{Command, ExitStatus, Stdio},
-    sync::Mutex,
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -124,7 +124,7 @@ pub(super) fn claim_saved(target: &str, session: &str) -> Result<Claim> {
 /// Forget a saved device with `herdr machine remove`. The CLI only edits the
 /// local catalog; it never connects, so the host's own Herdr keeps running.
 /// Blocks on a process: call it from the background executor.
-pub(super) fn remove(id: &str) -> Result<()> {
+pub(crate) fn remove(id: &str) -> Result<()> {
     remove_with(crate::daemon::executable().as_os_str(), id)
 }
 
@@ -164,6 +164,31 @@ fn rename_with(executable: &std::ffi::OsStr, id: &str, label: &str) -> Result<()
         return Ok(());
     }
     Err(Error::Rename {
+        status,
+        detail: last_line(&stderr),
+    }
+    .into())
+}
+
+/// Pause a saved device (`enabled` false) with `herdr machine disable`, or
+/// resume it with `enable`. The CLI only edits the local catalog: the host's
+/// own Herdr and its terminals keep running, and the catalog watcher drops or
+/// restores the connection. Blocks on a process: call it from the background
+/// executor.
+pub(crate) fn set_enabled(id: &str, enabled: bool) -> Result<()> {
+    set_enabled_with(crate::daemon::executable().as_os_str(), id, enabled)
+}
+
+fn set_enabled_with(executable: &std::ffi::OsStr, id: &str, enabled: bool) -> Result<()> {
+    if !sheprd_client::valid_profile_id(id) {
+        return Err(Error::NoProfile.into());
+    }
+    let verb = if enabled { "enable" } else { "disable" };
+    let (status, _, stderr) = run_cli(executable, &["machine", verb, id], REMOVE_TIMEOUT)?;
+    if status.success() {
+        return Ok(());
+    }
+    Err(Error::Pause {
         status,
         detail: last_line(&stderr),
     }
@@ -259,6 +284,7 @@ pub(super) struct Request {
     label: String,
     session: String,
     host_keys: HostKeys,
+    pub(super) tmux: bool,
 }
 
 impl Request {
@@ -297,6 +323,7 @@ impl Request {
             label,
             session: session.into(),
             host_keys: HostKeys::Verify,
+            tmux: false,
         })
     }
 
@@ -308,10 +335,6 @@ impl Request {
         &self.target
     }
 
-    pub(super) fn label(&self) -> &str {
-        &self.label
-    }
-
     /// Whether a saved device connects the same way: Herdr's `machine add` saves
     /// a new profile every time, so the same host would otherwise appear twice.
     pub(super) fn same_host(&self, target: &str, session: &str) -> bool {
@@ -320,10 +343,11 @@ impl Request {
 
     /// Blocks on SSH: call it from the background executor.
     pub(super) fn probe(&self) -> Result<HostProbe> {
-        Ok(sheprd_client::probe_host_with(
+        Ok(sheprd_client::ssh::probe_terminals(
             &self.target,
             &self.session,
             self.host_keys,
+            self.tmux,
         )?)
     }
 
@@ -350,13 +374,6 @@ impl Request {
     }
 }
 
-// The relay's command line is typed into a terminal shell. Single-quote
-// each word so a path never becomes shell syntax.
-#[cfg(unix)]
-fn quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
 /// The variables that choose where Herdr keeps its device catalog. Every CLI
 /// run for a device gets this process's values, so it edits the same catalog.
 const CATALOG_ROOTS: [&str; 3] = ["HERDR_CONFIG_PATH", "XDG_STATE_HOME", "XDG_CONFIG_HOME"];
@@ -376,55 +393,125 @@ fn cli_environment(command: &mut Command) {
     }
 }
 
-/// Run by `sh -c` before `machine add` when the user's key is to be
-/// installed first: `$1` is the target, and the rest is the save command.
 #[cfg(unix)]
-const INSTALL_KEY_THEN: &str = "target=$1; shift; ssh-copy-id \"$target\" && exec \"$@\"";
-
-/// What the setup terminal runs, as a child of `app` (this executable): the
-/// session helper, then `machine add`, after `ssh-copy-id` for `install_key`.
-/// Arguments stay separate words; no shell parses the target or label.
-#[cfg(unix)]
-fn setup_command(
-    app: &std::ffi::OsStr,
-    herdr: &std::ffi::OsStr,
-    request: &Request,
-    install_key: bool,
-) -> Command {
+fn setup_command(app: &std::ffi::OsStr, herdr: &std::ffi::OsStr, request: &Request) -> Command {
     let mut command = sheprd_client::new_command(app);
     command.arg(crate::setup_relay::SESSION);
-    if install_key {
-        command.args(["/bin/sh", "-c", INSTALL_KEY_THEN, "sh", request.target()]);
-    }
+    command.args([
+        "/bin/sh",
+        "-c",
+        include_str!("setup/prepare.sh"),
+        "sh",
+        request.target(),
+        &format!(
+            "/bin/sh -c {}",
+            sheprd_client::shell_quote(include_str!("setup/path.sh"))
+        ),
+        if request.host_keys == HostKeys::Skip {
+            "yes"
+        } else {
+            "no"
+        },
+    ]);
     command.arg(herdr).args(request.arguments());
     command
 }
 
-/// The pane's end of a terminal setup that this app runs, while it waits.
 #[cfg(unix)]
-pub(super) type Relay = crate::setup_relay::Listening<Claim>;
+fn key_setup_command(app: &std::ffi::OsStr, request: &Request) -> Command {
+    let mut command = sheprd_client::new_command(app);
+    command.args([crate::setup_relay::SESSION, "ssh-copy-id"]);
+    if request.host_keys == HostKeys::Skip {
+        command.args([
+            "-o",
+            "StrictHostKeyChecking=no", // i18n: data
+            "-o",
+            "UserKnownHostsFile=/dev/null", // i18n: data
+            "-o",
+            "GlobalKnownHostsFile=/dev/null", // i18n: data
+        ]);
+    }
+    command.args(["--", request.target()]);
+    command
+}
 
-/// Windows has no terminal setup, so there is never a relay.
-#[cfg(windows)]
-#[derive(Debug)]
-pub(super) enum Relay {}
+/// Installs the pinned herdr-core over SSH, adds `~/.local/bin` to the remote
+/// shell's PATH (best-effort), and saves the device directly without Herdr 1's
+/// CLI. Blocks on SSH: call it from the background executor.
+pub(super) fn install_core(request: &Request, claim: &Claim, cancelled: &AtomicBool) -> Result<()> {
+    install_core_with(
+        request,
+        claim,
+        cancelled,
+        verify_unsaved,
+        Request::remember_host_keys,
+        |target, cancelled| {
+            sheprd_remote::core_install::install(
+                sheprd_remote::core_install::Target::Host(sheprd_client::ScriptHost::Ssh(
+                    target,
+                    sheprd_client::SshLane::Bulk,
+                )),
+                cancelled,
+            )
+            .map(|_| ())
+            .map_err(|error| crate::Error::Remote(error.into()))
+        },
+        configure_remote_path,
+        store_host,
+    )
+}
 
-#[cfg(windows)]
-impl Relay {
-    pub(super) fn keep(&mut self, _: Claim) {
-        match *self {}
+#[allow(clippy::too_many_arguments)]
+fn install_core_with(
+    request: &Request,
+    claim: &Claim,
+    cancelled: &AtomicBool,
+    verify: impl FnOnce(&Request, &Claim) -> Result<()>,
+    remember_keys: impl FnOnce(&Request) -> Result<()>,
+    install: impl FnOnce(&str, &AtomicBool) -> Result<()>,
+    configure_path: impl FnOnce(&str, &AtomicBool),
+    store: impl FnOnce(&Request, &Claim) -> Result<()>,
+) -> Result<()> {
+    verify(request, claim)?;
+    remember_keys(request)?;
+    if cancelled.load(Ordering::Acquire) {
+        return Err(sheprd_client::Error::ScriptCancelled.into());
+    }
+    install(request.target(), cancelled)?;
+    configure_path(request.target(), cancelled);
+    if cancelled.load(Ordering::Acquire) {
+        return Err(sheprd_client::Error::ScriptCancelled.into());
+    }
+    store(request, claim)
+}
+
+fn configure_remote_path(target: &str, cancelled: &AtomicBool) {
+    if cancelled.load(Ordering::Acquire) {
+        return;
+    }
+    let limits = sheprd_client::ScriptLimits {
+        output: 4 * 1024,
+        idle: Duration::from_secs(15),
+    };
+    if let Err(error) = sheprd_client::run_script(
+        sheprd_client::ScriptHost::Ssh(target, sheprd_client::SshLane::Bulk),
+        include_str!("setup/path.sh"),
+        std::io::empty(),
+        std::io::sink(),
+        limits,
+        cancelled,
+    ) {
+        tracing::warn!(
+            category = "device_setup",
+            %error,
+            "Could not add ~/.local/bin to the remote shell PATH"
+        );
     }
 }
 
-/// A setup that needs prompts: this app runs it on a terminal of its own and
-/// a local workspace shows it (see `setup_relay` for why).
-#[derive(Debug)]
-pub(super) struct TerminalSetup {
-    /// The line typed into the workspace shell: a short relay command, well
-    /// under the 1024 bytes a shell in canonical mode accepts on macOS.
-    pub(super) command: String,
-    pub(super) relay: Relay,
-}
+/// The private terminal connection, held by the Add Device dialog.
+#[cfg(unix)]
+pub(super) type Relay = crate::setup_relay::Listening<Claim>;
 
 /// Runs `machine add` without a terminal, for a host whose probe found a
 /// compatible Herdr: the CLI starts a stopped server itself. Blocks on SSH, so
@@ -434,7 +521,7 @@ pub(super) fn save(request: &Request, claim: &Claim, probe: HostProbe) -> Result
     request.remember_host_keys()?;
     // Herdr 1's `machine add` provisions Herdr 1 there; a host with
     // herdr-core alone needs none of that, only the device.
-    if probe == HostProbe::Core {
+    if matches!(probe, HostProbe::Tmux | HostProbe::Core) {
         store_host(request, claim)?;
         return Ok(SaveOutcome::Ready);
     }
@@ -684,22 +771,11 @@ pub(super) fn last_line(output: &[u8]) -> String {
         .collect()
 }
 
-#[cfg(all(test, unix))]
-impl TerminalSetup {
-    pub(super) fn fixture(command: &str) -> Self {
-        Self {
-            command: command.into(),
-            relay: Relay::fixture(),
-        }
-    }
-}
-
-/// Start the setup for a local workspace: this app runs `machine add`, after
-/// `ssh-copy-id` for `install_key`, once the workspace's relay connects. The
-/// relay takes the host's claim and releases it when the setup ends. Blocks on the login environment and
-/// the file system: call it off the UI thread.
 #[cfg(unix)]
-pub(super) fn terminal_setup(request: &Request, install_key: bool) -> Result<TerminalSetup> {
+pub(super) fn native_setup(
+    request: &Request,
+    claim: Claim,
+) -> Result<crate::setup_relay::gui::Session> {
     request.remember_host_keys()?;
     let app = std::env::current_exe()?;
     let dir = crate::preferences::state_dir().ok_or(Error::NoStateDirectory)?;
@@ -707,32 +783,22 @@ pub(super) fn terminal_setup(request: &Request, install_key: bool) -> Result<Ter
         app.as_os_str(),
         crate::daemon::executable().as_os_str(),
         request,
-        install_key,
     );
     cli_environment(&mut command);
-    let relay = crate::setup_relay::listen(&dir, command, SETUP_LIMIT)?;
-    let command = relay_line(&app, relay.path())?;
-    Ok(TerminalSetup { command, relay })
+    let relay: Relay = crate::setup_relay::listen(&dir, command, SETUP_LIMIT)?;
+    crate::setup_relay::gui::Session::connect(relay, claim)
 }
 
-/// The line the workspace's shell runs: this executable relaying `socket`.
-/// It carries no environment, so its length depends only on the two paths.
 #[cfg(unix)]
-fn relay_line(app: &std::path::Path, socket: &std::path::Path) -> Result<String> {
-    let word = |path: &std::path::Path| path.to_str().map(quote).ok_or(Error::NonUtf8SetupPath);
-    Ok(format!(
-        "{} {} {}",
-        word(app)?,
-        quote(crate::setup_relay::ATTACH),
-        word(socket)?
-    ))
-}
-
-/// Windows has no relay for a terminal setup yet; the dialog asks the user to
-/// run `herdr machine add` in a terminal instead and never calls this.
-#[cfg(windows)]
-pub(super) fn terminal_setup(_: &Request, _: bool) -> Result<TerminalSetup> {
-    Err(Error::TerminalSetupUnavailable.into())
+pub(super) fn key_setup(request: &Request) -> Result<crate::setup_relay::gui::Session> {
+    request.remember_host_keys()?;
+    let app = std::env::current_exe()?;
+    let dir = crate::preferences::state_dir().ok_or(Error::NoStateDirectory)?;
+    let mut command = key_setup_command(app.as_os_str(), request);
+    cli_environment(&mut command);
+    let relay: crate::setup_relay::Listening<()> =
+        crate::setup_relay::listen(&dir, command, SETUP_LIMIT)?;
+    crate::setup_relay::gui::Session::connect(relay, ())
 }
 
 #[cfg(test)]

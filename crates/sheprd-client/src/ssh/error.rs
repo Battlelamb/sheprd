@@ -25,6 +25,10 @@ pub enum Error {
     Refused(#[source] SshFailure),
     #[error("SSH discovery timed out")]
     Timeout,
+    /// The user chose not to check this host's key, so nothing it says
+    /// about its own keys can be held to a strictly checked session.
+    #[error("this host's SSH key is not checked")]
+    Unchecked,
     #[error("SSH port forwarding is not supported on this platform")]
     Unsupported,
     // keep-sorted end
@@ -39,7 +43,12 @@ impl Error {
             Self::Cancelled => io::ErrorKind::Interrupted,
             Self::Closed => io::ErrorKind::UnexpectedEof,
             Self::Refused(failure) => match failure {
-                SshFailure::HostKey | SshFailure::Auth => io::ErrorKind::PermissionDenied,
+                // A check is the host refusing this identity until the user
+                // proves it, so it reads as the permission failure it is.
+                SshFailure::HostKey
+                | SshFailure::Auth
+                | SshFailure::RelayBanned(_)
+                | SshFailure::Tailscale(_) => io::ErrorKind::PermissionDenied,
                 SshFailure::Unreachable | SshFailure::NoRoute | SshFailure::LocalNetworkDenied => {
                     io::ErrorKind::NotConnected
                 }
@@ -48,6 +57,7 @@ impl Error {
             },
             Self::Timeout => io::ErrorKind::TimedOut,
             Self::KnownHostsUnavailable | Self::OutputLimit => io::ErrorKind::InvalidData,
+            Self::Unchecked => io::ErrorKind::PermissionDenied,
         }
     }
 }

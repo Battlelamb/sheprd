@@ -25,12 +25,15 @@ use std::{
 /// Extensions of documents the system opens in a viewer or editor rather
 /// than running. Scripts are left out on purpose: `.py`, `.sh`, or `.js` may
 /// be run by the default application for them.
-const DOCUMENTS: [&str; 52] = [
-    "bmp", "c", "cc", "cfg", "conf", "cpp", "cs", "css", "csv", "diff", "env", "gif", "go", "h",
-    "hpp", "htm", "html", "ico", "ini", "java", "jpeg", "jpg", "json", "jsonc", "jsx", "kt",
-    "lock", "log", "markdown", "md", "patch", "pdf", "png", "proto", "rs", "rst", "scss", "sql",
-    "svg", "swift", "tex", "toml", "ts", "tsv", "tsx", "txt", "vue", "webp", "xml", "yaml", "yml",
-    "zig",
+const DOCUMENTS: &[&str] = &[
+    // keep-sorted start
+    "aac", "avi", "bmp", "c", "cc", "cfg", "conf", "cpp", "cs", "css", "csv", "diff", "doc", "docx",
+    "env", "flac", "gif", "go", "h", "hpp", "htm", "html", "ico", "ini", "java", "jpeg", "jpg",
+    "json", "jsonc", "jsx", "kt", "lock", "log", "m4a", "m4v", "markdown", "md", "mkv", "mov",
+    "mp3", "mp4", "ogg", "patch", "pdf", "png", "ppt", "pptx", "proto", "rs", "rst", "scss", "sql",
+    "svg", "swift", "tex", "toml", "ts", "tsv", "tsx", "txt", "vue", "wav", "webm", "webp", "xls",
+    "xlsx", "xml", "yaml", "yml", "zig", "zip",
+    // keep-sorted end
 ];
 
 /// A path a pane printed, the line printed after it, and the pane and the
@@ -183,6 +186,17 @@ fn opened(path: &Path) -> Option<PathBuf> {
 }
 
 impl FileLink {
+    /// A regular, non-executable local file for a background thumbnail job.
+    /// Use the same symlink/network policy as the explicit file opener.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn thumbnail_path(&self) -> Option<PathBuf> {
+        let home = crate::config::home().ok();
+        let real = real_path(&self.resolve(home.as_deref())?).ok()?;
+        let metadata = std::fs::metadata(&real).ok()?;
+        (metadata.is_file() && !executable(&metadata) && metadata.len() <= 1024 * 1024 * 1024)
+            .then_some(real)
+    }
+
     /// Whether the path is there for a click to open. This reads the disk,
     /// so it runs off the UI thread.
     pub(crate) fn found(&self) -> bool {
@@ -340,6 +354,48 @@ impl SheprdWindow {
             });
         })
         .detach();
+    }
+
+    /// Selects the file `link` names in the system file manager, once a
+    /// background check finds it there. A missing file is answered with a
+    /// flash, as an explicit open is.
+    pub(crate) fn reveal_file_link(&mut self, link: FileLink, cx: &mut Context<Self>) {
+        let selection_epoch = self.selection_epoch;
+        let found = cx.background_executor().spawn(async move {
+            let home = crate::config::home().ok();
+            revealed(&link.resolve(home.as_deref())?)
+        });
+        cx.spawn(async move |this, cx| {
+            let Some(found) = found.await else {
+                tracing::debug!("Revealed file path not found");
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                if this.selection_epoch != selection_epoch {
+                    return;
+                }
+                match found {
+                    Ok(real) => cx.reveal_path(&real),
+                    Err(path) => this.show_flash(
+                        super::flash::Flash::warning(
+                            crate::Error::LinkedFileMissing { path }.to_string(),
+                        ),
+                        cx,
+                    ),
+                }
+            });
+        })
+        .detach();
+    }
+}
+
+/// The real path to select for `path`, or `Err(path)` when nothing is there.
+/// `None` when it cannot be read, which is not worth a flash.
+fn revealed(path: &Path) -> Option<Result<PathBuf, PathBuf>> {
+    match real_path(path) {
+        Ok(real) => Some(Ok(real)),
+        Err(Unresolved::Missing) => Some(Err(path.to_owned())),
+        Err(_) => None,
     }
 }
 

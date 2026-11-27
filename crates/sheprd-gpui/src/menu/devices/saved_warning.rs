@@ -11,12 +11,12 @@ impl SheprdWindow {
         // dialog until dismissed, rather than timing out a truncated flash.
         if let Some(form) = &mut self.menu.device_setup {
             form.step = outcome.warning().map_or(Step::Saved, Step::SavedWarning);
-            form.error = None;
+            form.clear_failure();
         }
         cx.notify();
     }
 
-    /// Handle completed saves before polling any setup workspace in progress.
+    /// Handle completed saves before polling interactive setup.
     pub(super) fn poll_saved_device(
         &mut self,
         window: &mut Window,

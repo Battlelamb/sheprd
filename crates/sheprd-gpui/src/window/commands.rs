@@ -485,6 +485,14 @@ impl SheprdWindow {
                 self.open_px0(None, window, cx);
                 return;
             }
+            Command::OpenMachine => {
+                self.open_some_machine(window, cx);
+                return;
+            }
+            Command::NewMachine => {
+                self.offer_new_machine(cx);
+                return;
+            }
             Command::RemotePair => {
                 self.open_remote_pairing(window, cx);
                 return;
@@ -529,6 +537,10 @@ impl SheprdWindow {
                     WorktreeShortcut::Remove
                 };
                 self.open_worktree_shortcut(shortcut, window, cx);
+                return;
+            }
+            Command::RemoveMergedWorktrees => {
+                self.open_merged_sweep(window, cx);
                 return;
             }
             Command::WorktreeNotes => {
@@ -668,8 +680,15 @@ impl SheprdWindow {
                 self.clear_all_notifications(window, cx);
                 return;
             }
+            Command::NewTmuxTerminal => {
+                #[cfg(feature = "tmux")]
+                self.new_provider_terminal(Some(crate::config::TerminalBackend::Tmux), window, cx);
+                #[cfg(not(feature = "tmux"))]
+                self.show_flash(Flash::warning(fl!("core-terminals-tmux-disabled")), cx);
+                return;
+            }
             Command::NewCoreTerminal => {
-                self.new_core_terminal(window, cx);
+                self.new_provider_terminal(Some(crate::config::TerminalBackend::Core), window, cx);
                 return;
             }
             // A herdr-core pane with the keyboard mirrors itself above.

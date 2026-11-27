@@ -9,7 +9,7 @@ fn ids<'a>(store: &'a Store, scope: &'a Scope) -> Vec<&'a str> {
 }
 
 #[test]
-fn kept_workspaces_are_numbered_per_app_and_listed_per_host() {
+fn kept_workspaces_take_random_ids_and_are_listed_per_host() {
     let (here, there) = (Scope::endpoint("here"), Scope::endpoint("there"));
     let mut store = Store::default();
     assert!(store.keep_default(&here, "herdr-2", "Herdr 2"));
@@ -23,14 +23,16 @@ fn kept_workspaces_are_numbered_per_app_and_listed_per_host() {
     let second = store
         .keep_workspace(&there, "web", "/src/web", false)
         .unwrap();
-    assert_eq!((first.as_str(), second.as_str()), ("space-1", "space-2"));
-    assert_eq!(ids(&store, &here), ["herdr-2", "space-1"]);
-    assert_eq!(ids(&store, &there), ["space-2"]);
-    assert_eq!(
-        store.kept_workspace(&here, "space-1").unwrap().cwd,
-        "/src/api"
-    );
-    assert!(store.kept_workspace(&there, "space-1").is_none());
+    assert_ne!(first, second);
+    for id in [&first, &second] {
+        let digits = id.strip_prefix("space-").unwrap();
+        assert_eq!(digits.len(), 16);
+        assert!(digits.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+    assert_eq!(ids(&store, &here), ["herdr-2", first.as_str()]);
+    assert_eq!(ids(&store, &there), [second.as_str()]);
+    assert_eq!(store.kept_workspace(&here, &first).unwrap().cwd, "/src/api");
+    assert!(store.kept_workspace(&there, &first).is_none());
 }
 
 #[test]
@@ -78,6 +80,7 @@ fn kept_workspaces_survive_a_restart_and_a_damaged_one_costs_only_itself() {
     let reread = sheprd_session::SavedTabs::parse(&bytes).unwrap();
     assert_eq!(reread.workspaces("s").next().unwrap().label, "api");
     let without = serde_json::to_string(&Saved {
+        synced: Default::default(),
         tabs: Vec::new(),
         workspaces: Vec::new(),
     })
@@ -113,4 +116,75 @@ fn a_closed_workspace_id_is_not_given_again() {
     assert_ne!(first, second);
     assert!(is_kept_id(&second) && is_kept_id(crate::core_terminals::WORKSPACE));
     assert!(!is_kept_id("w_1"));
+}
+
+#[test]
+fn the_last_folder_and_user_name_survive_serialization() {
+    let scope = Scope::endpoint("ssh:box");
+    let mut store = Store::default();
+    let id = store.keep_workspace(&scope, "old", "/old", false).unwrap();
+    assert!(!store.follow_kept_folder(&Scope::endpoint("other"), &id, "/wrong"));
+    assert!(!store.follow_kept_folder(&scope, &id, ""));
+    assert!(!store.follow_kept_folder(&scope, &id, &"x".repeat(5000)));
+    assert!(store.follow_kept_folder(&scope, &id, "/work/repo"));
+    assert_eq!(store.kept_workspace(&scope, &id).unwrap().label, "old");
+    assert!(!store.follow_kept_folder(&scope, &id, "/work/repo"));
+    store.rename_kept(&scope, &id, "My project");
+    assert!(store.follow_kept_folder(&scope, &id, "/work/final"));
+    let bytes = serde_json::to_vec(&Saved {
+        tabs: Vec::new(),
+        workspaces: store.workspaces.clone(),
+        synced: Default::default(),
+    })
+    .unwrap();
+    let restored = sheprd_session::SavedTabs::parse(&bytes).unwrap();
+    let saved = restored.workspaces(scope.as_str()).next().unwrap();
+    assert_eq!(saved.cwd, "/work/final");
+    assert_eq!(saved.label, "My project");
+    assert!(saved.custom);
+}
+
+#[test]
+fn only_a_tab_in_a_herdr_workspace_needs_herdr() {
+    let (here, there) = (Scope::endpoint("here"), Scope::endpoint("there"));
+    let mut store = Store::default();
+    assert!(!store.holds_herdr_tabs(&here), "nothing saved");
+    store.open(here.clone(), sheprd_session::DEFAULT_WORKSPACE, None, None);
+    let kept = store
+        .keep_workspace(&here, "api", "/src/api", false)
+        .unwrap();
+    store.open(here.clone(), &kept, None, None);
+    assert!(
+        !store.holds_herdr_tabs(&here),
+        "the app lists its own workspaces"
+    );
+    store.open(there.clone(), "w2", None, None);
+    assert!(!store.holds_herdr_tabs(&here), "another host's tab");
+    assert!(store.holds_herdr_tabs(&there));
+    store.open(here.clone(), "w2", None, None);
+    assert!(store.holds_herdr_tabs(&here));
+}
+
+#[test]
+fn an_automatic_name_follows_its_folder_and_a_user_name_stays() {
+    let scope = Scope::endpoint("here");
+    let mut store = Store::default();
+    let auto = store
+        .keep_workspace(&scope, "old", "/work/old", false)
+        .unwrap();
+    let named = store
+        .keep_workspace(&scope, "Mine", "/work/old", true)
+        .unwrap();
+    assert!(!store.follow_kept_label(&Scope::endpoint("other"), &auto, "new"));
+    assert!(!store.follow_kept_label(&scope, &auto, " \n"));
+    assert!(store.follow_kept_label(&scope, &auto, " new\n"));
+    assert!(
+        !store.follow_kept_label(&scope, &auto, "new"),
+        "already its name"
+    );
+    let followed = store.kept_workspace(&scope, &auto).unwrap();
+    assert_eq!(followed.label, "new");
+    assert!(!followed.custom);
+    assert!(!store.follow_kept_label(&scope, &named, "new"));
+    assert_eq!(store.kept_workspace(&scope, &named).unwrap().label, "Mine");
 }

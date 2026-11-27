@@ -1,0 +1,33 @@
+import AppIntents
+import SheprdRemoteCore
+import SwiftUI
+
+/// A Live Activity's answers: up to three of the waiting question's
+/// options as buttons that answer without opening the app. "Always"
+/// answers stay in the app, where they can ask for Face ID first.
+struct AnswerButtons: View {
+    let facts: ChatActivityFacts
+    let state: ChatActivityState
+
+    var body: some View {
+        if state.phase == .question, let permission = state.permission, let question = state.question, !answers.isEmpty {
+            HStack(spacing: 8) {
+                ForEach(answers, id: \.id) { option in
+                    Button(intent: AnswerIntent(computer: facts.computerId, pane: facts.pane, permission: permission, option: option, question: question)) {
+                        Text(option.name)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(option.kind.allows ? Palette.question : Color.white.opacity(0.2))
+                    .foregroundStyle(option.kind.allows ? Color.black : Color.white)
+                }
+            }
+        }
+    }
+
+    private var answers: [ChatActivityState.Option] {
+        Array(state.options.filter { $0.kind != .allowAlways && $0.kind != .rejectAlways }.prefix(3))
+    }
+}

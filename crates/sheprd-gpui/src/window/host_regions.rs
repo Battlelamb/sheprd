@@ -5,6 +5,7 @@
 
 use super::SheprdWindow;
 use crate::fonts::StyledFont as _;
+use crate::session_model::Sessions;
 use crate::sidebar::{ActivityPanel, BAR_WIDTH, SidebarMode};
 use gpui::{AnyElement, AnyView, Context, Div, Empty, Window, div, prelude::*, px, rgb};
 
@@ -12,25 +13,53 @@ use gpui::{AnyElement, AnyView, Context, Div, Empty, Window, div, prelude::*, px
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Region {
     ActivityBar,
+    /// Leaves a button slot above Settings for the Moonframe editor.
+    ActivityBarWithEditor,
+    Build,
+    SidebarActions,
+    Worktrees,
+    Agents,
+    /// The device picker under the sidebar's lists, as the sidebar ends with
+    /// it, while `[sidebar] device_footer` shows it.
+    Devices,
     /// The row over the activity bar and sidebar: the traffic lights' room,
     /// and Back and Forward.
     Header,
+    FullHeader,
     /// Menus, toasts and what else draws over the window, in its coordinates,
     /// so the host paints it over the whole window, outside its layout. It takes
     /// no clicks of its own.
     Overlay,
     Sidebar,
+    /// The workspaces heading and sidebar toggle over the list or rail.
+    SidebarTitle,
     StatusBar,
+    /// What ends the title bar: the checkout's changes and branch, the
+    /// account, and the details toggle. The tab strips leave its room free.
+    TitleBar,
 }
 
 /// The sizes the regions want, in pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sizes {
     pub activity_bar: f32,
+    pub build: f32,
+    /// The device picker's height, or zero while it is hidden.
+    pub devices: f32,
     pub header: f32,
+    pub full_header: bool,
+    /// The window's height, which the left column's sections share.
+    pub height: f32,
     /// The column holding the activity bar and sidebar.
     pub left: f32,
+    /// Whether the layout needs the complete sidebar (device tree, nested agents or rail).
+    pub sidebar_region: bool,
+    /// Zen mode leaves only the focused content.
+    pub zen: bool,
+    pub sidebar_title: f32,
     pub status_bar: f32,
+    /// The title bar's end, as last drawn.
+    pub titlebar: f32,
 }
 
 impl SheprdWindow {
@@ -42,13 +71,37 @@ impl SheprdWindow {
             } else {
                 0.
             },
+            build: if env!("HERDR_BUILD_WORKTREE") == "1" && !self.zen_layout() {
+                crate::worktree_banner::HEIGHT
+            } else {
+                0.
+            },
+            devices: if self.device_footer_shown() {
+                crate::sidebar::DEVICE_FOOTER_HEIGHT
+            } else {
+                0.
+            },
             header: crate::titlebar::HEIGHT,
+            full_header: self.hosted_full_header == Some(true),
+            height: f32::from(window.viewport_size().height),
             left: self.sidebar_column_width(width).unwrap_or(0.),
-            status_bar: if self.status_bar_visible {
+            sidebar_region: self.sidebar_mode() != SidebarMode::Expanded
+                || !self.device_footer_shown()
+                || self
+                    .mods
+                    .entries()
+                    .any(|(_, entry)| entry.places().contains(&sheprd_mods::Place::Sidebar))
+                || !self.config.layout.mode.lists_workspaces()
+                || (self.config.show_agents
+                    && self.config.agents_placement == crate::config::AgentsPlacement::Nested),
+            zen: self.zen_layout(),
+            sidebar_title: self.activity_title_height(),
+            status_bar: if self.status_bar_visible && !self.zen_layout() {
                 self.status_bar_height()
             } else {
                 0.
             },
+            titlebar: self.titlebar_width,
         }
     }
 
@@ -70,9 +123,39 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match region {
-            Region::ActivityBar if self.activity_bar_leads() => self
+            Region::ActivityBar | Region::ActivityBarWithEditor if self.activity_bar_leads() => {
+                self.region_root()
+                    .child(self.activity_bar_with_slot(region == Region::ActivityBarWithEditor, cx))
+                    .into_any_element()
+            }
+            // On the sidebar's fill, as the sidebar ends with it.
+            Region::Devices if self.device_footer_shown() => self
+                .sidebar_list_root()
+                .child(self.render_device_footer(cx))
+                .into_any_element(),
+            Region::Worktrees | Region::Agents => {
+                let indicators = self.sidebar_view.read(cx).indicators();
+                let width = self.expanded_sidebar_width(window);
+                let root = self.sidebar_list_root().relative();
+                if region == Region::Agents {
+                    root.child(self.render_agent_section(indicators, width, window, cx))
+                        .into_any_element()
+                } else {
+                    let (list, drag) = self.sidebar_worktrees(indicators, width, window, cx);
+                    root.child(list).child(drag).into_any_element()
+                }
+            }
+            Region::SidebarActions => self
+                .sidebar_list_root()
+                .child(self.sidebar_actions(cx))
+                .into_any_element(),
+            Region::Build if !self.zen_layout() => self
                 .region_root()
-                .child(self.render_activity_bar(cx))
+                .children(self.render_worktree_banner())
+                .into_any_element(),
+            Region::FullHeader => self
+                .region_root()
+                .child(self.render_titlebar(window, cx))
                 .into_any_element(),
             Region::Header => self
                 .region_root()
@@ -86,12 +169,50 @@ impl SheprdWindow {
                 root.into_any_element()
             }
             Region::Sidebar => self.render_sidebar_region(window, cx),
+            Region::SidebarTitle if self.activity_bar_leads() => self
+                .region_root()
+                .child(self.panel_title(ActivityPanel::Workspaces, cx))
+                .into_any_element(),
             Region::StatusBar if self.status_bar_visible => self
                 .region_root()
                 .child(self.render_status_bar(cx))
                 .into_any_element(),
+            Region::TitleBar => self.render_titlebar_region(window, cx),
             _ => Empty.into_any_element(),
         }
+    }
+
+    /// The title bar's end at its own width, which it reports so the shell
+    /// can size the region and the rightmost strip can leave it free.
+    fn render_titlebar_region(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let view = cx.entity().downgrade();
+        let end = self.titlebar_end(window, cx).relative().child(
+            gpui::canvas(
+                move |bounds, _, cx| {
+                    let width = f32::from(bounds.size.width).ceil();
+                    let _ = view.update(cx, |this, cx| {
+                        if this.titlebar_width != width {
+                            this.titlebar_width = width;
+                            cx.notify();
+                        }
+                    });
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .size_full(),
+        );
+        self.region_root()
+            .bg(self.fill().panel(self.theme.surface))
+            .flex()
+            .items_center()
+            .justify_end()
+            .child(end)
+            .into_any_element()
     }
 
     fn render_sidebar_region(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -123,12 +244,27 @@ impl SheprdWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The same foreground workspace as the sidebar, even when a kept
+        // workspace hides the daemon's focus. Never light for a background agent.
+        let sessions = self.sessions(self.selected_endpoint);
+        let kept = self.kept_in_front();
+        if let Some(workspace) = sessions.keyed().find_map(|(keeper, session)| {
+            session.workspace(Sessions::front_of(keeper, session, kept)?)
+        }) {
+            let rounded = cfg!(target_os = "macos") && !window.is_fullscreen();
+            root.extend([super::edge_light::frame(
+                workspace.status,
+                self.config.edge_light,
+                rounded,
+            )]);
+        }
         root.extend(self.render_tab_ghost(cx));
         root.extend(self.render_core_note(cx).map(IntoElement::into_any_element));
         root.extend(self.render_toasts(window, cx));
         root.extend(self.render_file_transfer(window, cx));
         root.extend(self.render_menu_leaving(window, cx));
-        if self.menu.page.is_some() {
+        // A custom Luau picker handles the sheet it opened.
+        if self.menu.page.is_some() && !self.hosted_picker_open() {
             root.extend([self.render_menu(window, cx).into_any_element()]);
         }
     }

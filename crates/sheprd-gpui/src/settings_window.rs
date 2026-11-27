@@ -3,6 +3,7 @@
 mod catalog;
 #[cfg(feature = "cloud")]
 mod cloud_devices;
+pub(crate) mod guidance;
 #[cfg(feature = "cloud")]
 // Add Device records the request instead in unit tests.
 #[cfg_attr(test, allow(dead_code, unused_imports))]
@@ -15,7 +16,12 @@ mod layouts;
 mod navigation;
 mod pages;
 pub(crate) use layouts::{apply_loaded_layout, layout_load_revision};
-pub(crate) use pages::remote_control::open as open_remote;
+pub(crate) use pages::fleet::{Pending as FleetPending, open as open_fleet};
+#[cfg(target_os = "macos")]
+pub(crate) use pages::machines::{
+    Deletion as MachineDeletion, offer_new as offer_new_machine, open as open_machines,
+};
+pub(crate) use pages::remote_control::{offer_linked_relay, open as open_remote};
 pub(crate) use pages::text_shortcuts::open as open_text_shortcuts;
 #[cfg(all(feature = "integration-test", target_os = "macos"))]
 mod native;
@@ -35,7 +41,7 @@ pub(crate) use sidebar::{apply_loaded_sidebar, sidebar_load_revision};
 mod themes;
 mod ui;
 #[cfg(all(feature = "integration-test", target_os = "macos"))]
-pub(crate) use native::verify_native;
+pub(crate) use native::{verify_native, verify_native_close};
 pub(crate) use themes::{
     apply_loaded_theme, apply_theme_draft, theme_load_revision, theme_pending,
 };
@@ -75,15 +81,17 @@ struct SettingsWindowHandle {
 impl Global for SettingsWindowHandle {}
 
 pub(crate) fn open(source: WeakEntity<SheprdWindow>, cx: &mut App) {
-    cx.defer(move |cx| {
-        open_with(source, cx, |view, window, cx| {
-            view.initialize_theme_browser(window, cx);
-            view.initialize_controls(cx);
-            #[cfg(windows)]
-            view.refresh_launch_at_login(None, cx);
-            view.reload(cx);
-            view.watch_config(cx);
-        })
+    cx.defer(move |cx| open_now(source, cx));
+}
+
+fn open_now(source: WeakEntity<SheprdWindow>, cx: &mut App) {
+    open_with(source, cx, |view, window, cx| {
+        view.initialize_theme_browser(window, cx);
+        view.initialize_controls(cx);
+        #[cfg(windows)]
+        view.refresh_launch_at_login(None, cx);
+        view.reload(cx);
+        view.watch_config(cx);
     });
 }
 
@@ -153,6 +161,7 @@ fn open_with(
 
 struct SettingsWindow {
     caption: crate::caption::Caption,
+    _guidance: Option<Subscription>,
     config: Config,
     /// The config as the last successful load read it, which sidebar saves
     /// diff against; previews change only `config`.
@@ -171,7 +180,11 @@ struct SettingsWindow {
     code: controls::code::CodeSettings,
     px0: controls::px0::Px0Settings,
     chat_env: controls::chat_env::ChatEnvSettings,
+    #[cfg(target_os = "macos")]
+    machines: pages::machines::MachinesPage,
     remote: pages::remote_control::RemoteSettings,
+    fleet: pages::fleet::FleetPage,
+    voice: pages::voice::VoicePage,
     text_shortcuts: pages::text_shortcuts::TextShortcutsPage,
     /// The open override dropdown, if any; its list renders inside its button.
     dropdown: Option<ui::Dropdown>,
@@ -180,7 +193,7 @@ struct SettingsWindow {
     /// A slider being dragged, or released and saving, that writes only on
     /// release.
     number_preview: Option<inputs::NumberPreview>,
-    /// The host colour being typed as hex, if any.
+    /// The colour being typed as hex, if any.
     hex_edit: Option<sidebar::HexEdit>,
     #[cfg(windows)]
     launch_at_login: launch_at_login::LaunchAtLogin,
@@ -324,6 +337,7 @@ impl SettingsWindow {
         );
         Self {
             caption: Default::default(),
+            _guidance: None,
             loaded_config: config.clone(),
             config,
             theme,
@@ -339,7 +353,11 @@ impl SettingsWindow {
             code: Default::default(),
             px0: Default::default(),
             chat_env: Default::default(),
+            #[cfg(target_os = "macos")]
+            machines: Default::default(),
             remote: Default::default(),
+            fleet: Default::default(),
+            voice: pages::voice::VoicePage::new(cx),
             text_shortcuts: Default::default(),
             dropdown: None,
             number_edit: None,
@@ -479,6 +497,7 @@ impl SettingsWindow {
         };
         self._source = Some(cx.observe(&owner, Self::source_changed));
         self.source = source;
+        self._guidance = None;
         self.new_window_target = owner
             .read(cx)
             .endpoints
@@ -643,6 +662,9 @@ impl SettingsWindow {
         if self.sidebar_queued && self.closing.is_none() && !self.busy() {
             self.save_sidebar_draft(cx);
         }
+        if self.remote.pins_pending && self.closing.is_none() && !self.busy() {
+            self.follow_public_pins(cx);
+        }
         if !self.busy() && !self.theme_dirty() && self.closing.is_some() {
             if self.layout_intent.is_some() {
                 self.save_layout_draft(cx);
@@ -690,6 +712,9 @@ impl SettingsWindow {
             self.finish_number_edit(false, cx);
         }
         if !self.finish_hex_edit(true, cx) {
+            if self.busy() {
+                return;
+            }
             self.finish_hex_edit(false, cx);
         }
         if !self.finish_code_edit(true, cx) {
@@ -698,6 +723,9 @@ impl SettingsWindow {
         self.dropdown = None;
         self.dismiss_control_font_picker(window, cx);
         self.clear_search(cx);
+        if self.section == Section::Voice {
+            self.dismiss_voice_sheet(cx);
+        }
         self.section = section;
         // A page opened from search or elsewhere shows in a short list too.
         self.navigation_scroll.scroll_to_item(section.nav_item());
@@ -708,6 +736,13 @@ impl SettingsWindow {
         if section == Section::General {
             self.open_chat_env_settings(cx);
         }
+        #[cfg(target_os = "macos")]
+        if section == Section::Machines {
+            self.open_machines(cx);
+        }
+        if section == Section::Voice {
+            self.open_voice(cx);
+        }
         if section == Section::TextShortcuts {
             self.open_text_shortcuts_page(cx);
         }
@@ -715,6 +750,11 @@ impl SettingsWindow {
             self.open_remote_control(cx);
         } else {
             self.close_remote_control();
+        }
+        if section == Section::Fleet {
+            self.open_fleet(cx);
+        } else {
+            self.close_fleet();
         }
         self.body_scroll.set_offset(Point::default());
         window.focus(&self.focus, cx);
@@ -737,6 +777,15 @@ impl SettingsWindow {
 impl Render for SettingsWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.caption.sync(window, &self.theme);
+        let guide = self
+            .source
+            .upgrade()
+            .map(|source| source.read(cx).agent_guidance.clone());
+        if self._guidance.is_none()
+            && let Some(guide) = &guide
+        {
+            self._guidance = Some(cx.observe(guide, |_, _, cx| cx.notify()));
+        }
         let searching = self.search_results.clone();
         let heading = if searching.is_some() {
             fl!("settings-results")
@@ -750,7 +799,10 @@ impl Render for SettingsWindow {
                 Section::Integrations => self.render_integration_controls(cx),
                 Section::Plugins => self.render_plugin_controls(cx),
                 Section::Code => self.render_code_controls(window, cx),
+                #[cfg(target_os = "macos")]
+                Section::Machines => self.render_machines(cx),
                 Section::RemoteControl => self.render_remote_control(cx),
+                Section::Fleet => self.render_fleet(cx),
                 #[cfg(feature = "cloud")]
                 Section::CloudDevices => self.render_cloud_devices(cx),
                 _ => self.render_controls(window, cx),
@@ -802,6 +854,11 @@ impl Render for SettingsWindow {
             .text_start()
             .children(header)
             .child(
+                div().flex_none().h(px(guide
+                    .as_ref()
+                    .map_or(0., |guide| 92. * guide.read(cx).shown()))),
+            )
+            .child(
                 div().flex_1().min_h_0().row().child(navigation).child(
                     self.scroll_area(
                         scrollbar::Pane::Body,
@@ -841,6 +898,13 @@ impl Render for SettingsWindow {
             )
             .child(self.footer(cx))
             .children(font_picker);
+        let root = root.children(self.guidance_highlight(guide.as_ref(), cx));
+        let root = root.children(
+            guide
+                .as_ref()
+                .and_then(|guide| crate::agent_guidance::banner(guide, &self.theme, window, cx)),
+        );
+        let root = root.children(self.voice_sheet(window, cx));
         let border = self.theme.active;
         crate::titlebar::frame(window, border, root)
     }

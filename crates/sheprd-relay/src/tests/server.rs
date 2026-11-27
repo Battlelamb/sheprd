@@ -30,6 +30,7 @@ mod shared_address;
 #[cfg(feature = "client")]
 mod through;
 mod tokens;
+mod viewer;
 
 pub(crate) use crate::tests::{hello, public, sign, signing_key};
 use crate::{

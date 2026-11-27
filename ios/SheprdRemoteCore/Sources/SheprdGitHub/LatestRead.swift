@@ -9,6 +9,8 @@ import Foundation
 public final class LatestRead<Key: Equatable> {
     private var current: (key: Key, id: UInt64, task: Task<Void, Never>)?
     private var started: UInt64 = 0
+    /// Calls waiting on a read, so tests can tell a caller has joined.
+    private(set) var callers = 0
 
     public init() {}
 
@@ -19,6 +21,8 @@ public final class LatestRead<Key: Equatable> {
     /// and returns once that read ends. A replaced read is cancelled: its
     /// `work` must check `Task.isCancelled` before keeping its answer.
     public func run(_ key: Key, _ work: @escaping @MainActor @Sendable () async -> Void) async {
+        callers += 1
+        defer { callers -= 1 }
         let id: UInt64
         let task: Task<Void, Never>
         if let current, current.key == key {

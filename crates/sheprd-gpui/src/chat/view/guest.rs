@@ -20,6 +20,13 @@ impl SheprdWindow {
         else {
             return row;
         };
+        // Layouts that name who speaks name the guest there instead.
+        if matches!(
+            self.config.chat.layout,
+            crate::config::ChatLayoutMode::Document | crate::config::ChatLayoutMode::Timeline
+        ) {
+            return row;
+        }
         let theme = &self.theme;
         let id = entry.id.0;
         let label = fl!(
@@ -27,12 +34,18 @@ impl SheprdWindow {
             name = safe_text(&guest.name, MAX_GUEST_NAME),
             tool = safe_text(&guest.tool, MAX_GUEST_TOOL)
         );
+        // Over the prompt: at the right where the person's words are in
+        // bubbles on the right, else at the column's start.
+        let right = matches!(
+            self.config.chat.layout,
+            crate::config::ChatLayoutMode::Bubbles | crate::config::ChatLayoutMode::IMessage
+        );
         let line = div()
             .debug_selector(move || format!("chat-guest-{id}"))
-            .mx(px(12.))
-            .mt(px(8.))
+            .px(px(16.))
+            .pt(px(8.))
             .flex()
-            .justify_end()
+            .when(right, |line| line.justify_end())
             .items_center()
             .gap(px(4.))
             .text_size(self.chat_small_text())
@@ -44,7 +57,10 @@ impl SheprdWindow {
                     .text_color(rgb(Hues::of(theme).purple)),
             )
             .child(label);
+        let line = self.chat_column(line);
+        // As wide as any row, so the prompt keeps its own alignment.
         div()
+            .w_full()
             .flex()
             .flex_col()
             .child(line)

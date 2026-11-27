@@ -47,8 +47,17 @@ final class GitHubDirect {
     private(set) var ownLogin: String?
     @ObservationIgnored private var watching: Task<Void, Never>?
     @ObservationIgnored private var readingBadges = false
-    /// The lists' read under way, and the states it reads.
-    @ObservationIgnored private var listRead: (states: Set<PullRequestFilter.State>, task: Task<Void, Never>)?
+    /// The lists' read under way, by what its answer depends on.
+    @ObservationIgnored private let listReads = LatestRead<ListRead>()
+
+    /// What a lists read's answer depends on: the states asked for, and the
+    /// account read with, so signing in or out replaces a read under way
+    /// rather than joining it.
+    private struct ListRead: Equatable {
+        var states: Set<PullRequestFilter.State>
+        var login: String?
+        var signOuts: Int
+    }
     /// Bumped when signing out, so reads begun before it keep nothing.
     /// Screens holding their own GitHub answers stamp them with it, and
     /// drop and read again those stamped before a sign-out.
@@ -130,23 +139,14 @@ final class GitHubDirect {
 
     /// Reads the pull request lists in `states`; `shown` when the person
     /// is waiting on it, so the lists say they are loading. A read of the
-    /// same states under way is joined; one of others, from before the
-    /// filter changed, is dropped for this one.
+    /// same states with the same account under way is joined; one from
+    /// before the filter or the account changed is dropped for this one.
     func refreshLists(source: Lenders, states: Set<PullRequestFilter.State>, shown: Bool = false) async {
         if shown { loadingLists = true }
-        let task: Task<Void, Never>
-        if let current = listRead, current.states == states {
-            task = current.task
-        } else {
-            listRead?.task.cancel()
-            task = Task { await self.readLists(source: source, states: states) }
-            listRead = (states, task)
+        await listReads.run(ListRead(states: states, login: ownLogin, signOuts: signOuts)) { [weak self] in
+            await self?.readLists(source: source, states: states)
         }
-        await task.value
-        if listRead?.task == task {
-            listRead = nil
-            loadingLists = false
-        }
+        if !listReads.isRunning { loadingLists = false }
     }
 
     private func readLists(source: Lenders, states: Set<PullRequestFilter.State>) async {

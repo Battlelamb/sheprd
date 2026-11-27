@@ -180,8 +180,13 @@ struct PullRequestsList: View {
     }
 
     @ViewBuilder private var empty: some View {
-        if let lists = direct.lists.lists, lists.filtered(filter).isEmpty, !lists.isEmpty || !filter.isStandard {
-            unmatched(read: lists)
+        if let lists = direct.lists.lists, lists.filtered(filter).isEmpty, !lists.states.isSuperset(of: filter.states),
+           direct.loadingLists {
+            // Read for other states, as just after the filter changed: what
+            // is cached says nothing of the states asked for yet.
+            LoadingPullRequests()
+        } else if let lists = direct.lists.lists, lists.filtered(filter).isEmpty, !lists.isEmpty || !filter.isStandard {
+            unmatched
         } else if let lists = direct.lists.lists?.filtered(filter), !lists.isEmpty, lists.matching(query).isEmpty {
             ContentUnavailableView.search(text: query)
         } else if direct.loadingLists, direct.lists.lists == nil {
@@ -192,20 +197,15 @@ struct PullRequestsList: View {
         }
     }
 
-    /// Nothing the filter lists: still being read when it asks for other
-    /// states than were, none on GitHub otherwise.
-    @ViewBuilder private func unmatched(read lists: PullRequestLists) -> some View {
-        if lists.states != filter.states, direct.loadingLists {
-            LoadingPullRequests()
-        } else {
-            ContentUnavailableView {
-                Label("No pull requests", systemImage: "line.3.horizontal.decrease.circle")
-            } description: {
-                Text("None match the filter.")
-            } actions: {
-                Button("Show Open Pull Requests") { withAnimation(.snappy) { filter = PullRequestFilter() } }
-                    .buttonStyle(.bordered)
-            }
+    /// Nothing the filter lists, of what was read for it.
+    private var unmatched: some View {
+        ContentUnavailableView {
+            Label("No pull requests", systemImage: "line.3.horizontal.decrease.circle")
+        } description: {
+            Text("None match the filter.")
+        } actions: {
+            Button("Show Open Pull Requests") { withAnimation(.snappy) { filter = PullRequestFilter() } }
+                .buttonStyle(.bordered)
         }
     }
 

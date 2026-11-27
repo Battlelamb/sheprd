@@ -158,6 +158,7 @@ public struct ChatTurnRow: Identifiable, Sendable {
         case prompt(turnId: EntryId, text: String, isLatest: Bool, collapsedMeta: String?)
         case steps(tools: [Tool])
         case entry(Entry)
+        case agentMessage(id: EntryId, text: String, message: AgentMessage)
         case markdownBlock(MarkdownBlock)
         case diff(path: String, old: String?, new: String)
         case showFullHere(turnId: EntryId)
@@ -176,11 +177,13 @@ extension ChatTurns {
     /// Flattens visible turns into direct `LazyVStack` rows with stable,
     /// unique IDs. Plain agent replies (without bubble or screen effects) are
     /// flattened to individual `MarkdownBlock` rows so even a single long
-    /// reply stays lazy; replies with effects stay whole for `AgentMessageView`.
+    /// reply stays lazy; replies with effects carry their pre-parsed
+    /// `AgentMessage` so `AgentMessageView` never parses them again.
     public static func rows(
         from turns: [ArraySlice<Entry>],
         latestTurnId: EntryId?,
-        filter: TurnFilterState
+        filter: TurnFilterState,
+        parse: (EntryId, String) -> AgentMessage = { _, text in AgentMessage.parse(text) }
     ) -> [ChatTurnRow] {
         var rows: [ChatTurnRow] = []
         for (offset, turn) in turns.enumerated() {
@@ -216,7 +219,7 @@ extension ChatTurns {
                 case .tool:
                     continue
                 case let .agent(text):
-                    let message = AgentMessage.parse(text)
+                    let message = parse(entry.id, text)
                     let plainMarkdown = message.screen == nil && message.parts.allSatisfy {
                         if case .markdown = $0 { true } else { false }
                     }
@@ -234,7 +237,10 @@ extension ChatTurns {
                             }
                         }
                     } else {
-                        rows.append(ChatTurnRow(id: .entry(entry.id), kind: .entry(entry)))
+                        rows.append(ChatTurnRow(
+                            id: .entry(entry.id),
+                            kind: .agentMessage(id: entry.id, text: text, message: message)
+                        ))
                     }
                 default:
                     rows.append(ChatTurnRow(id: .entry(entry.id), kind: .entry(entry)))
@@ -257,5 +263,83 @@ extension ChatTurns {
             }
         }
         return rows
+    }
+}
+
+/// Caches split turns, flattened `LazyVStack` rows, and parsed `AgentMessage`s
+/// per open chat so scroll-state updates, filter toggles, and streaming edits
+/// never re-parse unchanged replies.
+public final class ChatRowCache {
+    public struct Snapshot {
+        public let turns: [ArraySlice<Entry>]
+        public let promptCount: Int
+        public let hidden: Int
+        public let latestTurnId: EntryId?
+        public let rows: [ChatTurnRow]
+    }
+
+    private struct CachedMessage {
+        let text: String
+        let message: AgentMessage
+    }
+
+    private let parseMessage: (String) -> AgentMessage
+    private var parsed: [EntryId: CachedMessage] = [:]
+    private var lastEntries: [Entry]?
+    private var lastShownTurns = -1
+    private var lastFilter = TurnFilterState()
+    private var lastSnapshot: Snapshot?
+
+    public init(parse: @escaping (String) -> AgentMessage = AgentMessage.parse) {
+        self.parseMessage = parse
+    }
+
+    /// Returns the flattened view data for `entries`, `shownTurns`, and `filter`,
+    /// reusing the last snapshot when inputs are unchanged and reusing cached
+    /// `AgentMessage` parses for every unchanged agent reply.
+    public func snapshot(
+        entries: [Entry],
+        shownTurns: Int,
+        filter: TurnFilterState
+    ) -> Snapshot {
+        if let lastSnapshot,
+           lastShownTurns == shownTurns,
+           lastFilter == filter,
+           lastEntries == entries {
+            return lastSnapshot
+        }
+        let turns = ChatTurns.split(entries)
+        let promptCount = ChatTurns.promptCount(in: entries)
+        let visible = filter.visibleTurns(from: turns, shownTurns: shownTurns)
+        let latestTurnId = turns.last?.first?.id
+        var seen: Set<EntryId> = []
+        let rows = ChatTurns.rows(from: visible.turns, latestTurnId: latestTurnId, filter: filter) { id, text in
+            seen.insert(id)
+            if let cached = parsed[id], cached.text == text {
+                return cached.message
+            }
+            let message = parseMessage(text)
+            parsed[id] = CachedMessage(text: text, message: message)
+            return message
+        }
+        // Keep the parsed cache bounded to entries still present in the transcript.
+        if lastEntries != entries {
+            let liveIds = Set(entries.compactMap { entry -> EntryId? in
+                if case .agent = entry.kind { entry.id } else { nil }
+            })
+            parsed = parsed.filter { liveIds.contains($0.key) || seen.contains($0.key) }
+        }
+        let snapshot = Snapshot(
+            turns: turns,
+            promptCount: promptCount,
+            hidden: visible.hidden,
+            latestTurnId: latestTurnId,
+            rows: rows
+        )
+        lastEntries = entries
+        lastShownTurns = shownTurns
+        lastFilter = filter
+        lastSnapshot = snapshot
+        return snapshot
     }
 }

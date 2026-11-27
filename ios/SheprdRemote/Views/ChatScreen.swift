@@ -300,11 +300,11 @@ private struct ChatDocument: View {
     static let readableWidth: CGFloat = 680
 
     var body: some View {
-        let turns = ChatTurn.split(transcript.entries)
-        let promptCount = ChatTurns.promptCount(in: transcript.entries)
-        let visible = filter.visibleTurns(from: turns, shownTurns: shownTurns)
-        let latestTurnId = turns.last?.first?.id
-        let rows = ChatTurns.rows(from: visible.turns, latestTurnId: latestTurnId, filter: filter)
+        let snapshot = store.rowCache.snapshot(entries: transcript.entries, shownTurns: shownTurns, filter: filter)
+        let turns = snapshot.turns
+        let promptCount = snapshot.promptCount
+        let latestTurnId = snapshot.latestTurnId
+        let rows = snapshot.rows
         let tools: [Tool] = (turns.last ?? []).compactMap { entry in
             if case let .tool(tool) = entry.kind { tool } else { nil }
         }
@@ -317,11 +317,11 @@ private struct ChatDocument: View {
         ScrollViewReader { scrollProxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: filter.promptsOnly ? 8 : 12) {
-                    if visible.hidden > 0 {
+                    if snapshot.hidden > 0 {
                         Button {
                             shownTurns += 10
                         } label: {
-                            Label("Show \(min(visible.hidden, 10)) earlier of \(visible.hidden)", systemImage: "arrow.up.circle")
+                            Label("Show \(min(snapshot.hidden, 10)) earlier of \(snapshot.hidden)", systemImage: "arrow.up.circle")
                                 .font(.subheadline.weight(.medium))
                         }
                         .buttonStyle(.glass)
@@ -540,6 +540,8 @@ private struct ChatDocument: View {
             ChatStepsRow(tools: tools)
         case let .entry(entry):
             EntryView(entry: entry)
+        case let .agentMessage(id, text, message):
+            AgentMessageView(id: id, text: text, parsed: message)
         case let .markdownBlock(block):
             BlockView(block: block)
         case let .diff(path, old, new):

@@ -174,4 +174,44 @@ struct ChatTurnsTests {
             .prompt(3),
         ])
     }
+
+    @Test func rowCacheReusesParsedRepliesAndPreParsedEffects() {
+        var parseCount = 0
+        let cache = ChatRowCache { text in
+            parseCount += 1
+            return AgentMessage.parse(text)
+        }
+        var entries: [Entry] = [
+            Entry(id: 1, kind: .user(text: "First", files: 0)),
+            Entry(id: 2, kind: .agent(text: "First answer")),
+            Entry(id: 3, kind: .user(text: "Second", files: 0)),
+            Entry(id: 4, kind: .agent(text: ":::slam\nDone!\n:::")),
+        ]
+
+        // Initial render parses both agent replies once.
+        let initial = cache.snapshot(entries: entries, shownTurns: 5, filter: TurnFilterState())
+        #expect(parseCount == 2)
+        if case let .agentMessage(id, _, parsed) = initial.rows.last?.kind {
+            #expect(id == 4)
+            #expect(parsed.bubbleEffects == [.slam])
+        } else {
+            Issue.record("expected pre-parsed .agentMessage row for effect-bearing reply")
+        }
+
+        // Scroll/UI body re-evaluation with identical inputs parses nothing.
+        _ = cache.snapshot(entries: entries, shownTurns: 5, filter: TurnFilterState())
+        #expect(parseCount == 2)
+
+        // Filter toggle and peek reuse cached parses without re-parsing.
+        var filter = TurnFilterState(promptsOnly: true)
+        _ = cache.snapshot(entries: entries, shownTurns: 5, filter: filter)
+        filter.togglePeek(1)
+        _ = cache.snapshot(entries: entries, shownTurns: 5, filter: filter)
+        #expect(parseCount == 2)
+
+        // Streaming update to the last reply re-parses only the changed entry.
+        entries[3] = Entry(id: 4, kind: .agent(text: ":::slam\nDone and verified!\n:::"))
+        _ = cache.snapshot(entries: entries, shownTurns: 5, filter: TurnFilterState())
+        #expect(parseCount == 3)
+    }
 }

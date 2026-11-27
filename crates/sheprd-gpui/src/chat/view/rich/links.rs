@@ -72,6 +72,10 @@ impl Links {
     }
 
     fn open_with(&self, destination: &str, system: bool, cx: &mut App) {
+        if let Some(target) = crate::chat::screen_link::target(destination) {
+            self.open_screen(&target, cx);
+            return;
+        }
         if let Ok(url) = crate::browser::WebUrl::try_from(destination) {
             cx.open_url(url.as_str());
             return;
@@ -82,6 +86,27 @@ impl Links {
                 !system && view.config.open_files_in == crate::config::FileTarget::Editor,
                 cx,
             );
+        });
+    }
+
+    /// Shows the workspace or pane a `sheprd://` link names, in the Herdr
+    /// this window shows the chat from, under the same fence as a file. An
+    /// SSH chat's ids are its host's, so its links stay inert.
+    fn open_screen(&self, screen: &crate::OwnedNavigationTarget, cx: &mut App) {
+        let Some(target) = self.target.as_ref().filter(|_| self.local) else {
+            return;
+        };
+        let _ = self.view.update(cx, |view, cx| {
+            let current = view
+                .chats
+                .pane(&target.pane_id)
+                .is_some_and(|pane| pane.is_current(target, self.cursor));
+            if !current || view.selected_is_remote() || view.selection_epoch != self.selection_epoch
+            {
+                return;
+            }
+            let endpoint = view.endpoints[view.selected_endpoint].id.clone();
+            view.navigate_endpoint(&endpoint, screen.as_deref(), cx);
         });
     }
 

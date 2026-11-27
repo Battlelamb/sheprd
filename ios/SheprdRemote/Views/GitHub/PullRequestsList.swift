@@ -180,10 +180,10 @@ struct PullRequestsList: View {
     }
 
     @ViewBuilder private var empty: some View {
-        if let lists = direct.lists.lists, lists.filtered(filter).isEmpty, !lists.states.isSuperset(of: filter.states),
-           direct.loadingLists {
-            // Read for other states, as just after the filter changed: what
-            // is cached says nothing of the states asked for yet.
+        if let lists = direct.lists.lists, lists.filtered(filter).isEmpty, lists.states != filter.states, direct.loadingLists {
+            // Read for other states, as just after the filter changed. Even
+            // a read of more states says little: its 50 open pull requests
+            // may hold none of the older drafts a narrower read finds.
             LoadingPullRequests()
         } else if let lists = direct.lists.lists, lists.filtered(filter).isEmpty, !lists.isEmpty || !filter.isStandard {
             unmatched

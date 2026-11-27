@@ -126,7 +126,10 @@ impl SheprdWindow {
             .unwrap_or_default();
         let core = enabled.then(|| self.core_chat_targets());
         let known = super::core_pane::with_core(targets, core.unwrap_or_default());
-        let targets = discovery::bounded(known.clone(), rank);
+        let limit = route
+            .as_ref()
+            .map_or(super::MAX_CHATS, super::Route::max_chats);
+        let targets = discovery::bounded(known.clone(), limit, rank);
         if enabled {
             self.locate_chat_program(cx);
             self.probe_chat_agents(cx);

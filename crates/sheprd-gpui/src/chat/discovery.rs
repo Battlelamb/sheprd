@@ -1,6 +1,6 @@
 //! Which panes run a chat program this window may attach to.
 
-use super::{MAX_CHATS, Route, Surface, Target};
+use super::{Route, Surface, Target};
 use crate::state::LiveState;
 use sheprd_chat_protocol::{EndpointId, TOKEN};
 use sheprd_client::{ConnectTarget, protocol::ClientShellSnapshot};
@@ -76,12 +76,17 @@ pub(crate) fn targets(snapshot: &ClientShellSnapshot, route: Option<&Route>) -> 
         .collect()
 }
 
-/// At most [`MAX_CHATS`] of `targets`, in their order, those `rank`
-/// puts lower first. The window ranks the panes on screen before those
-/// holding files for an unsent prompt, and both before the rest, so a chat
-/// the user is looking at attaches however many chats run elsewhere.
-pub(crate) fn bounded(targets: Vec<Target>, rank: impl Fn(&str) -> u8) -> Vec<Target> {
-    bound_by(targets, MAX_CHATS, |target| rank(&target.pane_id))
+/// At most `limit` of `targets` ([`Route::max_chats`]), in their order,
+/// those `rank` puts lower first. The window ranks the panes on screen
+/// before those holding files for an unsent prompt, and both before the
+/// rest, so a chat the user is looking at attaches however many chats run
+/// elsewhere.
+pub(crate) fn bounded(
+    targets: Vec<Target>,
+    limit: usize,
+    rank: impl Fn(&str) -> u8,
+) -> Vec<Target> {
+    bound_by(targets, limit, |target| rank(&target.pane_id))
 }
 
 /// At most `limit` of `items`, in their order, those `rank` puts lower

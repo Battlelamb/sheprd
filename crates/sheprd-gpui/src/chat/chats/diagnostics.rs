@@ -75,7 +75,7 @@ impl Chats {
             reason,
             transport,
             targets = self.panes.len(),
-            limit = MAX_CHATS,
+            limit = route.map_or(MAX_CHATS, Route::max_chats),
             "Focused pane chat attachment"
         );
         self.diagnostic = Some(Decision {
@@ -133,14 +133,14 @@ mod tests {
             .collect();
         let excluded = format!("p{MAX_CHATS}");
         let known = discovery::targets(&snapshot, Some(&Route::Local));
-        let targets = discovery::bounded(known.clone(), |_| 2);
+        let targets = discovery::bounded(known.clone(), MAX_CHATS, |_| 2);
         assert!(targets.iter().all(|target| target.pane_id != excluded));
         assert_eq!(
             untracked_reason(&snapshot, &excluded, &known),
             "chat_limit_reached"
         );
 
-        let visible = discovery::bounded(known, |pane| u8::from(pane != excluded));
+        let visible = discovery::bounded(known, MAX_CHATS, |pane| u8::from(pane != excluded));
         assert!(visible.iter().any(|target| target.pane_id == excluded));
 
         snapshot.agents[MAX_CHATS].tokens[0].1.clear();

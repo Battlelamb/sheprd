@@ -104,6 +104,10 @@ impl<R: FnMut(Update)> Session<R> {
         if text.len() > MAX_GUEST_PROMPT_SIZE {
             return Err(Rejection::PromptTooLong);
         }
+        // What the person reads is what the agent gets.
+        if !sheprd_chat_protocol::shows_as_written(text) {
+            return Err(Rejection::HiddenText);
+        }
         if !self.transcript.status.accepts_prompts() || self.transcript.read_only {
             return Err(Rejection::NotReady);
         }

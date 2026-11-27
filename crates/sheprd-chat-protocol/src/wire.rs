@@ -247,6 +247,9 @@ pub enum Rejection {
     GuestOnly,
     #[error("the guest's name or tool is empty, too long, or holds control characters or quotes")]
     InvalidGuest,
+    /// A guest's prompt holds characters that do not show as themselves.
+    #[error("the guest's prompt holds control, invisible, or direction-changing characters")]
+    HiddenText,
     /// A command this program's version does not know, from a newer client.
     #[error("this chat program is older than Sheprd; start a new chat to use that")]
     Unsupported,

@@ -35,7 +35,7 @@ pub use error::{Error, Result};
 pub use frame::{MAX_FRAME_SIZE, encode_frame, read_frame, write_frame};
 pub use guest::{
     GUEST_ALLOW, GUEST_DENY, Guest, GuestPrompt, MAX_GUEST_NAME, MAX_GUEST_PROMPT_SIZE,
-    MAX_GUEST_TOOL, MAX_GUESTS_WAITING,
+    MAX_GUEST_TOOL, MAX_GUESTS_WAITING, shows_as_written,
 };
 pub use harnesses::Harnesses;
 pub use media::{Author, Image, ImageType, MAX_IMAGE_DATA};

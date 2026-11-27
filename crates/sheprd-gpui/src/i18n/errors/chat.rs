@@ -229,6 +229,7 @@ impl Localize for sheprd_chat_protocol::Rejection {
             Self::Denied => fl!("error-chat-rejection-denied"),
             Self::GuestOnly => fl!("error-chat-rejection-guest-only"),
             Self::InvalidGuest => fl!("error-chat-rejection-invalid-guest"),
+            Self::HiddenText => fl!("error-chat-rejection-hidden-text"),
             Self::Other => fl!("error-chat-rejection-other"),
         }
     }

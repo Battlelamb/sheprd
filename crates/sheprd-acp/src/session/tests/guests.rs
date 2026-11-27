@@ -179,6 +179,10 @@ fn bad_guest_prompts_are_refused_at_once() {
         (Guest::new("Bob\"", "tma"), "hi", Rejection::InvalidGuest),
         (Guest::new("Bob", "t\nma"), "hi", Rejection::InvalidGuest),
         (bob(), "   ", Rejection::EmptyPrompt),
+        (bob(), "run tests\u{200b}", Rejection::HiddenText),
+        (bob(), "say hi \u{202e}hsup tig", Rejection::HiddenText),
+        (bob(), "clear\u{1b}[2J", Rejection::HiddenText),
+        (bob(), "tag\u{e0041}", Rejection::HiddenText),
         (
             bob(),
             &"x".repeat(sheprd_chat_protocol::MAX_GUEST_PROMPT_SIZE + 1),

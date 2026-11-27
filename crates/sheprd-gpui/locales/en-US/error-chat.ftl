@@ -114,6 +114,7 @@ error-chat-rejection-unsupported = this chat program is older than Sheprd; start
 error-chat-rejection-denied = the person declined the guest's prompt
 error-chat-rejection-guest-only = a connection that relays guest prompts can send only guest prompts
 error-chat-rejection-invalid-guest = the guest's name or tool is empty, too long, or holds control characters or quotes
+error-chat-rejection-hidden-text = the guest's prompt holds control, invisible, or direction-changing characters
 error-chat-rejection-other = the program refused the command
 
 # An interactive card an agent's answer holds, whose JSON the window checks.

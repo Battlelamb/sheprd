@@ -105,8 +105,12 @@ you share the transcript onward, apply your own policy: tool output,
   non-blank and hold no control characters and none of `"`, `<`, `>`, `&`,
   or `` ` ``. Sheprd does not verify them: they are labels shown to the
   person and the agent as your tool's claim.
-- `text` is at most 16 KiB (`MAX_GUEST_PROMPT_SIZE`). Guest prompts carry no
-  files.
+- `text` is at most 16 KiB (`MAX_GUEST_PROMPT_SIZE`) and must show as
+  written (`shows_as_written`): no control characters other than line
+  breaks and tabs, and no zero-width, invisible, or direction-changing
+  characters (the zero-width joiner and emoji presentation selectors are
+  fine), so the person reads exactly what the agent would get. Guest
+  prompts carry no files.
 
 The prompt then waits in the transcript's `permissions` as a request whose
 `guest` field holds the full prompt, with the options `guest_allow` and
@@ -124,6 +128,7 @@ may take minutes, or never if they leave it:
 | `"rejected": "denied"` | The person declined it. |
 | `"rejected": "invalid_guest"` | A name is blank, too long, or holds a refused character. |
 | `"rejected": "empty_prompt"`, `"prompt_too_long"` | The text is blank or over 16 KiB. |
+| `"rejected": "hidden_text"` | The text holds control, invisible, or direction-changing characters. |
 | `"rejected": "queue_full"` | 8 guest prompts already wait, or the queue behind the turn is full. |
 | `"rejected": "not_ready"` | The chat cannot take prompts: it is read-only, or its agent failed or exited, which also ends every prompt still waiting. |
 | `"rejected": "guest_only"` | Not a guest prompt, on a connection that already relayed one. |

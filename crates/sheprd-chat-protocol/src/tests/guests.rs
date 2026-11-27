@@ -86,3 +86,24 @@ fn a_guest_permission_carries_the_prompt_and_older_rejections_still_read() {
     let newer: Rejection = serde_json::from_value(json!("guest_expired")).unwrap();
     assert_eq!(newer, Rejection::Other);
 }
+
+#[test]
+fn guest_text_must_show_as_written() {
+    assert!(shows_as_written(
+        "Line one\n\tLine two, café, 日本語, 👍🏽 ❤\u{fe0f} 👨\u{200d}👩\u{200d}👧"
+    ));
+    for hidden in [
+        "a\u{200b}b",
+        "\u{202e}abc",
+        "x\u{2066}y",
+        "\u{feff}x",
+        "a\rb",
+        "\u{e0061}",
+    ] {
+        assert!(!shows_as_written(hidden), "{hidden:?}");
+    }
+    assert_eq!(
+        serde_json::to_value(Rejection::HiddenText).unwrap(),
+        json!("hidden_text")
+    );
+}

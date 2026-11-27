@@ -57,6 +57,24 @@ fn label_ok(text: &str, max: usize) -> bool {
             .any(|c| c.is_control() || matches!(c, '"' | '<' | '>' | '&' | '`'))
 }
 
+/// Whether every character of a guest's `text` shows as itself: no control
+/// characters but line breaks and tabs, and none of the invisible or
+/// direction-changing ones that could hide or reorder words the person is
+/// asked to allow. The zero-width joiner and emoji presentation selectors
+/// stay, as emoji need them and they hide nothing.
+pub fn shows_as_written(text: &str) -> bool {
+    !text.chars().any(|c| {
+        (c.is_control() && !matches!(c, '\n' | '\t'))
+            || matches!(c,
+                '\u{00ad}' | '\u{034f}' | '\u{061c}' | '\u{115f}' | '\u{1160}' | '\u{17b4}'
+                | '\u{17b5}' | '\u{180b}'..='\u{180f}' | '\u{200b}' | '\u{200c}' | '\u{200e}' | '\u{200f}'
+                | '\u{2028}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{3164}'
+                | '\u{fe00}'..='\u{fe0d}' | '\u{feff}' | '\u{ffa0}' | '\u{fff9}'..='\u{fffb}'
+                | '\u{1bca0}'..='\u{1bca3}' | '\u{1d173}'..='\u{1d17a}'
+                | '\u{e0000}'..='\u{e0fff}')
+    })
+}
+
 /// A guest's prompt waiting for the person, carried by its permission
 /// request so a client can show it in full.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

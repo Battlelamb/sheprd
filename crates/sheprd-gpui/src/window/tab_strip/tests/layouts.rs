@@ -49,7 +49,7 @@ pub(super) fn strip(
 }
 
 #[gpui::test]
-fn every_layout_draws_its_tabs_as_wide_as_it_measures_them(cx: &mut TestAppContext) {
+fn every_horizontal_layout_draws_its_tabs_as_wide_as_it_measures_them(cx: &mut TestAppContext) {
     for &mode in TabLayoutMode::ALL {
         let (view, cx) = strip(cx, mode);
         let near = |a: Pixels, b: Pixels| (a - b).abs() <= px(0.5);

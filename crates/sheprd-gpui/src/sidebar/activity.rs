@@ -385,7 +385,7 @@ impl SheprdWindow {
         if self.activity_section().is_some() || self.mod_app().is_some() {
             return column;
         }
-        let sidebar = match self.sidebar_mode() {
+        let sidebar = match self.sidebar_display_mode() {
             SidebarMode::Expanded => self.render_sidebar(indicators, window, cx),
             // A window too narrow for the rail keeps the bar alone, which
             // still brings the sidebar back.
@@ -406,7 +406,7 @@ impl SheprdWindow {
             .child(self.panel_title(ActivityPanel::Workspaces, cx))
             .child(div().row().flex_1().min_h_0().child(sidebar));
         let width = self
-            .sidebar_mode()
+            .sidebar_display_mode()
             .width(self.sidebar_width, f32::from(window.viewport_size().width));
         match self.sidebar_slide_shown().zip(width) {
             Some((shown, width)) => column.child(crate::window::slide_start(panel, width, shown)),
@@ -478,6 +478,7 @@ impl SheprdWindow {
                     label(panel),
                     (state, busy),
                     bubble,
+                    None,
                 )
                 .role(Role::Tab)
                 .aria_selected(state == BarState::Selected)
@@ -494,6 +495,7 @@ impl SheprdWindow {
                     fl!("sidebar-activity-settings").into(),
                     (BarState::Idle, false),
                     None,
+                    Some(Command::Settings),
                 )
                 .role(Role::Button)
                 .on_click(cx.listener(|this, _, window, cx| {
@@ -509,9 +511,10 @@ impl SheprdWindow {
         label: SharedString,
         (state, busy): (BarState, bool),
         bubble: Option<Bubble>,
+        command: Option<Command>,
     ) -> Stateful<Div> {
         let theme = &self.theme;
-        let (foreground, surface, hover) = (theme.foreground, theme.surface, theme.active);
+        let hover = theme.active;
         let ink = match state {
             BarState::Selected => theme.foreground,
             BarState::Idle => theme.muted,
@@ -598,14 +601,8 @@ impl SheprdWindow {
             .items_center()
             .justify_center()
             .rounded(px(crate::config::corners::CONTROL))
-            .tooltip(move |_, cx| {
-                cx.new(|_| crate::menu::SettingsHint {
-                    text: label.clone(),
-                    foreground,
-                    surface,
-                })
-                .into()
-            })
+            .tooltip(self.action_hint(label, command))
+            .tooltip_show_delay(crate::window::chrome_buttons::ACTION_HINT_DELAY)
             .when(state == BarState::Selected, |button| {
                 button.bg(rgb(theme.primary_wash())).child(
                     div()

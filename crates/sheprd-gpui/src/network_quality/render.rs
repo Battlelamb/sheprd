@@ -68,7 +68,7 @@ impl SheprdWindow {
                 // sides to the 10px between CPU and MEM.
                 .ml(px(-2.))
                 .mr(px(-4.))
-                .h_full()
+                .h(px(self.status_bar_height()))
                 .tooltip(tooltip(reading, theme))
                 .child(
                     div()

@@ -24,7 +24,15 @@ fn run(args: &[&str]) -> (tempfile::TempDir, Output) {
         .arg(home.path().join("herdr-gpui"))
         .args(args)
         .env_clear()
-        .env("PATH", "/usr/bin:/bin")
+        .env(
+            "PATH",
+            std::env::join_paths([
+                bin.as_path(),
+                std::path::Path::new("/usr/bin"),
+                std::path::Path::new("/bin"),
+            ])
+            .unwrap(),
+        )
         .env("HOME", home.path())
         .env("HC_TERMINAL_ID", "t3")
         .output()

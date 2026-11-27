@@ -171,6 +171,16 @@ impl Sources {
 pub struct Stamp(Vec<(String, u64, Option<SystemTime>)>);
 
 impl Stamp {
+    /// Only a generated data module changed, not the code interpreting its state.
+    pub fn data_only_change(&self, before: &Self) -> bool {
+        self != before
+            && self
+                .0
+                .iter()
+                .filter(|file| file.0 != "data.luau")
+                .eq(before.0.iter().filter(|file| file.0 != "data.luau"))
+    }
+
     pub fn take(dir: impl AsRef<Path>) -> Result<Self> {
         let dir = dir.as_ref();
         let read = |source| Error::Read {

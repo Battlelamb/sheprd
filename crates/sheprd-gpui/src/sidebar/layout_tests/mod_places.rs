@@ -98,23 +98,82 @@ fn a_panel_header_folds_its_section(cx: &mut gpui::TestAppContext) {
 }
 
 #[gpui::test]
-fn the_right_edge_control_collapses_and_expands_the_panel(cx: &mut gpui::TestAppContext) {
-    let (view, cx) = panel_fixture(cx, false);
+fn the_right_sidebar_peeks_without_resizing_then_pins(cx: &mut gpui::TestAppContext) {
+    let (_view, cx) = panel_fixture(cx, false);
     let rail = cx.debug_bounds("mod-panel-rail").unwrap();
     let panel = cx.debug_bounds("mod-panel").unwrap();
+    let terminal = cx.debug_bounds("terminal").unwrap();
     assert!(rail.size.width < px(32.));
     assert!((panel.right() - rail.left()).abs() <= px(1.));
     let toggle = cx.debug_bounds("mod-panel-rail-toggle").unwrap().center();
-
-    for expanded in [false, true] {
-        cx.simulate_click(toggle, Modifiers::default());
+    let draw = |cx: &mut gpui::VisualTestContext| {
         cx.update(|window, cx| full_draw(window, cx).clear(cx));
-        assert_eq!(
-            view.read_with(cx, |view, _| view.mod_panel_expanded()),
-            expanded
-        );
-        assert_eq!(cx.debug_bounds("mod-panel-rail"), Some(rail));
-    }
+    };
+
+    cx.simulate_click(toggle, Modifiers::default());
+    draw(cx);
+    cx.simulate_mouse_move(terminal.center(), None, Modifiers::default());
+    draw(cx);
+    assert!(cx.debug_bounds("mod-panel").is_none());
+    let unpinned = cx.debug_bounds("terminal").unwrap();
+    assert!(unpinned.size.width > terminal.size.width);
+
+    cx.simulate_mouse_move(rail.center(), None, Modifiers::default());
+    draw(cx);
+    let header = cx.debug_bounds("mod-panel-first-header").unwrap();
+    cx.simulate_mouse_move(header.center(), None, Modifiers::default());
+    draw(cx);
+    assert!(cx.debug_bounds("mod-panel").is_some());
+    assert_eq!(cx.debug_bounds("terminal"), Some(unpinned));
+
+    cx.simulate_click(toggle, Modifiers::default());
+    cx.simulate_mouse_move(terminal.center(), None, Modifiers::default());
+    draw(cx);
+    assert!(cx.debug_bounds("mod-panel").is_some());
+    assert_eq!(cx.debug_bounds("mod-panel-rail"), Some(rail));
+    assert_eq!(cx.debug_bounds("terminal"), Some(terminal));
+}
+
+#[gpui::test]
+fn the_workspaces_rail_peeks_without_resizing_then_pins(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = cx.add_window_view(|window, cx| {
+        let mut view = fixture_window(window, cx);
+        view.toggle_sidebar();
+        view
+    });
+    let draw = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|window, cx| full_draw(window, cx).clear(cx));
+    };
+    draw(cx);
+    let rail = cx.debug_bounds("sidebar-rail").unwrap();
+    let terminal = cx.debug_bounds("terminal").unwrap();
+    cx.simulate_mouse_move(rail.center(), None, Modifiers::default());
+    draw(cx);
+    assert_eq!(cx.debug_bounds("sidebar-rail"), Some(rail));
+    cx.executor()
+        .advance_clock(crate::sidebar::rail::HOVER_DELAY);
+    draw(cx);
+    let sidebar = cx.debug_bounds("sidebar").unwrap();
+    assert!(sidebar.size.width > rail.size.width);
+    cx.simulate_mouse_move(sidebar.center(), None, Modifiers::default());
+    draw(cx);
+    assert_eq!(cx.debug_bounds("sidebar"), Some(sidebar));
+    assert_eq!(cx.debug_bounds("terminal"), Some(terminal));
+
+    cx.simulate_mouse_move(terminal.center(), None, Modifiers::default());
+    draw(cx);
+    assert_eq!(cx.debug_bounds("sidebar-rail"), Some(rail));
+    cx.simulate_mouse_move(rail.center(), None, Modifiers::default());
+    draw(cx);
+    cx.executor()
+        .advance_clock(crate::sidebar::rail::HOVER_DELAY);
+    draw(cx);
+    let toggle = cx.debug_bounds("toggle-sidebar").unwrap().center();
+    cx.simulate_click(toggle, Modifiers::default());
+    draw(cx);
+    assert!(view.read_with(cx, |view, _| view.sidebar_visible));
+    assert!(cx.debug_bounds("sidebar").is_some());
+    assert!(cx.debug_bounds("terminal").unwrap().size.width < terminal.size.width);
 }
 
 /// A hidden panel takes no room, and Toggle Mod Panel brings it back.
@@ -129,6 +188,100 @@ fn toggle_mod_panel_hides_and_shows_it(cx: &mut gpui::TestAppContext) {
         });
     });
     assert!(view.read_with(cx, |view, _| !view.mods.panel_hidden()));
+}
+
+#[gpui::test]
+fn arc_mod_panel_fits_its_sections_without_moving_the_top_tabs(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = panel_fixture(cx, true);
+    view.update(cx, |view, _| {
+        view.config.tab_layout = crate::config::TabLayoutMode::Arc;
+        view.mods.set_panel_hidden(false);
+    });
+    let draw = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|window, cx| full_draw(window, cx).clear(cx));
+    };
+    draw(cx);
+    let frame = cx.debug_bounds("arc-terminal-frame").unwrap();
+    let rail = cx.debug_bounds("mod-panel-rail").unwrap();
+    assert!(rail.left() >= frame.right());
+    assert!(cx.debug_bounds("mod-panel").is_none());
+    cx.simulate_mouse_move(rail.center(), None, Modifiers::default());
+    draw(cx);
+    let tabs = cx.debug_bounds("tab-scroller").unwrap();
+    let panel = cx.debug_bounds("mod-panel").unwrap();
+    let last = cx.debug_bounds("mod-panel-third").unwrap();
+    assert!(tabs.top() >= frame.top() && tabs.bottom() < frame.top() + px(56.));
+    assert!(panel.right() <= rail.left());
+    for control in [
+        tabs,
+        cx.debug_bounds("arc-split-pane").unwrap(),
+        cx.debug_bounds("tab-actions").unwrap(),
+    ] {
+        assert!(
+            panel.top() >= control.bottom(),
+            "{panel:?} covers {control:?}"
+        );
+    }
+    assert!((panel.bottom() - last.bottom()).abs() <= px(2.));
+    assert!(panel.bottom() + px(10.) < frame.bottom());
+    assert_eq!(cx.debug_bounds("arc-terminal-frame"), Some(frame));
+    cx.simulate_mouse_move(panel.center(), None, Modifiers::default());
+    draw(cx);
+    assert_eq!(cx.debug_bounds("mod-panel"), Some(panel));
+    cx.simulate_mouse_move(
+        point(panel.center().x, panel.bottom() + px(10.)),
+        None,
+        Modifiers::default(),
+    );
+    draw(cx);
+    assert!(cx.debug_bounds("mod-panel").is_none());
+    assert_eq!(cx.debug_bounds("arc-terminal-frame"), Some(frame));
+
+    let toggle = cx.debug_bounds("mod-panel-rail-toggle").unwrap();
+    cx.simulate_click(toggle.center(), Modifiers::default());
+    draw(cx);
+    let pinned = cx.debug_bounds("mod-panel").unwrap();
+    assert_eq!(pinned.top(), frame.top());
+    assert_eq!(pinned.size.height, panel.size.height);
+    assert!(cx.debug_bounds("arc-terminal-frame").unwrap().right() < frame.right());
+
+    cx.simulate_resize(size(px(1200.), px(200.)));
+    draw(cx);
+    let frame = cx.debug_bounds("arc-terminal-frame").unwrap();
+    let pinned = cx.debug_bounds("mod-panel").unwrap();
+    assert!(pinned.bottom() <= frame.bottom() + px(1.));
+    assert!(pinned.size.height < panel.size.height);
+}
+
+#[gpui::test]
+fn arc_status_moves_above_panel_sections_with_a_footer_fallback(cx: &mut gpui::TestAppContext) {
+    let (view, cx) = panel_fixture(cx, true);
+    view.update(cx, |view, _| {
+        view.config.tab_layout = crate::config::TabLayoutMode::Arc;
+        view.status_bar_visible = true;
+        view.mods.set_panel_hidden(false);
+    });
+    let draw = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|window, cx| full_draw(window, cx).clear(cx));
+    };
+    draw(cx);
+    let frame = cx.debug_bounds("arc-terminal-frame").unwrap();
+    assert!(cx.debug_bounds("connection-status").is_none());
+    let rail = cx.debug_bounds("mod-panel-rail").unwrap();
+    cx.simulate_mouse_move(rail.center(), None, Modifiers::default());
+    draw(cx);
+    let status = cx.debug_bounds("connection-status").unwrap();
+    let section = cx.debug_bounds("mod-panel-first").unwrap();
+    assert!(status.bottom() <= section.top());
+    assert!(status.right() <= rail.left());
+    assert!(cx.debug_bounds("status-version").unwrap().right() <= status.right());
+    assert_eq!(cx.debug_bounds("arc-terminal-frame"), Some(frame));
+
+    view.update(cx, |view, _| view.mods.set_panel_hidden(true));
+    draw(cx);
+    let footer = cx.debug_bounds("connection-status").unwrap();
+    assert!(cx.debug_bounds("mod-panel").is_none());
+    assert!(footer.top() > status.bottom() && footer.size.width > status.size.width);
 }
 
 /// Many tall sidebar mods share one area of at most 40% of the sidebar, so

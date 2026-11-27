@@ -53,9 +53,16 @@ The mod panel is a column on the window's right, beside the terminals, as
 opencode's sidebar sits beside a session. Each mod placed there gets a
 section under its title; clicking the header folds it. A view that returns
 `nil` has no section, so a mod can show itself only when it has something to
-say. The panel shows while any mod has a section; Toggle Mod Panel in the
-palette (`toggle_mod_panel`, bindable to a key) or `sheprd mod panel
-hide` hides it, and its left edge resizes it. Watch `focus` to describe the
+say. Click the edge-rail button to unpin the panel. Hover over the rail to
+open it over the terminal without resizing the terminal; click again to pin
+it beside the terminal. Toggle Mod Panel in the palette (`toggle_mod_panel`,
+bindable to a key) or `sheprd mod panel hide` hides the panel and its rail.
+In the Arc-style layout, the unpinned pane opens below the tab strip so its
+controls stay available. The pane fits its sections and scrolls when they
+exceed the available height. The status bar appears above
+its sections when the pane is available, and returns to the window footer
+when the pane is hidden or does not fit.
+Drag the inside edge to resize the pinned panel. Watch `focus` to describe the
 focused workspace: its `name`, `path`, and IDs to match against `agents` and
 `workspaces`.
 
@@ -132,7 +139,7 @@ Unknown keys are refused, so a typo is reported where it is.
 
 | Element | Keys |
 | --- | --- |
-| `row`, `column` | `gap` (`none`, `small`, `normal`, `large`), `align` (`stretch`, the default, `start`, `center`, `end`), children |
+| `row`, `column`, `card` | `gap` (`none`, `small`, `normal`, `large`), `align` (`stretch`, the default, `start`, `center`, `end`), children. A card is a column with a themed surface and padding. |
 | `list` | children, divided by lines |
 | `text` | `text`, `tone`, `size` (`small`, `normal`, `large`), `weight` (`normal`, `bold`), `truncate` |
 | `badge` | `text`, `tone` |
@@ -171,6 +178,9 @@ sheprd mod logs agents
 sheprd mod reload agents
 sheprd mod open dashboard                       # show an app
 ```
+
+An automatic reload that only changes `data.luau` keeps bounded, plain mod
+state. Reloading explicitly or changing other files reinitializes it.
 
 A broken save keeps the last working version drawn and shows the error in
 `sheprd mod`. Turn mods off with `[mods] enabled = false`, or one with

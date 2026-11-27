@@ -639,8 +639,7 @@ impl SheprdWindow {
                 return;
             }
             Command::ToggleModPanel => {
-                self.mods.set_panel_hidden(!self.mods.panel_hidden());
-                cx.notify();
+                self.toggle_mod_panel(window, cx);
                 return;
             }
             Command::ToggleZenMode => {

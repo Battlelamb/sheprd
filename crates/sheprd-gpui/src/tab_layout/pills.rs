@@ -129,7 +129,7 @@ impl TabLayout for Pills {
                     .flex()
                     .items_center()
                     .gap(px(DOT_GAP))
-                    .child(label)
+                    .child(div().child(label))
                     .children(zoom_mark(zoomed, &probe, text, cx))
                     .children(mute_mark(muted, &probe, text, cx)),
             )

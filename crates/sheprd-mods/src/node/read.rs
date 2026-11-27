@@ -75,7 +75,7 @@ impl Reader {
             return Err((props.here(), Problem::Unknown(key.clone())));
         }
         let node = match element {
-            Element::Row | Element::Column => {
+            Element::Row | Element::Column | Element::Card => {
                 let container = Container {
                     gap: props
                         .named("gap", Gap::parse, Gap::NAMES)?
@@ -92,6 +92,7 @@ impl Reader {
                 };
                 match element {
                     Element::Row => Node::Row(container),
+                    Element::Card => Node::Card(container),
                     _ => Node::Column(container),
                 }
             }

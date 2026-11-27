@@ -248,6 +248,13 @@ impl SheprdWindow {
                     div()
                         .id("titlebar-git")
                         .debug_selector(|| "titlebar-git".into())
+                        .role(Role::Button)
+                        .aria_label(fl!("commands-git-menu"))
+                        .tooltip(self.action_hint(
+                            fl!("commands-git-menu"),
+                            Some(crate::controls::Command::GitMenu),
+                        ))
+                        .tooltip_show_delay(crate::window::chrome_buttons::ACTION_HINT_DELAY)
                         .relative()
                         .row()
                         .items_center()
@@ -332,22 +339,47 @@ impl SheprdWindow {
                 |leading| leading.child(self.navigation(cx)),
             )
             .into_any_element();
-        render(
-            self.fill().tint(bar(self.theme.surface)),
-            Some(leading),
-            window,
-        )
-        .child(
-            div()
-                .debug_selector(|| "titlebar-center".into())
-                .flex_1()
-                .min_w_0()
-                .h_full()
-                .when(self.config.usage.topbar, |center| {
-                    center.child(status::render(&self.live, &self.config.ui, &self.theme))
-                }),
-        )
-        .child(self.titlebar_end(window, cx))
+        let background = if self.arc_chrome() {
+            rgb(self.arc_shell_color()).into()
+        } else {
+            bar(self.theme.surface)
+        };
+        render(self.fill().tint(background), Some(leading), window)
+            .child(
+                div()
+                    .debug_selector(|| "titlebar-center".into())
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .when(self.arc_chrome(), |center| {
+                        center
+                            .row()
+                            .items_center()
+                            .gap_2()
+                            .px_2()
+                            .text_size(px(12.))
+                            .child(
+                                div()
+                                    .rounded(px(5.))
+                                    .px(px(6.))
+                                    .py(px(2.))
+                                    .bg(rgb(self.theme.primary()))
+                                    .text_color(rgb(self.theme.background))
+                                    .child("S"),
+                            )
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(fl!("tab-layout-arc-application")),
+                            )
+                    })
+                    .when(self.config.usage.topbar && !self.arc_chrome(), |center| {
+                        center.child(status::render(&self.live, &self.config.ui, &self.theme))
+                    }),
+            )
+            .child(self.titlebar_end(window, cx))
     }
 
     pub(crate) fn sidebar_toggle(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -357,6 +389,11 @@ impl SheprdWindow {
             .role(Role::Button)
             .aria_label(fl!("titlebar-sidebar"))
             .aria_expanded(self.sidebar_visible)
+            .tooltip(self.action_hint(
+                fl!("titlebar-sidebar"),
+                Some(crate::controls::Command::ToggleSidebar),
+            ))
+            .tooltip_show_delay(crate::window::chrome_buttons::ACTION_HINT_DELAY)
             .map(|control| self.chrome_stop(crate::window::chrome_focus::Region::TitleBar, control))
             .flex_none()
             .self_center()

@@ -153,6 +153,47 @@ impl SheprdWindow {
         self.chrome_slide().is_some()
     }
 
+    pub(super) fn sidebar_layers(
+        &self,
+        reserved: Option<f32>,
+        merged: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> (Option<AnyElement>, Option<AnyElement>) {
+        let Some(reserved) = reserved else {
+            return (None, None);
+        };
+        let sidebar = self
+            .sidebar_mode()
+            .width(self.sidebar_width, self.viewport_width);
+        let display = self
+            .sidebar_display_mode()
+            .width(self.sidebar_width, self.viewport_width);
+        let width = reserved - sidebar.unwrap_or(0.) + display.unwrap_or(0.);
+        let view = crate::sidebar::cached_view(&self.sidebar_view, width);
+        let column = if self.arc_chrome()
+            && self.activity_section().is_none()
+            && self.mod_app().is_none()
+            && self.sidebar_display_mode() == crate::sidebar::SidebarMode::Expanded
+        {
+            self.arc_sidebar(view.into_any_element(), width, cx)
+        } else if merged {
+            self.sidebar_column(view, width, window, cx)
+                .into_any_element()
+        } else {
+            view.into_any_element()
+        };
+        if self.sidebar_hover_rail() && sidebar.is_some() && self.chrome_slide().is_none() {
+            let space = div().flex_none().w(px(reserved)).into_any_element();
+            let overlay = self
+                .sidebar_hover_overlay(column, width, cx)
+                .into_any_element();
+            (Some(space), Some(overlay))
+        } else {
+            (Some(self.sliding_sidebar(column, width)), None)
+        }
+    }
+
     /// The sidebar's column, `width` wide, sliding out to the left on the
     /// way in and back on the way out, always within its own room: the
     /// terminal beside it keeps its size while it moves.
@@ -170,10 +211,10 @@ impl SheprdWindow {
     /// The status bar outside zen mode's layout, sliding down out of its
     /// room on the way in and back up into it on the way out.
     pub(super) fn zen_status_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.status_bar_visible || self.zen_layout() {
+        if !self.status_bar_visible || self.zen_layout() || self.status_bar_in_panel() {
             return None;
         }
-        let bar = self.render_status_bar(cx);
+        let bar = self.render_status_bar(false, cx);
         Some(match self.chrome_slide() {
             Some(shown) => slide_down(bar, self.status_bar_height(), shown.bar).into_any_element(),
             None => bar.into_any_element(),
@@ -302,6 +343,20 @@ impl SheprdWindow {
     /// The groups in zen mode's centred column, with the terminal's own
     /// ground either side. Narrowing the terminal's box is what resizes it,
     /// through the same canvas bounds every other resize reads.
+    pub(super) fn terminal_groups(
+        &self,
+        groups: AnyElement,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let content = self.zen_column(groups);
+        if self.arc_chrome() {
+            content
+        } else {
+            self.with_mod_panel(content, window, cx)
+        }
+    }
+
     pub(super) fn zen_column(&self, groups: AnyElement) -> AnyElement {
         let Some(width) = self.config.zen.width.filter(|_| self.zen_layout()) else {
             return groups;

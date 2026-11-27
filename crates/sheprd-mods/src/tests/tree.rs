@@ -41,6 +41,19 @@ fn a_tree_reads_into_typed_nodes() {
 }
 
 #[test]
+fn card_preserves_children_and_counts_them() {
+    let node =
+        view(r#"ui.card { gap = "small", "Provider", ui.badge { text = "Configured" } }"#).unwrap();
+    assert_eq!(node.count(), 3);
+    let Node::Card(card) = node else {
+        panic!("expected a card")
+    };
+    assert_eq!(card.gap, Gap::Small);
+    assert_eq!(card.children[0], text("Provider"));
+    assert!(matches!(card.children[1], Node::Badge(_)));
+}
+
+#[test]
 fn ui_text_takes_a_bare_string() {
     assert_eq!(view("ui.text(\"hi\")").unwrap(), text("hi"));
 }

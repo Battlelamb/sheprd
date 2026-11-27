@@ -20,6 +20,7 @@ impl SheprdWindow {
     /// or while it listens on none.
     pub(crate) fn render_listening_ports(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let (endpoint, workspace, listed) = self.focused_listening_ports()?;
+        let in_panel = self.status_bar_in_panel();
         Some(
             div()
                 .id("listening-ports")
@@ -29,16 +30,22 @@ impl SheprdWindow {
                 .flex()
                 .flex_none()
                 .items_center()
-                .h_full()
+                .when(!in_panel, |item| item.h_full())
+                .when(in_panel, |item| {
+                    item.max_w_full().min_h(px(self.status_bar_height()))
+                })
                 .px(px(6.))
-                .child(chips(
-                    listed,
-                    (endpoint, workspace),
-                    &self.tunnels,
-                    &self.theme,
-                    14.,
-                    cx,
-                )),
+                .child(
+                    chips(
+                        listed,
+                        (endpoint, workspace),
+                        &self.tunnels,
+                        &self.theme,
+                        14.,
+                        cx,
+                    )
+                    .when(in_panel, |chips| chips.flex_wrap()),
+                ),
         )
     }
 

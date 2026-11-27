@@ -13,6 +13,7 @@ named! {
     pub enum Element {
         Badge = "badge",
         Button = "button",
+        Card = "card",
         Column = "column",
         Divider = "divider",
         Icon = "icon",
@@ -37,7 +38,7 @@ impl Element {
             Self::Button => &[
                 "label", "name", "file", "tone", "command", "msg", "disabled",
             ],
-            Self::Column | Self::Row => &["gap", "align"],
+            Self::Card | Self::Column | Self::Row => &["gap", "align"],
             Self::Divider | Self::List | Self::Spacer => &[],
             Self::Icon => &["name", "file", "tone"],
             Self::Link => &["label", "url"],
@@ -104,6 +105,7 @@ named! {
 pub enum Node {
     Badge(Badge),
     Button(Button),
+    Card(Container),
     Column(Container),
     Divider,
     Icon(Icon),
@@ -218,7 +220,7 @@ impl Node {
     /// This node and every node under it.
     pub fn count(&self) -> usize {
         1 + match self {
-            Self::Row(container) | Self::Column(container) => {
+            Self::Row(container) | Self::Column(container) | Self::Card(container) => {
                 container.children.iter().map(Self::count).sum()
             }
             Self::List(list) => list.items.iter().map(Self::count).sum(),

@@ -88,6 +88,27 @@ fn saving_reloads_and_a_broken_save_keeps_the_last_tree() {
 }
 
 #[test]
+fn data_refresh_keeps_the_mods_interaction_state() {
+    let root = tempfile::tempdir().unwrap();
+    let main = format!(
+        "local prefix = require('./data')\n{}",
+        counter("prefix").replace("\"prefix\"", "prefix")
+    );
+    let dir = write_mod(root.path(), "live", &main);
+    let data = dir.join("data.luau");
+    fs::write(&data, "return 'one'").unwrap();
+    let worker = Handle::spawn(dir).unwrap();
+    let mut seen = Vec::new();
+    assert_eq!(text(&next_tree(&worker, &mut seen)), "one0/0");
+    worker.send(Data::from("add")).unwrap();
+    assert_eq!(text(&next_tree(&worker, &mut seen)), "one1/0");
+    fs::write(data, "return 'new data'").unwrap();
+    assert_eq!(text(&next_tree(&worker, &mut seen)), "new data1/0");
+    worker.reload();
+    assert_eq!(text(&next_tree(&worker, &mut seen)), "new data0/0");
+}
+
+#[test]
 fn a_reload_whose_first_view_fails_keeps_the_running_mod() {
     let root = tempfile::tempdir().unwrap();
     let dir = write_mod(root.path(), "live", &counter("good "));

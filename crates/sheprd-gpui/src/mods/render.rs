@@ -25,7 +25,11 @@ pub(super) enum Axis {
 
 impl SheprdWindow {
     /// The status bar items of the mods placed there, in name order.
-    pub(crate) fn render_mod_status_items(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(crate) fn render_mod_status_items(
+        &self,
+        in_panel: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let mut items = Vec::new();
         for (name, entry) in self.mods.entries() {
             if !entry.places().contains(&Place::StatusBar) {
@@ -49,7 +53,8 @@ impl SheprdWindow {
                     .flex_shrink(1.)
                     .min_w_0()
                     .items_center()
-                    .h_full()
+                    .when(!in_panel, |item| item.h_full())
+                    .when(in_panel, |item| item.min_h(px(self.status_bar_height())))
                     .max_w(px(STATUS_ITEM_WIDTH))
                     .overflow_hidden()
                     .px(px(6.))
@@ -64,9 +69,10 @@ impl SheprdWindow {
                 .flex()
                 .flex_shrink(1.)
                 .min_w_0()
-                .max_w(px(STATUS_AREA_WIDTH))
-                .h_full()
-                .overflow_hidden()
+                .when(!in_panel, |area| {
+                    area.max_w(px(STATUS_AREA_WIDTH)).h_full().overflow_hidden()
+                })
+                .when(in_panel, |area| area.max_w_full().flex_wrap())
                 .children(items)
                 .into_any_element()
         })
@@ -218,8 +224,20 @@ impl Painter<'_> {
     ) -> AnyElement {
         let theme = self.theme;
         match node {
-            Node::Row(container) => self.container(container, id, Axis::Row, cx),
-            Node::Column(container) => self.container(container, id, Axis::Column, cx),
+            Node::Row(container) => self
+                .container(container, id, Axis::Row, cx)
+                .into_any_element(),
+            Node::Column(container) => self
+                .container(container, id, Axis::Column, cx)
+                .into_any_element(),
+            Node::Card(container) => self
+                .container(container, id, Axis::Column, cx)
+                .p(px(8.))
+                .rounded(px(crate::config::corners::SMALL))
+                .border_1()
+                .border_color(rgb(theme.active))
+                .bg(rgb(theme.active).opacity(0.28))
+                .into_any_element(),
             Node::List(list) => div()
                 .flex()
                 .flex_col()
@@ -385,7 +403,7 @@ impl Painter<'_> {
         id: &str,
         axis: Axis,
         cx: &mut Context<SheprdWindow>,
-    ) -> AnyElement {
+    ) -> Div {
         let gap = match container.gap {
             Gap::None => 0.,
             Gap::Small => 4.,
@@ -416,7 +434,6 @@ impl Painter<'_> {
                     element
                 }
             }))
-            .into_any_element()
     }
 
     /// Mod-folder SVGs are not drawn yet (they need the image cache the

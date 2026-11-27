@@ -6,7 +6,14 @@ fn local(home: &std::path::Path) -> Command {
     let mut command = Command::new("/bin/sh");
     command
         .arg("-c")
-        .arg(r#"eval "$1""#)
+        .arg(
+            r#"eval "set -- $1"
+script=$3
+if [ -n "${CORE_CANDIDATES:-}" ] && [ "${script#"$CORE_CANDIDATES"}" != "$script" ]; then
+    script='for path in "$HOME/.local/bin/herdr-core"; do'"${script#"$CORE_CANDIDATES"}"
+fi
+exec "$1" "$2" "$script""#,
+        )
         .arg("sh")
         .env_clear()
         .env("HOME", home)
@@ -133,10 +140,13 @@ esac
 /// [`local`] with the machine's own `curl` first on PATH.
 fn on(home: &std::path::Path) -> Command {
     let mut command = local(home);
-    command.env(
-        "PATH",
-        format!("{}:/usr/bin:/bin", home.join("tools").display()),
-    );
+    // A core on the test host must not satisfy the fake machine's probe.
+    command
+        .env("CORE_CANDIDATES", sheprd_client::core_bridge::CANDIDATES)
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin", home.join("tools").display()),
+        );
     command
 }
 

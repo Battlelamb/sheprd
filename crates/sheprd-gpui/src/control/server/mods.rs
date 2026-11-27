@@ -66,15 +66,14 @@ pub(super) fn serve(call: Call<ModOp>, cx: &mut App) -> Response {
                 reply: Reply::Opened { name },
             }
         }),
-        ModOp::Panel { switch } => in_window(&caller, cx, |view, _, cx| {
+        ModOp::Panel { switch } => in_window(&caller, cx, |view, window, cx| {
             if let Some(switch) = switch {
-                let shown = switch.apply(!view.mods.panel_hidden());
-                view.mods.set_panel_hidden(!shown);
-                cx.notify();
+                let shown = switch.apply(view.mod_panel_requested());
+                view.set_mod_panel_requested(shown, window, cx);
             }
             Response::Mod {
                 reply: Reply::Panel {
-                    shown: !view.mods.panel_hidden(),
+                    shown: view.mod_panel_requested(),
                     sections: view
                         .mods
                         .panel_sections()

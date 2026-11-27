@@ -734,8 +734,12 @@ impl SheprdWindow {
             .text_size(px(font.size))
             .line_height(px(line_height(font)))
             .text_color(rgb(theme.foreground))
-            .bg(self.fill().panel(theme.sidebar_background()))
-            .border_e(px(1.))
+            .bg(if self.arc_chrome() {
+                rgb(self.arc_shell_color()).into()
+            } else {
+                self.fill().panel(theme.sidebar_background())
+            })
+            .when(!self.arc_chrome(), |sidebar| sidebar.border_e(px(1.)))
             .border_color(rgb(theme.active))
             // Zero flex bases keep long workspace lists from displacing agents.
             .child(
@@ -797,6 +801,13 @@ impl SheprdWindow {
                             .child(
                                 div()
                                     .id("new-workspace")
+                                    .tooltip(self.action_hint(
+                                        fl!("sidebar-new-workspace"),
+                                        Some(Command::Workspace),
+                                    ))
+                                    .tooltip_show_delay(
+                                        crate::window::chrome_buttons::ACTION_HINT_DELAY,
+                                    )
                                     .map(|button| {
                                         self.sidebar_button(button, fl!("sidebar-new-workspace"))
                                     })

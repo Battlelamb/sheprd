@@ -131,6 +131,10 @@ impl Render for SheprdWindow {
         let fill = self.fill();
         let ground = self.ground();
         self.viewport_width = f32::from(window.viewport_size().width);
+        if !self.sidebar_hover_rail() {
+            self.sidebar_hover_pending = None;
+            self.sidebar_hovered = false;
+        }
         let font = self.config.terminal.font();
         // Parked groups paint with the same face as the window's terminal.
         let parked_font = font.clone();
@@ -143,19 +147,12 @@ impl Render for SheprdWindow {
         self.cell_width = self.painter.borrow_mut().cell_width(&font, window, cx);
         // Registers the window for surface-only redraws; see `redraw_terminal`.
         self.surface_signal.read(cx);
-        let sidebar = self
-            .sidebar_column_width(f32::from(window.viewport_size().width))
-            .map(|width| {
-                (
-                    crate::sidebar::cached_view(&self.sidebar_view, width),
-                    width,
-                )
-            });
+        let sidebar_width = self.sidebar_column_width(self.viewport_width);
         // The tab strip reserves its moving marks afresh; a hidden sidebar
         // leaves none behind.
         if let Some(marks) = crate::mark_layer::Marks::of(window, cx) {
             marks.begin_frame(cx.entity_id());
-            if sidebar.is_none() {
+            if sidebar_width.is_none() {
                 marks.forget(self.sidebar_view.entity_id());
             }
         }
@@ -435,6 +432,8 @@ impl Render for SheprdWindow {
             // A frame the daemon has not resized yet may be larger than the
             // box, so the box clips it and the padding stays clear.
             .child({
+                let split_buttons =
+                    self.legacy_split_buttons(surface.as_deref(), cell_width, cell_height, cx);
                 let cells = div()
                     .relative()
                     .size_full()
@@ -653,6 +652,7 @@ impl Render for SheprdWindow {
                         .size_full(),
                     );
                 cells
+                    .children(split_buttons)
                     .children(chats)
                     .children(self.render_reconnecting(cx))
                     .when_some(find_bar, |terminal, bar| terminal.child(bar))
@@ -797,8 +797,7 @@ impl Render for SheprdWindow {
             groups.push(self.render_group(slot, body, ends, reach, window, cx));
         }
         let content = self.render_groups(groups, window, cx);
-        let content =
-            section.unwrap_or_else(|| self.with_mod_panel(self.zen_column(content), window, cx));
+        let content = section.unwrap_or_else(|| self.terminal_groups(content, window, cx));
         // Not `||`: asking forgets group motion that has finished.
         if self.groups_moving()
             | self.tabs_growing()
@@ -816,6 +815,7 @@ impl Render for SheprdWindow {
         // Zen mode keeps toasts and menus: they carry errors and what the
         // user asked for, not chrome.
         let zen = self.zen_layout();
+        let (sidebar, sidebar_overlay) = self.sidebar_layers(sidebar_width, merged, window, cx);
         let root = div()
             .capture_key_down(cx.listener(Self::application_menu_shortcut))
             .capture_key_down(cx.listener(Self::chrome_focus_key))
@@ -959,13 +959,10 @@ impl Render for SheprdWindow {
                     .flex_1()
                     .min_h_0()
                     .relative()
-                    .children(sidebar.map(|(sidebar, width)| {
-                        let column = match merged {
-                            true => self.sidebar_column(sidebar, window, cx).into_any_element(),
-                            false => sidebar.into_any_element(),
-                        };
-                        self.sliding_sidebar(column, width)
-                    }))
+                    .when(self.arc_chrome(), |body| {
+                        body.bg(rgb(self.arc_shell_color()))
+                    })
+                    .children(sidebar)
                     .child(
                         div()
                             .flex()
@@ -976,8 +973,10 @@ impl Render for SheprdWindow {
                             .relative()
                             .child(content)
                             .children(self.render_notices(cx))
-                            .children(self.zen_status_bar(cx)),
-                    ),
+                            .children(self.zen_status_bar(cx))
+                            .map(|body| self.arc_frame(body, window, cx)),
+                    )
+                    .children(sidebar_overlay),
             )
             // After the body, whose rows reserve the marks it draws, and under
             // everything that covers the body.

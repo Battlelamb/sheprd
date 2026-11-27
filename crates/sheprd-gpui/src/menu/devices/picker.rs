@@ -791,6 +791,8 @@ impl SheprdWindow {
                 None => 0,
             };
             self.menu.selected = Some(next);
+            // A keyboard selection takes over from the opening block's auto-scroll.
+            self.menu.devices_reveal.set(None);
             self.reveal_picker_line(&lines, next, children.get(next).copied());
             cx.notify();
             return;

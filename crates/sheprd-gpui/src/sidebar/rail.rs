@@ -34,6 +34,8 @@ use std::collections::HashMap;
 /// Wide enough for the shared mark grid: a two-digit workspace number, an
 /// agent icon, and a drawn status icon, plus even padding inside the highlight.
 pub(crate) const RAIL_WIDTH: f32 = 64.;
+/// The workspace and agent marks must still be clickable before the rail opens.
+pub(super) const HOVER_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
 const HOST_MARK: f32 = 22.;
 const HOST_BORDER: f32 = 1.;
 const HOST_DOT: f32 = 6.;
@@ -99,10 +101,81 @@ impl SheprdWindow {
         }
     }
 
+    pub(crate) fn sidebar_hover_rail(&self) -> bool {
+        self.sidebar_mode() == SidebarMode::Rail
+            && SidebarMode::Rail.width(None, self.viewport_width).is_some()
+            && self.activity_section().is_none()
+            && self.mod_app().is_none()
+    }
+
+    /// Hover changes what is painted, not the width reserved for terminals.
+    pub(crate) fn sidebar_display_mode(&self) -> SidebarMode {
+        if self.sidebar_hovered && self.sidebar_hover_rail() {
+            SidebarMode::Expanded
+        } else {
+            self.sidebar_mode()
+        }
+    }
+
+    pub(crate) fn sidebar_hover_overlay(
+        &self,
+        column: AnyElement,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        div()
+            .absolute()
+            .inset_s(px(0.))
+            .top_0()
+            .bottom_0()
+            .w(px(width))
+            .flex()
+            .when(self.sidebar_hovered, |overlay| {
+                overlay.bg(rgb(self.theme.sidebar_background())).occlude()
+            })
+            .child(column)
+            // Track above the rows so a child that occludes clicks cannot end the peek.
+            .child(
+                div()
+                    .id("sidebar-hover-rail")
+                    .absolute()
+                    .inset_0()
+                    .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
+                    .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                        this.set_sidebar_hover(*hovered, cx);
+                    })),
+            )
+    }
+
+    fn set_sidebar_hover(&mut self, hovered: bool, cx: &mut Context<Self>) {
+        if !hovered || !self.sidebar_hover_rail() {
+            self.sidebar_hover_pending = None;
+            if std::mem::take(&mut self.sidebar_hovered) {
+                cx.notify();
+            }
+        } else if !self.sidebar_hovered && self.sidebar_hover_pending.is_none() {
+            self.sidebar_hover_pending = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(HOVER_DELAY).await;
+                let _ = this.update(cx, |this, cx| {
+                    this.sidebar_hover_pending.take();
+                    if this.sidebar_hover_rail() {
+                        this.sidebar_hovered = true;
+                        cx.notify();
+                    }
+                });
+            }));
+        }
+    }
+
     pub(crate) fn toggle_sidebar(&mut self) {
         self.sidebar_visible = !self.sidebar_visible;
-        self.sidebar_slide
-            .set(self.sidebar_visible, crate::motion::now());
+        self.sidebar_hover_pending = None;
+        if std::mem::take(&mut self.sidebar_hovered) {
+            self.sidebar_slide = Default::default();
+        } else {
+            self.sidebar_slide
+                .set(self.sidebar_visible, crate::motion::now());
+        }
         self.sidebar_start_pending = false;
     }
 
@@ -551,7 +624,10 @@ impl SheprdWindow {
                 rail_button("rail-new-workspace", font, look, theme)
                     .text_color(rgb(theme.muted))
                     .hover(|s| s.text_color(rgb(theme.foreground)))
-                    .tooltip(hint.with(fl!("sidebar-new-workspace")))
+                    .tooltip(
+                        self.action_hint(fl!("sidebar-new-workspace"), Some(Command::Workspace)),
+                    )
+                    .tooltip_show_delay(crate::window::chrome_buttons::ACTION_HINT_DELAY)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.command(Command::Workspace, window, cx);
                     }))

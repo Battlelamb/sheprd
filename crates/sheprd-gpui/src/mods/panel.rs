@@ -24,9 +24,12 @@ const RAIL_WIDTH: f32 = 28.;
 /// Whether the panel shows, and which sections are folded.
 #[derive(Debug, Default)]
 pub(super) struct PanelState {
+    arc_pinned: bool,
     /// Hidden with Toggle Mod Panel, for this window and session.
     hidden: bool,
     collapsed: bool,
+    hovered: bool,
+    card_hovered: bool,
     /// Sections folded to their header, by mod name.
     folded: BTreeSet<String>,
     motion: motion::Toggle,
@@ -41,6 +44,8 @@ impl super::Mods {
 
     pub(crate) fn set_panel_hidden(&mut self, hidden: bool) {
         self.panel.hidden = hidden;
+        self.panel.hovered = false;
+        self.panel.card_hovered = false;
     }
 
     fn toggle_fold(&mut self, name: &str) {
@@ -70,7 +75,10 @@ impl SheprdWindow {
     /// Sets the panel opening or closing to match its sections and the
     /// user's choice; whether it is moving, so the window draws again.
     pub(crate) fn update_mod_panel(&mut self) -> bool {
-        let open = self.mod_panel_expanded();
+        let open = self.mod_panel_pinned();
+        if !self.arc_chrome() || !self.mod_panel_shown() {
+            self.mods.panel.card_hovered = false;
+        }
         let now = motion::now();
         let first = !std::mem::replace(&mut self.mods.panel.placed, true);
         let was = self.mods.panel.motion.is_open();
@@ -78,8 +86,16 @@ impl SheprdWindow {
         was != open || self.mods.panel.motion.moving(now)
     }
 
-    pub(crate) fn mod_panel_expanded(&self) -> bool {
-        self.mod_panel_available() && !self.mods.panel.collapsed
+    fn mod_panel_pinned(&self) -> bool {
+        self.mod_panel_available() && !self.mod_panel_collapsed()
+    }
+
+    fn mod_panel_collapsed(&self) -> bool {
+        if self.arc_chrome() {
+            !self.mods.panel.arc_pinned
+        } else {
+            self.mods.panel.collapsed
+        }
     }
 
     fn mod_panel_available(&self) -> bool {
@@ -97,6 +113,30 @@ impl SheprdWindow {
             .width(beside)
             .min(beside - MIN_CONTENT - RAIL_WIDTH);
         (width >= MIN_PANEL).then_some(width)
+    }
+
+    pub(crate) fn mod_panel_requested(&self) -> bool {
+        !self.mods.panel_hidden()
+    }
+
+    pub(crate) fn set_mod_panel_requested(
+        &mut self,
+        shown: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.mod_panel_requested() != shown {
+            self.mods.set_panel_hidden(!shown);
+            if !shown && self.chrome_region == Some(Region::ModPanel) {
+                self.focus_chrome_region(None, window, cx);
+            } else {
+                cx.notify();
+            }
+        }
+    }
+
+    pub(crate) fn toggle_mod_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_mod_panel_requested(!self.mod_panel_requested(), window, cx);
     }
 
     /// Whether the panel is drawn now, opening or open, for the focus
@@ -129,6 +169,14 @@ impl SheprdWindow {
         if self.mods.panel.motion.moving(now) {
             window.request_animation_frame();
         }
+        let arc = self.arc_chrome();
+        let keyboard_status =
+            arc && self.status_bar_visible && self.chrome_region == Some(Region::StatusBar);
+        let peek = show_rail
+            && self.mod_panel_collapsed()
+            && (self.mods.panel.hovered
+                || (arc && self.mods.panel.card_hovered)
+                || keyboard_status);
         let slide = (shown > 0.).then(|| {
             let panel = self
                 .resizable_panel(
@@ -152,6 +200,7 @@ impl SheprdWindow {
                         .bottom_0()
                         .left_0()
                         .w(px(width))
+                        .when(arc, |column| column.py(px(crate::window::ARC_FRAME_INSET)))
                         .child(panel),
                 )
         });
@@ -163,32 +212,120 @@ impl SheprdWindow {
             .min_h_0()
             .child(div().flex().flex_1().min_w_0().min_h_0().child(content))
             .children(slide)
-            .children(show_rail.then(|| self.render_mod_panel_rail(cx)))
+            .children(show_rail.then(|| {
+                div()
+                    .relative()
+                    .h_full()
+                    .w(px(RAIL_WIDTH))
+                    .flex_none()
+                    .child(
+                        div()
+                            .absolute()
+                            .right_0()
+                            .top_0()
+                            .bottom_0()
+                            .w(px(RAIL_WIDTH + if peek { width } else { 0. }))
+                            .flex()
+                            .when(arc, |edge| {
+                                edge.items_start().py(px(crate::window::ARC_FRAME_INSET))
+                            })
+                            .when(!arc, |edge| edge.occlude())
+                            .when(peek, |edge| {
+                                let panel = self.render_mod_panel(cx);
+                                if arc {
+                                    edge.child(
+                                        div()
+                                            .w(px(width))
+                                            .flex_none()
+                                            .h_full()
+                                            // A peek covers the page, not the framed tab strip.
+                                            .pt(px(self.tab_strip_height() + 1.))
+                                            .child(
+                                                panel
+                                                    .w_full()
+                                                    .occlude()
+                                                    .hover_listener_mode(
+                                                        HoverListenerMode::InputModalityIndependent,
+                                                    )
+                                                    .on_hover(cx.listener(
+                                                        |this, hovered: &bool, _, cx| {
+                                                            this.mods.panel.card_hovered = *hovered;
+                                                            cx.notify();
+                                                        },
+                                                    )),
+                                            ),
+                                    )
+                                } else {
+                                    edge.child(
+                                        div()
+                                            .w(px(width))
+                                            .h_full()
+                                            .bg(rgb(self.theme.sidebar_background()))
+                                            .child(panel),
+                                    )
+                                }
+                            })
+                            .child(self.render_mod_panel_rail(cx))
+                            .child(
+                                div()
+                                    .id("mod-panel-hover-rail")
+                                    .absolute()
+                                    .right_0()
+                                    .top_0()
+                                    .bottom_0()
+                                    .when(arc, |area| area.w(px(RAIL_WIDTH)))
+                                    .when(!arc, |area| area.left_0())
+                                    .hover_listener_mode(
+                                        HoverListenerMode::InputModalityIndependent,
+                                    )
+                                    .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                                        if this.mods.panel.hovered != *hovered {
+                                            this.mods.panel.hovered = *hovered;
+                                            cx.notify();
+                                        }
+                                    })),
+                            ),
+                    )
+            }))
             .into_any_element()
     }
 
     fn render_mod_panel_rail(&self, cx: &mut Context<Self>) -> Div {
         let theme = &self.theme;
-        let collapsed = self.mods.panel.collapsed;
+        let collapsed = self.mod_panel_collapsed();
         let label = if collapsed {
-            fl!("layout-mod-panel-expand")
+            fl!("layout-mod-panel-pin")
         } else {
-            fl!("layout-mod-panel-collapse")
+            fl!("layout-mod-panel-unpin")
         };
         div()
             .debug_selector(|| "mod-panel-rail".into())
             .h_full()
             .w(px(RAIL_WIDTH))
             .flex_none()
-            .bg(self.fill().panel(theme.sidebar_background()))
-            .border_l_1()
-            .border_color(rgb(theme.active))
+            .when(self.arc_chrome(), |rail| {
+                rail.occlude().bg(rgb(self.arc_shell_color()))
+            })
+            .when(!self.arc_chrome(), |rail| {
+                rail.bg(self.fill().panel(theme.sidebar_background()))
+                    .border_l_1()
+                    .border_color(rgb(theme.active))
+            })
             .child(
                 self.chrome_stop(Region::ModPanel, div().id("mod-panel-rail-toggle"))
                     .debug_selector(|| "mod-panel-rail-toggle".into())
                     .role(Role::Button)
-                    .aria_expanded(!collapsed)
-                    .aria_label(label)
+                    .aria_expanded(
+                        !collapsed
+                            || self.mods.panel.hovered
+                            || (self.arc_chrome()
+                                && (self.mods.panel.card_hovered
+                                    || (self.status_bar_visible
+                                        && self.chrome_region == Some(Region::StatusBar)))),
+                    )
+                    .aria_label(label.clone())
+                    .tooltip(self.action_hint(label, None))
+                    .tooltip_show_delay(crate::window::chrome_buttons::ACTION_HINT_DELAY)
                     .flex()
                     .w_full()
                     .h(px(RAIL_WIDTH))
@@ -197,8 +334,15 @@ impl SheprdWindow {
                     .cursor_pointer()
                     .hover(|style| style.bg(rgb(theme.active)))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.mods.panel.collapsed = !this.mods.panel.collapsed;
-                        this.update_mod_panel();
+                        if this.arc_chrome() {
+                            this.mods.panel.arc_pinned = !this.mods.panel.arc_pinned;
+                            this.mods.panel.card_hovered = false;
+                        } else {
+                            this.mods.panel.collapsed = !this.mods.panel.collapsed;
+                        }
+                        // Move between overlay and docked layout without replaying the slide.
+                        let pinned = this.mod_panel_pinned();
+                        this.mods.panel.motion.set(pinned, motion::now(), true);
                         cx.notify();
                     }))
                     .child(
@@ -298,14 +442,20 @@ impl SheprdWindow {
             .aria_label("Mods")
             .flex()
             .flex_col()
-            .h_full()
             .min_h_0()
             .overflow_y_scroll()
             .bg(self.fill().panel(theme.sidebar_background()))
-            .border_l_1()
+            .when(self.arc_chrome(), |panel| {
+                panel.max_h_full().rounded(px(12.)).border_1()
+            })
+            .when(!self.arc_chrome(), |panel| panel.h_full().border_l_1())
             .border_color(rgb(theme.active))
             .text_size(px(size))
             .text_color(rgb(theme.foreground))
+            .children(
+                (self.status_bar_visible && self.status_bar_in_panel())
+                    .then(|| self.render_status_bar(true, cx)),
+            )
             .children(sections)
     }
 }

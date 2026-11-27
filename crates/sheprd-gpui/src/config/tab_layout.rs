@@ -68,6 +68,8 @@ tab_layouts! {
     /// Icons only, with the status on each icon's corner; the chosen tab
     /// names itself.
     Compact => "compact", "tab-layout-compact";
+    /// Workspaces and vertical tabs share the sidebar; content sits in one frame.
+    Arc => "arc", "tab-layout-arc";
 }
 
 impl TryFrom<&str> for TabLayoutMode {

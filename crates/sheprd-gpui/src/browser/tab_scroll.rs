@@ -53,6 +53,8 @@ struct Strip {
     /// the user scrolled away stays put until the choice changes, or the tab
     /// grows past what was brought into view.
     revealed: Option<(Pick, f32)>,
+    /// The previous layout could still have shown a narrower, growing tab.
+    growing: bool,
     /// Where on the thumb the pointer took hold of it.
     grab: f32,
     /// The frames spent bringing `revealed` into view; at `MAX_TRIES` it is
@@ -104,10 +106,12 @@ impl TabScroll {
         growing: bool,
     ) -> bool {
         let strip = self.strips.entry(group).or_default();
-        let same = strip
-            .revealed
-            .as_ref()
-            .is_some_and(|(revealed, at)| revealed == pick && (at - width).abs() < 0.5);
+        let same = strip.growing == growing
+            && strip
+                .revealed
+                .as_ref()
+                .is_some_and(|(revealed, at)| revealed == pick && (at - width).abs() < 0.5);
+        strip.growing = growing;
         if !same {
             strip.revealed = Some((pick.clone(), width));
             strip.tries = 0;

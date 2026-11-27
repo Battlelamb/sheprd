@@ -162,6 +162,17 @@ impl Mod {
         })
     }
 
+    /// Retains bounded plain state across a data-only reload. Nonportable
+    /// state keeps the new module's initialized value.
+    pub fn inherit_plain_state(&mut self, previous: &Self) -> Result<()> {
+        let value = previous.lua.registry_value::<Value>(&previous.state)?;
+        if let Ok(state) = Data::read(&value) {
+            let value = state.to_lua(&self.lua)?;
+            self.lua.replace_registry_value(&mut self.state, value)?;
+        }
+        Ok(())
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }

@@ -144,6 +144,7 @@ struct Worker {
     link: Arc<Link>,
     module: Option<Mod>,
     stamp: Option<Stamp>,
+    loaded_stamp: Option<Stamp>,
     next_scan: Instant,
     timers: Vec<(Instant, Data)>,
     state: Arc<State>,
@@ -158,6 +159,7 @@ impl Worker {
             link,
             module: None,
             stamp: None,
+            loaded_stamp: None,
             next_scan: Instant::now(),
             timers: Vec::new(),
             state: Arc::new(State::default()),
@@ -249,9 +251,14 @@ impl Worker {
         if !force && self.stamp.as_ref() == Some(&stamp) {
             return;
         }
-        self.stamp = Some(stamp);
+        let keep_state = !force
+            && self
+                .loaded_stamp
+                .as_ref()
+                .is_some_and(|before| stamp.data_only_change(before));
+        self.stamp = Some(stamp.clone());
         let mut log = Vec::new();
-        let candidate = self.candidate(&mut log);
+        let candidate = self.candidate(keep_state, &mut log);
         push_log(&mut lock(&self.link.outbox), log);
         let (sources, module, tree) = match candidate {
             Ok((sources, module, Ok(tree))) => (sources, module, Some(tree)),
@@ -262,6 +269,7 @@ impl Worker {
             Ok((_, _, Err(error))) | Err(error) => return self.fail_load(error),
         };
         self.module = Some(module);
+        self.loaded_stamp = Some(stamp);
         self.timers.clear();
         self.dirty = false;
         let icon = sources
@@ -283,10 +291,13 @@ impl Worker {
     /// Reads and loads the mod's files and draws them once, leaving what
     /// it logged in `log`. Loading must work; the first view's result is
     /// the caller's to judge.
-    fn candidate(&self, log: &mut Vec<LogLine>) -> Result<Candidate, Error> {
+    fn candidate(&self, keep_state: bool, log: &mut Vec<LogLine>) -> Result<Candidate, Error> {
         let sources = Sources::read(&self.dir)?;
         let now = SystemTime::now();
         let mut module = Mod::load(&sources, limits(), now)?;
+        if keep_state && let Some(previous) = &self.module {
+            module.inherit_plain_state(previous)?;
+        }
         let tree = module.view(&self.state, now);
         log.extend(module.take_log());
         Ok((sources, module, tree))

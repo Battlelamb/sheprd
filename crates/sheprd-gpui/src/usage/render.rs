@@ -31,7 +31,11 @@ impl SheprdWindow {
     /// As many providers as fit: the one chosen in the panel first, then
     /// those closest to a limit; nothing when usage is hidden or no provider
     /// on the host has numbers yet.
-    pub(crate) fn render_usage(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+    pub(crate) fn render_usage(
+        &self,
+        in_panel: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement + use<>> {
         let entry = self.usage.current();
         let shown = entry
             .map(|entry| entry.headline(self.usage.chosen()))
@@ -54,14 +58,13 @@ impl SheprdWindow {
             .flex()
             .flex_1()
             .min_w_0()
-            .h_full()
-            .overflow_hidden()
+            .when(!in_panel, |row| row.h_full().overflow_hidden())
             .flex_wrap()
             .content_start()
             .items_center()
             .gap_x(px(4.));
         for reading in &shown {
-            row = row.child(self.usage_segment(reading, now, cx));
+            row = row.child(self.usage_segment(reading, now, in_panel, cx));
         }
         if let Some(error) = host_error {
             let (foreground, surface) = (theme.foreground, theme.surface);
@@ -96,7 +99,8 @@ impl SheprdWindow {
                 .flex()
                 .flex_1()
                 .min_w_0()
-                .h_full()
+                .when(!in_panel, |row| row.h_full())
+                .when(in_panel, |row| row.w_full().flex_none())
                 .items_center()
                 .gap(px(4.))
                 .child(row)
@@ -148,6 +152,7 @@ impl SheprdWindow {
         &self,
         reading: &Reading,
         now: SystemTime,
+        in_panel: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let theme = &self.theme;
@@ -177,7 +182,10 @@ impl SheprdWindow {
             // A wrapped segment occupies a whole second line and is clipped
             // there, rather than leaving a partial provider on the first line.
             .flex_none()
-            .h_full()
+            .when(!in_panel, |segment| segment.h_full())
+            .when(in_panel, |segment| {
+                segment.min_h(px(self.status_bar_height())).max_w_full()
+            })
             .items_center()
             .gap(px(6.))
             .px(px(6.))
@@ -225,8 +233,10 @@ impl SheprdWindow {
         let mut labels = div()
             .flex()
             .min_w_0()
-            .overflow_hidden()
-            .whitespace_nowrap()
+            .when(!in_panel, |labels| {
+                labels.overflow_hidden().whitespace_nowrap()
+            })
+            .when(in_panel, |labels| labels.flex_wrap())
             .gap(px(4.));
         match self.config.status_bar.usage {
             Detail::Compact => {

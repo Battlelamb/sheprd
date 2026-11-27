@@ -44,6 +44,7 @@ mod settings;
 mod shared_names;
 mod shown_checkout;
 mod slide;
+mod split_close_button;
 mod split_shown;
 mod stale;
 mod tab_status;

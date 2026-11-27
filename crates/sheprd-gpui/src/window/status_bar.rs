@@ -24,18 +24,26 @@ const MODEL_WIDTH: f32 = 160.;
 
 impl SheprdWindow {
     /// The bar's height, which grows with the UI font.
-    pub(super) fn status_bar_height(&self) -> f32 {
+    pub(crate) fn status_bar_height(&self) -> f32 {
         (self.config.ui.size * 1.5 + 4.).max(22.)
     }
 
-    pub(super) fn render_status_bar(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(crate) fn status_bar_in_panel(&self) -> bool {
+        self.arc_chrome() && self.mod_panel_shown()
+    }
+
+    pub(crate) fn render_status_bar(
+        &self,
+        in_panel: bool,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let status = (!matches!(self.live.status, ConnectionStatus::Connected)
             || self.local_error.is_some()
             || self.live.error.is_some())
         .then(|| self.live.status_text(self.local_error.as_deref()));
         let items = self.config.status_bar;
         let height = px(self.status_bar_height());
-        let usage = self.render_usage(cx);
+        let usage = self.render_usage(in_panel, cx);
         let has_usage = usage.is_some();
         div()
             .id("connection-status")
@@ -51,13 +59,38 @@ impl SheprdWindow {
             .children(self.status_bar_probe())
             .row()
             .flex_none()
-            .h(height)
-            .overflow_hidden()
+            .when(!in_panel, |bar| bar.h(height).overflow_hidden())
+            .when(in_panel, |bar| {
+                bar.w_full()
+                    .flex_wrap()
+                    .py(px(6.))
+                    .border_b_1()
+                    .border_color(rgb(self.theme.active))
+            })
             .items_center()
             .gap(px(6.))
             .px_3()
             .bg(self.fill().panel(self.theme.surface))
             .text_color(rgb(self.theme.foreground))
+            .when(self.arc_chrome() && !in_panel, |bar| {
+                bar.border_t_1().border_color(rgb(self.theme.active))
+            })
+            .when(self.arc_chrome() && status.is_none(), |bar| {
+                bar.child(
+                    div()
+                        .size(px(5.))
+                        .rounded_full()
+                        .flex_none()
+                        .bg(rgb(self.theme.ink(self.theme.palette[2]))),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(px(11.))
+                        .text_color(rgb(self.theme.muted))
+                        .child(fl!("status-bar-connected")),
+                )
+            })
             .children(self.render_agent_model(cx))
             .children(usage)
             .children(self.render_device_tags_status(cx))
@@ -100,10 +133,12 @@ impl SheprdWindow {
             })
             .child(
                 div()
-                    .when(!has_usage || status.is_some(), |row| row.flex_1())
+                    .when(!in_panel && (!has_usage || status.is_some()), |row| {
+                        row.flex_1()
+                    })
+                    .when(in_panel && status.is_some(), |row| row.w_full())
+                    .when(!in_panel, |row| row.overflow_hidden().whitespace_nowrap())
                     .min_w_0()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
                     .when_some(status, |row, status| {
                         row.child(
                             div()
@@ -115,7 +150,7 @@ impl SheprdWindow {
                         )
                     }),
             )
-            .children(self.render_mod_status_items(cx))
+            .children(self.render_mod_status_items(in_panel, cx))
             .children(self.render_listening_ports(cx))
             .children(self.render_system_load())
             .children(self.render_gpu_load())
@@ -128,6 +163,7 @@ impl SheprdWindow {
                         glyph("icons/theme.svg", self.theme.foreground),
                         fl!("status-bar-theme"),
                         items.theme,
+                        Some(crate::controls::Command::Themes),
                     )
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_theme_picker(window, cx);
@@ -141,6 +177,7 @@ impl SheprdWindow {
                         glyph("icons/keyboard.svg", self.theme.foreground),
                         fl!("status-bar-shortcuts"),
                         items.shortcuts,
+                        Some(crate::controls::Command::Keybinds),
                     )
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_keybinds(window, cx);
@@ -154,6 +191,7 @@ impl SheprdWindow {
                         self.issue_ring(),
                         fl!("status-bar-report-issue"),
                         items.report_issue,
+                        None,
                     )
                     .on_click(cx.listener(|this, _, _, cx| this.open_report_issue(cx))),
                 )
@@ -380,7 +418,7 @@ impl SheprdWindow {
             .row()
             .items_center()
             .px_2()
-            .h_full()
+            .h(px(self.status_bar_height()))
             .cursor_pointer()
             .hover(|s| s.bg(rgb(self.theme.active)))
             .child(div().relative().row().child(glyph(icon, color)).when(
@@ -465,6 +503,7 @@ impl SheprdWindow {
         icon: impl IntoElement,
         label: String,
         style: Button,
+        command: Option<crate::controls::Command>,
     ) -> Stateful<Div> {
         let label = SharedString::from(label);
         let button = div()
@@ -479,15 +518,18 @@ impl SheprdWindow {
             .items_center()
             .gap(px(5.))
             .px_2()
+            .rounded(px(crate::config::corners::CONTROL))
             .cursor_pointer()
             .hover(|s| s.bg(rgb(self.theme.active)))
+            .tooltip(self.action_hint(label.clone(), command))
+            .tooltip_show_delay(super::chrome_buttons::ACTION_HINT_DELAY)
             .child(icon);
         match style {
             Button::Label => button
                 .flex_shrink_1()
                 .min_w(px(33.))
                 .child(div().min_w_0().truncate().child(label)),
-            Button::Icon | Button::Hidden => button.flex_none().h_full().tooltip(self.hint(label)),
+            Button::Icon | Button::Hidden => button.flex_none().h(px(self.status_bar_height())),
         }
     }
 

@@ -330,7 +330,67 @@ impl SheprdWindow {
         };
         let view = view.clone();
         let body = self.core_pane_body(tab, terminal, &view, cx);
-        chrome.pane(face, body, &draw.panes)
+        let terminal = terminal.clone();
+        let id = SharedString::from(format!("close-core-split-{}-{terminal}", u64::from(tab)));
+        let close = self.split_close_button(id.clone()).map(|button| {
+            button.on_click(cx.listener(move |this, _, window, cx| {
+                cx.stop_propagation();
+                this.request_core_split_close(tab, terminal.clone(), window, cx);
+            }))
+        });
+        div()
+            .relative()
+            .flex()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .child(chrome.pane(face, body, &draw.panes))
+            .children(close)
+            .child(self.split_pane_hover(id, cx))
+            .into_any_element()
+    }
+
+    fn request_core_split_close(
+        &mut self,
+        tab: TabId,
+        terminal: TerminalId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(shown) = self
+            .core_terminals
+            .tabs
+            .get(&tab)
+            .filter(|shown| shown.panes.count() > 1 && shown.panes.contains(&terminal))
+        else {
+            return;
+        };
+        if shown.observe || !self.config.confirm_close_pane {
+            self.close_core_pane(tab, terminal, window, cx);
+            return;
+        }
+        let result = window.prompt(
+            PromptLevel::Warning,
+            &fl!("close-modal-pane-title"),
+            Some(&fl!("close-modal-pane-note")),
+            &[
+                PromptButton::cancel(fl!("close-modal-cancel")),
+                PromptButton::new(fl!("close-modal-close-pane")),
+            ],
+            cx,
+        );
+        cx.spawn_in(window, async move |this, cx| {
+            if result.await.ok() == Some(1) {
+                let _ = this.update_in(cx, |this, window, cx| {
+                    if this.core_terminals.tabs.get(&tab).is_some_and(|shown| {
+                        shown.panes.count() > 1 && shown.panes.contains(&terminal)
+                    }) {
+                        this.close_core_pane(tab, terminal, window, cx);
+                    }
+                });
+            }
+        })
+        .detach();
     }
 
     /// What a pane is called and how its program is doing, as its chrome

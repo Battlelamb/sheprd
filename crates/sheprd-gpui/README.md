@@ -92,6 +92,33 @@ The status dot pulses amber during local daemon startup and is red when disconne
 Healthy connections leave the status bar quiet; connection indicators live in the
 device picker. Startup, disconnection, and operation errors remain in the status bar.
 
+## Sidebars
+
+The Workspaces toggle switches between pinned and compact. Hover over the
+compact rail to open Workspaces without resizing the terminal. If you want
+no rail when unpinned, set `sidebar_collapsed_mode = "hidden"` under `[ui]`
+in the local `config.toml`. The [mod sidebar](../../docs/mods.md) on the
+opposite edge has its own pin control and hide command.
+
+Hover inside a split terminal to reveal its × in the upper-right corner.
+It closes only that pane, following the pane-close confirmation setting.
+Hover over a navigation, tab, sidebar, or status-bar control for two
+seconds to see its action name and current shortcut, if one is bound.
+
+### Arc-style workspace
+
+Choose **View → Tab Layout → Arc-style workspace** (or set `tab_layout = "arc"`
+in `config-gpui.local.toml`). Workspaces stay on the left, and tabs stay visible
+in a horizontal strip above each terminal group, even with only one open tab.
+Panel mods such as Provider Accounts stay in the collapsible pane on the right.
+Hover over its rail to peek without resizing the terminal, or click its chevron
+to pin it.
+
+**Search or run…** opens the existing command palette. To add Arc's Ctrl+T on
+Linux without losing the usual shortcut, use `command_palette = ["ctrl-t",
+"ctrl-shift-p"]` under `[keybindings]` in the local GUI config. This makes
+Ctrl+T a GUI shortcut rather than a key sent to the terminal.
+
 ## macOS Git permission troubleshooting
 
 If Git in a local Sheprd terminal reports `Operation not permitted`, even

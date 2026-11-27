@@ -7,6 +7,9 @@ tab-layout-underline = Underline
 tab-layout-cards = Cards
 tab-layout-curved = Curved
 tab-layout-compact = Compact
+tab-layout-arc = Arc-style workspace
+tab-layout-arc-search = Search or run…
+tab-layout-arc-application = Sheprd
 
 # The tooltip standing in for a tab's title when the tab face hides it;
 # $label is the tab's name.

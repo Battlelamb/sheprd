@@ -247,13 +247,7 @@ impl SheprdWindow {
     /// named for this desktop's platform key, as GPUI's `unparse` names it.
     pub(super) fn application_shortcut(&self, action: &dyn Action, cx: &App) -> String {
         if let Some(command) = action.as_any().downcast_ref::<crate::RunCommand>() {
-            let platform = if cfg!(windows) { "win-" } else { "super-" };
-            return self
-                .keymap()
-                .shortcuts(command.command)
-                .next()
-                .unwrap_or_default()
-                .replace("cmd-", platform);
+            return self.action_shortcut(command.command).unwrap_or_default();
         }
         cx.key_bindings()
             .borrow()

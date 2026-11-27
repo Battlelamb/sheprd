@@ -52,7 +52,8 @@ impl SheprdWindow {
     /// tabs stay left to right with the panes under them, and one row cannot
     /// read both ways.
     pub(crate) fn tabs_in_titlebar(&self, first: GroupId, cx: &App) -> bool {
-        self.tab_bar_position() == TabBarPosition::Top
+        !self.arc_chrome()
+            && self.tab_bar_position() == TabBarPosition::Top
             && !self.strip_hidden(first, cx)
             && !crate::direction::is_rtl()
     }
@@ -121,12 +122,10 @@ impl SheprdWindow {
     pub(crate) fn sidebar_column(
         &self,
         sidebar: impl IntoElement,
+        width: f32,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Div {
-        let width = self
-            .sidebar_column_width(f32::from(window.viewport_size().width))
-            .unwrap_or(0.);
         div()
             .flex()
             .flex_col()
@@ -144,6 +143,13 @@ impl SheprdWindow {
             env!("HERDR_BUILD_BRANCH"),
             env!("HERDR_BUILD_PR"),
         )
+        .map(|banner| {
+            banner.when(self.arc_chrome(), |banner| {
+                banner
+                    .bg(rgb(self.arc_shell_color()))
+                    .text_color(rgb(self.theme.foreground))
+            })
+        })
     }
 
     /// What leads the leftmost strip: whatever clearance the sidebar column

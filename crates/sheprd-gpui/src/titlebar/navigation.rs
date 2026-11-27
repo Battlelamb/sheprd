@@ -80,7 +80,7 @@ impl SheprdWindow {
     pub(super) fn navigation(&self, cx: &mut Context<Self>) -> Div {
         let style = Style::NATIVE;
         let theme = &self.theme;
-        let (ink, surface) = (theme.foreground, theme.surface);
+        let ink = theme.foreground;
         let button = |step: Step| {
             let enabled = self.can_travel(step);
             let (frame, radius) = style.button();
@@ -133,14 +133,14 @@ impl SheprdWindow {
                         .cursor_pointer()
                         .hover(move |button| button.bg(wash(ink, hover)))
                         .active(move |button| button.bg(wash(ink, pressed)))
-                        .tooltip(move |_, cx| {
-                            cx.new(|_| crate::usage::Hint {
-                                text: label.clone(),
-                                foreground: ink,
-                                surface,
-                            })
-                            .into()
-                        })
+                        .tooltip(self.action_hint(
+                            label,
+                            Some(match step {
+                                Step::Back => crate::controls::Command::Back,
+                                Step::Forward => crate::controls::Command::Forward,
+                            }),
+                        ))
+                        .tooltip_show_delay(crate::window::chrome_buttons::ACTION_HINT_DELAY)
                         .on_click(cx.listener(move |this, _, window, cx| {
                             cx.stop_propagation();
                             this.travel(step, window, cx);

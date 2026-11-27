@@ -190,6 +190,7 @@ pub(crate) struct TabContext<'a> {
     pub(crate) indicators: Indicators,
     pub(crate) fill: Fill,
     pub(crate) slot: Slot,
+    pub(crate) close_shortcut: Option<String>,
     /// The keyboard ring's color while the tab strip takes Tab focus.
     pub(crate) ring: Option<u32>,
 }
@@ -345,7 +346,7 @@ pub(crate) fn layout_for(mode: TabLayoutMode) -> &'static dyn TabLayout {
         TabLayoutMode::Compact => &compact::Compact,
         TabLayoutMode::Curved => &curved::Curved,
         TabLayoutMode::Outline => &outline::Outline,
-        TabLayoutMode::Pills => &pills::Pills,
+        TabLayoutMode::Pills | TabLayoutMode::Arc => &pills::Pills,
         TabLayoutMode::Underline => &underline::Underline,
     }
 }
@@ -458,33 +459,35 @@ fn close_button(
     text: u32,
     cx: &TabContext<'_>,
 ) -> Stateful<Div> {
+    use crate::window::chrome_buttons::{ACTION_HINT_DELAY, hint_label, tooltip};
     let (id, probe, icon_probe) = probe.close(cx.slot);
-    cx.stop(
-        div()
-            .id(id)
-            .role(Role::Button)
-            .aria_label(fl!("tab-layout-close")),
-    )
-    .debug_selector(move || probe.clone())
-    .size(px(size))
-    .flex_none()
-    .flex()
-    .items_center()
-    .justify_center()
-    .rounded(px(crate::config::corners::CONTROL))
-    .hover(move |s| s.bg(rgba((text << 8) | 0x24)))
-    .child(
-        svg()
-            .path("icons/close.svg")
-            .debug_selector(move || icon_probe.clone())
-            .size(px(12.))
-            .text_color(rgb(text)),
-    )
-    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-    .on_click(move |event, window, cx| {
-        cx.stop_propagation();
-        close(event, window, cx);
-    })
+    let label = fl!("tab-layout-close");
+    cx.stop(div().id(id).role(Role::Button).aria_label(label.clone()))
+        .debug_selector(move || probe.clone())
+        .tooltip(tooltip(
+            hint_label(&label, cx.close_shortcut.as_deref()),
+            cx.theme,
+        ))
+        .tooltip_show_delay(ACTION_HINT_DELAY)
+        .size(px(size))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(crate::config::corners::CONTROL))
+        .hover(move |s| s.bg(rgba((text << 8) | 0x24)))
+        .child(
+            svg()
+                .path("icons/close.svg")
+                .debug_selector(move || icon_probe.clone())
+                .size(px(12.))
+                .text_color(rgb(text)),
+        )
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_click(move |event, window, cx| {
+            cx.stop_propagation();
+            close(event, window, cx);
+        })
 }
 
 #[cfg(test)]

@@ -7,6 +7,7 @@ mod agent_title;
 mod curved;
 mod dividers;
 mod launcher;
+mod rows;
 
 use super::{SheprdWindow, tab_drag::StripDrag};
 use crate::i18n::fl;
@@ -20,7 +21,7 @@ use crate::{
     herdr_settings::TabBarPosition,
     icons::AgentIcon,
     sidebar::Indicators,
-    tab_layout::{Lead, Mark, Probe, TabContext, TabFace, TabLayout, TabShape, TabState},
+    tab_layout::{Lead, Mark, TabContext, TabLayout, TabShape, TabState},
     titlebar::Ends,
 };
 use gpui::{prelude::*, *};
@@ -53,6 +54,7 @@ impl SheprdWindow {
             indicators,
             fill: self.fill(),
             slot,
+            close_shortcut: self.action_shortcut(Command::CloseTab),
             ring: (self.chrome_region == Some(crate::window::chrome_focus::Region::TitleBar))
                 .then(|| self.theme.primary()),
         }
@@ -227,7 +229,7 @@ impl SheprdWindow {
             .tab_body(slot, pick.as_ref(), self.strip_side(), window)
             .unzip();
         let faces = self.tab_context(slot, indicators);
-        let mut built: Vec<(Pick, Stateful<Div>)> = Vec::new();
+        let built = self.tab_rows(slot, &faces, &silenced, cx);
         let mut tabs = div()
             .id(SharedString::from(slot.selector("tabs")))
             .role(Role::TabList)
@@ -241,78 +243,6 @@ impl SheprdWindow {
             .track_scroll(&scroll)
             .px(px(layout.padding()))
             .text_color(rgb(self.theme.foreground));
-        if let Some(snapshot) = &self.live.snapshot {
-            // Herdr 1's tabs only while its workspace is in front, as the
-            // tab shortcuts count them.
-            for tab in self
-                .herdr_tabs_in_front()
-                .filter(|t| self.group_lists(slot.id, &Pick::Herdr(t.tab_id.clone())))
-            {
-                let id = tab.tab_id.clone();
-                let context_id = id.clone();
-                let close_id = id.clone();
-                let selected = matches!(&pick, Some(Pick::Herdr(picked)) if *picked == id);
-                let muted = silenced.tab(&id);
-                let label = self.strip_label(snapshot, tab);
-                let base = div()
-                    .id(SharedString::from(format!("tab-{id}")))
-                    .debug_selector({
-                        let id = id.clone();
-                        move || slot.selector(&format!("tab-{id}"))
-                    })
-                    .role(Role::Tab)
-                    .aria_label(if muted {
-                        fl!("tab-strip-muted", label = label.as_ref())
-                    } else {
-                        label.to_string()
-                    })
-                    .aria_selected(selected)
-                    .map(|control| faces.stop(control));
-                let face = TabFace {
-                    label,
-                    mark: herdr_mark(snapshot, tab),
-                    zoomed: tab.zoomed,
-                    muted,
-                    probe: Probe::Herdr(id.clone()),
-                    close: Box::new(cx.listener(move |this, _, window, cx| {
-                        this.close_strip_tab(Pick::Herdr(close_id.clone()), window, cx);
-                    })),
-                };
-                built.push((
-                    Pick::Herdr(id.clone()),
-                    layout
-                        .tab(base, face, self.tab_state(selected, slot.id), &faces)
-                        .map(|tab| self.grow_tab(tab, slot.id, &Pick::Herdr(id.clone())))
-                        .on_mouse_down(
-                            MouseButton::Right,
-                            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                                cx.stop_propagation();
-                                this.open_tab_menu(
-                                    &context_id,
-                                    Some(slot.id),
-                                    event.position,
-                                    window,
-                                    cx,
-                                );
-                                this.menu.opening_right_click =
-                                    this.menu.page == Some(crate::menu::Page::Tab);
-                            }),
-                        )
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.choose_herdr_tab(slot.id, &id, window, cx);
-                        })),
-                ));
-            }
-        }
-        let shown = match pick {
-            Some(Pick::Page(id)) => Some(id),
-            _ => None,
-        };
-        built.extend(
-            self.browser_tab_entries(slot, shown, &faces, cx)
-                .into_iter()
-                .map(|(id, tab)| (Pick::Page(id), tab)),
-        );
         // Closed tabs go back where they stood, in the order they stood.
         let mut leaving = self.leaving_tabs(slot.id);
         leaving.sort_by_key(|leaving| leaving.index);
@@ -417,52 +347,42 @@ impl SheprdWindow {
             // the button sits after the last tab instead of at the far right
             // of the window.
             .child(scroller)
-            .child(
-                self.strip_new_tab(
-                    slot,
-                    div()
-                        .id(SharedString::from(slot.selector("new-tab")))
-                        .debug_selector(move || slot.selector("new-tab"))
-                        .role(Role::Button)
-                        .aria_label(fl!("tab-strip-new-tab"))
-                        .map(|control| {
-                            self.chrome_stop(crate::window::chrome_focus::Region::TitleBar, control)
-                        })
-                        .map(|button| {
-                            layout.new_tab(
-                                button,
-                                svg()
-                                    .path("icons/plus.svg")
-                                    .debug_selector(move || slot.selector("new-tab-icon"))
-                                    .size(px(14.))
-                                    // Quiet like the unselected tabs beside it.
-                                    .text_color(rgb(self.theme.muted))
-                                    .into_any_element(),
-                                &self.theme,
-                            )
-                        })
-                        // A new Herdr tab opens in the group that asked for it;
-                        // other kinds of tab are behind "…".
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.expect_new_tab_in(slot.id);
-                            this.command(Command::Tab, window, cx);
-                        })),
-                    window,
-                    cx,
-                ),
-            )
+            .child(self.group_new_tab(slot, window, cx))
             .child(self.strip_room(ends, window))
             .children(self.strip_launcher(slot, launcher::Spot::Trailing, cx))
             .child(self.strip_button(
                 slot,
-                ("split-editor", fl!("tab-strip-split")),
+                (
+                    if self.arc_chrome() {
+                        "arc-split-pane"
+                    } else {
+                        "split-editor"
+                    },
+                    if self.arc_chrome() {
+                        fl!("commands-split-right")
+                    } else {
+                        fl!("tab-strip-split")
+                    },
+                    Some(if self.arc_chrome() {
+                        Command::SplitRight
+                    } else {
+                        Command::SplitEditor
+                    }),
+                ),
                 "icons/split.svg",
                 cx,
-                move |this, _, window, cx| this.split_group(slot.id, window, cx),
+                move |this, _, window, cx| {
+                    if this.arc_chrome() {
+                        this.activate_group(slot.id, window, cx);
+                        this.command(Command::SplitRight, window, cx);
+                    } else {
+                        this.split_group(slot.id, window, cx);
+                    }
+                },
             ))
             .child(self.strip_button(
                 slot,
-                ("tab-actions", fl!("tab-strip-actions")),
+                ("tab-actions", fl!("tab-strip-actions"), None),
                 "icons/more.svg",
                 cx,
                 move |this, event, window, cx| {
@@ -472,6 +392,40 @@ impl SheprdWindow {
             .when(ends.is_some_and(|ends| ends.trailing), |strip| {
                 strip.child(self.strip_trailing(window, cx))
             })
+    }
+
+    pub(super) fn group_new_tab(
+        &self,
+        slot: Slot,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let plus = self
+            .tab_layout()
+            .new_tab(
+                self.chrome_stop(
+                    crate::window::chrome_focus::Region::TitleBar,
+                    div()
+                        .id(SharedString::from(slot.selector("new-tab")))
+                        .debug_selector(move || slot.selector("new-tab"))
+                        .role(Role::Button)
+                        .aria_label(fl!("tab-strip-new-tab"))
+                        .tooltip(self.action_hint(fl!("tab-strip-new-tab"), Some(Command::Tab)))
+                        .tooltip_show_delay(super::chrome_buttons::ACTION_HINT_DELAY),
+                ),
+                svg()
+                    .path("icons/plus.svg")
+                    .debug_selector(move || slot.selector("new-tab-icon"))
+                    .size(px(14.))
+                    .text_color(rgb(self.theme.muted))
+                    .into_any_element(),
+                &self.theme,
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.expect_new_tab_in(slot.id);
+                this.command(Command::Tab, window, cx);
+            }));
+        self.strip_new_tab(slot, plus, window, cx)
     }
 
     /// Closes a strip's tab as its close button does: a page at once and a
@@ -607,7 +561,7 @@ impl SheprdWindow {
     fn strip_button(
         &self,
         slot: Slot,
-        (id, label): (&'static str, String),
+        (id, label, command): (&'static str, String, Option<Command>),
         icon: &'static str,
         cx: &mut Context<Self>,
         action: impl Fn(&mut Self, &ClickEvent, &mut Window, &mut Context<Self>) + 'static,
@@ -616,8 +570,11 @@ impl SheprdWindow {
             .id(SharedString::from(slot.selector(id)))
             .debug_selector(move || slot.selector(id))
             .role(Role::Button)
-            .aria_label(label)
+            .aria_label(label.clone())
+            .tooltip(self.action_hint(label, command))
+            .tooltip_show_delay(super::chrome_buttons::ACTION_HINT_DELAY)
             .map(|control| self.chrome_stop(crate::window::chrome_focus::Region::TitleBar, control))
+            .rounded(px(crate::config::corners::CONTROL))
             .w(px(30.))
             .min_h(px(TAB_HEIGHT))
             .flex_none()
@@ -746,8 +703,11 @@ impl SheprdWindow {
         }
     }
 
-    /// Where Herdr's shared config puts the tab row.
+    /// Arc keeps its tabs at the top; other layouts follow Herdr's setting.
     pub(crate) fn tab_bar_position(&self) -> TabBarPosition {
+        if self.arc_chrome() {
+            return TabBarPosition::Top;
+        }
         self.settings
             .shared
             .as_ref()
@@ -761,11 +721,12 @@ impl SheprdWindow {
     /// only while the strip would list one tab at most, browser tabs counted.
     pub(crate) fn strip_hidden(&self, group: GroupId, cx: &App) -> bool {
         self.zen_layout()
-            || self
-                .settings
-                .shared
-                .as_ref()
-                .is_some_and(|shared| shared.hide_tab_bar_when_single_tab)
+            || !self.arc_chrome()
+                && self
+                    .settings
+                    .shared
+                    .as_ref()
+                    .is_some_and(|shared| shared.hide_tab_bar_when_single_tab)
                 && !self.is_split()
                 && self.folding_groups().is_empty()
                 && !self.tab_drag_in(group)

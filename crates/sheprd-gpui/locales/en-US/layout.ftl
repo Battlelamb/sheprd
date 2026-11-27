@@ -11,5 +11,5 @@ layout-orca = Orca
 layout-minimal = Minimal
 layout-devices = Devices
 
-layout-mod-panel-expand = Expand right sidebar
-layout-mod-panel-collapse = Collapse right sidebar
+layout-mod-panel-pin = Pin mod sidebar
+layout-mod-panel-unpin = Unpin mod sidebar (open on hover)

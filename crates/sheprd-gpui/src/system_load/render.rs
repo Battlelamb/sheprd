@@ -40,6 +40,7 @@ impl SheprdWindow {
         let host = self.selected_host()?;
         let reading = self.system_load.get(&host)?;
         let theme = &self.theme;
+        let in_panel = self.status_bar_in_panel();
         let segment = div()
             .id("system-load")
             .debug_selector(|| "system-load".into())
@@ -50,7 +51,10 @@ impl SheprdWindow {
             .flex_none()
             .items_center()
             .px(px(6.))
-            .h_full()
+            .when(!in_panel, |item| item.h_full())
+            .when(in_panel, |item| {
+                item.max_w_full().min_h(px(self.status_bar_height()))
+            })
             .tooltip(tooltip(reading, &host, theme));
         if reading.latest().is_none() {
             // A host that never answered says so; one still starting shows nothing.
@@ -63,12 +67,12 @@ impl SheprdWindow {
                 ),
             );
         }
-        Some(segment.child(line(
-            reading,
-            theme,
-            None,
-            self.config.status_bar.system_load,
-        )))
+        Some(
+            segment.child(
+                line(reading, theme, None, self.config.status_bar.system_load)
+                    .when(in_panel, |line| line.flex_wrap()),
+            ),
+        )
     }
 
     /// The selected host's GPU, when `show_gpu_load` is on and the host has
@@ -80,7 +84,9 @@ impl SheprdWindow {
         let host = self.selected_host()?;
         let reading = self.system_load.get(&host)?;
         let theme = &self.theme;
-        let line = gpu_line(reading, theme, None, self.config.status_bar.gpu_detail)?;
+        let in_panel = self.status_bar_in_panel();
+        let line = gpu_line(reading, theme, None, self.config.status_bar.gpu_detail)?
+            .when(in_panel, |line| line.flex_wrap());
         Some(
             div()
                 .id("gpu-load")
@@ -91,7 +97,10 @@ impl SheprdWindow {
                 .flex_none()
                 .items_center()
                 .px(px(6.))
-                .h_full()
+                .when(!in_panel, |item| item.h_full())
+                .when(in_panel, |item| {
+                    item.max_w_full().min_h(px(self.status_bar_height()))
+                })
                 .tooltip(tooltip(reading, &host, theme))
                 .child(line),
         )

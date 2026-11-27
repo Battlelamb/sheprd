@@ -6,7 +6,10 @@
 mod accessibility;
 mod annotate;
 mod announcement;
+mod arc_chrome;
+pub(crate) use arc_chrome::ARC_FRAME_INSET;
 mod backdrop;
+pub(crate) mod chrome_buttons;
 pub(crate) mod chrome_focus;
 pub(crate) mod clipboard;
 #[cfg(target_os = "macos")]
@@ -370,6 +373,8 @@ pub(crate) struct SheprdWindow {
     /// Whether the last spaces list render was folded to its headers for a
     /// lifted device, whose geometry the next frame must not pin from.
     pub(crate) sidebar_folded: std::cell::Cell<bool>,
+    pub(crate) sidebar_hover_pending: Option<Task<()>>,
+    pub(crate) sidebar_hovered: bool,
     pub(crate) sidebar_modified: bool,
     pub(crate) sidebar_nested_reveal: sidebar::NestedReveal,
     /// A spaces row revealed last frame, which the next render moves out from
@@ -396,6 +401,7 @@ pub(crate) struct SheprdWindow {
     pub(crate) sidebar_width: Option<f32>,
     /// Shared by every window; see `app::shared_sound`.
     pub(crate) sound: std::rc::Rc<crate::sound::Service>,
+    pub(crate) split_button_hover: Option<SharedString>,
     /// The resize cursor of the pane border under the pointer, if any.
     pub(crate) split_cursor: Option<CursorStyle>,
     pub(crate) split_drag: Option<mouse::SplitDrag>,

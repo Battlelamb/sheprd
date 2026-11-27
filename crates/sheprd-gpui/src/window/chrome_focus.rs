@@ -99,9 +99,18 @@ impl SheprdWindow {
         cx: &mut Context<Self>,
     ) {
         let next = step(&self.regions(), self.focused_region(window), forward);
-        self.chrome_region = next;
+        self.focus_chrome_region(next, window, cx);
+    }
+
+    pub(crate) fn focus_chrome_region(
+        &mut self,
+        region: Option<Region>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.chrome_region = region;
         cx.notify();
-        if next.is_none() {
+        if region.is_none() {
             window.focus(&self.focus, cx);
             return;
         }
@@ -110,6 +119,12 @@ impl SheprdWindow {
         let view = cx.entity().downgrade();
         window.on_next_frame(move |window, _| {
             window.on_next_frame(move |window, cx| {
+                if !view
+                    .read_with(cx, |this, _| this.chrome_region == region)
+                    .unwrap_or(false)
+                {
+                    return;
+                }
                 window.blur(cx);
                 window.focus_next(cx);
                 if window.focused(cx).is_none() {

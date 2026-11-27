@@ -585,6 +585,7 @@ impl<R: FnMut(Update)> Session<R> {
         );
         self.emit(Change::PermissionAsked {
             permission: Permission {
+                guest: None,
                 call_id: Some(call_id),
                 id: permission,
                 options,
@@ -711,6 +712,7 @@ impl<R: FnMut(Update)> Session<R> {
             message.push_str(&stderr.join("\n"));
         }
         self.asked.clear();
+        self.drop_guests(sheprd_chat_protocol::Rejection::NotReady);
         let pending: Vec<PermissionId> = self.transcript.permissions.iter().map(|p| p.id).collect();
         for id in pending {
             self.emit(Change::PermissionResolved { id });

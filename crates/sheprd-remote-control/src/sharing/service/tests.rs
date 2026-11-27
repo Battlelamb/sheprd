@@ -21,6 +21,7 @@ fn sample_transcript() -> Transcript {
             Entry {
                 id: EntryId(1),
                 kind: EntryKind::User {
+                    guest: None,
                     text: "Can you fix the reconnect bug?".into(),
                     files: 0,
                     note: None,

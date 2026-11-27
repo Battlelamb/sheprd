@@ -84,6 +84,7 @@ fn an_earlier_turns_wizz_does_not_nudge_again() {
                 text: "Need you\n::wizz".to_owned(),
             },
             EntryKind::User {
+                guest: None,
                 text: "on it".to_owned(),
                 files: 0,
                 note: None,

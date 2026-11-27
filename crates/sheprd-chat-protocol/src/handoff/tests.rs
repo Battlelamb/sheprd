@@ -12,6 +12,7 @@ fn user(id: u64, text: &str) -> Entry {
     entry(
         id,
         EntryKind::User {
+            guest: None,
             text: text.to_owned(),
             files: 0,
             note: None,

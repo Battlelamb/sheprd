@@ -14,6 +14,8 @@ use crate::session::{ConnId, Pending, Session, Update};
 pub(super) struct Outgoing {
     pub(super) blocks: Vec<wire::ContentBlock>,
     pub(super) files: usize,
+    /// Who wrote it, when the person allowed a guest's prompt.
+    pub(super) guest: Option<sheprd_chat_protocol::Guest>,
     pub(super) handoff: Option<String>,
     pub(super) images: Vec<sheprd_chat_protocol::Image>,
     pub(super) sent: Option<String>,
@@ -33,6 +35,12 @@ impl<R: FnMut(Update)> Session<R> {
                 conn,
                 sheprd_chat_protocol::ServerMessage::Ack { id, rejected },
             );
+        }
+        match self.guest_command(conn, id, &command) {
+            Some(Some(rejected)) => return self.ack(conn, id, Some(rejected)),
+            // The person decides; the outcome is acknowledged then.
+            Some(None) => return,
+            None => {}
         }
         let rejected = match command {
             Command::Prompt {
@@ -57,6 +65,8 @@ impl<R: FnMut(Update)> Session<R> {
             Command::StopActivity { call_id } => self.stop_activity(&call_id),
             Command::SetAgent { agent } => self.set_agent(agent),
             Command::AddPullRequest { url } => self.add_pull_request(&url),
+            // Taken by `guest_command` above.
+            Command::GuestPrompt { .. } => Err(Rejection::Other),
         }
         .err();
         self.ack(conn, id, rejected);
@@ -95,6 +105,7 @@ impl<R: FnMut(Update)> Session<R> {
             let steered = self.can_steer() && self.steer(id, &text, &attachments, origin.clone());
             let mut queued = self.transcript.queued.clone();
             queued.push(Queued {
+                guest: origin.as_ref().and_then(|origin| origin.guest.clone()),
                 attachments,
                 id,
                 held: false,
@@ -147,6 +158,7 @@ impl<R: FnMut(Update)> Session<R> {
         let mut blocks = Vec::with_capacity(prepared.len() + 3);
         self.context
             .running(crate::context::Running::of(&self.transcript));
+        let guest = origin.as_ref().and_then(|origin| origin.guest.clone());
         let note = self.context.before_prompt(origin, text);
         if let Some(note) = &note {
             blocks.push(wire::ContentBlock::Text(wire::TextContent::new(note)));
@@ -163,6 +175,10 @@ impl<R: FnMut(Update)> Session<R> {
             .collect::<Vec<_>>();
         let sent = (!sent.is_empty()).then(|| sent.join("\n\n"));
         if !text.trim().is_empty() {
+            let text = match &guest {
+                Some(guest) => self.context.guest_words(guest, text),
+                None => text.to_owned(),
+            };
             blocks.push(wire::ContentBlock::Text(wire::TextContent::new(text)));
         }
         let mut images = Vec::new();
@@ -173,6 +189,7 @@ impl<R: FnMut(Update)> Session<R> {
         Some(Outgoing {
             blocks,
             files: attachments.len(),
+            guest,
             handoff,
             images,
             sent,
@@ -191,12 +208,13 @@ impl<R: FnMut(Update)> Session<R> {
         let Outgoing {
             blocks,
             files,
+            guest,
             handoff,
             images,
             sent,
             shown,
         } = outgoing;
-        self.show_prompt(&shown, files, sent, images);
+        self.show_prompt(&shown, files, sent, images, guest);
         let request = wire::PromptRequest::new(session, blocks);
         if self.request("session/prompt", &request, Pending::Prompt) {
             // Only a prompt the agent received names the chat and starts
@@ -217,16 +235,22 @@ impl<R: FnMut(Update)> Session<R> {
         }
     }
 
-    /// Shows the person's prompt in the transcript: its text, then its
-    /// pictures.
+    /// Shows the prompt in the transcript: its text, then its pictures,
+    /// naming the guest who wrote it, if one did.
     pub(super) fn show_prompt(
         &mut self,
         shown: &str,
         files: usize,
         sent: Option<String>,
         images: Vec<sheprd_chat_protocol::Image>,
+        guest: Option<sheprd_chat_protocol::Guest>,
     ) {
-        let prompt = self.projector.prompt(shown, files, sent);
+        let mut prompt = self.projector.prompt(shown, files, sent);
+        if let Change::Push { entry } = &mut prompt
+            && let sheprd_chat_protocol::EntryKind::User { guest: by, .. } = &mut entry.kind
+        {
+            *by = guest;
+        }
         self.emit(prompt);
         for image in images {
             let change = self.projector.image(Author::User, image);
@@ -304,6 +328,9 @@ impl<R: FnMut(Update)> Session<R> {
     }
 
     fn answer(&mut self, permission: PermissionId, option: &str) -> Result<(), Rejection> {
+        if let Some(answered) = self.answer_guest(permission, option) {
+            return answered;
+        }
         let asked = self
             .asked
             .get(&permission)
@@ -417,7 +444,8 @@ impl<R: FnMut(Update)> Session<R> {
     /// Answers `permission` with its allow option while auto-accepting;
     /// one that offers no way to allow it keeps waiting for a person.
     pub(super) fn auto_answer(&mut self, permission: PermissionId) {
-        if !self.transcript.auto_accept {
+        // Only the person lets a guest's words through.
+        if !self.transcript.auto_accept || self.guests.waits(permission) {
             return;
         }
         let option = self

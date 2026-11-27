@@ -10,6 +10,7 @@ fn document_prompt_body_keeps_normal_text_below_its_speaker_label(cx: &mut TestA
     let entry = Entry {
         id: EntryId(1),
         kind: EntryKind::User {
+            guest: None,
             text: "A normal prompt".into(),
             files: 0,
             note: None,

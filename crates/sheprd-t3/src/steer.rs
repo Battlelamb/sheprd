@@ -288,6 +288,8 @@ pub fn dispatch(
             return Err(Rejection::UnknownQueued);
         }
         Command::StopActivity { .. } => return Err(Rejection::UnknownActivity),
+        // T3 has no person to ask, so a guest's words never reach its agent.
+        Command::GuestPrompt { .. } => return Err(Rejection::Unsupported),
         Command::SetAutoAccept { .. }
         | Command::SetAgent { .. }
         | Command::AddPullRequest { .. } => {

@@ -146,6 +146,7 @@ impl<R: FnMut(Update)> Session<R> {
             outgoing.files,
             outgoing.sent,
             outgoing.images,
+            outgoing.guest,
         );
         (self.report)(Update::Prompt(outgoing.shown));
     }

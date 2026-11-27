@@ -111,6 +111,9 @@ error-chat-rejection-too-many-attachments = a prompt takes at most { $count } fi
 error-chat-rejection-queue-full = too many prompts are waiting; wait for the turn to end
 error-chat-rejection-unknown-file = an attached file does not exist or cannot be read
 error-chat-rejection-unsupported = this chat program is older than Sheprd; start a new chat to use that
+error-chat-rejection-denied = the person declined the guest's prompt
+error-chat-rejection-guest-only = a connection that relays guest prompts can send only guest prompts
+error-chat-rejection-invalid-guest = the guest's name or tool is empty, too long, or holds control characters or quotes
 error-chat-rejection-other = the program refused the command
 
 # An interactive card an agent's answer holds, whose JSON the window checks.

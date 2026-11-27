@@ -226,6 +226,9 @@ impl Localize for sheprd_chat_protocol::Rejection {
             Self::QueueFull => fl!("error-chat-rejection-queue-full"),
             Self::UnknownFile => fl!("error-chat-rejection-unknown-file"),
             Self::Unsupported => fl!("error-chat-rejection-unsupported"),
+            Self::Denied => fl!("error-chat-rejection-denied"),
+            Self::GuestOnly => fl!("error-chat-rejection-guest-only"),
+            Self::InvalidGuest => fl!("error-chat-rejection-invalid-guest"),
             Self::Other => fl!("error-chat-rejection-other"),
         }
     }

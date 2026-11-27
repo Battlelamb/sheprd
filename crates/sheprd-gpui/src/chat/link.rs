@@ -10,12 +10,14 @@
 //! connection up rather than buffering more, and the window reconnects from
 //! its cursor.
 
+mod mux;
+mod stderr;
+
 use super::{Error, MAX_EVENTS, MAX_PENDING, Result};
 use sheprd_chat_protocol::{
     ClientKind, ClientMessage, Cursor, REVISION, ServerMessage, VERSION, read_frame, write_frame,
 };
 use sheprd_client::private_endpoint::Connection;
-mod mux;
 
 use std::{
     io::{BufReader, BufWriter, Read, Write},
@@ -111,21 +113,32 @@ impl Closer {
     }
 }
 
-type Parts = (Box<dyn Read + Send>, Box<dyn Write + Send>, Closer);
+type Parts = (
+    Box<dyn Read + Send>,
+    Box<dyn Write + Send>,
+    Closer,
+    Option<stderr::Tail>,
+);
 
 /// Connects as `dial` says, into a reader, a writer, and their closer.
 fn open(dial: Dial) -> std::io::Result<Parts> {
     match dial {
         Dial::Socket(path) => {
             let (reader, writer, closer) = Connection::connect(&path, CONNECT_TIMEOUT)?.split()?;
-            Ok((Box::new(reader), Box::new(writer), Closer::Socket(closer)))
+            Ok((
+                Box::new(reader),
+                Box::new(writer),
+                Closer::Socket(closer),
+                None,
+            ))
         }
         Dial::Process(mut command) => {
             let mut child = command
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::null())
+                .stderr(Stdio::piped())
                 .spawn()?;
+            let tail = child.stderr.take().and_then(stderr::Tail::watch);
             let streams = child.stdout.take().zip(child.stdin.take());
             let closer = Closer::Process(Arc::new(Mutex::new(child)));
             let Some((stdout, stdin)) = streams else {
@@ -133,7 +146,7 @@ fn open(dial: Dial) -> std::io::Result<Parts> {
                 closer.reap();
                 return Err(std::io::ErrorKind::BrokenPipe.into());
             };
-            Ok((Box::new(stdout), Box::new(stdin), closer))
+            Ok((Box::new(stdout), Box::new(stdin), closer, tail))
         }
         Dial::Remote(..) | Dial::Ssh(..) | Dial::Mux(..) => {
             Err(std::io::ErrorKind::Unsupported.into())
@@ -291,6 +304,7 @@ fn run(
             Box::new(stream.clone()),
             Box::new(stream.clone()),
             Closer::Stream(stream),
+            None,
         );
         return serve(parts, since, queued, events, socket);
     }
@@ -303,7 +317,7 @@ fn run(
 /// Greets over `parts` through a writer thread, and reads until the
 /// connection ends, returning why.
 fn serve(
-    (reader, writer, closer): Parts,
+    (reader, writer, closer, tail): Parts,
     since: Option<Cursor>,
     queued: Receiver<ClientMessage>,
     events: &SyncSender<ServerMessage>,
@@ -345,6 +359,10 @@ fn serve(
     };
     closer.close();
     closer.reap();
+    // `ssh` says why a remote chat's connection failed only here.
+    if let Some(said) = tail.and_then(stderr::Tail::said) {
+        tracing::debug!(error = %end, said, "Chat connection's transport said");
+    }
     end
 }
 

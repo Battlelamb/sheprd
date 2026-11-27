@@ -83,6 +83,11 @@ use std::io;
 
 /// Chat panes attached at once; more are left to their terminal views.
 const MAX_CHATS: usize = 16;
+/// Chat panes attached at once on an SSH host: as many as the host's shared
+/// stream connections carry (`sheprd_client::SshLane::Stream`, two of 8).
+/// Past it each chat would log in on its own, and through a relay, which
+/// holds each device's key to a few sessions, those are refused.
+const MAX_SSH_CHATS: usize = 16;
 /// Commands waiting for their acknowledgement, per pane.
 const MAX_PENDING: usize = 32;
 /// Messages a worker holds for the window before it gives the connection up
@@ -242,6 +247,14 @@ const REMOTE_PROGRAM_DIRS: &[&str] = &[
 ];
 
 impl Route {
+    /// How many chats attach at once over this route.
+    pub(crate) fn max_chats(&self) -> usize {
+        match self {
+            Self::Ssh(_) => MAX_SSH_CHATS,
+            Self::Local | Self::Remote(_) => MAX_CHATS,
+        }
+    }
+
     pub(super) fn remote_name(&self) -> Option<&str> {
         match self {
             Self::Local => None,

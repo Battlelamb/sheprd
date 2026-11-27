@@ -1,6 +1,7 @@
 //! Shared SSH connections for one-shot commands. Each saved host gets at most
-//! one master per [`Lane`], started on first use and private to this process,
-//! so a burst of reads opens channels on one login instead of a login each.
+//! one master per [`Lane`] (two for streams), started on first use and
+//! private to this process, so a burst of reads opens channels on one login
+//! instead of a login each.
 //! Hosts that rate-limit new SSH connections (a firewall's `limit` rule,
 //! sshd's `MaxStartups`) then see one or two logins rather than a dozen.
 //!
@@ -47,6 +48,17 @@ impl Lane {
         match self {
             Self::Quick | Self::Stream => 8,
             Self::Bulk => 2,
+        }
+    }
+
+    /// Masters one host may have open at once on this lane. A window keeps
+    /// up to 16 chats attached, two masters' worth; reads and transfers
+    /// need only one. Through a relay each master is a session its dial key
+    /// is held to a few of, beside the terminal bridge's.
+    fn masters(self) -> usize {
+        match self {
+            Self::Quick | Self::Bulk => 1,
+            Self::Stream => 2,
         }
     }
 }

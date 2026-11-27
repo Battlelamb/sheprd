@@ -258,7 +258,7 @@ Keys:
   Shift+Tab      Next session mode
   Ctrl+O         Settings: agent (with --choose), model, thinking level,
                  mode (Left/Right change)
-  PgUp/PgDn      Scroll
+  PgUp/PgDn, mouse wheel  Scroll the transcript
   Ctrl+D         Quit when the prompt is empty
 ";
 

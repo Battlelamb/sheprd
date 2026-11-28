@@ -19,15 +19,45 @@ local function header(title: string, shown: number, total: number)
 	}
 end
 
-local function section(key: string, title: string, keys, total: number)
+-- Its dot on the edge index, in the agents' palette, as PullRequestsList
+-- gives it: red when it needs the person (changes asked for, a check
+-- failing), yellow while checks run, teal once approved, green otherwise.
+local function dot(pull): string
+	if not pull then
+		return "secondary"
+	elseif pull.review == "changesRequested" or pull.checks.failing > 0 then
+		return "red"
+	elseif pull.checks.pending > 0 then
+		return "yellow"
+	elseif pull.review == "approved" then
+		return "teal"
+	end
+	return "green"
+end
+
+-- A section: its header, its rows drawn as they scroll in, and its letter
+-- and dots on the edge index.
+local function section(key: string, title: string, keys, total: number, pulls)
 	if #keys == 0 then
 		return false
 	end
-	local rows = {}
+	local dots = {}
 	for i, id in keys do
-		rows[i] = key .. ":" .. id
+		dots[i] = dot(pulls[id])
 	end
-	return ui.section { key = key, header = header(title, #keys, total), rows = rows, row = "pull" }
+	return ui.section {
+		key = key,
+		header = header(title, #keys, total),
+		count = #keys,
+		row = function(i)
+			local pull = pulls[keys[i]]
+			if not pull then
+				return ui.text { "" }
+			end
+			return row.view(pull, key == "requested")
+		end,
+		edge = { letter = string.upper(string.sub(title, 1, 1)), dots = dots },
+	}
 end
 
 local function loading()
@@ -73,9 +103,10 @@ local function empty(pulls)
 	return nil
 end
 
-return mod {
-	providers = { "pulls" },
+-- From this many pull requests the list has an index down its edge.
+local INDEXED_FROM = 12
 
+return mod {
 	init = function(previous)
 		return previous or {}
 	end,
@@ -110,9 +141,11 @@ return mod {
 			mine = given.mine or {},
 			requestedTotal = given.requestedTotal or 0,
 			mineTotal = given.mineTotal or 0,
+			rows = given.rows or {},
 		}
 		local list = {
 			variant = "inset",
+			edge = #pulls.requested + #pulls.mine >= INDEXED_FROM,
 			titleMode = "inline",
 			refresh = "refresh",
 			refreshing = pulls.refreshing,
@@ -155,20 +188,8 @@ return mod {
 				}
 			)
 		end
-		table.insert(list, section("requested", "Review requested", pulls.requested, pulls.requestedTotal))
-		table.insert(list, section("mine", "Mine", pulls.mine, pulls.mineTotal))
+		table.insert(list, section("requested", "Review requested", pulls.requested, pulls.requestedTotal, pulls.rows))
+		table.insert(list, section("mine", "Mine", pulls.mine, pulls.mineTotal, pulls.rows))
 		return ui.list(list)
 	end,
-
-	views = {
-		-- One row, drawn as it scrolls in: `requested:ID` or `mine:ID`.
-		pull = function(state: State, key: string, app)
-			local part, id = string.match(key, "^(%a+):(.+)$")
-			local pull = id and (app.pulls.rows or {})[id]
-			if not pull then
-				return ui.text { "" }
-			end
-			return row.view(pull, part == "requested")
-		end,
-	},
 }

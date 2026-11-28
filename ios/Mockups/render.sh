@@ -57,6 +57,8 @@ case "$round" in
      ipad="" ;;
   trees) phone="trees-A-0 trees-B-0 trees-C-0 trees-D-0"
      ipad="" ;;
+  newfrom) phone="newfrom-Pull-0 newfrom-Pull-1 newfrom-Shell-0 newfrom-Menu-0"
+     ipad="" ;;
   csettings) phone="csettings-A-0 csettings-B-0 csettings-B-1 csettings-C-0 csettings-D-0"
      ipad="" ;;
   *) echo "unknown round $round" >&2; exit 2 ;;

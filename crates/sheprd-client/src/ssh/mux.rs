@@ -101,6 +101,19 @@ pub(crate) fn command(
     (super::command(target, remote_command), None)
 }
 
+/// Whether `target`'s `lane` commands ride a master of the user's own
+/// rather than one of this process's: connecting directly then opens no
+/// new login.
+pub(crate) fn rides_user_master(target: &str, lane: Lane) -> bool {
+    #[cfg(unix)]
+    return shared::registry().rides_user_master(target, lane);
+    #[cfg(not(unix))]
+    {
+        let _ = (target, lane);
+        false
+    }
+}
+
 /// A bridge to `session` on `target` is connecting. When it connected before
 /// in this process, this is a reconnect, and the network path may have
 /// changed (the user's config can pick a LAN or a VPN address), so the host's
@@ -108,16 +121,52 @@ pub(crate) fn command(
 /// next one starts a new master. A first connect keeps them, so the master a
 /// startup read just opened is not replaced at once.
 pub(crate) fn bridge_connecting(target: &str, session: &str) {
-    #[cfg(unix)]
-    shared::registry().bridge_connecting(target, session);
+    // Without masters, every connect may have taken a new path.
     #[cfg(not(unix))]
-    let _ = (target, session);
+    let _ = session;
+    #[cfg(not(unix))]
+    let reconnect = true;
+    #[cfg(unix)]
+    let reconnect = shared::registry().bridge_connecting(target, session);
+    if reconnect {
+        next_generation(target);
+    }
+}
+
+/// How many times `target`'s shared connections were given up for new ones,
+/// on a reconnect or a host key change. A long-lived stream opened under an
+/// earlier generation may reach the machine the target used to name, so its
+/// owner opens new work on a fresh one.
+pub(crate) fn generation(target: &str) -> u64 {
+    generations()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(target)
+        .copied()
+        .unwrap_or(0)
+}
+
+fn next_generation(target: &str) {
+    let mut generations = generations()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let generation = generations.entry(target.to_owned()).or_default();
+    *generation = generation.wrapping_add(1);
+}
+
+/// Each target's generation; bounded by the saved hosts.
+fn generations() -> &'static std::sync::Mutex<std::collections::HashMap<String, u64>> {
+    static GENERATIONS: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, u64>>,
+    > = std::sync::OnceLock::new();
+    GENERATIONS.get_or_init(Default::default)
 }
 
 /// Whether `target`'s host key is checked has changed, so its masters, opened
 /// under the old choice, take no new channels; the next command starts a
 /// master that follows the new one.
 pub(crate) fn host_keys_changed(target: &str) {
+    next_generation(target);
     #[cfg(unix)]
     shared::registry().retire(target);
     #[cfg(not(unix))]

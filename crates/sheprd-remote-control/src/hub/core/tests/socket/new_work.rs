@@ -471,3 +471,38 @@ async fn a_named_herdr_1_session_is_refused_rather_than_ignored() {
     drop((hub, source));
     fake.server.join().unwrap();
 }
+
+#[tokio::test]
+async fn a_terminal_needs_no_chat_program() {
+    let dir = tempfile::tempdir().unwrap();
+    let repository = committed_repository(dir.path());
+    let root = dir.path().join("worktrees");
+    let (source, fake) = fake_with_chat(&EndpointId::random());
+    source.poll().unwrap();
+    let mut hub = hub_on(&source, Layout::default());
+    hub.program = None;
+    hub.worktrees = Some(root.clone());
+    hub.create_workspace(NewWorkspace {
+        base: None,
+        checkout: None,
+        shell: true,
+        agent: Agent::Claude,
+        branch: Some("topic"),
+        cwd: repository.to_str().unwrap(),
+        session: None,
+        title: None,
+    })
+    .await
+    .unwrap();
+    let checkout = root.join("project").join("topic");
+    let params = &request(&fake)["params"];
+    assert_eq!(params["cwd"], checkout.to_str().unwrap());
+    // The checkout's shell: no program, no chat endpoint.
+    assert!(
+        params["argv"].as_array().is_none_or(Vec::is_empty),
+        "{params}"
+    );
+    assert!(params["labels"].get(TOKEN).is_none(), "{params}");
+    drop((hub, source));
+    fake.server.join().unwrap();
+}

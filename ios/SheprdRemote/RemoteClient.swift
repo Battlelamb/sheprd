@@ -230,8 +230,11 @@ final class RemoteClient: Sendable {
     }
 
     /// Creating waits up to ten seconds for the chat's program to report in.
+    /// A pull request's head is fetched first, for up to a minute
+    /// (`FETCH_WAIT` in the daemon's `sources.rs`), so that waits longer.
     func createWorkspace(_ request: NewWorkspaceRequest, bearer: String) async throws -> Created {
-        try await send("POST", "/api/v2/workspaces", body: request, bearer: bearer, timeout: 30)
+        let fetches = if case .pull = request.source { true } else { false }
+        return try await send("POST", "/api/v2/workspaces", body: request, bearer: bearer, timeout: fetches ? 100 : 30)
     }
 
     func startChat(_ request: NewChatRequest, workspace: String, bearer: String) async throws -> Created {

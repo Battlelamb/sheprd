@@ -82,9 +82,20 @@ enum WorkspaceStart {
         }
 
         /// The name the workspace gets unless the person types one: a pull
-        /// request's or issue's, as the desktop names its checkout.
+        /// request's or issue's, as the desktop names its checkout, cut to
+        /// the longest name a workspace may have.
         func title(for kind: Kind) -> String? {
-            item(for: kind)?.label
+            item(for: kind).map { Self.bounded($0.label) }
+        }
+
+        /// The most characters a workspace name may have, as the daemon
+        /// counts them (`MAX_LABEL_CHARS`, in Unicode scalars).
+        static let maxTitle = 200
+
+        static func bounded(_ title: String) -> String {
+            guard title.unicodeScalars.count > maxTitle else { return title }
+            let cut = String(String.UnicodeScalarView(title.unicodeScalars.prefix(maxTitle)))
+            return cut.trimmingCharacters(in: .whitespaces)
         }
 
         /// The request's branch, source, and default title for `kind`, with
@@ -99,10 +110,10 @@ enum WorkspaceStart {
                 return (branch ?? "", nil, nil)
             case .pull:
                 guard let item = item(for: kind), let head = item.head else { return ("", nil, nil) }
-                return ("", .pull(number: item.number, head: head, headOwner: item.headOwner), item.label)
+                return ("", .pull(number: item.number, head: head, headOwner: item.headOwner), title(for: kind))
             case .issue:
                 guard let item = item(for: kind) else { return ("", nil, nil) }
-                return (item.issueBranch, nil, item.label)
+                return (item.issueBranch, nil, title(for: kind))
             case .checkout:
                 return ("", checkout.map { .checkout(path: $0.path) }, nil)
             }

@@ -29,8 +29,10 @@ const MAX_BRANCHES: usize = 300;
 /// Checkouts listed at most.
 const MAX_CHECKOUTS: usize = 200;
 /// How long fetching a pull request's head may take: the network, and a
-/// credential helper that answers without asking.
-const FETCH_WAIT: Duration = Duration::from_secs(120);
+/// credential helper that answers without asking. The phone waits this
+/// long beyond its usual wait for a new workspace (`RemoteClient`'s
+/// `createWorkspace`), so it never gives up on a fetch still running.
+const FETCH_WAIT: Duration = Duration::from_secs(60);
 
 /// Why a source could not be listed or used.
 #[derive(Debug, thiserror::Error)]

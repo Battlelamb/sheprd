@@ -90,13 +90,12 @@ impl Source {
     /// A chat with `agent`, or a shell, in `cwd`.
     pub(in crate::hub) fn open_landing(
         &self,
-        landing: Landing,
-        launcher: &Launcher,
+        landing: &Landing,
         cwd: &str,
         place: Option<Place<'_>>,
     ) -> Result<String> {
         match landing {
-            Landing::Chat(agent) => self.open_chat(agent, launcher, cwd, place),
+            Landing::Chat(agent, launcher) => self.open_chat(*agent, launcher, cwd, place),
             Landing::Shell => self.open_shell(cwd, place),
         }
     }
@@ -106,8 +105,7 @@ impl Source {
     /// local branch as it is. Answers its pane and the checkout's folder.
     pub(in crate::hub) fn open_worktree(
         &self,
-        landing: Landing,
-        launcher: &Launcher,
+        landing: &Landing,
         new: NewCheckout<'_>,
         title: Option<&str>,
     ) -> Result<(String, String)> {
@@ -124,7 +122,7 @@ impl Source {
             cwd: &checkout,
             title,
         };
-        let started = self.open_landing(landing, launcher, &checkout, Some(place));
+        let started = self.open_landing(landing, &checkout, Some(place));
         if let Err(error) = &started {
             let branch = new.branch;
             // A retry must find the branch free, but only a start that

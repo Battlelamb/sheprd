@@ -250,7 +250,9 @@ struct NewWorkspaceSheet: View {
     }
 
     private var ready: Bool {
-        guard folder != nil, opens == .shell || !agent.isEmpty else { return false }
+        // Until this computer says what it can do, a choice made for the
+        // last one (a terminal, say) could reach one too old to honour it.
+        guard folder != nil, sourcesFrom == sourcesKey, opens == .shell || !agent.isEmpty else { return false }
         if start == .newBranch { return Self.plausibleBranch(branch) }
         return picks.chosen(for: start)
     }

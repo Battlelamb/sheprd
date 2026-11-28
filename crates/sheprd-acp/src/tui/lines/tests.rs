@@ -98,6 +98,7 @@ fn no_line_is_wider_than_asked() {
     let item = Entry {
         id: EntryId(1),
         kind: EntryKind::User {
+            guest: None,
             text: "a fairly long prompt that has to wrap more than once".to_owned(),
             files: 0,
             note: None,
@@ -106,6 +107,20 @@ fn no_line_is_wider_than_asked() {
     for line in plain(&entry(&item, 12)) {
         assert!(line.chars().count() <= 12, "{line}");
     }
+}
+
+#[test]
+fn a_guests_prompt_is_named_above_its_words() {
+    let item = Entry {
+        id: EntryId(1),
+        kind: EntryKind::User {
+            guest: Some(sheprd_chat_protocol::Guest::new("Bob", "tma")),
+            text: "hi".to_owned(),
+            files: 0,
+            note: None,
+        },
+    };
+    assert_eq!(plain(&entry(&item, 40)), ["Bob via tma · guest", "hi", ""]);
 }
 
 #[test]

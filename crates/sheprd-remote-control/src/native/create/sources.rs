@@ -133,8 +133,7 @@ pub(crate) async fn new_sources(
 /// The sources of the repository at `cwd`, leaving out checkouts whose
 /// folder is one of `open`. Blocking.
 fn read_sources(cwd: &Path, open: &[&str]) -> Result<Sources, Error> {
-    let listing = git(cwd, &["worktree", "list", "--porcelain"]).map_err(|_| Error::Read)?;
-    let entries = parse_worktrees(&listing);
+    let worktrees = list_worktrees(cwd)?;
     let refs = git(
         cwd,
         &[
@@ -148,11 +147,10 @@ fn read_sources(cwd: &Path, open: &[&str]) -> Result<Sources, Error> {
     .map_err(|_| Error::Read)?;
     let open: HashSet<PathBuf> = open.iter().map(|path| canonical(Path::new(path))).collect();
     Ok(Sources {
-        branches: free_branches(&refs, &entries),
-        checkouts: entries
+        branches: free_branches(&refs, &worktrees.branches),
+        checkouts: worktrees
+            .linked
             .into_iter()
-            // The first is the repository's own checkout.
-            .skip(1)
             .filter(|entry| !open.contains(&canonical(Path::new(&entry.path))))
             .take(MAX_CHECKOUTS)
             .collect(),
@@ -167,39 +165,57 @@ fn read_sources(cwd: &Path, open: &[&str]) -> Result<Sources, Error> {
     })
 }
 
-/// `git worktree list --porcelain`'s checkouts, in its order.
-pub(super) fn parse_worktrees(listing: &str) -> Vec<Listed> {
-    let mut entries = Vec::new();
-    for block in listing.split("\n\n") {
+/// What `git worktree list` says of a repository.
+#[derive(Debug, Default, Eq, PartialEq)]
+pub(super) struct Worktrees {
+    /// The branch of every checkout, the repository's own included.
+    pub(super) branches: HashSet<String>,
+    /// Its linked checkouts that still exist, in Git's order.
+    pub(super) linked: Vec<Listed>,
+}
+
+fn list_worktrees(cwd: &Path) -> Result<Worktrees, Error> {
+    let listing = git(cwd, &["worktree", "list", "--porcelain", "-z"]).map_err(|_| Error::Read)?;
+    Ok(parse_worktrees(&listing))
+}
+
+/// `git worktree list --porcelain -z`: fields end in NUL, and an empty
+/// field ends each checkout, so paths come as they are, never quoted. The
+/// first checkout is the repository's own, bare or not.
+pub(super) fn parse_worktrees(listing: &str) -> Worktrees {
+    let mut worktrees = Worktrees::default();
+    let records = listing
+        .split("\0\0")
+        .filter(|record| !record.trim_matches('\0').is_empty());
+    for (index, record) in records.enumerate() {
         let mut path = None;
         let mut branch = None;
         let mut gone = false;
-        for line in block.lines() {
-            if let Some(rest) = line.strip_prefix("worktree ") {
+        for field in record.split('\0') {
+            if let Some(rest) = field.strip_prefix("worktree ") {
                 path = Some(rest.to_owned());
-            } else if let Some(rest) = line.strip_prefix("branch refs/heads/") {
+            } else if let Some(rest) = field.strip_prefix("branch refs/heads/") {
                 branch = Some(rest.to_owned());
-            } else if line == "bare" || line.starts_with("prunable") {
+            } else if field == "bare" || field.starts_with("prunable") {
                 gone = true;
             }
         }
-        if let (Some(path), false) = (path, gone) {
-            entries.push(Listed { path, branch });
+        if let Some(branch) = &branch {
+            worktrees.branches.insert(branch.clone());
+        }
+        if let (Some(path), false, true) = (path, gone, index > 0) {
+            worktrees.linked.push(Listed { path, branch });
         }
     }
-    entries
+    worktrees
 }
 
-/// The local branches in `refs` (full names, one a line) that none of
-/// `entries` has checked out, that a request may name.
-pub(super) fn free_branches(refs: &str, entries: &[Listed]) -> Vec<String> {
-    let taken: HashSet<&str> = entries
-        .iter()
-        .filter_map(|entry| entry.branch.as_deref())
-        .collect();
+/// The local branches in `refs` (full names, one a line) that no checkout
+/// has (`taken`), that a request may name.
+pub(super) fn free_branches(refs: &str, taken: &HashSet<String>) -> Vec<String> {
     refs.lines()
         .filter_map(|line| line.trim().strip_prefix("refs/heads/"))
-        .filter(|branch| !taken.contains(branch) && valid_branch(branch))
+        .filter(|branch| !taken.contains(*branch) && valid_branch(branch))
         .take(MAX_BRANCHES)
         .map(str::to_owned)
         .collect()
@@ -208,14 +224,34 @@ pub(super) fn free_branches(refs: &str, entries: &[Listed]) -> Vec<String> {
 /// The checkout `path` names among the repository at `cwd`'s linked ones,
 /// as Git lists it, so a phone can only open one that exists. Blocking.
 pub(super) fn checkout_of(cwd: &Path, path: &str) -> Result<String, Error> {
-    let listing = git(cwd, &["worktree", "list", "--porcelain"]).map_err(|_| Error::Read)?;
     let wanted = canonical(Path::new(path));
-    parse_worktrees(&listing)
+    list_worktrees(cwd)?
+        .linked
         .into_iter()
-        .skip(1)
         .find(|entry| canonical(Path::new(&entry.path)) == wanted)
         .map(|entry| entry.path)
         .ok_or(Error::NotACheckout)
+}
+
+/// Whether `name` is a branch Git itself allows (`git check-ref-format
+/// --branch`), wider than the names a phone may type for a new branch: a
+/// pull request's head may be any of them.
+pub(super) fn git_branch(name: &str) -> bool {
+    const REFUSED: [char; 8] = [' ', '~', '^', ':', '?', '*', '[', '\\'];
+    !name.is_empty()
+        && name.len() <= 255
+        && name != "@"
+        && !name.starts_with(['-', '/'])
+        && !name.ends_with(['/', '.'])
+        && !name.contains("..")
+        && !name.contains("@{")
+        && !name.contains("//")
+        && !name
+            .chars()
+            .any(|c| c.is_ascii_control() || REFUSED.contains(&c))
+        && name
+            .split('/')
+            .all(|part| !part.starts_with('.') && !part.ends_with(".lock"))
 }
 
 /// A pull request's worktree: its branch, and the ref its head was just
@@ -242,8 +278,7 @@ pub(super) fn pull_refs(
             format!("refs/herdr/pull/{number}/head"),
         )
     } else {
-        let head = head.trim();
-        if !valid_branch(head) {
+        if !git_branch(head) {
             return None;
         }
         (

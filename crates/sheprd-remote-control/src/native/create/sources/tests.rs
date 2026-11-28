@@ -18,16 +18,17 @@ branch refs/heads/gone
 prunable gitdir file points to non-existent location
 ";
 
+/// `LISTING` as `--porcelain -z` writes it.
+fn nul(listing: &str) -> String {
+    listing.replace('\n', "\0")
+}
+
 #[test]
 fn worktrees_are_listed_with_their_branches_skipping_prunable_ones() {
-    let entries = parse_worktrees(LISTING);
+    let worktrees = parse_worktrees(&nul(LISTING));
     assert_eq!(
-        entries,
+        worktrees.linked,
         vec![
-            Listed {
-                path: "/code/app".into(),
-                branch: Some("main".into())
-            },
             Listed {
                 path: "/home/me/.herdr/worktrees/app/feature".into(),
                 branch: Some("feature/x".into())
@@ -38,13 +39,68 @@ fn worktrees_are_listed_with_their_branches_skipping_prunable_ones() {
             },
         ]
     );
+    assert!(worktrees.branches.contains("main") && worktrees.branches.contains("gone"));
+}
+
+#[test]
+fn a_bare_repository_keeps_its_first_linked_checkout() {
+    let listing =
+        nul("worktree /code/app.git\nbare\n\nworktree /w/one\nHEAD 1\nbranch refs/heads/one\n\n");
+    let worktrees = parse_worktrees(&listing);
+    assert_eq!(
+        worktrees.linked,
+        vec![Listed {
+            path: "/w/one".into(),
+            branch: Some("one".into())
+        }]
+    );
+}
+
+#[test]
+fn a_path_git_would_quote_comes_as_it_is() {
+    let listing = nul("worktree /code/app\n\nworktree /w/a \"b\"\\c\nHEAD 1\ndetached\n\n");
+    assert_eq!(parse_worktrees(&listing).linked[0].path, "/w/a \"b\"\\c");
 }
 
 #[test]
 fn free_branches_leave_out_checked_out_and_unsendable_ones() {
-    let entries = parse_worktrees(LISTING);
+    let taken = parse_worktrees(&nul(LISTING)).branches;
     let refs = "refs/heads/feature/x\nrefs/heads/fix-1\nrefs/heads/main\nrefs/heads/odd name\nrefs/heads/release/2\n";
-    assert_eq!(free_branches(refs, &entries), vec!["fix-1", "release/2"]);
+    assert_eq!(free_branches(refs, &taken), vec!["fix-1", "release/2"]);
+}
+
+#[test]
+fn a_pull_request_head_may_be_any_branch_git_allows() {
+    for good in ["fix+logging", "修正", "a/b-c_d.e", "v1@2"] {
+        assert!(git_branch(good), "{good}");
+        assert!(pull_refs("origin", 1, good, false).is_some(), "{good}");
+    }
+    for bad in [
+        "",
+        "@",
+        "-x",
+        "/x",
+        "x/",
+        "x.",
+        "a..b",
+        "a@{1}",
+        "a//b",
+        "a b",
+        "a~1",
+        "a^",
+        "a:b",
+        "a?",
+        "a*",
+        "a[",
+        "a\\b",
+        ".hidden",
+        "a/.b",
+        "x.lock",
+        "a/b.lock/c",
+        "a\tb",
+    ] {
+        assert!(!git_branch(bad), "{bad:?}");
+    }
 }
 
 #[test]

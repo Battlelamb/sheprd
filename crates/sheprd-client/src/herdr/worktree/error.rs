@@ -5,6 +5,8 @@ pub enum Error {
     // keep-sorted start
     #[error("The new worktree was abandoned: its caller stopped or ran out of time")]
     GaveUp,
+    #[error("Git could not fetch: {0}")]
+    Fetch(String),
     #[error("This computer has no home folder for new worktrees")]
     NoHome,
     #[error("That folder's repository has no name to file a worktree under")]

@@ -42,6 +42,7 @@ struct Mockup: View {
         case ("new", "A"): NewWorkspaceForm()
         case ("new", "B"): NewWorkspacePicker()
         case ("new", "C"): NewWorkspacePrompt()
+        case ("newfrom", _): NewWorkspaceFrom(variant: variant, state: state)
         case ("session", "A"): SessionList()
         case ("session", "B"): SessionPanel()
         case ("session", "C"): SessionCards()

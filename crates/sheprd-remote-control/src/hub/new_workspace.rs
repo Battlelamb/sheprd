@@ -1,5 +1,6 @@
-//! A phone's new workspace: in a folder, on a new worktree when a branch
-//! is given, with a chat in it.
+//! A phone's new workspace: in a folder, on a worktree when a branch is
+//! given (a new branch, or a local one as it is), or in a checkout of the
+//! repository that exists already, with a chat or a shell in it.
 //!
 //! A worktree of a repository Herdr 1 already shows is made by Herdr 1 from
 //! that repository's workspace, as Sheprd's own new worktree is, so it
@@ -22,15 +23,41 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct NewWorkspace<'a> {
     pub(crate) agent: Agent,
-    /// A new worktree on this branch, else the folder itself.
+    /// Where a new `branch` starts, a full ref such as a fetched pull
+    /// request's head; `None` for the checkout's own branch.
+    pub(crate) base: Option<&'a str>,
+    /// A worktree on this branch, else the folder itself. A branch that
+    /// exists locally is checked out as it is.
     pub(crate) branch: Option<&'a str>,
+    /// A checkout of `cwd`'s repository that exists already, opened in a
+    /// workspace of its own instead; the caller checked it is one.
+    pub(crate) checkout: Option<&'a str>,
     pub(crate) cwd: &'a str,
     /// The Herdr 1 session this daemon follows by that name; the primary
     /// otherwise.
     pub(crate) session: Option<&'a str>,
+    /// A shell, not a chat with `agent`, in the new workspace.
+    pub(crate) shell: bool,
     /// The name the person gave the workspace; else it is named for its
     /// folder or branch.
     pub(crate) title: Option<&'a str>,
+}
+
+impl NewWorkspace<'_> {
+    fn landing(&self) -> Landing {
+        if self.shell {
+            Landing::Shell
+        } else {
+            Landing::Chat(self.agent)
+        }
+    }
+}
+
+/// What the new workspace's first pane runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Landing {
+    Chat(Agent),
+    Shell,
 }
 
 impl Hub {
@@ -44,7 +71,7 @@ impl Hub {
         }
         let launcher = self.launcher().await?;
         let core = self.core_for_work().await?;
-        if let Some(branch) = new.branch {
+        if new.checkout.is_some() || new.branch.is_some() {
             let session = new.session.filter(|name| self.sessions.get(name).is_some());
             let cwd = PathBuf::from(new.cwd);
             // Git, not a workspace's folder, says which repository `cwd`
@@ -60,16 +87,37 @@ impl Hub {
                 }))
             })
             .await?;
-            if let Some(source) = repository {
-                let worktree = Worktree {
-                    base: source.base.as_deref(),
-                    branch,
-                    repository: &source.workspace,
-                    title: new.title,
-                };
-                return self.herdr_1_worktree(worktree, new.agent, &launcher).await;
+            match (repository, new.checkout, new.branch) {
+                (Some(source), Some(path), _) => {
+                    return self
+                        .herdr_1_checkout(&source.workspace, path, new, &launcher)
+                        .await;
+                }
+                (Some(source), None, Some(branch)) => {
+                    let worktree = Worktree {
+                        base: new.base.or(source.base.as_deref()),
+                        branch,
+                        repository: &source.workspace,
+                        title: new.title,
+                    };
+                    return self
+                        .herdr_1_worktree(worktree, new.landing(), &launcher)
+                        .await;
+                }
+                _ => {}
             }
         }
+        // Elsewhere an existing checkout is a folder like any other.
+        let new = match new.checkout {
+            Some(path) => NewWorkspace {
+                base: None,
+                branch: None,
+                checkout: None,
+                cwd: path,
+                ..new
+            },
+            None => new,
+        };
         if let Some(core) = core {
             return self.core_workspace(core, new, &launcher).await;
         }
@@ -93,29 +141,42 @@ impl Hub {
         {
             return Err(Error::SessionOnHerdr2);
         }
-        let (cwd, launcher, agent) = (new.cwd.to_owned(), launcher.clone(), new.agent);
+        let (cwd, launcher, landing) = (new.cwd.to_owned(), launcher.clone(), new.landing());
         let (branch, root) = (new.branch.map(str::to_owned), self.worktrees.clone());
+        let base = new.base.unwrap_or("HEAD").to_owned();
         let title = new.title.map(str::to_owned);
         let (pane, folder, kept) = on_core(move || {
             let title = title.as_deref();
             let (pane, folder) = match branch {
-                Some(branch) => {
-                    core.open_worktree_chat(agent, &launcher, &cwd, &branch, title, root.as_deref())
-                }
+                Some(branch) => core.open_worktree(
+                    landing,
+                    &launcher,
+                    core::NewCheckout {
+                        repository: &cwd,
+                        branch: &branch,
+                        base: &base,
+                        root: root.as_deref(),
+                    },
+                    title,
+                ),
                 // Sheprd keeps a workspace for it, in this folder.
                 None => core
-                    .open_chat(
-                        agent,
+                    .open_landing(
+                        landing,
                         &launcher,
                         &cwd,
                         Some(core::Place::New { cwd: &cwd, title }),
                     )
                     .map(|pane| (pane, cwd)),
             }?;
+            let named = match landing {
+                Landing::Chat(agent) => agent.display_name(),
+                Landing::Shell => SHELL_TITLE,
+            };
             // Kept in the core's shared document at once, titled as the
             // phone shows it; its label still asks a desktop to keep it.
             let kept = core
-                .share_new_workspace(&folder, &pane, title.unwrap_or(agent.display_name()))
+                .share_new_workspace(&folder, &pane, title.unwrap_or(named))
                 .unwrap_or_else(|error| {
                     tracing::warn!(%error, "A phone's new workspace waits for Sheprd to keep it");
                     None
@@ -139,21 +200,60 @@ impl Hub {
     async fn herdr_1_worktree(
         &self,
         worktree: Worktree<'_>,
-        agent: Agent,
+        landing: Landing,
         launcher: &Launcher,
     ) -> Result<CreatedWorkspace> {
         let created = self
             .call(ApiMethod::WorktreeCreate, worktree.params())
             .await?;
-        let workspace = answered(&created["workspace"]["workspace_id"])?;
-        let pane = answered(&created["root_pane"]["pane_id"])?;
-        // The worktree's first pane is a shell in its folder; the program
-        // path rides in this line because the pane was not made with it.
-        self.run_line(&pane, &direct_command_line(launcher, agent))
-            .await
-            .inspect_err(|error| {
-                tracing::warn!(%error, %workspace, "A new worktree's chat did not start; the worktree stays");
-            })?;
+        self.land_in_root(&created, landing, launcher).await
+    }
+
+    /// A checkout of the repository of `repository`'s workspace that exists
+    /// already, opened by Herdr 1 so it joins the repository's group. One
+    /// some workspace has open already gets a new tab there instead.
+    async fn herdr_1_checkout(
+        &self,
+        repository: &str,
+        path: &str,
+        new: NewWorkspace<'_>,
+        launcher: &Launcher,
+    ) -> Result<CreatedWorkspace> {
+        let mut params = json!({"workspace_id": repository, "path": path, "focus": false});
+        if let Some(title) = new.title {
+            params["label"] = title.into();
+        }
+        let opened = self.call(ApiMethod::WorktreeOpen, params).await?;
+        if opened["already_open"].as_bool() != Some(true) {
+            return self.land_in_root(&opened, new.landing(), launcher).await;
+        }
+        let workspace = answered(&opened["workspace"]["workspace_id"])?;
+        let pane = match new.landing() {
+            Landing::Chat(agent) => self.start_chat(&workspace, agent, None).await?,
+            Landing::Shell => self.new_terminal(&workspace).await?,
+        };
+        Ok(CreatedWorkspace { workspace, pane })
+    }
+
+    /// The workspace Herdr 1 `answer`ed with its first pane, a shell in its
+    /// folder, where a chat starts unless the shell is what was asked for.
+    async fn land_in_root(
+        &self,
+        answer: &Value,
+        landing: Landing,
+        launcher: &Launcher,
+    ) -> Result<CreatedWorkspace> {
+        let workspace = answered(&answer["workspace"]["workspace_id"])?;
+        let pane = answered(&answer["root_pane"]["pane_id"])?;
+        if let Landing::Chat(agent) = landing {
+            // The program path rides in this line because the pane was not
+            // made with it.
+            self.run_line(&pane, &direct_command_line(launcher, agent))
+                .await
+                .inspect_err(|error| {
+                    tracing::warn!(%error, %workspace, "A new worktree's chat did not start; the worktree stays");
+                })?;
+        }
         Ok(CreatedWorkspace { workspace, pane })
     }
 
@@ -173,6 +273,10 @@ impl Hub {
             .await?;
         let workspace = answered(&opened["workspace"]["workspace_id"])?;
         let Some(branch) = new.branch else {
+            if new.shell {
+                let pane = answered(&opened["root_pane"]["pane_id"])?;
+                return Ok(CreatedWorkspace { workspace, pane });
+            }
             let response = self
                 .call(
                     ApiMethod::TabCreate,
@@ -185,14 +289,18 @@ impl Hub {
             return Ok(CreatedWorkspace { workspace, pane });
         };
         let worktree = Worktree {
-            base: None,
+            base: new.base,
             branch,
             repository: &workspace,
             title: new.title,
         };
-        self.herdr_1_worktree(worktree, new.agent, launcher).await
+        self.herdr_1_worktree(worktree, new.landing(), launcher)
+            .await
     }
 }
+
+/// What a new workspace with a shell is called until Sheprd names it.
+const SHELL_TITLE: &str = "Terminal";
 
 /// A new worktree Herdr 1 makes.
 #[derive(Clone, Copy, Debug)]

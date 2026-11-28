@@ -135,6 +135,9 @@ async fn a_core_failure_is_reported_and_not_retried_on_herdr_one() {
     let hub = hub_on(&source, Layout::default());
     let error = hub
         .create_workspace(NewWorkspace {
+            base: None,
+            checkout: None,
+            shell: false,
             agent: Agent::Claude,
             branch: None,
             cwd: "/refused",
@@ -160,6 +163,9 @@ async fn a_worktree_chat_starts_on_the_core_in_its_new_checkout() {
     hub.worktrees = Some(root.clone());
     let created = hub
         .create_workspace(NewWorkspace {
+            base: None,
+            checkout: None,
+            shell: false,
             agent: Agent::Claude,
             branch: Some("topic"),
             cwd: repository.to_str().unwrap(),
@@ -197,6 +203,9 @@ async fn a_worktree_whose_chat_fails_leaves_the_branch_free_to_retry() {
     // The fake core refuses a folder of this name.
     let error = hub
         .create_workspace(NewWorkspace {
+            base: None,
+            checkout: None,
+            shell: false,
             agent: Agent::Claude,
             branch: Some("refused"),
             cwd: repository.to_str().unwrap(),
@@ -244,6 +253,9 @@ async fn a_worktree_git_refuses_starts_no_chat() {
     hub.worktrees = Some(dir.path().join("worktrees"));
     let error = hub
         .create_workspace(NewWorkspace {
+            base: None,
+            checkout: None,
+            shell: false,
             agent: Agent::Claude,
             branch: Some("topic"),
             cwd: dir.path().to_str().unwrap(),
@@ -438,6 +450,9 @@ async fn a_named_herdr_1_session_is_refused_rather_than_ignored() {
     );
     let refused = hub
         .create_workspace(NewWorkspace {
+            base: None,
+            checkout: None,
+            shell: false,
             agent: Agent::Claude,
             branch: None,
             cwd: "/code/one",

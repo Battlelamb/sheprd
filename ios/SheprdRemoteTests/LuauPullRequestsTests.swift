@@ -87,14 +87,23 @@ final class LuauPullRequestsTests: XCTestCase {
             let tree = try XCTUnwrap(workspace.drawing(of: Workspace.shell).tree, "\(state)")
             XCTAssertEqual(tree.problems, [], "\(state)")
             XCTAssertEqual(tree.kind, .list)
-            for section in ["requested", "mine"] {
-                for id in ids(published.value, section) {
-                    let row = workspace.part("pull", key: .string("\(section):\(id)"), of: Workspace.shell)
-                    XCTAssertEqual(row.problems, [], "\(section) \(id)")
+            // Each section draws its rows with `row(i)` as they scroll in, and
+            // gives each a dot on the edge index.
+            let sections = tree.children.filter { $0.kind == .section && $0.lazyRows != nil }
+            for section in sections {
+                let key = try XCTUnwrap(section.string("key"))
+                let ids = ids(published.value, key)
+                let rows = try XCTUnwrap(section.lazyRows)
+                XCTAssertEqual(rows.count, ids.count, key)
+                XCTAssertEqual(section.props["edge"]?["dots"]?.array?.count, ids.count, key)
+                for (index, id) in ids.enumerated() {
+                    let row = workspace.part(rows.function, key: .number(Double(index + 1)), of: Workspace.shell)
+                    XCTAssertEqual(row.problems, [], "\(key) \(id)")
                     XCTAssertEqual(row.kind, .link)
                     XCTAssertEqual(row.props["route"]?["pull"]?.string, id)
                 }
             }
+            XCTAssertEqual(sections.count, ["requested", "mine"].filter { !ids(published.value, $0).isEmpty }.count, "\(state)")
         }
     }
 }
